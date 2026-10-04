@@ -18934,6 +18934,26 @@ export async function recordPlanInstallment(input: {
       | "issued_installment_recovery_required" | "installment_recovery_review_required"; recoveryInvoiceIds?: number[] }
 > {
   await ensureSchema();
+  const prepared = preparePlanInstallment(input);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const outcome = await runPlanInstallmentTransaction(client, input, prepared);
+    await client.query("reason" in outcome ? "ROLLBACK" : "COMMIT");
+    return outcome;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof FinancialCurrencyIntegrityError) return { reason: "installment_recovery_review_required" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+type PlanInstallmentInput = Parameters<typeof recordPlanInstallment>[0];
+type PlanInstallmentOutcome = Awaited<ReturnType<typeof recordPlanInstallment>>;
+
+function preparePlanInstallment(input: PlanInstallmentInput) {
   const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
@@ -18953,210 +18973,211 @@ export async function recordPlanInstallment(input: {
     note: input.note,
   }), "utf8").digest("hex");
 
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
+  return { idempotencyKey, baseAmount, requestHash };
+}
 
-    // Resolve old successes before new recovery eligibility or acquiring provenance locks.
+/**
+ * @internal Run the existing installment writer on the caller's initialized,
+ * active transaction. The caller owns authorization and all transaction/connection
+ * boundaries: commit only success; roll back on ANY refusal or thrown exception,
+ * including failures after partial writes. Exceptions are deliberately not mapped
+ * here; the owned wrapper maps integrity failures only after its rollback.
+ * No schema initialization, pool acquisition, transaction control or release.
+ */
+export async function recordPlanInstallmentInTransaction(
+  client: DbClient, input: PlanInstallmentInput,
+): Promise<PlanInstallmentOutcome> {
+  return runPlanInstallmentTransaction(client, input, preparePlanInstallment(input));
+}
+
+async function runPlanInstallmentTransaction(
+  client: DbClient, input: PlanInstallmentInput,
+  prepared: ReturnType<typeof preparePlanInstallment>,
+): Promise<PlanInstallmentOutcome> {
+  const { idempotencyKey, baseAmount, requestHash } = prepared;
+  // Resolve old successes before new recovery eligibility or acquiring provenance locks.
+  if (idempotencyKey !== null) {
+    const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
+      `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
+    if (existing) {
+      if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
+        return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
+      }
+      return { reason: "idempotency_conflict" };
+    }
+  }
+  let beforeRecovery: Awaited<ReturnType<typeof readRecoveryDocumentStates>>;
+  try {
+    beforeRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+  } catch (error) {
+    if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+    // READ COMMITTED evidence uses several queries before provenance locks.
+    // A competing success can commit its invoice/receipt between those reads.
+    // Reconcile only that exact key before refusing the inconsistent snapshot.
+    // This catch is strictly PRE-WRITE; never commit/replay from a later catch.
     if (idempotencyKey !== null) {
       const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
         `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
       if (existing) {
         if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
-          await client.query("COMMIT");
           return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
         }
-        await client.query("ROLLBACK"); return { reason: "idempotency_conflict" };
-      }
-    }
-    let beforeRecovery: Awaited<ReturnType<typeof readRecoveryDocumentStates>>;
-    try {
-      beforeRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
-    } catch (error) {
-      if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
-      // READ COMMITTED evidence uses several queries before provenance locks.
-      // A competing success can commit its invoice/receipt between those reads.
-      // Reconcile only that exact key before refusing the inconsistent snapshot.
-      // This catch is strictly PRE-WRITE; never commit/replay from a later catch.
-      if (idempotencyKey !== null) {
-        const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
-          `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
-        if (existing) {
-          if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
-            await client.query("COMMIT");
-            return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
-          }
-          await client.query("ROLLBACK"); return { reason: "idempotency_conflict" };
-        }
-      }
-      throw error; // Existing outer mapping stays fail-closed when no matching success exists.
-    }
-    const originIds = [...new Set(beforeRecovery.flatMap((state) => state.projection.kind === "recoverable"
-      ? [state.projection.originPaymentId] : []))].sort((a, b) => a - b);
-    if (originIds.length) await client.query(`SELECT id FROM payments WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [originIds]);
-
-    const { rows: shifts } = await client.query<{ id: number }>(
-      `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
-    );
-    if (!shifts[0]) { await client.query("ROLLBACK"); return { reason: "no_shift" }; }
-
-    /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي
-       recordPayment)، فالطلب المكرر يرى سند سابقه الملتزم لا يسبقه. والفهرس الفريد على
-       المفتاح شبكة أمانٍ أخيرة. */
-    if (idempotencyKey !== null) {
-      const { rows: existing } = await client.query<{
-        id: number; invoice_id: number | null; idempotency_request_hash: string | null;
-      }>(
-        `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
-        [idempotencyKey],
-      );
-      if (existing[0]) {
-        if (existing[0].idempotency_request_hash === requestHash && existing[0].invoice_id !== null) {
-          await client.query("COMMIT");
-          return { invoiceId: existing[0].invoice_id, paymentId: existing[0].id, replayed: true };
-        }
-        await client.query("ROLLBACK");
         return { reason: "idempotency_conflict" };
       }
     }
-
-    // Existing invoice locks precede the plan lock. Never discover/acquire another
-    // payment lock after shift; new/ambiguous evidence below aborts instead of billing.
-    const priorInvoiceIds = beforeRecovery.filter((state) => state.projection.kind === "recoverable"
-      || (state.projection.kind === "review_required" && hasInstallmentReversalSignal(state)))
-      .map((state) => state.invoiceId).sort((a, b) => a - b);
-    if (priorInvoiceIds.length) await client.query(`SELECT id FROM invoices WHERE id = ANY($1::int[]) ORDER BY id FOR SHARE`, [priorInvoiceIds]);
-    const currentRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
-    const needsReview = currentRecovery.filter((state) => state.projection.kind === "review_required" && hasInstallmentReversalSignal(state));
-    if (needsReview.length) {
-      await client.query("ROLLBACK");
-      return { reason: "installment_recovery_review_required", recoveryInvoiceIds: needsReview.map((state) => state.invoiceId) };
-    }
-    const existingDebt = currentRecovery.filter((state) => state.projection.kind === "recoverable");
-    if (existingDebt.length) {
-      await client.query("ROLLBACK");
-      return { reason: "issued_installment_recovery_required", recoveryInvoiceIds: existingDebt.map((state) => state.invoiceId) };
-    }
-
-    /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
-       المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
-       الاتفاق لا عملة الدفاتر.
-       - الدفع بعملة الخطة: الفاتورة بمبلغه بعملة الخطة — لا تحويل أبدًا.
-       - الدفع بعملةٍ أخرى وخطةٌ أساسية (YER): السلوك الموثَّق القائم — الفاتورة
-         بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
-       - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
-         يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
-    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null; status: string }>(
-      /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
-      `SELECT t.patient_id, t.base_currency, t.status,
-              (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
-         FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
-      [input.planId],
-    );
-    const planRow = planRows[0];
-    if (!planRow || planRow.patient_id !== input.patientId) {
-      await client.query("ROLLBACK");
-      throw new Error("الخطة غير موجودة أو لا تخص المريض.");
-    }
-    // Recheck after the lock, not from the route's earlier snapshot. Replay was
-    // resolved above, so closure never turns a prior success into another charge.
-    if (planRow.status !== "active") {
-      await client.query("ROLLBACK");
-      return { reason: "inactive_plan" };
-    }
-    const planCurrency = planRow.base_currency as Currency;
-    let invoiceMinor: number;
-    let invoiceCurrency: Currency;
-    if (input.currency === planCurrency) {
-      invoiceMinor = input.amountMinor;
-      invoiceCurrency = planCurrency;
-    } else if (planCurrency === input.baseCurrency) {
-      invoiceMinor = baseAmount;
-      invoiceCurrency = input.baseCurrency;
-    } else {
-      await client.query("ROLLBACK");
-      return { reason: "cross_currency_not_supported" };
-    }
-
-    const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
-    const { rows: invoices } = await client.query<{ id: number }>(
-      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
-       VALUES (
-         ${documentNumberSql("invoice")},
-         $1, $2, 0, $3, $4::text, $5, $6)
-       RETURNING id`,
-      [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
-    );
-    const invoiceId = invoices[0].id;
-
-    /* (DOCATTR-1 — قرار المالك D1) القسط يُنسب إلى أطباء بنود خطته بنسبة قيمة كل بند — كل
-       سطرٍ يحمل طبيبه وخدمته، فيأخذ كل أخصائي عمولته على بنوده بقاعدة خدمتها في المحرك
-       نفسه. البند بلا طبيب للطبيب الأساسي للخطة. تُحسب لحظة الإصدار وتُجمَّد في السطر:
-       تعديل الخطة لاحقًا لا يعيد نسبة أقساطٍ صدرت. */
-    const { rows: attributionItems } = await client.query<{
-      doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
-    }>(
-      `SELECT d.id AS doctor_id, i.service_id, i.service_name, (i.quantity::bigint * i.unit_price_minor)::text AS value_minor
-         FROM plan_items i
-         LEFT JOIN parties d ON d.id = i.doctor_id AND d.kind = 'doctor'
-        WHERE i.plan_id = $1 AND i.status <> 'cancelled' ORDER BY i.sort_order, i.id`,
-      [input.planId],
-    );
-    const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
-      doctorId: item.doctor_id, serviceId: item.service_id, serviceName: item.service_name,
-      valueMinor: Number(item.value_minor),
-    })), planRow.primary_doctor_id);
-    for (const line of attribution) {
-      await client.query(
-        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
-         VALUES ($1, $2::int, $3::int, $4, 1, $5, $5)`,
-        [invoiceId, line.serviceId, line.doctorId,
-         attribution.length > 1 && line.serviceName ? `${description} — ${line.serviceName}` : description,
-         line.amountMinor],
-      );
-    }
-
-    const { rows: payments } = await client.query<{ id: number; receipt_number: string }>(
-      `INSERT INTO payments (
-         receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-         exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
-         idempotency_key, idempotency_request_hash)
-       VALUES (
-         ${documentNumberSql("receipt")},
-         $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
-       RETURNING id, receipt_number`,
-      [
-        input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
-        input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
-        input.createdBy, input.planId, idempotencyKey, requestHash,
-      ],
-    );
-
-    await client.query(
-      `UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId],
-    );
-
-    /* (TD-06) سند القبض وسطر تدقيقه معًا أو لا شيء — لكل باب يحصّل القسط (زر الخطة وباب
-       القبض العام). الإعادة بالمفتاح نفسه تعود قبل هنا فلا تكتب سطرًا ثانيًا. */
-    await insertAuditRow(client, {
-      action: "payment.create", entity: "payment", entityId: payments[0].id, entityLabel: payments[0].receipt_number,
-      details: {
-        المريض: input.patientId, المبلغ: input.amountMinor, العملة: input.currency,
-        سعر_الصرف: input.exchangeRate, المكافئ: baseAmount, الطريقة: input.method,
-        الخطة: input.planId, قسط: input.installmentNumber, فاتورة_القسط: invoiceId,
-      },
-      actor: input.createdBy, actorRole: input.actorRole ?? null,
-    });
-
-    await client.query("COMMIT");
-    return { invoiceId, paymentId: payments[0].id };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    if (error instanceof FinancialCurrencyIntegrityError) return { reason: "installment_recovery_review_required" };
-    throw error;
-  } finally {
-    client.release();
+    throw error; // Existing outer mapping stays fail-closed when no matching success exists.
   }
+  const originIds = [...new Set(beforeRecovery.flatMap((state) => state.projection.kind === "recoverable"
+    ? [state.projection.originPaymentId] : []))].sort((a, b) => a - b);
+  if (originIds.length) await client.query(`SELECT id FROM payments WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [originIds]);
+
+  const { rows: shifts } = await client.query<{ id: number }>(
+    `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
+  );
+  if (!shifts[0]) { return { reason: "no_shift" }; }
+
+  /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي
+     recordPayment)، فالطلب المكرر يرى سند سابقه الملتزم لا يسبقه. والفهرس الفريد على
+     المفتاح شبكة أمانٍ أخيرة. */
+  if (idempotencyKey !== null) {
+    const { rows: existing } = await client.query<{
+      id: number; invoice_id: number | null; idempotency_request_hash: string | null;
+    }>(
+      `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+      [idempotencyKey],
+    );
+    if (existing[0]) {
+      if (existing[0].idempotency_request_hash === requestHash && existing[0].invoice_id !== null) {
+        return { invoiceId: existing[0].invoice_id, paymentId: existing[0].id, replayed: true };
+      }
+      return { reason: "idempotency_conflict" };
+    }
+  }
+
+  // Existing invoice locks precede the plan lock. Never discover/acquire another
+  // payment lock after shift; new/ambiguous evidence below aborts instead of billing.
+  const priorInvoiceIds = beforeRecovery.filter((state) => state.projection.kind === "recoverable"
+    || (state.projection.kind === "review_required" && hasInstallmentReversalSignal(state)))
+    .map((state) => state.invoiceId).sort((a, b) => a - b);
+  if (priorInvoiceIds.length) await client.query(`SELECT id FROM invoices WHERE id = ANY($1::int[]) ORDER BY id FOR SHARE`, [priorInvoiceIds]);
+  const currentRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+  const needsReview = currentRecovery.filter((state) => state.projection.kind === "review_required" && hasInstallmentReversalSignal(state));
+  if (needsReview.length) {
+    return { reason: "installment_recovery_review_required", recoveryInvoiceIds: needsReview.map((state) => state.invoiceId) };
+  }
+  const existingDebt = currentRecovery.filter((state) => state.projection.kind === "recoverable");
+  if (existingDebt.length) {
+    return { reason: "issued_installment_recovery_required", recoveryInvoiceIds: existingDebt.map((state) => state.invoiceId) };
+  }
+
+  /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
+     المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
+     الاتفاق لا عملة الدفاتر.
+     - الدفع بعملة الخطة: الفاتورة بمبلغه بعملة الخطة — لا تحويل أبدًا.
+     - الدفع بعملةٍ أخرى وخطةٌ أساسية (YER): السلوك الموثَّق القائم — الفاتورة
+       بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
+     - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
+       يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
+  const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null; status: string }>(
+    /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
+    `SELECT t.patient_id, t.base_currency, t.status,
+            (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
+       FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
+    [input.planId],
+  );
+  const planRow = planRows[0];
+  if (!planRow || planRow.patient_id !== input.patientId) {
+    throw new Error("الخطة غير موجودة أو لا تخص المريض.");
+  }
+  // Recheck after the lock, not from the route's earlier snapshot. Replay was
+  // resolved above, so closure never turns a prior success into another charge.
+  if (planRow.status !== "active") {
+    return { reason: "inactive_plan" };
+  }
+  const planCurrency = planRow.base_currency as Currency;
+  let invoiceMinor: number;
+  let invoiceCurrency: Currency;
+  if (input.currency === planCurrency) {
+    invoiceMinor = input.amountMinor;
+    invoiceCurrency = planCurrency;
+  } else if (planCurrency === input.baseCurrency) {
+    invoiceMinor = baseAmount;
+    invoiceCurrency = input.baseCurrency;
+  } else {
+    return { reason: "cross_currency_not_supported" };
+  }
+
+  const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
+  const { rows: invoices } = await client.query<{ id: number }>(
+    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
+     VALUES (
+       ${documentNumberSql("invoice")},
+       $1, $2, 0, $3, $4::text, $5, $6)
+     RETURNING id`,
+    [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
+  );
+  const invoiceId = invoices[0].id;
+
+  /* (DOCATTR-1 — قرار المالك D1) القسط يُنسب إلى أطباء بنود خطته بنسبة قيمة كل بند — كل
+     سطرٍ يحمل طبيبه وخدمته، فيأخذ كل أخصائي عمولته على بنوده بقاعدة خدمتها في المحرك
+     نفسه. البند بلا طبيب للطبيب الأساسي للخطة. تُحسب لحظة الإصدار وتُجمَّد في السطر:
+     تعديل الخطة لاحقًا لا يعيد نسبة أقساطٍ صدرت. */
+  const { rows: attributionItems } = await client.query<{
+    doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
+  }>(
+    `SELECT d.id AS doctor_id, i.service_id, i.service_name, (i.quantity::bigint * i.unit_price_minor)::text AS value_minor
+       FROM plan_items i
+       LEFT JOIN parties d ON d.id = i.doctor_id AND d.kind = 'doctor'
+      WHERE i.plan_id = $1 AND i.status <> 'cancelled' ORDER BY i.sort_order, i.id`,
+    [input.planId],
+  );
+  const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
+    doctorId: item.doctor_id, serviceId: item.service_id, serviceName: item.service_name,
+    valueMinor: Number(item.value_minor),
+  })), planRow.primary_doctor_id);
+  for (const line of attribution) {
+    await client.query(
+      `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
+       VALUES ($1, $2::int, $3::int, $4, 1, $5, $5)`,
+      [invoiceId, line.serviceId, line.doctorId,
+       attribution.length > 1 && line.serviceName ? `${description} — ${line.serviceName}` : description,
+       line.amountMinor],
+    );
+  }
+
+  const { rows: payments } = await client.query<{ id: number; receipt_number: string }>(
+    `INSERT INTO payments (
+       receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
+       exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
+       idempotency_key, idempotency_request_hash)
+     VALUES (
+       ${documentNumberSql("receipt")},
+       $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
+     RETURNING id, receipt_number`,
+    [
+      input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
+      input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
+      input.createdBy, input.planId, idempotencyKey, requestHash,
+    ],
+  );
+
+  await client.query(
+    `UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId],
+  );
+
+  /* (TD-06) سند القبض وسطر تدقيقه معًا أو لا شيء — لكل باب يحصّل القسط (زر الخطة وباب
+     القبض العام). الإعادة بالمفتاح نفسه تعود قبل هنا فلا تكتب سطرًا ثانيًا. */
+  await insertAuditRow(client, {
+    action: "payment.create", entity: "payment", entityId: payments[0].id, entityLabel: payments[0].receipt_number,
+    details: {
+      المريض: input.patientId, المبلغ: input.amountMinor, العملة: input.currency,
+      سعر_الصرف: input.exchangeRate, المكافئ: baseAmount, الطريقة: input.method,
+      الخطة: input.planId, قسط: input.installmentNumber, فاتورة_القسط: invoiceId,
+    },
+    actor: input.createdBy, actorRole: input.actorRole ?? null,
+  });
+
+  return { invoiceId, paymentId: payments[0].id };
 }
 
 // ─── رحلة المريض V2: الخطة الموحَّدة، الزيارات المخطَّطة، وملخص «ماذا الآن؟» ───
