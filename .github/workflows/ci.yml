@@ -414,6 +414,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic diagnosis-case panels only; no broad directory upload.
+      - name: Upload orthodontic diagnosis case screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-diagnosis-case-ui
+          path: |
+            .settings-ui-artifacts/ortho-diagnosis-case-1280.png
+            .settings-ui-artifacts/ortho-diagnosis-case-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4

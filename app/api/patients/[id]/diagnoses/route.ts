@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  listPatientDiagnoses,
+  DiagnosisAssociationError, listPatientDiagnoses,
   recordAudit, recordPatientDiagnosis,
 } from "@/lib/db";
 import { validateDiagnosisContent } from "@/lib/diagnosis";
@@ -17,11 +17,19 @@ const denied = () =>
 const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
   const value = Number(id);
-  return Number.isInteger(value) && value > 0 ? value : null;
+  return Number.isInteger(value) && value > 0 && value <= 2_147_483_647 ? value : null;
+};
+
+// Omitted/null is standalone; an explicit malformed link must never become null.
+const parseCaseId = (value: unknown): number | null | "invalid" => {
+  if (value === undefined || value === null) return null;
+  if ((typeof value !== "number" && !(typeof value === "string" && /^\d+$/.test(value)))
+    || !Number.isInteger(Number(value)) || Number(value) <= 0 || Number(value) > 2_147_483_647) return "invalid";
+  return Number(value);
 };
 
 /** تاريخ التشخيص — كل النسخ، الأحدث أولًا. لا يُعدّل شيء هنا: تاريخٌ يُقرأ. */
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -31,8 +39,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "هذا الملف ليس من مرضاك." }, { status: 403 });
   }
 
+  const query = new URL(request.url).searchParams;
+  const orthoCaseId = parseCaseId(query.get("orthoCaseId"));
+  if (orthoCaseId === "invalid" || query.getAll("orthoCaseId").length > 1) {
+    return NextResponse.json({ message: "رقم حالة التقويم غير صالح." }, { status: 400 });
+  }
   try {
-    return NextResponse.json({ diagnoses: await listPatientDiagnoses(patientId) });
+    // No query keeps the original complete, patient-wide history contract.
+    return NextResponse.json({ diagnoses: orthoCaseId === null
+      ? await listPatientDiagnoses(patientId)
+      : await listPatientDiagnoses(patientId, orthoCaseId) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل التشخيص." }, { status: 500 });
   }
@@ -47,6 +63,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "doctor" && session.role !== "admin") {
+    return NextResponse.json({ message: "تسجيل التشخيص للطبيب والمدير." }, { status: 403 });
+  }
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
@@ -65,8 +84,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const label = typeof source.label === "string" && source.label.trim()
     ? source.label.trim().slice(0, 120) : null;
-  const rawCase = Number(source.orthoCaseId);
-  const orthoCaseId = Number.isInteger(rawCase) && rawCase > 0 ? rawCase : null;
+  const orthoCaseId = parseCaseId(source.orthoCaseId);
+  if (orthoCaseId === "invalid") {
+    return NextResponse.json({ message: "رقم حالة التقويم غير صالح." }, { status: 400 });
+  }
 
   try {
     const saved = await recordPatientDiagnosis({
@@ -87,7 +108,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actorRole: session.role,
     });
     return NextResponse.json(saved, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof DiagnosisAssociationError) {
+      return NextResponse.json({ message: error.message }, { status: 400 });
+    }
     return NextResponse.json({ message: "تعذّر حفظ التشخيص. أعد المحاولة." }, { status: 500 });
   }
 }
