@@ -321,7 +321,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     };
   }, [visit?.patientId, ownsVisit, currentOwner]);
 
-  const load = useCallback(async (requiredStatus?: Visit["status"]) => {
+  const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false) => {
     if (!currentOwner()) return false;
     const sequence = ++loadSequence.current;
     const stillCurrent = () => currentOwner() && sequence === loadSequence.current;
@@ -374,7 +374,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         return "";
       };
       const nextNotes = {
-        chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint, suggested?.chiefComplaint),
+        // A scheduled adjustment is reference context, not a new complaint.
+        chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint,
+          orthodonticDraft || loaded.ortho?.visitAdjustmentId != null ? null : suggested?.chiefComplaint),
         examination: loaded.examination ?? "",
         diagnosis: loaded.diagnosis ?? "", treatmentDone: loaded.treatmentDone ?? "",
         nextPlan: pick("nextPlan", loaded.nextPlan, suggested?.nextPlan),
@@ -463,7 +465,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       if (!currentOwner() || command.current !== attempt) return false;
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return false; }
       setError(null);
-      const reloaded = await load();
+      const reloaded = await load(undefined, orthoSession !== null);
       return reloaded && currentOwner() && command.current === attempt;
     } catch {
       if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
@@ -471,7 +473,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, ownsVisit, currentOwner, owner, visitId, load]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, load, orthoSession]);
 
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
   const sign = useCallback(async () => {
@@ -611,6 +613,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   }
 
   const signed = visit.status === "signed";
+  // An active case is context, not proof that today's visit is orthodontic.
+  const orthoFollowUp = !signed && Boolean(visit.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null));
   // Hide the added lab display while another visit is still loaded.
   const labVisitIsCurrent = visit.id === visitId;
   // Category metadata describes eligible work, never order/procedure provenance.
@@ -742,80 +746,144 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     return sessionPriceNote(item.billingRule, sessionIndex, item.sessionCount);
   };
 
-  return (
-    <div key={owner.generation}>
-      {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
-      ) : null}
+  const canChangeAdjustment = () => !busy && currentOwner() && command.current?.owner !== owner;
+  const changeAdjustment = (next: typeof orthoSession) => {
+    if (!canChangeAdjustment()) return;
+    // Keep the existing leave guard effective even before React commits the new session.
+    if (next) draftForLeave.current = { owner, dirty: true };
+    setOrthoSession(next);
+  };
 
-      {visit.referral ? (
-        /* (REF-3) لافتة الإحالة (§6): من أحال ولماذا وأي الأسنان وما الذي يتوقف عليها — للقراءة لا قرار. */
-        <div role="note" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
-          <p className="font-extrabold">
-            📨 محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""} — السبب: {visit.referral.reason}
-            {visit.referral.teeth ? ` — الأسنان: ${visit.referral.teeth}` : ""}
-          </p>
-          {visit.referral.caseTitle || visit.referral.blocksCaseTitle ? (
-            <p className="mt-0.5 font-semibold text-indigo-900">
-              {visit.referral.caseTitle ? `الحالة: ${visit.referral.caseTitle}` : ""}
-              {visit.referral.caseTitle && visit.referral.blocksCaseTitle ? " · " : ""}
-              {visit.referral.blocksCaseTitle ? `«${visit.referral.blocksCaseTitle}» متوقفة على هذا` : ""}
-            </p>
+  const orthodonticEntry = (
+    <>
+          {!signed && canWrite && visit.ortho ? (
+            <section id="visit-ortho-session" aria-label={orthoFollowUp ? "جلسة التقويم اليوم" : "سياق التقويم"} className="mb-3 scroll-mt-4 rounded-2xl border border-navy-200 bg-navy-50 p-3">
+              <h3 className="text-sm font-extrabold text-navy-900">{orthoFollowUp ? "جلسة التقويم اليوم" : "للمريض ملف تقويم نشط"}</h3>
+              <p className="mt-1 text-xs text-navy-800">
+                {orthoFollowUp
+                  ? "وثّق ما تغيّر وما نُفّذ في هذه الجلسة. لا حاجة إلى إعادة الشكوى أو الفحص أو التشخيص الأساسي لكل شدّة."
+                  : "إذا نُفّذت شدّة اليوم، سجّلها هنا. وإلا أكمل توثيق الزيارة المعتاد أدناه."}
+              </p>
+              <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
+              {visit.ortho.visitAdjustmentId !== null ? (
+                <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
+              ) : visit.status === "open" && orthoSession && canEditWork ? (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <label className="col-span-2 sm:col-span-3 text-[11px] font-bold text-slate-600">
+                    ما نُفّذ أو تغيّر اليوم
+                    <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
+                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, done: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600">
+                      السلك العلوي
+                      <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, upperWire: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    {visit.ortho.suggestedUpper && visit.ortho.suggestedUpper !== visit.ortho.upperWire ? (
+                      <button type="button" aria-label="استخدام السلك العلوي المقترح"
+                        disabled={busy || orthoSession.upperWire === visit.ortho.suggestedUpper}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedUpper) changeAdjustment({ ...orthoSession, upperWire: visit.ortho.suggestedUpper }); }}
+                        className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
+                        اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedUpper}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600">
+                      السلك السفلي
+                      <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, lowerWire: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    {visit.ortho.suggestedLower && visit.ortho.suggestedLower !== visit.ortho.lowerWire ? (
+                      <button type="button" aria-label="استخدام السلك السفلي المقترح"
+                        disabled={busy || orthoSession.lowerWire === visit.ortho.suggestedLower}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedLower) changeAdjustment({ ...orthoSession, lowerWire: visit.ortho.suggestedLower }); }}
+                        className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
+                        اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedLower}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <label className="text-[10px] font-bold text-slate-600">
+                    المطاطات
+                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة"
+                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, elastics: event.target.value as ElasticClass })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                      {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
+                        <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {orthoSession.elastics !== "none" && (
+                    <label className="col-span-2 text-[10px] font-bold text-slate-600 sm:col-span-3">
+                      وصف المطاطات (المقاس، القوة، الجهة، ساعات اللبس)
+                      <input value={orthoSession.elasticNote} aria-label="وصف مطاطات هذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, elasticNote: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                    </label>
+                  )}
+                  <label className="text-[10px] font-bold text-slate-600">
+                    القادمة بعد (أسابيع)
+                    <input value={orthoSession.nextWeeks} inputMode="numeric" dir="ltr" aria-label="أسابيع حتى الشدّة القادمة"
+                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, nextWeeks: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
+                    يبدأ السلك والمطاطات بالقيم الحالية؛ عدّل فقط ما تغيّر اليوم. اختيار السلك المقترح اختياري ولا يُطبّق تلقائيًا. تُحفظ الشدّة مع التوقيع فقط، وليس مع «احفظ بلا توقيع».
+                    <button type="button" onClick={() => { if (canChangeAdjustment()) changeAdjustment(null); }}
+                      className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
+                  </p>
+                </div>
+              ) : visit.status === "open" && canEditWork ? (
+                <button type="button"
+                  onClick={() => {
+                    if (!canChangeAdjustment()) return;
+                    // Provenance is tracked by load()/setNote(), not guessed from text.
+                    if (autoFilled.has("chiefComplaint")) setNote("chiefComplaint", "");
+                    changeAdjustment({
+                    upperWire: visit.ortho?.upperWire ?? "",
+                    lowerWire: visit.ortho?.lowerWire ?? "",
+                    elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
+                    elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
+                    });
+                  }}
+                  className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
+                  + شدّة هذه الزيارة (تُحفظ مع التوقيع)
+                </button>
+              ) : null}
+              {(visit.ortho.visitAdjustmentId !== null || orthoSession !== null) && (
+                <p className="mt-1 text-[11px] font-bold text-navy-800">
+                  {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
+                    ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
+                    : visit.ortho.adjustmentBillingClass === "INCLUDED"
+                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
+                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
+                </p>
+              )}
+              {visit.status === "open" && canEditWork && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+                && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
+                <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
+                  <label className="flex items-center gap-1.5 font-bold text-rose-900">
+                    <input type="checkbox" checked={noChargeAdjustment} onChange={(event) => { if (canChangeAdjustment()) setNoChargeAdjustment(event.target.checked); }} />
+                    بلا رسوم لهذه الشدّة
+                  </label>
+                  {noChargeAdjustment ? (
+                    <input value={noChargeReason} onChange={(event) => { if (canChangeAdjustment()) setNoChargeReason(event.target.value); }}
+                      aria-label="سبب بلا رسوم للشدّة" placeholder="السبب — مثل: شدّة تعويضية بعد كسر حاصرة"
+                      className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs" />
+                  ) : null}
+                </div>
+              ) : null}
+              </fieldset>
+            </section>
           ) : null}
-        </div>
-      ) : null}
-
-      <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
-        signed ? "border-success-300 bg-success-50" : "border-navy-800 bg-white"
-      }`}>
-        <Icon name={signed ? "check" : "clock"} className={`h-5 w-5 ${signed ? "text-success-700" : "text-navy-800"}`} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-navy-900">
-            {signed ? "زيارة موقَّعة" : "زيارة مفتوحة"} — {visit.patientName}
-          </p>
-          {signed ? (
-            <p className="text-[11px] font-semibold text-slate-500">
-              وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
-              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : " · بلا فاتورة (كشف)"}
-            </p>
-          ) : null}
-        </div>
-        {signed && visit.invoiceId ? (
-          <a href={`/print/invoice/${visit.invoiceId}`} target="_blank" rel="noopener"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
-            الفاتورة
-          </a>
-        ) : null}
-        {/* وصفة طبية من مساحة العمل — بلا الرجوع لرأس ملف المريض. */}
-        {visit.patientId ? (
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => { if (currentOwner()) setRxOpen(true); }}
-              className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
-            >
-              <span>💊</span>
-              <span>روشتة طبية (℞)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (currentOwner()) setPostOpOpen(true); }}
-              className="flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
-            >
-              <span>📋</span>
-              <span>إرشادات المريض</span>
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <VisitSteps steps={[
-        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
-        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
-        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
-        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
-      ]} />
-
+    </>
+  );
+  const visitReference = (
+    <>
       {/*
         * سياق الرحلة قبل الحقول: الزيارة المخطَّطة التي جاءت منها هذه الزيارة،
         * وآخر زيارة قبلها — ما عُمل آخر مرة يُقرأ لا يُخمَّن (المواصفة §١٢).
@@ -864,7 +932,37 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         </section>
       ) : null}
 
+    </>
+  );
+  const visitNotes = (
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
+        {orthoFollowUp ? (
+          <>
+            <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" value={notes.chiefComplaint} disabled={busy || !canWrite}
+              phrases={phrases.chiefComplaint} onPhrase={(phrase) => setNote("chiefComplaint", appendPhrase(notes.chiefComplaint, phrase))}
+              onChange={(value) => setNote("chiefComplaint", value)} />
+            <Field label="الخطوة القادمة" value={notes.nextPlan} disabled={busy || !canWrite}
+              auto={autoFilled.has("nextPlan")} phrases={phrases.nextPlan}
+              onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
+              onChange={(value) => setNote("nextPlan", value)} />
+            <details className="rounded-xl border border-slate-200 p-3 sm:col-span-2"
+              open={Boolean(notes.examination || notes.diagnosis || notes.treatmentDone)}>
+              <summary className="cursor-pointer text-xs font-bold text-slate-600">فحص أو تشخيص جديد / توثيق إضافي اليوم</summary>
+              <p className="mt-1 text-[11px] text-slate-500">عند وجود تغيّر أو عمل إضافي، سجّله هنا. يبقى التوثيق السابق في مرجع الحالة.</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <Field label="فحص اليوم (إن أُجري)" value={notes.examination} disabled={busy || !canWrite}
+                  phrases={phrases.examination} onPhrase={(phrase) => setNote("examination", appendPhrase(notes.examination, phrase))}
+                  onChange={(value) => setNote("examination", value)} />
+                <Field label="تشخيص جديد أو محدّث (إن وجد)" value={notes.diagnosis} disabled={busy || !canWrite}
+                  phrases={phrases.diagnosis} onPhrase={(phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
+                  onChange={(value) => setNote("diagnosis", value)} />
+                <Field label="توثيق عمل إضافي اليوم" value={notes.treatmentDone} disabled={busy || !canWrite}
+                  hint={notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
+                  onChange={(value) => setNote("treatmentDone", value)} />
+              </div>
+            </details>
+          </>
+        ) : <>
         {([
           ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
           ["examination", "② الفحص", phrases.examination],
@@ -882,6 +980,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
           onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
+        </>}
         <label className="block">
           <span className="mb-1 block text-[11px] font-bold text-slate-500">
             الطبيب المعالج
@@ -899,6 +998,130 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </select>
         </label>
       </div>
+
+  );
+
+  return (
+    <div key={owner.generation}>
+      {error ? (
+        <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
+      ) : null}
+
+      {visit.referral ? (
+        /* (REF-3) لافتة الإحالة (§6): من أحال ولماذا وأي الأسنان وما الذي يتوقف عليها — للقراءة لا قرار. */
+        <div role="note" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
+          <p className="font-extrabold">
+            📨 محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""} — السبب: {visit.referral.reason}
+            {visit.referral.teeth ? ` — الأسنان: ${visit.referral.teeth}` : ""}
+          </p>
+          {visit.referral.caseTitle || visit.referral.blocksCaseTitle ? (
+            <p className="mt-0.5 font-semibold text-indigo-900">
+              {visit.referral.caseTitle ? `الحالة: ${visit.referral.caseTitle}` : ""}
+              {visit.referral.caseTitle && visit.referral.blocksCaseTitle ? " · " : ""}
+              {visit.referral.blocksCaseTitle ? `«${visit.referral.blocksCaseTitle}» متوقفة على هذا` : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
+        signed ? "border-success-300 bg-success-50" : "border-navy-800 bg-white"
+      }`}>
+        <Icon name={signed ? "check" : "clock"} className={`h-5 w-5 ${signed ? "text-success-700" : "text-navy-800"}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-navy-900">
+            {signed ? "زيارة موقَّعة" : "زيارة مفتوحة"} — {visit.patientName}
+          </p>
+          {signed ? (
+            <p className="text-[11px] font-semibold text-slate-500">
+              وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
+              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : " · بلا فاتورة (كشف)"}
+            </p>
+          ) : null}
+        </div>
+        {signed && visit.invoiceId ? (
+          <a href={`/print/invoice/${visit.invoiceId}`} target="_blank" rel="noopener"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
+            الفاتورة
+          </a>
+        ) : null}
+        {/* وصفة طبية من مساحة العمل — بلا الرجوع لرأس ملف المريض. */}
+        {visit.patientId ? (
+          <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+            <button
+              type="button"
+              onClick={() => { if (currentOwner()) setRxOpen(true); }}
+              className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
+            >
+              <span>💊</span>
+              <span>روشتة طبية (℞)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (currentOwner()) setPostOpOpen(true); }}
+              className="flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
+            >
+              <span>📋</span>
+              <span>إرشادات المريض</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <VisitSteps steps={orthoFollowUp ? [
+        { id: "visit-ortho-session", label: "جلسة اليوم", done: Boolean(visit.ortho?.visitAdjustmentId || orthoSession?.done.trim()) },
+        { id: "visit-notes", label: "تغيّرات اليوم", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
+        { id: "visit-procedures", label: "إجراءات إضافية", done: drafts.length > 0 },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
+      ] : [
+        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
+        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
+        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
+      ]} />
+
+      {orthodonticEntry}
+      {orthoFollowUp ? (
+        <>
+          {visitNotes}
+          <details className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3" data-testid="ortho-visit-reference">
+            <summary className="cursor-pointer text-xs font-extrabold text-navy-900">مرجع الحالة: الخطة وخط الأساس والجلسة السابقة</summary>
+            <p className="my-2 text-[11px] text-slate-500">للقراءة فقط؛ لا تُنسخ هذه المعلومات إلى فحص اليوم أو تشخيصه.</p>
+            {visit.ortho ? (
+              <div className="mb-3 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-navy-900">
+                  مريض تقويم · {orthoPhaseLabel(visit.ortho.phase)}
+                </span>
+                {/* السلكان موسومان: «014 / 012» وحدها لا تقول أيّهما العلوي. */}
+                <span className="flex items-center gap-2 text-sm font-extrabold text-navy-900">
+                  {visit.ortho.upperWire || visit.ortho.lowerWire ? (
+                    <>
+                      <span>علوي <span dir="ltr">{visit.ortho.upperWire ?? "—"}</span></span>
+                      <span className="text-navy-300">·</span>
+                      <span>سفلي <span dir="ltr">{visit.ortho.lowerWire ?? "—"}</span></span>
+                    </>
+                  ) : "بلا سلك بعد"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-navy-800">
+                {visit.ortho.lastAdjustment
+                  ? `${sinceText(visit.ortho.daysSinceLast)}${visit.ortho.lastDone ? ` — ${visit.ortho.lastDone}` : ""}`
+                  : "لا شدّات مسجّلة بعد"}
+                {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
+              </p>
+                <p className="mt-1 text-[11px] text-navy-800">
+                  {visit.ortho.legacyBaseline ? "متابعة على خط أساس من العلاج السابق." : "تفاصيل خط الأساس محفوظة في ملف التقويم إن كانت مسجّلة."}
+                  {visit.patientId ? <a href={`/patients/${visit.patientId}?tab=ortho`}
+                onClick={(event) => { if (!currentOwner()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
+                </p>
+              </div>
+            ) : null}
+            {visit.suggestions?.chiefComplaint ? <p className="mb-2 text-[11px] text-slate-600">سبب الموعد / الجلسة المخطّطة: {visit.suggestions.chiefComplaint}</p> : null}
+            {visitReference}
+          </details>
+        </>
+      ) : <>{visitReference}{visitNotes}</>}
 
       {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
       {!signed && plannedToday.length > 0 ? (
@@ -1187,122 +1410,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               }} />
           ) : null}
 
-          {visit.ortho ? (
-            <div className="mb-2 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-extrabold text-navy-900">
-                  مريض تقويم · {orthoPhaseLabel(visit.ortho.phase)}
-                </span>
-                {/* السلكان موسومان: «014 / 012» وحدها لا تقول أيّهما العلوي. */}
-                <span className="flex items-center gap-2 text-sm font-extrabold text-navy-900">
-                  {visit.ortho.upperWire || visit.ortho.lowerWire ? (
-                    <>
-                      <span>علوي <span dir="ltr">{visit.ortho.upperWire ?? "—"}</span></span>
-                      <span className="text-navy-300">·</span>
-                      <span>سفلي <span dir="ltr">{visit.ortho.lowerWire ?? "—"}</span></span>
-                    </>
-                  ) : "بلا سلك بعد"}
-                </span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-navy-800">
-                {visit.ortho.lastAdjustment
-                  ? `${sinceText(visit.ortho.daysSinceLast)}${visit.ortho.lastDone ? ` — ${visit.ortho.lastDone}` : ""}`
-                  : "لا شدّات مسجّلة بعد"}
-                {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
-              </p>
-              {visit.ortho.visitAdjustmentId !== null ? (
-                <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
-              ) : visit.status === "open" && orthoSession && canEditWork ? (
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <label className="text-[10px] font-bold text-slate-600">
-                    السلك العلوي
-                    <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
-                      onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, upperWire: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    السلك السفلي
-                    <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
-                      onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, lowerWire: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    المطاطات
-                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة"
-                      onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, elastics: event.target.value as ElasticClass })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
-                      {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
-                        <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {orthoSession.elastics !== "none" && (
-                    <label className="col-span-2 text-[10px] font-bold text-slate-600 sm:col-span-3">
-                      وصف المطاطات (المقاس، القوة، الجهة، ساعات اللبس)
-                      <input value={orthoSession.elasticNote} aria-label="وصف مطاطات هذه الشدّة"
-                        onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, elasticNote: event.target.value })}
-                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                    </label>
-                  )}
-                  <label className="col-span-2 text-[10px] font-bold text-slate-600">
-                    ما نُفّذ
-                    <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
-                      onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, done: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    القادمة بعد (أسابيع)
-                    <input value={orthoSession.nextWeeks} inputMode="numeric" dir="ltr" aria-label="أسابيع حتى الشدّة القادمة"
-                      onChange={(event) => !busy && currentOwner() && setOrthoSession({ ...orthoSession, nextWeeks: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                  </label>
-                  <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
-                    تُحفظ الشدّة مع توقيع الزيارة — مرةً واحدة مهما تكرّر الضغط.
-                    <button type="button" onClick={() => { if (!busy && currentOwner()) setOrthoSession(null); }}
-                      className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
-                  </p>
-                </div>
-              ) : visit.status === "open" && canEditWork ? (
-                <button type="button"
-                  onClick={() => !busy && currentOwner() && setOrthoSession({
-                    upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",
-                    lowerWire: visit.ortho?.suggestedLower ?? visit.ortho?.lowerWire ?? "",
-                    elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
-                    elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
-                  })}
-                  className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
-                  + شدّة هذه الزيارة (تُحفظ مع التوقيع)
-                </button>
-              ) : null}
-              {(visit.ortho.visitAdjustmentId !== null || orthoSession !== null) && (
-                <p className="mt-1 text-[11px] font-bold text-navy-800">
-                  {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
-                    ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
-                    : visit.ortho.adjustmentBillingClass === "INCLUDED"
-                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
-                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
-                </p>
-              )}
-              {visit.status === "open" && canEditWork && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
-                && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
-                <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
-                  <label className="flex items-center gap-1.5 font-bold text-rose-900">
-                    <input type="checkbox" checked={noChargeAdjustment} onChange={(event) => { if (!busy && currentOwner()) setNoChargeAdjustment(event.target.checked); }} />
-                    بلا رسوم لهذه الشدّة
-                  </label>
-                  {noChargeAdjustment ? (
-                    <input value={noChargeReason} onChange={(event) => { if (!busy && currentOwner()) setNoChargeReason(event.target.value); }}
-                      aria-label="سبب بلا رسوم للشدّة" placeholder="السبب — مثل: شدّة تعويضية بعد كسر حاصرة"
-                      className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs" />
-                  ) : null}
-                </div>
-              ) : null}
-              <a href={`/patients/${visit.patientId}?tab=ortho`}
-                className="mt-1 ms-2 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                ملف التقويم
-              </a>
-            </div>
-          ) : null}
+
 
           {visit.planWarning ? (
             <p role="alert" className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
@@ -1365,6 +1473,22 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             </header>
 
             <dl className="space-y-2 text-xs">
+              {orthoSession && visit.ortho?.visitAdjustmentId === null ? (
+                <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
+                  <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
+                  <dd className="mt-1 space-y-1 text-navy-800">
+                    <p>{orthoSession.done.trim() || "لم يُكتب وصف لما نُفّذ في الشدّة"}</p>
+                    <p>علوي <span dir="ltr">{orthoSession.upperWire || "—"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWire || "—"}</span></p>
+                    <p>المطاطات: {ELASTIC_LABEL[orthoSession.elastics]}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
+                    <p>الشدّة القادمة بعد {Number(orthoSession.nextWeeks) || 4} أسابيع</p>
+                  </dd>
+                </div>
+              ) : visit.ortho?.visitAdjustmentId != null ? (
+                <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
+                  <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
+                  <dd>سُجّلت لهذه الزيارة؛ لن تُضاف مرة أخرى عند التوقيع.</dd>
+                </div>
+              ) : null}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
                 <dt className="mb-1 font-extrabold text-emerald-900">تم اليوم</dt>
                 {doneToday.length > 0 ? (
