@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, listLabOrders, listParties, ratesFromSettings, recordAudit, settleLabOrdersBatch } from "@/lib/db";
+import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, listLabOrders, listParties, partyDueByCurrency, ratesFromSettings, recordAudit, settleLabOrdersBatch } from "@/lib/db";
 import { refusalStatus } from "@/lib/expense-request";
 import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
@@ -14,6 +14,7 @@ import {
   reconcileLabStatement,
   type ReconcileOrderItem,
 } from "@/lib/lab-reconciliation";
+import { LAB_BALANCE_VIEW, projectLabBalanceOverview } from "@/lib/lab-balance-overview";
 import type { Currency } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,34 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+const privateJson = (body: unknown, status = 200) => NextResponse.json(body, {
+  status, headers: { "Cache-Control": "private, no-store" },
+});
+
 export async function GET(request: Request) {
   const session = await requireSession();
-  if (!session) return denied();
-
   const { searchParams } = new URL(request.url);
+  if (!session) return searchParams.has("view")
+    ? privateJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401) : denied();
+  if (searchParams.has("view")) {
+    // Financial ledger admission is stricter than legacy reconciliation reads. The
+    // existing proxy/capability gates still apply; no role is granted access here.
+    if (!isAdmin(session.role)) return privateJson({ message: "أرصدة المختبرات متاحة للمدير فقط." }, 403);
+    if (searchParams.getAll("view").length !== 1 || searchParams.get("view") !== LAB_BALANCE_VIEW
+      || [...searchParams.keys()].some((key) => key !== "view")) {
+      return privateJson({ message: "نمط قراءة أرصدة المختبرات غير صالح." }, 400);
+    }
+    try {
+      // Read catalog first so a lab created during this overview cannot enter
+      // the catalog after the canonical owner already enumerated its parties.
+      const catalog = await listParties("lab");
+      const balances = await partyDueByCurrency();
+      return privateJson(projectLabBalanceOverview(catalog, balances, new Date().toISOString()));
+    } catch (error) {
+      console.error("Failed to load canonical lab balances:", error);
+      return privateJson({ message: "تعذّر التحقق من أرصدة المختبرات." }, 503);
+    }
+  }
   const partyIdParam = searchParams.get("partyId");
   const targetPartyId = partyIdParam ? Number(partyIdParam) : null;
 
@@ -87,7 +111,6 @@ export async function GET(request: Request) {
         (o) => o.partyId === party.id || o.labName === party.name,
       );
       const unsettled = partyOrders.filter((o) => o.financialStatus !== "paid");
-      const totalUnsettledMinor = unsettled.reduce((sum, o) => sum + (o.costMinor || 0), 0);
 
       return {
         partyId: party.id,
@@ -98,12 +121,13 @@ export async function GET(request: Request) {
           (o) => o.status === "sent" || o.status === "in_progress" || o.status === "received",
         ).length,
         unsettledOrdersCount: unsettled.length,
-        unsettledCostMinor: totalUnsettledMinor,
       };
     });
 
     return NextResponse.json({
       labs: labStats,
+      financialSummary: { state: "unavailable", reason: "use_authorized_financial_read" },
+      clinicalScope: { kind: "loaded_global_window", limit: 300 },
       risks,
       totalRisksCount: risks.length,
     });
@@ -130,21 +154,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const source = (body ?? {}) as Record<string, unknown>;
-  const partyId = Number(source.partyId);
-  const orderIdsRaw = Array.isArray(source.orderIds) ? source.orderIds : [];
-  const orderIds = orderIdsRaw.map(Number).filter((id) => Number.isInteger(id) && id > 0);
-
-  if (!Number.isInteger(partyId) || partyId <= 0) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = body as Record<string, unknown>;
+  const positiveSafeInteger = (value: unknown, maximum = Number.MAX_SAFE_INTEGER): number | null => {
+    if (typeof value !== "number" && (typeof value !== "string" || !/^[0-9]+$/.test(value))) return null;
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : null;
+  };
+  const partyId = positiveSafeInteger(source.partyId, 2_147_483_647);
+  if (partyId === null) {
     return NextResponse.json({ message: "يرجى تحديد المختبر." }, { status: 400 });
   }
 
-  if (orderIds.length === 0) {
+  if (!Array.isArray(source.orderIds) || source.orderIds.length === 0) {
     return NextResponse.json({ message: "يرجى تحديد أمر عمل واحد على الأقل للمطابقة والتسوية." }, { status: 400 });
   }
+  // Validate every supplied ID before the writer normalizes the selected set.
+  const orderIds: number[] = [];
+  for (const value of source.orderIds) {
+    const id = positiveSafeInteger(value, 2_147_483_647);
+    if (id === null) {
+      return NextResponse.json({ message: "أرقام أوامر المختبر غير صالحة." }, { status: 400 });
+    }
+    orderIds.push(id);
+  }
 
-  const amountMinor = Number(source.amountMinor);
-  if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+  const amountMinor = positiveSafeInteger(source.amountMinor);
+  if (amountMinor === null) {
     return NextResponse.json({ message: "مبلغ التسوية غير صالح." }, { status: 400 });
   }
 
@@ -154,6 +192,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر عملة التسوية." }, { status: 400 });
   }
   const currency: Currency = source.currency;
+  if (source.exchangeRate !== undefined && (typeof source.exchangeRate !== "number"
+    || !Number.isFinite(source.exchangeRate) || source.exchangeRate <= 0)) {
+    return NextResponse.json({ message: "سعر الصرف غير صالح." }, { status: 400 });
+  }
   const monthLabel = typeof source.monthLabel === "string" ? source.monthLabel.trim() : undefined;
   const note = typeof source.note === "string" && source.note.trim() ? source.note.trim() : null;
   const prepaymentReason = source.prepayment === true && typeof source.prepaymentReason === "string"
@@ -194,6 +236,16 @@ export async function POST(request: Request) {
     });
 
     if (!result.ok) {
+      if (result.reason === "batch_link_invalid" || result.reason === "batch_currency_mismatch"
+        || result.reason === "batch_requires_full_allocation" || result.reason === "batch_busy") {
+        const batchMessages = {
+          batch_link_invalid: "تعذّرت مطابقة التزامات الأوامر. حدّث البيانات واستخدم سداد الفاتورة منفردة عند الحاجة.",
+          batch_currency_mismatch: "التسوية المجمّعة تتطلب عملة واحدة مطابقة للدفع. استخدم سداد الفاتورة منفردة للعملات المختلفة.",
+          batch_requires_full_allocation: "التسوية المجمّعة تتطلب كامل المتبقي للأوامر المحددة بالضبط. حدّث البيانات أو استخدم سداد الفاتورة منفردة.",
+          batch_busy: "توجد عملية أخرى على بيانات التسوية. حدّث البيانات وتحقّق من الحالة قبل إعادة المحاولة.",
+        };
+        return NextResponse.json({ code: result.reason, message: batchMessages[result.reason], quote: null }, { status: 409 });
+      }
       const ids = result.orderIds?.map((id) => `RX-${id}`).join("، ") ?? "";
       const byReason: Record<string, [number, string]> = {
         not_lab: [404, "جهة المختبر غير مسجلة بالنظام."],

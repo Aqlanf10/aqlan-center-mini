@@ -24,17 +24,21 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const term = params.get("q") ?? "";
 
-  // عزل الطبيب (§٣٩): طبيبٌ مربوطٌ بجهته يرى مرضاه فقط — والفلترة في الاستعلام
-  // نفسه لا بعد جلب النتائج، فما ليس له لا يصل إلى الشبكة أصلًا.
-  // صلاحيات الوكيل المساعد: من منحه المدير «عرض جميع المرضى» صراحةً يُرفع عنه
-  // العزل — المنح الاستثنائي يوثّقه عمود الصلاحيات لا خيارٌ في الشاشة.
-  let doctorPartyId =
-    session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
-      ? session.partyId
-      : null;
+  // Match canAccessPatient: use the current doctor account and honor the explicit
+  // all-patient grant before requiring its current party link. Null is the SQL
+  // all-patients scope, so a missing link or failed account read must never reach it.
+  let doctorPartyId: number | null = null;
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions?.canViewAllPatients) doctorPartyId = null;
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return denied();
+    if (user.permissions?.canViewAllPatients !== true) {
+      if (typeof user.partyId !== "number" || !Number.isSafeInteger(user.partyId) || user.partyId <= 0) {
+        return NextResponse.json({ message: "لا يمكنك عرض المرضى دون ربط حسابك بطبيب." }, { status: 403 });
+      }
+      doctorPartyId = user.partyId;
+    }
   }
 
   try {

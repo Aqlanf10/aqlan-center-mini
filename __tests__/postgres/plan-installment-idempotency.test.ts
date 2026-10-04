@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -92,9 +92,48 @@ describe("(FIN-1) plan installment collection is idempotent", () => {
   it("five concurrent submissions with one key record a single receipt", async () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => collect("inst:burst-0001")));
     const ids = new Set(results.map((result) => ("paymentId" in result ? result.paymentId : null)));
-    expect(ids.size).toBe(1);
+    const counts = await countsFor("inst:burst-0001");
+    expect(ids.size, JSON.stringify({ results, counts })).toBe(1);
     expect([...ids][0]).not.toBeNull();
-    expect(await countsFor("inst:burst-0001")).toEqual({ payments: 1, invoices: 1 });
+    expect(counts).toEqual({ payments: 1, invoices: 1 });
+  });
+
+  it("five matching attempts replay a success committed after the pre-lock invoice snapshot", async () => {
+    await collect("inst:snapshot-anchor"); // Keep evidence acquisition beyond its empty-invoice fast path.
+    const key = "inst:snapshot-commit-window";
+    const pool = getPool(); const paused = await pool.connect(); const realQuery = paused.query.bind(paused);
+    let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
+    let observed!: () => void; let failed!: (error: unknown) => void;
+    const sawSnapshot = new Promise<void>((resolve, reject) => { observed = resolve; failed = reject; });
+    let intercepted = false;
+    const querySpy = vi.spyOn(paused, "query").mockImplementation(async (sql, values) => {
+      const result = await realQuery(sql, values);
+      if (!intercepted && sql.includes("total_minor::text, discount_minor::text, base_currency")
+        && sql.includes("FROM invoices WHERE patient_id = $1 ORDER BY id") && values?.[0] === patientId) {
+        intercepted = true; observed(); await held;
+      }
+      return result;
+    });
+    const connectSpy = vi.spyOn(pool, "connect").mockResolvedValueOnce(paused);
+    const retry = collect(key); void retry.catch(failed);
+    try {
+      await sawSnapshot;
+      // Restore before released clients can be reused through Pool.query's callback overload.
+      querySpy.mockRestore(); connectSpy.mockRestore();
+      const winner = await collect(key);
+      const others = await Promise.all(Array.from({ length: 3 }, () => collect(key)));
+      release();
+      const results = [winner, ...others, await retry];
+      const counts = await countsFor(key);
+      const { rows: [audit] } = await pool.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM audit_log a
+        JOIN payments p ON a.entity = 'payment' AND a.entity_id = p.id::text
+        WHERE p.idempotency_key = $1 AND a.action = 'payment.create'`, [key]);
+      console.info("REPLAY_SNAPSHOT_WITNESS", JSON.stringify({ operation: "installment", results, counts, auditCount: audit.count }));
+      const ids = new Set(results.map((result) => "paymentId" in result ? result.paymentId : null));
+      expect(ids.size, JSON.stringify({ results, counts, auditCount: audit.count })).toBe(1);
+      expect([...ids][0]).not.toBeNull(); expect(results.filter((result) => "replayed" in result && result.replayed)).toHaveLength(4);
+      expect(counts).toEqual({ payments: 1, invoices: 1 }); expect(audit.count).toBe(1);
+    } finally { release(); await retry.catch(() => {}); querySpy.mockRestore(); connectSpy.mockRestore(); }
   });
 
   it("the same key for a different amount or another actor is a conflict, not a replay", async () => {

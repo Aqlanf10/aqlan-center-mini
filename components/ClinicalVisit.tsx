@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
 import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
+import { LAB_STATUS_LABEL, type LabOrderStatus } from "@/lib/lab";
 import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
@@ -133,7 +134,7 @@ interface Visit {
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
   }[];
-  /** طلبات المختبر المرتبطة بالزيارة (§١٩) — للزر السياقي. */
+  /** طلبات المختبر المرتبطة بالزيارة؛ لا تثبت نسبتها إلى إجراء بعينه. */
   labOrders: {
     id: number; workType: string; toothCode: number | null;
     status: string; labName: string;
@@ -167,6 +168,8 @@ export interface VisitSignResult {
 }
 
 interface Draft {
+  /** Display-only eligibility: saved category or an explicitly picked catalog service. Never submitted. */
+  labCategory: string | null;
   serviceId: number; toothCode: string; surfaces: string; quantity: number;
   price: string; doctorId: number | null; planItemId: number | null;
   /** (P1-6) سبب الانحراف عن سعر الدليل — يُطلب ويُرسل حين يختلف السعر. */
@@ -185,8 +188,10 @@ interface BillingPreview {
   zeroReason: string | null;
 }
 
-export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
+export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange }: {
   visitId: number;
+  expectedPatientId?: number;
+  onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
   onSigned?: (result: VisitSignResult) => void;
   /** (VISIT-2) افتح «مراجعة وإنهاء الزيارة» مباشرةً بعد التحميل — حين يصل الطبيب إلى ملف
    *  المريض الجديد الذي فُتح له للتوّ من زيارته ليكمل الإنهاء هناك. */
@@ -200,7 +205,30 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const canWrite = isAdmin(session?.role) || session?.role === "doctor" || session?.role === "assistant";
   const canEditWork = isAdmin(session?.role) || session?.role === "doctor";
 
+  // A retained component may receive another visit or principal. A fresh token
+  // also distinguishes A→B→A, so identity equality cannot revive old requests.
+  const ownerKey = JSON.stringify([visitId, expectedPatientId ?? null, session?.username ?? null,
+    session?.role ?? null, session?.permissions ?? null]);
+  const [owner, setOwner] = useState({ key: ownerKey, generation: 0 });
+  if (owner.key !== ownerKey) setOwner({ key: ownerKey, generation: owner.generation + 1 });
+  const liveOwner = useRef<typeof owner | null>(owner);
+  const loadSequence = useRef(0);
+  const lastAppliedOwner = useRef<typeof owner | null>(null);
+  const command = useRef<{ owner: typeof owner } | null>(null);
+  const [loadedOwner, setLoadedOwner] = useState<typeof owner | null>(null);
+  useLayoutEffect(() => {
+    liveOwner.current = owner;
+    return () => {
+      if (liveOwner.current === owner) liveOwner.current = null;
+      loadSequence.current += 1;
+    };
+  }, [owner]);
+  const currentOwner = useCallback(() => owner.key === ownerKey && liveOwner.current === owner, [owner, ownerKey]);
+
   const [visit, setVisit] = useState<Visit | null>(null);
+  const ownsVisit = loadedOwner === owner && owner.key === ownerKey && visit?.id === visitId;
+  const [dirty, setDirty] = useState(false);
+  const draftForLeave = useRef({ owner, dirty: false });
   /* (TD-05 owner review — Finding 1) عملة فاتورة هذه الزيارة كما سيوقّعها
    * الخادم: عملة بنود خطتها إن كانت بعملةٍ واحدة، وإلا الأساس. أرقام المعاينة
    * قبل التوقيع تُعرض بها — لا بعملة الدفاتر.
@@ -220,7 +248,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [doctorId, setDoctorId] = useState<number | null>(null);
   /* (CASE-1) شدّة التقويم في هذه الزيارة — تُرسل مع التوقيع وتُكتب في معاملته، مرةً واحدة. */
   const [orthoSession, setOrthoSession] = useState<{
-    upperWire: string; lowerWire: string; elastics: ElasticClass; elasticNote: string; done: string; nextWeeks: string;
+    upperWire: string; lowerWire: string; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
   } | null>(null);
   /* (VISIT-1) ما مُلئ تلقائيًا — يُوسَم «تلقائي» حتى يلمسه الطبيب. */
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
@@ -235,6 +263,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [addendum, setAddendum] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorOwner, setErrorOwner] = useState<typeof owner | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -248,19 +277,20 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const [serverUnmet, setServerUnmet] = useState<string[]>([]);
   const autoReviewDone = useRef(false);
   useEffect(() => {
-    if (!reviewOpen) { setBillingPreview(null); return; }
+    if (!reviewOpen || !ownsVisit) { setBillingPreview(null); return; }
     let cancelled = false;
     void (async () => {
       try {
         const response = await fetch(`/api/visits/${visitId}/billing-preview`, { cache: "no-store" });
-        if (!response.ok || cancelled) return;
-        setBillingPreview(await response.json() as BillingPreview);
+        if (!response.ok || cancelled || !currentOwner()) return;
+        const preview = await response.json() as BillingPreview;
+        if (!cancelled && currentOwner()) setBillingPreview(preview);
       } catch {
         // بلا معاينة تبقى المراجعة كما كانت — والتوقيع يقرر في الخادم على أي حال.
       }
     })();
     return () => { cancelled = true; };
-  }, [reviewOpen, visitId]);
+  }, [reviewOpen, visitId, ownsVisit, currentOwner]);
   /* الوصفة الطبية من مساحة العمل (من عمل الوكيل المساعد): التشخيص والطبيب
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
@@ -273,7 +303,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
 
   useEffect(() => {
     const patientId = visit?.patientId;
-    if (!patientId) {
+    if (!patientId || !ownsVisit) {
       setPatientContext(null);
       return;
     }
@@ -281,7 +311,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     fetch(`/api/patients/${patientId}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { medicalAlert?: string | null; phone?: string | null } | null) => {
-        if (!cancelled && data) {
+        if (!cancelled && currentOwner() && data) {
           setPatientContext({ medicalAlert: data.medicalAlert ?? null, phone: data.phone ?? null });
         }
       })
@@ -289,19 +319,50 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     return () => {
       cancelled = true;
     };
-  }, [visit?.patientId]);
+  }, [visit?.patientId, ownsVisit, currentOwner]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false) => {
+    if (!currentOwner()) return false;
+    const sequence = ++loadSequence.current;
+    const stillCurrent = () => currentOwner() && sequence === loadSequence.current;
     try {
       const [visitResponse, serviceResponse, partyResponse] = await Promise.all([
         fetch(`/api/visits/${visitId}/clinical`, { cache: "no-store" }),
         fetch("/api/services", { cache: "no-store" }),
         fetch("/api/parties?kind=doctor", { cache: "no-store" }),
       ]);
-      const payload = await visitResponse.json();
+      const [payload, catalog, parties] = await Promise.all([
+        visitResponse.json(), serviceResponse.ok ? serviceResponse.json() : null,
+        partyResponse.ok ? partyResponse.json() : null,
+      ]);
+      if (!stillCurrent()) return false;
       if (!visitResponse.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
       const loaded = payload as Visit;
-      setVisit(loaded);
+      if (loaded.id !== visitId || (expectedPatientId !== undefined && loaded.patientId !== expectedPatientId)) {
+        throw new Error("بيانات الزيارة لا تطابق السياق الحالي. حدّث الزيارة قبل التوثيق.");
+      }
+      if (requiredStatus && loaded.status !== requiredStatus) throw new Error("تعذّر تأكيد حالة الزيارة بعد الحفظ. أعد تحميلها.");
+      const recordList = (value: unknown) => Array.isArray(value)
+        && value.every((row) => row !== null && typeof row === "object" && !Array.isArray(row));
+      const nullableText = (value: unknown) => value === null || typeof value === "string";
+      if ((loaded.status !== "open" && loaded.status !== "signed")
+        || typeof loaded.patientName !== "string"
+        || (loaded.patientId !== null && (!Number.isSafeInteger(loaded.patientId) || loaded.patientId <= 0))
+        || [loaded.chiefComplaint, loaded.examination, loaded.diagnosis, loaded.treatmentDone, loaded.nextPlan].some((value) => !nullableText(value))
+        || !recordList(loaded.procedures) || !recordList(loaded.outstanding)
+        || !recordList(loaded.sessionPricing) || !recordList(loaded.labOrders)
+        || (loaded.activeCases != null && !recordList(loaded.activeCases))
+        || (catalog !== null && !recordList(catalog))
+        || (parties !== null && !recordList(Array.isArray(parties) ? parties : parties?.balances))) {
+        throw new Error("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
+      }
+      if (loaded.procedures.some((line) => !Number.isSafeInteger(line.serviceId) || line.serviceId <= 0
+        || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unitPriceMinor) || line.unitPriceMinor < 0)) {
+        throw new Error("بيانات إجراءات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
+      }
+      // Prepare every editable part before publishing ownership. A malformed B
+      // must never combine B identity/notes with procedure drafts left over from A.
       /* (VISIT-1) الفارغ فقط يُملأ من الاقتراحات، وفي الزيارة المفتوحة فقط — ولا يُحفظ
          شيءٌ منه حتى يحفظ الطبيب أو يوقّع. */
       const open = loaded.status === "open";
@@ -312,17 +373,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         if (suggestion) { filled.add(key); return suggestion; }
         return "";
       };
-      setNotes({
-        chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint, suggested?.chiefComplaint),
+      const nextNotes = {
+        // A scheduled adjustment is reference context, not a new complaint.
+        chiefComplaint: pick("chiefComplaint", loaded.chiefComplaint,
+          orthodonticDraft || loaded.ortho?.visitAdjustmentId != null ? null : suggested?.chiefComplaint),
         examination: loaded.examination ?? "",
         diagnosis: loaded.diagnosis ?? "", treatmentDone: loaded.treatmentDone ?? "",
         nextPlan: pick("nextPlan", loaded.nextPlan, suggested?.nextPlan),
-      });
+      };
       if (!loaded.doctorId && suggested?.doctorId) filled.add("doctor");
-      setDoctorId(loaded.doctorId ?? suggested?.doctorId ?? null);
-      setAutoFilled(filled);
+      const nextDoctorId = loaded.doctorId ?? suggested?.doctorId ?? null;
       const loadedCurrency: Currency = isCurrency(loaded.billingCurrency) ? loaded.billingCurrency : CLINIC_BASE_CURRENCY;
-      setVisitCurrency(loadedCurrency);
       /* (المراجعة النهائية للمالك — TD-05) العملة ملك البند لا الزيارة:
        * كل سطرٍ يُشتق عملته من **بند خطته هو** في الحمولة المحمّلة نفسها
        * (`procedures[].planCurrency`) — لا من عملةٍ واحدة على مستوى الزيارة
@@ -330,11 +391,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
        * «1,500.00» ولو كانت الزيارة فارغةً قبله؛ والسطر المرتبط بخطةٍ أخرى
        * العملة يُنسَّق بعملتها هو؛ والسطر الحر بالأساس. والمزيج يظهر
        * مجموعين منفصلين وتحذيرًا — والتوقيع المختلط يُرفض من الخادم. */
-      setDrafts(loaded.procedures.map((line) => {
+      const nextDrafts = loaded.procedures.map((line) => {
         const lineCurrency = isCurrency(line.planCurrency)
           ? (line.planCurrency as Currency)
           : loadedCurrency;
         return {
+          labCategory: line.category,
           serviceId: line.serviceId, toothCode: line.toothCode ? String(line.toothCode) : "",
           surfaces: line.surfaces ?? "", quantity: line.quantity,
           price: formatAmount(line.unitPriceMinor, lineCurrency),
@@ -342,24 +404,34 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           planItemId: line.planItemId,
           currency: lineCurrency,
         };
-      }));
-      if (serviceResponse.ok) setServices(await serviceResponse.json());
-      if (partyResponse.ok) {
-        const parties = await partyResponse.json();
-        setDoctors(Array.isArray(parties) ? parties : parties.balances ?? []);
+      });
+      const nextDoctors = Array.isArray(parties) ? parties : parties?.balances ?? [];
+      const newOwner = lastAppliedOwner.current !== owner;
+      if (newOwner) {
+        setOrthoSession(null); setAddendum(""); setReviewOpen(false); setPickerOpen(false);
+        setBillingPreview(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
+        setServerUnmet([]); setRxOpen(false); setPostOpOpen(false); setPatientContext(null);
+        setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = "";
       }
+      lastAppliedOwner.current = owner;
+      setLoadedOwner(owner); setVisit(loaded); setNotes(nextNotes); setDrafts(nextDrafts);
+      setDoctorId(nextDoctorId); setAutoFilled(filled); setVisitCurrency(loadedCurrency); setDirty(false);
+      if (serviceResponse.ok || newOwner) setServices(catalog ?? []);
+      if (partyResponse.ok || newOwner) setDoctors(nextDoctors);
       setError(null);
+      return true;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      if (stillCurrent()) { setErrorOwner(owner); setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل."); }
+      return false;
     }
-  }, [visitId, base]);
+  }, [visitId, expectedPatientId, currentOwner, owner]);
 
   useEffect(() => { void load(); }, [load]);
 
   /* (VISIT-1) «ما نُفّذ» يُكتب من الإجراءات المضافة — ويتبعها ما دام الطبيب لم يكتب فيه بنفسه. */
   const visitOpen = visit?.status === "open";
   useEffect(() => {
-    if (!visitOpen) return;
+    if (!visitOpen || !ownsVisit || !currentOwner()) return;
     const text = treatmentDoneFromProcedures(drafts.map((draft) => ({
       name: services.find((service) => service.id === draft.serviceId)?.name
         ?? visit?.outstanding.find((item) => item.planItemId === draft.planItemId)?.serviceName
@@ -370,17 +442,19 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     lastAutoTreatment.current = text;
     setNotes((current) => (current.treatmentDone.trim() === "" || current.treatmentDone === previous)
       ? { ...current, treatmentDone: text } : current);
-  }, [drafts, services, visitOpen, visit?.outstanding]);
+  }, [drafts, services, visitOpen, visit?.outstanding, ownsVisit, currentOwner]);
 
   const setNote = (key: NoteKey, value: string) => {
     // A save reloads its submitted snapshot. Do not accept newer edits until
     // both the write and that reload have finished.
-    if (busy) return;
+    if (busy || !ownsVisit || !currentOwner()) return;
+    draftForLeave.current = { owner, dirty: true }; setDirty(true);
     setNotes((current) => ({ ...current, [key]: value }));
     setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
   };
   const send = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return false;
+    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return false;
+    const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
@@ -388,21 +462,27 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         body: JSON.stringify(body),
       });
       const payload = await response.json();
+      if (!currentOwner() || command.current !== attempt) return false;
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return false; }
       setError(null);
-      await load();
-      return true;
+      const reloaded = await load(undefined, orthoSession !== null);
+      return reloaded && currentOwner() && command.current === attempt;
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
       return false;
     } finally {
-      setBusy(false);
+      if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, visitId, load]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, load, orthoSession]);
 
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
   const sign = useCallback(async () => {
-    if (busy) return;
+    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
+    if (orthoSession?.elastics === "" && visit?.ortho?.visitAdjustmentId === null) {
+      setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+      return;
+    }
+    const attempt = { owner }; command.current = attempt;
     setBusy(true);
     setError(null);
     try {
@@ -423,6 +503,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         }),
       });
       const payload = await response.json();
+      if (!currentOwner() || command.current !== attempt) return;
       if (!response.ok) {
         if (Array.isArray(payload?.unmetRequirements)) {
           setServerUnmet(payload.unmetRequirements.filter((line: unknown): line is string => typeof line === "string"));
@@ -435,8 +516,20 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       }
       setServerUnmet([]);
       setReviewOpen(false);
-      setOrthoSession(null);
-      await load();
+      setOrthoSession(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
+      draftForLeave.current = { owner, dirty: false }; setDirty(false);
+      // The sign POST has succeeded. A failed follow-up GET must not turn that
+      // accepted signature into editable work or suppress its live checkout.
+      setVisit((current) => current?.id === visitId ? {
+        ...current, status: "signed", invoiceId: typeof payload.invoiceId === "number" ? payload.invoiceId : null,
+        signedAt: typeof payload.signedAt === "string" ? payload.signedAt : current.signedAt,
+        signedBy: typeof payload.signedBy === "string" ? payload.signedBy : current.signedBy,
+      } : current);
+      await load("signed");
+      if (!currentOwner() || command.current !== attempt) return;
+      // A live completed signature may navigate. It is no longer a pending
+      // command or an unsaved draft when native beforeunload runs.
+      command.current = null; setBusy(false); draftForLeave.current = { owner, dirty: false };
       onSigned?.({
         invoiceId: payload.invoiceId ?? null,
         invoiceCurrency: isCurrency(payload.invoiceCurrency) ? payload.invoiceCurrency : null,
@@ -448,14 +541,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         patientId: typeof payload.patientId === "number" ? payload.patientId : null,
       });
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      setBusy(false);
+      if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, visitId, load, onSigned, overrideReason, orthoSession, visit]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
+    if (id !== visitId || !ownsVisit || !currentOwner() || command.current?.owner === owner) return null;
+    const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
       const response = await fetch(`/api/visits/${id}`, {
@@ -463,85 +558,78 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         body: JSON.stringify({ action: "open_file" }),
       });
       const payload = await response.json().catch(() => null);
+      if (!currentOwner() || command.current !== attempt) return null;
       if (!response.ok || !payload?.patientId) {
         setError(payload?.message ?? "تعذّر فتح ملف المريض.");
         return null;
       }
       return Number(payload.patientId);
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
       return null;
     } finally {
-      setBusy(false);
+      if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, []);
+  }, [visitId, ownsVisit, currentOwner, owner]);
 
   /* (VISIT-2) الوصول من «مراجعة وإنهاء» لمريضٍ فُتح ملفّه للتوّ: تُفتح المراجعة مرةً واحدة. */
   useEffect(() => {
-    if (!autoReview || autoReviewDone.current || !visit || visit.status !== "open" || !canWrite) return;
+    if (!autoReview || autoReviewDone.current || !ownsVisit || !currentOwner() || !visit || visit.status !== "open" || !canWrite) return;
     autoReviewDone.current = true;
     setReviewOpen(true);
-  }, [autoReview, visit, canWrite]);
+  }, [autoReview, visit, canWrite, ownsVisit, currentOwner]);
 
-  /*
-   * الطلب السياقي للمختبر (§١٩): إجراء التاج أو الجسر أو القشرة يولّد زرّه —
-   * «🦷 طلب معمل» ببياناتٍ مسبقة (المريض والسنّ ونوع العمل والزيارة) — بلا نموذج.
-   * والطلب الموجود للسنّ نفسه يُظهر حالته بدل الزر: الموجود لا يُطلب مرّتين.
-   */
-  const createLabRequest = async (draft: Draft, index: number) => {
-    if (!visit || busy) return;
-    const service = services.find((row) => row.id === draft.serviceId);
-    const workType = labWorkForCategory(service?.category ?? null);
-    if (!workType || !visit.patientId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/lab", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId: visit.patientId,
-          status: "needed",
-          visitId: visit.id,
-          toothCode: draft.toothCode ? Number(draft.toothCode) : null,
-          workType,
-          details: `من ${service?.name ?? workType}${draft.toothCode ? ` — سن ${draft.toothCode}` : ""}`,
-          note: "طلب من شاشة الزيارة — أكمل بيانات المختبر ثم أرسله",
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر إنشاء طلب المختبر.");
-        return;
-      }
-      void index;
-      await load();
-    } catch {
-      setError("تعذّر الاتصال بالخادم.");
-    } finally {
-      setBusy(false);
+  const hasDraft = dirty || orthoSession !== null || Boolean(addendum.trim() || overrideReason.trim() || noChargeAdjustment || noChargeReason.trim());
+  useLayoutEffect(() => {
+    draftForLeave.current = { owner, dirty: ownsVisit && hasDraft };
+  }, [owner, ownsVisit, hasDraft]);
+  const canLeave = useCallback(() => {
+    if (!ownsVisit || !currentOwner()) return true;
+    if (command.current?.owner === owner) {
+      setError("هناك طلب حفظ أو توقيع قيد التنفيذ. انتظر نتيجته قبل الانتقال.");
+      return false;
     }
-  };
+    return draftForLeave.current.owner !== owner || !draftForLeave.current.dirty
+      || window.confirm("هناك توثيق للزيارة غير محفوظ. هل تريد تجاهله والانتقال؟");
+  }, [ownsVisit, currentOwner, owner]);
+  useEffect(() => {
+    onNavigationGuardChange?.(canLeave);
+    return () => onNavigationGuardChange?.(null);
+  }, [onNavigationGuardChange, canLeave]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const warn = (event: BeforeUnloadEvent) => {
+      const unsaved = draftForLeave.current.owner === owner && draftForLeave.current.dirty;
+      if (!ownsVisit || !currentOwner() || (!unsaved && command.current?.owner !== owner)) return;
+      event.preventDefault(); event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [ownsVisit, currentOwner, owner]);
 
-  /** طلب المختبر الموجود لهذا السنّ في هذه الزيارة — لعرضه بدل الزر. */
-  const labForDraft = (draft: Draft) => {
-    if (!visit) return null;
-    const tooth = draft.toothCode ? Number(draft.toothCode) : null;
-    return (
-      visit.labOrders.find((order) => order.toothCode === tooth && tooth !== null) ??
-      visit.labOrders.find((order) => order.toothCode === null) ?? null
-    );
-  };
-
-  if (!visit) {
-    return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-      {error ?? "جارٍ التحميل…"}
-    </p>;
+  if (!visit || !ownsVisit) {
+    const ownedError = errorOwner === owner ? error : null;
+    return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
+      <p role={ownedError ? "alert" : undefined}>{ownedError ?? "جارٍ تحميل الزيارة الحالية…"}</p>
+      {ownedError ? <button type="button" onClick={() => void load()}
+        className="mt-2 rounded-xl border border-slate-200 px-3 py-2 font-bold text-navy-800">أعد تحميل الزيارة</button> : null}
+    </div>;
   }
 
   const signed = visit.status === "signed";
+  // With no recorded adjustment, the baseline has free text but no structured elastic class.
+  const baselineElasticNote = visit.ortho?.lastAdjustment === null ? visit.ortho.elasticNote?.trim() ?? "" : "";
+  // An active case is context, not proof that today's visit is orthodontic.
+  const orthoFollowUp = !signed && Boolean(visit.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null));
+  // Hide the added lab display while another visit is still loaded.
+  const labVisitIsCurrent = visit.id === visitId;
+  // Category metadata describes eligible work, never order/procedure provenance.
+  const eligibleLabWork = Array.from(new Set(drafts.map((draft) => labWorkForCategory(draft.labCategory))
+    .filter((work): work is string => typeof work === "string")));
   const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
     // Procedure changes also regenerate treatmentDone.
-    if (busy) return;
+    if (busy || !currentOwner()) return;
+    draftForLeave.current = { owner, dirty: true }; setDirty(true);
     setDrafts(update);
   };
   const lines = drafts.map((draft) => ({
@@ -570,6 +658,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     updateDrafts((rows) => [
       ...rows,
       {
+        labCategory: service.category,
         serviceId: service.id,
         toothCode: "",
         surfaces: "",
@@ -621,7 +710,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
   const notDoneToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
 
   const addPlannedItem = (item: Visit["outstanding"][number]) => {
-    if (busy) return;
+    if (busy || !currentOwner() || command.current?.owner === owner) return;
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
@@ -636,6 +725,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     updateDrafts((rows) => [
       ...rows,
       {
+        // Plan staging has no canonical category; a later saved read supplies it.
+        labCategory: null,
         serviceId: item.serviceId ?? 0,
         toothCode: item.toothCode ? String(item.toothCode) : "",
         surfaces: "",
@@ -661,80 +752,158 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
     return sessionPriceNote(item.billingRule, sessionIndex, item.sessionCount);
   };
 
-  return (
-    <div>
-      {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
-      ) : null}
+  const canChangeAdjustment = () => !busy && currentOwner() && command.current?.owner !== owner;
+  const changeAdjustment = (next: typeof orthoSession) => {
+    if (!canChangeAdjustment()) return;
+    // Keep the existing leave guard effective even before React commits the new session.
+    if (next) draftForLeave.current = { owner, dirty: true };
+    setOrthoSession(next);
+  };
 
-      {visit.referral ? (
-        /* (REF-3) لافتة الإحالة (§6): من أحال ولماذا وأي الأسنان وما الذي يتوقف عليها — للقراءة لا قرار. */
-        <div role="note" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
-          <p className="font-extrabold">
-            📨 محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""} — السبب: {visit.referral.reason}
-            {visit.referral.teeth ? ` — الأسنان: ${visit.referral.teeth}` : ""}
-          </p>
-          {visit.referral.caseTitle || visit.referral.blocksCaseTitle ? (
-            <p className="mt-0.5 font-semibold text-indigo-900">
-              {visit.referral.caseTitle ? `الحالة: ${visit.referral.caseTitle}` : ""}
-              {visit.referral.caseTitle && visit.referral.blocksCaseTitle ? " · " : ""}
-              {visit.referral.blocksCaseTitle ? `«${visit.referral.blocksCaseTitle}» متوقفة على هذا` : ""}
-            </p>
+  const orthodonticEntry = (
+    <>
+          {!signed && canWrite && visit.ortho ? (
+            <section id="visit-ortho-session" aria-label={orthoFollowUp ? "جلسة التقويم اليوم" : "سياق التقويم"} className="mb-3 scroll-mt-4 rounded-2xl border border-navy-200 bg-navy-50 p-3">
+              <h3 className="text-sm font-extrabold text-navy-900">{orthoFollowUp ? "جلسة التقويم اليوم" : "للمريض ملف تقويم نشط"}</h3>
+              <p className="mt-1 text-xs text-navy-800">
+                {orthoFollowUp
+                  ? "وثّق ما تغيّر وما نُفّذ في هذه الجلسة. لا حاجة إلى إعادة الشكوى أو الفحص أو التشخيص الأساسي لكل شدّة."
+                  : "إذا نُفّذت شدّة اليوم، سجّلها هنا. وإلا أكمل توثيق الزيارة المعتاد أدناه."}
+              </p>
+              <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
+              {visit.ortho.visitAdjustmentId !== null ? (
+                <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
+              ) : visit.status === "open" && orthoSession && canEditWork ? (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <label className="col-span-2 sm:col-span-3 text-[11px] font-bold text-slate-600">
+                    ما نُفّذ أو تغيّر اليوم
+                    <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
+                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, done: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600">
+                      السلك العلوي
+                      <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, upperWire: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    {visit.ortho.suggestedUpper && visit.ortho.suggestedUpper !== visit.ortho.upperWire ? (
+                      <button type="button" aria-label="استخدام السلك العلوي المقترح"
+                        disabled={busy || orthoSession.upperWire === visit.ortho.suggestedUpper}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedUpper) changeAdjustment({ ...orthoSession, upperWire: visit.ortho.suggestedUpper }); }}
+                        className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
+                        اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedUpper}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600">
+                      السلك السفلي
+                      <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, lowerWire: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
+                    </label>
+                    {visit.ortho.suggestedLower && visit.ortho.suggestedLower !== visit.ortho.lowerWire ? (
+                      <button type="button" aria-label="استخدام السلك السفلي المقترح"
+                        disabled={busy || orthoSession.lowerWire === visit.ortho.suggestedLower}
+                        onClick={() => { if (canChangeAdjustment() && visit.ortho?.suggestedLower) changeAdjustment({ ...orthoSession, lowerWire: visit.ortho.suggestedLower }); }}
+                        className="mt-1 text-[10px] font-bold text-navy-800 underline disabled:text-slate-400">
+                        اقتراح اختياري: <span dir="ltr">{visit.ortho.suggestedLower}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                  {baselineElasticNote ? (
+                    <p role="status" data-testid="visit-baseline-elastics"
+                      className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 sm:col-span-3">
+                      وصف المطاطات المحفوظ في خط الأساس: {baselineElasticNote}.
+                      اختر الصنف لهذه الجلسة، أو «بلا مطاطات» إذا لم تعد تُستخدم. لا يُستنتج الصنف من الوصف.
+                    </p>
+                  ) : null}
+                  <label className="text-[10px] font-bold text-slate-600">
+                    المطاطات
+                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة" required
+                      onChange={(event) => {
+                        if (!canChangeAdjustment()) return;
+                        const elastics = event.target.value as ElasticClass | "";
+                        changeAdjustment({ ...orthoSession, elastics,
+                          ...(baselineElasticNote && elastics === "none" ? { elasticNote: "" } : {}),
+                        });
+                      }}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                      {baselineElasticNote ? <option value="">— اختر الصنف دون تغيير الوصف المحفوظ —</option> : null}
+                      {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
+                        <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {orthoSession.elastics !== "none" && (
+                    <label className="col-span-2 text-[10px] font-bold text-slate-600 sm:col-span-3">
+                      وصف المطاطات (المقاس، القوة، الجهة، ساعات اللبس)
+                      <input value={orthoSession.elasticNote} aria-label="وصف مطاطات هذه الشدّة"
+                        onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, elasticNote: event.target.value })}
+                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                    </label>
+                  )}
+                  <label className="text-[10px] font-bold text-slate-600">
+                    القادمة بعد (أسابيع)
+                    <input value={orthoSession.nextWeeks} inputMode="numeric" dir="ltr" aria-label="أسابيع حتى الشدّة القادمة"
+                      onChange={(event) => canChangeAdjustment() && changeAdjustment({ ...orthoSession, nextWeeks: event.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+                  </label>
+                  <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
+                    يبدأ السلك والمطاطات بالقيم الحالية؛ عدّل فقط ما تغيّر اليوم. اختيار السلك المقترح اختياري ولا يُطبّق تلقائيًا. تُحفظ الشدّة مع التوقيع فقط، وليس مع «احفظ بلا توقيع».
+                    <button type="button" onClick={() => { if (canChangeAdjustment()) changeAdjustment(null); }}
+                      className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
+                  </p>
+                </div>
+              ) : visit.status === "open" && canEditWork ? (
+                <button type="button"
+                  onClick={() => {
+                    if (!canChangeAdjustment()) return;
+                    // Provenance is tracked by load()/setNote(), not guessed from text.
+                    if (autoFilled.has("chiefComplaint")) setNote("chiefComplaint", "");
+                    changeAdjustment({
+                    upperWire: visit.ortho?.upperWire ?? "",
+                    lowerWire: visit.ortho?.lowerWire ?? "",
+                    elastics: baselineElasticNote ? "" : (visit.ortho?.elastics as ElasticClass | null) ?? "none",
+                    elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
+                    });
+                  }}
+                  className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
+                  + شدّة هذه الزيارة (تُحفظ مع التوقيع)
+                </button>
+              ) : null}
+              {(visit.ortho.visitAdjustmentId !== null || orthoSession !== null) && (
+                <p className="mt-1 text-[11px] font-bold text-navy-800">
+                  {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
+                    ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
+                    : visit.ortho.adjustmentBillingClass === "INCLUDED"
+                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
+                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
+                </p>
+              )}
+              {visit.status === "open" && canEditWork && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
+                && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
+                <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
+                  <label className="flex items-center gap-1.5 font-bold text-rose-900">
+                    <input type="checkbox" checked={noChargeAdjustment} onChange={(event) => { if (canChangeAdjustment()) setNoChargeAdjustment(event.target.checked); }} />
+                    بلا رسوم لهذه الشدّة
+                  </label>
+                  {noChargeAdjustment ? (
+                    <input value={noChargeReason} onChange={(event) => { if (canChangeAdjustment()) setNoChargeReason(event.target.value); }}
+                      aria-label="سبب بلا رسوم للشدّة" placeholder="السبب — مثل: شدّة تعويضية بعد كسر حاصرة"
+                      className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs" />
+                  ) : null}
+                </div>
+              ) : null}
+              </fieldset>
+            </section>
           ) : null}
-        </div>
-      ) : null}
-
-      <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
-        signed ? "border-success-300 bg-success-50" : "border-navy-800 bg-white"
-      }`}>
-        <Icon name={signed ? "check" : "clock"} className={`h-5 w-5 ${signed ? "text-success-700" : "text-navy-800"}`} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-navy-900">
-            {signed ? "زيارة موقَّعة" : "زيارة مفتوحة"} — {visit.patientName}
-          </p>
-          {signed ? (
-            <p className="text-[11px] font-semibold text-slate-500">
-              وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
-              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : " · بلا فاتورة (كشف)"}
-            </p>
-          ) : null}
-        </div>
-        {signed && visit.invoiceId ? (
-          <a href={`/print/invoice/${visit.invoiceId}`} target="_blank" rel="noopener"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
-            الفاتورة
-          </a>
-        ) : null}
-        {/* وصفة طبية من مساحة العمل — بلا الرجوع لرأس ملف المريض. */}
-        {visit.patientId ? (
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setRxOpen(true)}
-              className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
-            >
-              <span>💊</span>
-              <span>روشتة طبية (℞)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPostOpOpen(true)}
-              className="flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
-            >
-              <span>📋</span>
-              <span>إرشادات المريض</span>
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <VisitSteps steps={[
-        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
-        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
-        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
-        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
-      ]} />
-
+    </>
+  );
+  const visitReference = (
+    <>
       {/*
         * سياق الرحلة قبل الحقول: الزيارة المخطَّطة التي جاءت منها هذه الزيارة،
         * وآخر زيارة قبلها — ما عُمل آخر مرة يُقرأ لا يُخمَّن (المواصفة §١٢).
@@ -783,7 +952,37 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         </section>
       ) : null}
 
+    </>
+  );
+  const visitNotes = (
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
+        {orthoFollowUp ? (
+          <>
+            <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" value={notes.chiefComplaint} disabled={busy || !canWrite}
+              phrases={phrases.chiefComplaint} onPhrase={(phrase) => setNote("chiefComplaint", appendPhrase(notes.chiefComplaint, phrase))}
+              onChange={(value) => setNote("chiefComplaint", value)} />
+            <Field label="الخطوة القادمة" value={notes.nextPlan} disabled={busy || !canWrite}
+              auto={autoFilled.has("nextPlan")} phrases={phrases.nextPlan}
+              onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
+              onChange={(value) => setNote("nextPlan", value)} />
+            <details className="rounded-xl border border-slate-200 p-3 sm:col-span-2"
+              open={Boolean(notes.examination || notes.diagnosis || notes.treatmentDone)}>
+              <summary className="cursor-pointer text-xs font-bold text-slate-600">فحص أو تشخيص جديد / توثيق إضافي اليوم</summary>
+              <p className="mt-1 text-[11px] text-slate-500">عند وجود تغيّر أو عمل إضافي، سجّله هنا. يبقى التوثيق السابق في مرجع الحالة.</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <Field label="فحص اليوم (إن أُجري)" value={notes.examination} disabled={busy || !canWrite}
+                  phrases={phrases.examination} onPhrase={(phrase) => setNote("examination", appendPhrase(notes.examination, phrase))}
+                  onChange={(value) => setNote("examination", value)} />
+                <Field label="تشخيص جديد أو محدّث (إن وجد)" value={notes.diagnosis} disabled={busy || !canWrite}
+                  phrases={phrases.diagnosis} onPhrase={(phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
+                  onChange={(value) => setNote("diagnosis", value)} />
+                <Field label="توثيق عمل إضافي اليوم" value={notes.treatmentDone} disabled={busy || !canWrite}
+                  hint={notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
+                  onChange={(value) => setNote("treatmentDone", value)} />
+              </div>
+            </details>
+          </>
+        ) : <>
         {([
           ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
           ["examination", "② الفحص", phrases.examination],
@@ -801,14 +1000,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
           onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
+        </>}
         <label className="block">
           <span className="mb-1 block text-[11px] font-bold text-slate-500">
             الطبيب المعالج
             {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
           </span>
-          <select value={doctorId ?? ""} disabled={signed || !canEditWork}
+          <select value={doctorId ?? ""} disabled={signed || busy || !canEditWork}
             onChange={(event) => {
-              setDoctorId(Number(event.target.value) || null);
+              if (busy || !currentOwner()) return;
+              draftForLeave.current = { owner, dirty: true }; setDirty(true); setDoctorId(Number(event.target.value) || null);
               setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
             }}
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
@@ -817,6 +1018,130 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           </select>
         </label>
       </div>
+
+  );
+
+  return (
+    <div key={owner.generation}>
+      {error ? (
+        <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
+      ) : null}
+
+      {visit.referral ? (
+        /* (REF-3) لافتة الإحالة (§6): من أحال ولماذا وأي الأسنان وما الذي يتوقف عليها — للقراءة لا قرار. */
+        <div role="note" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-950">
+          <p className="font-extrabold">
+            📨 محال{visit.referral.fromName ? ` من ${visit.referral.fromName}` : ""} — السبب: {visit.referral.reason}
+            {visit.referral.teeth ? ` — الأسنان: ${visit.referral.teeth}` : ""}
+          </p>
+          {visit.referral.caseTitle || visit.referral.blocksCaseTitle ? (
+            <p className="mt-0.5 font-semibold text-indigo-900">
+              {visit.referral.caseTitle ? `الحالة: ${visit.referral.caseTitle}` : ""}
+              {visit.referral.caseTitle && visit.referral.blocksCaseTitle ? " · " : ""}
+              {visit.referral.blocksCaseTitle ? `«${visit.referral.blocksCaseTitle}» متوقفة على هذا` : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
+        signed ? "border-success-300 bg-success-50" : "border-navy-800 bg-white"
+      }`}>
+        <Icon name={signed ? "check" : "clock"} className={`h-5 w-5 ${signed ? "text-success-700" : "text-navy-800"}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-navy-900">
+            {signed ? "زيارة موقَّعة" : "زيارة مفتوحة"} — {visit.patientName}
+          </p>
+          {signed ? (
+            <p className="text-[11px] font-semibold text-slate-500">
+              وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
+              {visit.invoiceId ? ` · فاتورة #${visit.invoiceId}` : " · بلا فاتورة (كشف)"}
+            </p>
+          ) : null}
+        </div>
+        {signed && visit.invoiceId ? (
+          <a href={`/print/invoice/${visit.invoiceId}`} target="_blank" rel="noopener"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800">
+            الفاتورة
+          </a>
+        ) : null}
+        {/* وصفة طبية من مساحة العمل — بلا الرجوع لرأس ملف المريض. */}
+        {visit.patientId ? (
+          <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+            <button
+              type="button"
+              onClick={() => { if (currentOwner()) setRxOpen(true); }}
+              className="flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-100 transition-colors"
+            >
+              <span>💊</span>
+              <span>روشتة طبية (℞)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (currentOwner()) setPostOpOpen(true); }}
+              className="flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
+            >
+              <span>📋</span>
+              <span>إرشادات المريض</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <VisitSteps steps={orthoFollowUp ? [
+        { id: "visit-ortho-session", label: "جلسة اليوم", done: Boolean(visit.ortho?.visitAdjustmentId || orthoSession?.done.trim()) },
+        { id: "visit-notes", label: "تغيّرات اليوم", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
+        { id: "visit-procedures", label: "إجراءات إضافية", done: drafts.length > 0 },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
+      ] : [
+        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
+        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
+        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
+      ]} />
+
+      {orthodonticEntry}
+      {orthoFollowUp ? (
+        <>
+          {visitNotes}
+          <details className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3" data-testid="ortho-visit-reference">
+            <summary className="cursor-pointer text-xs font-extrabold text-navy-900">مرجع الحالة: الخطة وخط الأساس والجلسة السابقة</summary>
+            <p className="my-2 text-[11px] text-slate-500">للقراءة فقط؛ لا تُنسخ هذه المعلومات إلى فحص اليوم أو تشخيصه.</p>
+            {visit.ortho ? (
+              <div className="mb-3 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-extrabold text-navy-900">
+                  مريض تقويم · {orthoPhaseLabel(visit.ortho.phase)}
+                </span>
+                {/* السلكان موسومان: «014 / 012» وحدها لا تقول أيّهما العلوي. */}
+                <span className="flex items-center gap-2 text-sm font-extrabold text-navy-900">
+                  {visit.ortho.upperWire || visit.ortho.lowerWire ? (
+                    <>
+                      <span>علوي <span dir="ltr">{visit.ortho.upperWire ?? "—"}</span></span>
+                      <span className="text-navy-300">·</span>
+                      <span>سفلي <span dir="ltr">{visit.ortho.lowerWire ?? "—"}</span></span>
+                    </>
+                  ) : "بلا سلك بعد"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-navy-800">
+                {visit.ortho.lastAdjustment
+                  ? `${sinceText(visit.ortho.daysSinceLast)}${visit.ortho.lastDone ? ` — ${visit.ortho.lastDone}` : ""}`
+                  : "لا شدّات مسجّلة بعد"}
+                {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
+              </p>
+                <p className="mt-1 text-[11px] text-navy-800">
+                  {visit.ortho.legacyBaseline ? "متابعة على خط أساس من العلاج السابق." : "تفاصيل خط الأساس محفوظة في ملف التقويم إن كانت مسجّلة."}
+                  {visit.patientId ? <a href={`/patients/${visit.patientId}?tab=ortho`}
+                onClick={(event) => { if (!currentOwner()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
+                </p>
+              </div>
+            ) : null}
+            {visit.suggestions?.chiefComplaint ? <p className="mb-2 text-[11px] text-slate-600">سبب الموعد / الجلسة المخطّطة: {visit.suggestions.chiefComplaint}</p> : null}
+            {visitReference}
+          </details>
+        </>
+      ) : <>{visitReference}{visitNotes}</>}
 
       {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
       {!signed && plannedToday.length > 0 ? (
@@ -877,7 +1202,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
               <button key={choice.value} type="button" role="radio" aria-checked={visitCurrency === choice.value}
                 onClick={() => {
                   if (busy || choice.value === visitCurrency) return;
-                  setVisitCurrency(choice.value);
+                  if (!currentOwner()) return;
+                  draftForLeave.current = { owner, dirty: true }; setDirty(true); setVisitCurrency(choice.value);
                   /* الإجراءات الحرّة تنتقل للعملة الجديدة بسعر دليلها — وبنود الخطة تبقى بعملة خطتها. */
                   updateDrafts((rows) => rows.map((row) => {
                     if (row.planItemId !== null) return row;
@@ -947,28 +1273,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                     {note ? (
                       <span className="text-[10px] text-slate-500">{note}</span>
                     ) : null}
-                    {labWorkForCategory(services.find((row) => row.id === draft.serviceId)?.category ?? null) ? (
-                      // الزر السياقي (§١٩ و§٢٧): يظهر عند إجراء المعمل فقط.
-                      (() => {
-                        const existing = labForDraft(draft);
-                        return existing ? (
-                          <a href="/lab" className="rounded-lg bg-sky-100 px-2 py-1 text-[10px] font-extrabold text-sky-800 no-underline hover:bg-sky-200">
-                            🦷 طلب معمل: {existing.workType}
-                            {existing.status === "needed" ? " — لم يُرسل بعد" : ""}
-                          </a>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => void createLabRequest(draft, index)}
-                            disabled={busy || !visit.patientId}
-                            title="طلب مختبر مسبق البيانات من هذا الإجراء — المريض والسنّ والنوع"
-                            className="rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-extrabold text-white hover:bg-sky-700 disabled:opacity-40"
-                          >
-                            🦷 طلب معمل
-                          </button>
-                        );
-                      })()
-                    ) : null}
                     {!signed ? (
                       <button onClick={() => updateDrafts((rows) => rows.filter((_, i) => i !== index))}
                         className="mr-auto rounded-lg px-2 py-1 text-[11px] font-bold text-danger-700 hover:bg-danger-50">
@@ -1033,18 +1337,24 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           </ul>
         )}
 
+        {labVisitIsCurrent && !signed && eligibleLabWork.length > 0 ? (
+          <p role="note" data-testid="clinical-lab-sign-guidance" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
+            عند توقيع الزيارة بعد مراجعتها سريريًا، ينشئ النظام طلب مختبر «لم يُرسل بعد» للعمل المؤهل ({eligibleLabWork.join("، ")}) إذا لم يوجد طلب قائم وفق قواعد النظام. لا توقّع الزيارة لمجرد إنشاء طلب مختبر.
+          </p>
+        ) : null}
+
         {!signed && canWrite ? (
           <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
-              <button type="button" onClick={() => setPickerOpen(true)}
+              <button type="button" onClick={() => { if (currentOwner()) setPickerOpen(true); }}
                 className="rounded-xl border border-navy-800 bg-white px-3 py-1.5 text-[11px] font-black text-navy-800">
                 🔍 بحث سريع
               </button>
             </div>
             <QuickServicePicker
               open={pickerOpen}
-              onClose={() => setPickerOpen(false)}
+              onClose={() => { if (currentOwner()) setPickerOpen(false); }}
               currency={visitCurrency}
               services={services}
               allowUnpriced
@@ -1067,6 +1377,20 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
         </fieldset>
       </section>
 
+      {labVisitIsCurrent ? <section aria-label="طلبات المختبر المرتبطة بالزيارة" data-testid="clinical-visit-lab-orders" className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs">
+        <h3 className="font-bold text-sky-900">طلبات المختبر المرتبطة بالزيارة</h3>
+        <p className="mt-1 text-slate-600">هذه قائمة الزيارة؛ لا تثبت ارتباط الطلب بإجراء محدد أو بطبيبه.</p>
+        {visit.labOrders.length > 0 ? (
+          <ul className="mt-2 space-y-1">
+            {visit.labOrders.map((order) => (
+              <li key={order.id} data-lab-order-id={order.id}>
+                #{order.id} · {order.workType} · {order.toothCode === null ? "دون سن محدد" : `سن ${order.toothCode}`} · {Object.prototype.hasOwnProperty.call(LAB_STATUS_LABEL, order.status) ? LAB_STATUS_LABEL[order.status as LabOrderStatus] : order.status}
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-2 text-slate-600">لا توجد طلبات مختبر في القراءة الحالية لهذه الزيارة.</p>}
+      </section> : null}
+
       {/* (P4) المواد المصروفة: التلقائية من ربط الخدمات واليدوية لهذه الزيارة — من سجل حركات المخزون نفسه. */}
       {/* (P0-F) المساعد السريري لا يصرف مخزونًا ولا يرى سجل المواد — للطبيب والإدارة. */}
       {canEditWork ? <VisitMaterials visitId={visit.id} canAdd={canWrite} /> : null}
@@ -1080,13 +1404,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           ) : null}
           {canWrite ? (
             <>
-              <textarea value={addendum} onChange={(event) => setAddendum(event.target.value)}
+              <textarea value={addendum} onChange={(event) => { if (!busy && currentOwner()) setAddendum(event.target.value); }}
                 rows={2} placeholder="ملحق تصحيحي — يُضاف ولا يمحو ما قبله"
                 aria-label="ملحق"
                 className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               <button
                 onClick={async () => {
-                  if (await send({ action: "addendum", text: addendum })) setAddendum("");
+                  if (await send({ action: "addendum", text: addendum }) && currentOwner()) setAddendum("");
                 }}
                 disabled={busy || !addendum.trim()}
                 className="rounded-xl border border-warning-300 bg-warning-50 px-4 py-2 text-sm font-bold text-warning-900 disabled:opacity-40">
@@ -1098,130 +1422,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       ) : canWrite ? (
         <>
           {visit.patientId === null ? (
-            <LinkPatient visitId={visit.id} suggestion={visit.patientName} onLinked={() => void load()}
+            <LinkPatient visitId={visit.id} suggestion={visit.patientName} canAct={currentOwner} onLinked={() => void load()}
               onOpenFile={async () => {
-                if (!(await send(payload()))) return;
+                if (!(await send(payload())) || !currentOwner()) return;
                 const patientId = await openPatientFile(visit.id);
-                if (patientId) window.location.href = `/patients/${patientId}?tab=today`;
+                if (patientId && currentOwner()) window.location.href = `/patients/${patientId}?tab=today`;
               }} />
           ) : null}
 
-          {visit.ortho ? (
-            <div className="mb-2 rounded-xl border border-navy-200 bg-navy-50 px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-extrabold text-navy-900">
-                  مريض تقويم · {orthoPhaseLabel(visit.ortho.phase)}
-                </span>
-                {/* السلكان موسومان: «014 / 012» وحدها لا تقول أيّهما العلوي. */}
-                <span className="flex items-center gap-2 text-sm font-extrabold text-navy-900">
-                  {visit.ortho.upperWire || visit.ortho.lowerWire ? (
-                    <>
-                      <span>علوي <span dir="ltr">{visit.ortho.upperWire ?? "—"}</span></span>
-                      <span className="text-navy-300">·</span>
-                      <span>سفلي <span dir="ltr">{visit.ortho.lowerWire ?? "—"}</span></span>
-                    </>
-                  ) : "بلا سلك بعد"}
-                </span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-navy-800">
-                {visit.ortho.lastAdjustment
-                  ? `${sinceText(visit.ortho.daysSinceLast)}${visit.ortho.lastDone ? ` — ${visit.ortho.lastDone}` : ""}`
-                  : "لا شدّات مسجّلة بعد"}
-                {visit.ortho.elasticNote ? ` · مطاطات: ${visit.ortho.elasticNote}` : ""}
-              </p>
-              {visit.ortho.visitAdjustmentId !== null ? (
-                <p className="mt-1 text-[11px] font-bold text-emerald-800">✓ سُجّلت شدّة هذه الزيارة</p>
-              ) : visit.status === "open" && orthoSession && canEditWork ? (
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <label className="text-[10px] font-bold text-slate-600">
-                    السلك العلوي
-                    <input value={orthoSession.upperWire} dir="ltr" aria-label="السلك العلوي لهذه الشدّة"
-                      onChange={(event) => setOrthoSession({ ...orthoSession, upperWire: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    السلك السفلي
-                    <input value={orthoSession.lowerWire} dir="ltr" aria-label="السلك السفلي لهذه الشدّة"
-                      onChange={(event) => setOrthoSession({ ...orthoSession, lowerWire: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-mono" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    المطاطات
-                    <select value={orthoSession.elastics} aria-label="مطاطات هذه الشدّة"
-                      onChange={(event) => setOrthoSession({ ...orthoSession, elastics: event.target.value as ElasticClass })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
-                      {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
-                        <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {orthoSession.elastics !== "none" && (
-                    <label className="col-span-2 text-[10px] font-bold text-slate-600 sm:col-span-3">
-                      وصف المطاطات (المقاس، القوة، الجهة، ساعات اللبس)
-                      <input value={orthoSession.elasticNote} aria-label="وصف مطاطات هذه الشدّة"
-                        onChange={(event) => setOrthoSession({ ...orthoSession, elasticNote: event.target.value })}
-                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                    </label>
-                  )}
-                  <label className="col-span-2 text-[10px] font-bold text-slate-600">
-                    ما نُفّذ
-                    <input value={orthoSession.done} aria-label="ما نُفّذ في الشدّة"
-                      onChange={(event) => setOrthoSession({ ...orthoSession, done: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                  </label>
-                  <label className="text-[10px] font-bold text-slate-600">
-                    القادمة بعد (أسابيع)
-                    <input value={orthoSession.nextWeeks} inputMode="numeric" dir="ltr" aria-label="أسابيع حتى الشدّة القادمة"
-                      onChange={(event) => setOrthoSession({ ...orthoSession, nextWeeks: event.target.value })}
-                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
-                  </label>
-                  <p className="col-span-2 text-[10px] text-navy-700 sm:col-span-3">
-                    تُحفظ الشدّة مع توقيع الزيارة — مرةً واحدة مهما تكرّر الضغط.
-                    <button type="button" onClick={() => setOrthoSession(null)}
-                      className="ms-2 font-bold text-slate-600 underline">إلغاء</button>
-                  </p>
-                </div>
-              ) : visit.status === "open" && canEditWork ? (
-                <button type="button"
-                  onClick={() => setOrthoSession({
-                    upperWire: visit.ortho?.suggestedUpper ?? visit.ortho?.upperWire ?? "",
-                    lowerWire: visit.ortho?.suggestedLower ?? visit.ortho?.lowerWire ?? "",
-                    elastics: (visit.ortho?.elastics as ElasticClass | null) ?? "none",
-                    elasticNote: visit.ortho?.elasticNote ?? "", done: "", nextWeeks: String(visit.ortho?.nextWeeks ?? 4),
-                  })}
-                  className="mt-1 rounded-lg border border-navy-300 bg-white px-3 py-1 text-[11px] font-bold text-navy-900 hover:bg-navy-100">
-                  + شدّة هذه الزيارة (تُحفظ مع التوقيع)
-                </button>
-              ) : null}
-              {(visit.ortho.visitAdjustmentId !== null || orthoSession !== null) && (
-                <p className="mt-1 text-[11px] font-bold text-navy-800">
-                  {visit.ortho.adjustmentBillingClass === "LEGACY_INCLUDED"
-                    ? "شدّة مشمولة بالعلاج السابق؛ لا فاتورة جديدة للشدّة نفسها."
-                    : visit.ortho.adjustmentBillingClass === "INCLUDED"
-                      ? "شدّة مشمولة باتفاق الأقساط؛ لا فاتورة مستقلة للشدّة."
-                      : "الشدّة خارج العقد — لا فاتورة تلقائية. فوترها بإضافة خدمة «شدّة تقويم»، أو اخترها «بلا رسوم» بسبب، أو تبقى معلّقة لقرار لاحق."}
-                </p>
-              )}
-              {visit.status === "open" && canEditWork && visit.ortho.adjustmentBillingClass === "OUTSIDE_CONTRACT"
-                && (visit.ortho.visitAdjustmentId !== null || orthoSession !== null) ? (
-                <div className="mt-1 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px]">
-                  <label className="flex items-center gap-1.5 font-bold text-rose-900">
-                    <input type="checkbox" checked={noChargeAdjustment} onChange={(event) => setNoChargeAdjustment(event.target.checked)} />
-                    بلا رسوم لهذه الشدّة
-                  </label>
-                  {noChargeAdjustment ? (
-                    <input value={noChargeReason} onChange={(event) => setNoChargeReason(event.target.value)}
-                      aria-label="سبب بلا رسوم للشدّة" placeholder="السبب — مثل: شدّة تعويضية بعد كسر حاصرة"
-                      className="mt-1 w-full rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs" />
-                  ) : null}
-                </div>
-              ) : null}
-              <a href={`/patients/${visit.patientId}?tab=ortho`}
-                className="mt-1 ms-2 inline-block text-[11px] font-bold text-navy-800 underline decoration-navy-300 underline-offset-4">
-                ملف التقويم
-              </a>
-            </div>
-          ) : null}
+
 
           {visit.planWarning ? (
             <p role="alert" className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
@@ -1241,13 +1450,18 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           </button>
           <button
             onClick={async () => {
+              if (!currentOwner()) return;
+              if (orthoSession?.elastics === "" && visit.ortho?.visitAdjustmentId === null) {
+                setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+                return;
+              }
               // الحفظ ثم المراجعة: توقيعٌ يترك ما كُتب في الشاشة غير محفوظ يفقد العمل.
-              if (!(await send(payload()))) return;
+              if (!(await send(payload())) || !currentOwner()) return;
               /* (VISIT-2) المريض الجديد بلا ملف: يُفتح ملفّه أولًا ثم يكمل الإنهاء من «زيارة اليوم»
                  في ملفّه — فيأتي بعد التوقيع الشبّاك (التحصيل وحجز الجلسة القادمة) ويبقى الملف مفتوحًا. */
               if (visit.patientId === null) {
                 const patientId = await openPatientFile(visit.id);
-                if (patientId) window.location.href = `/patients/${patientId}?tab=today&review=1`;
+                if (patientId && currentOwner()) window.location.href = `/patients/${patientId}?tab=today&review=1`;
                 return;
               }
               setReviewOpen(true);
@@ -1275,7 +1489,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
       {reviewOpen ? (
         <div role="dialog" aria-label="مراجعة وإنهاء الزيارة"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-          onClick={() => setReviewOpen(false)}>
+          onClick={() => { if (currentOwner()) setReviewOpen(false); }}>
           <section className="w-full max-w-lg rounded-2xl border border-navy-800 bg-white p-4 shadow-xl"
             onClick={(event) => event.stopPropagation()}>
             <header className="mb-3">
@@ -1284,6 +1498,22 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             </header>
 
             <dl className="space-y-2 text-xs">
+              {orthoSession && visit.ortho?.visitAdjustmentId === null ? (
+                <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
+                  <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
+                  <dd className="mt-1 space-y-1 text-navy-800">
+                    <p>{orthoSession.done.trim() || "لم يُكتب وصف لما نُفّذ في الشدّة"}</p>
+                    <p>علوي <span dir="ltr">{orthoSession.upperWire || "—"}</span> · سفلي <span dir="ltr">{orthoSession.lowerWire || "—"}</span></p>
+                    <p>المطاطات: {orthoSession.elastics ? ELASTIC_LABEL[orthoSession.elastics] : "لم يُحدّد الصنف بعد"}{orthoSession.elasticNote ? ` · ${orthoSession.elasticNote}` : ""}</p>
+                    <p>الشدّة القادمة بعد {Number(orthoSession.nextWeeks) || 4} أسابيع</p>
+                  </dd>
+                </div>
+              ) : visit.ortho?.visitAdjustmentId != null ? (
+                <div className="rounded-xl border border-navy-200 bg-navy-50 p-3">
+                  <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
+                  <dd>سُجّلت لهذه الزيارة؛ لن تُضاف مرة أخرى عند التوقيع.</dd>
+                </div>
+              ) : null}
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
                 <dt className="mb-1 font-extrabold text-emerald-900">تم اليوم</dt>
                 {doneToday.length > 0 ? (
@@ -1338,7 +1568,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
                   <dt className="font-extrabold">بنودٌ تتطلب ما لم يكتمل بعد</dt>
                   <dd className="space-y-1">
                     {unmetInVisit.map((line) => <p key={line}>⚠️ {line}</p>)}
-                    <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} maxLength={300}
+                    <textarea value={overrideReason} onChange={(event) => { if (!busy && currentOwner()) setOverrideReason(event.target.value); }} maxLength={300}
                       rows={2} aria-label="سبب المتابعة" placeholder="سبب المتابعة الآن (يُسجَّل في سجل التدقيق)"
                       className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-sm text-slate-800" />
                   </dd>
@@ -1399,7 +1629,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
             </dl>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => setReviewOpen(false)}
+              <button type="button" onClick={() => { if (currentOwner()) setReviewOpen(false); }}
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
                 رجوع — أكمل العمل
               </button>
@@ -1424,7 +1654,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
           والطبيب المختار يُعبّآن تلقائيًا — وصفةٌ من سياق الزيارة نفسها. */}
       <PrescriptionModal
         isOpen={rxOpen}
-        onClose={() => setRxOpen(false)}
+        onClose={() => { if (currentOwner()) setRxOpen(false); }}
         patientId={visit?.patientId ?? undefined}
         patientName={visit?.patientName ?? ""}
         /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
@@ -1437,7 +1667,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false }: {
 
       <PostOpModal
         isOpen={postOpOpen}
-        onClose={() => setPostOpOpen(false)}
+        onClose={() => { if (currentOwner()) setPostOpOpen(false); }}
         patientId={visit?.patientId ?? 0}
         patientName={visit?.patientName ?? ""}
         initialTreatmentText={notes.treatmentDone || notes.diagnosis || ""}
@@ -1509,8 +1739,8 @@ export function VisitSteps({ steps }: { steps: { id: string; label: string; done
  * لا مطابقة صامتة بالاسم: «محمد أحمد» اسمُ رجلين، ودمجُ ملفَّي شخصين يخلط تاريخين
  * طبيّين — وهو أسوأ من تكرار ملفٍّ واحد يُدمج لاحقًا. فالبرنامج يعرض، والطبيب يقرّر.
  */
-function LinkPatient({ visitId, suggestion, onLinked, onOpenFile }: {
-  visitId: number; suggestion: string; onLinked: () => void; onOpenFile: () => Promise<void>;
+function LinkPatient({ visitId, suggestion, canAct, onLinked, onOpenFile }: {
+  visitId: number; suggestion: string; canAct: () => boolean; onLinked: () => void; onOpenFile: () => Promise<void>;
 }) {
   const [term, setTerm] = useState(suggestion);
   const [matches, setMatches] = useState<{ id: number; patientNumber: string; fullName: string; phone: string | null }[]>([]);
@@ -1518,35 +1748,35 @@ function LinkPatient({ visitId, suggestion, onLinked, onOpenFile }: {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !canAct()) return;
     const text = term.trim();
     if (text.length < 2) { setMatches([]); return; }
     const timer = setTimeout(() => {
       void (async () => {
         try {
           const response = await fetch(`/api/patients?q=${encodeURIComponent(text)}`, { cache: "no-store" });
-          if (!response.ok) return;
+          if (!response.ok || !canAct()) return;
           const payload = await response.json();
-          setMatches(Array.isArray(payload) ? payload.slice(0, 5) : []);
+          if (canAct()) setMatches(Array.isArray(payload) ? payload.slice(0, 5) : []);
         } catch {
           // البحث مساعدةٌ لا شرط — تعذّره لا يمنع التوقيع.
         }
       })();
     }, 300);
     return () => clearTimeout(timer);
-  }, [term, open]);
+  }, [term, open, canAct]);
 
   const link = async (patientId: number) => {
-    if (busy) return;
+    if (busy || !canAct()) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/visits/${visitId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "link", patientId }),
       });
-      if (response.ok) { setOpen(false); onLinked(); }
+      if (response.ok && canAct()) { setOpen(false); onLinked(); }
     } finally {
-      setBusy(false);
+      if (canAct()) setBusy(false);
     }
   };
 
@@ -1559,7 +1789,7 @@ function LinkPatient({ visitId, suggestion, onLinked, onOpenFile }: {
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" disabled={busy}
-          onClick={async () => { setBusy(true); try { await onOpenFile(); } finally { setBusy(false); } }}
+          onClick={async () => { if (!canAct()) return; setBusy(true); try { await onOpenFile(); } finally { if (canAct()) setBusy(false); } }}
           className="rounded-lg bg-navy-900 px-3 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
           افتح له ملفًّا الآن
         </button>

@@ -364,6 +364,81 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic patient/Today owner fixtures only. Never upload the
+      # directory, real patient records, traces, HAR, cookies or browser state.
+      - name: Upload clinical visit owner UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-owner-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-pending-390.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-390.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only standalone orthodontic wire fixtures and geometry; no real records,
+      # traces, HAR, cookies, browser state, or artifact-directory uploads.
+      - name: Upload standalone orthodontic wire screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-adjustment-wire-defaults-ui
+          path: |
+            .settings-ui-artifacts/ortho-adjustment-current-wires-1280.png
+            .settings-ui-artifacts/ortho-adjustment-current-wires-390.png
+            .settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json
+            .settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only synthetic orthodontic regimen fixtures and control geometry; never
+      # real records, traces, HAR, cookies, browser state, or whole directories.
+      - name: Upload orthodontic regimen screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-regimen-defaults-ui
+          path: |
+            .settings-ui-artifacts/ortho-regimen-ongoing-1280.png
+            .settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json
+            .settings-ui-artifacts/ortho-regimen-ongoing-390.png
+            .settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json
+            .settings-ui-artifacts/ortho-regimen-baseline-1280.png
+            .settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json
+            .settings-ui-artifacts/ortho-regimen-baseline-390.png
+            .settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png
+            .settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-390.png
+            .settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only synthetic orthodontic visit entry fixtures, never live patient data.
+      - name: Upload orthodontic chairside entry screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-ortho-entry-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
+            .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic read-only carry-forward screens, never real ledger data.
       - name: Upload accounting carry-forward UI screenshots
         if: always()
@@ -403,6 +478,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic compact patient context fixtures; never real patient data.
+      - name: Upload compact patient context screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-compact-context-ui
+          path: |
+            .settings-ui-artifacts/patient-compact-today-ordinary-1280.png
+            .settings-ui-artifacts/patient-compact-today-ordinary-390.png
+            .settings-ui-artifacts/patient-compact-today-long-1280.png
+            .settings-ui-artifacts/patient-compact-today-long-390.png
+            .settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png
+            .settings-ui-artifacts/patient-compact-treatment-ordinary-390.png
+            .settings-ui-artifacts/patient-compact-treatment-long-1280.png
+            .settings-ui-artifacts/patient-compact-treatment-long-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic endodontic fixtures; never upload real patient records.
       - name: Upload endodontics cockpit screenshots
         if: always()
@@ -412,6 +506,130 @@ jobs:
           path: |
             .settings-ui-artifacts/endodontics-cockpit-1280.png
             .settings-ui-artifacts/endodontics-cockpit-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic UI fixtures only; never upload real patient information.
+      - name: Upload cockpit UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-cockpit-readiness-ui
+          path: |
+            .settings-ui-artifacts/patient-cockpit-readiness-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-390.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic UI fixtures only; never upload real patient information.
+      - name: Upload legacy UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-patient-guidance-ui
+          path: |
+            .settings-ui-artifacts/legacy-patient-plan-1280.png
+            .settings-ui-artifacts/legacy-patient-plan-390.png
+            .settings-ui-artifacts/legacy-opening-guidance-1280.png
+            .settings-ui-artifacts/legacy-opening-guidance-390.png
+            .settings-ui-artifacts/legacy-current-collection-1280.png
+            .settings-ui-artifacts/legacy-current-collection-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic diagnosis-case panels only; no broad directory upload.
+      - name: Upload orthodontic diagnosis case screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-diagnosis-case-ui
+          path: |
+            .settings-ui-artifacts/ortho-diagnosis-case-1280.png
+            .settings-ui-artifacts/ortho-diagnosis-case-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only the two synthetic archive reader panels; never upload the directory.
+      - name: Upload legacy archive reader screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-archive-reader-screenshots
+          path: |
+            .settings-ui-artifacts/legacy-archive-reader-1280.png
+            .settings-ui-artifacts/legacy-archive-reader-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic agreement read-state fixtures only. Append to the
+      # existing job after real HTTP UI tests; preserve concurrent upload steps.
+      - name: Upload orthodontic agreement read-state screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-package-read-state-ui
+          path: |
+            .settings-ui-artifacts/ortho-package-unavailable-1280.png
+            .settings-ui-artifacts/ortho-package-unavailable-390.png
+            .settings-ui-artifacts/ortho-package-funded-1280.png
+            .settings-ui-artifacts/ortho-package-funded-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic plan projections only; no real patient or receipt data.
+      - name: Upload plan payment visibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-payment-visibility-ui
+          path: |
+            .settings-ui-artifacts/plan-payment-hidden-1280.png
+            .settings-ui-artifacts/plan-payment-hidden-390.png
+            .settings-ui-artifacts/plan-payment-denied-1280.png
+            .settings-ui-artifacts/plan-payment-denied-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Allowlist only synthetic unchanged-UI records viewport captures and bounds.
+      - name: Upload orthodontic record case screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-records-case-ui
+          path: |
+            .settings-ui-artifacts/ortho-records-case-1280.png
+            .settings-ui-artifacts/ortho-records-references-1280.png
+            .settings-ui-artifacts/ortho-records-case-390.png
+            .settings-ui-artifacts/ortho-records-profile-390.png
+            .settings-ui-artifacts/ortho-records-references-390.png
+            .settings-ui-artifacts/ortho-records-unavailable-390.png
+            .settings-ui-artifacts/ortho-records-ceph-summary-1280.png
+            .settings-ui-artifacts/ortho-records-ceph-summary-390.png
+            .settings-ui-artifacts/ortho-records-capture-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic checklist panels; canonical classifier success and unavailable reads.
+      - name: Upload legacy checklist refresh screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-checklist-refresh-ui
+          path: |
+            .settings-ui-artifacts/legacy-checklist-independent-1280.png
+            .settings-ui-artifacts/legacy-checklist-independent-390.png
+            .settings-ui-artifacts/legacy-checklist-unavailable-1280.png
+            .settings-ui-artifacts/legacy-checklist-unavailable-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

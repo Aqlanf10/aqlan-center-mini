@@ -47,6 +47,7 @@ const {
 const pool = getPool();
 const BASE = "YER";
 const TODAY = new Date().toISOString().slice(0, 10);
+const SYNTHETIC_USD_RATE = 531.125;
 const UNIT_MINOR = 2000; // ٢٠ دولارًا بالسنتات — سعر الوحدة في جدول التسعير
 
 let failed = false;
@@ -75,6 +76,8 @@ const countRows = async (sql, args) => {
 /* ═══════════ ١ — التسعير بالكمية: ٢٠ دولارًا × ٣ أسنان = ٦٠ ═══════════ */
 
 async function journeyPricingQuantity() {
+  // This PGlite-only fixture must store the FX used by automatic foreign rules.
+  await db.saveSettings({ "finance.rate.USD": String(SYNTHETIC_USD_RATE) });
   console.log("\n── ١: التسعير بالكمية — سعر الوحدة من جدول التسعير × عدد الأسنان ──");
 
   const lab = await createLaboratory({ name: "مختبر الكمية " + number(), currency: "USD" });
@@ -125,19 +128,23 @@ async function journeyPricingQuantity() {
     `costMinor=${order.costMinor} (المتوقع ${UNIT_MINOR * 3})`,
   );
   check("العملة من قاعدة التسعير نفسها", order.costCurrency === "USD");
+  check("سعر صرف الأمر من إعداد الاختبار لا القيمة الاحتياطية ١", order.exchangeRate === SYNTHETIC_USD_RATE);
+  check("قيمة الأمر الأساسية محفوظة بالريال اليمني", order.baseAmountMinor === 31868);
 
   const payable = await countRows(
     `SELECT COUNT(*)::text AS count FROM payables WHERE lab_order_id = $1`, [order.id],
   );
   check("الالتزام وُلد بقيمة الإرسالية كاملةً (٦٠ دولارًا لا ٢٠)", payable === 1);
   const payAmount = await pool.query(
-    `SELECT amount_minor::text AS amount FROM payables WHERE lab_order_id = $1`, [order.id],
+    `SELECT amount_minor::text AS amount, exchange_rate, base_amount_minor FROM payables WHERE lab_order_id = $1`, [order.id],
   );
   check(
     "مقدار الالتزام = الإجمالي المضروب",
     Number(payAmount.rows[0]?.amount) === UNIT_MINOR * 3,
     `amount=${payAmount.rows[0]?.amount}`,
   );
+  check("الالتزام يحفظ سعر الصرف نفسه", Number(payAmount.rows[0]?.exchange_rate) === SYNTHETIC_USD_RATE);
+  check("الالتزام يحفظ القيمة الأساسية نفسها", Number(payAmount.rows[0]?.base_amount_minor) === 31868);
 
   /* وبقاعدةٍ واحدة من الواجهة: labPricingQuantity — تُختبر في وحدة vitest،
      وهنا نتأكد أن الخادم يوافقها على الحالة نفسها. */

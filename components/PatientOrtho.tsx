@@ -6,7 +6,7 @@ import { OrthoPackageLink } from "./OrthoPackageLink";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
-  nextAdjustmentDate, nextWire, usesArchwires, wiresFor,
+  nextAdjustmentDate, usesArchwires, wiresFor,
   type Appliance, type Arches, type CaseStatus, type ElasticClass,
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
@@ -20,6 +20,7 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
+import { PatientDiagnosis } from "./PatientDiagnosis";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -144,6 +145,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
+  const [onboardingRevision, setOnboardingRevision] = useState(0);
 
   // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
   const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
@@ -178,6 +180,13 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  // The case row may keep the same ID and plan ID after a confirmed change.
+  // Invalidate the independent classifier immediately, even if reloading cases fails.
+  const refreshAfterConfirmedChange = () => {
+    setOnboardingRevision((value) => value + 1);
+    void load();
+  };
+
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
   const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
@@ -191,6 +200,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
     const payload = await response.json().catch(() => null);
     if (!response.ok) { setError(payload?.message ?? "تعذّر التنفيذ."); return false; }
     setError(null);
+    setOnboardingRevision((value) => value + 1);
     await load();
     return true;
   };
@@ -255,7 +265,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <LegacyBaselineForm
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setRecordingLegacy(false); void load(); }}
+                onSaved={() => { setRecordingLegacy(false); refreshAfterConfirmedChange(); }}
                 onError={setError}
               />
             </div>
@@ -265,7 +275,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <NewCase
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setOpening(false); void load(); }}
+                onSaved={() => { setOpening(false); refreshAfterConfirmedChange(); }}
                 onError={setError}
               />
             </div>
@@ -351,13 +361,14 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
                   {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
-                    ? <LegacyOnboardingChecklist patientId={patientId} /> : null}
+                    ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
+                        refreshRevision={onboardingRevision} /> : null}
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
                         canLink={session?.role === "admin" || session?.role === "reception"
                           || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
-                        onChanged={() => void load()} />
+                        onChanged={refreshAfterConfirmedChange} />
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
@@ -502,7 +513,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                               onSaved={(result) => {
                                 setAdjusting(null);
                                 setSaved(result);
-                                void load();
+                                refreshAfterConfirmedChange();
                               }}
                               onError={setError}
                             />
@@ -716,7 +727,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200">
                               <button
                                 onClick={async () => {
-                                  const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)") ?? "";
+                                  const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)");
+                                  if (note === null) return;
                                   await patch(row.id, { status: "completed", note });
                                 }}
                                 className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 shadow-xs transition-colors"
@@ -1064,16 +1076,19 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   }) => void;
   onError: (message: string | null) => void;
 }) {
-  const suggestedUpper = nextWire(caseRow.slot, caseRow.upperWire)?.code ?? caseRow.upperWire ?? "";
-  const suggestedLower = nextWire(caseRow.slot, caseRow.lowerWire)?.code ?? caseRow.lowerWire ?? "";
-
   const [doneOn, setDoneOn] = useState(today);
-  const [upperWire, setUpperWire] = useState(suggestedUpper);
-  const [lowerWire, setLowerWire] = useState(suggestedLower);
-  const [elastics, setElastics] = useState<ElasticClass>("none");
-  const [elasticNote, setElasticNote] = useState("");
+  // Recording a session must not advance either arch without an explicit selection.
+  const [upperWire, setUpperWire] = useState(caseRow.upperWire ?? "");
+  const [lowerWire, setLowerWire] = useState(caseRow.lowerWire ?? "");
+  const previousAdjustment = caseRow.adjustments[0] ?? null;
+  // The baseline stores a description, not an elastic class. Never infer one from its text.
+  const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
+  const [elastics, setElastics] = useState<ElasticClass | "">(
+    previousAdjustment?.elastics ?? (baselineElasticNote ? "" : "none"),
+  );
+  const [elasticNote, setElasticNote] = useState(previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
   const [done, setDone] = useState("");
-  const [nextWeeks, setNextWeeks] = useState("4");
+  const [nextWeeks, setNextWeeks] = useState(String(previousAdjustment?.nextWeeks ?? 4));
   const [saving, setSaving] = useState(false);
 
   const [queue, setQueue] = useState<QueuedPhoto[]>([]);
@@ -1099,6 +1114,10 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (saving) return;
+    if (!elastics) {
+      onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+      return;
+    }
     setSaving(true);
     onError(null);
     try {
@@ -1190,18 +1209,30 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         </div>
       ) : null}
 
+      {baselineElasticNote ? (
+        <p role="status" data-testid="adjustment-baseline-elastics"
+          className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950">
+          وصف المطاطات المحفوظ في خط الأساس: {baselineElasticNote}.
+          اختر الصنف لهذه الجلسة، أو «بلا مطاطات» إذا لم تعد تُستخدم. لا يُستنتج الصنف من الوصف.
+        </p>
+      ) : null}
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[8rem] flex-1">
           <span className="mb-1 block text-[10px] font-bold text-slate-500">المطاطات</span>
-          <select value={elastics} onChange={(event) => setElastics(event.target.value as ElasticClass)}
-            aria-label="صنف المطاطات"
+          <select value={elastics} onChange={(event) => {
+            const value = event.target.value as ElasticClass | "";
+            setElastics(value);
+            if (value === "none") setElasticNote("");
+          }}
+            aria-label="صنف المطاطات" required
             className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+            {baselineElasticNote ? <option value="">— اختر الصنف دون تغيير الوصف المحفوظ —</option> : null}
             {(Object.keys(ELASTIC_LABEL) as ElasticClass[]).map((value) => (
               <option key={value} value={value}>{ELASTIC_LABEL[value]}</option>
             ))}
           </select>
         </label>
-        {elastics !== "none" ? (
+        {elastics !== "none" || elasticNote ? (
           <label className="min-w-[9rem] flex-1">
             <span className="mb-1 block text-[10px] font-bold text-slate-500">وصف المطاطات</span>
             <input value={elasticNote} onChange={(event) => setElasticNote(event.target.value)}
@@ -1405,194 +1436,6 @@ function OrthoComparisonContent({ patientId, orthoCaseId }: { patientId: number;
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ═══════════════ التشخيص النسخي السريري ═══════════════ */
-
-interface DiagnosisVersionView {
-  id: number;
-  version: number;
-  content: Record<string, string | null>;
-  label: string | null;
-  createdBy: string;
-  createdAt: string;
-}
-
-function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
-  patientId: number; orthoCaseId: number | null;
-  onError: (message: string | null) => void;
-}) {
-  const [versions, setVersions] = useState<DiagnosisVersionView[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [writing, setWriting] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/patients/${patientId}/diagnoses`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setVersions(payload.diagnoses as DiagnosisVersionView[]);
-    } catch {
-      setVersions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [patientId]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const current = versions[0];
-
-  const save = async (content: Record<string, string>, label: string) => {
-    setSaving(true);
-    onError(null);
-    try {
-      const response = await fetch(`/api/patients/${patientId}/diagnoses`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, label, orthoCaseId }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر الحفظ."); return; }
-      setWriting(false);
-      await load();
-    } catch {
-      onError("تعذّر الاتصال بالخادم.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const lines = (content: Record<string, string | null>): string[] => {
-    const names: Record<string, string> = {
-      skeletal: "الصنف الهيكلي", dental: "الصنف السني", crowding: "الازدحام",
-      overjet: "Overjet", bite: "الإطباق",
-    };
-    return Object.entries(content)
-      .filter(([, value]) => value)
-      .map(([key, value]) => key === "note" ? String(value) : `${names[key] ?? key}: ${value}`);
-  };
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-xs font-black text-navy-900 flex items-center gap-1.5">
-          <span>📝</span> التشخيص السريري للفكين وتصنيف الحالة {current ? `(نسخة ${current.version})` : ""}
-        </h4>
-        <span className="text-[10px] text-slate-500 font-bold">
-          {current ? friendlyDateLong(current.createdAt.slice(0, 10)) : "غير مسجل بعد"}
-        </span>
-      </div>
-
-      <div className="space-y-2">
-        {loading ? (
-          <p className="text-xs text-slate-400">جارٍ التحميل…</p>
-        ) : versions.length === 0 ? (
-          <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 text-center">
-            لا تشخيص سريري مسجل بعد — سجّل تشخيص البداية ليقارن عليه تقدم الحالة.
-          </p>
-        ) : (
-          versions.map((version, index) => (
-            <div key={version.id}
-              className={`rounded-xl p-3 ${index === 0 ? "border border-navy-200 bg-navy-50/50" : "bg-slate-50"}`}>
-              <p className="mb-1 text-[11px] font-extrabold text-slate-800">
-                {version.version === 1 ? "تشخيص البداية" : `تحديث التشخيص — نسخة ${version.version}`}
-                {version.label ? ` · ${version.label}` : ""}
-                {" · "}{friendlyDateLong(version.createdAt.slice(0, 10))} · {version.createdBy}
-              </p>
-              <ul className="list-inside list-disc text-xs text-slate-700 space-y-0.5">
-                {lines(version.content).map((line) => <li key={line}>{line}</li>)}
-              </ul>
-            </div>
-          ))
-        )}
-
-        {!writing ? (
-          <button onClick={() => setWriting(true)}
-            className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
-            {current ? "+ تحديث التشخيص (نسخة جديدة — لا يمسح القديم)" : "+ سجّل تشخيص البداية"}
-          </button>
-        ) : (
-          <DiagnosisForm saving={saving} onCancel={() => setWriting(false)} onSave={save} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DiagnosisForm({ saving, onCancel, onSave }: {
-  saving: boolean;
-  onCancel: () => void;
-  onSave: (content: Record<string, string>, label: string) => void;
-}) {
-  const [skeletal, setSkeletal] = useState("");
-  const [dental, setDental] = useState("");
-  const [crowding, setCrowding] = useState("");
-  const [overjet, setOverjet] = useState("");
-  const [bite, setBite] = useState("");
-  const [note, setNote] = useState("");
-  const [label, setLabel] = useState("");
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
-      <div className="mb-2 grid grid-cols-2 gap-2">
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف الهيكلي</span>
-          <input value={skeletal} onChange={(event) => setSkeletal(event.target.value)}
-            placeholder="Class II هيكلي" aria-label="الصنف الهيكلي"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف السني</span>
-          <input value={dental} onChange={(event) => setDental(event.target.value)}
-            placeholder="Class II Div 1" aria-label="الصنف السني" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الازدحام</span>
-          <input value={crowding} onChange={(event) => setCrowding(event.target.value)}
-            placeholder="علوي 5 مم" aria-label="الازدحام"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">Overjet</span>
-          <input value={overjet} onChange={(event) => setOverjet(event.target.value)}
-            placeholder="7 مم" aria-label="البعد الأفقي" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الإطباق</span>
-          <input value={bite} onChange={(event) => setBite(event.target.value)}
-            placeholder="عضة عميقة 60%" aria-label="الإطباق"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">سبب التحديث</span>
-          <input value={label} onChange={(event) => setLabel(event.target.value)}
-            placeholder="بعد ٦ أشهر من العلاج" aria-label="سبب التحديث"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-      </div>
-      <label className="mb-2 block">
-        <span className="mb-1 block text-[10px] font-bold text-slate-500">ملاحظات حرة</span>
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2}
-          aria-label="ملاحظات التشخيص"
-          className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-      </label>
-      <div className="flex gap-2">
-        <button type="button" disabled={saving}
-          onClick={() => onSave({ skeletal, dental, crowding, overjet, bite, note }, label)}
-          className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-black text-white disabled:opacity-50 hover:bg-navy-900">
-          {saving ? "جارٍ الحفظ…" : "احفظ النسخة الجديدة"}
-        </button>
-        <button type="button" onClick={onCancel}
-          className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
-          إلغاء
-        </button>
-      </div>
     </div>
   );
 }

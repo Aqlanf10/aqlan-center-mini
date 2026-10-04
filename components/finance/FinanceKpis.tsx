@@ -1,6 +1,8 @@
 "use client";
 
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
+import { sumLabNetBalances, type LabBalanceReadState } from "@/lib/lab-balance-overview";
+import { LabNetAmounts } from "./LabNetAmounts";
 
 export type ShiftReadState = "loading" | "error" | "ready";
 
@@ -39,8 +41,7 @@ interface FinanceKpisProps {
   totalDebtsByCurrency: Record<Currency, number>;
   debtorsCount: number;
   overduePlansCount: number;
-  totalLabPayablesMinor: number;
-  unsettledLabOrdersCount: number;
+  labBalanceState: LabBalanceReadState;
   onOpenQuickCollect: () => void;
   onOpenNewExpense: () => void;
   onOpenCloseShift: () => void;
@@ -68,8 +69,7 @@ export function FinanceKpis({
   totalDebtsByCurrency,
   debtorsCount,
   overduePlansCount,
-  totalLabPayablesMinor,
-  unsettledLabOrdersCount,
+  labBalanceState,
   onOpenQuickCollect,
   onOpenNewExpense,
   onOpenCloseShift,
@@ -238,27 +238,23 @@ export function FinanceKpis({
           </span>
         </div>
 
-        {/* بطاقة ٥: مستحقات معامل الأسنان (AP) */}
-        <div
+        {/* Signed net balances, not gross AP or clinical-order costs. */}
+        {labBalanceState.phase !== "unavailable" ? <div
           onClick={() => onTabChange("receivables")}
           className="group cursor-pointer rounded-2xl border border-purple-200/90 bg-gradient-to-br from-purple-50/90 via-white to-purple-50/50 p-3.5 shadow-xs transition-all hover:border-purple-400 hover:shadow-md"
         >
-          <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-bold text-purple-950">مستحقات المعامل (AP)</span>
-            <span className="rounded-md bg-purple-200/80 px-1.5 py-0.5 text-[10px] font-bold text-purple-900">
-              {unsettledLabOrdersCount} عمل معمل
-            </span>
+          <h3 className="text-xs font-bold text-purple-950">صافي أرصدة المختبرات بكل عملة</h3>
+          <div className="mt-2 text-lg text-purple-900">
+            {labBalanceState.phase === "ready" ? <LabNetAmounts buckets={sumLabNetBalances(labBalanceState.data.labs)} />
+              : <p role="status">{labBalanceState.phase === "loading" ? "جارٍ التحقق من أرصدة المختبرات…" : "أرصدة المختبرات غير متاحة"}</p>}
           </div>
-          <p className="mt-1 text-xl font-black text-purple-900 font-mono">
-            {formatMoney(totalLabPayablesMinor, baseCurrency)}
-          </p>
           <p className="mt-2 text-[11px] font-medium text-purple-800">
-            تركيبات وزراعة معلقة
+            الموجب علينا للمختبر؛ السالب رصيد لنا لديه. صافي الصفر قد يخفي ديوناً وأرصدة متقابلة بين المختبرات.
           </p>
           <span className="mt-2.5 block text-[11px] font-bold text-purple-700 group-hover:underline">
-            تسوية كشوفات المعامل ↗
+            مراجعة أرصدة كل مختبر ↗
           </span>
-        </div>
+        </div> : null}
       </section>
 
       {/* ٢. شريط الإجراءات السريعة البارزة */}

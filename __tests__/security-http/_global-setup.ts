@@ -186,7 +186,7 @@ async function seed(dbUrl: string): Promise<{ patientAId: number; patientBId: nu
     // زيارة لمريض أ لدى طبيبه أ — بها تُختبر حدود CDS السريري على زيارة موجودة
     const { rows: [visit] } = await client.query(
       `INSERT INTO visits (patient_name, patient_id, doctor_id, status)
-       VALUES ($1, $2, $3, 'seated') RETURNING id`,
+       VALUES ($1, $2, $3, 'waiting') RETURNING id`,
       [TEST_PATIENTS.patientA.fullName, patientA.id, partyA.id],
     );
 

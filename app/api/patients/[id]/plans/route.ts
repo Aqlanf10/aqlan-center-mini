@@ -9,7 +9,8 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
+import { withoutPlanPayments } from "@/lib/plan-payment-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
-  if (!(await canAccessPatient(session, patientId))) {
+  if (!(await canAccessPatient(session, patientId, session.role === "doctor" ? "canViewPlans" : undefined))) {
     return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على خطط هذا المريض." }, { status: 403 });
   }
 
@@ -47,7 +48,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const base = CLINIC_BASE_CURRENCY;
     const doctorSeesMoney =
       session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
-    const maySeeFinancial = canHandleMoney(session.role) || doctorSeesMoney;
+    // Preserve the legacy global restriction as well as the per-doctor deny.
+    // The global switch is not a grant of patient-payment permission.
+    const maySeeFinancial = (canHandleMoney(session.role) || doctorSeesMoney)
+      && await canViewPatientMoney(session, patientId);
 
     const [plans, plannedVisits] = await Promise.all([
       listPatientPlans(patientId, today),
@@ -56,16 +60,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     const visiblePlans = maySeeFinancial
       ? plans
-      : plans.map((plan) => ({
-          ...plan,
-          installments: [],
-          paidMinor: 0,
-          progress: {
-            ...plan.progress,
-            paidMinor: 0, remainingMinor: 0, overdueMinor: 0,
-            nextDueAmountMinor: 0, paidCount: 0,
-          },
-        }));
+      : plans.map((plan) => withoutPlanPayments(plan));
 
     return NextResponse.json({
       plans: visiblePlans,

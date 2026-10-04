@@ -1,17 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { minutesSince, type Visit } from "@/lib/flow";
+import { useEffect, useState, type ReactNode } from "react";
+import { minutesSince } from "@/lib/flow";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { formatMoney } from "@/lib/money";
-import { suggestSpecialtyTab, type ChairStep, type ChairStepKey, type SpecialtyTab } from "@/lib/chair-readiness";
+import { suggestSpecialtyTab, type SpecialtyTab } from "@/lib/chair-readiness";
 import { useChairCount } from "@/components/SettingsProvider";
-import { sendGatedMove, type VisitReadiness } from "@/components/today/useChairReadiness";
+import { usePatientCockpitReadiness } from "./usePatientCockpitReadiness";
 import type { WorkflowSummary } from "./SummaryTab";
-
-interface CockpitVisit extends VisitReadiness {
-  stepper?: { steps: ChairStep[]; current: ChairStepKey | null };
-}
 
 const STATUS_TEXT: Record<string, string> = {
   waiting: "في الانتظار",
@@ -25,7 +21,7 @@ const hhmm = (iso: string | null) => (iso
   : "");
 
 /**
- * (CHAIR-1 Slice 4) قمرة ملف المريض — شريطٌ ثابت أعلى الملف، **تركيبٌ لا محرّك**.
+ * (CHAIR-1 Slice 4) قمرة ملف المريض — سياقٌ موجز أعلى الملف، **تركيبٌ لا محرّك**.
  *
  * يعرض: الاسم والتنبيهات، والرصيد بكل عملة (لمن يُسمح له فقط — الخادم يقرّر)، وحالة زيارة اليوم
  * وكرسيّها ووقتها، ومراحل الرحلة وصول → جاهز → على الكرسي → توقيع → دفع.
@@ -36,6 +32,7 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
+  compact = false, identity, primaryAction, secondaryActions, safety,
 }: {
   patientId: number;
   patientName: string;
@@ -45,112 +42,33 @@ export function PatientCockpit({
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
+  /** Presentation slots reuse the patient page's existing identity and actions. */
+  compact?: boolean;
+  identity?: ReactNode;
+  primaryAction?: ReactNode;
+  secondaryActions?: ReactNode;
+  safety?: ReactNode;
 }) {
   const chairCount = useChairCount();
-  const [visit, setVisit] = useState<CockpitVisit | null>(null);
-  const [todayVisits, setTodayVisits] = useState<Visit[]>([]);
-  const [chair, setChair] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "warn" | "error" | "ok"; text: string } | null>(null);
+  const { visit, alerts, readiness, chairsState, coherent, canOperate, active, freeChairs, selectedChair,
+    busy, message, canEnterChair, setChair, reload, clear, enterChair } = usePatientCockpitReadiness({
+    patientId, patientName, patientPhone, fallbackAlert, summary, chairCount, onChanged,
+  });
   const [now, setNow] = useState(() => new Date());
-
-  const reload = useCallback(async () => {
-    try {
-      const [readiness, visits] = await Promise.all([
-        fetch(`/api/visits/readiness?patientId=${patientId}`, { cache: "no-store" }),
-        fetch("/api/visits", { cache: "no-store" }),
-      ]);
-      if (readiness.ok) {
-        const payload = await readiness.json() as { visit?: CockpitVisit | null };
-        setVisit(payload.visit ?? null);
-      }
-      if (visits.ok) {
-        const payload = await visits.json();
-        if (Array.isArray(payload)) setTodayVisits(payload as Visit[]);
-      }
-    } catch { /* القمرة مساعدة — تعذّرها لا يعطّل الملف */ }
-  }, [patientId]);
-
   useEffect(() => {
-    const first = setTimeout(() => { void reload(); }, 0);
-    const poll = setInterval(() => { void reload(); setNow(new Date()); }, 30_000);
-    return () => { clearTimeout(first); clearInterval(poll); };
-  }, [reload, summary?.openVisit?.id, summary?.openVisit?.status]);
-
-  /* الكراسي المتاحة لهذا المريض: كرسيّ ندائه إن نُودي، وإلا الفارغة اليوم. */
-  const freeChairs = useMemo(() => {
-    if (visit?.status === "called" && visit.chair) return [visit.chair];
-    const others = todayVisits.filter((row) => row.id !== visit?.visitId);
-    const free: number[] = [];
-    for (let n = 1; n <= chairCount; n += 1) {
-      const taken = others.some((row) => row.chair === n && (row.status === "in_chair" || row.status === "called"));
-      if (!taken) free.push(n);
-    }
-    return free;
-  }, [todayVisits, visit, chairCount]);
-  const selectedChair = chair !== null && freeChairs.includes(chair) ? chair : freeChairs[0] ?? null;
-
-  const active = visit !== null && visit.signedAt === null && visit.status !== "done";
-  const canEnterChair = visit === null || (visit.signedAt === null
-    && (visit.status === "waiting" || visit.status === "called"));
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const suggestion = suggestSpecialtyTab({
     orthoActive: summary?.counts.orthoCase === true,
     plannedTodayTitle: summary?.openVisit?.plannedTitle ?? null,
     planSpecialty: summary?.activePlans[0]?.specialty ?? null,
     hasOpenVisit: active,
   });
-  const alerts = visit?.alerts ?? (fallbackAlert ? [fallbackAlert] : []);
-
-  const clear = async () => {
-    if (!visit || busy) return;
-    setBusy(true);
-    try {
-      const response = await fetch(`/api/visits/${visit.visitId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "clear" }),
-      });
-      const payload = await response.json().catch(() => null);
-      setMessage(response.ok ? null : { tone: "error", text: payload?.message ?? "تعذّر إقرار الجاهزية." });
-      await reload();
-    } catch {
-      setMessage({ tone: "error", text: "تعذّر الاتصال بالخادم." });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const enterChair = async () => {
-    if (busy) return;
-    if (!selectedChair) { setMessage({ tone: "error", text: "لا كرسي فارغ الآن — راجع لوحة اليوم." }); return; }
-    setBusy(true);
-    setMessage(null);
-    try {
-      /* الزيارة القائمة تُستعمل كما هي؛ وإلا يُسجَّل الوصول بالمسار نفسه، و409 (LIVE-4) يعيد القائمة. */
-      let visitId = visit && visit.signedAt === null && visit.status !== "done" ? visit.visitId : null;
-      if (visitId === null) {
-        const created = await fetch("/api/visits", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ patientId, patientName, patientPhone, note: "دخول مباشر من ملف المريض" }),
-        });
-        const payload = await created.json().catch(() => null);
-        if (created.ok && typeof payload?.id === "number") visitId = payload.id;
-        else if (created.status === 409 && typeof payload?.visitId === "number") visitId = payload.visitId;
-        else { setMessage({ tone: "error", text: payload?.message ?? "تعذّر تسجيل الوصول." }); return; }
-      }
-      const response = await sendGatedMove(visitId as number, { action: "seat", chair: selectedChair });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) setMessage({ tone: "error", text: payload?.message ?? "تعذّر الإدخال إلى الكرسي." });
-      else setMessage(typeof payload?.warning === "string" ? { tone: "warn", text: payload.warning } : { tone: "ok", text: `على الكرسي ${selectedChair}` });
-      await reload();
-      onChanged();
-    } catch {
-      setMessage({ tone: "error", text: "تعذّر الاتصال بالخادم." });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const statusLine = (() => {
-    if (!visit) return "لا زيارة اليوم";
+    if (readiness === "loading") return "حالة الزيارة قيد التحقق";
+    if (readiness === "unavailable") return "حالة الزيارة غير متاحة الآن";
+    if (!visit) return "لا زيارة اليوم في القراءة الحالية";
     if (visit.signedAt) return "وُقّعت الزيارة";
     const base = STATUS_TEXT[visit.status] ?? visit.status;
     if (visit.status === "in_chair") {
@@ -161,29 +79,7 @@ export function PatientCockpit({
     return `${base} — بانتظار التوقيع`;
   })();
 
-  return (
-    <div className="sticky top-0 z-30 -mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur" aria-label="قمرة المريض">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="truncate text-sm font-black text-navy-900">{patientName}</span>
-        {alerts.length > 0 ? (
-          <span className="rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
-          </span>
-        ) : null}
-        {(visit?.balances ?? []).map((line) => (
-          <span key={line.currency}
-            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
-            عليه {formatMoney(line.dueMinor, line.currency)}
-          </span>
-        ))}
-        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
-        {visit?.cleared ? (
-          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
-        ) : null}
-      </div>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        {visit?.stepper ? (
+  const visitSteps = visit?.stepper ? (
           <ol className="flex flex-wrap items-center gap-1" aria-label="مراحل الزيارة">
             {visit.stepper.steps.map((step) => (
               <li key={step.key}
@@ -196,10 +92,41 @@ export function PatientCockpit({
               </li>
             ))}
           </ol>
-        ) : null}
+        ) : null;
 
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          {active && !visit?.cleared && visit?.checklist !== null ? (
+  return (
+    <div className={compact
+      ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+      : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
+      aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
+          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
+        {alerts.length > 0 ? (
+          <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
+            ⚠️ {compact ? alerts.join(" • ") : alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
+          </span>
+        ) : null}
+        {(visit?.balances ?? []).map((line) => (
+          <span key={line.currency}
+            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
+            عليه {formatMoney(line.dueMinor, line.currency)}
+          </span>
+        ))}
+        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
+        {compact ? safety : null}
+        {visit?.cleared ? (
+          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
+        ) : null}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {!compact ? visitSteps : null}
+
+        <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
+          {compact ? primaryAction : null}
+          {compact ? secondaryActions : null}
+          {canOperate && active && !visit?.cleared && visit?.checklist !== null ? (
             <button type="button" onClick={() => void clear()} disabled={busy}
               title={(visit?.checklist ?? []).map((item) => item.label).join("\n")}
               className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 disabled:opacity-40">
@@ -209,7 +136,7 @@ export function PatientCockpit({
           {canEnterChair ? (
             <span className="flex items-center gap-1">
               {freeChairs.length > 1 && visit?.status !== "called" ? (
-                <select aria-label="الكرسي" value={selectedChair ?? ""} onChange={(event) => setChair(Number(event.target.value))}
+                <select aria-label="الكرسي" disabled={busy} value={selectedChair ?? ""} onChange={(event) => setChair(Number(event.target.value))}
                   className="rounded-lg border border-slate-200 bg-white px-1 py-1 text-[11px] font-bold">
                   {freeChairs.map((n) => <option key={n} value={n}>كرسي {n}</option>)}
                 </select>
@@ -220,7 +147,7 @@ export function PatientCockpit({
               </button>
             </span>
           ) : null}
-          {suggestion ? (
+          {!compact && suggestion ? (
             <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900">
               مقترح: {suggestion.label} ←
@@ -228,6 +155,30 @@ export function PatientCockpit({
           ) : null}
         </div>
       </div>
+
+      {compact && (visitSteps || suggestion) ? (
+        <details className="mt-1 text-[11px]" data-testid="patient-visit-details">
+          <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {visitSteps}
+            {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
+              مقترح: {suggestion.label}
+            </button> : null}
+          </div>
+        </details>
+      ) : null}
+
+      {readiness !== "ready" || chairsState !== "ready" || !coherent ? (
+        <p role="status" data-testid="patient-cockpit-read-state" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+          {readiness === "unavailable" ? "تعذّر التحقق من الزيارة؛ إدخال الكرسي متوقف حتى التحديث."
+            : readiness === "loading" ? "جارٍ التحقق من الزيارة والكراسي؛ لا تُفترض جاهزية أو إتاحة."
+              : chairsState === "loading" ? "جارٍ التحقق من إتاحة الكراسي."
+                : chairsState === "unavailable" ? "إتاحة الكراسي غير معروفة؛ أعد التحقق قبل الإدخال."
+                  : "قراءات الزيارة والكراسي غير متطابقة؛ أعد التحقق قبل الإدخال."}
+          <button type="button" disabled={busy} onClick={() => void reload()} className="rounded border border-slate-200 px-2 py-1 font-bold">إعادة التحقق</button>
+        </p>
+      ) : null}
 
       {message ? (
         <p role={message.tone === "error" ? "alert" : "status"}

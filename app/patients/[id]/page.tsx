@@ -130,6 +130,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
+
 
   const copyToClipboard = (text: string, label: string) => {
     try {
@@ -159,21 +161,31 @@ function PatientFileWorkspace({ id }: { id: string }) {
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const tab = location.tab;
   const treatmentSubTab = location.sub;
+  const compactWorkspace = tab === "today" || tab === "treatment";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
+  const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
   const trackEndoGuard = useCallback((guard: (() => boolean) | null) => { endoLeaveGuard.current = guard; }, []);
+  const trackClinicalGuard = useCallback((guard: (() => boolean) | null) => { clinicalLeaveGuard.current = guard; }, []);
   useEffect(() => {
     const controller = createPatientNavigation(window, {
-      canLeave: () => endoLeaveGuard.current ? endoLeaveGuard.current()
-        : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟"),
+      canLeave: () => {
+        if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
+        return endoLeaveGuard.current ? endoLeaveGuard.current()
+          : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
+      },
       onChange: setLocation,
     });
     navigation.current = controller;
     return () => { navigation.current = null; };
   }, []);
-  const goTo = (target: string) => navigation.current?.navigate(patientDestination(target, location));
+  const goTo = (target: string) => {
+    const accepted = navigation.current?.navigate(patientDestination(target, location));
+    if (accepted) setMoreOpen(false);
+    return accepted;
+  };
   const setTab = (next: Tab) => goTo(next);
   const setTreatmentSubTab = (next: TreatmentSubTab) => goTo(next);
   // Optional specialty callbacks open canonical workspaces only; they do not select or add work.
@@ -368,23 +380,107 @@ function PatientFileWorkspace({ id }: { id: string }) {
     }
   })();
 
+  // Clinical warnings remain visible independently of the optional details disclosure.
+  const medicalAlertBanner = patient.medicalAlert ? (
+          <div data-testid="patient-medical-alert-banner" className="mt-3 min-w-0 break-words [overflow-wrap:anywhere] rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-bold text-red-800 shadow-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1 font-black text-red-700">
+                  <span className="text-base">⚠️</span> تنبيه أمان سريري:
+                </span>
+                {parsedAlerts.badges.map((b) => (
+                  <span
+                    key={b.id}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-black shadow-xs ${
+                      b.severity === "high"
+                        ? "bg-red-600 text-white"
+                        : "bg-amber-500 text-white"
+                    }`}
+                  >
+                    <span>{b.icon}</span>
+                    <span>{b.label}</span>
+                  </span>
+                ))}
+                {parsedAlerts.customNote ? (
+                  <span className="min-w-0 max-w-full text-red-900 font-semibold">{parsedAlerts.customNote}</span>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowVitalsModal(true)}
+                className="rounded-lg bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800 hover:bg-red-200 transition-colors"
+              >
+                ✏️ تعديل التنبيهات
+              </button>
+            </div>
+          </div>
+        ) : null;
+
   return (
-    <main className="mx-auto max-w-5xl p-4 pb-24">
-      {/* (CHAIR-1) قمرة المريض: شريطٌ ثابت بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
+    <main className="mx-auto max-w-5xl p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-4 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28" data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
+      {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
         patientId={patient.id}
         patientName={patient.fullName}
         patientPhone={patient.phone}
         fallbackAlert={patient.medicalAlert}
         summary={summary}
+        compact={compactWorkspace}
+        identity={compactWorkspace ? (
+          <div className="flex min-w-0 items-center gap-2" data-testid="patient-compact-identity">
+            {patient.photoDocumentId ? <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
+              className="h-8 w-8 shrink-0 rounded-lg object-cover" />
+              : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
+            <div className="min-w-0 flex-1">
+              <h1 className="break-words text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
+                <button type="button" onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")} title="نسخ رقم الملف الطبي"
+                  className="rounded bg-slate-100 px-1.5 font-bold text-navy-900">#{patient.patientNumber}</button>
+                <span>{GENDER_LABEL[patient.gender]} · {ageText(age)}</span>
+                {copiedLabel === "patientNumber" ? <span role="status" className="text-emerald-700">نُسخ الرقم</span> : null}
+              </div>
+            </div>
+          </div>
+        ) : undefined}
+        primaryAction={compactWorkspace && primaryAction ? (
+          <button type="button" onClick={primaryAction.run} disabled={busyAction}
+            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
+            {primaryAction.label}
+          </button>
+        ) : undefined}
+        secondaryActions={compactWorkspace ? (
+          <button type="button" onClick={() => {
+            setMoreOpen(false);
+            setPatientDetailsOpen((open) => !open);
+          }}
+            aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
+            className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
+            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
+          </button>
+        ) : undefined}
+        safety={compactWorkspace ? <>
+          <PatientFlagChips flags={patient.flags} />
+          {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
+            <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
+              className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
+                ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                : bpRisk.category === "stage1" ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-rose-300 bg-rose-100 text-rose-900"}`}>
+              الضغط: {vitals.bpSystolic}/{vitals.bpDiastolic} · {bpRisk.label}
+            </button>
+          ) : null}
+        </> : undefined}
         onOpenTab={(target) => {
           if (target === "today") { setTab("today"); return; }
           goTo(target === "ortho" ? "ortho" : "plans");
         }}
         onChanged={() => void load()}
       />
+      {compactWorkspace ? medicalAlertBanner : null}
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
-      <header className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
+      <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
+        className="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" data-testid="patient-details-panel">
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
@@ -525,7 +621,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {/* شريط الإجراءات السريرية السريعة */}
           <div className="flex flex-wrap items-center gap-2">
-            {primaryAction ? (
+            {!compactWorkspace && primaryAction ? (
               <button
                 type="button"
                 onClick={primaryAction.run}
@@ -589,7 +685,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)}>
+            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
               <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
@@ -728,41 +824,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         </div>
 
         {/* التنبيه الطبي وشارات السلامة السريرية */}
-        {patient.medicalAlert ? (
-          <div className="mt-3 rounded-xl border border-red-300 bg-red-50 p-2.5 text-xs font-bold text-red-800 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="flex items-center gap-1 font-black text-red-700">
-                  <span className="text-base">⚠️</span> تنبيه أمان سريري:
-                </span>
-                {parsedAlerts.badges.map((b) => (
-                  <span
-                    key={b.id}
-                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-black shadow-xs ${
-                      b.severity === "high"
-                        ? "bg-red-600 text-white"
-                        : "bg-amber-500 text-white"
-                    }`}
-                  >
-                    <span>{b.icon}</span>
-                    <span>{b.label}</span>
-                  </span>
-                ))}
-                {parsedAlerts.customNote ? (
-                  <span className="text-red-900 font-semibold">{parsedAlerts.customNote}</span>
-                ) : null}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowVitalsModal(true)}
-                className="rounded-lg bg-red-100 px-2.5 py-1 text-[11px] font-bold text-red-800 hover:bg-red-200 transition-colors"
-              >
-                ✏️ تعديل التنبيهات
-              </button>
-            </div>
-          </div>
-        ) : null}
+        {!compactWorkspace ? medicalAlertBanner : null}
 
         {/* الرصيد المالي في الرأس */}
         {/* (TD-05) سطرٌ لكل عملة — والباقي غير المستحق بعملة خطته. */}
@@ -793,12 +855,18 @@ function PatientFileWorkspace({ id }: { id: string }) {
             ))
           : null}
 
-        {successMsg ? (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">
+        {!compactWorkspace && successMsg ? (
+          <div role="status" data-testid="patient-success-notice" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">
             ✓ {successMsg}
           </div>
         ) : null}
       </header>
+
+      {compactWorkspace && successMsg ? (
+        <p role="status" data-testid="patient-success-notice" className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-xs font-bold text-emerald-800">
+          ✓ {successMsg}
+        </p>
+      ) : null}
 
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
@@ -843,7 +911,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
       />
 
       {/* خمسة تبويبات لا أحد عشر */}
-      <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-slate-200 pb-2">
+      <div className={`${compactWorkspace ? "mb-2 flex-nowrap overflow-x-auto gap-1" : "mb-4 flex-wrap gap-1.5"} flex items-center border-b border-slate-200 pb-2`} aria-label="أقسام ملف المريض">
         {TABS.map(([key, title, icon]) => {
           const isSelected = tab === key;
           const badge =
@@ -857,13 +925,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
               onClick={() => setTab(key)}
               aria-current={isSelected ? "page" : undefined}
               data-testid={`patient-tab-${key}`}
-              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+              className={`${compactWorkspace ? "shrink-0 rounded-lg px-2 py-2 text-[11px]" : "rounded-xl px-3.5 py-2 text-xs"} font-bold transition-all ${
                 isSelected
                   ? "bg-navy-800 text-white shadow-xs"
                   : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
               }`}
             >
-              <span className="ml-1">{icon}</span>
+              {!compactWorkspace ? <span className="ml-1">{icon}</span> : null}
               {title}{badge}
               {filesCount != null ? (
                 <span className={`mr-1.5 rounded-full px-1.5 text-[10px] font-extrabold ${
@@ -920,27 +988,18 @@ function PatientFileWorkspace({ id }: { id: string }) {
         <div className="space-y-4">
           {/* شريط محطات العلاج السريري الموحدة وفق المعايير العالمية */}
           <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 px-1">
-              <div className="flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs text-white">
-                  🦷
-                </span>
-                <div>
-                  <h3 className="text-xs font-black text-navy-900">محطة العلاج السريري الشاملة</h3>
-                  <p className="text-[10px] text-slate-500">
-                    هيكلة وتنظيم سجلات المريض وفق معايير برمجيات طب وتقويم الأسنان المتقدمة
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500">
-                <span>المحطة:</span>
-                <span className="text-navy-900 font-black">
-                  {TREATMENT_SUBTABS.find((st) => st.id === treatmentSubTab)?.title}
-                </span>
-              </div>
-            </div>
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600 sm:hidden" htmlFor="patient-treatment-section">
+              قسم العلاج
+              <select id="patient-treatment-section" data-testid="patient-treatment-section" value={treatmentSubTab}
+                onChange={(event) => {
+                  if (!setTreatmentSubTab(event.target.value as TreatmentSubTab)) event.currentTarget.value = treatmentSubTab;
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-bold text-navy-900">
+                {TREATMENT_SUBTABS.map((section) => <option key={section.id} value={section.id}>{section.title}</option>)}
+              </select>
+            </label>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+            <div className="hidden flex-wrap gap-1 sm:flex" aria-label="أقسام العلاج">
               {TREATMENT_SUBTABS.map((subTab) => {
                 const isSelected = treatmentSubTab === subTab.id;
                 let badgeContent: React.ReactNode = null;
@@ -971,15 +1030,14 @@ function PatientFileWorkspace({ id }: { id: string }) {
                     onClick={() => setTreatmentSubTab(subTab.id)}
                     aria-current={isSelected ? "page" : undefined}
                     data-testid={`patient-subtab-${subTab.id}`}
-                    className={`flex items-center justify-between gap-1.5 rounded-xl px-3 py-2 text-right transition-all ${
+                    className={`flex items-center justify-between gap-1 rounded-lg px-2.5 py-1.5 text-right transition-all ${
                       isSelected
                         ? "bg-navy-900 text-white shadow-xs"
                         : "bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/70"
                     }`}
                   >
                     <div className="flex items-center gap-1.5 truncate">
-                      <span className="text-sm">{subTab.icon}</span>
-                      <span className="text-xs font-black truncate">{subTab.title}</span>
+                      <span className="text-xs font-bold">{subTab.title}</span>
                     </div>
                     {badgeContent}
                   </button>
@@ -1055,6 +1113,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
+          onNavigationGuardChange={trackClinicalGuard}
           onVisitStarted={() => {
             setSuccessMsg("بدأت الزيارة.");
             void load();

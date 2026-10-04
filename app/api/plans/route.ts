@@ -13,6 +13,8 @@ import { MAX_SELECTED_TEETH, isValidTooth } from "@/lib/dental";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isRestrictedRole } from "@/lib/role-routes";
+import { canViewPatientMoney } from "@/lib/patient-access";
+import { withoutPlanPayments } from "@/lib/plan-payment-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -31,11 +33,11 @@ export async function GET(request: Request) {
      إلا خطط مرضاه (عزل الخادم) — وعموم الخطط تبقى للإدارة والاستقبال. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canViewPlans === false) {
+    if (!user?.isActive || user.permissions?.canViewPlans === false) {
       return NextResponse.json({ message: "غير مصرّح لك بعرض خطط العلاج." }, { status: 403 });
     }
     if (Number.isInteger(patientId) && patientId > 0) {
-      const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+      const doctorPartyId = user.partyId;
       if (doctorPartyId) {
         const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
         if (!owns) {
@@ -58,6 +60,9 @@ export async function GET(request: Request) {
     const plans = Number.isInteger(patientId) && patientId > 0
       ? await listPatientPlans(patientId, today)
       : await listActivePlans(today);
+    const canSeeFinancial = session.role === "doctor"
+      ? await canViewPatientMoney(session, patientId)
+      : canViewMoney(session.role);
     // Finance roles need receivables and installments, not treatment items,
     // tooth codes, clinical notes or patient consent details.
     const result = isRestrictedRole(session.role) ? plans.map((plan) => ({
@@ -73,8 +78,8 @@ export async function GET(request: Request) {
       installments: plan.installments,
       paidMinor: plan.paidMinor,
       progress: plan.progress,
-    })) : plans;
-    return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY });
+    })) : canSeeFinancial ? plans : plans.map((plan) => withoutPlanPayments(plan, true));
+    return NextResponse.json({ plans: result, today, baseCurrency: CLINIC_BASE_CURRENCY, canSeeFinancial });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الخطط." }, { status: 500 });
   }

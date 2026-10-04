@@ -5,6 +5,8 @@ import Link from "next/link";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
 import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
+import { sumLabNetBalances, type LabBalanceReadState } from "@/lib/lab-balance-overview";
+import { LabNetAmounts } from "./LabNetAmounts";
 
 export interface DebtPatientRow {
   patientId: number;
@@ -27,7 +29,6 @@ export interface LabSummaryRow {
   phone: string | null;
   activeOrdersCount: number;
   unsettledOrdersCount: number;
-  unsettledCostMinor: number;
 }
 
 interface ReceivablesLabsTabProps {
@@ -39,6 +40,8 @@ interface ReceivablesLabsTabProps {
   clinicName: string;
   clinicPhone?: string | null;
   labSummaries: LabSummaryRow[];
+  labBalanceState: LabBalanceReadState;
+  onReloadLabBalances: () => void;
   labRisks: LabDeliveryRisk[];
   onOpenCollectForPatient: (patient: { id: number; name: string; dueMinor: number; currency: Currency }) => void;
   onOpenLabReconcileForParty: (partyId: number) => void;
@@ -56,10 +59,11 @@ export function ReceivablesLabsTab({
   canCollect = canMutate,
   canReconcile = canMutate,
   debtRows,
-  baseCurrency,
   clinicName,
   clinicPhone,
   labSummaries,
+  labBalanceState,
+  onReloadLabBalances,
   labRisks,
   onOpenCollectForPatient,
   onOpenLabReconcileForParty,
@@ -106,13 +110,6 @@ export function ReceivablesLabsTab({
     });
   }, [debtRows, agingFilter, patientSearch]);
 
-  const totalUnsettledLabCost = useMemo(() => {
-    return labSummaries.reduce((sum, l) => sum + (l.unsettledCostMinor || 0), 0);
-  }, [labSummaries]);
-
-  const totalUnsettledLabOrders = useMemo(() => {
-    return labSummaries.reduce((sum, l) => sum + (l.unsettledOrdersCount || 0), 0);
-  }, [labSummaries]);
 
   return (
     <div className="space-y-6">
@@ -133,11 +130,11 @@ export function ReceivablesLabsTab({
                     إنذار سريري مالي مبكر: مواعيد قادمة لمرضى وأعمال المعمل لم تصل بعد!
                   </h3>
                   <span className="rounded-full bg-rose-600 px-2.5 py-0.5 text-[11px] font-black text-white">
-                    {labRisks.length} حالات تستوجب المتابعة
+                    {labRisks.length} حالات في النافذة المحمّلة
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 font-medium mt-0.5">
-                  تكامل حركة المعمل مع جدول المواعيد السريرية يمنع تأجيل جلسات المرضى وإحراج العيادة.
+                  المخاطر من نافذة تصل إلى 300 أمر على مستوى المركز؛ ليست حصراً كاملاً لمخاطر التسليم.
                 </p>
               </div>
             </div>
@@ -426,92 +423,56 @@ export function ReceivablesLabsTab({
         )}
       </section>
 
-      {/* القسم الثاني: مستحقات معامل الأسنان (Accounts Payable - Dental Labs) */}
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-xs">
+      {/* Canonical whole-party net balances are independent of loaded clinical counts. */}
+      {labBalanceState.phase !== "unavailable" ? <section aria-label="أرصدة المختبرات" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-xs">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-100 text-purple-800 text-sm font-black">
-                🦷
-              </span>
-              <h3 className="text-base font-black text-navy-900">
-                حسابات ومستحقات مختبرات الأسنان (Dental Labs AP)
-              </h3>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              مطابقة كشوفات التركيبات والزراعة وسداد مستحقات الفنيين والمعامل المعتمدة
-            </p>
+            <h3 className="text-base font-black text-navy-900">صافي أرصدة المختبرات بكل عملة</h3>
+            <p className="mt-1 text-xs text-slate-600">الموجب علينا للمختبر؛ السالب رصيد لنا لديه. هذه أرصدة حساب الجهة كاملة وليست اقتراح دفع للأوامر المحددة.</p>
+            <p className="mt-1 text-xs text-slate-600">قد تتقابل الديون والأرصدة بين المختبرات فيصبح الصافي صفراً؛ راجع كل مختبر أدناه.</p>
           </div>
-
           <div className="flex items-center gap-2">
-            <span className="rounded-xl bg-purple-50 border border-purple-200 px-3 py-1.5 text-xs font-mono font-black text-purple-900">
-              إجمالي المستحق: {formatMoney(totalUnsettledLabCost, baseCurrency)}
-            </span>
-            <Link
-              href="/finance/lab-accounting"
-              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-900 hover:bg-slate-100"
-            >
+            <button type="button" onClick={onReloadLabBalances} disabled={labBalanceState.phase === "loading"}
+              className="rounded-xl border border-purple-200 px-3 py-2 text-xs font-bold text-purple-900 disabled:opacity-50">تحديث أرصدة المختبرات</button>
+            <Link href="/finance/lab-accounting" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-900 hover:bg-slate-100">
               كشوفات المختبرات الموسعة ↗
             </Link>
           </div>
         </div>
-
-        {labSummaries.length === 0 ? (
-          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6 text-center text-xs text-slate-400">
-            لا توجد مختبرات مسجلة أو مستحقات معلقة حالياً.
+        {labBalanceState.phase !== "ready" ? <p role="status" className="rounded-xl bg-slate-50 p-4 text-sm">
+          {labBalanceState.phase === "loading" ? "جارٍ التحقق من أرصدة المختبرات…" : "تعذّر التحقق من أرصدة المختبرات؛ هذا لا يعني أن الرصيد صفر."}
+        </p> : <>
+          <div className="mb-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-950">
+            <p className="mb-1 font-bold">إجمالي صافي الأرصدة بكل عملة</p>
+            <LabNetAmounts buckets={sumLabNetBalances(labBalanceState.data.labs)} />
           </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {labSummaries.map((lab) => (
-              <div
-                key={lab.partyId}
-                className="flex flex-col justify-between rounded-2xl border border-slate-200/90 bg-slate-50/50 p-4 transition-all hover:border-purple-300 hover:bg-white shadow-2xs"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div>
-                      <h4 className="font-black text-xs text-navy-900">{lab.partyName}</h4>
-                      {lab.phone ? (
-                        <a
-                          href={`tel:${lab.phone}`}
-                          className="text-[10px] text-slate-500 font-mono hover:text-sky-700"
-                        >
-                          📞 {lab.phone}
-                        </a>
-                      ) : null}
-                    </div>
-                    <span className="rounded-md bg-purple-100 px-2 py-0.5 text-[10px] font-black text-purple-900">
-                      {lab.unsettledOrdersCount} عمل معلق
-                    </span>
+          {labBalanceState.data.labs.length === 0 ? <p className="text-sm text-slate-600">لا توجد مختبرات في القائمة المقروءة.</p> :
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {labBalanceState.data.labs.map((lab) => {
+                const clinical = labSummaries.find((row) => row.partyId === lab.partyId);
+                return <div key={lab.partyId} className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
+                  <div>
+                    <h4 className="text-sm font-black text-navy-900">{lab.partyName}</h4>
+                    {lab.phone ? <a href={`tel:${lab.phone}`} className="text-xs text-slate-500">{lab.phone}</a> : null}
+                    <p className="mb-1 mt-3 text-xs text-slate-600">صافي رصيد حساب المختبر بكل عملة</p>
+                    <LabNetAmounts buckets={lab.partyNetBalance.byCurrency} />
+                    {clinical ? <div className="mt-3 space-y-1 text-[11px] text-slate-500">
+                      <p>الأعمال النشطة ضمن النافذة المحمّلة: {clinical.activeOrdersCount}</p>
+                      <p>علامات غير «مدفوع» ضمن النافذة المحمّلة: {clinical.unsettledOrdersCount}</p>
+                      <p>نافذة حتى 300 أمر على مستوى المركز؛ هذه حالات مسجلة ولا تثبت وجود دين أو سداده.</p>
+                    </div> : null}
                   </div>
-
-                  <div className="space-y-1 text-[11px] mb-3">
-                    <div className="flex justify-between text-slate-600">
-                      <span>الأعمال النشطة:</span>
-                      <span className="font-mono font-bold">{lab.activeOrdersCount} طلب</span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>الرصيد غير المسدد:</span>
-                      <span className="font-mono font-black text-purple-900">
-                        {formatMoney(lab.unsettledCostMinor, lab.currency)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {canReconcile ? <button
-                  type="button"
-                  onClick={() => onOpenLabReconcileForParty(lab.partyId)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-purple-700 py-2 text-xs font-black text-white hover:bg-purple-800 transition-colors shadow-2xs"
-                >
-                  <span>📑</span>
-                  <span>تسوية كشف المعمل</span>
-                </button> : null}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+                  {canReconcile ? <button type="button" onClick={() => onOpenLabReconcileForParty(lab.partyId)}
+                    className="mt-3 w-full rounded-xl bg-purple-700 py-2 text-xs font-bold text-white hover:bg-purple-800">مقارنة أوامر المختبر</button> : null}
+                </div>;
+              })}
+            </div>}
+        </>}
+      </section> : <div>
+        <Link href="/finance/lab-accounting" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-900 hover:bg-slate-100">
+          كشوفات المختبرات الموسعة ↗
+        </Link>
+      </div>}
 
       {/* القسم الثالث: بنود المصروفات التشغيلية والجهات */}
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-xs">

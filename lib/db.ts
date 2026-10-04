@@ -1,4 +1,10 @@
+import { readRecoveryDocumentStates, publicRecoveryRead, hasInstallmentReversalSignal, type PatientInstallmentRecoveryRead } from "./reversed-installment-recovery-db";
+import {
+  REVERSED_INSTALLMENT_RECOVERY_PURPOSE, parseRecoveryIntent, recoveryIntentFingerprintSource, type RecoveryIntent,
+} from "./reversed-installment-recovery";
 import { walkoutLineClass } from "./checkout-summary";
+import { commissionTimeKey, commissionTimestampIso } from "./commission-time";
+import { resolveAutomaticLabPrice } from "./lab-order-pricing";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
@@ -3813,7 +3819,8 @@ export async function commitLegacyImport(input: {
 }
 
 export interface LegacyTreatmentView {
-  legacyNumber: number; treatedOn: string | null; doctorName: string | null; service: string | null;
+  id: number; legacyNumber: number | null; sourceKind: "legacy_import" | "manual_history"; historicalAsOf: string | null;
+  treatedOn: string | null; doctorName: string | null; service: string | null;
   currency: Currency; priceMinor: number; rate: number | null; paidMinor: number; remainingMinor: number;
   payments: { legacyNumber: number; paidOn: string | null; currency: Currency; amountMinor: number; rate: number | null;
     method: string | null; cashBox: string | null }[];
@@ -3827,12 +3834,17 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   await ensureSchema();
   const [treatments, payments] = await Promise.all([
     getPool().query<{
-      id: number; legacy_number: number; treated_on: string | null; doctor_name: string | null; service: string | null;
+      id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
+      has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
     }>(
       `SELECT id, legacy_number, treated_on::text, doctor_name, service, currency, price_minor::text, rate::text,
-              paid_minor::text, remaining_minor::text
-         FROM legacy_treatments WHERE patient_id = $1 ORDER BY treated_on NULLS LAST, legacy_number`, [patientId]),
+              paid_minor::text, remaining_minor::text,
+              to_jsonb(t) ? 'source_kind' AS has_provenance,
+              to_jsonb(t)->>'source_kind' AS source_kind,
+              to_jsonb(t)->>'historical_as_of' AS historical_as_of
+         FROM legacy_treatments t WHERE patient_id = $1
+        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
     getPool().query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
@@ -3846,16 +3858,30 @@ export async function patientLegacyHistory(patientId: number): Promise<{
     amountMinor: toMinor(row.amount_minor), rate: row.rate === null ? null : Number(row.rate),
     method: row.method, cashBox: row.cash_box,
   });
-  const views = treatments.rows.map((row) => ({
-    id: row.id,
-    view: {
-      legacyNumber: row.legacy_number, treatedOn: row.treated_on, doctorName: row.doctor_name, service: row.service,
-      currency: requireCurrency(row.currency, "معالجة قديمة", row.legacy_number),
+  const views = treatments.rows.map((row) => {
+    // The current schema has no provenance columns. Only an actual old-system
+    // number identifies that historical import; a later nullable row must carry
+    // explicit valid provenance. Never manufacture a number or guess its origin.
+    const sourceKind = row.has_provenance ? row.source_kind : "legacy_import";
+    if ((sourceKind !== "legacy_import" && sourceKind !== "manual_history")
+      || (sourceKind === "legacy_import" && (row.legacy_number === null || row.historical_as_of !== null))
+      || (sourceKind === "manual_history" && (row.legacy_number !== null
+        || !row.historical_as_of || !/^\d{4}-\d{2}-\d{2}$/.test(row.historical_as_of)))) {
+      throw new Error(`Invalid legacy archive provenance for record ${row.id}`);
+    }
+    const view: LegacyTreatmentView = {
+      id: row.id, legacyNumber: row.legacy_number, sourceKind, historicalAsOf: row.historical_as_of,
+      treatedOn: row.treated_on, doctorName: row.doctor_name, service: row.service,
+      currency: requireCurrency(row.currency, "معالجة قديمة", row.legacy_number ?? row.id),
       priceMinor: toMinor(row.price_minor), rate: row.rate === null ? null : Number(row.rate),
       paidMinor: toMinor(row.paid_minor), remainingMinor: toMinor(row.remaining_minor),
-      payments: [] as LegacyTreatmentView["payments"],
-    },
-  }));
+      payments: [],
+    };
+    return {
+      id: row.id,
+      view,
+    };
+  });
   const byId = new Map(views.map((entry) => [entry.id, entry.view]));
   const orphanPayments: LegacyTreatmentView["payments"] = [];
   for (const row of payments.rows) {
@@ -5083,7 +5109,7 @@ export type PatientMergeResult =
  * الأجنبية من القاعدة نفسها لا من قائمةٍ في الكود تنسى جدولًا يُضاف غدًا — ثم يملأ
  * فراغات الهدف من المصدر (ويضمّ التنبيهين الطبيين لا يُسقط أحدهما)، ثم يحذف المصدر.
  *
- * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي) لا يُدمج: تلك سجلات
+ * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي، أرشيف مالي سابق) لا يُدمج: تلك سجلات
  * append-only لا يُعاد نسبها بصمت — تُصحَّح بقيودٍ معاكسة. وأي تعارضٍ فريد (مثل
  * خطةٍ واحدة لكل مريض) يتراجع بالدمج كله: لا دمج نصفيّ أبدًا.
  */
@@ -5108,18 +5134,24 @@ export async function mergeDuplicatePatient(
       return { ok: false, reason: "not_found" };
     }
 
-    const { rows: [footprint] } = await client.query<{ payments: number; movements: number; opening: number }>(
+    const { rows: [footprint] } = await client.query<{
+      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number;
+    }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
-              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening`,
+              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
+              (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1) AS legacy_treatments,
+              (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
       [sourceId],
     );
-    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0) {
+    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
-        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening },
+        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
+          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments },
       };
     }
 
@@ -6430,6 +6462,8 @@ export async function createLabOrder(input: {
     // «٣ أسنان × ٢٠ = ٦٠» الذي حُسم من الجهتين بقاعدة واحدة: labPricingQuantity).
     let resolvedCost = input.costMinor ?? null;
     let resolvedCurrency = input.costCurrency ?? null;
+    let resolvedExchangeRate = input.exchangeRate;
+    let automaticBaseAmount: number | null = null;
     if (resolvedCost == null && resolvedPartyId && input.labServiceId && input.status !== "needed") {
       const priceRes = await client.query<{
         cost_minor: string | number;
@@ -6452,14 +6486,22 @@ export async function createLabOrder(input: {
           input.toothNumbers ?? null,
           (priceRes.rows[0].tooth_scope as LabService["toothScope"] | null) ?? null,
         );
-        resolvedCost =
-          Number(priceRes.rows[0].cost_minor) * (quantity > 1 ? quantity : 1);
-        resolvedCurrency = priceRes.rows[0].cost_currency as Currency;
+        const automaticPrice = resolveAutomaticLabPrice({
+          costMinor: priceRes.rows[0].cost_minor,
+          costCurrency: priceRes.rows[0].cost_currency,
+          quantity,
+          baseCurrency: input.baseCurrency,
+          settings: await getSettingsInTransaction(client, { requireStoredExchangeRates: true }),
+        });
+        resolvedCost = automaticPrice.costMinor;
+        resolvedCurrency = automaticPrice.costCurrency;
+        resolvedExchangeRate = automaticPrice.exchangeRate;
+        automaticBaseAmount = automaticPrice.baseAmountMinor;
       }
     }
-    const baseAmount = resolvedCost != null && resolvedCurrency
-      ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, input.exchangeRate)
-      : null;
+    const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency
+      ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, resolvedExchangeRate)
+      : null);
 
     // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
     // وحساب الذمم الافتراضي لطلبات المعامل هو 2101 ما لم يُخصص غيره.
@@ -6507,7 +6549,7 @@ export async function createLabOrder(input: {
         input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
         input.priority ?? "normal", input.impressionType ?? "physical",
         input.technicianName ?? null,
-        baseAmount, input.exchangeRate,
+        baseAmount, resolvedExchangeRate,
         expenseCatId, expenseAccCode, payableAccCode, isPosted,
       ],
     );
@@ -6550,7 +6592,7 @@ export async function createLabOrder(input: {
         [
           resolvedPartyId,
           `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
-          resolvedCost, resolvedCurrency, input.exchangeRate, baseAmount,
+          resolvedCost, resolvedCurrency, resolvedExchangeRate, baseAmount,
           input.baseCurrency, orderId, input.dueDate, input.createdBy,
           expenseCatId, expenseAccCode, payableAccCode, isPosted,
         ],
@@ -7492,14 +7534,39 @@ export async function getSettings(): Promise<SettingsMap> {
   if (settingsCache && now - settingsCache.at < SETTINGS_TTL_MS) return settingsCache.value;
 
   await ensureSchema();
-  const { rows } = await getPool().query<{ key: string; value: string }>(
+  const value = await readSettings(getPool());
+  settingsCache = { value, at: now };
+  return value;
+}
+
+/**
+ * Read settings on the caller's transaction client without consulting or publishing
+ * process cache. The caller initializes schema first and owns the transaction.
+ */
+export async function getSettingsInTransaction(
+  client: DbClient,
+  options: { requireStoredExchangeRates?: boolean } = {},
+): Promise<SettingsMap> {
+  return readSettings(client, options);
+}
+
+async function readSettings(
+  executor: Pick<DbClient, "query">,
+  options: { requireStoredExchangeRates?: boolean } = {},
+): Promise<SettingsMap> {
+  const { rows } = await executor.query<{ key: string; value: string }>(
     `SELECT key, value FROM settings`,
   );
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
-  const value = withDefaults(stored);
-  settingsCache = { value, at: now };
-  return value;
+  const settings = withDefaults(stored);
+  if (options.requireStoredExchangeRates) {
+    // Financial snapshots must not mistake display defaults for configured FX.
+    // Preserve the raw rates from this same SELECT, including missing/blank values.
+    settings["finance.rate.SAR"] = stored["finance.rate.SAR"] ?? "";
+    settings["finance.rate.USD"] = stored["finance.rate.USD"] ?? "";
+  }
+  return settings;
 }
 
 /**
@@ -8123,7 +8190,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
 import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
-import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
+import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
   id: number;
@@ -9168,6 +9235,9 @@ export async function listPaymentsByDate(date: string): Promise<Payment[]> {
  *    الاستثناءان الموثّقان: الردّ يرث هدف سنده الأصلي كاملًا (فأصلُ قسطٍ يحمل
  *    فاتورةً وخطةً معًا يُرَدّ بهما معًا)، وrecordPlanInstallment يبني فاتورةً
  *    من الخطة فيقيد سنده بهما معًا — ربطٌ قصدي لا يمرّ عبر هذا المسار أصلًا.
+ *    Explicit reversed-installment recovery is another server-owned exception:
+ *    its wrapper proves/locks the original association and adds an atomic audit;
+ *    ordinary callers still cannot choose both targets.
  *
  * ٩) (TD-05 second owner review — Finding 9) **ترتيب الأقفال المالي الكانوني
  *    الموحّد** — يُتّبع في كل معاملةٍ تمسّ أكثر من كيانٍ مالي، وإلا تقاطعت
@@ -9230,6 +9300,8 @@ export async function recordPayment(input: {
     | "cross_currency_not_supported"
     | "reversal_exceeds_remaining"
     | "idempotency_conflict"
+    | "issued_installment_recovery_required"
+    | "installment_recovery_review_required"
     | null;
   replayed?: boolean;
 }> {
@@ -9353,6 +9425,13 @@ export async function correctPayment(input: {
       );
       const hit = keyed[0];
       if (hit) {
+        // A recovery key belongs to its explicit audited purpose, even if its user
+        // note happens to equal a legacy correction replacement note. Old correction
+        // matching/hashes remain untouched for all pre-existing ordinary keys.
+        const { rows: recoveryAudit } = await client.query(
+          `SELECT id FROM audit_log WHERE action = 'payment.recover_installment'
+             AND entity = 'payment' AND entity_id = $1 LIMIT 1`, [String(hit.id)]);
+        if (recoveryAudit.length) { await client.query("ROLLBACK"); return { reason: "idempotency_conflict" }; }
         /* المطابقة على الطلب كاملًا كما خُزِّن — لا على المبلغ والعملة وحدهما. */
         let same = false;
         if (next === null) {
@@ -9474,7 +9553,9 @@ type PaymentOutcome =
       | "foreign_on_account_requires_target"
       | "cross_currency_not_supported"
       | "reversal_exceeds_remaining"
-      | "idempotency_conflict";
+      | "idempotency_conflict"
+      | "issued_installment_recovery_required"
+      | "installment_recovery_review_required";
   };
 
 async function runPaymentTransaction(
@@ -9488,6 +9569,8 @@ async function runPaymentTransaction(
     idempotencyKey: string | null; reversalOfId: number | null;
     /** (RC-1) بديل سندٍ يرث هدف أصله المقفول كما هو — قسط الخطة يحمل فاتورته وخطته معًا قصدًا. */
     inheritedTarget?: boolean;
+    /** Internal opt-in recovery only: ordinary/correction v1 fingerprints stay unchanged. */
+    requestHashOverride?: string;
   },
   /** (RC-1) معاملةٌ خارجية قائمة (تصحيح السند: عكسٌ + سندٌ بديل ذرّيًا). حينها لا تُفتح معاملة ولا
    *  تُثبَّت ولا يُحرَّر الاتصال هنا — المتصل يملكها: يُثبّت عند النجاح، ويتراجع عن كل شيء عند أي سبب. */
@@ -9580,6 +9663,7 @@ async function runPaymentTransaction(
     const effectiveOpeningCurrency = refundSnapshot ? refundSnapshot.openingCurrency : input.openingCurrency;
     const isRefund = input.kind === "refund";
     let inactivePlanTarget = false;
+    let lockedInvoicePlanId: number | null = null;
 
     if (effectiveInvoiceId !== null) {
       /* فحص الفاتورة: للمدفوعات كامل الشروط (ليست ملغاةً + توافق العملة).
@@ -9587,8 +9671,8 @@ async function runPaymentTransaction(
        * لاحقًا (إلغاءٌ مثلًا) لا يعني أن ردّه يُمنع — الردُّ يُعيد ما قُبض،
        * ودورة حياة الفاتورة بعده. وتوافق العملة للردّ مضمون بنيويًّا: الردّ
        * بعملة الأصل، والأصل قُبض بعملةٍ توافقت مع فاتورته يوم قُبض. */
-      const { rows } = await client.query<{ base_currency: string }>(
-        `SELECT base_currency FROM invoices
+      const { rows } = await client.query<{ base_currency: string; plan_id: number | null }>(
+        `SELECT base_currency, plan_id FROM invoices
           WHERE id = $1 AND patient_id = $2 ${isRefund ? "" : "AND status <> 'cancelled'"}
           FOR SHARE`,
         [effectiveInvoiceId, input.patientId],
@@ -9597,6 +9681,7 @@ async function runPaymentTransaction(
         await tx("ROLLBACK");
         return { kind: "reason", reason: "invalid_invoice" };
       }
+      lockedInvoicePlanId = rows[0].plan_id;
       if (!isRefund) {
         /* (TD-05 / Phase J) الدفعة على فاتورة: بعملتها، أو بعملةٍ أخرى ضد فاتورةٍ
            أساسية (العقد الموثَّق القائم — مكافئ مسجَّل بسعر يوم الدفع). أما دفعٌ
@@ -9673,7 +9758,7 @@ async function runPaymentTransaction(
     );
     /* (P1-FIX-4) بصمة الطلب الكانونية بالقيم الفعلية المُخزَّنة: أي اختلاف في
        العملية (مبلغ/مريض/عملة/نوع/ممثّل/أصل) يجعل البصمة مختلفة. */
-    const requestHash = idempotencyRequestHash(
+    const requestHash = prepared.requestHashOverride ?? idempotencyRequestHash(
       input, prepared, effectiveInvoiceId, effectivePlanId,
       effectiveExchangeRate, effectiveBaseCurrency, effectiveOpeningCurrency,
     );
@@ -9724,6 +9809,44 @@ async function runPaymentTransaction(
       if (input.amountMinor > remaining) {
         await tx("ROLLBACK");
         return { kind: "reason", reason: "reversal_exceeds_remaining" };
+      }
+    }
+
+    // Backend-first containment: a legacy client must not turn a proven reversal
+    // into an ordinary receipt with lost attribution. Old successful keys returned
+    // above. Only an inherited, locked invoice + its canonical plan association
+    // may bypass this guard for the atomic refund/replacement path. Inheriting a
+    // historical invoice-only receipt is not evidence that its missing plan is safe.
+    // No automatic target/plan derivation occurs here.
+    const inheritedCanonicalInstallment = prepared.inheritedTarget === true
+      && effectiveInvoiceId !== null && effectivePlanId !== null
+      && lockedInvoicePlanId === effectivePlanId && effectiveOpeningCurrency === null;
+    if (input.kind === "payment" && !inheritedCanonicalInstallment && effectiveOpeningCurrency === null) {
+      const targetPredicate = effectiveInvoiceId !== null ? "i.id = $2"
+        : effectivePlanId !== null ? "i.plan_id = $2" : "i.base_currency = $2";
+      const targetValue = effectiveInvoiceId ?? effectivePlanId ?? CLINIC_BASE_CURRENCY;
+      const { rows: [signal] } = await client.query<{ possible: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM invoices i WHERE i.patient_id = $1 AND i.plan_id IS NOT NULL
+           AND i.status <> 'cancelled' AND ${targetPredicate}
+           AND EXISTS (SELECT 1 FROM payments p WHERE p.invoice_id = i.id
+             AND (p.kind = 'refund' OR p.reversal_of_id IS NOT NULL
+               OR EXISTS (SELECT 1 FROM payments r WHERE r.reversal_of_id = p.id)))) AS possible`,
+        [input.patientId, targetValue]);
+      if (signal?.possible) {
+        let states: Awaited<ReturnType<typeof readRecoveryDocumentStates>>;
+        try { states = await readRecoveryDocumentStates(client, input.patientId); }
+        catch (error) {
+          if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+          await tx("ROLLBACK"); return { kind: "reason", reason: "installment_recovery_review_required" };
+        }
+        const relevant = states.filter((state) => effectiveInvoiceId !== null ? state.invoiceId === effectiveInvoiceId
+          : effectivePlanId !== null ? state.planId === effectivePlanId : state.snapshot.invoice.baseCurrency === CLINIC_BASE_CURRENCY);
+        if (relevant.some((state) => state.projection.kind === "review_required" && hasInstallmentReversalSignal(state))) {
+          await tx("ROLLBACK"); return { kind: "reason", reason: "installment_recovery_review_required" };
+        }
+        if (relevant.some((state) => state.projection.kind === "recoverable")) {
+          await tx("ROLLBACK"); return { kind: "reason", reason: "issued_installment_recovery_required" };
+        }
       }
     }
 
@@ -9787,6 +9910,220 @@ async function runPaymentTransaction(
   } finally {
     if (own) (client as DbClient).release();
   }
+}
+
+/** Read-only UI targets; the transaction writer revalidates all evidence. */
+export async function patientReversedInstallmentRecoveries(patientId: number): Promise<PatientInstallmentRecoveryRead> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const result = publicRecoveryRead(await readRecoveryDocumentStates(client, patientId));
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
+
+export type RecoveryPaymentRefusal = Extract<PaymentOutcome, { kind: "reason" }>["reason"]
+  | "invalid_recovery_request" | "recovery_review_required" | "recovery_not_available"
+  | "recovery_exceeds_remaining" | "recovery_target_changed" | "exchange_rate_required" | "recovery_account_credit_review";
+type RecoveryOutcome = { kind: "reason"; reason: RecoveryPaymentRefusal }
+  | { kind: "inserted" | "replay"; paymentId: number };
+type RecoveryWriteInput = RecoveryIntent & { createdBy: string; actorRole?: string | null };
+
+/** Shared raw key lookup first; no purpose/hash predicate may conceal a spent key. */
+async function recoveryReplay(
+  client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
+): Promise<RecoveryOutcome | null> {
+  const { rows: [stored] } = await client.query<{
+    id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
+    kind: string; amount_minor: string; currency: string; method: string; note: string | null;
+    opening_currency: string | null; reversal_of_id: number | null;
+    created_by: string | null; exchange_rate: string; base_amount_minor: string; base_currency: string;
+    idempotency_request_hash: string | null;
+  }>(`SELECT id, patient_id, invoice_id, plan_id, kind, amount_minor::text, currency, method, note,
+             opening_currency, reversal_of_id, created_by, exchange_rate::text, base_amount_minor::text, base_currency, idempotency_request_hash
+        FROM payments WHERE idempotency_key = $1`, [key]);
+  if (!stored) return null;
+  if (stored.idempotency_request_hash !== requestHash) return { kind: "reason", reason: "idempotency_conflict" };
+  const { rows: audits } = await client.query<{ actor: string | null; details: Record<string, unknown> | null }>(
+    `SELECT actor, details FROM audit_log WHERE action = 'payment.recover_installment'
+       AND entity = 'payment' AND entity_id = $1 ORDER BY id`, [String(stored.id)]);
+  const audit = audits[0];
+  const details = audit?.details;
+  if (audits.length !== 1 || !details || Array.isArray(details) || audit.actor !== input.createdBy
+    || stored.patient_id !== input.patientId || stored.invoice_id !== input.invoiceId
+    || stored.kind !== "payment" || stored.opening_currency !== null || stored.reversal_of_id !== null
+    || Number(stored.amount_minor) !== input.amountMinor || stored.currency !== input.currency || stored.method !== input.method || stored.note !== input.note
+    || stored.created_by !== input.createdBy || stored.plan_id === null
+    || details.purpose !== REVERSED_INSTALLMENT_RECOVERY_PURPOSE || details.patientId !== input.patientId
+    || details.invoiceId !== input.invoiceId || details.planId !== stored.plan_id
+    || details.amountMinor !== input.amountMinor || details.currency !== input.currency || details.method !== input.method
+    || details.baseCurrency !== stored.base_currency || details.baseAmountMinor !== Number(stored.base_amount_minor)
+    || details.exchangeRate !== Number(stored.exchange_rate) || !Number.isFinite(Number(stored.exchange_rate)) || Number(stored.exchange_rate) <= 0
+    || !Number.isSafeInteger(details.originalPaymentId) || Number(details.originalPaymentId) <= 0
+    || !Number.isSafeInteger(details.creationAuditId) || Number(details.creationAuditId) <= 0
+    || !isCurrency(details.targetCurrency) || !Number.isSafeInteger(details.settlementMinor)
+    || Number(details.settlementMinor) <= 0 || !Number.isSafeInteger(details.priorRemainingMinor)
+    || !Number.isSafeInteger(details.newRemainingMinor)
+    || Number(details.priorRemainingMinor) - Number(details.settlementMinor) !== details.newRemainingMinor
+    || Number(details.newRemainingMinor) < 0
+    || !Number.isSafeInteger(details.priorAccountDueMinor) || !Number.isSafeInteger(details.newAccountDueMinor)
+    || Number(details.priorAccountDueMinor) - Number(details.settlementMinor) !== details.newAccountDueMinor
+    || Number(details.newAccountDueMinor) < 0) {
+    return { kind: "reason", reason: "recovery_review_required" };
+  }
+  try {
+    if (settlePaymentMinor({ amountMinor: Number(stored.amount_minor), currency: requireCurrency(stored.currency, "سند استعادة", stored.id),
+      baseAmountMinor: Number(stored.base_amount_minor) }, details.targetCurrency) !== details.settlementMinor) {
+      return { kind: "reason", reason: "recovery_review_required" };
+    }
+  } catch { return { kind: "reason", reason: "recovery_review_required" }; }
+  return { kind: "replay", paymentId: stored.id };
+}
+
+async function runRecoveryTransaction(
+  client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
+): Promise<RecoveryOutcome> {
+  const previous = await recoveryReplay(client, input, key, requestHash);
+  if (previous) return previous;
+  // Opening addOnly writers lock this patient FOR UPDATE. Acquire the compatible
+  // FK/key-share fence before any later opening-table lock, avoiding an FK cycle.
+  const { rows: patientRows } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId]);
+  if (!patientRows.length) return { kind: "reason", reason: "invalid_invoice" };
+  let found: Awaited<ReturnType<typeof readRecoveryDocumentStates>>[number] | undefined;
+  try {
+    found = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
+  } catch (error) {
+    if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+    // A concurrent committed receipt can outlive this pre-lock multi-query
+    // snapshot. Recheck its exact intent using stored receipt/audit FX first.
+    // No financial write has occurred in this transaction at this boundary.
+    const afterFailedInitialRead = await recoveryReplay(client, input, key, requestHash);
+    if (afterFailedInitialRead) return afterFailedInitialRead;
+    throw error;
+  }
+  // The first key lookup may have missed an uncommitted success whose receipt is
+  // visible in the completed evidence read. Recheck before ANY mutable-state refusal.
+  const afterInitialRead = await recoveryReplay(client, input, key, requestHash);
+  if (afterInitialRead) return afterInitialRead;
+  if (!found) return { kind: "reason", reason: "invalid_invoice" };
+  if (found.projection.kind === "review_required") return { kind: "reason", reason: "recovery_review_required" };
+  if (found.projection.kind !== "recoverable") return { kind: "reason", reason: "recovery_not_available" };
+  const proof = found.projection;
+  // Same ordering as refunds/corrections. Never acquire another payment lock after shift.
+  await client.query(`SELECT id FROM payments WHERE id = $1 FOR UPDATE`, [proof.originPaymentId]);
+  const afterOriginWait = await recoveryReplay(client, input, key, requestHash);
+  if (afterOriginWait) return afterOriginWait;
+  const { rows: shifts } = await client.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+  if (!shifts.length) return { kind: "reason", reason: "no_shift" };
+  // The account cap includes every invoice, plan-target receipt and opening row.
+  // SHARE blocks opening writes INCLUDING an absent-row insertion; ordinary reads
+  // and receipt writers remain compatible. It lasts only through this transaction.
+  // Existing opening set/clear writers do not acquire shift/invoice/plan locks.
+  await client.query(`LOCK TABLE patient_opening_balances IN SHARE MODE`);
+  const { rows: lockedInvoices } = await client.query<{ id: number }>(
+    `SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
+  const { rows: lockedPlans } = await client.query<{ id: number }>(
+    `SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR SHARE`, [input.patientId]);
+  const afterShiftWait = await recoveryReplay(client, input, key, requestHash);
+  if (afterShiftWait) return afterShiftWait;
+  const current = (await readRecoveryDocumentStates(client, input.patientId)).find((state) => state.invoiceId === input.invoiceId);
+  if (!current || current.snapshot.invoice.status === "cancelled") return { kind: "reason", reason: "invalid_invoice" };
+  if (current.projection.kind === "review_required") return { kind: "reason", reason: "recovery_review_required" };
+  if (current.projection.kind !== "recoverable") return { kind: "reason", reason: "recovery_not_available" };
+  const target = current.projection;
+  // A correction/new invoice that appeared while waiting must not contribute an
+  // unlocked principal to the account cap. Abort the whole attempt, never lock a
+  // newly discovered invoice/plan after later locks. Inserts after this balance read
+  // cannot lower the already-locked principal or add a receipt (shift is held).
+  const { rows: finalInvoices } = await client.query<{ id: number }>(`SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id`, [input.patientId]);
+  const { rows: finalPlans } = await client.query<{ id: number }>(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id`, [input.patientId]);
+  if (JSON.stringify(finalInvoices) !== JSON.stringify(lockedInvoices) || JSON.stringify(finalPlans) !== JSON.stringify(lockedPlans)) {
+    return { kind: "reason", reason: "recovery_target_changed" };
+  }
+  if (target.originPaymentId !== proof.originPaymentId || target.creationAuditId !== proof.creationAuditId || target.planId !== proof.planId) {
+    return { kind: "reason", reason: "recovery_target_changed" };
+  }
+  if (input.currency !== target.currency && target.currency !== CLINIC_BASE_CURRENCY) {
+    return { kind: "reason", reason: "cross_currency_not_supported" };
+  }
+  // This lookup is after replay and on the owned connection, never the global pool/cache.
+  const exchangeRate = rateFromSettings(await getSettingsInTransaction(client, { requireStoredExchangeRates: true }), input.currency, CLINIC_BASE_CURRENCY);
+  if (exchangeRate === null) return { kind: "reason", reason: "exchange_rate_required" };
+  const baseAmountMinor = toBaseAmount(input.amountMinor, input.currency, CLINIC_BASE_CURRENCY, exchangeRate);
+  if (!Number.isSafeInteger(baseAmountMinor) || baseAmountMinor < 0) return { kind: "reason", reason: "invalid_recovery_request" };
+  const settlementMinor = settlePaymentMinor({ amountMinor: input.amountMinor, currency: input.currency, baseAmountMinor }, target.currency);
+  if (!Number.isSafeInteger(settlementMinor) || settlementMinor <= 0 || settlementMinor > target.remainingMinor) {
+    return { kind: "reason", reason: "recovery_exceeds_remaining" };
+  }
+  if (settlementMinor > Math.max(0, target.actualAccountDueMinor)) {
+    return { kind: "reason", reason: "recovery_account_credit_review" };
+  }
+  const outcome = await runPaymentTransaction({
+    patientId: input.patientId, invoiceId: target.invoiceId, planId: target.planId, openingCurrency: null,
+    kind: "payment", amountMinor: input.amountMinor, currency: input.currency, baseCurrency: CLINIC_BASE_CURRENCY,
+    exchangeRate, method: input.method, note: input.note, createdBy: input.createdBy,
+  }, { idempotencyKey: key, reversalOfId: null, inheritedTarget: true, requestHashOverride: requestHash }, client);
+  if (outcome.kind === "reason") return outcome;
+  if (outcome.kind === "replay") return await recoveryReplay(client, input, key, requestHash)
+    ?? { kind: "reason", reason: "recovery_review_required" };
+  const { rows: [stored] } = await client.query<{ receipt_number: string; exchange_rate: string; base_amount_minor: string }>(
+    `SELECT receipt_number, exchange_rate::text, base_amount_minor::text FROM payments WHERE id = $1`, [outcome.paymentId]);
+  if (!stored || Number(stored.base_amount_minor) !== baseAmountMinor) return { kind: "reason", reason: "recovery_review_required" };
+  // NUMERIC(18,6) can round a tiny positive rate to zero. Such a new recovery
+  // cannot become a valid future origin; roll the receipt back before its audit.
+  if (!Number.isFinite(Number(stored.exchange_rate)) || Number(stored.exchange_rate) <= 0) {
+    return { kind: "reason", reason: "exchange_rate_required" };
+  }
+  // Separate from original installment creation proof; the receipt and this audit commit together.
+  await insertAuditRow(client, {
+    action: "payment.recover_installment", entity: "payment", entityId: outcome.paymentId, entityLabel: stored.receipt_number,
+    actor: input.createdBy, actorRole: input.actorRole ?? null,
+    details: {
+      purpose: REVERSED_INSTALLMENT_RECOVERY_PURPOSE, patientId: input.patientId, invoiceId: target.invoiceId, planId: target.planId,
+      originalPaymentId: target.originPaymentId, creationAuditId: target.creationAuditId,
+      amountMinor: input.amountMinor, currency: input.currency, method: input.method,
+      baseCurrency: CLINIC_BASE_CURRENCY, baseAmountMinor, exchangeRate: Number(stored.exchange_rate),
+      targetCurrency: target.currency, settlementMinor, priorRemainingMinor: target.remainingMinor,
+      newRemainingMinor: target.remainingMinor - settlementMinor,
+      priorAccountDueMinor: target.actualAccountDueMinor, newAccountDueMinor: target.actualAccountDueMinor - settlementMinor,
+    },
+  });
+  return outcome;
+}
+
+/** Explicit, append-only recovery on an already issued invoice. Ordinary receipts
+ * retain their existing target, fingerprint, overpayment and manual-status semantics.
+ */
+export async function recordReversedInstallmentRecovery(input: RecoveryWriteInput & { idempotencyKey: string }): Promise<{
+  payment: Payment | null; reason: RecoveryPaymentRefusal | null; replayed?: boolean;
+}> {
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || !isCurrency(input.currency)
+    || typeof input.createdBy !== "string" || !input.createdBy.trim()) return { payment: null, reason: "invalid_recovery_request" };
+  const parsed = parseRecoveryIntent({ ...input, amount: toInputAmount(input.amountMinor, input.currency) }, input.idempotencyKey);
+  if (parsed.kind !== "recovery") return { payment: null, reason: "invalid_recovery_request" };
+  const canonical: RecoveryWriteInput = { ...parsed.intent, createdBy: input.createdBy, actorRole: input.actorRole };
+  const requestHash = createHash("sha256").update(recoveryIntentFingerprintSource(canonical, canonical.createdBy), "utf8").digest("hex");
+  await ensureSchema();
+  const client = await getPool().connect();
+  let outcome: RecoveryOutcome;
+  try {
+    await client.query("BEGIN");
+    outcome = await runRecoveryTransaction(client, canonical, parsed.idempotencyKey, requestHash);
+    await client.query(outcome.kind === "reason" ? "ROLLBACK" : "COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    // Known canonical ownership/currency integrity failures need explicit review,
+    // never a zero balance or a generic retry loop. Database/query errors still throw.
+    if (error instanceof FinancialCurrencyIntegrityError) return { payment: null, reason: "recovery_review_required" };
+    throw error;
+  } finally { client.release(); }
+  if (outcome.kind === "reason") return { payment: null, reason: outcome.reason };
+  return { payment: await getPayment(outcome.paymentId), reason: null, ...(outcome.kind === "replay" ? { replayed: true } : {}) };
 }
 
 /**
@@ -10158,15 +10495,15 @@ function describeCommissionSnapshot(value: CommissionSnapshotValue | null): stri
 
 /** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
 export async function loadCommissionPolicyTimelines(): Promise<{
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
   names: Map<number, string>;
 }> {
   await ensureSchema();
   const pool = getPool();
   const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
-    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date }>(
-      `SELECT party_id, percent, config, effective_from
+    pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
+      `SELECT party_id, percent, config, effective_from, to_char(effective_from, 'US') AS effective_from_us
          FROM doctor_commission_history
         ORDER BY party_id, effective_from, id`,
     ),
@@ -10179,11 +10516,11 @@ export async function loadCommissionPolicyTimelines(): Promise<{
          FROM parties p WHERE p.kind = 'doctor'`,
     ),
   ]);
-  const timelines = new Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>();
+  const timelines = new Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>();
   for (const row of historyRows) {
     const list = timelines.get(row.party_id) ?? [];
     list.push({
-      at: new Date(row.effective_from).getTime(),
+      at: commissionTimeKey(commissionTimestampIso(row.effective_from, row.effective_from_us)),
       percent: Number(row.percent),
       config: normalizeStoredConfig(row.config),
     });
@@ -10207,13 +10544,13 @@ export async function loadCommissionPolicyTimelines(): Promise<{
  * بحالته الحيّة — وهي بالضبط ما كانت التقارير تستعمله.
  */
 export function commissionPolicyResolver(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }): (doctorId: number, atIso: string) => CommissionSnapshotValue | undefined {
   return (doctorId, atIso) => {
     const list = policies.timelines.get(doctorId);
     if (list && list.length > 0) {
-      const at = new Date(atIso).getTime();
+      const at = commissionTimeKey(atIso);
       let chosen = list[0];
       for (const entry of list) {
         if (entry.at <= at) chosen = entry;
@@ -10227,7 +10564,7 @@ export function commissionPolicyResolver(policies: {
 
 /** السياسة الحالية (للعرض): أحدث لقطة أو الحالة الحيّة. */
 function currentCommissionPercent(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }, doctorId: number): number {
   const list = policies.timelines.get(doctorId);
@@ -11680,9 +12017,18 @@ export async function voidExpense(
         return { ok: false, reason: "no_shift" };
       }
       targetShiftId = open[0].id;
-    } else if (current.shift_status !== "open") {
-      await client.query("ROLLBACK");
-      return { ok: false, reason: "closed_shift" };
+    } else {
+      // The origin query locks only the expense, so its joined shift status
+      // can be stale. Fence the exact original shift through reversal commit:
+      // a close that wins must be rechecked, and a later close must include us.
+      const { rows: originalShift } = await client.query<{ id: number }>(
+        `SELECT id FROM cashier_shifts WHERE id = $1 AND status = 'open' FOR SHARE`,
+        [current.shift_id],
+      );
+      if (!originalShift[0]) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "closed_shift" };
+      }
     }
     snapshot = {
       ...snapshot,
@@ -11797,17 +12143,14 @@ export async function voidExpense(
 
 export type LabBatchRefusal =
   | SupplierPaymentRefusal
-  | "not_lab" | "orders_invalid" | "orders_cancelled" | "orders_already_paid";
+  | "not_lab" | "orders_invalid" | "orders_cancelled" | "orders_already_paid"
+  | "batch_link_invalid" | "batch_currency_mismatch" | "batch_requires_full_allocation" | "batch_busy";
 
 /**
- * (P0-2) تسوية مختبر مجمّعة — سند صرف واحد لعدة أوامر عمل، في معاملةٍ واحدة.
- *
- * كانت في المسار نفسه بلا معاملة وبلا أي فحص: تُعاد تسوية أوامر مسدّدة، وتُقبل
- * أوامر مختبرٍ آخر أو ملغاة، وسعر الصرف يأتي من العميل. الآن: الأوامر تُقفل وتُفحص
- * (للمختبر نفسه، غير ملغاة، غير مسدّدة)، والسند يمرّ بحارس رصيد المختبر نفسه
- * (قرار المالك: لا صرف فوق المستحق إلا «دفعة مقدمة» بسبب)، والسعر من الإعدادات،
- * وكل ذلك يسقط معًا أو ينجح معًا. والتتبع يحمل رقم السند بنيويًّا (expense_id)
- * فيعيد إبطاله الأوامر «غير مسدّدة».
+ * تسوية مجمّعة كاملة فقط: التزامات تشغيلية متقابلة لنفس المختبر وبعملة الدفع.
+ * قفل الجهة ثم الأوامر والالتزامات؛ تعارض القفل الأدنى يُرفض بلا انتظار.
+ * الإسقاط المالي يأتي في عبارة جديدة بعد الأقفال، ثم تُقفل الوردية قبل الصرف.
+ * السداد الجزئي أو بعملة مختلفة يبقى في مسار الالتزام الفردي دون تغيير.
  */
 export async function settleLabOrdersBatch(input: {
   partyId: number;
@@ -11827,6 +12170,20 @@ export async function settleLabOrdersBatch(input: {
   | { ok: true; expense: Expense; orderIds: number[]; partyName: string; quote: SettlementQuote | null }
   | { ok: false; reason: LabBatchRefusal; quote: SettlementQuote | null; orderIds?: number[] }
 > {
+  // The exported writer also fails closed; HTTP validation cannot authorize a
+  // smaller selection by coercing/filtering invalid IDs or rounding money.
+  const validId = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
+  if (!validId(input.partyId) || !Array.isArray(input.orderIds) || input.orderIds.length === 0
+    || !input.orderIds.every(validId)) {
+    return { ok: false, reason: "orders_invalid", quote: null };
+  }
+  if (!isCurrency(input.currency)) return { ok: false, reason: "batch_currency_mismatch", quote: null };
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0
+    || input.baseCurrency !== CLINIC_BASE_CURRENCY
+    || !Number.isFinite(input.exchangeRate) || input.exchangeRate <= 0
+    || (input.currency === CLINIC_BASE_CURRENCY && input.exchangeRate !== 1)) {
+    return { ok: false, reason: "batch_requires_full_allocation", quote: null };
+  }
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
   const orderIds = [...new Set(input.orderIds)].sort((a, b) => a - b);
@@ -11835,32 +12192,126 @@ export async function settleLabOrdersBatch(input: {
     await client.query("ROLLBACK");
     return { ok: false as const, reason, quote, orderIds: ids };
   };
+  // Only these pre-write NOWAIT acquisitions may produce a safely bounded busy
+  // refusal. An allocation, expense, commit or response error must propagate.
+  const acquire = async <T>(sql: string, values: unknown[] = []): Promise<T[] | null> => {
+    try { return (await client.query<T>(sql, values)).rows; }
+    catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") return null;
+      throw error;
+    }
+  };
   try {
     await client.query("BEGIN");
     const { rows: partyRows } = await client.query<{ name: string; kind: string }>(
       `SELECT name, kind FROM parties WHERE id = $1 FOR UPDATE`, [input.partyId],
     );
     const party = partyRows[0];
-    if (!party || party.kind !== "lab") return refuse("not_lab");
+    if (!party || party.kind !== "lab") return await refuse("not_lab");
 
-    const { rows: orders } = await client.query<{
+    const orders = await acquire<{
       id: number; party_id: number | null; lab_name: string; status: string; financial_status: string;
       payable_id: number | null;
     }>(
       `SELECT id, party_id, lab_name, status, financial_status, payable_id
-         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE NOWAIT`,
       [orderIds],
     );
+    if (orders === null) return await refuse("batch_busy");
     const found = new Map(orders.map((order) => [order.id, order]));
     const foreign = orderIds.filter((id) => {
       const order = found.get(id);
       return !order || !(order.party_id === input.partyId || (order.party_id === null && order.lab_name === party.name));
     });
-    if (foreign.length > 0) return refuse("orders_invalid", foreign);
+    if (foreign.length > 0) return await refuse("orders_invalid", foreign);
     const cancelled = orders.filter((order) => order.status === "cancelled").map((order) => order.id);
-    if (cancelled.length > 0) return refuse("orders_cancelled", cancelled);
+    if (cancelled.length > 0) return await refuse("orders_cancelled", cancelled);
     const alreadyPaid = orders.filter((order) => order.financial_status === "paid").map((order) => order.id);
-    if (alreadyPaid.length > 0) return refuse("orders_already_paid", alreadyPaid);
+    if (alreadyPaid.length > 0) return await refuse("orders_already_paid", alreadyPaid);
+
+    const payableIds: number[] = [];
+    for (const order of orders) {
+      if (order.payable_id === null) return await refuse("batch_link_invalid");
+      payableIds.push(order.payable_id);
+    }
+    if (new Set(payableIds).size !== orders.length) return await refuse("batch_link_invalid");
+    payableIds.sort((a, b) => a - b);
+    const linked = await acquire<{ id: number; lab_order_id: number | null; source_type: string }>(
+      `SELECT id, lab_order_id, source_type FROM payables
+        WHERE id = ANY($1::int[]) AND party_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
+      [payableIds, input.partyId],
+    );
+    if (linked === null) return await refuse("batch_busy");
+    const links = new Map(linked.map((row) => [row.id, row]));
+    if (linked.length !== payableIds.length || orders.some((order) => {
+      const row = links.get(order.payable_id!);
+      return !row || row.source_type !== "operational" || row.lab_order_id !== order.id;
+    })) return await refuse("batch_link_invalid");
+
+    // Every historical contributor must share the target-party fence, whether
+    // reached directly or through an allocation. Check rows, never their net:
+    // an already reversed pair does not make ambiguous provenance admissible.
+    // Allocation originals also need this order's settlement evidence matched
+    // by the unchanged reversal owner, or a later void could restore debt while
+    // leaving our paid marker intact. Reversal rows keep their original's trail.
+    const { rows: ambiguous } = await client.query(
+      `SELECT 1 FROM expenses e
+        WHERE e.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+         JOIN payables p ON p.id = a.payable_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.reversal_of_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM lab_order_tracking t
+             WHERE t.lab_order_id = p.lab_order_id AND t.action = 'financial_settlement'
+               AND (t.expense_id = e.id
+                    OR (t.expense_id IS NULL AND t.notes LIKE '%رقم ' || e.voucher_number || ' بمبلغ%')))
+       LIMIT 1`, [payableIds, input.partyId],
+    );
+    if (ambiguous.length > 0) return await refuse("batch_link_invalid");
+
+    // A separate READ COMMITTED statement after all locks: use the canonical
+    // amount/settlement owners, never an order-cost or party-net approximation.
+    const { rows: balances } = await client.query<{
+      id: number; currency: string; amount_minor: string; settled: string;
+    }>(
+      `SELECT b.id, b.currency, ${payableAmountSql("b")}::text AS amount_minor,
+              ${payableSettledTotalSql("b")}::text AS settled
+         FROM payables b WHERE b.id = ANY($1::int[]) AND b.party_id = $2 ORDER BY b.id`,
+      [payableIds, input.partyId],
+    );
+    if (balances.length !== payableIds.length) return await refuse("batch_link_invalid");
+    const plan: { payableId: number; remaining: number }[] = [];
+    let selectedTotal = 0;
+    for (const bill of balances) {
+      if (!isCurrency(bill.currency) || bill.currency !== input.currency) return await refuse("batch_currency_mismatch");
+      const amount = Number(bill.amount_minor);
+      const settled = Number(bill.settled);
+      const remaining = amount - settled;
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(settled)
+        || !Number.isSafeInteger(remaining) || remaining <= 0) return await refuse("batch_requires_full_allocation");
+      selectedTotal += remaining;
+      if (!Number.isSafeInteger(selectedTotal)) return await refuse("batch_requires_full_allocation");
+      plan.push({ payableId: bill.id, remaining });
+    }
+    if (selectedTotal !== input.amountMinor) return await refuse("batch_requires_full_allocation");
+    const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
+    if (!Number.isSafeInteger(baseAmount) || baseAmount < 0) return await refuse("batch_requires_full_allocation");
+
+    // Refuse an incompatible shift owner instead of waiting while holding the
+    // selected locks. A compatible SHARE may pass a queued close in PostgreSQL;
+    // admission safety comes from the provenance gate and target-party fence,
+    // not queue priority. The unchanged expense owner reuses our shared lock.
+    const openShift = await acquire<{ id: number }>(
+      `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE NOWAIT`,
+    );
+    if (openShift === null) return await refuse("batch_busy");
+    if (openShift.length === 0) return await refuse("no_shift");
 
     const note = input.note?.trim()
       || `تسوية وسداد كشف حساب مختبر [${party.name}]${input.monthLabel ? ` (${input.monthLabel})` : ""} لعدد (${orderIds.length}) أوامر عمل: [${orderIds.map((id) => `RX-${id}`).join(", ")}]`;
@@ -11870,63 +12321,47 @@ export async function settleLabOrdersBatch(input: {
       exchangeRate: input.exchangeRate, payableId: null, note, createdBy: input.createdBy,
       rateOverrideReason: input.rateOverrideReason, prepaymentReason: input.prepaymentReason,
     }, settingsRates);
-    if (result.id === null) return refuse(result.reason ?? "no_shift", undefined, result.quote);
+    if (result.id === null) return await refuse(result.reason ?? "no_shift", undefined, result.quote);
 
-    /* توزيع السند على التزامات الأوامر المحددة (بترتيب أرقامها): لكل التزامٍ متبقّيه
-       بمكافئ سعر اللحظة، حتى ينفد المبلغ. فلا يبقى التزامٌ سوّاه الكشف «متبقّيًا»
-       يُسدَّد مرّةً ثانية بزر السداد. وما زاد على متبقّي الأوامر يبقى رصيدًا غير موزّع
-       للمختبر (وقد مرّ بحارس رصيده). */
-    const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
-    let left = input.amountMinor;
-    for (const order of orders) {
-      if (left <= 0) break;
-      if (order.payable_id === null) continue;
-      const { rows: billRows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
-        `SELECT b.currency, b.amount_minor, ${payableSettledTotalSql("b")}::text AS settled
-           FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
-        [order.payable_id],
-      );
-      if (!billRows[0]) continue;
-      const billCurrency = requireCurrency(billRows[0].currency, "التزام", `#${order.payable_id}`);
-      const remaining = toMinor(billRows[0].amount_minor) - toMinor(billRows[0].settled);
-      if (remaining <= 0) continue;
-      const billRate = rateOf(billCurrency, rates);
-      const fullPaid = maxPaymentFor(remaining, input.currency, billCurrency, rates);
-      if (billRate === null || fullPaid === null) return refuse("missing_rate", undefined, result.quote);
-      let paid: number;
-      let settled: number;
-      if (left >= fullPaid) {
-        paid = fullPaid;
-        settled = remaining;
-      } else {
-        paid = left;
-        settled = Math.min(remaining, convertMinor(left, input.currency, billCurrency, rates) ?? 0);
-      }
-      if (settled <= 0 || paid <= 0) continue;
-      await client.query(
+    let allocated = 0;
+    for (const item of plan) {
+      const { rows: saved } = await client.query<{ payable_id: number; paid_minor: string; settled_minor: string }>(
         `INSERT INTO expense_payable_allocations
            (expense_id, payable_id, paid_minor, payable_currency, payable_exchange_rate, settled_minor)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [result.id, order.payable_id, paid, billCurrency, billRate, settled],
+         VALUES ($1, $2, $3, $4, $5, $3) RETURNING payable_id, paid_minor, settled_minor`,
+        [result.id, item.payableId, item.remaining, input.currency, input.exchangeRate],
       );
-      left -= paid;
+      if (saved.length !== 1 || saved[0].payable_id !== item.payableId
+        || Number(saved[0].paid_minor) !== item.remaining || Number(saved[0].settled_minor) !== item.remaining) {
+        throw new Error("Lab batch allocation coverage changed");
+      }
+      allocated += item.remaining;
+    }
+    if (plan.length !== orderIds.length || allocated !== input.amountMinor) {
+      throw new Error("Lab batch full allocation was not completed");
     }
 
     const { rows: voucher } = await client.query<{ voucher_number: string }>(
       `SELECT voucher_number FROM expenses WHERE id = $1`, [result.id],
     );
-    await client.query(
-      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[])`, [orderIds],
+    const { rows: marked } = await client.query<{ id: number }>(
+      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[]) RETURNING id`, [orderIds],
     );
-    await client.query(
+    if (marked.length !== orderIds.length || marked.some((row) => !found.has(row.id))) {
+      throw new Error("Lab batch selected order coverage changed");
+    }
+    const { rows: tracked } = await client.query<{ lab_order_id: number }>(
       `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
        SELECT id, 'financial_settlement', status, status, $1, $2, $3, $4
-         FROM lab_orders WHERE id = ANY($5::int[])`,
+         FROM lab_orders WHERE id = ANY($5::int[]) RETURNING lab_order_id`,
       [
         `تمت التسوية المالية المجمعة بسند صرف رقم ${voucher[0].voucher_number} بمبلغ ${input.amountMinor} ${input.currency}`,
         input.createdBy, input.actorRole ?? "manager", result.id, orderIds,
       ],
     );
+    if (tracked.length !== orderIds.length || tracked.some((row) => !found.has(row.lab_order_id))) {
+      throw new Error("Lab batch tracking coverage changed");
+    }
     await client.query("COMMIT");
     const expense = await getExpense(result.id);
     return { ok: true, expense: expense!, orderIds, partyName: party.name, quote: result.quote };
@@ -11995,7 +12430,7 @@ export async function commissionReport(
       `SELECT id, name, commission_percent FROM parties WHERE kind = 'doctor'`,
     ),
     pool.query<{
-      patient_id: number; invoice_id: number; net_minor: string; created_at: Date;
+      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
       case_id: number | null; plan_id: number | null;
@@ -12004,7 +12439,7 @@ export async function commissionReport(
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
-              i.created_at,
+              i.created_at, to_char(i.created_at, 'US') AS created_at_us,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
               it.service_id,
@@ -12054,7 +12489,7 @@ export async function commissionReport(
       id: row.invoice_id,
       netMinor: toMinor(row.net_minor),
       currency: requireCurrency(row.base_currency, "فاتورة", row.invoice_id),
-      createdAt: row.created_at.toISOString(),
+      createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
       doctorShares: [],
     };
     if (row.doctor_id) {
@@ -12108,10 +12543,10 @@ export async function commissionReport(
         patient_id: number; id: number; kind: string; invoice_id: number | null; plan_id: number | null;
         opening_currency: string | null;
         reversal_of_id: number | null; amount_minor: string; currency: string;
-        base_amount_minor: string; created_at: Date;
+        base_amount_minor: string; created_at: Date; created_at_us: string;
       }>(
         `SELECT patient_id, id, kind, invoice_id, plan_id, opening_currency, reversal_of_id,
-                amount_minor, currency, base_amount_minor, created_at
+                amount_minor, currency, base_amount_minor, created_at, to_char(created_at, 'US') AS created_at_us
            FROM payments
           WHERE patient_id = ANY($1::int[])
             AND (created_at AT TIME ZONE $2)::date <= $3::date
@@ -12217,7 +12652,7 @@ export async function commissionReport(
           target,
           settlementMinor: value,
           effectiveMinor: value,
-          createdAt: new Date(row.created_at).toISOString(),
+          createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;
@@ -12443,7 +12878,7 @@ export async function commissionReport(
       (invoice) => inRange(invoice.id),
       {
         overrideAt,
-        sink: detail ? (line) => detail.lines.push({ ...line, patientId }) : undefined,
+        sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
 
@@ -18584,9 +19019,30 @@ export async function recordPlanInstallment(input: {
   idempotencyKey?: string | null;
 }): Promise<
   | { invoiceId: number; paymentId: number; replayed?: boolean }
-  | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan" }
+  | { reason: "no_shift" | "cross_currency_not_supported" | "idempotency_conflict" | "inactive_plan"
+      | "issued_installment_recovery_required" | "installment_recovery_review_required"; recoveryInvoiceIds?: number[] }
 > {
   await ensureSchema();
+  const prepared = preparePlanInstallment(input);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const outcome = await runPlanInstallmentTransaction(client, input, prepared);
+    await client.query("reason" in outcome ? "ROLLBACK" : "COMMIT");
+    return outcome;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    if (error instanceof FinancialCurrencyIntegrityError) return { reason: "installment_recovery_review_required" };
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+type PlanInstallmentInput = Parameters<typeof recordPlanInstallment>[0];
+type PlanInstallmentOutcome = Awaited<ReturnType<typeof recordPlanInstallment>>;
+
+function preparePlanInstallment(input: PlanInstallmentInput) {
   const idempotencyKey = validateIdempotencyKey(input.idempotencyKey ?? null);
   const baseAmount = toBaseAmount(
     input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate,
@@ -18606,153 +19062,211 @@ export async function recordPlanInstallment(input: {
     note: input.note,
   }), "utf8").digest("hex");
 
-  const client = await getPool().connect();
+  return { idempotencyKey, baseAmount, requestHash };
+}
+
+/**
+ * @internal Run the existing installment writer on the caller's initialized,
+ * active transaction. The caller owns authorization and all transaction/connection
+ * boundaries: commit only success; roll back on ANY refusal or thrown exception,
+ * including failures after partial writes. Exceptions are deliberately not mapped
+ * here; the owned wrapper maps integrity failures only after its rollback.
+ * No schema initialization, pool acquisition, transaction control or release.
+ */
+export async function recordPlanInstallmentInTransaction(
+  client: DbClient, input: PlanInstallmentInput,
+): Promise<PlanInstallmentOutcome> {
+  return runPlanInstallmentTransaction(client, input, preparePlanInstallment(input));
+}
+
+async function runPlanInstallmentTransaction(
+  client: DbClient, input: PlanInstallmentInput,
+  prepared: ReturnType<typeof preparePlanInstallment>,
+): Promise<PlanInstallmentOutcome> {
+  const { idempotencyKey, baseAmount, requestHash } = prepared;
+  // Resolve old successes before new recovery eligibility or acquiring provenance locks.
+  if (idempotencyKey !== null) {
+    const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
+      `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
+    if (existing) {
+      if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
+        return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
+      }
+      return { reason: "idempotency_conflict" };
+    }
+  }
+  let beforeRecovery: Awaited<ReturnType<typeof readRecoveryDocumentStates>>;
   try {
-    await client.query("BEGIN");
-
-    const { rows: shifts } = await client.query<{ id: number }>(
-      `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
-    );
-    if (!shifts[0]) { await client.query("ROLLBACK"); return { reason: "no_shift" }; }
-
-    /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي
-       recordPayment)، فالطلب المكرر يرى سند سابقه الملتزم لا يسبقه. والفهرس الفريد على
-       المفتاح شبكة أمانٍ أخيرة. */
+    beforeRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+  } catch (error) {
+    if (!(error instanceof FinancialCurrencyIntegrityError)) throw error;
+    // READ COMMITTED evidence uses several queries before provenance locks.
+    // A competing success can commit its invoice/receipt between those reads.
+    // Reconcile only that exact key before refusing the inconsistent snapshot.
+    // This catch is strictly PRE-WRITE; never commit/replay from a later catch.
     if (idempotencyKey !== null) {
-      const { rows: existing } = await client.query<{
-        id: number; invoice_id: number | null; idempotency_request_hash: string | null;
-      }>(
-        `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
-        [idempotencyKey],
-      );
-      if (existing[0]) {
-        if (existing[0].idempotency_request_hash === requestHash && existing[0].invoice_id !== null) {
-          await client.query("COMMIT");
-          return { invoiceId: existing[0].invoice_id, paymentId: existing[0].id, replayed: true };
+      const { rows: [existing] } = await client.query<{ id: number; invoice_id: number | null; idempotency_request_hash: string | null }>(
+        `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`, [idempotencyKey]);
+      if (existing) {
+        if (existing.idempotency_request_hash === requestHash && existing.invoice_id !== null) {
+          return { invoiceId: existing.invoice_id, paymentId: existing.id, replayed: true };
         }
-        await client.query("ROLLBACK");
         return { reason: "idempotency_conflict" };
       }
     }
-
-    /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
-       المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
-       الاتفاق لا عملة الدفاتر.
-       - الدفع بعملة الخطة: الفاتورة بمبلغه بعملة الخطة — لا تحويل أبدًا.
-       - الدفع بعملةٍ أخرى وخطةٌ أساسية (YER): السلوك الموثَّق القائم — الفاتورة
-         بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
-       - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
-         يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
-    const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null; status: string }>(
-      /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
-      `SELECT t.patient_id, t.base_currency, t.status,
-              (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
-         FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
-      [input.planId],
-    );
-    const planRow = planRows[0];
-    if (!planRow || planRow.patient_id !== input.patientId) {
-      await client.query("ROLLBACK");
-      throw new Error("الخطة غير موجودة أو لا تخص المريض.");
-    }
-    // Recheck after the lock, not from the route's earlier snapshot. Replay was
-    // resolved above, so closure never turns a prior success into another charge.
-    if (planRow.status !== "active") {
-      await client.query("ROLLBACK");
-      return { reason: "inactive_plan" };
-    }
-    const planCurrency = planRow.base_currency as Currency;
-    let invoiceMinor: number;
-    let invoiceCurrency: Currency;
-    if (input.currency === planCurrency) {
-      invoiceMinor = input.amountMinor;
-      invoiceCurrency = planCurrency;
-    } else if (planCurrency === input.baseCurrency) {
-      invoiceMinor = baseAmount;
-      invoiceCurrency = input.baseCurrency;
-    } else {
-      await client.query("ROLLBACK");
-      return { reason: "cross_currency_not_supported" };
-    }
-
-    const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
-    const { rows: invoices } = await client.query<{ id: number }>(
-      `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
-       VALUES (
-         ${documentNumberSql("invoice")},
-         $1, $2, 0, $3, $4::text, $5, $6)
-       RETURNING id`,
-      [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
-    );
-    const invoiceId = invoices[0].id;
-
-    /* (DOCATTR-1 — قرار المالك D1) القسط يُنسب إلى أطباء بنود خطته بنسبة قيمة كل بند — كل
-       سطرٍ يحمل طبيبه وخدمته، فيأخذ كل أخصائي عمولته على بنوده بقاعدة خدمتها في المحرك
-       نفسه. البند بلا طبيب للطبيب الأساسي للخطة. تُحسب لحظة الإصدار وتُجمَّد في السطر:
-       تعديل الخطة لاحقًا لا يعيد نسبة أقساطٍ صدرت. */
-    const { rows: attributionItems } = await client.query<{
-      doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
-    }>(
-      `SELECT d.id AS doctor_id, i.service_id, i.service_name, (i.quantity::bigint * i.unit_price_minor)::text AS value_minor
-         FROM plan_items i
-         LEFT JOIN parties d ON d.id = i.doctor_id AND d.kind = 'doctor'
-        WHERE i.plan_id = $1 AND i.status <> 'cancelled' ORDER BY i.sort_order, i.id`,
-      [input.planId],
-    );
-    const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
-      doctorId: item.doctor_id, serviceId: item.service_id, serviceName: item.service_name,
-      valueMinor: Number(item.value_minor),
-    })), planRow.primary_doctor_id);
-    for (const line of attribution) {
-      await client.query(
-        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
-         VALUES ($1, $2::int, $3::int, $4, 1, $5, $5)`,
-        [invoiceId, line.serviceId, line.doctorId,
-         attribution.length > 1 && line.serviceName ? `${description} — ${line.serviceName}` : description,
-         line.amountMinor],
-      );
-    }
-
-    const { rows: payments } = await client.query<{ id: number; receipt_number: string }>(
-      `INSERT INTO payments (
-         receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
-         exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
-         idempotency_key, idempotency_request_hash)
-       VALUES (
-         ${documentNumberSql("receipt")},
-         $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
-       RETURNING id, receipt_number`,
-      [
-        input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
-        input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
-        input.createdBy, input.planId, idempotencyKey, requestHash,
-      ],
-    );
-
-    await client.query(
-      `UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId],
-    );
-
-    /* (TD-06) سند القبض وسطر تدقيقه معًا أو لا شيء — لكل باب يحصّل القسط (زر الخطة وباب
-       القبض العام). الإعادة بالمفتاح نفسه تعود قبل هنا فلا تكتب سطرًا ثانيًا. */
-    await insertAuditRow(client, {
-      action: "payment.create", entity: "payment", entityId: payments[0].id, entityLabel: payments[0].receipt_number,
-      details: {
-        المريض: input.patientId, المبلغ: input.amountMinor, العملة: input.currency,
-        سعر_الصرف: input.exchangeRate, المكافئ: baseAmount, الطريقة: input.method,
-        الخطة: input.planId, قسط: input.installmentNumber, فاتورة_القسط: invoiceId,
-      },
-      actor: input.createdBy, actorRole: input.actorRole ?? null,
-    });
-
-    await client.query("COMMIT");
-    return { invoiceId, paymentId: payments[0].id };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
+    throw error; // Existing outer mapping stays fail-closed when no matching success exists.
   }
+  const originIds = [...new Set(beforeRecovery.flatMap((state) => state.projection.kind === "recoverable"
+    ? [state.projection.originPaymentId] : []))].sort((a, b) => a - b);
+  if (originIds.length) await client.query(`SELECT id FROM payments WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [originIds]);
+
+  const { rows: shifts } = await client.query<{ id: number }>(
+    `SELECT id FROM cashier_shifts WHERE status = 'open' LIMIT 1 FOR UPDATE`,
+  );
+  if (!shifts[0]) { return { reason: "no_shift" }; }
+
+  /* (FIN-1) فحص الإعادة تحت قفل الوردية: كل تحصيلٍ يتسلسل على صفها (هنا وفي
+     recordPayment)، فالطلب المكرر يرى سند سابقه الملتزم لا يسبقه. والفهرس الفريد على
+     المفتاح شبكة أمانٍ أخيرة. */
+  if (idempotencyKey !== null) {
+    const { rows: existing } = await client.query<{
+      id: number; invoice_id: number | null; idempotency_request_hash: string | null;
+    }>(
+      `SELECT id, invoice_id, idempotency_request_hash FROM payments WHERE idempotency_key = $1`,
+      [idempotencyKey],
+    );
+    if (existing[0]) {
+      if (existing[0].idempotency_request_hash === requestHash && existing[0].invoice_id !== null) {
+        return { invoiceId: existing[0].invoice_id, paymentId: existing[0].id, replayed: true };
+      }
+      return { reason: "idempotency_conflict" };
+    }
+  }
+
+  // Existing invoice locks precede the plan lock. Never discover/acquire another
+  // payment lock after shift; new/ambiguous evidence below aborts instead of billing.
+  const priorInvoiceIds = beforeRecovery.filter((state) => state.projection.kind === "recoverable"
+    || (state.projection.kind === "review_required" && hasInstallmentReversalSignal(state)))
+    .map((state) => state.invoiceId).sort((a, b) => a - b);
+  if (priorInvoiceIds.length) await client.query(`SELECT id FROM invoices WHERE id = ANY($1::int[]) ORDER BY id FOR SHARE`, [priorInvoiceIds]);
+  const currentRecovery = (await readRecoveryDocumentStates(client, input.patientId)).filter((state) => state.planId === input.planId);
+  const needsReview = currentRecovery.filter((state) => state.projection.kind === "review_required" && hasInstallmentReversalSignal(state));
+  if (needsReview.length) {
+    return { reason: "installment_recovery_review_required", recoveryInvoiceIds: needsReview.map((state) => state.invoiceId) };
+  }
+  const existingDebt = currentRecovery.filter((state) => state.projection.kind === "recoverable");
+  if (existingDebt.length) {
+    return { reason: "issued_installment_recovery_required", recoveryInvoiceIds: existingDebt.map((state) => state.invoiceId) };
+  }
+
+  /* (TD-05) عملة الاتفاق من الخطة نفسها — مقفولةً داخل المعاملة لا من قول
+     المتصل: القسط بندٌ في اتفاقٍ بعملته، والفاتورة التي يولّدها تحمل عملة
+     الاتفاق لا عملة الدفاتر.
+     - الدفع بعملة الخطة: الفاتورة بمبلغه بعملة الخطة — لا تحويل أبدًا.
+     - الدفع بعملةٍ أخرى وخطةٌ أساسية (YER): السلوك الموثَّق القائم — الفاتورة
+       بالمكافئ الأساسي المسجَّل بسعر يوم الدفع.
+     - الدفع بعملةٍ أخرى وخطةٌ بعملة اتفاق (SAR/USD): تحويلٌ صامت مرفوض —
+       يُفشَل بوضوح لا يُخمَّن بسعر اليوم. */
+  const { rows: planRows } = await client.query<{ patient_id: number; base_currency: string; primary_doctor_id: number | null; status: string }>(
+    /* (DOCATTR-1 review) الطبيب الأساسي يُقبل طبيبًا فقط — جهةٌ من نوعٍ آخر لا تأخذ حصة قسط. */
+    `SELECT t.patient_id, t.base_currency, t.status,
+            (SELECT d.id FROM parties d WHERE d.id = t.primary_doctor_id AND d.kind = 'doctor') AS primary_doctor_id
+       FROM treatment_plans t WHERE t.id = $1 FOR UPDATE OF t`,
+    [input.planId],
+  );
+  const planRow = planRows[0];
+  if (!planRow || planRow.patient_id !== input.patientId) {
+    throw new Error("الخطة غير موجودة أو لا تخص المريض.");
+  }
+  // Recheck after the lock, not from the route's earlier snapshot. Replay was
+  // resolved above, so closure never turns a prior success into another charge.
+  if (planRow.status !== "active") {
+    return { reason: "inactive_plan" };
+  }
+  const planCurrency = planRow.base_currency as Currency;
+  let invoiceMinor: number;
+  let invoiceCurrency: Currency;
+  if (input.currency === planCurrency) {
+    invoiceMinor = input.amountMinor;
+    invoiceCurrency = planCurrency;
+  } else if (planCurrency === input.baseCurrency) {
+    invoiceMinor = baseAmount;
+    invoiceCurrency = input.baseCurrency;
+  } else {
+    return { reason: "cross_currency_not_supported" };
+  }
+
+  const description = `${input.planTitle} — قسط ${input.installmentNumber}`;
+  const { rows: invoices } = await client.query<{ id: number }>(
+    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, note, created_by, plan_id)
+     VALUES (
+       ${documentNumberSql("invoice")},
+       $1, $2, 0, $3, $4::text, $5, $6)
+     RETURNING id`,
+    [input.patientId, invoiceMinor, invoiceCurrency, input.note, input.createdBy, input.planId],
+  );
+  const invoiceId = invoices[0].id;
+
+  /* (DOCATTR-1 — قرار المالك D1) القسط يُنسب إلى أطباء بنود خطته بنسبة قيمة كل بند — كل
+     سطرٍ يحمل طبيبه وخدمته، فيأخذ كل أخصائي عمولته على بنوده بقاعدة خدمتها في المحرك
+     نفسه. البند بلا طبيب للطبيب الأساسي للخطة. تُحسب لحظة الإصدار وتُجمَّد في السطر:
+     تعديل الخطة لاحقًا لا يعيد نسبة أقساطٍ صدرت. */
+  const { rows: attributionItems } = await client.query<{
+    doctor_id: number | null; service_id: number | null; service_name: string; value_minor: string;
+  }>(
+    `SELECT d.id AS doctor_id, i.service_id, i.service_name, (i.quantity::bigint * i.unit_price_minor)::text AS value_minor
+       FROM plan_items i
+       LEFT JOIN parties d ON d.id = i.doctor_id AND d.kind = 'doctor'
+      WHERE i.plan_id = $1 AND i.status <> 'cancelled' ORDER BY i.sort_order, i.id`,
+    [input.planId],
+  );
+  const attribution = attributeInstallment(invoiceMinor, attributionItems.map((item) => ({
+    doctorId: item.doctor_id, serviceId: item.service_id, serviceName: item.service_name,
+    valueMinor: Number(item.value_minor),
+  })), planRow.primary_doctor_id);
+  for (const line of attribution) {
+    await client.query(
+      `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
+       VALUES ($1, $2::int, $3::int, $4, 1, $5, $5)`,
+      [invoiceId, line.serviceId, line.doctorId,
+       attribution.length > 1 && line.serviceName ? `${description} — ${line.serviceName}` : description,
+       line.amountMinor],
+    );
+  }
+
+  const { rows: payments } = await client.query<{ id: number; receipt_number: string }>(
+    `INSERT INTO payments (
+       receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
+       exchange_rate, base_amount_minor, base_currency, method, note, created_by, plan_id,
+       idempotency_key, idempotency_request_hash)
+     VALUES (
+       ${documentNumberSql("receipt")},
+       $1, $2, $3, 'payment', $4, $5, $6, $7, $8, $9, $10::text, $11, $12, $13::text, $14::text)
+     RETURNING id, receipt_number`,
+    [
+      input.patientId, invoiceId, shifts[0].id, input.amountMinor, input.currency,
+      input.exchangeRate, baseAmount, input.baseCurrency, input.method, input.note,
+      input.createdBy, input.planId, idempotencyKey, requestHash,
+    ],
+  );
+
+  await client.query(
+    `UPDATE invoices SET status = 'paid' WHERE id = $1`, [invoiceId],
+  );
+
+  /* (TD-06) سند القبض وسطر تدقيقه معًا أو لا شيء — لكل باب يحصّل القسط (زر الخطة وباب
+     القبض العام). الإعادة بالمفتاح نفسه تعود قبل هنا فلا تكتب سطرًا ثانيًا. */
+  await insertAuditRow(client, {
+    action: "payment.create", entity: "payment", entityId: payments[0].id, entityLabel: payments[0].receipt_number,
+    details: {
+      المريض: input.patientId, المبلغ: input.amountMinor, العملة: input.currency,
+      سعر_الصرف: input.exchangeRate, المكافئ: baseAmount, الطريقة: input.method,
+      الخطة: input.planId, قسط: input.installmentNumber, فاتورة_القسط: invoiceId,
+    },
+    actor: input.createdBy, actorRole: input.actorRole ?? null,
+  });
+
+  return { invoiceId, paymentId: payments[0].id };
 }
 
 // ─── رحلة المريض V2: الخطة الموحَّدة، الزيارات المخطَّطة، وملخص «ماذا الآن؟» ───
@@ -20817,17 +21331,21 @@ export interface DiagnosisRecord {
 }
 
 /** تاريخ التشخيص — الأحدث أولًا، فالقارئ يبدأ من اليوم ويرجع إلى البداية. */
-export async function listPatientDiagnoses(patientId: number): Promise<DiagnosisRecord[]> {
+export async function listPatientDiagnoses(patientId: number, orthoCaseId?: number): Promise<DiagnosisRecord[]> {
+  if (orthoCaseId !== undefined && !validDiagnosisId(orthoCaseId)) throw new DiagnosisAssociationError();
   await ensureSchema();
   const { rows } = await getPool().query<{
     id: number; version: number; content: Record<string, unknown>;
     label: string | null; ortho_case_id: number | null; supersedes: number | null;
     created_by: string; created_at: Date;
   }>(
-    `SELECT id, version, content, label, ortho_case_id, supersedes, created_by, created_at
-       FROM patient_diagnoses WHERE patient_id = $1
-      ORDER BY created_at DESC, id DESC`,
-    [patientId],
+    `SELECT d.id, d.version, d.content, d.label, d.ortho_case_id, d.supersedes, d.created_by, d.created_at
+       FROM patient_diagnoses d WHERE d.patient_id = $1
+        AND ($2::int IS NULL OR (d.ortho_case_id = $2 AND EXISTS (
+          SELECT 1 FROM ortho_cases c WHERE c.id = $2 AND c.patient_id = d.patient_id
+        )))
+      ORDER BY d.id DESC`,
+    [patientId, orthoCaseId ?? null],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -20841,11 +21359,24 @@ export async function listPatientDiagnoses(patientId: number): Promise<Diagnosis
   }));
 }
 
+/** One nonrevealing refusal for missing, malformed, or foreign clinical links. */
+export class DiagnosisAssociationError extends Error {
+  constructor() {
+    super("تعذّر ربط التشخيص بملف المريض والسجل المحدد.");
+    this.name = "DiagnosisAssociationError";
+  }
+}
+
+const validDiagnosisId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2_147_483_647;
+
 /**
- * يفتح نسخة تشخيصٍ جديدة — لا يعدّل سلفًا.
- *
- * رقم النسخة وسلسلتها يُحسَبان داخل القفل الاستشاري على آخر نسخة: جهازان
- * يحدّثان في اللحظة نفسها فتترتب النسختان لا تصطدمان في الرقم نفسه.
+ * Append-only, patient-wide version history, including standalone diagnoses.
+ * A patient-scoped advisory lock also serializes the first diagnosis, for which
+ * no predecessor row exists. Patient KEY SHARE protects merge/delete without
+ * blocking a visit-holder filling a non-key patient field (phone).
+ * Then lock visit → case, retaining patient ownership until this write commits.
+ * A visit and case independently belong to the patient; neither implies a session
+ * association, and closed cases/signed visits remain valid historical references.
  */
 export async function recordPatientDiagnosis(input: {
   patientId: number;
@@ -20855,10 +21386,33 @@ export async function recordPatientDiagnosis(input: {
   visitId: number | null;
   createdBy: string;
 }): Promise<{ id: number; version: number }> {
+  if (!validDiagnosisId(input.patientId)
+    || [input.orthoCaseId, input.visitId].some(id => id !== null && !validDiagnosisId(id))) {
+    throw new DiagnosisAssociationError();
+  }
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // Dedicated two-integer namespace; all diagnosis versions share this lock,
+    // whether standalone or attached to one of the patient's historical cases.
+    await client.query(`SELECT pg_advisory_xact_lock(73127, $1::int)`, [input.patientId]);
+    const { rows: patients } = await client.query(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId],
+    );
+    if (!patients[0]) throw new DiagnosisAssociationError();
+    if (input.visitId !== null) {
+      const { rows } = await client.query<{ patient_id: number | null }>(
+        `SELECT patient_id FROM visits WHERE id = $1 FOR SHARE`, [input.visitId],
+      );
+      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+    }
+    if (input.orthoCaseId !== null) {
+      const { rows } = await client.query<{ patient_id: number }>(
+        `SELECT patient_id FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId],
+      );
+      if (rows[0]?.patient_id !== input.patientId) throw new DiagnosisAssociationError();
+    }
     const { rows: latest } = await client.query<{ id: number; version: number }>(
       `SELECT id, version FROM patient_diagnoses WHERE patient_id = $1
         ORDER BY id DESC LIMIT 1 FOR UPDATE`,
@@ -25348,7 +25902,7 @@ export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], 
 
 /** (F-5) يحلّ القواعد القديمة المخزَّنة بالاسم في كل لقطات السياسة — في الذاكرة فقط. */
 async function resolveLegacyServiceRatesInPolicies(policies: {
-  timelines: Map<number, Array<{ at: number; percent: number; config: DoctorCommissionConfig | null }>>;
+  timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
 }): Promise<ServiceRateFinding[]> {
   const { rows: catalog } = await getPool().query<{ id: number; name: string }>(`SELECT id, name FROM services`);
