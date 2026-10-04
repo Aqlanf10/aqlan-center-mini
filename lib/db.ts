@@ -3815,7 +3815,8 @@ export async function commitLegacyImport(input: {
 }
 
 export interface LegacyTreatmentView {
-  legacyNumber: number; treatedOn: string | null; doctorName: string | null; service: string | null;
+  id: number; legacyNumber: number | null; sourceKind: "legacy_import" | "manual_history"; historicalAsOf: string | null;
+  treatedOn: string | null; doctorName: string | null; service: string | null;
   currency: Currency; priceMinor: number; rate: number | null; paidMinor: number; remainingMinor: number;
   payments: { legacyNumber: number; paidOn: string | null; currency: Currency; amountMinor: number; rate: number | null;
     method: string | null; cashBox: string | null }[];
@@ -3829,12 +3830,17 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   await ensureSchema();
   const [treatments, payments] = await Promise.all([
     getPool().query<{
-      id: number; legacy_number: number; treated_on: string | null; doctor_name: string | null; service: string | null;
+      id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
+      has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
     }>(
       `SELECT id, legacy_number, treated_on::text, doctor_name, service, currency, price_minor::text, rate::text,
-              paid_minor::text, remaining_minor::text
-         FROM legacy_treatments WHERE patient_id = $1 ORDER BY treated_on NULLS LAST, legacy_number`, [patientId]),
+              paid_minor::text, remaining_minor::text,
+              to_jsonb(t) ? 'source_kind' AS has_provenance,
+              to_jsonb(t)->>'source_kind' AS source_kind,
+              to_jsonb(t)->>'historical_as_of' AS historical_as_of
+         FROM legacy_treatments t WHERE patient_id = $1
+        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
     getPool().query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
@@ -3848,16 +3854,30 @@ export async function patientLegacyHistory(patientId: number): Promise<{
     amountMinor: toMinor(row.amount_minor), rate: row.rate === null ? null : Number(row.rate),
     method: row.method, cashBox: row.cash_box,
   });
-  const views = treatments.rows.map((row) => ({
-    id: row.id,
-    view: {
-      legacyNumber: row.legacy_number, treatedOn: row.treated_on, doctorName: row.doctor_name, service: row.service,
-      currency: requireCurrency(row.currency, "معالجة قديمة", row.legacy_number),
+  const views = treatments.rows.map((row) => {
+    // The current schema has no provenance columns. Only an actual old-system
+    // number identifies that historical import; a later nullable row must carry
+    // explicit valid provenance. Never manufacture a number or guess its origin.
+    const sourceKind = row.has_provenance ? row.source_kind : "legacy_import";
+    if ((sourceKind !== "legacy_import" && sourceKind !== "manual_history")
+      || (sourceKind === "legacy_import" && (row.legacy_number === null || row.historical_as_of !== null))
+      || (sourceKind === "manual_history" && (row.legacy_number !== null
+        || !row.historical_as_of || !/^\d{4}-\d{2}-\d{2}$/.test(row.historical_as_of)))) {
+      throw new Error(`Invalid legacy archive provenance for record ${row.id}`);
+    }
+    const view: LegacyTreatmentView = {
+      id: row.id, legacyNumber: row.legacy_number, sourceKind, historicalAsOf: row.historical_as_of,
+      treatedOn: row.treated_on, doctorName: row.doctor_name, service: row.service,
+      currency: requireCurrency(row.currency, "معالجة قديمة", row.legacy_number ?? row.id),
       priceMinor: toMinor(row.price_minor), rate: row.rate === null ? null : Number(row.rate),
       paidMinor: toMinor(row.paid_minor), remainingMinor: toMinor(row.remaining_minor),
-      payments: [] as LegacyTreatmentView["payments"],
-    },
-  }));
+      payments: [],
+    };
+    return {
+      id: row.id,
+      view,
+    };
+  });
   const byId = new Map(views.map((entry) => [entry.id, entry.view]));
   const orphanPayments: LegacyTreatmentView["payments"] = [];
   for (const row of payments.rows) {
@@ -5085,7 +5105,7 @@ export type PatientMergeResult =
  * الأجنبية من القاعدة نفسها لا من قائمةٍ في الكود تنسى جدولًا يُضاف غدًا — ثم يملأ
  * فراغات الهدف من المصدر (ويضمّ التنبيهين الطبيين لا يُسقط أحدهما)، ثم يحذف المصدر.
  *
- * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي) لا يُدمج: تلك سجلات
+ * المصدر ذو الأثر المالي (دفعات، حركات مخزون، رصيد افتتاحي، أرشيف مالي سابق) لا يُدمج: تلك سجلات
  * append-only لا يُعاد نسبها بصمت — تُصحَّح بقيودٍ معاكسة. وأي تعارضٍ فريد (مثل
  * خطةٍ واحدة لكل مريض) يتراجع بالدمج كله: لا دمج نصفيّ أبدًا.
  */
@@ -5110,18 +5130,24 @@ export async function mergeDuplicatePatient(
       return { ok: false, reason: "not_found" };
     }
 
-    const { rows: [footprint] } = await client.query<{ payments: number; movements: number; opening: number }>(
+    const { rows: [footprint] } = await client.query<{
+      payments: number; movements: number; opening: number; legacy_treatments: number; legacy_payments: number;
+    }>(
       `SELECT (SELECT COUNT(*)::int FROM payments WHERE patient_id = $1) AS payments,
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
-              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening`,
+              (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
+              (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1) AS legacy_treatments,
+              (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
       [sourceId],
     );
-    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0) {
+    if (footprint.payments > 0 || footprint.movements > 0 || footprint.opening > 0
+      || footprint.legacy_treatments > 0 || footprint.legacy_payments > 0) {
       await client.query("ROLLBACK");
       return {
         ok: false, reason: "source_has_financial_history",
-        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening },
+        counts: { payments: footprint.payments, inventoryMovements: footprint.movements, openingBalances: footprint.opening,
+          legacyTreatments: footprint.legacy_treatments, legacyPayments: footprint.legacy_payments },
       };
     }
 

@@ -462,6 +462,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only the two synthetic archive reader panels; never upload the directory.
+      - name: Upload legacy archive reader screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-archive-reader-screenshots
+          path: |
+            .settings-ui-artifacts/legacy-archive-reader-1280.png
+            .settings-ui-artifacts/legacy-archive-reader-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
