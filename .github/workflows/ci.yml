@@ -242,6 +242,9 @@ jobs:
       - name: Install Chromium for Settings browser journey
         run: npx playwright install --with-deps chromium
 
+      - name: Install PDF text inspection tool
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
+
       - name: HTTP security integration tests
         run: npm run test:security-http
 
@@ -332,6 +335,21 @@ jobs:
             .settings-ui-artifacts/expense-catalogue-restricted-1280.png
             .settings-ui-artifacts/expense-catalogue-restricted-390.png
             .settings-ui-artifacts/expense-catalogue-revoked-open-report.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic dossier fixtures only; no real clinical records or broad uploads.
+      - name: Upload patient dossier ENDO print artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-dossier-endo-print-ui
+          path: |
+            .settings-ui-artifacts/patient-dossier-endo-screen.png
+            .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
+            .settings-ui-artifacts/patient-dossier-endo-print.png
+            .settings-ui-artifacts/patient-dossier-endo-a4.pdf
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
