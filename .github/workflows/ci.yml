@@ -399,6 +399,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic UI fixtures only; never upload real patient information.
+      - name: Upload cockpit UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-cockpit-readiness-ui
+          path: |
+            .settings-ui-artifacts/patient-cockpit-readiness-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-390.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png
+            .settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
