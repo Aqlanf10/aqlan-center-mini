@@ -519,6 +519,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic checklist panels; canonical classifier success and unavailable reads.
+      - name: Upload legacy checklist refresh screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-checklist-refresh-ui
+          path: |
+            .settings-ui-artifacts/legacy-checklist-independent-1280.png
+            .settings-ui-artifacts/legacy-checklist-independent-390.png
+            .settings-ui-artifacts/legacy-checklist-unavailable-1280.png
+            .settings-ui-artifacts/legacy-checklist-unavailable-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
