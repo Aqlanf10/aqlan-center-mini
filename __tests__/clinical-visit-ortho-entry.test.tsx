@@ -361,3 +361,148 @@ describe("orthodontic chairside entry", () => {
     expect(bodies().filter((body) => body.action !== "sign").every((body) => Array.isArray(body.procedures) && body.procedures.length === 0)).toBe(true);
   });
 });
+
+
+describe("baseline-only elastic class confirmation", () => {
+  function baseline(description = "صنف ثانٍ 3/16 — ليلًا") {
+    stored.ortho = { ...orthodontics, lastAdjustment: null, daysSinceLast: null, lastDone: null,
+      elastics: null, elasticNote: description };
+  }
+
+  it.each(["صنف ثانٍ 3/16 — ليلًا", "class_iii", "لا توجد مطاطات", "Unknown legacy description"])(
+    "does not turn baseline text into a class or save/sign while unresolved: %s", async (description) => {
+      baseline(description);
+      await mount(); await start();
+      expect(input("مطاطات هذه الشدّة").props.value).toBe("");
+      expect(input("مطاطات هذه الشدّة").props.required).toBe(true);
+      expect(input("وصف مطاطات هذه الشدّة").props.value).toBe(description);
+      expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
+      const explanation = find((node) => node.props["data-testid"] === "visit-baseline-elastics");
+      expect(contents(explanation)).toContain(description);
+      expect(explanation.props.role).toBe("status");
+      await review(); await flush();
+      expect(writes()).toHaveLength(0);
+      expect(nodes().some((node) => node.props.role === "dialog")).toBe(false);
+      expect(contents(render())).toContain("اختر صنف المطاطات لهذه الجلسة");
+      expect(onSigned).not.toHaveBeenCalled();
+    },
+  );
+
+  it("signs only the explicitly selected class and retains baseline instructions without copying prior work", async () => {
+    baseline(); await mount(); await start();
+    edit("مطاطات هذه الشدّة", "class_ii");
+    edit("ما نُفّذ في الشدّة", "Actual work today");
+    await review(); await flush();
+    const displayed = contents(find((node) => node.props["data-testid"] === "ortho-session-review"));
+    expect(displayed).toContain("صنف ثانٍ");
+    expect(displayed).toContain("صنف ثانٍ 3/16 — ليلًا");
+    await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toEqual({ caseId: 95001, upperWire: "014 NiTi", lowerWire: "012 NiTi",
+      elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "Actual work today", nextWeeks: 4 });
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("allows an explicit baseline-first choice of no elastics and clears only its draft instructions", async () => {
+    baseline(); const original = structuredClone(stored.ortho);
+    await mount(); await start(); edit("مطاطات هذه الشدّة", "none");
+    expect(nodes().some((node) => node.props["aria-label"] === "وصف مطاطات هذه الشدّة")).toBe(false);
+    expect(stored.ortho).toEqual(original);
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: "", done: "" });
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("allows save-without-sign while preserving the unresolved choice and description", async () => {
+    baseline(); await mount(); await start();
+    setNote("فحص اليوم (إن أُجري)", "Actual current examination");
+    await save(); await flush();
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]).toMatchObject({ examination: "Actual current examination" });
+    expect(bodies()[0]).not.toHaveProperty("orthoSession");
+    expect(input("مطاطات هذه الشدّة").props.value).toBe("");
+    expect(input("وصف مطاطات هذه الشدّة").props.value).toBe("صنف ثانٍ 3/16 — ليلًا");
+    await review(); await flush();
+    expect(bodies()).toHaveLength(1);
+    expect(nodes().some((node) => node.props.role === "dialog")).toBe(false);
+  });
+
+  it("does not block an ordinary visit until a baseline adjustment is explicitly staged", async () => {
+    baseline(); await mount();
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toBe(null);
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("removes the unresolved-choice block when the adjustment is cancelled", async () => {
+    baseline(); await mount(); await start();
+    await invoke(button("إلغاء"));
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toBe(null);
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("does not block a refreshed visit that already has its recorded adjustment", async () => {
+    baseline(); await mount(); await start();
+    nextRead = async () => response(200, { ...stored, ortho: { ...(stored.ortho as object), visitAdjustmentId: 95002 } });
+    await save(); await flush();
+    expect(contents(render())).toContain("سُجّلت شدّة هذه الزيارة");
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toBe(null);
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it("guards the sign handler itself when an unresolved class reaches an already-open review", async () => {
+    baseline(); await mount(); await start(); edit("مطاطات هذه الشدّة", "class_ii");
+    await review(); await flush();
+    // Exercise the actual handler independently of the review-entry guard.
+    edit("مطاطات هذه الشدّة", "");
+    const count = writes().length;
+    await sign(); await flush();
+    // Check dispatch before the fallback label so the original-product negative
+    // proves the sign guard itself, not only a presentation difference.
+    expect(writes()).toHaveLength(count);
+    expect(bodies().some((body) => body.action === "sign")).toBe(false);
+    expect(contents(find((node) => node.props["data-testid"] === "ortho-session-review"))).toContain("لم يُحدّد الصنف بعد");
+    expect(contents(render())).toContain("اختر صنف المطاطات لهذه الجلسة");
+    expect(onSigned).not.toHaveBeenCalled();
+  });
+
+  it.each(["class_ii", "vertical", "none"])("retains authoritative historical %s, description and interval without the baseline guard", async (elastics) => {
+    stored.ortho = { ...orthodontics, elastics, elasticNote: "Saved historical instructions", nextWeeks: 6 };
+    await mount(); await start();
+    expect(input("مطاطات هذه الشدّة").props.value).toBe(elastics);
+    expect(input("أسابيع حتى الشدّة القادمة").props.value).toBe("6");
+    expect(nodes().some((node) => node.props["data-testid"] === "visit-baseline-elastics")).toBe(false);
+    expect(input("ما نُفّذ في الشدّة").props.value).toBe("");
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics, elasticNote: "Saved historical instructions", nextWeeks: 6, done: "" });
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+
+  it.each([null, "", "   "])("leaves no-description first-session defaults unchanged (%s)", async (elasticNote) => {
+    stored.ortho = { ...orthodontics, lastAdjustment: null, elastics: null, elasticNote };
+    await mount(); await start();
+    expect(input("مطاطات هذه الشدّة").props.value).toBe("none");
+    expect(nodes().some((node) => node.props["data-testid"] === "visit-baseline-elastics")).toBe(false);
+    await review(); await flush(); await sign(); await flush();
+    expect(bodies().at(-1)?.orthoSession).toMatchObject({ elastics: "none", elasticNote: elasticNote ?? "", done: "" });
+  });
+
+  it("retains the explicit baseline choice after rejected sign and review dismissal", async () => {
+    baseline(); await mount(); await start(); edit("مطاطات هذه الشدّة", "class_ii");
+    edit("ما نُفّذ في الشدّة", "Current adjustment only");
+    await review(); await flush();
+    nextPost = async () => response(409, { message: "Synthetic sign refusal" });
+    await sign(); await flush();
+    expect(onSigned).not.toHaveBeenCalled();
+    await invoke(button("رجوع — أكمل العمل"));
+    expect(input("مطاطات هذه الشدّة").props.value).toBe("class_ii");
+    expect(input("وصف مطاطات هذه الشدّة").props.value).toBe("صنف ثانٍ 3/16 — ليلًا");
+    expect(input("ما نُفّذ في الشدّة").props.value).toBe("Current adjustment only");
+    nextPost = null; await review(); await flush(); await sign(); await flush();
+    const attempts = bodies().filter((body) => body.action === "sign");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1].orthoSession).toEqual(attempts[0].orthoSession);
+    expect(onSigned).toHaveBeenCalledOnce();
+  });
+});

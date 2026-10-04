@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
 
 // CI-only built-page acceptance. The isolated HTTP harness owns authentication.
@@ -39,7 +39,7 @@ function clinicalVisit(ortho = true) {
 function note(page: Page, label: string) {
   return page.locator(`#visit-notes label:has(> span:has-text("${label}")) > textarea`);
 }
-async function fixture(width: number, ortho = true) {
+async function fixture(width: number, ortho = true, regimen: "ordinary" | "baseline" | "ongoing" | "recorded-none" = "ordinary") {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -47,6 +47,12 @@ async function fixture(width: number, ortho = true) {
   const unexpected: string[] = [];
   const errors: string[] = [];
   let stored: Record<string, unknown> = clinicalVisit(ortho);
+  if (regimen === "baseline") stored.ortho = { ...(stored.ortho as object), lastAdjustment: null,
+    daysSinceLast: null, lastDone: null, elastics: null, elasticNote: "صنف ثانٍ 3/16 — ليلًا" };
+  if (regimen === "ongoing") stored.ortho = { ...(stored.ortho as object), elastics: "class_ii",
+    elasticNote: "3/16 خفيفة — ليلًا", nextWeeks: 6 };
+  if (regimen === "recorded-none") stored.ortho = { ...(stored.ortho as object), elastics: "none",
+    elasticNote: null, nextWeeks: 8 };
   let pendingSave: Route | null = null;
   let holdSave = false;
   let rejectSign = false;
@@ -272,6 +278,116 @@ describe("orthodontic session-first chairside entry in the built page", () => {
         expect(await note(f.page, "② الفحص").inputValue()).toBe("فحص جديد محفوظ في المسودة");
       }
       expect(f.writes).toEqual([]); assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+});
+
+
+async function captureVisitRegimen(page: Page, width: number, kind: "ongoing" | "baseline") {
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await page.locator("#visit-ortho-session").evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const bounds = [];
+  for (const label of ["مطاطات هذه الشدّة", "وصف مطاطات هذه الشدّة", "أسابيع حتى الشدّة القادمة"]) {
+    const control = page.getByLabel(label, { exact: true });
+    const geometry = await control.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const points = [[rect.left + 3, rect.top + 3], [rect.right - 3, rect.top + 3],
+        [rect.left + 3, rect.bottom - 3], [rect.right - 3, rect.bottom - 3],
+        [rect.left + rect.width / 2, rect.top + rect.height / 2]];
+      return { label: element.getAttribute("aria-label"), left: rect.left, right: rect.right,
+        top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+        viewport: { width: innerWidth, height: innerHeight },
+        hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+    });
+    expect(geometry.width).toBeGreaterThan(70); expect(geometry.height).toBeGreaterThan(20);
+    expect(geometry.left).toBeGreaterThanOrEqual(0); expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport.height);
+    expect(geometry.hits).toEqual([true, true, true, true, true]);
+    bounds.push(geometry);
+  }
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await mkdir(".settings-ui-artifacts", { recursive: true });
+  const name = `clinical-visit-regimen-${kind}-${width}`;
+  await writeFile(`.settings-ui-artifacts/${name}-bounds.json`, JSON.stringify(bounds, null, 2));
+  await page.screenshot({ path: `.settings-ui-artifacts/${name}.png` });
+}
+
+describe("Today baseline elastic confirmation in the built RTL page", () => {
+  it.each([1280, 390])("preserves the known regimen and interval without repeating prior work at %ipx", async (width) => {
+    const f = await fixture(width, true, "ongoing");
+    try {
+      f.rejectSign(true); await start(f.page).click();
+      const elasticClass = f.page.getByLabel("مطاطات هذه الشدّة", { exact: true });
+      expect(await elasticClass.inputValue()).toBe("class_ii");
+      expect(await elasticClass.locator("option:checked").textContent()).toBe("صنف ثانٍ");
+      expect(await f.page.getByLabel("وصف مطاطات هذه الشدّة", { exact: true }).inputValue()).toBe("3/16 خفيفة — ليلًا");
+      expect(await f.page.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("6");
+      expect(await done(f.page).inputValue()).toBe(""); expect(f.writes).toEqual([]);
+      await captureVisitRegimen(f.page, width, "ongoing");
+      await done(f.page).fill("مراجعة اليوم دون تغيير المطاطات");
+      await review(f.page).click(); await dialog(f.page).waitFor();
+      await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
+      await expect.poll(() => f.writes.filter((body) => body.action === "sign").length).toBe(1);
+      expect(f.writes.find((body) => body.action === "sign")?.orthoSession).toMatchObject({
+        elastics: "class_ii", elasticNote: "3/16 خفيفة — ليلًا", nextWeeks: 6,
+        upperWire: "014 NiTi", lowerWire: "012 NiTi", done: "مراجعة اليوم دون تغيير المطاطات",
+      });
+      assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+
+  it.each([1280, 390])("requires an explicit baseline class before review or sign at %ipx", async (width) => {
+    const f = await fixture(width, true, "baseline");
+    try {
+      f.rejectSign(true); await start(f.page).click();
+      const elasticClass = f.page.getByLabel("مطاطات هذه الشدّة", { exact: true });
+      expect(await elasticClass.inputValue()).toBe("");
+      expect(await elasticClass.locator("option:checked").textContent()).toContain("اختر الصنف");
+      expect(await f.page.getByLabel("وصف مطاطات هذه الشدّة", { exact: true }).inputValue()).toBe("صنف ثانٍ 3/16 — ليلًا");
+      expect(await f.page.getByTestId("visit-baseline-elastics").textContent()).toContain("لا يُستنتج الصنف");
+      expect(await done(f.page).inputValue()).toBe(""); await captureVisitRegimen(f.page, width, "baseline");
+      await review(f.page).click();
+      await f.page.getByRole("alert").filter({ hasText: "اختر صنف المطاطات لهذه الجلسة" }).waitFor();
+      expect(await dialog(f.page).count()).toBe(0); expect(f.writes).toEqual([]);
+      // Ordinary notes may still be saved: the pending adjustment never travels in this payload.
+      await f.page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).click();
+      await expect.poll(() => f.writes.length).toBe(1);
+      await expect.poll(() => elasticClass.isEnabled()).toBe(true);
+      expect(f.writes[0]).not.toHaveProperty("orthoSession"); expect(await elasticClass.inputValue()).toBe("");
+      await elasticClass.selectOption(width === 1280 ? "class_ii" : "none");
+      await review(f.page).click(); await dialog(f.page).waitFor();
+      expect(await dialog(f.page).getByTestId("ortho-session-review").textContent()).toContain(width === 1280 ? "صنف ثانٍ" : "بلا مطاطات");
+      await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
+      await expect.poll(() => f.writes.filter((body) => body.action === "sign").length).toBe(1);
+      expect(f.writes.find((body) => body.action === "sign")?.orthoSession).toMatchObject(width === 1280
+        ? { elastics: "class_ii", elasticNote: "صنف ثانٍ 3/16 — ليلًا", done: "" }
+        : { elastics: "none", elasticNote: "", done: "" });
+      assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+
+  it("retains a recorded no-elastics state without demanding baseline re-entry", async () => {
+    const f = await fixture(390, true, "recorded-none");
+    try {
+      await start(f.page).click();
+      expect(await f.page.getByLabel("مطاطات هذه الشدّة", { exact: true }).inputValue()).toBe("none");
+      expect(await f.page.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).inputValue()).toBe("8");
+      expect(await f.page.getByTestId("visit-baseline-elastics").count()).toBe(0);
+      await review(f.page).click(); await dialog(f.page).waitFor(); assertSafe(f);
+    } finally { await f.context.close(); }
+  });
+
+  it("removes the baseline class block when the staged adjustment is cancelled", async () => {
+    const f = await fixture(390, true, "baseline");
+    try {
+      await start(f.page).click();
+      await f.page.getByRole("button", { name: "إلغاء", exact: true }).click();
+      await review(f.page).click(); await dialog(f.page).waitFor();
+      expect(await dialog(f.page).getByTestId("ortho-session-review").count()).toBe(0);
+      expect(f.writes).toHaveLength(1); expect(f.writes[0]).not.toHaveProperty("orthoSession"); assertSafe(f);
     } finally { await f.context.close(); }
   });
 });
