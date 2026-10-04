@@ -3,6 +3,7 @@ import { chromium, type Browser, type Dialog, type Page } from "playwright";
 import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
+import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 
 // Runs only against the existing built-app security harness and its isolated test database.
 // No Production URL, credentials, or patient data are accepted by this test.
@@ -87,7 +88,7 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
     const history = "تحذير تاريخ طبي مستقل لا يُزال مع تنبيه الملف";
     const writes: string[] = [], unexpected: string[] = [], errors: string[] = [];
     let failedGets = 0;
-    await context.route("**/*", async route => {
+    const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url()), method = request.method();
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}`); await route.abort(); return; }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -117,7 +118,7 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
       await route.continue();
     });
     const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
-    try {
+    await routes.run(async () => {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
       const cockpit = page.getByTestId("patient-context-strip");
       await expect.poll(() => cockpit.textContent()).toContain(history);
@@ -170,7 +171,10 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
       }
       expect(writes).toEqual(["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""]);
       expect(unexpected).toEqual([]); expect(errors).toEqual([]);
-    } finally { await context.close(); }
+    }, () => {
+      expect(writes).toEqual(["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""]);
+      expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+    });
   });
 });
 
@@ -262,7 +266,7 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       let readinessUnavailable = false;
       let allowVitals = false;
       const writes: string[] = [], unexpected: string[] = [], errors: string[] = [];
-      await context.route("**/*", async route => {
+      const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
         const request = route.request(), url = new URL(request.url()), method = request.method();
         if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${url.pathname}`); await route.abort(); return; }
         if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -300,7 +304,7 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
         const size = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
         expect(size.scroll).toBeLessThanOrEqual(size.width + 1);
       };
-      try {
+      await routes.run(async () => {
         await mkdir(".settings-ui-artifacts", { recursive: true });
         long = true; readinessUnavailable = true;
         await page.goto(`${baseUrl}/patients/${patientId}?tab=today`, { waitUntil: "domcontentloaded" });
@@ -392,6 +396,9 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
         expect(writes).toEqual([`PATCH /api/patients/${patientId}`]);
         expect(unexpected).toEqual([]); expect(errors).toEqual([]);
         await noOverflow();
-      } finally { await context.close(); }
+      }, () => {
+        expect(writes).toEqual([`PATCH /api/patients/${patientId}`]);
+        expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+      });
     });
   });
