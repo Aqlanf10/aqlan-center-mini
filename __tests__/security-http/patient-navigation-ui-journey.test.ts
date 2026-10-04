@@ -124,7 +124,10 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
       await draft(page); const url = page.url();
       for (const [index, alert] of ["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""].entries()) {
         await page.getByTestId("patient-details-toggle").click();
-        await page.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
+        const more = page.getByTestId("patient-more-actions");
+        await more.locator("summary").click();
+        await more.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
+        await more.locator("summary").click();
         const editor = page.getByRole("region", { name: "تعديل البيانات", exact: true });
         await editor.getByRole("textbox", { name: /تنبيه طبي/ }).fill(alert);
         await editor.getByRole("button", { name: "حفظ التغييرات", exact: true }).click();
