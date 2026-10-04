@@ -124,6 +124,15 @@ describe("cockpit only commands from known current readiness", () => {
     const pending = deferred<MockResponse>(); chairs = pending.promise; await mounted(); expect(entry()).toBeUndefined();
     pending.resolve(response([chair(), chair()])); await settle(); expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
   });
+  it("keeps an unsupported shared seated fixture unavailable even when this patient has no visit", async () => {
+    props.summary = { ...props.summary!, openVisit: null };
+    ready = response({ visit: null });
+    chairs = response([chair({ id: 302, patientId: 92, status: "seated", chair: null })]);
+    await mounted();
+    expect(text(render())).toContain("لا زيارة اليوم في القراءة الحالية");
+    expect(text(render())).toContain("إتاحة الكراسي غير معروفة");
+    expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+  });
   it("allows confirmed no-visit despite a historical summary but never from unknown reads", async () => {
     ready = response({ visit: null }); chairs = response([]); await mounted(); expect(entry()?.props.disabled).toBe(false);
     props = { ...props, summary: { ...props.summary!, openVisit: null } }; render(); await settle(); expect(entry()?.props.disabled).toBe(false); expect(writes()).toHaveLength(0);

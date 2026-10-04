@@ -501,7 +501,7 @@ async function createVisit(
   await db.query(`INSERT INTO parties (name, kind) SELECT 'طبيب اختبار العملة', 'doctor' WHERE NOT EXISTS (SELECT 1 FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة')`);
   const { rows: [visit] } = await db.query<{ id: number }>(
     `INSERT INTO visits (patient_name, patient_id, status, arrived_at, doctor_id)
-     VALUES ($1, $2, 'seated', NOW() - ($3 || ' seconds')::interval, (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
+     VALUES ($1, $2, 'waiting', NOW() - ($3 || ' seconds')::interval, (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
     [PRIVATE_PATIENT_NAME, privatePatientId, String(300 - ++visitClock)],
   );
   for (const line of procedures) {

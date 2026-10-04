@@ -361,7 +361,7 @@ async function linkedVisit(planTitle: string, extraUnlinked = false): Promise<nu
   if (!itemId) throw new Error(`خطة «${planTitle}» غير مهيأة`);
   const { rows: [visit] } = await db.query<{ id: number }>(
     `INSERT INTO visits (patient_name, patient_id, status, arrived_at)
-     VALUES ($1, $2, 'seated', NOW() + ($3 || ' seconds')::interval) RETURNING id`,
+     VALUES ($1, $2, 'waiting', NOW() + ($3 || ' seconds')::interval) RETURNING id`,
     [PATIENT_B_NAME, h.seeded.patientBId, String(60 + Math.floor(Date.now() / 1000) % 1000)],
   );
   await db.query(
