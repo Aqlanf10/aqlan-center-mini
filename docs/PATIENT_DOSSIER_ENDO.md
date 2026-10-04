@@ -66,7 +66,11 @@ response must carry the existing private/no-store and production CSP protections
 After the page and its fonts load, the journey retains the two synthetic
 screen/print-media PNGs and generates actual Chromium A4 paginated output at
 `.settings-ui-artifacts/patient-dossier-endo-a4.pdf`. CI allowlists exactly these
-three files under `patient-dossier-endo-print-ui`; no real patient data, broad
+four files under `patient-dossier-endo-print-ui`, including a 390px RTL mobile
+preview screenshot. The mobile proof checks that the ordinary browser Print
+button remains visible and inside the viewport, invokes that action using a
+synthetic browser callback, and preserves the loaded clinical content. The
+paper-sized preview retains its A4 geometry; no real patient data, broad
 artifact paths or new runtime/npm dependency are introduced.
 
 ### Repeating identity and actual multipage proof
@@ -105,13 +109,16 @@ visible on every page, the signed record retained its continuation context,
 all 80 note lines remained readable, and the addendum, final draft and signature
 area survived without clipping or overlap. This is evidence for that head only;
 latest-main integration still requires its own full CI and fresh artifact review.
+Local validation of the integrated candidate used Node 22.23.3: all 20 focused
+SSR/projection tests, scoped ESLint and the full TypeScript check passed. The
+built-app desktop/mobile/actual-PDF journey remains a full CI release gate.
 
 The browser proof also rasterizes each saved PDF page with `pdftoppm`, reads its
 patient-header band through a blank browser canvas, and compares the visible
 pixels with page one. The first page must contain visible ink, and every page
 must retain the same ink and geometry. This detects a clipped or overpainted
 header even when its text remains extractable. Raster buffers remain in memory;
-the same three synthetic CI artifacts remain the only uploaded files.
+the same four synthetic CI artifacts remain the only uploaded files.
 
 The journey must execute successfully in CI before release. Download its PDF,
 render every page, and review clipping, row/note/addendum splits, continuation-page

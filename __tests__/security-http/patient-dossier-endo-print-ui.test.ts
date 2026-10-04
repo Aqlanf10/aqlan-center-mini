@@ -123,6 +123,30 @@ describe("existing dossier ENDO print on the built app", () => {
       expect(await page.getByText("سجل مخطط اصطناعي 12", { exact: true }).count()).toBe(1);
       await mkdir(".settings-ui-artifacts", { recursive: true });
       await page.locator(".sheet-a4").screenshot({ path: ".settings-ui-artifacts/patient-dossier-endo-screen.png" });
+      // A4 content retains its paper geometry on narrow screens; its ordinary
+      // browser Print action must remain reachable in the RTL mobile viewport.
+      await page.setViewportSize({ width: 390, height: 844 });
+      const printButton = page.getByRole("button", { name: "اطبع", exact: true });
+      await expect.poll(async () => printButton.isVisible()).toBe(true);
+      const printBounds = await printButton.boundingBox();
+      expect(printBounds).not.toBeNull();
+      expect(printBounds!.x).toBeGreaterThanOrEqual(0);
+      expect(printBounds!.x + printBounds!.width).toBeLessThanOrEqual(390);
+      expect(await page.locator(".sheet-a4").getAttribute("dir")).toBe("rtl");
+      expect(await records.innerText()).toContain(draftNote);
+      await page.evaluate(() => {
+        window.print = () => { document.documentElement.dataset.syntheticPrintInvoked = "true"; };
+      });
+      const printWrites: string[] = [];
+      page.on("request", (request) => {
+        if (!["GET", "HEAD"].includes(request.method())) printWrites.push(request.method());
+      });
+      await printButton.click();
+      await expect.poll(async () => page.locator("html").getAttribute("data-synthetic-print-invoked")).toBe("true");
+      expect(await printButton.isEnabled()).toBe(true);
+      expect(printWrites).toEqual([]);
+      await page.screenshot({ path: ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png" });
+      await page.setViewportSize({ width: 1280, height: 1100 });
       await page.emulateMedia({ media: "print" });
       expect(await records.innerText()).toContain(addendumText);
       expect(await page.locator(".sheet-a4").innerText()).not.toContain(planSentinel);

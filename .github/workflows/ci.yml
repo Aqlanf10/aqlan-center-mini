@@ -347,6 +347,7 @@ jobs:
           name: patient-dossier-endo-print-ui
           path: |
             .settings-ui-artifacts/patient-dossier-endo-screen.png
+            .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
             .settings-ui-artifacts/patient-dossier-endo-print.png
             .settings-ui-artifacts/patient-dossier-endo-a4.pdf
           include-hidden-files: true
