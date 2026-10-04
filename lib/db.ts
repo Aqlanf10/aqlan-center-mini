@@ -12143,17 +12143,14 @@ export async function voidExpense(
 
 export type LabBatchRefusal =
   | SupplierPaymentRefusal
-  | "not_lab" | "orders_invalid" | "orders_cancelled" | "orders_already_paid";
+  | "not_lab" | "orders_invalid" | "orders_cancelled" | "orders_already_paid"
+  | "batch_link_invalid" | "batch_currency_mismatch" | "batch_requires_full_allocation" | "batch_busy";
 
 /**
- * (P0-2) تسوية مختبر مجمّعة — سند صرف واحد لعدة أوامر عمل، في معاملةٍ واحدة.
- *
- * كانت في المسار نفسه بلا معاملة وبلا أي فحص: تُعاد تسوية أوامر مسدّدة، وتُقبل
- * أوامر مختبرٍ آخر أو ملغاة، وسعر الصرف يأتي من العميل. الآن: الأوامر تُقفل وتُفحص
- * (للمختبر نفسه، غير ملغاة، غير مسدّدة)، والسند يمرّ بحارس رصيد المختبر نفسه
- * (قرار المالك: لا صرف فوق المستحق إلا «دفعة مقدمة» بسبب)، والسعر من الإعدادات،
- * وكل ذلك يسقط معًا أو ينجح معًا. والتتبع يحمل رقم السند بنيويًّا (expense_id)
- * فيعيد إبطاله الأوامر «غير مسدّدة».
+ * تسوية مجمّعة كاملة فقط: التزامات تشغيلية متقابلة لنفس المختبر وبعملة الدفع.
+ * قفل الجهة ثم الأوامر والالتزامات؛ تعارض القفل الأدنى يُرفض بلا انتظار.
+ * الإسقاط المالي يأتي في عبارة جديدة بعد الأقفال، ثم تُقفل الوردية قبل الصرف.
+ * السداد الجزئي أو بعملة مختلفة يبقى في مسار الالتزام الفردي دون تغيير.
  */
 export async function settleLabOrdersBatch(input: {
   partyId: number;
@@ -12173,6 +12170,20 @@ export async function settleLabOrdersBatch(input: {
   | { ok: true; expense: Expense; orderIds: number[]; partyName: string; quote: SettlementQuote | null }
   | { ok: false; reason: LabBatchRefusal; quote: SettlementQuote | null; orderIds?: number[] }
 > {
+  // The exported writer also fails closed; HTTP validation cannot authorize a
+  // smaller selection by coercing/filtering invalid IDs or rounding money.
+  const validId = (value: number) => Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
+  if (!validId(input.partyId) || !Array.isArray(input.orderIds) || input.orderIds.length === 0
+    || !input.orderIds.every(validId)) {
+    return { ok: false, reason: "orders_invalid", quote: null };
+  }
+  if (!isCurrency(input.currency)) return { ok: false, reason: "batch_currency_mismatch", quote: null };
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0
+    || input.baseCurrency !== CLINIC_BASE_CURRENCY
+    || !Number.isFinite(input.exchangeRate) || input.exchangeRate <= 0
+    || (input.currency === CLINIC_BASE_CURRENCY && input.exchangeRate !== 1)) {
+    return { ok: false, reason: "batch_requires_full_allocation", quote: null };
+  }
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
   const orderIds = [...new Set(input.orderIds)].sort((a, b) => a - b);
@@ -12181,32 +12192,126 @@ export async function settleLabOrdersBatch(input: {
     await client.query("ROLLBACK");
     return { ok: false as const, reason, quote, orderIds: ids };
   };
+  // Only these pre-write NOWAIT acquisitions may produce a safely bounded busy
+  // refusal. An allocation, expense, commit or response error must propagate.
+  const acquire = async <T>(sql: string, values: unknown[] = []): Promise<T[] | null> => {
+    try { return (await client.query<T>(sql, values)).rows; }
+    catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "55P03") return null;
+      throw error;
+    }
+  };
   try {
     await client.query("BEGIN");
     const { rows: partyRows } = await client.query<{ name: string; kind: string }>(
       `SELECT name, kind FROM parties WHERE id = $1 FOR UPDATE`, [input.partyId],
     );
     const party = partyRows[0];
-    if (!party || party.kind !== "lab") return refuse("not_lab");
+    if (!party || party.kind !== "lab") return await refuse("not_lab");
 
-    const { rows: orders } = await client.query<{
+    const orders = await acquire<{
       id: number; party_id: number | null; lab_name: string; status: string; financial_status: string;
       payable_id: number | null;
     }>(
       `SELECT id, party_id, lab_name, status, financial_status, payable_id
-         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+         FROM lab_orders WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE NOWAIT`,
       [orderIds],
     );
+    if (orders === null) return await refuse("batch_busy");
     const found = new Map(orders.map((order) => [order.id, order]));
     const foreign = orderIds.filter((id) => {
       const order = found.get(id);
       return !order || !(order.party_id === input.partyId || (order.party_id === null && order.lab_name === party.name));
     });
-    if (foreign.length > 0) return refuse("orders_invalid", foreign);
+    if (foreign.length > 0) return await refuse("orders_invalid", foreign);
     const cancelled = orders.filter((order) => order.status === "cancelled").map((order) => order.id);
-    if (cancelled.length > 0) return refuse("orders_cancelled", cancelled);
+    if (cancelled.length > 0) return await refuse("orders_cancelled", cancelled);
     const alreadyPaid = orders.filter((order) => order.financial_status === "paid").map((order) => order.id);
-    if (alreadyPaid.length > 0) return refuse("orders_already_paid", alreadyPaid);
+    if (alreadyPaid.length > 0) return await refuse("orders_already_paid", alreadyPaid);
+
+    const payableIds: number[] = [];
+    for (const order of orders) {
+      if (order.payable_id === null) return await refuse("batch_link_invalid");
+      payableIds.push(order.payable_id);
+    }
+    if (new Set(payableIds).size !== orders.length) return await refuse("batch_link_invalid");
+    payableIds.sort((a, b) => a - b);
+    const linked = await acquire<{ id: number; lab_order_id: number | null; source_type: string }>(
+      `SELECT id, lab_order_id, source_type FROM payables
+        WHERE id = ANY($1::int[]) AND party_id = $2 ORDER BY id FOR UPDATE NOWAIT`,
+      [payableIds, input.partyId],
+    );
+    if (linked === null) return await refuse("batch_busy");
+    const links = new Map(linked.map((row) => [row.id, row]));
+    if (linked.length !== payableIds.length || orders.some((order) => {
+      const row = links.get(order.payable_id!);
+      return !row || row.source_type !== "operational" || row.lab_order_id !== order.id;
+    })) return await refuse("batch_link_invalid");
+
+    // Every historical contributor must share the target-party fence, whether
+    // reached directly or through an allocation. Check rows, never their net:
+    // an already reversed pair does not make ambiguous provenance admissible.
+    // Allocation originals also need this order's settlement evidence matched
+    // by the unchanged reversal owner, or a later void could restore debt while
+    // leaving our paid marker intact. Reversal rows keep their original's trail.
+    const { rows: ambiguous } = await client.query(
+      `SELECT 1 FROM expenses e
+        WHERE e.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.party_id IS DISTINCT FROM $2::int
+       UNION ALL
+       SELECT 1 FROM expense_payable_allocations a
+         JOIN expenses e ON e.id = a.expense_id
+         JOIN payables p ON p.id = a.payable_id
+        WHERE a.payable_id = ANY($1::int[]) AND e.reversal_of_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM lab_order_tracking t
+             WHERE t.lab_order_id = p.lab_order_id AND t.action = 'financial_settlement'
+               AND (t.expense_id = e.id
+                    OR (t.expense_id IS NULL AND t.notes LIKE '%رقم ' || e.voucher_number || ' بمبلغ%')))
+       LIMIT 1`, [payableIds, input.partyId],
+    );
+    if (ambiguous.length > 0) return await refuse("batch_link_invalid");
+
+    // A separate READ COMMITTED statement after all locks: use the canonical
+    // amount/settlement owners, never an order-cost or party-net approximation.
+    const { rows: balances } = await client.query<{
+      id: number; currency: string; amount_minor: string; settled: string;
+    }>(
+      `SELECT b.id, b.currency, ${payableAmountSql("b")}::text AS amount_minor,
+              ${payableSettledTotalSql("b")}::text AS settled
+         FROM payables b WHERE b.id = ANY($1::int[]) AND b.party_id = $2 ORDER BY b.id`,
+      [payableIds, input.partyId],
+    );
+    if (balances.length !== payableIds.length) return await refuse("batch_link_invalid");
+    const plan: { payableId: number; remaining: number }[] = [];
+    let selectedTotal = 0;
+    for (const bill of balances) {
+      if (!isCurrency(bill.currency) || bill.currency !== input.currency) return await refuse("batch_currency_mismatch");
+      const amount = Number(bill.amount_minor);
+      const settled = Number(bill.settled);
+      const remaining = amount - settled;
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(settled)
+        || !Number.isSafeInteger(remaining) || remaining <= 0) return await refuse("batch_requires_full_allocation");
+      selectedTotal += remaining;
+      if (!Number.isSafeInteger(selectedTotal)) return await refuse("batch_requires_full_allocation");
+      plan.push({ payableId: bill.id, remaining });
+    }
+    if (selectedTotal !== input.amountMinor) return await refuse("batch_requires_full_allocation");
+    const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
+    if (!Number.isSafeInteger(baseAmount) || baseAmount < 0) return await refuse("batch_requires_full_allocation");
+
+    // Refuse an incompatible shift owner instead of waiting while holding the
+    // selected locks. A compatible SHARE may pass a queued close in PostgreSQL;
+    // admission safety comes from the provenance gate and target-party fence,
+    // not queue priority. The unchanged expense owner reuses our shared lock.
+    const openShift = await acquire<{ id: number }>(
+      `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE NOWAIT`,
+    );
+    if (openShift === null) return await refuse("batch_busy");
+    if (openShift.length === 0) return await refuse("no_shift");
 
     const note = input.note?.trim()
       || `تسوية وسداد كشف حساب مختبر [${party.name}]${input.monthLabel ? ` (${input.monthLabel})` : ""} لعدد (${orderIds.length}) أوامر عمل: [${orderIds.map((id) => `RX-${id}`).join(", ")}]`;
@@ -12216,63 +12321,47 @@ export async function settleLabOrdersBatch(input: {
       exchangeRate: input.exchangeRate, payableId: null, note, createdBy: input.createdBy,
       rateOverrideReason: input.rateOverrideReason, prepaymentReason: input.prepaymentReason,
     }, settingsRates);
-    if (result.id === null) return refuse(result.reason ?? "no_shift", undefined, result.quote);
+    if (result.id === null) return await refuse(result.reason ?? "no_shift", undefined, result.quote);
 
-    /* توزيع السند على التزامات الأوامر المحددة (بترتيب أرقامها): لكل التزامٍ متبقّيه
-       بمكافئ سعر اللحظة، حتى ينفد المبلغ. فلا يبقى التزامٌ سوّاه الكشف «متبقّيًا»
-       يُسدَّد مرّةً ثانية بزر السداد. وما زاد على متبقّي الأوامر يبقى رصيدًا غير موزّع
-       للمختبر (وقد مرّ بحارس رصيده). */
-    const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
-    let left = input.amountMinor;
-    for (const order of orders) {
-      if (left <= 0) break;
-      if (order.payable_id === null) continue;
-      const { rows: billRows } = await client.query<{ currency: string; amount_minor: string; settled: string }>(
-        `SELECT b.currency, b.amount_minor, ${payableSettledTotalSql("b")}::text AS settled
-           FROM payables b WHERE b.id = $1 FOR UPDATE OF b`,
-        [order.payable_id],
-      );
-      if (!billRows[0]) continue;
-      const billCurrency = requireCurrency(billRows[0].currency, "التزام", `#${order.payable_id}`);
-      const remaining = toMinor(billRows[0].amount_minor) - toMinor(billRows[0].settled);
-      if (remaining <= 0) continue;
-      const billRate = rateOf(billCurrency, rates);
-      const fullPaid = maxPaymentFor(remaining, input.currency, billCurrency, rates);
-      if (billRate === null || fullPaid === null) return refuse("missing_rate", undefined, result.quote);
-      let paid: number;
-      let settled: number;
-      if (left >= fullPaid) {
-        paid = fullPaid;
-        settled = remaining;
-      } else {
-        paid = left;
-        settled = Math.min(remaining, convertMinor(left, input.currency, billCurrency, rates) ?? 0);
-      }
-      if (settled <= 0 || paid <= 0) continue;
-      await client.query(
+    let allocated = 0;
+    for (const item of plan) {
+      const { rows: saved } = await client.query<{ payable_id: number; paid_minor: string; settled_minor: string }>(
         `INSERT INTO expense_payable_allocations
            (expense_id, payable_id, paid_minor, payable_currency, payable_exchange_rate, settled_minor)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [result.id, order.payable_id, paid, billCurrency, billRate, settled],
+         VALUES ($1, $2, $3, $4, $5, $3) RETURNING payable_id, paid_minor, settled_minor`,
+        [result.id, item.payableId, item.remaining, input.currency, input.exchangeRate],
       );
-      left -= paid;
+      if (saved.length !== 1 || saved[0].payable_id !== item.payableId
+        || Number(saved[0].paid_minor) !== item.remaining || Number(saved[0].settled_minor) !== item.remaining) {
+        throw new Error("Lab batch allocation coverage changed");
+      }
+      allocated += item.remaining;
+    }
+    if (plan.length !== orderIds.length || allocated !== input.amountMinor) {
+      throw new Error("Lab batch full allocation was not completed");
     }
 
     const { rows: voucher } = await client.query<{ voucher_number: string }>(
       `SELECT voucher_number FROM expenses WHERE id = $1`, [result.id],
     );
-    await client.query(
-      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[])`, [orderIds],
+    const { rows: marked } = await client.query<{ id: number }>(
+      `UPDATE lab_orders SET financial_status = 'paid' WHERE id = ANY($1::int[]) RETURNING id`, [orderIds],
     );
-    await client.query(
+    if (marked.length !== orderIds.length || marked.some((row) => !found.has(row.id))) {
+      throw new Error("Lab batch selected order coverage changed");
+    }
+    const { rows: tracked } = await client.query<{ lab_order_id: number }>(
       `INSERT INTO lab_order_tracking (lab_order_id, action, from_status, to_status, notes, actor, actor_role, expense_id)
        SELECT id, 'financial_settlement', status, status, $1, $2, $3, $4
-         FROM lab_orders WHERE id = ANY($5::int[])`,
+         FROM lab_orders WHERE id = ANY($5::int[]) RETURNING lab_order_id`,
       [
         `تمت التسوية المالية المجمعة بسند صرف رقم ${voucher[0].voucher_number} بمبلغ ${input.amountMinor} ${input.currency}`,
         input.createdBy, input.actorRole ?? "manager", result.id, orderIds,
       ],
     );
+    if (tracked.length !== orderIds.length || tracked.some((row) => !found.has(row.lab_order_id))) {
+      throw new Error("Lab batch tracking coverage changed");
+    }
     await client.query("COMMIT");
     const expense = await getExpense(result.id);
     return { ok: true, expense: expense!, orderIds, partyName: party.name, quote: result.quote };

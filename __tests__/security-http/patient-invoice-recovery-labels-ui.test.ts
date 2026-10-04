@@ -266,6 +266,17 @@ async function expectUnknownRead(f: Account) {
     .getByRole("button").count()).toBe(0);
 }
 
+async function expectLedgerError(f: Account, message?: string) {
+  // The framework's route announcer is also role=alert. Require the actual
+  // named Account error, uniquely visible and carrying a user-facing message.
+  const alert = f.page.getByRole("alert", { name: "خطأ حساب المريض", exact: true });
+  await alert.waitFor({ state: "visible" });
+  expect(await alert.count()).toBe(1);
+  const text = (await alert.innerText()).trim();
+  expect(text).not.toBe("");
+  if (message !== undefined) expect(text).toBe(message);
+}
+
 const evidenceDirectory = ".settings-ui-artifacts";
 
 async function captureInvoiceEvidence(page: Page, panel: Locator, file: string) {
@@ -304,13 +315,19 @@ async function captureInvoiceEvidence(page: Page, panel: Locator, file: string) 
         const dy = Math.min(1, line.height / 4);
         // Retain real sticky headers/overlays. Every rendered text fragment must
         // fit and be hit-testable through the label at its edges and centre.
-        const unoccluded = [line.left + dx, line.left + line.width / 2, line.right - dx].every((x) =>
-          [line.top + dy, line.top + line.height / 2, line.bottom - dy].every((y) => {
+        const hits = [line.left + dx, line.left + line.width / 2, line.right - dx].flatMap((x) =>
+          [line.top + dy, line.top + line.height / 2, line.bottom - dy].map((y) => {
             const hit = document.elementFromPoint(x, y);
-            return hit !== null && element.contains(hit);
+            return { x, y, contained: hit !== null && element.contains(hit),
+              target: hit === null ? null : { tag: hit.tagName.toLowerCase(),
+                role: hit.getAttribute("role"), id: hit.id, class: hit.getAttribute("class") } };
           }));
+        // Same nine points and exact label containment as the original gate;
+        // retain failed targets so a future failure cannot be guessed from PNGs.
+        const unoccluded = hits.every((hit) => hit.contained);
         textRuns.push({ text: node.textContent.trim(), bounds: rect(line),
-          inViewport: inViewport(line), inRow: inRow(line), unoccluded });
+          inViewport: inViewport(line), inRow: inRow(line), unoccluded,
+          failedHits: hits.filter((hit) => !hit.contained) });
       }
     }
     return {
@@ -320,7 +337,8 @@ async function captureInvoiceEvidence(page: Page, panel: Locator, file: string) 
       documentWidth: document.documentElement.scrollWidth,
       row: { bounds: rect(rowBounds), clientWidth: invoiceRow.clientWidth,
         scrollWidth: invoiceRow.scrollWidth, inViewport: inViewport(rowBounds) },
-      label: { name: element.getAttribute("aria-label"), bounds: rect(element.getBoundingClientRect()), textRuns },
+      label: { name: element.getAttribute("aria-label"), display: getComputedStyle(element).display,
+        bounds: rect(element.getBoundingClientRect()), textRuns },
     };
   });
   return { screenshot: file, ...bounds };
@@ -338,6 +356,7 @@ async function captureAndAssertInvoiceEvidence(f: Account, width: number) {
   for (const capture of captures) {
     expect(capture.direction).toBe("rtl");
     expect(capture.labelDirection).toBe("rtl");
+    expect(capture.label.display).toBe("inline-block");
     expect(capture.viewport.width).toBe(width);
     expect(capture.documentWidth).toBeLessThanOrEqual(width + 1);
     expect(capture.row.scrollWidth).toBeLessThanOrEqual(capture.row.clientWidth + 1);
@@ -446,8 +465,8 @@ describe("server-evidence invoice settlement labels in the real Account UI", () 
       await f.reload();
       await expectUnknownRead(f);
       await f.respond({ message: deniedText }, status);
-      await f.page.getByRole("alert").filter({ hasText: status === 401 || status === 403
-        ? "غير مصرّح لك بعرض حساب المريض." : "تعذّر تحميل حساب المريض." }).waitFor();
+      await expectLedgerError(f, status === 401 || status === 403
+        ? "غير مصرّح لك بعرض حساب المريض." : "تعذّر تحميل حساب المريض.");
       await expectUnknownRead(f);
       expect(await f.page.getByText("137.50 ر.س", { exact: true }).count()).toBe(0);
       await f.reload();
@@ -468,7 +487,7 @@ describe("server-evidence invoice settlement labels in the real Account UI", () 
       await f.reload();
       await expectUnknownRead(f);
       await f.malformedJson();
-      await f.page.getByRole("alert").waitFor();
+      await expectLedgerError(f);
       await expectUnknownRead(f);
       expect(await f.page.getByText("234.56 $", { exact: true }).count()).toBe(0);
       f.assertIsolated();

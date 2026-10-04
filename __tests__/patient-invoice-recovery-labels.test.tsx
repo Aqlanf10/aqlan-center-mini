@@ -97,6 +97,15 @@ afterEach(() => {
 });
 
 describe("actual invoice settlement status markup", () => {
+  it("contains evidence-bearing status in one inline block without changing ordinary status layout", () => {
+    for (const evidence of [envelope(), { recoveries: [], reviews: [{ invoiceId: 61, planId: 21, reason: "review" }] }, null]) {
+      expect(renderStatus(evidence)).toContain('class="inline-block max-w-full align-top"');
+    }
+    expect(renderStatus(envelope(), { ready: false })).toContain('class="inline-block max-w-full align-top"');
+    for (const html of [renderStatus({ recoveries: [], reviews: [] }), renderStatus(null, { invoice: invoice({ status: "cancelled" }) })]) {
+      expect(html).not.toContain("inline-block");
+    }
+  });
   it.each([10000, 4000, 1500])("renders only the canonical %i-minor linked remainder and retains recorded status", (remainingMinor) => {
     const data = envelope(recovery({ remainingMinor, linkedNetPaidMinor: 10000 - remainingMinor, suggestedCashMinor: remainingMinor }));
     const before = structuredClone(data); const html = renderStatus(data);
@@ -273,6 +282,8 @@ describe("actual PatientLedger canonical response integration and ownership", ()
     read = () => failure === "network" ? Promise.reject(new Error("Synthetic network"))
       : Promise.resolve(failure === "json" ? { ...response(null), json: async () => { throw new Error("Synthetic JSON"); } } : response({}));
     refresh(); await flush(); expect(statusHtml()).toContain(unavailableLabel); expect(statusHtml()).not.toContain(remainderLabel);
+    const alerts = elements(render()).filter((node) => node.props.role === "alert");
+    expect(alerts).toHaveLength(1); expect(alerts[0].props["aria-label"]).toBe("خطأ حساب المريض");
   });
   it("ignores superseded headers and delayed JSON after a newer same-owner read", async () => {
     await mount(); const old = deferred<MockResponse>(); read = () => old.promise; refresh();

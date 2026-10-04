@@ -211,7 +211,8 @@ export function InvoiceSettlementStatus({ invoice, patientId, evidence, ready }:
 }) {
   const view = invoiceRecoveryView(invoice, patientId, evidence, ready);
   return (
-    <span role="group" aria-label={`حالة تسوية الفاتورة ${invoice.invoiceNumber}`}>
+    <span role="group" aria-label={`حالة تسوية الفاتورة ${invoice.invoiceNumber}`}
+      className={view.kind === "recorded" ? undefined : "inline-block max-w-full align-top"}>
       <span>{view.kind === "recorded" ? "" : "الحالة المسجلة: "}{STATUS_LABEL[invoice.status]}</span>
       {view.kind === "recovery" ? (
         <span className="mt-1 block rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
@@ -339,12 +340,12 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
   if (loading && !ledger) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>;
   }
-  if (!ledger && error) return <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>;
+  if (!ledger && error) return <p role="alert" aria-label="خطأ حساب المريض" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>;
 
   return (
     <div>
       {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" aria-label="خطأ حساب المريض" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
       {notice ? (
         <p role="status" className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800">{notice}</p>
