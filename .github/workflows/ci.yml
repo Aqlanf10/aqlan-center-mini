@@ -288,6 +288,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic prescription-context viewport captures and native bounds only.
+      # No real patients, traces, HAR, cookies, browser state, or broad uploads.
+      - name: Upload prescription patient context evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prescription-patient-context-ui
+          path: |
+            .settings-ui-artifacts/prescription-patient-context-warning-1280.png
+            .settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-unavailable-1280.png
+            .settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-warning-390.png
+            .settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-unavailable-390.png
+            .settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic prescription draft, never real clinical data.
       - name: Upload prescription diagnosis UI screenshot
         if: always()

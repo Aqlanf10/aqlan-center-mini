@@ -60,6 +60,8 @@ interface PrescriptionModalProps {
   patientName: string;
   patientPhone?: string | null;
   medicalAlert?: string | null;
+  /** ClinicalVisit distinguishes an unread/unavailable file from verified empty fields. */
+  patientContextStatus?: "loading" | "unavailable" | "ready";
   defaultDiagnosis?: string;
   defaultDoctorName?: string;
 }
@@ -71,6 +73,7 @@ export function PrescriptionModal({
   patientName,
   patientPhone,
   medicalAlert,
+  patientContextStatus,
   defaultDiagnosis = "",
   defaultDoctorName = "",
 }: PrescriptionModalProps) {
@@ -384,6 +387,13 @@ export function PrescriptionModal({
 
         {/* محتوى النموذج */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {patientContextStatus && patientContextStatus !== "ready" && (
+            <p role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs font-semibold text-amber-950">
+              {patientContextStatus === "loading"
+                ? "جارٍ تحميل التنبيهات الطبية وبيانات التواصل من ملف المريض. عدم ظهور تنبيه الآن لا يعني عدم وجود حساسية أو مخاطر دوائية."
+                : "تعذّر التحقق من التنبيهات الطبية وبيانات التواصل من ملف المريض. حالة الحساسية والمخاطر غير معروفة هنا؛ تحقّق من الملف قبل الوصف، وأعد فتح النافذة للمحاولة مجددًا."}
+            </p>
+          )}
           {/* تنبيه الحساسية إن وُجد */}
           {medicalAlert && (
             <div className="flex items-center gap-2.5 rounded-2xl border border-red-200 bg-red-50/80 p-3.5 text-xs text-red-900">

@@ -164,7 +164,7 @@ beforeEach(() => {
     }
     if (url === "/api/services") return response(200, []);
     if (url === "/api/parties?kind=doctor") return response(200, [{ id: 94001, name: "Synthetic clinician" }]);
-    if (url === "/api/patients/92001") return response(200, { medicalAlert: null, phone: null });
+    if (url === "/api/patients/92001") return response(200, { patient: { id: 92001, medicalAlert: null, phone: null }, visits: [], appointments: [] });
     if (/^\/api\/visits\/9100[12]\/billing-preview$/.test(url)) return response(200, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: null });
     throw new Error(`Unexpected synthetic request: ${url}`);
   });
@@ -512,10 +512,13 @@ it("retires accepted snapshots and commands when permissions change under the sa
 it("does not apply A's delayed patient context after B's current context", async () => {
   const oldContext = deferred<Response>(); let contexts = 0;
   extraReads.set("/api/patients/92001", () => ++contexts === 1 ? oldContext.promise
-    : Promise.resolve(response(200, { medicalAlert: "Current context B", phone: "777000002" })));
-  await mount(); currentVisitId = 91002; await flush();
+    : Promise.resolve(response(200, { patient: { id: 92001, medicalAlert: "Current context B", phone: "777000002" }, visits: [], appointments: [] })));
+  await mount();
+  await invoke(find((node) => node.type === "button" && contents(node).includes("روشتة طبية (℞)"))); await flush();
+  currentVisitId = 91002; await flush();
+  await invoke(find((node) => node.type === "button" && contents(node).includes("روشتة طبية (℞)"))); await flush();
   expect(find((node) => Object.hasOwn(node.props, "medicalAlert")).props.medicalAlert).toBe("Current context B");
-  oldContext.resolve(response(200, { medicalAlert: "Retired context A", phone: "777000001" })); await flush();
+  oldContext.resolve(response(200, { patient: { id: 92001, medicalAlert: "Retired context A", phone: "777000001" }, visits: [], appointments: [] })); await flush();
   expect(find((node) => Object.hasOwn(node.props, "medicalAlert")).props.medicalAlert).toBe("Current context B");
   expect(find((node) => Object.hasOwn(node.props, "patientPhone")).props.patientPhone).toBe("777000002");
 });
