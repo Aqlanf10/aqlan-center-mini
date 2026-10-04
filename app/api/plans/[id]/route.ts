@@ -84,6 +84,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       amountMinor, currency, baseCurrency: base, exchangeRate, method, note,
       createdBy: session.username, actorRole: session.role, idempotencyKey,
     });
+    if ("reason" in result && (result.reason === "issued_installment_recovery_required" || result.reason === "installment_recovery_review_required")) {
+      return NextResponse.json({
+        reason: result.reason,
+        message: result.reason === "issued_installment_recovery_required"
+          ? "يوجد قسط مُصدر عُكس قبضه. اختر إعادة تحصيل الفاتورة الأصلية من الحساب؛ لا تُصدر قسطًا جديدًا."
+          : "يوجد قسط مُصدر يحتاج مراجعة ربطه قبل التحصيل. راجع المدير؛ لا تُصدر فاتورة بديلة.",
+        ...("recoveryInvoiceIds" in result ? { recoveryInvoiceIds: result.recoveryInvoiceIds } : {}),
+      }, { status: 409 });
+    }
     if ("reason" in result && result.reason === "inactive_plan") {
       return NextResponse.json({ message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." }, { status: 409 });
     }

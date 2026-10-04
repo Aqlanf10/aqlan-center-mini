@@ -129,7 +129,7 @@ describe("inactive plan collection eligibility", () => {
     }
   });
 
-  it("historical refunds, original-target corrections, and issued-invoice settlement remain valid", async () => {
+  it("historical refunds and original-target corrections remain valid; reversed installments require explicit recovery", async () => {
     const target = await seed();
     const first = await post("general", target, "historical-origin-test");
     expect(first.status).toBe(201);
@@ -149,11 +149,39 @@ describe("inactive plan collection eligibility", () => {
     });
     expect(correction.reason).toBeNull();
     if (correction.reason === null) expect(correction.replacement).toMatchObject({ invoiceId: receipt.invoiceId, planId: target.planId });
-    const settlement = await db.recordPayment({
+    const before = await db.patientLedger(target.patientId);
+    const legacySettlement = await db.recordPayment({
       ...ordinary(target), planId: null, invoiceId: receipt.invoiceId, amountMinor: 10000, idempotencyKey: "historical-settlement-test",
     });
+    expect(legacySettlement).toMatchObject({ reason: "issued_installment_recovery_required", payment: null });
+    expect(await db.patientLedger(target.patientId)).toEqual(before);
+    const settlement = await db.recordReversedInstallmentRecovery({
+      purpose: "reversed-installment-recovery", patientId: target.patientId, invoiceId: receipt.invoiceId,
+      amountMinor: 10000, currency: "YER", method: "cash", note: null,
+      createdBy: "inactive-plan-test", actorRole: "admin", idempotencyKey: "historical-explicit-recovery-test",
+    });
     expect(settlement.reason).toBeNull();
-    expect(settlement.payment?.invoiceId).toBe(receipt.invoiceId);
+    expect(settlement.payment).toMatchObject({ invoiceId: receipt.invoiceId, planId: target.planId });
+    const after = await db.patientLedger(target.patientId);
+    expect(after.invoices).toHaveLength(1);
+    expect(db.ledgerBalancesByCurrency(target.patientId, after, await db.patientPlanCurrencies(target.patientId)).YER.dueMinor).toBe(0);
+  });
+
+  it("an ordinary issued invoice on a closed plan remains collectible without a reversal recovery purpose", async () => {
+    const target = await seed("active", false);
+    const invoice = await db.createInvoice({ patientId: target.patientId, baseCurrency: "YER", discountMinor: 0,
+      note: null, createdBy: "inactive-plan-test",
+      items: [{ serviceId: null, doctorId: null, description: "Synthetic ordinary issued invoice", quantity: 1, unitPriceMinor: 10000 }] });
+    if (!invoice) throw new Error("ordinary invoice missing");
+    await db.getPool().query(`UPDATE invoices SET plan_id = $2 WHERE id = $1`, [invoice.id, target.planId]);
+    await close(target, "cancelled");
+    const settlement = await db.recordPayment({ ...ordinary(target), planId: null, invoiceId: invoice.id,
+      amountMinor: 10000, idempotencyKey: "ordinary-inactive-issued-invoice" });
+    expect(settlement.reason).toBeNull();
+    expect(settlement.payment).toMatchObject({ invoiceId: invoice.id, planId: null });
+    const ledger = await db.patientLedger(target.patientId);
+    expect(ledger.invoices).toHaveLength(1); expect(ledger.payments).toHaveLength(1);
+    expect(db.ledgerBalancesByCurrency(target.patientId, ledger, await db.patientPlanCurrencies(target.patientId)).YER.dueMinor).toBe(0);
   });
 
   it("an original-target correction of a historical plan-only receipt stays possible", async () => {

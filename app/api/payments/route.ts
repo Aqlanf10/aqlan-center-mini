@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPayment, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment } from "@/lib/db";
+import { getPayment, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment, recordReversedInstallmentRecovery } from "@/lib/db";
+import { parseRecoveryIntent } from "@/lib/reversed-installment-recovery";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -48,6 +49,40 @@ export async function POST(request: Request) {
   // A refund reverses a receipt. Only the manager may correct an issued receipt.
   if (source.kind === "refund" && session.role !== "admin") {
     return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
+  }
+
+  // Opt-in mode: replay/FX/audit belong to its canonical transaction. No generic
+  // invoice-only write or post-commit audit may run for this purpose.
+  const recovery = parseRecoveryIntent(body, request.headers.get("idempotency-key"));
+  if (recovery.kind === "invalid") {
+    return NextResponse.json({ reason: "invalid_recovery_request", message: "طلب إعادة تحصيل القسط غير صالح. اختر الفاتورة الأصلية ومبلغًا ومفتاح إعادة صالحين دون أهداف أو أسعار صرف إضافية." }, { status: 400 });
+  }
+  if (recovery.kind === "recovery") {
+    try {
+      const result = await recordReversedInstallmentRecovery({
+        ...recovery.intent, idempotencyKey: recovery.idempotencyKey,
+        createdBy: session.username, actorRole: session.role,
+      });
+      if (result.reason || !result.payment) {
+        const messages: Record<string, string> = {
+          invalid_recovery_request: "طلب إعادة تحصيل القسط غير صالح.",
+          recovery_review_required: "ربط القسط المعكوس يحتاج مراجعة المدير قبل التحصيل. لا تُصدر قسطًا جديدًا بدلًا منه.",
+          recovery_not_available: "لم تعد هذه الفاتورة متاحة لإعادة التحصيل. حدّث الحساب واختر هدفًا صالحًا.",
+          recovery_exceeds_remaining: "المبلغ يتجاوز المتبقي على الفاتورة الأصلية. حدّث الحساب وراجع المبلغ.",
+          recovery_account_credit_review: "المبلغ يتجاوز المستحق الفعلي على الحساب بهذه العملة أو يوجد رصيد دائن. راجع التسويات مع المدير قبل قبض المال؛ لا تُصدر قسطًا جديدًا.",
+          recovery_target_changed: "تغيّر ربط الفاتورة الأصلية أثناء التحصيل. حدّث الحساب وراجع الهدف.",
+          exchange_rate_required: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية.",
+          idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
+          no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
+          invalid_invoice: "الفاتورة لا تخص المريض أو غير صالحة.",
+          cross_currency_not_supported: "حصّل الفاتورة بعملتها نفسها؛ التسوية بهذه العملة غير مدعومة.",
+        };
+        return NextResponse.json({ reason: result.reason, message: messages[result.reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." }, { status: result.reason === "invalid_recovery_request" ? 400 : 409 });
+      }
+      return NextResponse.json(result.payment, { status: result.replayed ? 200 : 201 });
+    } catch {
+      return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
+    }
   }
 
   const patientId = Number(source.patientId);
@@ -154,8 +189,10 @@ export async function POST(request: Request) {
               no_shift: "لا توجد وردية مفتوحة. افتح الوردية من شاشة المالية أولًا.",
               cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
               idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
+              issued_installment_recovery_required: "يوجد قسط مُصدر عُكس قبضه. اختر إعادة تحصيل الفاتورة الأصلية من الحساب؛ لا تُصدر قسطًا جديدًا.",
+              installment_recovery_review_required: "يوجد قسط مُصدر يحتاج مراجعة ربطه قبل التحصيل. راجع المدير؛ لا تُصدر فاتورة بديلة.",
             } as const;
-            return NextResponse.json({ message: messages[result.reason] }, { status: 409 });
+            return NextResponse.json({ reason: result.reason, message: messages[result.reason], ...("recoveryInvoiceIds" in result ? { recoveryInvoiceIds: result.recoveryInvoiceIds } : {}) }, { status: 409 });
           }
           // (TD-06) سطر التدقيق يُكتب داخل recordPlanInstallment في معاملة السند نفسها.
           const payment = await getPayment(result.paymentId);
@@ -173,6 +210,11 @@ export async function POST(request: Request) {
       baseCurrency: base, exchangeRate, method, note, createdBy: session.username,
       idempotencyKey, reversalOfId,
     });
+    if (reason === "issued_installment_recovery_required" || reason === "installment_recovery_review_required") {
+      return NextResponse.json({ reason, message: reason === "issued_installment_recovery_required"
+        ? "يوجد قسط معكوس بفاتورته الأصلية. لم يُسجّل قبض جديد؛ يلزم مسار إعادة تحصيل الفاتورة الأصلية. لا تكرر القبض أو تُصدر قسطًا جديدًا."
+        : "تاريخ القسط المعكوس يحتاج مراجعة المدير. لم يُسجّل قبض جديد؛ لا تكرر التحصيل أو تُصدر قسطًا آخر." }, { status: 409 });
+    }
     if (reason === "invalid_invoice") {
       return NextResponse.json({ message: "الفاتورة لا تخص المريض أو غير صالحة." }, { status: 409 });
     }

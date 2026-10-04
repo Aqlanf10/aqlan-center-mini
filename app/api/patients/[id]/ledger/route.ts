@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  getSettings, listPatientPlans, patientLedger, patientReceiptRemainders,
+  getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
 } from "@/lib/db";
 import { openingBalanceAccess } from "@/lib/opening-access";
 import { planLedgerSummary } from "@/lib/plans";
@@ -47,7 +47,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const [
       { invoices, payments, openings }, plans, settings, receiptRemaining,
-      legacyBalanceArrangements, legacyOpeningPositions,
+      legacyBalanceArrangements, legacyOpeningPositions, installmentRecovery,
     ] = await Promise.all([
       patientLedger(id),
       listPatientPlans(id, today),
@@ -56,6 +56,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       session.role === "admin" ? patientReceiptRemainders(id) : Promise.resolve(undefined),
       listLegacyBalanceArrangements(id, today),
       listLegacyOpeningPositions(id),
+      patientReversedInstallmentRecoveries(id),
     ]);
     /* (TD-05) أرصدة بعملاتها المستقلة: كل عملة اتفاقٍ بدلوها، والدفعات تسوّي
        دلو فاتورتها إن رُبطت به، ودلو خطتها إن قُيّدت عليها (المقدَّمة قبل
@@ -99,6 +100,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       openingAccess: openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true"),
       legacyBalanceArrangements,
       legacyOpeningPositions,
+      installmentRecovery,
       legacyArrangementAccess: { manage: session.role === "admin" || session.role === "reception" },
     });
   } catch {

@@ -258,6 +258,9 @@ describe("(RC-1) correcting a wrong receipt", () => {
       `SELECT COALESCE(SUM(CASE WHEN kind = 'refund' THEN -amount_minor ELSE amount_minor END), 0)::text AS s
          FROM payments WHERE plan_id = $1 AND currency = 'YER'`, [planId]))[0].s);
     expect(await planPaid()).toBe(30_000);
+    // This pre-existing ordinary receipt tests explicit dual-target rejection below.
+    // Once the installment has been reversed, a NEW invoice-only receipt requires review.
+    const again = await pay(p, installInvoice, 1_000);
 
     const result = await correctPayment({
       paymentId: installmentId, reason: "المقبوض 25,000", actor: "admin", replacement: replacement(25_000, { original: true }),
@@ -267,7 +270,9 @@ describe("(RC-1) correcting a wrong receipt", () => {
     expect(result.replacement).toMatchObject({ invoiceId: installInvoice, planId, amountMinor: 25_000 });
     expect(await planPaid()).toBe(25_000);
     // والهدف المزدوج يبقى حكرًا على الموروث: من يطلبه صراحةً يُرفض كما كان.
-    const again = await pay(p, installInvoice, 1_000);
+    expect((await recordPayment({ patientId: p, invoiceId: installInvoice, kind: "payment", amountMinor: 1_000,
+      currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash", note: null, createdBy: "cashier" })).reason)
+      .toBe("installment_recovery_review_required");
     expect((await correctPayment({
       paymentId: again.id, reason: "هدفان", actor: "admin", replacement: replacement(1_000, { invoiceId: installInvoice, planId }),
     })).reason).toBe("multiple_payment_targets");
