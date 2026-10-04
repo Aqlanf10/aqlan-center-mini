@@ -417,6 +417,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic compact patient context fixtures; never real patient data.
+      - name: Upload compact patient context screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-compact-context-ui
+          path: |
+            .settings-ui-artifacts/patient-compact-today-ordinary-1280.png
+            .settings-ui-artifacts/patient-compact-today-ordinary-390.png
+            .settings-ui-artifacts/patient-compact-today-long-1280.png
+            .settings-ui-artifacts/patient-compact-today-long-390.png
+            .settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png
+            .settings-ui-artifacts/patient-compact-treatment-ordinary-390.png
+            .settings-ui-artifacts/patient-compact-treatment-long-1280.png
+            .settings-ui-artifacts/patient-compact-treatment-long-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic endodontic fixtures; never upload real patient records.
       - name: Upload endodontics cockpit screenshots
         if: always()

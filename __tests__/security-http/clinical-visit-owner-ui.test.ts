@@ -209,6 +209,9 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean } = {}
         const before = workflowReads;
         const refreshesBefore = refreshWrites;
         nextWorkflowVisit = id;
+        const details = page.getByTestId("patient-details-toggle");
+        if (await details.getAttribute("aria-expanded") === "false") await details.click();
+        await page.getByTestId("patient-details-panel").waitFor({ state: "visible" });
         // The visible stethoscope is part of the header button's accessible name.
         const openVitals = page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true });
         await expect.poll(() => openVitals.count()).toBe(1);
@@ -339,9 +342,10 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       } finally { await f.context.close(); }
     });
 
-    it("Stay preserves the draft and URL, while explicit Discard changes the real shell tab once", async () => {
+    it.each([1280, 390])("Stay preserves draft and URL at %ipx, while explicit Discard changes the real shell tab once", async width => {
       const f = await fixture();
       try {
+        await f.page.setViewportSize({ width, height: 1100 });
         const draft = notes("Synthetic preserved draft A");
         await fillNotes(f.page, draft);
         const url = f.page.url();
@@ -367,11 +371,12 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       } finally { await f.context.close(); }
     });
 
-    it("a pending clinical save blocks repeated shell navigation without a discard dialog", async () => {
+    it.each([1280, 390])("a pending clinical save blocks repeated shell navigation at %ipx without a discard dialog", async width => {
       const f = await fixture();
       let prompts = 0;
       f.page.on("dialog", async (dialog) => { prompts += 1; await dialog.dismiss(); });
       try {
+        await f.page.setViewportSize({ width, height: 1100 });
         const draft = notes("Synthetic pending A");
         await fillNotes(f.page, draft);
         await f.save.click();
