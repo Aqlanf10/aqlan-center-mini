@@ -32,8 +32,8 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
-async function open(search: string) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
+async function open(search: string, width = 1280) {
+  const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE" });
   const [name, ...value] = h.sessions.doctorA.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
@@ -51,6 +51,11 @@ async function withDiscard(page: Page, accept: boolean, action: () => Promise<un
   try { await action(); await expect.poll(() => count).toBe(1); }
   finally { page.off("dialog", handler); }
   expect(count).toBe(1);
+}
+async function chooseTreatment(page: Page, section: string) {
+  const select = page.getByTestId("patient-treatment-section");
+  if (await select.isVisible()) await select.selectOption(section);
+  else await page.getByTestId(`patient-subtab-${section}`).click();
 }
 async function draft(page: Page) {
   await page.getByTestId("endo-record").click();
@@ -73,16 +78,21 @@ describe("patient context navigation on the built application", () => {
     } finally { await context.close(); }
   });
 
-  it("explicit tab cancellation keeps URL and draft, while an accepted shortcut changes once", async () => {
-    const { context, page } = await open("?tab=treatment&sub=endo");
+  it.each([1280, 390])("explicit tab and specialty cancellation preserve the selected workspace and draft at %ipx", async width => {
+    const { context, page } = await open("?tab=treatment&sub=endo&orthoCaseId=123&visitId=456#record", width);
     try {
       await draft(page);
       const url = page.url(); const length = await page.evaluate(() => history.length);
       await withDiscard(page, false, () => page.getByTestId("patient-tab-account").click());
       expect(page.url()).toBe(url); expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة اختبار محمية");
-      await withDiscard(page, false, () => page.getByTestId("patient-subtab-ortho").click());
+      await withDiscard(page, false, () => chooseTreatment(page, "ortho"));
       expect(page.url()).toBe(url); expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة اختبار محمية");
       expect(await page.evaluate(() => history.length)).toBe(length);
+      await selected(page, "patient-subtab-endo");
+      if (width === 390) expect(await page.getByTestId("patient-treatment-section").inputValue()).toBe("endo");
+      expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe("123");
+      expect(new URL(page.url()).searchParams.get("visitId")).toBe("456");
+      expect(new URL(page.url()).hash).toBe("#record");
       await mkdir(".settings-ui-artifacts", { recursive: true });
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 1100 });
@@ -95,8 +105,8 @@ describe("patient context navigation on the built application", () => {
     } finally { await context.close(); }
   });
 
-  it("the child's synchronous save guard blocks repeated explicit tab requests without a discard prompt", async () => {
-    const { context, page } = await open("?tab=summary");
+  it.each([1280, 390])("the child's synchronous save guard blocks repeated tab and specialty requests at %ipx", async width => {
+    const { context, page } = await open("?tab=summary", width);
     let release!: () => void;
     const paused = new Promise<void>((resolve) => { release = resolve; });
     let reached!: () => void;
@@ -105,7 +115,7 @@ describe("patient context navigation on the built application", () => {
     page.on("dialog", async (dialog) => { prompts += 1; await dialog.dismiss(); });
     try {
       await page.getByTestId("patient-tab-treatment").click();
-      await page.getByTestId("patient-subtab-endo").click(); await draft(page);
+      await chooseTreatment(page, "endo"); await draft(page);
       await page.route(`**/api/patients/${patientId}/endo/*/visits`, async (route) => {
         reached(); await paused;
         await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "رفض حفظ تجريبي" }) });
@@ -115,7 +125,8 @@ describe("patient context navigation on the built application", () => {
       await page.getByTestId("patient-tab-today").click();
       expect(page.url()).toBe(url);
       await page.getByTestId("patient-tab-files").click();
-      await page.getByTestId("patient-subtab-plans").click();
+      await chooseTreatment(page, "plans");
+      if (width === 390) expect(await page.getByTestId("patient-treatment-section").inputValue()).toBe("endo");
       expect(page.url()).toBe(url);
       expect(prompts).toBe(0);
       expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة اختبار محمية");
@@ -140,3 +151,148 @@ describe("patient context navigation on the built application", () => {
     } finally { await anonymous.close(); }
   });
 });
+
+// Presentation-only synthetic overrides atop the existing isolated navigation
+// fixture. Every write is blocked except one explicitly armed Vitals response;
+// that response proves notice visibility, not medical persistence/freshness.
+describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true")(
+  "compact patient context on the actual built RTL workspace", () => {
+    it.each([1280, 390])("keeps identity, complete warnings and actions reachable at %ipx without duplicate controls", async width => {
+      const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
+      const [name, ...value] = h.sessions.doctorA.cookie.split("=");
+      await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+      const warnings = ["حساسية دواء اصطناعية تحتاج مراجعة", "تحذير تاريخ طبي مستقل لا يُختصر", "تحذير ثالث طويل " + "يجب مراجعة التاريخ الطبي قبل الإجراء. ".repeat(8) + "تحذيرمتصل".repeat(30)];
+      let long = false;
+      let readinessUnavailable = false;
+      let allowVitals = false;
+      const writes: string[] = [], unexpected: string[] = [], errors: string[] = [];
+      await context.route("**/*", async route => {
+        const request = route.request(), url = new URL(request.url()), method = request.method();
+        if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${url.pathname}`); await route.abort(); return; }
+        if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+          if (allowVitals && method === "PATCH" && url.pathname === `/api/patients/${patientId}`) {
+            allowVitals = false; writes.push(`${method} ${url.pathname}`);
+            await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+          } else { unexpected.push(`${method} ${url.pathname}`); await route.abort(); }
+          return;
+        }
+        if (url.pathname === `/api/patients/${patientId}`) {
+          const response = await route.fetch(); const payload = await response.json();
+          expect(response.ok()).toBe(true);
+          payload.patient.medicalAlert = long ? `[VITALS: BP=165/100] تنبيه ملف اصطناعي ${warnings[2]}` : null;
+          payload.patient.flags = long ? ["تنبيه متابعة اصطناعي"] : [];
+          await route.fulfill({ response, json: payload }); return;
+        }
+        if (url.pathname === "/api/visits/readiness" && url.searchParams.get("patientId") === String(patientId)) {
+          if (readinessUnavailable) {
+            await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "تعذّر تحقق اصطناعي" }) }); return;
+          }
+          const response = await route.fetch(); const payload = await response.json();
+          expect(response.ok()).toBe(true); expect(payload.visit?.patientId).toBe(patientId);
+          payload.visit.alerts = long ? warnings : [];
+          await route.fulfill({ response, json: payload }); return;
+        }
+        await route.continue();
+      });
+      const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+      const cockpit = page.getByTestId("patient-context-strip");
+      const details = page.getByTestId("patient-details-toggle");
+      const noOverflow = async () => {
+        const size = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
+        expect(size.scroll).toBeLessThanOrEqual(size.width + 1);
+      };
+      try {
+        await mkdir(".settings-ui-artifacts", { recursive: true });
+        long = true; readinessUnavailable = true;
+        await page.goto(`${baseUrl}/patients/${patientId}?tab=today`, { waitUntil: "domcontentloaded" });
+        await selected(page, "patient-tab-today");
+        await expect.poll(() => page.getByTestId("patient-cockpit-read-state").innerText()).toContain("تعذّر التحقق");
+        // The page already owns an authorized patient warning independently of
+        // readiness. Collapsing details must not conceal it or bypass hook gates.
+        expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+        const medicalBanner = page.getByTestId("patient-medical-alert-banner");
+        expect(await medicalBanner.isVisible()).toBe(true);
+        expect(await medicalBanner.innerText()).toContain(warnings[2]);
+        expect(await medicalBanner.count()).toBe(1);
+        expect(await cockpit.innerText()).not.toContain(warnings[2]);
+        expect(writes).toEqual([]); expect(unexpected).toEqual([]);
+        readinessUnavailable = false;
+        for (const variant of ["ordinary", "long"] as const) {
+          long = variant === "long";
+          await page.goto(`${baseUrl}/patients/${patientId}?tab=today&sub=endo&caseProbe=retained&visitId=${visitId}#record`, { waitUntil: "domcontentloaded" });
+          await selected(page, "patient-tab-today");
+          await cockpit.waitFor();
+          await expect.poll(() => page.getByTestId("patient-cockpit-read-state").count()).toBe(0);
+          expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+          expect(await details.getAttribute("aria-expanded")).toBe("false");
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+          expect(await page.locator("h1:visible").count()).toBe(1);
+          expect(await page.getByTestId("patient-compact-identity").innerText()).toContain(`NAV-${stamp}`);
+          expect(await page.getByTestId("patient-primary-action").count()).toBe(1);
+          expect(await cockpit.evaluate(element => getComputedStyle(element).position)).toBe("static");
+          if (long) {
+            for (const warning of warnings) await expect.poll(() => cockpit.innerText()).toContain(warning);
+            expect(await page.getByTestId("patient-compact-pressure-alert").innerText()).toContain("165/100");
+            expect(await cockpit.innerText()).toContain("تنبيه متابعة اصطناعي");
+          }
+          const save = page.getByRole("button", { name: "احفظ بلا توقيع", exact: true });
+          await save.click({ trial: true });
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await noOverflow();
+          await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-today-${variant}-${width}.png`, fullPage: true });
+          await page.getByTestId("patient-tab-treatment").click();
+          await selected(page, "patient-subtab-endo");
+          await page.getByTestId("endo-record").waitFor();
+          expect(new URL(page.url()).searchParams.get("caseProbe")).toBe("retained");
+          expect(new URL(page.url()).searchParams.get("visitId")).toBe(String(visitId));
+          expect(new URL(page.url()).hash).toBe("#record");
+          if (width === 390) {
+            const selector = page.getByTestId("patient-treatment-section");
+            expect(await selector.isVisible()).toBe(true);
+            expect(await selector.locator("option").count()).toBe(8);
+            expect(await selector.inputValue()).toBe("endo");
+          } else expect(await page.getByTestId("patient-subtab-endo").isVisible()).toBe(true);
+          await noOverflow();
+          await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-treatment-${variant}-${width}.png`, fullPage: true });
+          expect(writes).toEqual([]); expect(unexpected).toEqual([]);
+        }
+        // Keyboard disclosure leaves compact safety context visible. Hiding it
+        // dismisses More so it cannot intercept later workspace controls.
+        await details.focus(); await page.keyboard.press("Enter");
+        await page.getByTestId("patient-details-panel").waitFor({ state: "visible" });
+        await page.getByTestId("patient-more-actions").locator("summary").click();
+        await expect.poll(() => page.getByTestId("patient-more-actions").getAttribute("open")).not.toBeNull();
+        await details.click();
+        expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+        await details.click();
+        expect(await page.getByTestId("patient-more-actions").getAttribute("open")).toBeNull();
+        await details.click();
+        // Existing five canonical destinations and eight treatment owners stay reachable.
+        for (const target of ["summary", "account", "files", "today", "treatment"]) {
+          await page.getByTestId(`patient-tab-${target}`).click();
+          await selected(page, `patient-tab-${target}`);
+          expect(new URL(page.url()).searchParams.get("caseProbe")).toBe("retained");
+        }
+        for (const sub of ["chart", "plans", "cases", "ortho", "lab", "referrals", "materials", "endo"]) {
+          await chooseTreatment(page, sub); await selected(page, `patient-subtab-${sub}`);
+          if (width === 390) expect(await page.getByTestId("patient-treatment-section").inputValue()).toBe(sub);
+        }
+        expect(writes).toEqual([]); expect(unexpected).toEqual([]);
+        // Trigger an existing onSaved notice while the details are subsequently hidden.
+        long = false; await page.reload(); await selected(page, "patient-subtab-endo");
+        await details.click();
+        await page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true }).click();
+        const modal = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "محطة العلامات الحيوية والمخاطر الطبية", exact: true }) });
+        allowVitals = true;
+        await modal.getByRole("button", { name: "حفظ العلامات في ملف المريض", exact: true }).click();
+        await modal.waitFor({ state: "hidden" });
+        await details.click();
+        await page.getByTestId("patient-success-notice").waitFor({ state: "visible" });
+        expect(await page.getByTestId("patient-success-notice").count()).toBe(1);
+        expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+        expect(writes).toEqual([`PATCH /api/patients/${patientId}`]);
+        expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+        await noOverflow();
+      } finally { await context.close(); }
+    });
+  });

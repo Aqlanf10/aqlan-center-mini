@@ -163,7 +163,10 @@ async function fixture(width: number) {
   };
   const open = async () => {
     await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`, { waitUntil: "domcontentloaded" });
-    await page.getByTestId("patient-subtab-ortho").waitFor(); return openCase("A");
+    if (width < 640) {
+      await page.getByTestId("patient-treatment-section").waitFor();
+      await expect.poll(() => page.getByTestId("patient-treatment-section").inputValue()).toBe("ortho");
+    } else await page.getByTestId("patient-subtab-ortho").waitFor(); return openCase("A");
   };
   return { context, page, open, openCase, unexpected, errors };
 }

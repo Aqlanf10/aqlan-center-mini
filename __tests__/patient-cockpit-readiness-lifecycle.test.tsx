@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from "react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientCockpit } from "../components/patient/PatientCockpit";
 import type { SessionInfo } from "../components/SessionProvider";
@@ -84,7 +84,7 @@ beforeEach(() => {
   vi.stubGlobal("window", { setTimeout, clearTimeout, setInterval, clearInterval, addEventListener: add, removeEventListener: remove, prompt: vi.fn(() => null) });
   vi.stubGlobal("document", { get visibilityState() { return hooks.visible; }, addEventListener: add, removeEventListener: remove });
   ready = response({ visit: visit() }); chairs = response([chair()]); mutation = null;
-  props = { patientId: 91, patientName: "مريض اختبار", patientPhone: null, fallbackAlert: "تنبيه الملف", onChanged: vi.fn(), onOpenTab: vi.fn(),
+  props = { compact: true, patientId: 91, patientName: "مريض اختبار", patientPhone: null, fallbackAlert: "تنبيه الملف", onChanged: vi.fn(), onOpenTab: vi.fn(),
     summary: { openVisit: { id: 301, status: "waiting", chair: null, arrivedAt: "2026-10-04T06:00:00Z", plannedTitle: null },
       lastVisit: null, nextAppointment: null, activePlans: [], plannedVisits: [], counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false }, financial: null, alerts: [], canSeeFinancial: true } };
   fetchMock.mockImplementation((url: string, options?: RequestInit) => {
@@ -123,6 +123,15 @@ describe("cockpit only commands from known current readiness", () => {
   it("does not guess chair availability from delayed or duplicate/foreign-shaped rows", async () => {
     const pending = deferred<MockResponse>(); chairs = pending.promise; await mounted(); expect(entry()).toBeUndefined();
     pending.resolve(response([chair(), chair()])); await settle(); expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+  });
+  it("keeps an unsupported shared seated fixture unavailable even when this patient has no visit", async () => {
+    props.summary = { ...props.summary!, openVisit: null };
+    ready = response({ visit: null });
+    chairs = response([chair({ id: 302, patientId: 92, status: "seated", chair: null })]);
+    await mounted();
+    expect(text(render())).toContain("لا زيارة اليوم في القراءة الحالية");
+    expect(text(render())).toContain("إتاحة الكراسي غير معروفة");
+    expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
   });
   it("allows confirmed no-visit despite a historical summary but never from unknown reads", async () => {
     ready = response({ visit: null }); chairs = response([]); await mounted(); expect(entry()?.props.disabled).toBe(false);
@@ -287,5 +296,50 @@ describe("cockpit only commands from known current readiness", () => {
   it("assistant/read-only and missing sessions never gain entry or clearance controls", async () => {
     hooks.session = { username: "assistant", role: "assistant" }; await mounted(); expect(entry()).toBeUndefined(); expect(button("أقِرّ الجاهزية")).toBeUndefined();
     hooks.session = null; render(); await settle(); expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+  });
+});
+
+
+describe("compact patient context presentation with the actual readiness hook", () => {
+  it("shows complete medical warnings outside the disclosure and reuses each presentation slot once", async () => {
+    const warnings = ["حساسية دواء اصطناعية", "تحذير ثان مستقل", "التحذير الثالث كامل " + "تحذيرطويل".repeat(25)];
+    ready = response({ visit: visit({ alerts: warnings }) });
+    props = { ...props,
+      identity: createElement("h1", { "data-testid": "identity-slot" }, "هوية المريض ورقمه"),
+      primaryAction: createElement("button", { "data-testid": "primary-slot" }, "الإجراء الرئيسي"),
+      secondaryActions: createElement("button", { "data-testid": "secondary-slot" }, "بيانات المريض والإجراءات"),
+      safety: createElement("span", { "data-testid": "safety-slot" }, "ضغط مرتفع وعلم المريض"),
+    };
+    const tree = await mounted();
+    for (const warning of warnings) expect(text(tree)).toContain(warning);
+    expect(text(tree)).not.toContain(" …");
+    for (const id of ["identity-slot", "primary-slot", "secondary-slot", "safety-slot"])
+      expect(elements(tree).filter(node => node.props["data-testid"] === id)).toHaveLength(1);
+    const disclosure = elements(tree).find(node => node.props["data-testid"] === "patient-visit-details");
+    expect(disclosure?.type).toBe("details");
+    expect(disclosure?.props.open).toBeUndefined();
+    for (const warning of warnings) expect(text(disclosure)).not.toContain(warning);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("keeps retry and command feedback visible outside the visit-details disclosure", async () => {
+    ready = response({}, 503); const tree = await mounted();
+    const disclosure = elements(tree).find(node => node.props["data-testid"] === "patient-visit-details");
+    expect(button("إعادة التحقق", tree)).toBeDefined();
+    expect(text(disclosure)).not.toContain("إعادة التحقق");
+    ready = response({ visit: visit() }); click(button("إعادة التحقق", tree)); await settle();
+    mutation = () => response({ message: "رفض اصطناعي مرئي" }, 409);
+    click(entry()); await settle();
+    const changed = render();
+    expect(elements(changed).find(node => node.props.role === "alert" && text(node).includes("رفض اصطناعي مرئي"))).toBeDefined();
+    expect(text(elements(changed).find(node => node.props["data-testid"] === "patient-visit-details"))).not.toContain("رفض اصطناعي مرئي");
+  });
+
+  it.each([true, false])("keeps %s compact context nonsticky and the original controls guarded", async compact => {
+    props = { ...props, compact }; const tree = await mounted();
+    expect(tree.props["data-compact"]).toBe(String(compact));
+    expect(tree.props.className).not.toMatch(/(?:^|\s)(?:sticky|fixed|top-0)(?:\s|$)/);
+    expect(entry()?.props.disabled).toBe(false);
+    expect(writes()).toHaveLength(0);
   });
 });

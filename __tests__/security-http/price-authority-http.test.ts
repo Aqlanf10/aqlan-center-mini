@@ -54,7 +54,7 @@ beforeAll(async () => {
      VALUES ($1, 'filling', 0, FALSE, TRUE) RETURNING id`, [`خدمة بلا سعر ${stamp}`]));
   const { rows: [doctor] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username = 'secdoctora'`);
   ({ rows: [{ id: visitId }] } = await db.query<{ id: number }>(
-    `INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('سلطة السعر', $1, $2, 'seated') RETURNING id`,
+    `INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('سلطة السعر', $1, $2, 'waiting') RETURNING id`,
     [h.seeded.patientAId, doctor?.party_id ?? null]));
 }, 120_000);
 afterAll(async () => {

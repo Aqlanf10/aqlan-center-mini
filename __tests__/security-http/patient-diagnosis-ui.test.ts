@@ -58,7 +58,10 @@ async function fixture(width: number, session: Pick<Session, "cookie"> = h.sessi
   });
   const open = async () => {
     await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`, { waitUntil: "domcontentloaded" });
-    await page.getByTestId("patient-subtab-ortho").waitFor();
+    if (width < 640) {
+      await page.getByTestId("patient-treatment-section").waitFor();
+      await expect.poll(() => page.getByTestId("patient-treatment-section").inputValue()).toBe("ortho");
+    } else await page.getByTestId("patient-subtab-ortho").waitFor();
     const card = caseCard(page, "A"); await card.getByRole("button", { name: /السجلات/ }).click();
     const panel = diagnosisPanel(card, page); await panel.getByRole("heading", { name: /التشخيص السريري لهذه الحالة/ }).waitFor();
     return panel;

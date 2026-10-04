@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { minutesSince } from "@/lib/flow";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { formatMoney } from "@/lib/money";
@@ -21,7 +21,7 @@ const hhmm = (iso: string | null) => (iso
   : "");
 
 /**
- * (CHAIR-1 Slice 4) قمرة ملف المريض — شريطٌ ثابت أعلى الملف، **تركيبٌ لا محرّك**.
+ * (CHAIR-1 Slice 4) قمرة ملف المريض — سياقٌ موجز أعلى الملف، **تركيبٌ لا محرّك**.
  *
  * يعرض: الاسم والتنبيهات، والرصيد بكل عملة (لمن يُسمح له فقط — الخادم يقرّر)، وحالة زيارة اليوم
  * وكرسيّها ووقتها، ومراحل الرحلة وصول → جاهز → على الكرسي → توقيع → دفع.
@@ -32,6 +32,7 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
+  compact = false, identity, primaryAction, secondaryActions, safety,
 }: {
   patientId: number;
   patientName: string;
@@ -41,6 +42,12 @@ export function PatientCockpit({
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
+  /** Presentation slots reuse the patient page's existing identity and actions. */
+  compact?: boolean;
+  identity?: ReactNode;
+  primaryAction?: ReactNode;
+  secondaryActions?: ReactNode;
+  safety?: ReactNode;
 }) {
   const chairCount = useChairCount();
   const { visit, alerts, readiness, chairsState, coherent, canOperate, active, freeChairs, selectedChair,
@@ -72,29 +79,7 @@ export function PatientCockpit({
     return `${base} — بانتظار التوقيع`;
   })();
 
-  return (
-    <div className="sticky top-0 z-30 -mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur" aria-label="قمرة المريض">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="truncate text-sm font-black text-navy-900">{patientName}</span>
-        {alerts.length > 0 ? (
-          <span className="rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
-          </span>
-        ) : null}
-        {(visit?.balances ?? []).map((line) => (
-          <span key={line.currency}
-            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
-            عليه {formatMoney(line.dueMinor, line.currency)}
-          </span>
-        ))}
-        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
-        {visit?.cleared ? (
-          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
-        ) : null}
-      </div>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-        {visit?.stepper ? (
+  const visitSteps = visit?.stepper ? (
           <ol className="flex flex-wrap items-center gap-1" aria-label="مراحل الزيارة">
             {visit.stepper.steps.map((step) => (
               <li key={step.key}
@@ -107,9 +92,40 @@ export function PatientCockpit({
               </li>
             ))}
           </ol>
-        ) : null}
+        ) : null;
 
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
+  return (
+    <div className={compact
+      ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+      : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
+      aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
+          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
+        {alerts.length > 0 ? (
+          <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
+            ⚠️ {compact ? alerts.join(" • ") : alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
+          </span>
+        ) : null}
+        {(visit?.balances ?? []).map((line) => (
+          <span key={line.currency}
+            className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
+            عليه {formatMoney(line.dueMinor, line.currency)}
+          </span>
+        ))}
+        <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">🪑 {statusLine}</span>
+        {compact ? safety : null}
+        {visit?.cleared ? (
+          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">جاهز ✓</span>
+        ) : null}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {!compact ? visitSteps : null}
+
+        <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
+          {compact ? primaryAction : null}
+          {compact ? secondaryActions : null}
           {canOperate && active && !visit?.cleared && visit?.checklist !== null ? (
             <button type="button" onClick={() => void clear()} disabled={busy}
               title={(visit?.checklist ?? []).map((item) => item.label).join("\n")}
@@ -131,7 +147,7 @@ export function PatientCockpit({
               </button>
             </span>
           ) : null}
-          {suggestion ? (
+          {!compact && suggestion ? (
             <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900">
               مقترح: {suggestion.label} ←
@@ -139,6 +155,19 @@ export function PatientCockpit({
           ) : null}
         </div>
       </div>
+
+      {compact && (visitSteps || suggestion) ? (
+        <details className="mt-1 text-[11px]" data-testid="patient-visit-details">
+          <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {visitSteps}
+            {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
+              مقترح: {suggestion.label}
+            </button> : null}
+          </div>
+        </details>
+      ) : null}
 
       {readiness !== "ready" || chairsState !== "ready" || !coherent ? (
         <p role="status" data-testid="patient-cockpit-read-state" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
