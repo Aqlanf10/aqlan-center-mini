@@ -145,6 +145,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
+  const [onboardingRevision, setOnboardingRevision] = useState(0);
 
   // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
   const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
@@ -179,6 +180,13 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  // The case row may keep the same ID and plan ID after a confirmed change.
+  // Invalidate the independent classifier immediately, even if reloading cases fails.
+  const refreshAfterConfirmedChange = () => {
+    setOnboardingRevision((value) => value + 1);
+    void load();
+  };
+
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
   const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
@@ -192,6 +200,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
     const payload = await response.json().catch(() => null);
     if (!response.ok) { setError(payload?.message ?? "تعذّر التنفيذ."); return false; }
     setError(null);
+    setOnboardingRevision((value) => value + 1);
     await load();
     return true;
   };
@@ -256,7 +265,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <LegacyBaselineForm
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setRecordingLegacy(false); void load(); }}
+                onSaved={() => { setRecordingLegacy(false); refreshAfterConfirmedChange(); }}
                 onError={setError}
               />
             </div>
@@ -266,7 +275,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <NewCase
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setOpening(false); void load(); }}
+                onSaved={() => { setOpening(false); refreshAfterConfirmedChange(); }}
                 onError={setError}
               />
             </div>
@@ -352,13 +361,14 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
                   {row.baselineKind === "legacy" ? <LegacyBaselineSummary row={row} /> : null}
                   {row.baselineKind === "legacy" && (row.status === "active" || row.status === "retention")
-                    ? <LegacyOnboardingChecklist patientId={patientId} /> : null}
+                    ? <LegacyOnboardingChecklist patientId={patientId} caseId={row.id} planId={row.planId}
+                        refreshRevision={onboardingRevision} /> : null}
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
                         canLink={session?.role === "admin" || session?.role === "reception"
                           || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
-                        onChanged={() => void load()} />
+                        onChanged={refreshAfterConfirmedChange} />
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
@@ -503,7 +513,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                               onSaved={(result) => {
                                 setAdjusting(null);
                                 setSaved(result);
-                                void load();
+                                refreshAfterConfirmedChange();
                               }}
                               onError={setError}
                             />
