@@ -1,5 +1,6 @@
 import { walkoutLineClass } from "./checkout-summary";
 import { commissionTimeKey, commissionTimestampIso } from "./commission-time";
+import { resolveAutomaticLabPrice } from "./lab-order-pricing";
 import { Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
@@ -6431,6 +6432,8 @@ export async function createLabOrder(input: {
     // «٣ أسنان × ٢٠ = ٦٠» الذي حُسم من الجهتين بقاعدة واحدة: labPricingQuantity).
     let resolvedCost = input.costMinor ?? null;
     let resolvedCurrency = input.costCurrency ?? null;
+    let resolvedExchangeRate = input.exchangeRate;
+    let automaticBaseAmount: number | null = null;
     if (resolvedCost == null && resolvedPartyId && input.labServiceId && input.status !== "needed") {
       const priceRes = await client.query<{
         cost_minor: string | number;
@@ -6453,14 +6456,22 @@ export async function createLabOrder(input: {
           input.toothNumbers ?? null,
           (priceRes.rows[0].tooth_scope as LabService["toothScope"] | null) ?? null,
         );
-        resolvedCost =
-          Number(priceRes.rows[0].cost_minor) * (quantity > 1 ? quantity : 1);
-        resolvedCurrency = priceRes.rows[0].cost_currency as Currency;
+        const automaticPrice = resolveAutomaticLabPrice({
+          costMinor: priceRes.rows[0].cost_minor,
+          costCurrency: priceRes.rows[0].cost_currency,
+          quantity,
+          baseCurrency: input.baseCurrency,
+          settings: await getSettingsInTransaction(client, { requireStoredExchangeRates: true }),
+        });
+        resolvedCost = automaticPrice.costMinor;
+        resolvedCurrency = automaticPrice.costCurrency;
+        resolvedExchangeRate = automaticPrice.exchangeRate;
+        automaticBaseAmount = automaticPrice.baseAmountMinor;
       }
     }
-    const baseAmount = resolvedCost != null && resolvedCurrency
-      ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, input.exchangeRate)
-      : null;
+    const baseAmount = automaticBaseAmount ?? (resolvedCost != null && resolvedCurrency
+      ? toBaseAmount(resolvedCost, resolvedCurrency, input.baseCurrency, resolvedExchangeRate)
+      : null);
 
     // الترحيل المحاسبي: بند المصروف يحدد حساب المصروف إن لم يُحدد صراحة،
     // وحساب الذمم الافتراضي لطلبات المعامل هو 2101 ما لم يُخصص غيره.
@@ -6508,7 +6519,7 @@ export async function createLabOrder(input: {
         input.toothNumbers ?? null, input.shade ?? null, input.stumpShade ?? null,
         input.priority ?? "normal", input.impressionType ?? "physical",
         input.technicianName ?? null,
-        baseAmount, input.exchangeRate,
+        baseAmount, resolvedExchangeRate,
         expenseCatId, expenseAccCode, payableAccCode, isPosted,
       ],
     );
@@ -6551,7 +6562,7 @@ export async function createLabOrder(input: {
         [
           resolvedPartyId,
           `${input.workType}${input.toothNumbers ? ` [سن ${input.toothNumbers}]` : ""}${input.details ? ` — ${input.details}` : ""}`,
-          resolvedCost, resolvedCurrency, input.exchangeRate, baseAmount,
+          resolvedCost, resolvedCurrency, resolvedExchangeRate, baseAmount,
           input.baseCurrency, orderId, input.dueDate, input.createdBy,
           expenseCatId, expenseAccCode, payableAccCode, isPosted,
         ],
@@ -7493,14 +7504,39 @@ export async function getSettings(): Promise<SettingsMap> {
   if (settingsCache && now - settingsCache.at < SETTINGS_TTL_MS) return settingsCache.value;
 
   await ensureSchema();
-  const { rows } = await getPool().query<{ key: string; value: string }>(
+  const value = await readSettings(getPool());
+  settingsCache = { value, at: now };
+  return value;
+}
+
+/**
+ * Read settings on the caller's transaction client without consulting or publishing
+ * process cache. The caller initializes schema first and owns the transaction.
+ */
+export async function getSettingsInTransaction(
+  client: DbClient,
+  options: { requireStoredExchangeRates?: boolean } = {},
+): Promise<SettingsMap> {
+  return readSettings(client, options);
+}
+
+async function readSettings(
+  executor: Pick<DbClient, "query">,
+  options: { requireStoredExchangeRates?: boolean } = {},
+): Promise<SettingsMap> {
+  const { rows } = await executor.query<{ key: string; value: string }>(
     `SELECT key, value FROM settings`,
   );
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
-  const value = withDefaults(stored);
-  settingsCache = { value, at: now };
-  return value;
+  const settings = withDefaults(stored);
+  if (options.requireStoredExchangeRates) {
+    // Financial snapshots must not mistake display defaults for configured FX.
+    // Preserve the raw rates from this same SELECT, including missing/blank values.
+    settings["finance.rate.SAR"] = stored["finance.rate.SAR"] ?? "";
+    settings["finance.rate.USD"] = stored["finance.rate.USD"] ?? "";
+  }
+  return settings;
 }
 
 /**

@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
 import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME } from "@/lib/lab";
+import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { toWhatsAppNumber } from "@/lib/reminders";
@@ -218,7 +219,10 @@ export async function POST(request: Request) {
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json(created, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof LabOrderPricingConflict) {
+      return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
+    }
     // المريض المحذوف أو غير الموجود يسقط على قيد المفتاح الأجنبي.
     return NextResponse.json({ message: "تعذّر حفظ العمل. تأكد من المريض وأعد المحاولة." }, { status: 500 });
   }
