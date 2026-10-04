@@ -26132,7 +26132,9 @@ export async function commissionDetailReport(
     visitId: visitOf.get(line.invoiceId) ?? null,
     clinicDate: collector.invoiceClinicDate.get(line.invoiceId) ?? line.invoiceCreatedAt.slice(0, 10),
     doctorName: doctorName.get(line.doctorId) ?? "—",
-    categoryLabel: line.category ? CATEGORY_LABEL[line.category] ?? line.category : null,
+    categoryLabel: line.category
+      ? Object.hasOwn(CATEGORY_LABEL, line.category) ? CATEGORY_LABEL[line.category] : line.category
+      : null,
     caseTitle: line.caseId !== null ? caseById.get(line.caseId)?.title ?? null : null,
     caseSpecialty: line.caseId !== null ? caseById.get(line.caseId)?.specialty ?? null : null,
     planTitle: line.planId !== null ? planTitle.get(line.planId) ?? null : null,
