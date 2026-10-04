@@ -504,7 +504,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Allowlist only synthetic exact-case records acceptance screenshots.
+      # Exact synthetic plan projections only; no real patient or receipt data.
+      - name: Upload plan payment visibility screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-payment-visibility-ui
+          path: |
+            .settings-ui-artifacts/plan-payment-hidden-1280.png
+            .settings-ui-artifacts/plan-payment-hidden-390.png
+            .settings-ui-artifacts/plan-payment-denied-1280.png
+            .settings-ui-artifacts/plan-payment-denied-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Allowlist only synthetic unchanged-UI records viewport captures and bounds.
       - name: Upload orthodontic record case screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -512,8 +527,12 @@ jobs:
           name: ortho-records-case-ui
           path: |
             .settings-ui-artifacts/ortho-records-case-1280.png
+            .settings-ui-artifacts/ortho-records-references-1280.png
             .settings-ui-artifacts/ortho-records-case-390.png
+            .settings-ui-artifacts/ortho-records-profile-390.png
+            .settings-ui-artifacts/ortho-records-references-390.png
             .settings-ui-artifacts/ortho-records-unavailable-390.png
+            .settings-ui-artifacts/ortho-records-capture-bounds.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

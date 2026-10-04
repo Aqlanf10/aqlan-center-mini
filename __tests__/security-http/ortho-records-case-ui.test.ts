@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { Client } from "pg";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { baseUrl, harness, TEST_USERS } from "./_server";
 import { computeAll, REQUIRED_LANDMARKS, type LandmarkMap } from "../../lib/ceph";
 
@@ -100,6 +100,45 @@ afterAll(async () => { await browser?.close(); await db?.end(); });
 function caseCard(page: Page, key: "A" | "B") {
   return page.locator("li").filter({ has: page.getByText(new RegExp(`^RECORD-CASE-${key}\\s*·`)) });
 }
+const captureBounds: unknown[] = [];
+async function captureViewport(page: Page, target: Locator, filename: string) {
+  // A tall element screenshot can place viewport-sticky chrome across the
+  // stitched panel. Capture bounded targets in the real viewport instead:
+  // no hidden chrome, injected CSS, resized viewport or modified application UI.
+  await target.evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const bounds = await target.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const rectangle = (box: DOMRect) => ({ x: box.x, y: box.y, width: box.width, height: box.height,
+      top: box.top, right: box.right, bottom: box.bottom, left: box.left });
+    const chrome = [...document.querySelectorAll<HTMLElement>("body *")].filter(node => {
+      if (node.contains(element) || element.contains(node)) return false;
+      const style = getComputedStyle(node), box = node.getBoundingClientRect();
+      return ["fixed", "sticky"].includes(style.position) && style.display !== "none" && style.visibility !== "hidden"
+        && box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight;
+    }).map(node => ({ tag: node.tagName, label: node.getAttribute("aria-label"), position: getComputedStyle(node).position,
+      rect: rectangle(node.getBoundingClientRect()) }));
+    const overlaps = chrome.filter(item => item.rect.left < rect.right && item.rect.right > rect.left
+      && item.rect.top < rect.bottom && item.rect.bottom > rect.top);
+    const points = [[rect.left + 8, rect.top + 8], [rect.right - 8, rect.top + 8],
+      [rect.left + 8, rect.bottom - 8], [rect.right - 8, rect.bottom - 8],
+      [rect.left + rect.width / 2, rect.top + rect.height / 2]].map(([x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, clear: hit !== null && (hit === element || element.contains(hit)) };
+    });
+    return { target: element.getAttribute("data-testid") ?? element.getAttribute("role"),
+      rect: rectangle(rect), viewport: { width: innerWidth, height: innerHeight }, chrome, overlaps, points };
+  });
+  await mkdir(".settings-ui-artifacts", { recursive: true });
+  captureBounds.push({ filename, ...bounds });
+  await writeFile(".settings-ui-artifacts/ortho-records-capture-bounds.json", JSON.stringify(captureBounds, null, 2));
+  expect(bounds.rect.width).toBeGreaterThan(0); expect(bounds.rect.height).toBeGreaterThan(0);
+  expect(bounds.rect.left).toBeGreaterThanOrEqual(0); expect(bounds.rect.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.rect.right).toBeLessThanOrEqual(bounds.viewport.width);
+  expect(bounds.rect.bottom).toBeLessThanOrEqual(bounds.viewport.height);
+  expect(bounds.overlaps).toEqual([]); expect(bounds.points.every(point => point.clear)).toBe(true);
+  await page.screenshot({ path: `.settings-ui-artifacts/${filename}` });
+}
 async function fixture(width: number) {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
   const [name, ...value] = h.sessions.admin.cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -150,8 +189,9 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       await panel.scrollIntoViewIfNeeded();
       expect(await panel.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
       expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-      await mkdir(".settings-ui-artifacts", { recursive: true });
-      await panel.screenshot({ path: `.settings-ui-artifacts/ortho-records-case-${width}.png` });
+      await captureViewport(f.page, xray, `ortho-records-case-${width}.png`);
+      if (width === 390) await captureViewport(f.page, profile, "ortho-records-profile-390.png");
+      await captureViewport(f.page, refs, `ortho-records-references-${width}.png`);
       // The historical case uses its own source and keeps the current image a reference.
       const oldPanel = await f.openCase("B");
       await oldPanel.getByTestId("ortho-record-slot-profile").locator("img").waitFor();
@@ -172,8 +212,7 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       expect(await panel.textContent()).toContain("هذا لا يعني عدم وجود صور أو تحليلات مسجلة");
       expect(await panel.getByTestId("ortho-record-slot-profile").count()).toBe(0);
       expect(await panel.getByRole("button", { name: /رفع السيفالو|إضافة صورة/ }).count()).toBe(0);
-      await mkdir(".settings-ui-artifacts", { recursive: true });
-      await panel.screenshot({ path: ".settings-ui-artifacts/ortho-records-unavailable-390.png" });
+      await captureViewport(f.page, panel.getByRole("alert"), "ortho-records-unavailable-390.png");
       fail = false; await panel.getByRole("button", { name: "إعادة تحميل سجلات الحالة", exact: true }).click();
       await panel.getByTestId("ortho-record-slot-profile").locator("img").waitFor();
       expect(await panel.getByTestId("ortho-record-slot-profile").locator("img").getAttribute("src")).toBe(`/api/documents/${currentPhoto}`);

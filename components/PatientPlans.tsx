@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import {
   CURRENCIES,
@@ -63,12 +63,13 @@ interface Plan {
   totalFromItems: boolean;
   consentAt: string | null; consentBy: string | null; consentNote: string | null;
   installments: { id: number; number: number; dueDate: string; amountMinor: number }[];
-  paidMinor: number;
+  hasInstallments?: boolean;
+  paidMinor: number | null;
   progress: {
     totalMinor: number; dueToDateMinor: number; paidMinor: number; remainingMinor: number;
     overdueMinor: number; nextDueDate: string | null; nextDueAmountMinor: number;
     paidCount: number; count: number;
-  };
+  } | null;
 }
 interface PlannedVisit {
   id: number; planTitle: string | null; sequence: number; title: string;
@@ -79,14 +80,26 @@ interface PlannedVisit {
 const SPECIALTIES = ["علاج عام", "تقويم", "زراعة", "تركيبات", "جراحة", "تجميل"];
 
 export function PatientPlans({ patientId }: { patientId: number }) {
+  const session = useSession();
+  // A new patient, principal or permission snapshot owns fresh state. In
+  // particular A → B → A cannot resurrect A's previously visible collections.
+  const scope = JSON.stringify([patientId, session?.username, session?.role, session?.permissions ?? null]);
+  if (!session || (session.role === "doctor" && session.permissions?.canViewPlans === false)) {
+    return <p role="status" className="rounded-xl border border-slate-200 p-4 text-sm text-slate-500">غير مصرّح لك بعرض خطط العلاج.</p>;
+  }
+  return <PatientPlansContent key={scope} patientId={patientId} />;
+}
+
+function PatientPlansContent({ patientId }: { patientId: number }) {
   // (TD-05) الأساس دستوري من الكود — وعملة كل خطةٍ تُعرض بعملتها هي.
   const fallback: Currency = CLINIC_BASE_CURRENCY;
-  const session = useSession();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plannedVisits, setPlannedVisits] = useState<PlannedVisit[]>([]);
-  const [canSeeFinancial, setCanSeeFinancial] = useState(true);
+  const [canSeeFinancial, setCanSeeFinancial] = useState(false);
   const [base, setBase] = useState<Currency>(fallback);
   const [loading, setLoading] = useState(true);
+  const [readUnavailable, setReadUnavailable] = useState(false);
+  const [readDenied, setReadDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -100,25 +113,67 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
   const [consentFor, setConsentFor] = useState<number | null>(null);
 
+  const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
   const load = useCallback(async () => {
-    setLoading(true);
+    const lifetime = readRef.current;
+    if (!lifetime.active) return;
+    const generation = ++lifetime.generation;
+    lifetime.controller?.abort();
+    const controller = new AbortController();
+    lifetime.controller = controller;
+    const current = () => lifetime.active && lifetime.generation === generation && !controller.signal.aborted;
+    // Refresh is unknown authority: retire the old snapshot before awaiting
+    // headers/body. Clinical authoring drafts stay in this same scoped child.
+    setCanSeeFinancial(false);
+    setLoading(true); setReadUnavailable(false); setError(null);
     try {
-      const response = await fetch(`/api/patients/${patientId}/plans`, { cache: "no-store" });
+      const response = await fetch(`/api/patients/${patientId}/plans`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
+      // Never wait on a denied body's transport before retiring cached data.
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setReadDenied(true); setLastReceipt(null); setPayFor(null); setPayAmount("");
+          setPlans([]); setPlannedVisits([]); setConsentFor(null);
+          setQuickCreating(false); setAgreementCreating(false); setFromTemplate(false); setCreating(false);
+        }
+        throw new Error(response.status === 401 || response.status === 403
+          ? "غير مصرّح لك بعرض خطط العلاج." : "تعذّر تحميل الخطط.");
+      }
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (!current()) return;
+      if (!Array.isArray(payload?.plans)) throw new Error("تعذّر التحقق من بيانات الخطط.");
+      setReadDenied(false);
+      if (payload.canSeeFinancial !== true) { setLastReceipt(null); setPayFor(null); setPayAmount(""); }
       setPlans(payload.plans as Plan[]);
-      setPlannedVisits(payload.plannedVisits ?? []);
-      setCanSeeFinancial(payload.canSeeFinancial ?? false);
+      setPlannedVisits(Array.isArray(payload.plannedVisits) ? payload.plannedVisits : []);
+      setCanSeeFinancial(payload.canSeeFinancial === true);
       if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
+      if (!current()) return;
+      setReadUnavailable(true);
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [patientId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useLayoutEffect(() => {
+    const lifetime = readRef.current;
+    lifetime.active = true;
+    void load();
+    const refresh = () => { void load(); };
+    const visible = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      lifetime.active = false;
+      lifetime.generation += 1;
+      lifetime.controller?.abort();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [load]);
 
   /* (FIN-1) مفتاح إعادة لكل محاولة تحصيل — كما في CollectPaymentModal: انقطاع الرد ثم ضغطٌ
      ثانٍ بالمبلغ نفسه يرسل المفتاح نفسه فيُعاد السند الأول لا يُنشأ ثانٍ. تغيير المبلغ أو
@@ -128,7 +183,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   const inFlightRef = useRef(false);
 
   const collect = async (plan: Plan) => {
-    if (busy || inFlightRef.current) return;
+    if (!readRef.current.active || busy || inFlightRef.current) return;
     const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
     const target = `${plan.id}:${body}`;
     if (attemptRef.current?.target !== target) {
@@ -159,12 +214,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   };
 
   return (
-    <div>
+    <div data-testid="patient-plans-content">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-red-700 text-red-700">{error}</p>
       ) : null}
 
-      {lastReceipt ? (
+      {lastReceipt && canSeeFinancial ? (
         <div className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
           <p className="mb-2 text-sm font-bold text-emerald-800">سُجّل القسط.</p>
           <div className="flex flex-wrap items-start justify-center gap-2">
@@ -180,11 +235,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      <LegacyOrthoPlanContext patientId={patientId} />
+      {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} /> : null}
 
       {/* المداخل الواضحة: السرعة أولًا، والتعقيد عند الحاجة. كلها تنتهي إلى محرك V2 نفسه. */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <button
+          disabled={(loading || readUnavailable) && !quickCreating}
           onClick={() => {
             setQuickCreating((open) => !open);
             setAgreementCreating(false); setFromTemplate(false); setCreating(false);
@@ -194,6 +250,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
           {quickCreating ? "إغلاق الخطة السريعة" : "⚡ خطة سريعة"}
         </button>
         <button
+          disabled={(loading || readUnavailable) && !agreementCreating}
           onClick={() => {
             setAgreementCreating((open) => !open);
             setQuickCreating(false); setFromTemplate(false); setCreating(false);
@@ -203,6 +260,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
           {agreementCreating ? "إغلاق الاتفاق" : "🦷 تقويم / مبلغ متفق"}
         </button>
         <button
+          disabled={(loading || readUnavailable) && !fromTemplate}
           onClick={() => {
             setFromTemplate((open) => !open);
             setQuickCreating(false); setAgreementCreating(false); setCreating(false);
@@ -212,6 +270,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
           {fromTemplate ? "إغلاق القوالب" : "📋 قالب تخصص"}
         </button>
         <button
+          disabled={(loading || readUnavailable) && !creating}
           onClick={() => {
             setCreating((open) => !open);
             setQuickCreating(false); setAgreementCreating(false); setFromTemplate(false);
@@ -255,9 +314,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
         />
       ) : null}
 
+      {loading && plans.length > 0 ? (
+        <p role="status" className="mb-2 text-xs text-slate-500">جارٍ تحديث الخطط…</p>
+      ) : null}
       {loading && plans.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : plans.length === 0 ? (
+      ) : readUnavailable && plans.length === 0 ? null : plans.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
           لا توجد خطط علاج جديدة مسجّلة هنا. تُنشأ الخطة عند الاتفاق على علاج جديد.
         </p>
@@ -279,14 +341,14 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 </span>
               </div>
 
-              <div className="mb-2 grid grid-cols-3 gap-2 text-center">
+              <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
                   <p className="text-[11px] text-slate-500">
                     {plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
-                {plan.installments.length > 0 && canSeeFinancial ? (
+                {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.progress.paidMinor, plan.baseCurrency)}</p>
@@ -311,7 +373,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 )}
               </div>
 
-              {plan.installments.length > 0 && canSeeFinancial ? (
+              {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
                 <>
                   <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div className="h-full bg-emerald-500"
@@ -329,13 +391,13 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 </>
               ) : null}
 
-              {canSeeFinancial && plan.progress.overdueMinor > 0 ? (
+              {canSeeFinancial && plan.progress && plan.progress.overdueMinor > 0 ? (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700">
                   متأخر: {formatMoney(plan.progress.overdueMinor, plan.baseCurrency)}
                 </p>
               ) : null}
 
-              {canSeeFinancial && plan.status === "active" && plan.installments.length > 0 ? (
+              {canSeeFinancial && plan.progress && plan.status === "active" && plan.installments.length > 0 ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
@@ -367,7 +429,7 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                       onClick={() => {
                         setPayFor(plan.id);
                         // المقترح: القسط القادم — أكثر ما يُدفع فعلًا.
-                        const suggested = plan.progress.nextDueAmountMinor || plan.installments[0]?.amountMinor || 0;
+                        const suggested = plan.progress?.nextDueAmountMinor || plan.installments[0]?.amountMinor || 0;
                         setPayAmount(suggested ? toInputAmount(suggested, plan.baseCurrency) : "");
                         // (TD-05) التحصيل يبدأ بعملة الاتفاق — والاختيار يبقى للمحصِّل.
                         setPayCurrency(plan.baseCurrency);
@@ -408,6 +470,8 @@ export function PatientPlans({ patientId }: { patientId: number }) {
               {plan.status === "active" && !plan.consentAt && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
                 consentFor === plan.id ? (
                   <ConsentForm plan={plan}
+                    scheduleExists={loading || readUnavailable ? null : canSeeFinancial ? plan.installments.length > 0
+                      : typeof plan.hasInstallments === "boolean" ? plan.hasInstallments : null}
                     onDone={() => { setConsentFor(null); void load(); }} onError={setError} />
                 ) : (
                   <button onClick={() => setConsentFor(plan.id)}
@@ -425,14 +489,14 @@ export function PatientPlans({ patientId }: { patientId: number }) {
                 </p>
               ) : null}
 
-              {canSeeFinancial && plan.installments.length > 0 ? (
+              {canSeeFinancial && plan.progress && plan.installments.length > 0 ? (
               <details className="mt-2">
                 <summary className="cursor-pointer text-[11px] font-bold text-slate-500">جدول الأقساط</summary>
                 <ul className="mt-2 space-y-1">
                   {plan.installments.map((installment) => (
                     <li key={installment.id} className="flex justify-between gap-2 text-xs">
-                      <span className={installment.number <= plan.progress.paidCount ? "text-emerald-700" : "text-slate-600"}>
-                        {installment.number <= plan.progress.paidCount ? "✓ " : ""}
+                      <span className={plan.progress !== null && installment.number <= plan.progress.paidCount ? "text-emerald-700" : "text-slate-600"}>
+                        {plan.progress !== null && installment.number <= plan.progress.paidCount ? "✓ " : ""}
                         قسط {installment.number} · {friendlyDateLong(installment.dueDate)}
                       </span>
                       <span className="font-bold">{formatMoney(installment.amountMinor, plan.baseCurrency)}</span>
@@ -1174,8 +1238,8 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
  * يُسألان في النَّفَس نفسه على الكرسي: «موافق؟» ثم «أقدر أقسّطها؟». وفصلُهما إلى
  * خطوتين يجعل نصف الخطط تُوافَق ولا تُجدوَل.
  */
-function ConsentForm({ plan, onDone, onError }: {
-  plan: Plan; onDone: () => void; onError: (message: string | null) => void;
+function ConsentForm({ plan, scheduleExists, onDone, onError }: {
+  plan: Plan; scheduleExists: boolean | null; onDone: () => void; onError: (message: string | null) => void;
 }) {
   // (TD-05) الموافقة على مبلغ الخطة بعملة اتفاقها.
   const base: Currency = plan.baseCurrency;
@@ -1188,7 +1252,7 @@ function ConsentForm({ plan, onDone, onError }: {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (busy) return;
+    if (busy || (split && scheduleExists !== false)) return;
     setBusy(true);
     onError(null);
     try {
@@ -1221,16 +1285,18 @@ function ConsentForm({ plan, onDone, onError }: {
         aria-label="كيف وُثّقت الموافقة"
         className="mb-2 w-full rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs" />
 
-      {plan.installments.length === 0 ? (
+      {scheduleExists === false ? (
         <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
           <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
           قسّطها
         </label>
-      ) : (
+      ) : scheduleExists === true ? (
         <p className="mb-2 text-[11px] font-bold text-slate-500">لهذا الاتفاق جدول أقساط قائم — لا يُعاد تقسيطه.</p>
+      ) : (
+        <p role="status" className="mb-2 text-[11px] font-bold text-slate-500">وجود جدول الأقساط غير متحقق — لا يُنشأ جدول جديد حتى يكتمل التحقق.</p>
       )}
 
-      {split && plan.installments.length === 0 ? (
+      {split && scheduleExists === false ? (
         <div className="mb-2 flex flex-wrap gap-2">
           <input value={count} onChange={(event) => setCount(event.target.value)}
             aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
@@ -1244,7 +1310,7 @@ function ConsentForm({ plan, onDone, onError }: {
         </div>
       ) : null}
 
-      <button onClick={() => void submit()} disabled={busy || plan.totalMinor <= 0}
+      <button onClick={() => void submit()} disabled={busy || plan.totalMinor <= 0 || (split && scheduleExists !== false)}
         className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-extrabold text-white disabled:opacity-40">
         سجّل الموافقة
       </button>
