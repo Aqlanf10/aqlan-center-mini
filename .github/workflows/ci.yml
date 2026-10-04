@@ -422,6 +422,30 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Synthetic case diagnosis reference only; no real patient data, traces,
+      # HAR, authentication state, browser storage, or whole-directory uploads.
+      - name: Upload case diagnosis reference screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-diagnosis-reference-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png
+            .settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic orthodontic visit entry fixtures, never live patient data.
       - name: Upload orthodontic chairside entry screenshots
         if: always()

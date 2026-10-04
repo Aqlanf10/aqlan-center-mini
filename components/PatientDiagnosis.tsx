@@ -41,17 +41,19 @@ type Owner = { scope: readonly unknown[]; active: boolean; ready: boolean; readS
 type Writer = { owner: Owner; active: boolean };
 type Snapshot = { owner: Owner; status: "loading" | "ready" | "error"; versions: DiagnosisVersionView[] };
 
-export function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
-  patientId: number; orthoCaseId: number;
-  onError: (message: string | null) => void;
-}) {
+type DiagnosisProps = { patientId: number; orthoCaseId: number } & (
+  | { readOnly: true; referenceVisitId: number; onError?: (message: string | null) => void }
+  | { readOnly?: false; referenceVisitId?: never; onError: (message: string | null) => void }
+);
+
+export function PatientDiagnosis({ patientId, orthoCaseId, onError, readOnly = false, referenceVisitId }: DiagnosisProps) {
   const session = useSession();
   const canRead = !!session?.username?.trim() && ["admin", "doctor", "reception", "assistant"].includes(session.role);
-  const canWrite = canRead && (session?.role === "doctor" || session?.role === "admin");
+  const canWrite = !readOnly && canRead && (session?.role === "doctor" || session?.role === "admin");
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope],
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId],
     active: false, ready: false, readSequence: 0, controller: null, saving: false, timer: null }),
-    [patientId, orthoCaseId, session?.username, session?.role, permissionScope]);
+    [patientId, orthoCaseId, session?.username, session?.role, permissionScope, readOnly, referenceVisitId]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [writer, setWriter] = useState<Writer | null>(null);
   const [savingOwner, setSavingOwner] = useState<Owner | null>(null);
@@ -106,7 +108,7 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
     if (!owner.active || !canWrite || !owner.ready || !writer?.active || writer.owner !== owner || owner.saving) return;
     owner.saving = true;
     setSavingOwner(owner);
-    onError(null);
+    onError?.(null);
     try {
       const response = await fetch(`/api/patients/${patientId}/diagnoses`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -114,14 +116,14 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
       });
       const payload = await response.json().catch(() => null);
       if (!owner.active) return;
-      if (!response.ok) { onError(payload?.message ?? "تعذّر الحفظ."); return; }
+      if (!response.ok) { onError?.(payload?.message ?? "تعذّر الحفظ."); return; }
       writer.active = false;
       setWriter(null);
       // The POST has settled. A bounded refresh must not keep the write latch
       // held if an old transport ignores abort after its read deadline.
       void load();
     } catch {
-      if (owner.active) onError("تعذّر الاتصال بالخادم.");
+      if (owner.active) onError?.("تعذّر الاتصال بالخادم.");
     } finally {
       owner.saving = false;
       if (owner.active) setSavingOwner(null);
@@ -137,23 +139,38 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
       .map(([key, value]) => key === "note" ? String(value) : `${names[key] ?? key}: ${value}`);
   };
 
+  const entry = (version: DiagnosisVersionView, index: number) => (
+    <div key={version.id} data-testid={readOnly && index === 0 ? "ortho-diagnosis-latest-entry" : undefined}
+      className={`rounded-xl p-3 break-words ${index === 0 ? "border border-navy-200 bg-navy-50/50" : "bg-slate-50"}`}>
+      <p className="mb-1 text-[11px] font-extrabold text-slate-800">
+        {readOnly && index === 0 ? "آخر قيد مسجّل" : index === versions.length - 1 ? "أول تشخيص مسجل لهذه الحالة" : "تحديث التشخيص"} · نسخة {version.version}
+        {version.label ? ` · ${version.label}` : ""}
+        {" · "}{friendlyDateLong(version.createdAt.slice(0, 10))} · {version.createdBy}
+      </p>
+      <ul className="list-inside list-disc text-xs text-slate-700 space-y-0.5">
+        {lines(version.content).map((line) => <li key={line}>{line}</li>)}
+      </ul>
+    </div>
+  );
+
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
+    <div data-testid={readOnly ? "ortho-diagnosis-reference" : undefined}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
         <h4 className="text-xs font-black text-navy-900 flex items-center gap-1.5">
-          <span>📝</span> التشخيص السريري لهذه الحالة {current ? `(نسخة ${current.version})` : ""}
+          <span>📝</span> {readOnly ? "آخر قيد تشخيص مسجّل لهذه الحالة" : "التشخيص السريري لهذه الحالة"} {current ? `(نسخة ${current.version})` : ""}
         </h4>
         <span className="text-[10px] text-slate-500 font-bold">
           {current ? friendlyDateLong(current.createdAt.slice(0, 10)) : ready ? "غير مسجل لهذه الحالة" : ""}
         </span>
       </div>
       <p className="mb-2 text-[10px] text-slate-500">نسخ هذه الحالة فقط؛ أرقام النسخ تتبع سجل المريض الكامل.</p>
+      {readOnly ? <p className="mb-2 text-[11px] text-slate-600">مرجع للقراءة فقط. قد يتضمن القيد حقولًا محدّثة فقط، ولا يمثّل بالضرورة تقييمًا كاملًا. تُعرض القيود السابقة منفصلة بلا دمج؛ لا تُنسخ إلى تشخيص اليوم.</p> : null}
       <div className="space-y-2">
         {failed ? (
           <div role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
             <p>{readFailure}</p>
             <button type="button" onClick={() => { if (owner.active) void load(); }}
-              className="mt-2 font-bold underline">إعادة تحميل التشخيص</button>
+              className="mt-2 min-h-11 rounded-lg px-2 font-bold underline">إعادة تحميل التشخيص</button>
           </div>
         ) : !ready ? (
           <p className="text-xs text-slate-400">جارٍ التحميل…</p>
@@ -161,18 +178,17 @@ export function PatientDiagnosis({ patientId, orthoCaseId, onError }: {
           <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500 text-center">
             لا تشخيص سريري مسجل لهذه الحالة بعد.
           </p>
-        ) : versions.map((version, index) => (
-          <div key={version.id} className={`rounded-xl p-3 ${index === 0 ? "border border-navy-200 bg-navy-50/50" : "bg-slate-50"}`}>
-            <p className="mb-1 text-[11px] font-extrabold text-slate-800">
-              {index === versions.length - 1 ? "أول تشخيص مسجل لهذه الحالة" : "تحديث التشخيص"} · نسخة {version.version}
-              {version.label ? ` · ${version.label}` : ""}
-              {" · "}{friendlyDateLong(version.createdAt.slice(0, 10))} · {version.createdBy}
-            </p>
-            <ul className="list-inside list-disc text-xs text-slate-700 space-y-0.5">
-              {lines(version.content).map((line) => <li key={line}>{line}</li>)}
-            </ul>
-          </div>
-        ))}
+        ) : readOnly ? (
+          <>
+            {entry(current, 0)}
+            {versions.length > 1 ? (
+              <details key={JSON.stringify(owner.scope)} data-testid="ortho-diagnosis-history" className="rounded-xl border border-slate-200 bg-white p-2">
+                <summary className="min-h-11 cursor-pointer py-3 text-xs font-bold text-slate-600">القيود السابقة لهذه الحالة ({versions.length - 1})</summary>
+                <div className="mt-2 space-y-2">{versions.slice(1).map((version, index) => entry(version, index + 1))}</div>
+              </details>
+            ) : null}
+          </>
+        ) : versions.map(entry)}
         {canWrite && ready && (!writing ? (
           <button type="button" onClick={() => { if (owner.active && owner.ready && !owner.saving) setWriter({ owner, active: true }); }}
             className="w-full rounded-xl border border-navy-800 bg-white py-2 text-xs font-bold text-navy-800 hover:bg-navy-50 transition-colors">
