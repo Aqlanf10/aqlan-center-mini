@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page, type Request } from "playwright";
 import { Client } from "pg";
 import { mkdir, readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -28,6 +28,69 @@ const addendumText = "ملحق تصحيح سريري اصطناعي مع بقا�
 const planSentinel = "SYN-PRIVATE-CROWN-NO-PRINT";
 const visitHistoryNotes: string[] = [];
 const pdfPath = ".settings-ui-artifacts/patient-dossier-endo-a4.pdf";
+async function assertMobilePrintPaint(page: Page, prepare: () => Promise<unknown>, screenshotPath?: string) {
+  const printWrites: string[] = [];
+  const trackWrites = (request: Request) => {
+    if (!["GET", "HEAD"].includes(request.method())) printWrites.push(request.method());
+  };
+  page.on("request", trackWrites);
+  try {
+    await prepare();
+    await page.evaluate(async () => {
+      await document.fonts.ready; window.scrollTo(0, 0);
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    });
+    const printButton = page.getByRole("button", { name: "اطبع", exact: true });
+    const identity = page.locator(".dossier-demographics-grid").getByText(patientName, { exact: true });
+    await expect.poll(async () => printButton.isVisible()).toBe(true);
+    const printBounds = await printButton.boundingBox(), identityBounds = await identity.boundingBox();
+    for (const bounds of [printBounds, identityBounds]) {
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+    }
+    for (const target of [printButton, identity]) {
+      expect(await target.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        return hit === element || !!hit && element.contains(hit);
+      })).toBe(true);
+    }
+    expect(await page.locator(".sheet-a4").getAttribute("dir")).toBe("rtl");
+    expect(await page.getByRole("region", { name: "سجل علاج الجذور" }).innerText()).toContain(draftNote);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.evaluate(() => {
+      delete document.documentElement.dataset.syntheticPrintInvoked;
+      window.print = () => { document.documentElement.dataset.syntheticPrintInvoked = "true"; };
+    });
+    await printButton.click();
+    await expect.poll(async () => page.locator("html").getAttribute("data-synthetic-print-invoked")).toBe("true");
+    expect(await printButton.isEnabled()).toBe(true);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const mobilePng = await page.screenshot(screenshotPath ? { path: screenshotPath } : {});
+    const paintPage = await page.context().newPage();
+    try {
+      await paintPage.setContent("<html><body></body></html>");
+      const painted = await paintPage.evaluate(async ({ source, boxes }) => {
+        const image = new Image(); image.src = source; await image.decode();
+        const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+        const paint = canvas.getContext("2d")!; paint.drawImage(image, 0, 0);
+        return { width: image.width, height: image.height, ink: boxes.map(box => {
+          const pixels = paint.getImageData(Math.floor(box.x), Math.floor(box.y), Math.ceil(box.width), Math.ceil(box.height)).data;
+          let count = 0;
+          for (let index = 0; index < pixels.length; index += 4) if (pixels[index] + pixels[index + 1] + pixels[index + 2] < 540) count++;
+          return count;
+        }) };
+      }, { source: `data:image/png;base64,${mobilePng.toString("base64")}`, boxes: [printBounds!, identityBounds!] });
+      expect(painted).toMatchObject({ width: 390, height: 844 });
+      expect(painted.ink[0], "Print control must visibly paint in the actual mobile PNG").toBeGreaterThan(100);
+      expect(painted.ink[1], "patient identity must visibly paint in the actual mobile PNG").toBeGreaterThan(100);
+    } finally { await paintPage.close(); }
+    expect(printWrites).toEqual([]);
+  } finally { page.off("request", trackWrites); }
+}
+
 async function send(path: string, method: "POST" | "PUT" | "PATCH", body: unknown, status: number) {
   const response = await authedMutation(path, h.sessions.admin, method, JSON.stringify(body));
   expect(response.status, path).toBe(status);
@@ -130,54 +193,15 @@ describe("existing dossier ENDO print on the built app", () => {
         await mobile.addCookies([{ name, value: value.join("="), url: baseUrl }]);
         const mobilePage = await mobile.newPage();
         mobilePage.on("pageerror", error => errors.push(error.message));
-        const printWrites: string[] = [];
-        mobilePage.on("request", request => { if (!["GET", "HEAD"].includes(request.method())) printWrites.push(request.method()); });
-        await mobilePage.goto(`${baseUrl}/print/dossier/${patientId}`, { waitUntil: "load" });
-        await mobilePage.evaluate(async () => { await document.fonts.ready; window.scrollTo(0, 0); });
-        const printButton = mobilePage.getByRole("button", { name: "اطبع", exact: true });
-        const identity = mobilePage.locator(".dossier-demographics-grid").getByText(patientName, { exact: true });
-        await expect.poll(async () => printButton.isVisible()).toBe(true);
-        const printBounds = await printButton.boundingBox(), identityBounds = await identity.boundingBox();
-        for (const bounds of [printBounds, identityBounds]) {
-          expect(bounds).not.toBeNull();
-          expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.y).toBeGreaterThanOrEqual(0);
-          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
-          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
-        }
-        for (const target of [printButton, identity]) {
-          expect(await target.evaluate(element => {
-            const bounds = element.getBoundingClientRect();
-            const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-            return hit === element || !!hit && element.contains(hit);
-          })).toBe(true);
-        }
-        expect(await mobilePage.locator(".sheet-a4").getAttribute("dir")).toBe("rtl");
-        expect(await mobilePage.getByRole("region", { name: "سجل علاج الجذور" }).innerText()).toContain(draftNote);
-        expect(await mobilePage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-        await mobilePage.evaluate(() => {
-          window.print = () => { document.documentElement.dataset.syntheticPrintInvoked = "true"; };
-        });
-        await printButton.click();
-        await expect.poll(async () => mobilePage.locator("html").getAttribute("data-synthetic-print-invoked")).toBe("true");
-        expect(await printButton.isEnabled()).toBe(true); expect(printWrites).toEqual([]);
-        await mobilePage.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-        const mobilePng = await mobilePage.screenshot({ path: ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png" });
-        const paintPage = await mobile.newPage(); await paintPage.setContent("<html><body></body></html>");
-        const painted = await paintPage.evaluate(async ({ source, boxes }) => {
-          const image = new Image(); image.src = source; await image.decode();
-          const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
-          const paint = canvas.getContext("2d")!; paint.drawImage(image, 0, 0);
-          return { width: image.width, height: image.height, ink: boxes.map(box => {
-            const pixels = paint.getImageData(Math.floor(box.x), Math.floor(box.y), Math.ceil(box.width), Math.ceil(box.height)).data;
-            let count = 0;
-            for (let index = 0; index < pixels.length; index += 4) if (pixels[index] + pixels[index + 1] + pixels[index + 2] < 540) count++;
-            return count;
-          }) };
-        }, { source: `data:image/png;base64,${mobilePng.toString("base64")}`, boxes: [printBounds!, identityBounds!] });
-        expect(painted).toMatchObject({ width: 390, height: 844 });
-        expect(painted.ink[0], "Print control must visibly paint in the actual mobile PNG").toBeGreaterThan(100);
-        expect(painted.ink[1], "patient identity must visibly paint in the actual mobile PNG").toBeGreaterThan(100);
+        await assertMobilePrintPaint(mobilePage,
+          () => mobilePage.goto(`${baseUrl}/print/dossier/${patientId}`, { waitUntil: "load" }),
+          ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png");
       } finally { await mobile.close(); }
+      // Also preserve the original desktop screenshot -> resize/repaint -> Print
+      // path. Its PNG is inspected in memory, retaining the exact four artifacts.
+      await assertMobilePrintPaint(page, () => page.setViewportSize({ width: 390, height: 844 }));
+      await page.setViewportSize({ width: 1280, height: 1100 });
+      await page.evaluate(() => { window.scrollTo(0, 0); });
       await page.emulateMedia({ media: "print" });
       expect(await records.innerText()).toContain(addendumText);
       expect(await page.locator(".sheet-a4").innerText()).not.toContain(planSentinel);
