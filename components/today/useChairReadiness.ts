@@ -17,6 +17,9 @@ export interface VisitReadiness {
   checklist: ReadinessItem[] | null;
   attention: number | null;
   alerts: string[] | null;
+  /** Same authorization as alerts; optional while an older server is serving. */
+  historyAlerts?: string[] | null;
+  editableAlert?: string | null;
   /** null = لا يرى المال (الطبيب بلا «مدفوعات مرضاي»). */
   balances: BalanceLine[] | null;
 }

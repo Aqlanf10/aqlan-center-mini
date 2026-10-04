@@ -78,6 +78,78 @@ describe("patient context navigation on the built application", () => {
     } finally { await context.close(); }
   });
 
+describe("confirmed patient alert freshness beside an unchanged ENDO draft", () => {
+  it.each([1280, 390])("keeps add/replace/remove visible through failed canonical GETs at %ipx", async width => {
+    const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
+    const [name, ...value] = h.sessions.doctorA.cookie.split("=");
+    await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+    let failRefresh = false;
+    const history = "تحذير تاريخ طبي مستقل لا يُزال مع تنبيه الملف";
+    const writes: string[] = [], unexpected: string[] = [], errors: string[] = [];
+    let failedGets = 0;
+    await context.route("**/*", async route => {
+      const request = route.request(), url = new URL(request.url()), method = request.method();
+      if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}`); await route.abort(); return; }
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        if (method === "PATCH" && url.pathname === `/api/patients/${patientId}`) {
+          const body = request.postDataJSON();
+          writes.push(body.medicalAlert); failRefresh = true;
+          await route.fulfill({ status: 200, contentType: "application/json",
+            body: JSON.stringify({ id: patientId, medicalAlert: body.medicalAlert.trim() || null }) });
+        } else { unexpected.push(`${method} ${url.pathname}`); await route.abort(); }
+        return;
+      }
+      const patientGet = url.pathname === `/api/patients/${patientId}`;
+      const readinessGet = url.pathname === "/api/visits/readiness" && url.searchParams.get("patientId") === String(patientId);
+      if ((patientGet || readinessGet) && failRefresh) {
+        failedGets += 1;
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "تعذّر تحديث تجريبي" }) }); return;
+      }
+      if (patientGet || readinessGet) {
+        const response = await route.fetch(), payload = await response.json(); expect(response.ok()).toBe(true);
+        if (patientGet) { expect(payload.patient.id).toBe(patientId); payload.patient.medicalAlert = null; }
+        else {
+          expect(payload.visit.patientId).toBe(patientId);
+          payload.visit.alerts = [history]; payload.visit.historyAlerts = [history]; payload.visit.editableAlert = null;
+        }
+        await route.fulfill({ response, json: payload }); return;
+      }
+      await route.continue();
+    });
+    const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+    try {
+      await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
+      const cockpit = page.getByTestId("patient-context-strip");
+      await expect.poll(() => cockpit.textContent()).toContain(history);
+      await draft(page); const url = page.url();
+      for (const [index, alert] of ["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""].entries()) {
+        await page.getByTestId("patient-details-toggle").click();
+        await page.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
+        const editor = page.getByRole("region", { name: "تعديل البيانات", exact: true });
+        await editor.getByRole("textbox", { name: /تنبيه طبي/ }).fill(alert);
+        await editor.getByRole("button", { name: "حفظ التغييرات", exact: true }).click();
+        await editor.waitFor({ state: "hidden" });
+        await page.getByTestId("patient-details-toggle").click();
+        await expect.poll(() => failedGets).toBeGreaterThan(0);
+        await expect.poll(() => cockpit.textContent()).toContain(history);
+        if (alert) await expect.poll(() => cockpit.textContent()).toContain(alert);
+        if (index > 0) expect(await cockpit.textContent()).not.toContain("تحذير جديد مؤكد");
+        if (index === 2) expect(await cockpit.textContent()).not.toContain("تحذير بديل مؤكد");
+        expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة اختبار محمية");
+        expect(page.url()).toBe(url); expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+        expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+        if (index === 1) {
+          await mkdir(".settings-ui-artifacts", { recursive: true });
+          await page.screenshot({ path: `.settings-ui-artifacts/patient-alert-freshness-${width}.png`, fullPage: true });
+        }
+      }
+      expect(writes).toEqual(["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""]);
+      expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+    } finally { await context.close(); }
+  });
+});
+
   it.each([1280, 390])("explicit tab and specialty cancellation preserve the selected workspace and draft at %ipx", async width => {
     const { context, page } = await open("?tab=treatment&sub=endo&orthoCaseId=123&visitId=456#record", width);
     try {
@@ -172,7 +244,8 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
         if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
           if (allowVitals && method === "PATCH" && url.pathname === `/api/patients/${patientId}`) {
             allowVitals = false; writes.push(`${method} ${url.pathname}`);
-            await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+            const body = request.postDataJSON();
+            await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: patientId, medicalAlert: body.medicalAlert.trim() || null }) });
           } else { unexpected.push(`${method} ${url.pathname}`); await route.abort(); }
           return;
         }
@@ -190,6 +263,8 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           const response = await route.fetch(); const payload = await response.json();
           expect(response.ok()).toBe(true); expect(payload.visit?.patientId).toBe(patientId);
           payload.visit.alerts = long ? warnings : [];
+          payload.visit.historyAlerts = long ? warnings : [];
+          payload.visit.editableAlert = long ? `[VITALS: BP=165/100] تنبيه ملف اصطناعي ${warnings[2]}` : null;
           await route.fulfill({ response, json: payload }); return;
         }
         await route.continue();

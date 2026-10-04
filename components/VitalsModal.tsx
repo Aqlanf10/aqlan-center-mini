@@ -2,7 +2,7 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Activity,
   Heart,
@@ -29,7 +29,7 @@ interface VitalsModalProps {
   patientId: number;
   patientName: string;
   currentMedicalAlert?: string | null;
-  onSaved: (newMedicalAlert: string, vitals: VitalSigns) => void;
+  onSaved: (newMedicalAlert: string | null, vitals: VitalSigns) => void;
 }
 
 export function VitalsModal({
@@ -49,11 +49,15 @@ export function VitalsModal({
   const [medicalNote, setMedicalNote] = useState<string>("");
 
   const [saving, setSaving] = useState(false);
+  const committed = useRef(false);
+  const [committedWithoutConfirmation, setCommittedWithoutConfirmation] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // تحديث القيم الابتدائية عند فتح النافذة
   useEffect(() => {
     if (isOpen) {
+      committed.current = false;
+      setCommittedWithoutConfirmation(false);
       setError(null);
       const parsed = parsePatientVitals(currentMedicalAlert);
       if (parsed.vitals) {
@@ -73,7 +77,7 @@ export function VitalsModal({
       }
       setMedicalNote(parsed.cleanAlert || "");
     }
-  }, [isOpen, currentMedicalAlert]);
+  }, [isOpen, patientId, currentMedicalAlert]);
 
   if (!isOpen) return null;
 
@@ -112,7 +116,7 @@ export function VitalsModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (saving || committed.current) return;
 
     setSaving(true);
     setError(null);
@@ -130,6 +134,7 @@ export function VitalsModal({
 
     try {
       const hasReading = numSys !== null || numDia !== null || numPulse !== null || numSugar !== null;
+      let confirmedAlert: string | null;
       if (hasReading) {
         const recorded = await fetch(`/api/patients/${patientId}/vitals`, {
           method: "POST",
@@ -139,23 +144,35 @@ export function VitalsModal({
             recordedAt: vitalsData.recordedAt, medicalAlert: serializedAlert,
           }),
         });
+        if (recorded.ok) committed.current = true;
+        const data = await recorded.json().catch(() => null);
         if (!recorded.ok) {
-          const data = await recorded.json().catch(() => ({}));
-          throw new Error(data.message || "تعذّر حفظ القراءة.");
+          throw new Error(data?.message || "تعذّر حفظ القراءة.");
         }
+        if (data?.patientId !== patientId || !(typeof data.medicalAlert === "string" || data.medicalAlert === null)) {
+          setCommittedWithoutConfirmation(true);
+          throw new Error("حُفظ الطلب لكن تعذّر التحقق من التنبيه؛ أعد تحميل الملف.");
+        }
+        confirmedAlert = data.medicalAlert;
       } else {
         const res = await fetch(`/api/patients/${patientId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ medicalAlert: serializedAlert }),
         });
+        if (res.ok) committed.current = true;
+        const data = await res.json().catch(() => null);
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.message || "تعذّر حفظ العلامات الحيوية.");
+          throw new Error(data?.message || "تعذّر حفظ العلامات الحيوية.");
         }
+        if (data?.id !== patientId || !(typeof data.medicalAlert === "string" || data.medicalAlert === null)) {
+          setCommittedWithoutConfirmation(true);
+          throw new Error("حُفظ الطلب لكن تعذّر التحقق من التنبيه؛ أعد تحميل الملف.");
+        }
+        confirmedAlert = data.medicalAlert;
       }
 
-      onSaved(serializedAlert, vitalsData);
+      onSaved(confirmedAlert, vitalsData);
       onClose();
     } catch (err: any) {
       setError(err.message || "حدث خطأ غير متوقع أثناء الحفظ.");
@@ -386,7 +403,7 @@ export function VitalsModal({
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || committedWithoutConfirmation}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all"
             >
               {saving ? (

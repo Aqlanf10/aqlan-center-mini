@@ -409,6 +409,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exactly two synthetic saved-alert scenes; no clinical logs or browser state.
+      - name: Upload patient alert freshness screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-alert-freshness-ui
+          path: |
+            .settings-ui-artifacts/patient-alert-freshness-1280.png
+            .settings-ui-artifacts/patient-alert-freshness-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only synthetic orthodontic visit entry fixtures, never live patient data.
       - name: Upload orthodontic chairside entry screenshots
         if: always()
