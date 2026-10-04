@@ -40,7 +40,10 @@ retirement, hard denial with malformed bodies/hung peers, actual page save
 callbacks and canonical vitals confirmation. The existing built-app navigation
 journey adds synthetic RTL1280/390 PatientEditor add/replace/remove checks with
 failed patient/readiness GETs, preserved dirty ENDO input, no extra writes and
-exactly two allowlisted screenshots. HTTP tests compare the returned vitals alert
+exactly two allowlisted native viewport screenshots. Before capture, the journey
+settles scroll at the top and checks the combined editable/history warning's
+complete viewport bounds and five native hit-test points, rejecting fixed-header
+occlusion. Full-page stitching alone is not visibility evidence. HTTP tests compare the returned vitals alert
 with persisted isolated-test data and check medical source redaction.
 
 Local focused Node22 tests, nonincremental TypeScript and scoped lint are required;

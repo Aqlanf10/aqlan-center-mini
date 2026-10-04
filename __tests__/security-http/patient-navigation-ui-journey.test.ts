@@ -144,7 +144,28 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         if (index === 1) {
           await mkdir(".settings-ui-artifacts", { recursive: true });
-          await page.screenshot({ path: `.settings-ui-artifacts/patient-alert-freshness-${width}.png`, fullPage: true });
+          // A full-page stitched image can move fixed navigation over the warning.
+          // Capture the settled native viewport and prove both sources are unobscured.
+          await page.evaluate(() => window.scrollTo(0, 0));
+          await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+          const combined = cockpit.locator("span[title]").filter({ hasText: history });
+          expect(await combined.count()).toBe(1);
+          expect(await combined.innerText()).toContain(alert);
+          const geometry = await combined.evaluate(element => {
+            const rect = element.getBoundingClientRect();
+            const points = [[rect.x + rect.width / 2, rect.y + 3], [rect.x + rect.width / 2, rect.bottom - 3],
+              [rect.x + 5, rect.y + rect.height / 2], [rect.right - 5, rect.y + rect.height / 2],
+              [rect.x + rect.width / 2, rect.y + rect.height / 2]];
+            return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
+              viewportWidth: innerWidth, viewportHeight: innerHeight,
+              unobscured: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+          });
+          expect(geometry.width).toBeGreaterThan(0); expect(geometry.height).toBeGreaterThan(0);
+          expect(geometry.x).toBeGreaterThanOrEqual(0); expect(geometry.y).toBeGreaterThanOrEqual(0);
+          expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+          expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
+          expect(geometry.unobscured).toEqual([true, true, true, true, true]);
+          await page.screenshot({ path: `.settings-ui-artifacts/patient-alert-freshness-${width}.png`, fullPage: false });
         }
       }
       expect(writes).toEqual(["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""]);
