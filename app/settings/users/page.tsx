@@ -8,7 +8,6 @@ import {
   type DoctorCommissionConfig,
   type CommissionCalculationMode,
   type CustomDoctorServiceRate,
-  DENTAL_SERVICE_CATEGORIES,
   PRESET_SPECIALTIES,
   PRESET_BRANCHES,
   DEFAULT_DOCTOR_PERMISSIONS,
@@ -18,6 +17,7 @@ import {
   isDoctorFinancialHidden,
 } from "@/lib/doctor-permissions";
 import { toInputAmount } from "@/lib/money";
+import { CommissionCategoryEditor } from "@/components/settings/CommissionCategoryEditor";
 import { financeAccessFor, type FinanceAccess } from "@/lib/finance-permissions";
 
 interface ClinicServiceItem {
@@ -2425,53 +2425,21 @@ export default function UsersAndDoctorsPage() {
 
                   {/* Mode 2: By Service Category */}
                   {editForm.commissionConfig.calculationMode === "by_category" && (
-                    <div className="rounded-xl border border-slate-200 p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <h4 className="font-black text-navy-900">نِسب الطبيب حسب أقسام الخدمات السنية</h4>
-                        <span className="text-[11px] text-slate-500">حدد نسبة مئوية لكل تخصص</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                        {DENTAL_SERVICE_CATEGORIES.map((cat) => {
-                          const currentVal =
-                            editForm.commissionConfig.categoryRates[cat.key] ??
-                            editForm.commissionConfig.defaultPercent ??
-                            cat.defaultPercent;
-
-                          return (
-                            <div
-                              key={cat.key}
-                              className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2"
-                            >
-                              <span className="font-bold text-slate-800">{cat.label}</span>
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  value={currentVal}
-                                  onChange={(e) => {
-                                    const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
-                                    setEditForm((c) => ({
-                                      ...c,
-                                      commissionConfig: {
-                                        ...c.commissionConfig,
-                                        categoryRates: {
-                                          ...c.commissionConfig.categoryRates,
-                                          [cat.key]: val,
-                                        },
-                                      },
-                                    }));
-                                  }}
-                                  className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center font-bold text-navy-900"
-                                />
-                                <span className="text-[11px] text-slate-400">%</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <CommissionCategoryEditor
+                      config={editForm.commissionConfig}
+                      services={clinicServices}
+                      onCategoryChange={(key, percent) => setEditForm((current) => ({
+                        ...current,
+                        commissionConfig: {
+                          ...current.commissionConfig,
+                          categoryRates: { ...current.commissionConfig.categoryRates, [key]: percent },
+                        },
+                      }))}
+                      onDefaultPercentChange={(percent) => setEditForm((current) => ({
+                        ...current,
+                        commissionConfig: { ...current.commissionConfig, defaultPercent: percent },
+                      }))}
+                    />
                   )}
 
                   {/* Mode 3: Fixed Amount */}
