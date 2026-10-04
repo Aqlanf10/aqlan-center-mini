@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { Client } from "pg";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
 
 /**
@@ -387,6 +387,97 @@ describe("ENDO-4 — endodontic chairside journey", () => {
       expect(Number(saved.working_length_mm)).toBe(20.5); expect(saved.note).toBe("ملاحظة قناة محفوظة"); expect(saved.obturated).toBe(false);
       expect((await db.query(`SELECT signed_at FROM visits WHERE id=$1`, [visit.id])).rows[0].signed_at).toBeNull();
       expect((await db.query(`SELECT id FROM invoices WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
+    } finally { await context.close(); }
+  });
+});
+
+describe("ENDO reference reads in the real patient file", () => {
+  it.each([1280, 390])("retires denied references before stalled cases, then restores the same draft without a write at %ipx", async width => {
+    // Actual isolated patient/case/visit reads, with only bounded fault responses
+    // substituted. No financial endpoint or signed clinical history is altered.
+    expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
+    expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
+    const { rows: [patient] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, 'مريض سلامة مرجع العصب التجريبي', $2) RETURNING id`,
+      [`EU-READ-${stamp}-${width}`, doctorParty]);
+    const { rows: [visit] } = await db.query<{ id: number }>(
+      `INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('مريض سلامة مرجع العصب التجريبي', $1, $2, 'in_chair') RETURNING id`,
+      [patient.id, doctorParty]);
+    const { rows: [caseRow] } = await db.query<{ id: number }>(
+      `INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, 'endodontics', 'حالة جذور تجريبية للمرجع', 'secdoctora') RETURNING id`, [patient.id]);
+    await db.query(`INSERT INTO endo_treatments (patient_id, case_id, tooth_code, created_by) VALUES ($1, $2, 36, 'secdoctora')`, [patient.id, caseRow.id]);
+    const before = async () => (await db.query(`SELECT
+      (SELECT COALESCE(jsonb_agg(to_jsonb(e)), '[]') FROM endo_visits e WHERE e.visit_id=$2) AS records,
+      (SELECT COALESCE(jsonb_agg(to_jsonb(v)), '[]') FROM visits v WHERE v.id=$2) AS visit,
+      (SELECT COALESCE(jsonb_agg(to_jsonb(i)), '[]') FROM invoices i WHERE i.patient_id=$1) AS invoices,
+      (SELECT COALESCE(jsonb_agg(to_jsonb(p)), '[]') FROM payments p WHERE p.patient_id=$1) AS payments`, [patient.id, visit.id])).rows;
+    const originalRows = await before();
+    const { context, page } = await open("doctorA");
+    const pendingCases: Route[] = []; const writes: string[] = []; const errors: string[] = [];
+    let markCaseStarted!: () => void;
+    const caseStarted = new Promise<void>(resolve => { markCaseStarted = resolve; });
+    let deny = false; let failCases = false;
+    page.on("pageerror", error => errors.push(error.message));
+    await context.route("**/api/**", async route => {
+      const request = route.request(); const path = new URL(request.url()).pathname;
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+        writes.push(`${request.method()} ${path}`);
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "فشل حفظ تجريبي؛ المسودة محفوظة" }) });
+      } else if (path === `/api/patients/${patient.id}/endo` && deny) {
+        // Guarantee the optional headers really are stalled before the shared
+        // denial aborts them; this does not depend on browser request ordering.
+        await caseStarted;
+        await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "رفض القراءة التجريبي" }) });
+      } else if (path === `/api/patients/${patient.id}/cases` && deny) { pendingCases.push(route); markCaseStarted(); }
+      else if (path === `/api/patients/${patient.id}/cases` && failCases) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: "{invalid" });
+      } else await route.continue();
+    });
+    try {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(`${baseUrl}/patients/${patient.id}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("endo-record").click();
+      await page.getByTestId("endo-note").fill("مسودة هذه الزيارة فقط");
+      await expand(page, "endo-assessment-more");
+      await page.getByTestId("endo-radiographicFindings").fill("موجودات شعاعية للمسودة فقط");
+      await page.getByTestId("endo-save").click(); await page.getByTestId("endo-error").waitFor();
+      expect(writes).toEqual([`PUT /api/patients/${patient.id}/endo/${(await db.query<{ id: number }>(`SELECT id FROM endo_treatments WHERE patient_id=$1`, [patient.id])).rows[0].id}/visits`]);
+      const expectedWrites = [...writes]; deny = true;
+      await page.getByRole("button", { name: "تحديث البيانات مع إبقاء المسودة", exact: true }).click();
+      await page.getByTestId("endo-read-unavailable").getByRole("alert").waitFor();
+      await expect.poll(() => pendingCases.length).toBe(1);
+      expect(await page.getByTestId("endo-read-unavailable").innerText()).toContain("غير مصرّح");
+      await page.getByTestId("endo-read-retained-draft").waitFor();
+      for (const id of ["endo-strip", "endo-form", "endo-history", "endo-work-links", "endo-crown-link", "endo-new"]) expect(await page.getByTestId(id).count()).toBe(0);
+      expect(await page.getByText("مسودة هذه الزيارة فقط", { exact: true }).count()).toBe(0);
+      const reload = page.getByTestId("endo-reload"); await reload.scrollIntoViewIfNeeded();
+      const bounds = await reload.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        const hits = [[box.left + 3, box.top + 3], [box.right - 3, box.top + 3],
+          [box.left + 3, box.bottom - 3], [box.right - 3, box.bottom - 3], [box.left + box.width / 2, box.top + box.height / 2]]
+          .map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); });
+        return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height,
+          viewport: { width: innerWidth, height: innerHeight }, hits, pageWidth: document.documentElement.scrollWidth };
+      });
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      await writeFile(`.settings-ui-artifacts/endodontics-read-denied-${width}-bounds.json`, JSON.stringify(bounds, null, 2));
+      await page.getByTestId("endo-read-unavailable").screenshot({ path: `.settings-ui-artifacts/endodontics-read-denied-${width}.png` });
+      expect(bounds.height).toBeGreaterThanOrEqual(44); expect(bounds.width).toBeGreaterThan(70);
+      expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(width);
+      expect(bounds.top).toBeGreaterThanOrEqual(0); expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewport.height);
+      expect(bounds.pageWidth).toBeLessThanOrEqual(width + 1); expect(bounds.hits).toEqual([true, true, true, true, true]);
+      deny = false; failCases = true; await reload.click();
+      await page.getByTestId("endo-form").waitFor(); await page.getByTestId("endo-case-unavailable").getByRole("button").waitFor();
+      await expect.poll(() => page.getByTestId("endo-case-unavailable").getAttribute("role")).toBe("alert");
+      expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة هذه الزيارة فقط");
+      expect(await page.getByTestId("endo-radiographicFindings").inputValue()).toBe("موجودات شعاعية للمسودة فقط");
+      expect(await page.getByTestId("endo-save").isEnabled()).toBe(true);
+      expect(await page.getByTestId("endo-case-unavailable").innerText()).toContain("هذا لا يعني عدم وجود خطة");
+      for (const id of ["endo-plan-context", "endo-open-plans", "endo-crown-item", "endo-new"]) expect(await page.getByTestId(id).count()).toBe(0);
+      failCases = false; await page.getByTestId("endo-reload").click();
+      await page.getByTestId("endo-plan-context").waitFor();
+      expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة هذه الزيارة فقط");
+      expect(writes).toEqual(expectedWrites); expect(errors).toEqual([]); expect(await before()).toEqual(originalRows);
     } finally { await context.close(); }
   });
 });

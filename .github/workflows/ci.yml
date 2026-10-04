@@ -517,6 +517,21 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Bounded synthetic denial panel and retry-control geometry only.
+      - name: Upload endodontics reference read safety evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endodontics-reference-read-safety-ui
+          path: |
+            .settings-ui-artifacts/endodontics-read-denied-1280.png
+            .settings-ui-artifacts/endodontics-read-denied-390.png
+            .settings-ui-artifacts/endodontics-read-denied-1280-bounds.json
+            .settings-ui-artifacts/endodontics-read-denied-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exact synthetic UI fixtures only; never upload real patient information.
       - name: Upload cockpit UI screenshots
         if: always()

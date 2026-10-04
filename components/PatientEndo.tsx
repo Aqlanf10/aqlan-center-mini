@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   APICAL_DIAGNOSES, APICAL_LABEL, CROWN_STATE_LABEL, ENDO_KIND_LABEL, ENDO_STAGES, ENDO_STAGE_LABEL, ENDO_STATUS_LABEL,
   MEASUREMENT_METHODS, MEASUREMENT_METHOD_LABEL, PROGNOSES, PROGNOSIS_LABEL, PULPAL_DIAGNOSES, PULPAL_LABEL,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/endodontics";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ALL_TEETH, toothName } from "@/lib/dental";
+import { useSession } from "./SessionProvider";
 import type { EndoTreatmentView, EndoVisitView } from "@/lib/endodontics-db";
 import type { CasePlanItem, SpecialtyCase } from "@/lib/db";
 
@@ -205,7 +206,8 @@ interface PatientEndoProps {
 
 export function PatientEndo(props: PatientEndoProps) {
   // A patient/authority change never reuses another context's data or draft, even before effects run.
-  return <PatientEndoWorkspace key={`${props.patientId}:${props.authorityKey ?? ""}:${props.canWrite}:${props.canEditPlans}`} {...props} />;
+  const session = useSession();
+  return <PatientEndoWorkspace key={JSON.stringify([props.patientId, session, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
 function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount }: PatientEndoProps) {
@@ -213,6 +215,9 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
   const [planVisible, setPlanVisible] = useState(false);
+  const [clinicalRead, setClinicalRead] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [caseError, setCaseError] = useState<string | null>(null);
+  const referenceRead = useRef({ clinical: false, cases: false, plan: false, controller: null as AbortController | null });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -226,7 +231,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const mounted = useRef(true);
   const [formTreatmentId, setFormTreatmentId] = useState<number | null>(null);
   const [formVisitId, setFormVisitId] = useState<number | null>(null);
-  const [caseUnavailable, setCaseUnavailable] = useState(false);
+  const [caseUnavailable, setCaseUnavailable] = useState(true);
   const [caseCreationUncertain, setCaseCreationUncertain] = useState(false);
   const [crownLink, setCrownLink] = useState({ crown: "", rct: "" });
   const [closing, setClosing] = useState<{ treatmentId: number; status: "completed" | "abandoned"; outcome: string } | null>(null);
@@ -238,41 +243,85 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [pendingDraft]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; generation.current += 1; };
+    return () => { mounted.current = false; generation.current += 1; referenceRead.current.controller?.abort(); };
   }, []);
 
   const load = useCallback(async () => {
+    if (busyRef.current || !mounted.current) return;
     const ticket = ++generation.current;
-    const current = () => mounted.current && generation.current === ticket;
-    try {
-      const [endoResponse, caseResponse] = await Promise.all([
-        fetch(`/api/patients/${patientId}/endo`, { cache: "no-store" }),
-        fetch(`/api/patients/${patientId}/cases`, { cache: "no-store" }),
-      ]);
-      const [endoPayload, casePayload] = await Promise.all([
-        endoResponse.json().catch(() => null), caseResponse.json().catch(() => null),
-      ]);
-      if (!current()) return;
-      if (!endoResponse.ok || !Array.isArray(endoPayload?.treatments)) {
-        setTreatments(null); setCases([]); setPlanItems([]); setPlanVisible(false);
-        setError(endoPayload?.message ?? "تعذّر تحميل علاج الجذور.");
-        return;
+    referenceRead.current.controller?.abort();
+    const controller = new AbortController();
+    referenceRead.current = { clinical: false, cases: false, plan: false, controller };
+    const current = () => mounted.current && generation.current === ticket && !controller.signal.aborted;
+    const denyPatientRead = (status: number) => {
+      if (status !== 401 && status !== 403 && status !== 404) return false;
+      // Both reads share patient/session access. Plan permission denial instead
+      // returns 200 with planVisible:false, so either hard denial retires all
+      // references and latches this generation against a later peer success.
+      referenceRead.current.clinical = false; referenceRead.current.cases = false; referenceRead.current.plan = false;
+      controller.abort();
+      setTreatments(null); setCases([]); setPlanItems([]); setPlanVisible(false);
+      setClinicalRead("unavailable"); setCaseUnavailable(true); setCaseError(null);
+      setError("غير مصرّح لك بعرض علاج الجذور لهذا المريض.");
+      return true;
+    };
+    // Saved references are withdrawn synchronously. Captured drafts stay in
+    // memory, inert, until the same owner's authorized clinical read succeeds.
+    setClinicalRead("loading"); setError(null); setCaseError(null);
+    setCaseUnavailable(true); setCases([]); setPlanItems([]); setPlanVisible(false);
+    const clinical = async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}/endo`, { cache: "no-store", signal: controller.signal });
+        if (!current()) return;
+        if (denyPatientRead(response.status)) return;
+        // Denial is authoritative at headers; neither error JSON nor optional
+        // case/catalogue reads may keep clinical information on screen.
+        if (!response.ok) throw new Error("تعذّر تحميل علاج الجذور. أعد التحميل.");
+        const payload = await response.json();
+        if (!current()) return;
+        if (!Array.isArray(payload?.treatments)
+          || payload.treatments.some((one: EndoTreatmentView) => !one || one.patientId !== patientId)) {
+          throw new Error("تعذّر التحقق من بيانات علاج الجذور. أعد التحميل.");
+        }
+        setTreatments(payload.treatments);
+        // Choose once; a refresh never transfers a draft to a fallback episode.
+        setSelectedId((selected) => selected ?? payload.treatments.find((one: EndoTreatmentView) => one.status === "in_progress")?.id ?? payload.treatments[0]?.id ?? null);
+        referenceRead.current.clinical = true; setClinicalRead("ready");
+      } catch (failure) {
+        if (!current()) return;
+        referenceRead.current.clinical = false; setClinicalRead("unavailable");
+        setTreatments(null);
+        setError(failure instanceof Error && !(failure instanceof TypeError || failure instanceof SyntaxError)
+          ? failure.message : "تعذّر تحميل علاج الجذور. أعد التحميل.");
       }
-      setTreatments(endoPayload.treatments);
-      // Choose once. A refresh must not move a draft to a newer/fallback episode.
-      setSelectedId((current) => current ?? endoPayload.treatments.find((one: EndoTreatmentView) => one.status === "in_progress")?.id ?? endoPayload.treatments[0]?.id ?? null);
-      const casesOk = caseResponse.ok && Array.isArray(casePayload?.cases);
-      setCaseUnavailable(!casesOk);
-      setError(casesOk ? null : casePayload?.message ?? "تعذّر تحميل الحالات. أعد التحميل قبل فتح علاج أو ربط الخطة.");
-      setCases(casesOk ? casePayload.cases.filter((one: SpecialtyCase) => one.specialty === "endodontics" && one.id !== null
-        && (one.status === "active" || one.status === "waiting")) : []);
-      setPlanVisible(casesOk && casePayload.planVisible === true);
-      setPlanItems(casesOk && casePayload.planVisible === true ? casePayload.items ?? [] : []);
-    } catch {
-      if (current()) setError("تعذّر الاتصال بالخادم. أعد التحميل.");
-    }
+    };
+    const caseReferences = async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}/cases`, { cache: "no-store", signal: controller.signal });
+        if (!current()) return;
+        if (denyPatientRead(response.status)) return;
+        if (!response.ok) throw new Error("تعذّر تحميل الحالات والخطة. أعد التحميل قبل فتح علاج أو ربط الخطة.");
+        const payload = await response.json();
+        if (!current()) return;
+        if (!Array.isArray(payload?.cases) || typeof payload.planVisible !== "boolean"
+          || (payload.planVisible && !Array.isArray(payload.items))) throw new Error("تعذّر التحقق من الحالات والخطة. أعد التحميل.");
+        setCases(payload.cases.filter((one: SpecialtyCase) => one.specialty === "endodontics" && one.id !== null
+          && (one.status === "active" || one.status === "waiting")));
+        setPlanVisible(payload.planVisible);
+        setPlanItems(payload.planVisible ? payload.items : []);
+        referenceRead.current.cases = true; referenceRead.current.plan = payload.planVisible; setCaseUnavailable(false);
+      } catch {
+        if (!current()) return;
+        referenceRead.current.cases = false; referenceRead.current.plan = false; setCaseUnavailable(true);
+        setCases([]); setPlanItems([]); setPlanVisible(false);
+        setCaseError("تعذّر تحميل الحالات والخطة. هذا لا يعني عدم وجود خطة؛ أعد التحميل قبل فتح علاج أو ربط الخطة.");
+      }
+    };
+    // Ordinary case failures leave valid clinical documentation usable. Shared
+    // patient/session denial from either read retires both grants immediately.
+    await Promise.all([clinical(), caseReferences()]);
   }, [patientId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -293,7 +342,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   };
   // Lock synchronously, including case creation. A disabled button alone does not contain repeated events.
   const mutate = async (work: () => Promise<EndoTreatmentView>): Promise<EndoTreatmentView | null> => {
-    if (busyRef.current || !canWrite) return null;
+    if (busyRef.current || !mounted.current || !canWrite || !referenceRead.current.clinical) return null;
     busyRef.current = true;
     const ticket = ++generation.current;
     setBusy(true); setError(null); setNotice(null);
@@ -310,6 +359,8 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
       if (mounted.current && generation.current === ticket) {
         if (failure instanceof EndoRequestError && (failure.status === 401 || failure.status === 403)) {
           setTreatments(null); setCases([]); setPlanItems([]); setPlanVisible(false);
+          referenceRead.current.clinical = false; referenceRead.current.cases = false; referenceRead.current.plan = false;
+          setClinicalRead("unavailable"); setCaseUnavailable(true);
         }
         setError(failure instanceof TypeError ? "تعذّر الاتصال بالخادم. أعد المحاولة." : failure instanceof Error ? failure.message : "تعذّر الاتصال بالخادم.");
       }
@@ -329,6 +380,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const todayRecord = selected && openVisitId !== null ? selected.visits.find((visit) => visit.visitId === openVisitId) ?? null : null;
 
   const startForm = (treatment: EndoTreatmentView) => {
+    if (!referenceRead.current.clinical || !mounted.current) return;
     if (!discard()) return;
     setOpenForm(null); setAddendum(null); setClosing(null); setCrownLink({ crown: "", rct: "" });
     setSelectedId(treatment.id);
@@ -345,10 +397,11 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
     }
   };
 
-  if (!treatments) {
-    return <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
-      <p role={error ? "alert" : undefined}>{error ?? "جارٍ التحميل…"}</p>
-      {error ? <button type="button" onClick={() => void load()}>إعادة التحميل</button> : null}
+  if (clinicalRead !== "ready" || !treatments) {
+    return <div data-testid="endo-read-unavailable" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+      <p role={error ? "alert" : "status"}>{error ?? "جارٍ التحقق من علاج الجذور…"}</p>
+      {pendingDraft ? <p className="mt-2" data-testid="endo-read-retained-draft">بقيت المسودة لهذه الزيارة محفوظة في الشاشة؛ التعديل والحفظ متوقفان حتى نجاح إعادة التحميل.</p> : null}
+      <button type="button" data-testid="endo-reload" onClick={() => void load()} className="mt-2 min-h-11 rounded-lg border border-slate-200 px-3 py-2">إعادة التحميل</button>
     </div>;
   }
 
@@ -378,6 +431,10 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
         <button type="button" className="mr-2 underline" onClick={() => void load()}>تحديث البيانات مع إبقاء المسودة</button>
       </p> : null}
       {notice ? <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-sm text-emerald-800">{notice}</p> : null}
+      {caseUnavailable ? <p role={caseError ? "alert" : "status"} data-testid="endo-case-unavailable" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        {caseError ?? "جارٍ التحقق من الحالات والخطة؛ ربط الخطة وفتح علاج جديد متوقفان حتى اكتمال القراءة."}
+        <button type="button" data-testid="endo-reload" onClick={() => void load()} className="mt-2 block min-h-11 rounded-lg border border-amber-300 px-3 py-2">إعادة التحميل</button>
+      </p> : null}
 
       {/* ── الأسنان ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="أسنان علاج الجذور">
@@ -389,7 +446,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
           ) : null}
         </div>
 
-        {openForm ? (
+        {openForm && !caseUnavailable ? (
           <div className="mb-3 grid gap-2 rounded-xl border border-navy-100 bg-navy-50/40 p-2 sm:grid-cols-3">
             <label className={label}>السنّ (FDI)
               <select value={openForm.toothCode} onChange={(event) => setOpenForm({ ...openForm, toothCode: event.target.value })} className={field} data-testid="endo-tooth">
@@ -415,6 +472,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
             <div className="flex gap-2 sm:col-span-3">
               <button type="button" data-testid="endo-open-save" disabled={busy || !openForm.toothCode || (caseCreationUncertain && !openForm.caseId)}
                 onClick={async () => {
+                  if (!referenceRead.current.cases) return;
                   const opened = await mutate(async () => {
                     let caseId = openForm.caseId ? Number(openForm.caseId) : null;
                     if (caseId === null) {
@@ -443,7 +501,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
           </div>
         ) : null}
 
-        {caseUnavailable || caseCreationUncertain ? <p role="alert" className="text-xs text-amber-800">
+        {caseCreationUncertain ? <p role="alert" className="text-xs text-amber-800">
           تعذّر تأكيد الحالة. أعد تحميل الحالات واختر الحالة المحفوظة؛ لن تُنشأ حالة أخرى تلقائيًا. إن لم تظهر الحالة، تحقّق من تبويب الحالات وأعد التحميل حتى تتضح نتيجة الطلب.
           <button type="button" className="mr-2 underline" onClick={() => void load()}>إعادة التحميل</button>
         </p> : null}
@@ -728,6 +786,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
                     <button type="button" data-testid="endo-crown-link" disabled={busy || !crownLink.crown || !crownLink.rct}
                       className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold"
                       onClick={async () => {
+                        if (!referenceRead.current.cases || !referenceRead.current.plan) return;
                         if (await send(`/api/patients/${patientId}/endo/${selected.id}/crown`, "PATCH", {
                           crownRequired: true, crownPlanItemId: Number(crownLink.crown), rctPlanItemId: Number(crownLink.rct),
                         })) setCrownLink({ crown: "", rct: "" });
