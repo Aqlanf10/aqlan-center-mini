@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, parseAmount, type Balance, type Currency } from "@/lib/money";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -24,6 +24,7 @@ interface Service { id: number; name: string; category: string | null; priceMino
 interface InvoiceItem { id: number; description: string; quantity: number; unitPriceMinor: number; totalMinor: number }
 interface Invoice {
   id: number; invoiceNumber: string; status: "open" | "paid" | "cancelled";
+  patientId?: number;
   totalMinor: number; discountMinor: number; note: string | null; createdAt: string; items: InvoiceItem[];
   baseCurrency: Currency;
 }
@@ -62,6 +63,8 @@ interface Ledger {
   legacyBalanceArrangements?: LegacyArrangementView[];
   legacyOpeningPositions?: LegacyOpeningPosition[];
   legacyArrangementAccess?: { manage: boolean };
+  /** Server-owned, canonical evidence. Absence says nothing about settlement. */
+  installmentRecovery?: unknown;
 }
 
 const STATUS_LABEL: Record<Invoice["status"], string> = {
@@ -69,6 +72,163 @@ const STATUS_LABEL: Record<Invoice["status"], string> = {
 };
 
 const EMPTY_BALANCE: Balance = { billedMinor: 0, collectedMinor: 0, openingMinor: 0, dueMinor: 0 };
+
+type InvoiceRecoveryView =
+  | { kind: "recorded" | "unavailable" | "review" }
+  | { kind: "recovery"; remainingMinor: number; currency: Currency; accountCreditReview: boolean };
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const positiveId = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const nonnegativeMinor = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** The API's consumed wire contract, including existing optional/legacy fields.
+ * Do not coerce, drop rows, invent zero or cast an object into financial truth.
+ * Match db.ts toMinor/DTOs and the existing pure summary mappings: signed
+ * historical values and nullable references are preserved, not reclassified.
+ * Recovery evidence remains unknown and is checked independently per invoice. */
+const signedMinor = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
+const nullableText = (value: unknown): value is string | null => value === null || typeof value === "string";
+const nullableId = (value: unknown): value is number | null => value === null || signedMinor(value);
+const moneyFields = (value: Record<string, unknown>, keys: readonly string[]) => keys.every((key) => signedMinor(value[key]));
+function isInvoiceItem(value: unknown): value is InvoiceItem {
+  return record(value) && signedMinor(value.id) && typeof value.description === "string"
+    && signedMinor(value.quantity) && signedMinor(value.unitPriceMinor) && signedMinor(value.totalMinor);
+}
+function isInvoice(value: unknown): value is Invoice {
+  return record(value) && signedMinor(value.id) && typeof value.invoiceNumber === "string"
+    && (value.patientId === undefined || signedMinor(value.patientId))
+    && (value.status === "open" || value.status === "paid" || value.status === "cancelled")
+    && signedMinor(value.totalMinor) && signedMinor(value.discountMinor) && isCurrency(value.baseCurrency)
+    && nullableText(value.note) && typeof value.createdAt === "string"
+    && Array.isArray(value.items) && value.items.every(isInvoiceItem);
+}
+function isPayment(value: unknown): value is Payment {
+  return record(value) && signedMinor(value.id) && typeof value.receiptNumber === "string" && nullableId(value.invoiceId)
+    && (value.kind === "payment" || value.kind === "refund") && signedMinor(value.amountMinor)
+    && isCurrency(value.currency) && typeof value.exchangeRate === "number" && Number.isFinite(value.exchangeRate)
+    && signedMinor(value.baseAmountMinor) && typeof value.method === "string" && nullableText(value.note)
+    && typeof value.createdAt === "string" && (value.planId === undefined || nullableId(value.planId))
+    && (value.openingCurrency === undefined || value.openingCurrency === null || isCurrency(value.openingCurrency));
+}
+function isOpening(value: unknown): value is OpeningBalance {
+  return record(value) && signedMinor(value.patientId) && signedMinor(value.amountMinor)
+    && typeof value.asOfDate === "string" && nullableText(value.note)
+    && (value.currency === undefined || isCurrency(value.currency));
+}
+function isBalance(value: unknown): value is Balance {
+  return record(value) && moneyFields(value, ["billedMinor", "collectedMinor", "openingMinor", "dueMinor"]);
+}
+function isPlanSummary(value: unknown): value is PlanSummary {
+  if (!record(value) || !signedMinor(value.id) || typeof value.title !== "string"
+    || (value.status !== "active" && value.status !== "completed" && value.status !== "cancelled")
+    || !signedMinor(value.totalMinor) || typeof value.consented !== "boolean"
+    || (value.baseCurrency !== undefined && !isCurrency(value.baseCurrency))) return false;
+  const installments = value.installments;
+  if (installments !== null && (!record(installments)
+    || !moneyFields(installments, ["paidMinor", "remainingMinor", "overdueMinor", "nextDueAmountMinor"])
+    || !nullableText(installments.nextDueDate) || !signedMinor(installments.paidCount) || !signedMinor(installments.count))) return false;
+  const items = value.items;
+  return items === null || (record(items) && signedMinor(items.count) && signedMinor(items.doneCount)
+    && moneyFields(items, ["doneMinor", "remainingMinor"]));
+}
+function isLegacyOpening(value: unknown): value is LegacyOpeningPosition {
+  return record(value) && isCurrency(value.currency) && moneyFields(value, ["openingMinor", "settledMinor", "remainingMinor"]);
+}
+function isLegacyArrangement(value: unknown): value is LegacyArrangementView {
+  if (!record(value) || !signedMinor(value.id) || !isCurrency(value.currency)
+    || (value.cadence !== "per_visit" && value.cadence !== "monthly")
+    || !moneyFields(value, ["installmentMinor", "startingDueMinor"]) || !nullableText(value.firstDueDate)
+    || !nullableText(value.note) || !record(value.progress)) return false;
+  return moneyFields(value.progress, ["currentOpeningDueMinor", "paidSinceStartMinor", "arrangementRemainingMinor",
+    "suggestedMinor", "overdueMinor", "nextDueAmountMinor"])
+    && nullableText(value.progress.nextDueDate) && typeof value.progress.completed === "boolean";
+}
+function isLedgerRead(value: unknown): value is Ledger {
+  if (!record(value) || !Array.isArray(value.invoices) || !value.invoices.every(isInvoice)
+    || !Array.isArray(value.payments) || !value.payments.every(isPayment)
+    || !Array.isArray(value.plans) || !value.plans.every(isPlanSummary)
+    || (value.opening !== null && !isOpening(value.opening)) || !isBalance(value.balance)
+    || !isCurrency(value.baseCurrency)) return false;
+  if (value.openings !== undefined && (!Array.isArray(value.openings) || !value.openings.every(isOpening))) return false;
+  const balances = value.balances;
+  if (balances !== undefined && (!record(balances) || !CURRENCIES.every((currency) => isBalance(balances[currency])))) return false;
+  if (value.openingAccess !== undefined && (!record(value.openingAccess)
+    || typeof value.openingAccess.add !== "boolean" || typeof value.openingAccess.edit !== "boolean")) return false;
+  if (value.receiptRemaining !== undefined && (!record(value.receiptRemaining)
+    || !Object.values(value.receiptRemaining).every(signedMinor))) return false;
+  if (value.legacyBalanceArrangements !== undefined && (!Array.isArray(value.legacyBalanceArrangements)
+    || !value.legacyBalanceArrangements.every(isLegacyArrangement))) return false;
+  if (value.legacyOpeningPositions !== undefined && (!Array.isArray(value.legacyOpeningPositions)
+    || !value.legacyOpeningPositions.every(isLegacyOpening))) return false;
+  return value.legacyArrangementAccess === undefined || (record(value.legacyArrangementAccess)
+    && typeof value.legacyArrangementAccess.manage === "boolean");
+}
+
+/** This validates an existing read projection, never derives settlement from
+ * raw status, notes or the ledger's payment list. It authorizes no collection. */
+function invoiceRecoveryView(invoice: Invoice, patientId: number, evidence: unknown, ready: boolean): InvoiceRecoveryView {
+  if (invoice.status === "cancelled") return { kind: "recorded" };
+  if (invoice.status !== "open" && invoice.status !== "paid") return { kind: "unavailable" };
+  if (!ready) return { kind: "unavailable" };
+  if (evidence === undefined) return { kind: "recorded" };
+  if (!record(evidence) || !Array.isArray(evidence.recoveries) || !Array.isArray(evidence.reviews)) return { kind: "unavailable" };
+  const rows: unknown[] = [...evidence.recoveries, ...evidence.reviews];
+  // An unidentifiable entry could belong to this invoice; never silently drop it.
+  if (rows.some((row) => !record(row) || !positiveId(row.invoiceId))) return { kind: "unavailable" };
+  const recoveries = (evidence.recoveries as Record<string, unknown>[]).filter((row) => row.invoiceId === invoice.id);
+  const reviews = (evidence.reviews as Record<string, unknown>[]).filter((row) => row.invoiceId === invoice.id);
+  if (recoveries.length + reviews.length === 0) return { kind: "recorded" };
+  if (recoveries.length + reviews.length !== 1 || !positiveId(patientId)
+    || invoice.patientId !== patientId || !isCurrency(invoice.baseCurrency)
+    || !nonnegativeMinor(invoice.totalMinor) || !nonnegativeMinor(invoice.discountMinor)) return { kind: "unavailable" };
+  if (reviews.length === 1) {
+    const review = reviews[0];
+    return (review.planId === null || positiveId(review.planId)) && typeof review.reason === "string" && review.reason.trim().length > 0
+      ? { kind: "review" } : { kind: "unavailable" };
+  }
+  const recovery = recoveries[0];
+  if (recovery.kind !== "recoverable" || recovery.purpose !== "reversed-installment-recovery"
+    || recovery.patientId !== patientId || !positiveId(recovery.planId)
+    || !positiveId(recovery.originPaymentId) || !positiveId(recovery.creationAuditId)
+    || recovery.rawInvoiceStatus !== invoice.status || recovery.currency !== invoice.baseCurrency
+    || !positiveId(recovery.principalMinor) || recovery.principalMinor !== invoiceNet(invoice)
+    || !nonnegativeMinor(recovery.linkedNetPaidMinor) || !positiveId(recovery.remainingMinor)
+    || recovery.principalMinor - recovery.linkedNetPaidMinor !== recovery.remainingMinor
+    || typeof recovery.actualAccountDueMinor !== "number" || !Number.isSafeInteger(recovery.actualAccountDueMinor)
+    || !nonnegativeMinor(recovery.suggestedCashMinor)
+    || recovery.suggestedCashMinor !== Math.min(recovery.remainingMinor, Math.max(0, recovery.actualAccountDueMinor))
+    || typeof recovery.accountCreditReview !== "boolean"
+    || recovery.accountCreditReview !== (recovery.actualAccountDueMinor < recovery.remainingMinor)
+    || !Array.isArray(recovery.reversalPaymentIds) || recovery.reversalPaymentIds.length === 0
+    || !recovery.reversalPaymentIds.every(positiveId)
+    || new Set(recovery.reversalPaymentIds).size !== recovery.reversalPaymentIds.length) return { kind: "unavailable" };
+  return { kind: "recovery", remainingMinor: recovery.remainingMinor, currency: invoice.baseCurrency, accountCreditReview: recovery.accountCreditReview };
+}
+
+/** Actual invoice-row presentation, shared with focused markup regressions. */
+export function InvoiceSettlementStatus({ invoice, patientId, evidence, ready }: {
+  invoice: Invoice; patientId: number; evidence: unknown; ready: boolean;
+}) {
+  const view = invoiceRecoveryView(invoice, patientId, evidence, ready);
+  return (
+    <span role="group" aria-label={`حالة تسوية الفاتورة ${invoice.invoiceNumber}`}
+      className={view.kind === "recorded" ? undefined : "inline-block max-w-full align-top"}>
+      <span>{view.kind === "recorded" ? "" : "الحالة المسجلة: "}{STATUS_LABEL[invoice.status]}</span>
+      {view.kind === "recovery" ? (
+        <span className="mt-1 block rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+          <span className="block font-bold">متبقٍ مرتبط بالفاتورة بعد عكس السداد: {formatMoney(view.remainingMinor, view.currency)}</span>
+          <span className="block">{view.accountCreditReview
+            ? "المتبقي المرتبط بالفاتورة ليس مبلغًا للتحصيل؛ راجع رصيد الحساب بعملته"
+            : "هذا متبقٍ مرتبط بالفاتورة؛ رصيد الحساب بعملته هو المرجع للمستحق الحالي"}</span>
+        </span>
+      ) : view.kind === "review" ? (
+        <span className="mt-1 block font-bold text-amber-800">حالة السداد تحتاج مراجعة</span>
+      ) : view.kind === "unavailable" ? (
+        <span className="mt-1 block text-slate-500">تعذّر التحقق من حالة السداد؛ راجع رصيد الحساب بعملته</span>
+      ) : null}
+    </span>
+  );
+}
 
 /* (TD-05) أدوات عرض الأرصدة متعددة العملات. */
 function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }[] {
@@ -82,6 +242,14 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
 }
 
 export function PatientLedger({ patientId }: { patientId: number }) {
+  const session = useSession();
+  // A fresh patient/principal/permission owner cannot reuse another owner's read.
+  const scope = JSON.stringify([patientId, session]);
+  if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
+  return <PatientLedgerContent key={scope} patientId={patientId} />;
+}
+
+function PatientLedgerContent({ patientId }: { patientId: number }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -107,26 +275,49 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   const canAddOpening = ledger?.openingAccess?.add ?? admin;
   const canEditOpening = ledger?.openingAccess?.edit ?? admin;
 
+  const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
   const load = useCallback(async () => {
+    const lifetime = readRef.current;
+    if (!lifetime.active) return;
+    const generation = ++lifetime.generation;
+    lifetime.controller?.abort();
+    const controller = new AbortController(); lifetime.controller = controller;
+    const current = () => lifetime.active && lifetime.generation === generation && !controller.signal.aborted;
     setLoading(true);
     try {
-      const [ledgerResponse, servicesResponse] = await Promise.all([
-        fetch(`/api/patients/${patientId}/ledger`, { cache: "no-store" }),
-        fetch("/api/services", { cache: "no-store" }),
-      ]);
-      const payload = await ledgerResponse.json();
-      if (!ledgerResponse.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setLedger(payload as Ledger);
-      if (servicesResponse.ok) setServices(await servicesResponse.json());
+      // The optional catalogue must not delay a denied ledger response or retain
+      // old financial evidence while its headers/body are still pending.
+      void fetch("/api/services", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        if (!current() || !response.ok) return;
+        const nextServices: unknown = await response.json();
+        if (current() && Array.isArray(nextServices)) setServices(nextServices);
+      }).catch(() => {});
+      const ledgerResponse = await fetch(`/api/patients/${patientId}/ledger`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
+      // Retire denied data before awaiting an error body that may never arrive.
+      if (!ledgerResponse.ok) {
+        if (ledgerResponse.status === 401 || ledgerResponse.status === 403) setLedger(null);
+        throw new Error(ledgerResponse.status === 401 || ledgerResponse.status === 403
+          ? "غير مصرّح لك بعرض حساب المريض." : "تعذّر تحميل حساب المريض.");
+      }
+      const payload: unknown = await ledgerResponse.json();
+      if (!current()) return;
+      if (!isLedgerRead(payload)) throw new Error("تعذّر التحقق من بيانات حساب المريض.");
+      setLedger(payload);
       setError(null);
     } catch (loadError) {
+      if (!current()) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [patientId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const lifetime = readRef.current; lifetime.active = true;
+    void load();
+    return () => { lifetime.active = false; lifetime.generation++; lifetime.controller?.abort(); };
+  }, [load]);
 
   const send = useCallback(async (run: () => Promise<Response>) => {
     if (busy) return null;
@@ -149,11 +340,12 @@ export function PatientLedger({ patientId }: { patientId: number }) {
   if (loading && !ledger) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>;
   }
+  if (!ledger && error) return <p role="alert" aria-label="خطأ حساب المريض" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>;
 
   return (
     <div>
       {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p role="alert" aria-label="خطأ حساب المريض" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
       {notice ? (
         <p role="status" className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800">{notice}</p>
@@ -392,7 +584,9 @@ export function PatientLedger({ patientId }: { patientId: number }) {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-extrabold">{invoice.invoiceNumber}</span>
                   <span className="text-[11px] text-slate-500">
-                    {friendlyDateLong(invoice.createdAt.slice(0, 10))} · {STATUS_LABEL[invoice.status]}
+                    {friendlyDateLong(invoice.createdAt.slice(0, 10))} · <InvoiceSettlementStatus invoice={invoice}
+                      patientId={patientId} evidence={ledger.installmentRecovery}
+                      ready={!loading && !error && ledger.invoices.filter((row) => row.id === invoice.id).length === 1} />
                   </span>
                 </div>
                 <ul className="mt-2 space-y-0.5">
