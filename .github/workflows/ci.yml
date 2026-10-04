@@ -347,6 +347,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic patient/Today owner fixtures only. Never upload the
+      # directory, real patient records, traces, HAR, cookies or browser state.
+      - name: Upload clinical visit owner UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-visit-owner-ui
+          path: |
+            .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-pending-390.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-ready-390.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-1280.png
+            .settings-ui-artifacts/clinical-visit-owner-stay-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic read-only carry-forward screens, never real ledger data.
       - name: Upload accounting carry-forward UI screenshots
         if: always()
