@@ -4,12 +4,11 @@ import {
   CLINIC_TIME_ZONE,
   getSettings,
   listAppointmentsByDate,
-  listLabOrders,
+  labCounts,
   listVisitsByDate,
   todayPlannedVisits,
 } from "@/lib/db";
 import { dayReport, tomorrowLoad } from "@/lib/report";
-import { labSummary } from "@/lib/lab";
 import { addDays, clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
@@ -30,11 +29,11 @@ export async function GET(request: Request) {
   try {
     const settings = await getSettings();
     const chairs = chairCount(settings);
-    const [visits, appointments, nextDay, labOrders, plannedToday] = await Promise.all([
+    const [visits, appointments, nextDay, lab, plannedToday] = await Promise.all([
       listVisitsByDate(date),
       listAppointmentsByDate(date),
       listAppointmentsByDate(next),
-      listLabOrders(),
+      labCounts({ mode: "workflow", today }),
       /*
        * لوحة اليوم (§٢٦): ما المخطَّط لهذا اليوم — زيارات مخطَّطة مجدولة، وبنود
        * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.
@@ -57,7 +56,7 @@ export async function GET(request: Request) {
         nextDay, next, chairs,
         settings["clinic.day_start"], settings["clinic.day_end"],
       ),
-      lab: labSummary(labOrders, today),
+      lab,
       chairs,
       plannedToday,
     });
