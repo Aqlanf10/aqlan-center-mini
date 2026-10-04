@@ -156,7 +156,22 @@ describe("(REF-1) internal referral journey", () => {
   });
 
   it("the database refuses a workflow state that contradicts the legacy status", async () => {
-    await expect(q(`UPDATE patient_referrals SET workflow_state = 'scheduled' WHERE id = $1`, [referralId])).rejects.toThrow();
+    const [constraintPatient] = await q<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ('P-REF-CONSTRAINT', 'مريض قيد الإحالة') RETURNING id`);
+    const created = await createInternalReferral({
+      patientId: constraintPatient.id, doctorPartyId: orthodontist, toPartyId: endodontist,
+      toSpecialty: "endodontics", reason: "قيد توافق الحالة", teeth: "21", urgency: "routine",
+      caseId: null, blocksCaseId: null, planItemId: null, requestedServiceId: null, actor: "constraint-test",
+    });
+    if (!created.ok) throw new Error(created.reason);
+    const constraintId = created.referral.id;
+    // Seed an allowed coupled state independently of the preceding lifecycle.
+    await q(`UPDATE patient_referrals SET status = 'completed', workflow_state = 'completed' WHERE id = $1`, [constraintId]);
+    const state = () => q(`SELECT status, workflow_state FROM patient_referrals WHERE id = $1`, [constraintId]);
+    expect(await state()).toEqual([{ status: "completed", workflow_state: "completed" }]);
+    await expect(q(`UPDATE patient_referrals SET workflow_state = 'scheduled' WHERE id = $1`, [constraintId]))
+      .rejects.toMatchObject({ code: "23514", constraint: "patient_referrals_workflow_state_check" });
+    expect(await state()).toEqual([{ status: "completed", workflow_state: "completed" }]);
     await expect(q(
       `INSERT INTO patient_referrals (patient_id, to_name, to_specialty, reason, created_by, kind) VALUES ($1, 'x', 'other', 'سبب', 'x', 'internal')`,
       [patientId])).rejects.toThrow();
