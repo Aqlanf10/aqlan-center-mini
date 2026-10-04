@@ -74,7 +74,13 @@ describe("authorized raw service category creation to actual commission report",
       const earnedMinor = basis === "collected_cash" ? percent * 50 : percent * 100;
       expect(lines[0]).toMatchObject({ category, percent, ruleSource: rule, basis, accruedMinor: percent * 100, earnedMinor });
       for (const field of [lines[0].percent, lines[0].accruedMinor, lines[0].earnedMinor]) expect(Number.isFinite(field)).toBe(true);
-      expect(body.rows.find(row => row.doctorId === party.id)).toMatchObject({ accruedMinor: percent * 100, earnedMinor });
+      const doctorRows = body.rows.filter(row => row.doctorId === party.id);
+      // The existing summary omits all-zero currencies; detail still records
+      // the explicit zero policy and its exact finite amounts above.
+      if (percent === 0) expect(doctorRows).toEqual([]);
+      else expect(doctorRows).toHaveLength(1);
+      expect(doctorRows.reduce((total, row) => total + row.accruedMinor, 0)).toBe(percent * 100);
+      expect(doctorRows.reduce((total, row) => total + row.earnedMinor, 0)).toBe(earnedMinor);
       expect(await snapshot()).toEqual(before);
       expect(before[0].facts.config_text).toBe(storedConfig);
     } finally {
