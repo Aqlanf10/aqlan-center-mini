@@ -73,7 +73,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       details: { القراءة: saved.id, الزيارة: saved.visitId },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(saved, { status: 201 });
+    // recordVitals commits this exact validated value in the same transaction;
+    // it does not normalize it. Omission must not imply an alert removal.
+    return NextResponse.json({ ...saved, ...(medicalAlert !== undefined ? { medicalAlert } : {}) }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ العلامات الحيوية." }, { status: 500 });
   }

@@ -60,7 +60,7 @@ describe("actual commission category editor and unchanged raw-key billing contra
   });
   it("reports only the explicitly edited raw key, preserving a legacy key and special service priority", () => {
     const config = fixture(); const v = view(config);
-    (v.input("نسبة فئة rct").props.onChange as (event: unknown) => void)({ target: { value: "55" } });
+    (v.input("نسبة فئة rct").props.onInput as (event: unknown) => void)({ currentTarget: { value: "55" } });
     expect(v.onCategoryChange).toHaveBeenCalledExactlyOnceWith("rct", 55);
     const saved = { ...config, categoryRates: { ...config.categoryRates, rct: 55 } };
     expect(resolveDoctorEffectivePolicy(saved, "2026-10-04", "rct").percent).toBe(55);
@@ -73,7 +73,7 @@ describe("actual commission category editor and unchanged raw-key billing contra
     const config = fixture(); delete config.categoryRates.rct;
     expect(resolveDoctorEffectivePolicy(config, "2026-10-04", "rct")).toMatchObject({ percent: 17, matchedRule: "default" });
     const v = view(config);
-    (v.input("النسبة العامة للفئات").props.onChange as (event: unknown) => void)({ target: { value: "0" } });
+    (v.input("النسبة العامة للفئات").props.onInput as (event: unknown) => void)({ currentTarget: { value: "0" } });
     expect(v.onDefaultPercentChange).toHaveBeenCalledExactlyOnceWith(0);
     const updated = { ...config, defaultPercent: 0 };
     expect(view(updated).input("نسبة فئة rct").props.value).toBe(0);
@@ -84,10 +84,21 @@ describe("actual commission category editor and unchanged raw-key billing contra
     const v = view();
     for (const label of ["نسبة فئة rct", "النسبة العامة للفئات"]) {
       const input = v.input(label); expect(input.props).toMatchObject({ step: "any", min: 0, max: 100 });
-      (input.props.onChange as (event: unknown) => void)({ target: { value: String(value) } });
+      (input.props.onInput as (event: unknown) => void)({ currentTarget: { value: String(value) } });
     }
     expect(v.onCategoryChange).toHaveBeenCalledExactlyOnceWith("rct", value);
     expect(v.onDefaultPercentChange).toHaveBeenCalledExactlyOnceWith(value);
+  });
+
+  it("records a native same-value zero replacement as an explicit category choice", () => {
+    const config = fixture(0); delete config.categoryRates.rct;
+    const v = view(config);
+    const input = v.input("نسبة فئة rct");
+    expect(input.props.value).toBe(0);
+    expect(Object.hasOwn(config.categoryRates, "rct")).toBe(false);
+    expect(v.onCategoryChange).not.toHaveBeenCalled();
+    (input.props.onInput as (event: unknown) => void)({ currentTarget: { value: "0" } });
+    expect(v.onCategoryChange).toHaveBeenCalledExactlyOnceWith("rct", 0);
   });
 
 });

@@ -9,7 +9,10 @@ type Props = {
   onDefaultPercentChange: (percent: number) => void;
 };
 
-/** Display raw billing keys. Merely displaying an inherited rate never creates an override. */
+/** Display raw billing keys. Merely displaying an inherited rate never creates an override.
+ * Native input records a deliberate replacement even when its number is unchanged;
+ * React onChange filters same-value replacements (for example inherited 0 → explicit 0).
+ */
 export function CommissionCategoryEditor({ config, services, onCategoryChange, onDefaultPercentChange }: Props) {
   const canonical = Object.entries(CATEGORY_LABEL);
   const canonicalKeys = new Set(canonical.map(([key]) => key));
@@ -32,7 +35,7 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
           <input
             aria-label={`نسبة فئة ${key}`}
             type="number" step="any" min={0} max={100} value={value}
-            onChange={(event) => onCategoryChange(key, percent(event.target.value))}
+            onInput={(event) => onCategoryChange(key, percent(event.currentTarget.value))}
             className="min-h-11 w-16 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
           />
           <span className="text-[11px] text-slate-400">%</span>
@@ -49,7 +52,7 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
         <span className="text-sm font-bold text-slate-800">النسبة العامة للمسودة، للفئات بلا نسبة محددة</span>
         <span className="flex shrink-0 items-center gap-1.5">
           <input aria-label="النسبة العامة للفئات" type="number" step="any" min={0} max={100} value={config.defaultPercent}
-            onChange={(event) => onDefaultPercentChange(percent(event.target.value))}
+            onInput={(event) => onDefaultPercentChange(percent(event.currentTarget.value))}
             className="min-h-11 w-16 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" />
           <span className="text-[11px] text-slate-400">%</span>
         </span>

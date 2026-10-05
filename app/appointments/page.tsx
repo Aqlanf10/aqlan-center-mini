@@ -645,7 +645,7 @@ export default function AppointmentsPage() {
 
       {/* شريط الفلترة والبحث في جدول اليوم */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="min-w-0 max-w-full flex flex-wrap items-center gap-1.5">
           {["all", "booked", "arrived", "done", "no_show"].map((st) => {
             const count = st === "all" ? items.length : items.filter((i) => i.status === st).length;
             const isSelected = statusFilter === st;
@@ -690,7 +690,7 @@ export default function AppointmentsPage() {
             <select
               value={doctorFilter}
               onChange={(e) => setDoctorFilter(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-navy-900 outline-none focus:border-navy-800"
+              className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-navy-900 outline-none focus:border-navy-800"
             >
               <option value="all">👨‍⚕️ جميع الأطباء</option>
               {doctors.map((d) => (

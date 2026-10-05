@@ -102,7 +102,8 @@ afterEach(() => {
 const saveLabel = "حفظ التغييرات والصلاحيات";
 function click(node: Element) { return (node.props.onClick as () => void | Promise<void>)(); }
 function change(node: Element, value: string | boolean) {
-  (node.props.onChange as (event: unknown) => void)({ target: typeof value === "boolean" ? { checked: value } : { value } });
+  const target = typeof value === "boolean" ? { checked: value } : { value };
+  ((node.props.onInput ?? node.props.onChange) as (event: unknown) => void)({ target, currentTarget: target });
 }
 function find(predicate: (node: Element) => boolean) {
   const node = nodes(render()).find(predicate);
@@ -166,6 +167,7 @@ describe("actual doctor editor financial intent", () => {
   it.each([0, 12.345, 30])("keeps explicit general %s, including same-value intent, without precision rounding", async value => {
     await ready(); open(); finance(); const input = percentInput();
     expect(input.props).toMatchObject({ step: "any", min: 0, max: 100 });
+    expect(input.props.onInput).toBeTypeOf("function");
     change(input, String(value)); await click(button(saveLabel)); await ready();
     expect(writes).toHaveLength(1); expect(sent()).toMatchObject({ defaultPercent: value });
     expect(Object.hasOwn(writes[0].body, "commissionPercent")).toBe(false);

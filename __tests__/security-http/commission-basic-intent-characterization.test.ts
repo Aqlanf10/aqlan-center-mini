@@ -121,7 +121,6 @@ describe("actual Basic omission and explicit financial Save", () => {
       const beforeFinancial = await f.snapshot();
       expect(beforeFinancial.lines.find(line => line.invoiceId === stillOrdinary)).toMatchObject({ percent: 20, earnedMinor: 2000 });
       await u.open(); const input = await finance(u.page); expect(await input.getAttribute("step")).toBe("any");
-      if (percent === 30) await input.fill("31"); // Deliberately return to the displayed value through real React input events.
       await input.fill(String(percent)); expect(await input.evaluate(element => (element as HTMLInputElement).checkValidity())).toBe(true);
       await save(u.page, f.userId); expect(u.writes).toHaveLength(2);
       expect(u.writes[1].body.commissionConfig).toMatchObject({ defaultPercent: percent });

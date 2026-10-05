@@ -2449,15 +2449,13 @@ export default function UsersAndDoctorsPage() {
                           min={0}
                           max={100}
                           value={editForm.commissionConfig.defaultPercent}
-                          onChange={(e) =>
+                          onInput={(event) => {
+                            const defaultPercent = Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0));
                             setEditForm((c) => ({
                               ...c,
-                              commissionConfig: {
-                                ...c.commissionConfig,
-                                defaultPercent: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
-                              },
-                            }))
-                          }
+                              commissionConfig: { ...c.commissionConfig, defaultPercent },
+                            }));
+                          }}
                           className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-black text-navy-900"
                         />
                         <span className="text-xs text-slate-600">% من الإيراد الصافي</span>
@@ -2824,10 +2822,10 @@ export default function UsersAndDoctorsPage() {
                                           min={0}
                                           max={100}
                                           value={rate.percent}
-                                          onChange={(e) =>
+                                          onInput={(event) =>
                                             handleUpdateSpecialRatePercent(
                                               rate.id,
-                                              Number(e.target.value) || 0,
+                                              Number(event.currentTarget.value) || 0,
                                             )
                                           }
                                           className="w-12 bg-transparent text-center font-black text-emerald-950 focus:outline-none"

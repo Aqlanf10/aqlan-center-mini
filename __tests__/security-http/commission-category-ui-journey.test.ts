@@ -59,6 +59,8 @@ describe("actual prospective commission category editor", () => {
         expect((await response).status()).toBe(200);
         await region.waitFor({ state: "hidden" });
       };
+      const untouchedFilling = region.getByRole("spinbutton", { name: "نسبة فئة filling", exact: true });
+      await untouchedFilling.focus(); await untouchedFilling.press("Tab");
       await save();
       expect(writes).toHaveLength(1);
       for (const key of ["commissionConfig", "commissionPercent", "clearCommissionConfig"]) expect(Object.hasOwn(writes[0].body, key)).toBe(false);
@@ -78,7 +80,11 @@ describe("actual prospective commission category editor", () => {
       expect(await region.getByText("علاج الجذور والعصب", { exact: true }).count()).toBe(1);
       const rct = region.getByRole("spinbutton", { name: "نسبة فئة rct", exact: true });
       const filling = region.getByRole("spinbutton", { name: "نسبة فئة filling", exact: true });
-      await rct.fill("12.345"); await filling.fill("0");
+      await rct.fill("12.345");
+      // At390 the inherited value is already0. Replacing it with0 is still an
+      // explicit user input; keep this proof free of an intermediate value.
+      await filling.fill("0");
+      await filling.locator("..").locator("..").getByText("نسبة محددة في المسودة", { exact: false }).waitFor();
       for (const input of await region.getByRole("spinbutton").all()) {
         expect(await input.getAttribute("step")).toBe("any");
         expect(await input.evaluate(element => (element as HTMLInputElement).checkValidity())).toBe(true);
