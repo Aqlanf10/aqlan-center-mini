@@ -466,6 +466,9 @@ export function parseDoctorCommissionConfig(raw: unknown, defaultPercentFallback
         serviceRatesMap[k] = Math.max(0, Math.min(100, v));
       }
     }
+    // Keep legacy map-only policies distinct from an explicit modern []:
+    // synthesizing that array would erase this map on the next parse.
+    delete base.customServiceRates;
     base.serviceRates = serviceRatesMap;
   }
   if (typeof parsed.fixedAmountPerVisitMinor === "number" && parsed.fixedAmountPerVisitMinor >= 0) {
