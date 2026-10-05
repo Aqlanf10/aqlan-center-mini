@@ -58,12 +58,17 @@ describe("ortho withheld-image presentation", () => {
     expect(html).toContain("كاميرا الجلسة");
   });
 
-  it.each([true, undefined])("retains historical image checks for visible/legacy payloads (%s)", (photosVisible) => {
-    const html = render({ ...base, photosVisible });
-    expect(html).not.toContain("محجوبة حسب صلاحياتك");
-    expect(html).not.toContain("ناقص:");
-    const empty = render({ ...base, photosVisible, adjustments: [] });
-    expect(empty).toContain("ناقص:");
-    expect(empty).not.toContain("محجوبة حسب صلاحياتك");
+  it.each([true, undefined])("keeps standalone pre-activation history informationally unknown (%s)", (photosVisible) => {
+    // Static rendering does not run the existing PR250 layout activation. Neither
+    // a supplied album nor an empty array is a current authorized read here.
+    for (const adjustments of [base.adjustments, []]) {
+      const html = render({ ...base, photosVisible, adjustments });
+      expect(html).not.toContain("محجوبة حسب صلاحياتك");
+      expect(html).toContain('data-testid="ortho-photo-history-unknown"');
+      expect(html).toContain("لا يعني ذلك عدم وجود صور");
+      expect(html).not.toContain("ناقص:");
+      expect(html).toContain("ما نُفّذ");
+      expect(html).toContain("كاميرا الجلسة");
+    }
   });
 });

@@ -161,6 +161,116 @@ export interface FullSetInput {
   capturedViews: PhotoView[];
 }
 
+
+/** A complete saved eight-view set, with its recorded provenance. */
+export interface SavedFullPhotoSet {
+  adjustmentId: number;
+  stage: PhotoStage;
+  takenOn: string;
+  /** One persisted document per required view, in FULL_SET_VIEWS order. */
+  documentIds: number[];
+}
+
+export type SavedFullPhotoSetHistory =
+  | { status: "ready"; latest: SavedFullPhotoSet | null }
+  | { status: "unknown"; reason: "visibility" | "metadata"; latest: null };
+
+const photoRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const photoId = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
+
+function photoCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  if (value.startsWith("0000-")) return false;
+  // Same real-calendar round-trip contract as waiting-list's isRealDate.
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Read evidence from the current, authorized Ortho adjustment projection only.
+ * A parent case/array is not evidence of each photo's identity: the canonical
+ * endpoint supplies patientId, orthoCaseId, adjustmentId and removedAt as well.
+ *
+ * Never join different adjustments, stages or recorded capture dates. Missing
+ * capture dates are unknown; doneOn is not silently relabelled as takenOn.
+ * Future-dated evidence relative to explicit clinic today is unknown. A valid
+ * later historical session/capture cannot establish history for a backdated form.
+ * Unclassified/legacy metadata remains unknown, not an empty/healthy history.
+ *
+ * This is an informational derivation, not a sign-off or photography gate.
+ * Queued files and upload acknowledgements are deliberately not inputs. Only
+ * persisted documents returned by a fresh read can establish a saved full set.
+ * The caller must retire stale/denied reads and check status before passing
+ * latest?.takenOn to fullPhotoSetCheck; do not coalesce unknown into null.
+ */
+export function savedFullPhotoSetHistory(input: {
+  patientId: number;
+  orthoCaseId: number;
+  photosVisible?: boolean;
+  /** Explicit current clinic date; no hidden clock is read by this helper. */
+  today: string;
+  /** Date of the form/session whose prior saved history is being assessed. */
+  asOfDate: string;
+  adjustments: unknown;
+}): SavedFullPhotoSetHistory {
+  const unknown = (): SavedFullPhotoSetHistory => ({ status: "unknown", reason: "metadata", latest: null });
+  if (input.photosVisible !== true) return { status: "unknown", reason: "visibility", latest: null };
+  if (!photoId(input.patientId) || !photoId(input.orthoCaseId)
+    || !photoCalendarDate(input.today) || !photoCalendarDate(input.asOfDate)
+    || input.asOfDate > input.today || !Array.isArray(input.adjustments)) return unknown();
+
+  const adjustmentIds = new Set<number>();
+  const documentIds = new Set<number>();
+  let latest: SavedFullPhotoSet | null = null;
+  for (const adjustment of input.adjustments) {
+    if (!photoRecord(adjustment) || !photoId(adjustment.id) || adjustmentIds.has(adjustment.id)
+      || !photoCalendarDate(adjustment.doneOn) || adjustment.doneOn > input.today
+      || !Array.isArray(adjustment.photos)) return unknown();
+    adjustmentIds.add(adjustment.id);
+    const groups = new Map<string, { stage: PhotoStage; takenOn: string; views: Map<PhotoView, number> }>();
+    for (const photo of adjustment.photos) {
+      if (!photoRecord(photo) || !photoId(photo.id) || documentIds.has(photo.id)
+        || typeof photo.isImage !== "boolean"
+        || !(photo.removedAt === null || (typeof photo.removedAt === "string"
+          && photoCalendarDate(photo.removedAt.slice(0, 10)) && Number.isFinite(Date.parse(photo.removedAt))))) return unknown();
+      documentIds.add(photo.id);
+      // Known non-photo and retired documents are not evidence of a current set.
+      if (!photo.isImage || photo.removedAt !== null || photo.photoStage === "archived") continue;
+      if (photo.patientId !== input.patientId || photo.orthoCaseId !== input.orthoCaseId
+        || photo.adjustmentId !== adjustment.id || !isPhotoStage(photo.photoStage)
+        || !Object.hasOwn(PHOTO_STAGE_LABEL, photo.photoStage) || !isPhotoView(photo.photoView)
+        || !photoCalendarDate(photo.takenOn) || photo.takenOn > input.today) return unknown();
+      if (adjustment.doneOn > input.asOfDate || photo.takenOn > input.asOfDate
+        || !FULL_SET_VIEWS.includes(photo.photoView)) continue;
+
+      const key = `${photo.photoStage}:${photo.takenOn}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { stage: photo.photoStage, takenOn: photo.takenOn, views: new Map() };
+        groups.set(key, group);
+      }
+      const previous = group.views.get(photo.photoView);
+      // Duplicate views never replace another required view; tie-break is stable.
+      if (previous === undefined || photo.id < previous) group.views.set(photo.photoView, photo.id);
+    }
+
+    for (const group of groups.values()) {
+      if (!FULL_SET_VIEWS.every(view => group.views.has(view))) continue;
+      const candidate: SavedFullPhotoSet = {
+        adjustmentId: adjustment.id, stage: group.stage, takenOn: group.takenOn,
+        documentIds: FULL_SET_VIEWS.map(view => group.views.get(view)!),
+      };
+      if (!latest || candidate.takenOn > latest.takenOn
+        || (candidate.takenOn === latest.takenOn && (candidate.adjustmentId > latest.adjustmentId
+          || (candidate.adjustmentId === latest.adjustmentId
+            && PHOTO_STAGE_ORDER.indexOf(candidate.stage) > PHOTO_STAGE_ORDER.indexOf(latest.stage))))) latest = candidate;
+    }
+  }
+  return { status: "ready", latest };
+}
+
 const MONTH_DAYS = 30.44;
 
 /**
