@@ -15,7 +15,7 @@ type Owner = {
 const hooks = vi.hoisted(() => ({
   current: null as Owner | null, changed: false, retiredWrites: 0,
   layout: [] as Array<() => void>, passive: [] as Array<() => void>,
-  session: null as SessionInfo | null,
+  session: null as SessionInfo | null, contexts: new Map<unknown, unknown>(),
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
@@ -43,6 +43,9 @@ vi.mock("react", async (original) => {
     });
   };
   return { ...react,
+    createContext: (initial: unknown) => { const context = { initial }; return Object.assign(context, { Provider: context }); },
+    useContext: (context: { initial: unknown }) => hooks.contexts.has(context) ? hooks.contexts.get(context) : context.initial,
+
     useState: (initial: unknown) => {
       const scope = owner(); const index = scope.cursor++;
       if (!(index in scope.values)) scope.values[index] = typeof initial === "function" ? initial() : initial;
@@ -136,12 +139,21 @@ function expand(node: ReactNode, path: string, scopedChild = false): ReactNode {
   if (!node || typeof node !== "object" || !("props" in node)) return node;
   const element = node as Element;
   const identity = `${path}:${String(element.key ?? "")}`;
+  if (element.type && typeof element.type === "object" && "initial" in element.type) {
+    const prior = hooks.contexts.get(element.type); const had = hooks.contexts.has(element.type);
+    hooks.contexts.set(element.type, element.props.value);
+    const children = expand(element.props.children as ReactNode, `${identity}/provider`, true);
+    if (had) hooks.contexts.set(element.type, prior); else hooks.contexts.delete(element.type);
+    return children;
+  }
   if (typeof element.type === "function") {
     const selected = element.type === PatientOrtho || element.type === LegacyOnboardingChecklist || element.type === OrthoPackageLink;
     if (!selected && !scopedChild) return element;
     if (!componentIds.has(element.type)) componentIds.set(element.type, componentIds.size);
     const ownerPath = `${identity}/component-${componentIds.get(element.type)}`;
-    return expand(execute(element.type as Component, element.props, ownerPath), `${ownerPath}/result`, true);
+    const result = execute(element.type as Component, element.props, ownerPath);
+    if (element.type.name === "PatientOrthoWorkspace") parentTree = result;
+    return expand(result, `${ownerPath}/result`, true);
   }
   return { ...element, props: { ...element.props, children: expand(element.props.children as ReactNode, `${identity}/children`) } };
 }
@@ -206,7 +218,7 @@ beforeEach(() => {
   hooks.session = { username: "synthetic-a", role: "doctor", permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } };
   patientId = 19; caseRow = fixture(); fetchMock.mockReset();
   classifierRead = async () => response(classification(caseRow.planId !== null, caseRow.id));
-  casesRead = async () => response({ cases: [caseRow] });
+  casesRead = async (id) => response({ cases: [{ ...caseRow, patientId: id }] });
   plansRead = async (id) => response(plans(id));
   patch = async ({ planId }) => { caseRow = { ...caseRow, planId }; return response({ ok: true }); };
   fetchMock.mockImplementation(async (url, init) => {
@@ -216,7 +228,7 @@ beforeEach(() => {
     if (legacy) return classifierRead(Number(legacy[1]));
     if (url.startsWith("/api/ortho?patientId=")) return casesRead(Number(url.split("=")[1]));
     if (url.startsWith("/api/plans?patientId=")) return plansRead(Number(url.split("=")[1]));
-    if (/^\/api\/patients\/\d+$/.test(url)) return response({ patient: { fullName: "Synthetic patient", phone: null } });
+    if (/^\/api\/patients\/\d+$/.test(url)) return response({ patient: { id: Number(url.split("/").at(-1)), fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -254,21 +266,30 @@ describe("actual orthodontic parent, checklist and package composition", () => {
     expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا اتفاق مالي مربوط بالحالة" : "✓ باقة تقويم");
   });
 
-  it.each([51, null])("refreshes a confirmed write with unchanged planId=%s while the cases reload stalls and fails", async (initialPlan) => {
+  it.each([51, null])("withdraws parent references after a confirmed plan transition while the case reload stalls/fails, then restores the canonical classifier (%s)", async (initialPlan) => {
     caseRow = fixture({ planId: initialPlan }); await mount();
     const before = checklistProps(); const casesPending = deferred<MockResponse>(); const classifierPending = deferred<MockResponse>();
     casesRead = () => casesPending.promise; classifierRead = () => classifierPending.promise;
-    changeAgreement(initialPlan === null ? 51 : null); await flush(); unknown();
+    const next = initialPlan === null ? 51 : null;
+    changeAgreement(next); await flush();
+    // A saved link is a confirmed mutation, not a grant to show an old case.
+    expect(checklist()).toBeUndefined(); expect(section(PACKAGE_LABEL)).toBeUndefined(); unknown(render());
+    expect(classifierCalls()).toHaveLength(1); expect(writes()).toHaveLength(1);
+    casesPending.resolve(response({ message: "Synthetic cases unavailable" }, 503)); await flush();
+    expect(text(render())).toContain("تعذّر تحميل حالات التقويم");
+    expect(checklist()).toBeUndefined(); expect(section(PACKAGE_LABEL)).toBeUndefined(); unknown(render());
+    casesRead = async (id) => response({ cases: [{ ...caseRow, patientId: id }] });
+    click(button("إعادة تحميل كابينة التقويم")); await flush(); unknown();
     const after = checklistProps();
-    expect(after.planId).toBe(initialPlan); expect(after.caseId).toBe(before.caseId);
+    expect(after.planId).toBe(next); expect(after.caseId).toBe(before.caseId);
     expect(after.refreshRevision).toBe(Number(before.refreshRevision) + 1);
     expect(classifierCalls()).toHaveLength(2);
-    classifierPending.resolve(response(classification(initialPlan === null))); await flush();
-    expect(text(checklist())).toContain(initialPlan === null ? INCLUDED : OUTSIDE);
-    casesPending.resolve(response({ message: "Synthetic cases unavailable" }, 503)); await flush();
-    expect(text(render())).toContain("Synthetic cases unavailable");
-    expect(text(checklist())).toContain(initialPlan === null ? INCLUDED : OUTSIDE);
-    expect(classifierCalls()).toHaveLength(2); expect(writes()).toHaveLength(1);
+    classifierPending.resolve(response(classification(next !== null))); await flush();
+    expect(text(checklist())).toContain(next === null ? OUTSIDE : INCLUDED);
+    expect(text(checklist())).not.toContain(next === null ? INCLUDED : OUTSIDE);
+    expect(text(section(PACKAGE_LABEL))).toContain(next === null ? "لا اتفاق مالي مربوط بالحالة" : "✓ باقة تقويم");
+    expect(writes()).toEqual([["/api/ortho/41", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ planId: next }) }]]);
   });
 
   it("does not invalidate the classifier for an unsuccessful package mutation", async () => {
@@ -290,7 +311,7 @@ describe("actual orthodontic parent, checklist and package composition", () => {
 
 describe("classifier failures and bounded retry", () => {
   it.each([401, 403, 503])("retires old labels on confirmed refresh HTTP %s before reading an error body", async (status) => {
-    await mount(); casesRead = async () => response({}, 503);
+    await mount();
     const body = deferred<unknown>(); const json = vi.fn(() => body.promise);
     classifierRead = async () => ({ ...response(null, status), json });
     changeAgreement(null); await flush(); unknown(); expect(json).not.toHaveBeenCalled();
@@ -306,7 +327,7 @@ describe("classifier failures and bounded retry", () => {
   });
 
   it.each(["fetch", "body"])("retires labels after a %s failure and retries only the canonical GET", async (stage) => {
-    await mount(); casesRead = async () => response({}, 503);
+    await mount();
     classifierRead = stage === "fetch"
       ? async () => { throw new Error("Synthetic offline"); }
       : async () => ({ ...response(null), json: async () => { throw new Error("Synthetic malformed JSON"); } });
@@ -389,7 +410,7 @@ describe("classifier scope and stale completion retirement", () => {
     await mount(); expect(text(checklist())).toContain(INCLUDED);
     const original = hooks.session; const staleButton = button("فكّ الربط", section(PACKAGE_LABEL));
     const old = deferred<MockResponse>(); classifierRead = () => old.promise;
-    casesRead = async () => response({}, 503); changeAgreement(null); await flush(); unknown();
+    changeAgreement(null); await flush(); unknown();
     const before = classifierCalls().length; const signal = classifierCalls()[before - 1][1]?.signal as AbortSignal;
     classifierRead = async () => response({}, 403);
     if (change === "patient") patientId = 20;

@@ -5,11 +5,27 @@ import { wiresFor } from "../lib/ortho";
 
 // Exercise the actual standalone form's state and submit handlers with synthetic data.
 // Peripheral components are stubbed; no route, database, browser, or real network runs.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+const hooks = vi.hoisted(() => ({
+  values: [] as unknown[], cursor: 0, memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
+  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
+}));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return {
     ...react,
+    useContext: () => null,
+    useMemo: (compute: () => unknown, deps?: readonly unknown[]) => {
+      const index = hooks.cursor++; const before = hooks.memos.get(index);
+      if (before && deps && before.deps && deps.length === before.deps.length && deps.every((value, at) => Object.is(value, before.deps![at]))) return before.value;
+      const value = compute(); hooks.memos.set(index, { value, deps }); return value;
+    },
+    useLayoutEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+      const index = hooks.cursor++; const before = hooks.effects.get(index);
+      if (before && deps && before.deps && deps.length === before.deps.length
+        && deps.every((value, at) => Object.is(value, before.deps![at]))) return;
+      before?.cleanup?.();
+      hooks.effects.set(index, { deps, cleanup: effect() || undefined });
+    },
     useState: (initial: unknown) => {
       const index = hooks.cursor++;
       if (!(index in hooks.values)) {
@@ -86,17 +102,24 @@ async function submit() {
   await form.props.onSubmit({ preventDefault: vi.fn() });
 }
 const body = (index = 0) => JSON.parse(String(fetchMock.mock.calls[index][1].body)) as Record<string, unknown>;
-const response = (status: number, value: unknown) => ({ ok: status >= 200 && status < 300, json: async () => value });
+const response = (status: number, value: unknown) => ({ status, ok: status >= 200 && status < 300, json: async () => value });
+
+function unmount() {
+  // Genuine remount discards memoized owners and runs their layout cleanup,
+  // not only useState slots. Ordinary rerenders preserve every hook lifetime.
+  for (const effect of hooks.effects.values()) effect.cleanup?.();
+  hooks.effects.clear(); hooks.memos.clear(); hooks.values = []; hooks.cursor = 0;
+}
 
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0;
+  unmount();
   vi.clearAllMocks();
   caseRow = structuredClone(base);
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(response(200, { id: 96001, visitId: 91002 }));
   vi.stubGlobal("fetch", fetchMock);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { unmount(); vi.unstubAllGlobals(); });
 
 describe("standalone orthodontic adjustment wire defaults", () => {
   it("sends current wires for a notes-only save", async () => {
@@ -205,7 +228,7 @@ describe("standalone orthodontic adjustment wire defaults", () => {
     chooseWire("السلك العلوي", "016 NiTi");
     await submit();
     // The parent unmounts the form after a confirmed save and reloads the case.
-    hooks.values = [];
+    unmount();
     caseRow = { ...caseRow, upperWire: "016 NiTi" };
     expect(input("السلك العلوي").props.value).toBe("016 NiTi");
     expect(input("السلك السفلي").props.value).toBe("012 NiTi");
@@ -365,7 +388,7 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
     edit("أسابيع حتى الشدّة القادمة", "2");
     edit("ما نُفّذ في الشدّة", "Prior session procedure");
     await submit();
-    hooks.values = [];
+    unmount();
     previous({ elastics: "vertical", elasticNote: "Updated instructions", nextWeeks: 2, done: "Prior session procedure" });
     expect(input("صنف المطاطات").props.value).toBe("vertical");
     expect(input("وصف المطاطات").props.value).toBe("Updated instructions");
