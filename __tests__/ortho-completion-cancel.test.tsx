@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
+import { RETAINER_LABEL } from "../lib/ortho";
 
 // Exercise PatientOrtho's real rendered button handlers with synthetic hook storage.
 // Child editors are not executed; fetch and the native prompt are fully mocked.
@@ -200,5 +201,34 @@ describe.each(["active", "retention"] as const)("PatientOrtho %s case completion
     await click(button(DISCONTINUE_LABEL));
     expect(prompt).toHaveBeenCalledExactlyOnceWith(DISCONTINUE_PROMPT);
     expectOneWrite("discontinued", note);
+  });
+});
+
+
+describe.each(["active", "retention"] as const)("PatientOrtho %s existing retainer click", (status) => {
+  it("repeated selected-type clicks send only the type and refresh from the server", async () => {
+    await openRetention(status);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const selected = button(RETAINER_LABEL.essix);
+      expect(selected.props.disabled).not.toBe(true);
+      expect(String(selected.props.className)).toContain("bg-emerald-600");
+      // A synthetic server acknowledgement, not a persistence assertion. The
+      // real route-to-PostgreSQL test proves the unchanged delivery date.
+      fetchMock.mockImplementationOnce(async (url, init) => {
+        expect(url).toBe(`/api/ortho/${CASE_ID}`);
+        expect(init).toEqual({ method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ retainer: "essix" }) });
+        return Response.json({ ok: true });
+      });
+      await click(selected); await settle(); render();
+      expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
+        [`/api/ortho/${CASE_ID}`, "PATCH"],
+        [`/api/ortho?patientId=${PATIENT_ID}`, "GET"],
+        [`/api/patients/${PATIENT_ID}`, "GET"],
+      ]);
+      expect(prompt).not.toHaveBeenCalled();
+      expect(caseRow.retainerOn).toBe(fixture.retainerOn);
+      fetchMock.mockClear();
+    }
   });
 });

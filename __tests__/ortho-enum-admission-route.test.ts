@@ -59,6 +59,7 @@ describe("actual PATCH retainer own-key admission", () => {
     expect(await response.json()).toEqual({ ok: true });
     expect(setRetainer).toHaveBeenCalledWith({
       id: 41, retainer, deliveredOn: retainer === "none" ? null : "2026-09-21",
+      preserveExistingDeliveryDate: false,
     });
     onlyWriter(setRetainer);
   });
@@ -87,7 +88,7 @@ describe("actual PATCH retainer own-key admission", () => {
 
   it("keeps explicit none without a delivery date", async () => {
     expect((await call("PATCH", { retainer: "none" })).status).toBe(200);
-    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null });
+    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true });
   });
 });
 
@@ -114,7 +115,7 @@ describe("actual PATCH phase own-key admission", () => {
 
   it.each(nonstrings.map((value) => [value] as const))("keeps retainer fallthrough for non-string phase %j", async (phase) => {
     expect((await call("PATCH", { phase, retainer: "none" })).status).toBe(200);
-    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null });
+    expect(setRetainer).toHaveBeenCalledWith({ id: 41, retainer: "none", deliveredOn: null, preserveExistingDeliveryDate: true });
     onlyWriter(setRetainer);
   });
 });
