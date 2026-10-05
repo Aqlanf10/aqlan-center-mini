@@ -135,7 +135,9 @@ interface SavedAdjustment {
 
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
-type Draft = { values: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean };
+type Draft = { values: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean;
+  activate: () => void; markUncertain: () => void;
+};
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
 type OrthoOwner = {
   active: boolean; denied: boolean; clinical: boolean; contact: boolean; standalone: boolean;
@@ -143,16 +145,64 @@ type OrthoOwner = {
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
   deny: () => void;
+  activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
+  bindDenial: (deny: () => void) => void; denyRead: () => void;
+  beginRead: (controller: AbortController) => number;
+  setTimer: (timer: ReturnType<typeof setTimeout>) => void; clearTimer: () => void; releaseTimer: () => void;
+  grantClinical: (cases: OrthoCase[]) => void; withdrawClinical: () => void; setContact: (granted: boolean) => void;
 };
 const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
+/** Mutable lifecycle storage owns its transitions; hooks only read it or call its methods. */
 function makeOwner(standalone = false): OrthoOwner {
-  return { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
+  const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), mutations: new Set(), deny: () => {} };
+    cases: [], drafts: new Map(), mutations: new Set(), deny: () => {},
+    activate: () => { owner.active = true; },
+    activateStandaloneDraft: (key, draft) => {
+      owner.active = true; owner.clinical = true; owner.contact = true;
+      draft.activate(); owner.drafts.set(key, draft);
+    },
+    retire: () => retireOwner(owner),
+    bindDenial: (deny) => { owner.deny = deny; },
+    denyRead: () => {
+      owner.denied = true; owner.clinical = false; owner.contact = false;
+      owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
+      owner.clearTimer();
+      for (const operation of owner.mutations) {
+        operation.active = false; operation.draft.markUncertain();
+      }
+    },
+    beginRead: (controller) => {
+      owner.controller?.abort();
+      if (owner.timer !== null) clearTimeout(owner.timer);
+      owner.controller = controller;
+      const sequence = ++owner.readSequence;
+      owner.denied = false; owner.clinical = false; owner.contact = false; owner.cases = [];
+      return sequence;
+    },
+    setTimer: (timer) => { owner.timer = timer; },
+    clearTimer: () => { if (owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; } },
+    releaseTimer: () => { owner.timer = null; },
+    grantClinical: (cases) => { owner.cases = cases; owner.clinical = true; },
+    withdrawClinical: () => { owner.clinical = false; owner.cases = []; },
+    setContact: (granted) => { owner.contact = granted; },
+  };
+  return owner;
+}
+function makeDraft(): Draft {
+  const draft: Draft = { values: new Map(), urls: new Set(), active: true, busy: false, uncertain: false,
+    activate: () => { draft.active = true; },
+    markUncertain: () => { draft.uncertain = true; },
+  };
+  return draft;
+}
+function makeViewLease() {
+  let active = false;
+  return { get active() { return active; }, activate: () => { active = true; }, retire: () => { active = false; } };
 }
 function draftFor(owner: OrthoOwner, key: string): Draft {
   let draft = owner.drafts.get(key);
-  if (!draft) { draft = { values: new Map(), urls: new Set(), active: true, busy: false, uncertain: false }; owner.drafts.set(key, draft); }
+  if (!draft) { draft = makeDraft(); owner.drafts.set(key, draft); }
   return draft;
 }
 function disposeDraft(owner: OrthoOwner, key: string) {
@@ -198,12 +248,12 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
   const fallback = useMemo(() => makeOwner(true), [authority, patientId, caseId]);
   const owner = parent ?? fallback;
   const draft = draftFor(owner, key);
-  const lease = useMemo(() => ({ active: false }), [owner, draft]);
+  const lease = useMemo(() => makeViewLease(), [owner, draft]);
   const [, render] = useState(0);
   useLayoutEffect(() => {
-    if (!parent) { owner.active = true; owner.clinical = true; owner.contact = true; draft.active = true; owner.drafts.set(key, draft); }
-    lease.active = true;
-    return () => { lease.active = false; if (!parent) retireOwner(owner); };
+    if (!parent) owner.activateStandaloneDraft(key, draft);
+    lease.activate();
+    return () => { lease.retire(); if (!parent) owner.retire(); };
   }, [owner, parent, lease, draft, key]);
   const redraw = () => { if (lease.active && owner.active) render((value) => value + 1); };
   const editable = () => lease.active && owner.active && owner.clinical && !owner.denied && draft.active && !draft.busy && !draft.uncertain;
@@ -230,7 +280,7 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
       if (response.status === 401 || response.status === 403) { owner.deny(); return false; }
       return true;
     },
-    uncertain: () => { draft.uncertain = true; redraw(); },
+    uncertain: () => { draft.markUncertain(); redraw(); },
     finish: (operation: Mutation) => { endMutation(owner, operation); redraw(); },
     release: (url: string) => { if (draft.urls.delete(url)) URL.revokeObjectURL(url); },
   };
@@ -267,7 +317,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
-  useLayoutEffect(() => { owner.active = true; return () => retireOwner(owner); }, [owner]);
+  useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   return <OrthoOwnerContext.Provider value={owner}>
     <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} />
   </OrthoOwnerContext.Provider>;
@@ -302,40 +352,32 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
 
   const deny = useCallback(() => {
     if (!owner.active) return;
-    owner.denied = true; owner.clinical = false; owner.contact = false;
-    owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
-    if (owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; }
-    for (const operation of owner.mutations) {
-      operation.active = false; operation.draft.uncertain = true;
-    }
+    owner.denyRead();
     setCases([]); setPatient(null); setReadState("denied");
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
-  useLayoutEffect(() => { owner.deny = deny; }, [owner, deny]);
+  useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
   const load = useCallback(() => {
     if (!owner.active) return;
-    owner.controller?.abort();
-    if (owner.timer !== null) clearTimeout(owner.timer);
-    const controller = new AbortController(); owner.controller = controller;
-    const sequence = ++owner.readSequence;
+    const controller = new AbortController();
+    const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
-    owner.denied = false; owner.clinical = false; owner.contact = false; owner.cases = [];
     setReadState("loading"); setPatient(null); setError(null);
     if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
       deny(); return;
     }
     let finished = 0;
     const finish = () => { if (++finished === 2 && owner.timer !== null && owner.readSequence === sequence) {
-      clearTimeout(owner.timer); owner.timer = null;
+      owner.clearTimer();
     } };
-    owner.timer = setTimeout(() => {
+    owner.setTimer(setTimeout(() => {
       if (!current()) return;
       controller.abort();
       if (!owner.clinical) { setCases([]); setReadState("error"); }
       if (!owner.contact) setPatient(null);
       setError("تعذّر إكمال قراءة كابينة التقويم. أعد التحميل.");
-      owner.timer = null;
-    }, ORTHO_PARENT_READ_TIMEOUT_MS);
+      owner.releaseTimer();
+    }, ORTHO_PARENT_READ_TIMEOUT_MS));
     const read = async (kind: "clinical" | "contact") => {
       try {
         const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}`,
@@ -348,18 +390,18 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
         if (!current()) return;
         if (kind === "clinical") {
           const verified = readCases(payload, patientId);
-          owner.cases = verified; owner.clinical = true; setCases(verified); setReadState("ready");
+          owner.grantClinical(verified); setCases(verified); setReadState("ready");
         } else {
           const patient = payload && typeof payload === "object" ? (payload as { patient?: unknown }).patient : null;
           if (!patient || typeof patient !== "object") throw new Error("Invalid patient");
           const row = patient as { id?: unknown; fullName?: unknown; phone?: unknown };
           if (row.id !== patientId || typeof row.fullName !== "string" || (row.phone !== null && typeof row.phone !== "string")) throw new Error("Invalid patient");
-          owner.contact = true; setPatient({ name: row.fullName, phone: row.phone });
+          owner.setContact(true); setPatient({ name: row.fullName, phone: row.phone });
         }
       } catch {
         if (!current()) return;
-        if (kind === "clinical") { owner.clinical = false; owner.cases = []; setCases([]); setReadState("error"); }
-        else { owner.contact = false; setPatient(null); }
+        if (kind === "clinical") { owner.withdrawClinical(); setCases([]); setReadState("error"); }
+        else { owner.setContact(false); setPatient(null); }
         setError(kind === "clinical" ? "تعذّر تحميل حالات التقويم. أعد التحميل." : "تعذّر التحقق من بيانات المريض؛ الحجز والتذكير متوقفان حتى نجاح القراءة.");
       } finally { finish(); }
     };
@@ -396,10 +438,10 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
       if (response.status === 401 || response.status === 403) { deny(); return false; }
       const payload = await response.json().catch(() => null);
       if (!currentMutation(owner, operation)) return false;
-      if (!response.ok) { if (response.status >= 500) draft.uncertain = true; safeError(payload?.message ?? "تعذّر التنفيذ."); return false; }
+      if (!response.ok) { if (response.status >= 500) draft.markUncertain(); safeError(payload?.message ?? "تعذّر التنفيذ."); return false; }
       safeError(null); refreshAfterConfirmedChange(); return true;
     } catch {
-      if (currentMutation(owner, operation)) { draft.uncertain = true; safeError("تعذّر تأكيد نتيجة التعديل. راجع الحالة بعد إعادة التحميل قبل تكراره."); }
+      if (currentMutation(owner, operation)) { draft.markUncertain(); safeError("تعذّر تأكيد نتيجة التعديل. راجع الحالة بعد إعادة التحميل قبل تكراره."); }
       return false;
     } finally { endMutation(owner, operation); if (owner.active) redrawMutation((value) => value + 1); }
   };
@@ -1069,10 +1111,10 @@ function NextAppointmentCard({
   const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
   // The card survives Back/success, but a captured form command must not.
   // Retained draft values alone cannot distinguish two separate form openings.
-  const bookingView = useMemo(() => ({ active: false }), [booking, form.draft]);
+  const bookingView = useMemo(() => makeViewLease(), [booking, form.draft]);
   useLayoutEffect(() => {
-    bookingView.active = booking;
-    return () => { bookingView.active = false; };
+    if (booking) bookingView.activate(); else bookingView.retire();
+    return () => { bookingView.retire(); };
   }, [bookingView, booking]);
   const currentBookingView = () => bookingView.active && form.draft.values.get("booking") === true
     && !form.draft.values.get("booked");
@@ -1116,7 +1158,7 @@ function NextAppointmentCard({
         return;
       }
       form.commit("booked", { date, time });
-      bookingView.active = false;
+      bookingView.retire();
       form.commit("booking", false);
     } catch {
       if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة الحجز. راجع المواعيد قبل تكراره."); }
@@ -1198,7 +1240,7 @@ function NextAppointmentCard({
             </button>
             <button type="button" onClick={() => {
               if (!form.editable() || !currentBookingView()) return;
-              bookingView.active = false; setBooking(false);
+              bookingView.retire(); setBooking(false);
             }}
               className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-600">
               رجوع
