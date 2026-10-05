@@ -3,7 +3,8 @@
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { patientAlertScope, type ConfirmedPatientAlert } from "@/lib/chair-readiness";
 import type { Visit } from "@/lib/flow";
 import type { Appointment } from "@/lib/schedule";
 import {
@@ -112,8 +113,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 
-  const [file, setFile] = useState<PatientFile | null>(null);
-  const [summary, setSummary] = useState<WorkflowSummary | null>(null);
+  const [fileSnapshot, setFile] = useState<PatientFile | null>(null);
+  const [summarySnapshot, setSummary] = useState<WorkflowSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -131,8 +132,29 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
-
-
+  const alertScope = patientAlertScope(Number(id), session);
+  const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
+    confirmed: undefined as ConfirmedPatientAlert | undefined }), [alertScope]);
+  const [confirmedAlert, setConfirmedAlert] = useState<{ owner: typeof alertOwner; alert: ConfirmedPatientAlert }>();
+  const [fileOwner, setFileOwner] = useState<typeof alertOwner | null>(null);
+  const [summaryOwner, setSummaryOwner] = useState<typeof alertOwner | null>(null);
+  const file = fileOwner === alertOwner ? fileSnapshot : null;
+  const summary = summaryOwner === alertOwner ? summarySnapshot : null;
+  const loadSequence = useRef(0);
+  const retireLoads = useCallback(() => { ++loadSequence.current; }, []);
+  useLayoutEffect(() => {
+    alertOwner.active = true;
+    return () => { alertOwner.active = false; retireLoads(); };
+  }, [alertOwner, retireLoads]);
+  const confirmPatientAlert = (value: string | null) => {
+    if (!alertOwner.active) return false;
+    const saved = { scope: alertOwner.scope, revision: ++alertOwner.revision, value };
+    alertOwner.confirmed = saved;
+    setConfirmedAlert({ owner: alertOwner, alert: saved });
+    setFile((previous) => previous?.patient.id === Number(id)
+      ? { ...previous, patient: { ...previous.patient, medicalAlert: value } } : previous);
+    return true;
+  };
   const copyToClipboard = (text: string, label: string) => {
     try {
       void navigator.clipboard.writeText(text);
@@ -199,19 +221,43 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async () => {
+    if (!alertOwner.active) return;
+    const sequence = ++loadSequence.current;
+    const startedRevision = alertOwner.revision;
+    const current = () => alertOwner.active && sequence === loadSequence.current;
+    let denied = false;
+    const read = async (url: string) => {
+      const response = await fetch(url, { cache: "no-store" });
+      // A denied peer retires accepted context immediately, before either body
+      // or the other response's headers settle. Later peers cannot restore it.
+      if (current() && [401, 403, 404].includes(response.status)) {
+        denied = true; setFileOwner(null); setSummaryOwner(null);
+        throw new Error("تعذّر التحقق من صلاحية الملف.");
+      }
+      return response;
+    };
     setLoading(true);
     try {
       const [patientRes, workflowRes] = await Promise.all([
-        fetch(`/api/patients/${id}`, { cache: "no-store" }),
-        fetch(`/api/patients/${id}/workflow`, { cache: "no-store" }),
+        read(`/api/patients/${id}`),
+        read(`/api/patients/${id}/workflow`),
       ]);
 
+      if (!current() || denied) return;
       const payload = await patientRes.json();
+      if (!current() || denied) return;
       if (!patientRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (payload?.patient?.id !== Number(id)) throw new Error("تعذّر التحقق من سياق المريض.");
+      // A read begun before a confirmed save cannot restore its editable warning.
+      if (startedRevision !== alertOwner.revision && alertOwner.confirmed) {
+        payload.patient.medicalAlert = alertOwner.confirmed.value;
+      }
       setFile(payload as PatientFile);
+      setFileOwner(alertOwner);
 
       if (workflowRes.ok) {
         const data = await workflowRes.json();
+        if (!current() || denied) return;
         setSummary({
           openVisit: data.openVisit ?? null,
           lastVisit: data.lastVisit ?? null,
@@ -223,14 +269,15 @@ function PatientFileWorkspace({ id }: { id: string }) {
           alerts: data.alerts ?? [],
           canSeeFinancial: data.canSeeFinancial ?? false,
         });
+        setSummaryOwner(alertOwner);
       }
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      if (current()) setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
-  }, [id]);
+  }, [id, alertOwner]);
 
   useEffect(() => {
     void load();
@@ -425,6 +472,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         patientName={patient.fullName}
         patientPhone={patient.phone}
         fallbackAlert={patient.medicalAlert}
+        confirmedAlert={confirmedAlert?.owner === alertOwner ? confirmedAlert.alert : undefined}
         summary={summary}
         compact={compactWorkspace}
         identity={compactWorkspace ? (
@@ -877,7 +925,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
       {editing ? (
         <PatientEditor
           patient={patient}
-          onSaved={() => {
+          onSaved={(medicalAlert) => {
+            if (!confirmPatientAlert(medicalAlert)) return;
             setEditing(false);
             void load();
           }}
@@ -1229,14 +1278,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           isOpen={showVitalsModal}
           onClose={() => setShowVitalsModal(false)}
           onSaved={(newAlert) => {
-            setFile((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    patient: { ...prev.patient, medicalAlert: newAlert },
-                  }
-                : prev,
-            );
+            if (!confirmPatientAlert(newAlert)) return;
             setSuccessMsg("تم تحديث العلامات الحيوية والتنبيه الطبي بنجاح.");
             void load();
           }}
@@ -1425,7 +1467,7 @@ function PatientEditor({
   onError,
 }: {
   patient: Patient;
-  onSaved: () => void;
+  onSaved: (medicalAlert: string | null) => void;
   onError: (message: string | null) => void;
 }) {
   const [form, setForm] = useState({
@@ -1481,7 +1523,11 @@ function PatientEditor({
         onError(payload?.message ?? "تعذّر الحفظ.");
         return;
       }
-      onSaved();
+      if (payload?.id !== patient.id || !(typeof payload.medicalAlert === "string" || payload.medicalAlert === null)) {
+        onError("حُفظ الطلب لكن تعذّر التحقق من التنبيه؛ أعد تحميل الملف.");
+        return;
+      }
+      onSaved(payload.medicalAlert);
     } catch {
       onError("تعذّر الاتصال بالخادم.");
     } finally {

@@ -47,6 +47,29 @@ export interface ReadinessChecklist {
   attention: number;
   /** نصوص التنبيهات الطبية كما تظهر في الشارة (القديم + المشتق من آخر نسخة). */
   alerts: string[];
+  /** History-derived warnings independent of the editable patient alert. */
+  historyAlerts: string[];
+}
+
+export interface PatientAlertSources {
+  alerts: readonly string[] | null;
+  historyAlerts?: readonly string[] | null;
+  editableAlert?: string | null;
+  confirmedAlertRevision?: number;
+}
+
+export type ConfirmedPatientAlert = { scope: string; revision: number; value: string | null };
+export const patientAlertScope = (patientId: number, session: { username: string; role: string; permissions?: unknown } | null) =>
+  JSON.stringify([patientId, JSON.stringify([session?.username, session?.role, session?.permissions ?? null])]);
+
+/** Only explicitly split sources can retire editable text without losing a history warning. */
+export function patientContextAlerts(fallback: string | null, sources: PatientAlertSources | null,
+  confirmed?: { revision: number; value: string | null }): string[] {
+  const history = sources?.historyAlerts === undefined ? sources?.alerts ?? [] : sources.historyAlerts ?? [];
+  const currentServer = sources?.editableAlert !== undefined
+    && sources.confirmedAlertRevision === (confirmed?.revision ?? 0);
+  const editable = (currentServer ? sources.editableAlert : confirmed ? confirmed.value : fallback)?.trim();
+  return [...new Set([...(editable ? [editable] : []), ...history])];
 }
 
 /**
@@ -64,6 +87,7 @@ export function deriveReadiness(facts: ReadinessFacts, reviewMonths: number, tod
       items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }],
       attention: 1,
       alerts: [],
+      historyAlerts: [],
     };
   }
   const items: ReadinessItem[] = [];
@@ -76,12 +100,12 @@ export function deriveReadiness(facts: ReadinessFacts, reviewMonths: number, tod
     items.push({ key: "medical_history", state: "ok", label: "التاريخ الطبي محدَّث" });
   }
 
+  const historyAlerts = facts.history
+    ? deriveAlerts({ answers: facts.history.answers, allergies: [...facts.history.allergies], asaClass: facts.history.asaClass })
+      .map((alert) => alert.label) : [];
   const alerts = [
     ...(facts.medicalAlert?.trim() ? [facts.medicalAlert.trim()] : []),
-    ...(facts.history
-      ? deriveAlerts({ answers: facts.history.answers, allergies: [...facts.history.allergies], asaClass: facts.history.asaClass })
-        .map((alert) => alert.label)
-      : []),
+    ...historyAlerts,
   ];
   items.push(alerts.length > 0
     ? { key: "alerts", state: "attention", label: `تنبيه طبي: ${alerts.join(" • ")}` }
@@ -94,7 +118,7 @@ export function deriveReadiness(facts: ReadinessFacts, reviewMonths: number, tod
     ? { key: "intake", state: "ok", label: "استمارة اليوم مستلمة" }
     : { key: "intake", state: "info", label: "لا استمارة اليوم" });
 
-  return { items, attention: items.filter((item) => item.state === "attention").length, alerts };
+  return { items, attention: items.filter((item) => item.state === "attention").length, alerts, historyAlerts };
 }
 
 // ─── Slice 2 — الرصيد عند الوصول (معلومة لا منع) ───────────────────────────
