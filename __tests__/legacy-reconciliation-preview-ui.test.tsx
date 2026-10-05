@@ -5,6 +5,7 @@ import { PatientLedger } from "../components/PatientLedger";
 import { LegacyBalanceArrangementPanel } from "../components/LegacyBalanceArrangementPanel";
 import type { SessionInfo } from "../components/SessionProvider";
 import { formatMoney } from "../lib/money";
+import { previewTextLineHasOwnedHits, type PreviewTextLineEvidence } from "./fixtures/preview-label-text-boundary";
 
 // Actual components with the repository's existing bounded hook/key driver.
 // Leaf editors never execute. These tests do not open a browser or a database.
@@ -259,5 +260,124 @@ describe("existing Account read-grant insertion", () => {
   it("does not expose the preview from malformed ledger evidence", async () => {
     readLedger = async () => response({ ...ledger(), legacyOpeningPositions: [{ currency: "SAR" }] });
     renderLedger(); await settle(); expect(previewNodes(renderLedger())).toHaveLength(0);
+  });
+});
+
+describe("narrow native label/control text boundary evidence", () => {
+  function boundary(): PreviewTextLineEvidence {
+    return {
+      kind: "field-label-0", bounds: { left: 268, right: 365, top: 282.5, bottom: 300.5 },
+      associatedControl: { nativeLabel: true, nativeControl: true, tag: "select",
+        bounds: { left: 25, right: 365, top: 299.5, bottom: 343.5 } },
+      hits: [
+        { point: "centre", x: 316.5, y: 291.5, owned: true, hitTag: "label", hitsNativeLabelControl: false },
+        { point: "top", x: 316.5, y: 283.5, owned: true, hitTag: "label", hitsNativeLabelControl: false },
+        { point: "bottom", x: 316.5, y: 299.5, owned: false, hitTag: "select", hitsNativeLabelControl: true },
+        { point: "left", x: 269, y: 291.5, owned: true, hitTag: "label", hitsNativeLabelControl: false },
+        { point: "right", x: 364, y: 291.5, owned: true, hitTag: "label", hitsNativeLabelControl: false },
+      ],
+    };
+  }
+
+  it("keeps fully owned paragraph and field-label lines strict without requiring a control", () => {
+    for (const kind of ["introduction", "receipt-timing-disclaimer", "field-label-0"]) {
+      const evidence = boundary(); evidence.kind = kind; evidence.associatedControl = null;
+      evidence.hits = evidence.hits.map(hit => ({ ...hit, owned: true, hitTag: "p", hitsNativeLabelControl: false }));
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(true);
+    }
+  });
+
+  it("permits only the measured trailing border for native inputs/selects without changing raw evidence", () => {
+    for (const tag of ["input", "select"]) {
+      for (const overlap of [0.25, 0.5, 1]) {
+        const evidence = boundary(); evidence.bounds.bottom = 299.5 + overlap;
+        evidence.associatedControl!.tag = tag;
+        evidence.hits = evidence.hits.map(hit => hit.point === "bottom" ? { ...hit, hitTag: tag } : hit);
+        const before = JSON.stringify(evidence);
+        expect(previewTextLineHasOwnedHits(evidence)).toBe(true);
+        expect(JSON.stringify(evidence)).toBe(before);
+        expect(evidence.hits.find(hit => hit.point === "bottom")!.owned).toBe(false);
+      }
+    }
+  });
+
+  it("rejects deeper, zero and negative overlap without rounding or tolerance inflation", () => {
+    for (const overlap of [1.000001, 2, 18, 0, -0.25]) {
+      const evidence = boundary(); evidence.bounds.bottom = 299.5 + overlap;
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
+    const notTrailing = boundary(); notTrailing.bounds.top = 299.5;
+    notTrailing.hits = notTrailing.hits.map(hit => ({ ...hit, y: 299.5 }));
+    expect(previewTextLineHasOwnedHits(notTrailing)).toBe(false);
+  });
+
+  it("rejects malformed/nonfinite rectangles and sample coordinates", () => {
+    for (const invalid of [NaN, Infinity, -Infinity, "299.5", null, undefined]) {
+      const control = boundary(); control.associatedControl!.bounds.top = invalid as number;
+      expect(previewTextLineHasOwnedHits(control)).toBe(false);
+      const line = boundary(); line.bounds.bottom = invalid as number;
+      expect(previewTextLineHasOwnedHits(line)).toBe(false);
+      const point = boundary(); point.hits = point.hits.map(hit => hit.point === "bottom" ? { ...hit, y: invalid as number } : hit);
+      expect(previewTextLineHasOwnedHits(point)).toBe(false);
+    }
+    const flat = boundary(); flat.associatedControl!.bounds.right = flat.associatedControl!.bounds.left;
+    expect(previewTextLineHasOwnedHits(flat)).toBe(false);
+  });
+
+  it("rejects a foreign control, descendant or chrome hit even at the same border", () => {
+    for (const hitTag of ["select", "input", "span", "div", "nav"]) {
+      const evidence = boundary();
+      evidence.hits = evidence.hits.map(hit => hit.point === "bottom"
+        ? { ...hit, hitTag, hitsNativeLabelControl: false } : hit);
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
+    const contradictory = boundary();
+    contradictory.hits = contradictory.hits.map(hit => hit.point === "bottom" ? { ...hit, hitTag: "nav" } : hit);
+    expect(previewTextLineHasOwnedHits(contradictory)).toBe(false);
+  });
+
+  it("does not permit an unowned centre, top, left or right sample", () => {
+    for (const point of ["centre", "top", "left", "right"]) {
+      const evidence = boundary();
+      evidence.hits = evidence.hits.map(hit => ({ ...hit, owned: hit.point !== point,
+        hitTag: hit.point === point ? "select" : "label", hitsNativeLabelControl: hit.point === point }));
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
+  });
+
+  it("does not permit paragraph/chrome targets or an unknown field-label index", () => {
+    for (const kind of ["introduction", "receipt-timing-disclaimer", "paragraph", "header", "bottomNavigation",
+      "field-label", "field-label-4", "field-label-0-suffix"]) {
+      const evidence = boundary(); evidence.kind = kind;
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
+  });
+
+  it("requires all other four label samples to remain owned", () => {
+    const evidence = boundary();
+    evidence.hits = evidence.hits.map(hit => hit.point === "left" ? { ...hit, owned: false } : hit);
+    expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+  });
+
+  it("rejects missing, duplicate or unknown samples instead of weakening the five-hit gate", () => {
+    const missing = boundary(); missing.hits = missing.hits.slice(0, 4);
+    expect(previewTextLineHasOwnedHits(missing)).toBe(false);
+    const duplicate = boundary(); duplicate.hits = duplicate.hits.map(hit => hit.point === "right" ? { ...hit, point: "left" } : hit);
+    expect(previewTextLineHasOwnedHits(duplicate)).toBe(false);
+    const unknown = boundary(); unknown.hits = unknown.hits.map(hit => hit.point === "right" ? { ...hit, point: "corner" } : hit);
+    expect(previewTextLineHasOwnedHits(unknown)).toBe(false);
+  });
+
+  it("requires a native associated control and an exact top-border coordinate", () => {
+    const absent = boundary(); absent.associatedControl = null;
+    expect(previewTextLineHasOwnedHits(absent)).toBe(false);
+    for (const patch of [{ nativeLabel: false }, { nativeControl: false }, { tag: "div" }, { tag: "button" }]) {
+      const evidence = boundary(); Object.assign(evidence.associatedControl!, patch);
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
+    for (const y of [299.499999, 299.500001]) {
+      const evidence = boundary(); evidence.hits = evidence.hits.map(hit => hit.point === "bottom" ? { ...hit, y } : hit);
+      expect(previewTextLineHasOwnedHits(evidence)).toBe(false);
+    }
   });
 });

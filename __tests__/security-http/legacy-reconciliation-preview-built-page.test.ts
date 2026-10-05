@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Patient } from "@/lib/patient";
+import { previewTextLineHasOwnedHits } from "../fixtures/preview-label-text-boundary";
 import { baseUrl, harness } from "./_server";
 
 /**
@@ -272,10 +273,13 @@ async function captureMobileTextView(page: Page, view: "upper" | "lower") {
         { point: "right", x: box.right - dx, y: midY },
       ].map(sample => {
         const hit = document.elementFromPoint(sample.x, sample.y);
-        // Text targets contain only direct text. A nested input cannot count as
-        // an unobscured label, and header/footer chrome cannot count as the owner.
+        const associated = element instanceof HTMLLabelElement ? element.control : null;
+        const nativeControl = associated instanceof HTMLInputElement || associated instanceof HTMLSelectElement;
+        // Preserve raw ownership. The separate identity fact never accepts a
+        // descendant or a control discovered through a selector instead of label.control.
         return { ...sample, owned: hit === element || (!directText && !!hit && element.contains(hit)),
-          hitTag: hit?.tagName.toLowerCase() ?? null };
+          hitTag: hit?.tagName.toLowerCase() ?? null,
+          hitsNativeLabelControl: directText && nativeControl && hit === associated };
       });
     };
     const labels = Array.from(section.querySelectorAll("label"));
@@ -290,6 +294,12 @@ async function captureMobileTextView(page: Page, view: "upper" | "lower") {
     }
     const text = targets.map(({ kind, element }) => {
       const style = getComputedStyle(element);
+      const associated = element instanceof HTMLLabelElement ? element.control : null;
+      const associatedControl = associated ? {
+        nativeLabel: element instanceof HTMLLabelElement,
+        nativeControl: associated instanceof HTMLInputElement || associated instanceof HTMLSelectElement,
+        tag: associated.tagName.toLowerCase(), bounds: rect(associated.getBoundingClientRect()),
+      } : null;
       const lines: Array<{ text: string; bounds: ReturnType<typeof rect>; inViewport: boolean;
         hits: ReturnType<typeof points> }> = [];
       let lineCount = 0;
@@ -307,7 +317,7 @@ async function captureMobileTextView(page: Page, view: "upper" | "lower") {
         }
       }
       return { kind, visibleStyle: style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0,
-        lineCount, truncated: lineCount > lines.length, lines };
+        lineCount, truncated: lineCount > lines.length, lines, associatedControl };
     });
     const fields = selectedView === "upper"
       ? labels.slice(0, 5).map(label => label.querySelector("input, select"))
@@ -348,7 +358,9 @@ function assertMobileTextViews(views: Awaited<ReturnType<typeof captureMobileTex
       expect(target.lineCount, target.kind).toBeGreaterThan(0);
       for (const line of target.lines) {
         expect(line.inViewport, target.kind).toBe(true);
-        expect(line.hits).toHaveLength(5); expect(line.hits.every(hit => hit.owned), target.kind).toBe(true);
+        expect(line.hits).toHaveLength(5);
+        expect(previewTextLineHasOwnedHits({ kind: target.kind, bounds: line.bounds,
+          hits: line.hits, associatedControl: target.associatedControl }), target.kind).toBe(true);
       }
     }
     expect(view.controls).toHaveLength(view.view === "upper" ? 4 : 1);
