@@ -1,7 +1,7 @@
 "use client";
 
 import { formatMoney } from "@/lib/money";
-import type { VisitReadiness } from "./useChairReadiness";
+import type { TodayReadState, VisitReadiness } from "./useChairReadiness";
 
 const STATE_ICON = { ok: "✓", attention: "!", info: "·" } as const;
 
@@ -12,13 +12,41 @@ const STATE_ICON = { ok: "✓", attention: "!", info: "·" } as const;
  * «أقِرّ الجاهزية». والرصيد معلومةٌ لمن يرى المال: كهرماني إن بلغ عتبة الإعداد، ولا يمنع شيئًا.
  */
 export function ReadinessChip({
-  item, busy, onClear,
+  item, visit, state, canClear, busy, onClear, onRetry,
 }: {
   item: VisitReadiness | undefined;
+  visit: { id: number; patientId: number | null; status: string; chair: number | null };
+  state: TodayReadState;
+  canClear: boolean;
   busy: boolean;
   onClear: (visitId: number) => void;
+  onRetry: () => void;
 }) {
-  if (!item) return null;
+  // Matching a visit ID alone can attach another patient's cached details to a
+  // relinked row. Movement state must agree before offering clearance as well.
+  const matchesPatient = item?.visitId === visit.id && item.patientId === visit.patientId;
+  const coherent = matchesPatient && item.status === visit.status && item.chair === visit.chair;
+  if (!item || state !== "ready" || !coherent) {
+    const warnings = matchesPatient ? item?.alerts ?? [] : [];
+    return (
+      <div className="mt-1 space-y-1 text-[11px]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-slate-600" role="status">
+            {state === "loading" ? "الجاهزية قيد التحقق" : "الجاهزية غير متاحة؛ أعد التحقق"}
+          </span>
+          {state !== "loading" && (
+            <button type="button" onClick={onRetry} disabled={busy}
+              className="min-h-[44px] min-w-[44px] rounded-lg border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 disabled:opacity-40">
+              أعد التحقق
+            </button>
+          )}
+        </div>
+        {warnings.length > 0 && (
+          <p className="font-bold text-amber-900">آخر تنبيه محفوظ: {[...new Set(warnings)].join(" • ")}</p>
+        )}
+      </div>
+    );
+  }
   const balances = item.balances ?? [];
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -51,14 +79,14 @@ export function ReadinessChip({
                 </li>
               ))}
             </ul>
-            <button
+            {canClear && item.signedAt === null && item.status !== "done" && <button
               type="button"
               onClick={() => onClear(item.visitId)}
               disabled={busy}
               className="mt-1.5 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-40"
             >
               أقِرّ الجاهزية
-            </button>
+            </button>}
           </div>
         </details>
       )}

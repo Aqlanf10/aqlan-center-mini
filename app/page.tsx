@@ -155,7 +155,7 @@ export default function FlowBoard() {
   const [doctorList, setDoctorList] = useState<{ id: number; name: string }[]>([]);
   const [expectedFailed, setExpectedFailed] = useState(false);
   /* (CHAIR-1) جاهزية الكرسي والرصيد عند الوصول — طلبٌ مستقلّ لا يمسّ `/api/visits` وشاشة الصالة. */
-  const readiness = useChairReadiness(REFRESH_MS);
+  const readiness = useChairReadiness(REFRESH_MS, session, visits);
   const reloadReadiness = readiness.reload;
   /* تحذير البوابة (لم تُقَرّ الجاهزية) — سطرٌ يظهر ويختفي، لا نافذة ولا نقرة. */
   const [notice, setNotice] = useState<string | null>(null);
@@ -1023,7 +1023,9 @@ export default function FlowBoard() {
                       <p className="text-xs text-slate-500">
                         {sinceCall === 0 ? "نُودي الآن" : `مضى على النداء ${minutesText(sinceCall)}`}
                       </p>
-                      <ReadinessChip item={readiness.byVisit.get(visit.id)} busy={busy} onClear={clearReadiness} />
+                      <ReadinessChip item={readiness.byVisit.get(visit.id)} visit={visit}
+                        state={readiness.state} canClear={readiness.canClear} busy={busy}
+                        onClear={clearReadiness} onRetry={reloadReadiness} />
                     </div>
                     <div className="flex shrink-0 gap-1.5">
                       <button
@@ -1087,7 +1089,9 @@ export default function FlowBoard() {
                     {row.visit.patientPhone ? (
                       <p className="text-xs text-slate-500" dir="ltr">{row.visit.patientPhone}</p>
                     ) : null}
-                    <ReadinessChip item={readiness.byVisit.get(row.visit.id)} busy={busy} onClear={clearReadiness} />
+                    <ReadinessChip item={readiness.byVisit.get(row.visit.id)} visit={row.visit}
+                      state={readiness.state} canClear={readiness.canClear} busy={busy}
+                      onClear={clearReadiness} onRetry={reloadReadiness} />
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {chairs.map((chair) => (
@@ -1152,4 +1156,3 @@ export default function FlowBoard() {
     </main>
   );
 }
-

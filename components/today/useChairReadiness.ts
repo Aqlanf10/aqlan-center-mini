@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { SessionInfo } from "@/components/SessionProvider";
 import type { BalanceLine, ReadinessItem } from "@/lib/chair-readiness";
+import { isCurrency } from "@/lib/money";
 
 /** صفّ جاهزية زيارةٍ كما يعيده `GET /api/visits/readiness`. */
 export interface VisitReadiness {
@@ -24,33 +26,156 @@ export interface VisitReadiness {
   balances: BalanceLine[] | null;
 }
 
-/**
- * (CHAIR-1) جاهزية زيارات اليوم للوحة — طلبٌ مستقلّ عن `/api/visits` عمدًا: شاشة الصالة تقرأ
- * ذاك المسار، والتنبيهات الطبية والأرصدة لا تذهب إليها. فشل التحميل يُبقي آخر قراءةٍ صحيحة
- * ولا يعطّل اللوحة: الشارة مساعدةٌ لا شرط.
- */
-export function useChairReadiness(refreshMs: number) {
-  const [byVisit, setByVisit] = useState<Map<number, VisitReadiness>>(new Map());
-  const [requireClearance, setRequireClearance] = useState(false);
+export type TodayReadState = "loading" | "ready" | "unavailable";
+type BoardVisit = { id: number; patientId: number | null };
+type ReadOwner = { scope: string; foregroundEpoch: number; refreshMs: number };
+type Snapshot = {
+  owner: ReadOwner; state: TodayReadState; byVisit: Map<number, VisitReadiness>;
+  requireClearance: boolean | null;
+};
+const positiveId = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const dateValid = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
+const nullableDate = (value: unknown) => value === null || dateValid(value);
+const nullableStrings = (value: unknown) =>
+  value === null || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+const record = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
-  const reload = useCallback(async () => {
-    try {
-      const response = await fetch("/api/visits/readiness", { cache: "no-store" });
-      if (!response.ok) return;
-      const payload = await response.json() as { items?: VisitReadiness[]; requireClearance?: boolean };
-      if (!Array.isArray(payload.items)) return;
-      setByVisit(new Map(payload.items.map((item) => [item.visitId, item])));
-      setRequireClearance(payload.requireClearance === true);
-    } catch { /* آخر قراءةٍ تبقى */ }
+function validReadiness(value: unknown): value is VisitReadiness {
+  if (!record(value)) return false;
+  const row = value;
+  return positiveId(row.visitId) && (row.patientId === null || positiveId(row.patientId))
+    && typeof row.status === "string" && ["waiting", "called", "in_chair", "done"].includes(row.status)
+    && (row.chair === null || positiveId(row.chair)) && dateValid(row.arrivedAt)
+    && nullableDate(row.seatedAt) && nullableDate(row.signedAt)
+    && (row.cleared === null || (record(row.cleared) && dateValid(row.cleared.at)
+      && (row.cleared.by === null || typeof row.cleared.by === "string")))
+    && (row.checklist === null || (Array.isArray(row.checklist) && row.checklist.every((item) => record(item)
+      && typeof item.key === "string" && ["file", "medical_history", "alerts", "flags", "intake"].includes(item.key)
+      && typeof item.state === "string" && ["ok", "attention", "info"].includes(item.state) && typeof item.label === "string")))
+    && (row.attention === null || (typeof row.attention === "number" && Number.isSafeInteger(row.attention) && row.attention >= 0))
+    && nullableStrings(row.alerts)
+    && (row.historyAlerts === undefined || nullableStrings(row.historyAlerts))
+    && (row.editableAlert === undefined || row.editableAlert === null || typeof row.editableAlert === "string")
+    && (row.balances === null || (Array.isArray(row.balances) && row.balances.every((item) => record(item)
+      && isCurrency(item.currency) && typeof item.dueMinor === "number" && Number.isSafeInteger(item.dueMinor)
+      && item.dueMinor >= 0 && typeof item.warn === "boolean")))
+    // A deliberately redacted row never grants previously cached details.
+    && (row.checklist !== null || (row.attention === null && row.alerts === null && row.balances === null
+      && (row.historyAlerts === undefined || row.historyAlerts === null)
+      && (row.editableAlert === undefined || row.editableAlert === null)));
+}
+
+/**
+ * Independent clinical read for Today. A failed refresh may retain explicitly
+ * labelled, same-owner warnings, never current clearance, balances or a grant.
+ * The server's movement/override policy remains independent of this read.
+ */
+export function useChairReadiness(refreshMs: number, session: SessionInfo | null, visits: readonly BoardVisit[]) {
+  const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
+  // A relink, departure or A→B→A board transition must obtain a fresh grant.
+  // Sorting prevents an unrelated display-order change from retiring the read.
+  const identities = visits.map((visit) => [visit.id, visit.patientId]).sort((a, b) => Number(a[0]) - Number(b[0]));
+  const scope = JSON.stringify([authority, identities]);
+  const [foregroundEpoch, setForegroundEpoch] = useState(0);
+  // Scope text may recur after A→B→A. A retained callback belongs to its exact
+  // committed owner, never a later lifetime with equivalent identifiers.
+  const owner = useMemo<ReadOwner>(() => ({ scope, foregroundEpoch, refreshMs }), [scope, foregroundEpoch, refreshMs]);
+  const canRead = !!session && ["admin", "reception", "doctor", "assistant"].includes(session.role);
+  const canClear = !!session && ["admin", "reception", "doctor"].includes(session.role);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const lifetime = useRef({ owner, mounted: false });
+  const generation = useRef(0);
+  const pending = useRef<{ abort: AbortController; finish: () => void } | null>(null);
+  const alive = useCallback(() => lifetime.current.mounted && lifetime.current.owner === owner
+    && (typeof document === "undefined" || document.visibilityState === "visible"), [owner]);
+  const retire = useCallback(() => {
+    ++generation.current;
+    pending.current?.abort.abort();
+    pending.current?.finish();
+    pending.current = null;
   }, []);
 
-  useEffect(() => {
+  const reload = useCallback(async () => {
+    if (!alive() || !canRead) return;
+    retire();
+    const ticket = generation.current;
+    const abort = new AbortController();
+    const current = () => alive() && generation.current === ticket && !abort.signal.aborted;
+    const publishState = (state: TodayReadState, denied = false) => {
+      if (!current()) return;
+      setSnapshot((previous) => ({
+        owner, state, requireClearance: null,
+        byVisit: !denied && previous?.owner === owner ? previous.byVisit : new Map(),
+      }));
+    };
+    publishState("loading");
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    pending.current = { abort, finish };
+    const timeout = setTimeout(() => {
+      publishState("unavailable"); abort.abort(); finish();
+    }, 15_000);
+    const read = async () => {
+      try {
+        const response = await fetch("/api/visits/readiness", { cache: "no-store", signal: abort.signal });
+        if (!current()) return;
+        // Do not wait for an error body before retiring confidential data.
+        if (!response.ok) {
+          publishState("unavailable", [401, 403, 404].includes(response.status));
+          return;
+        }
+        const payload: unknown = await response.json();
+        if (!current()) return;
+        if (!record(payload) || typeof payload.requireClearance !== "boolean"
+          || !Array.isArray(payload.items) || !payload.items.every(validReadiness)
+          || new Set(payload.items.map((item) => item.visitId)).size !== payload.items.length) {
+          publishState("unavailable"); return;
+        }
+        setSnapshot({ owner, state: "ready", requireClearance: payload.requireClearance,
+          byVisit: new Map(payload.items.map((item) => [item.visitId, item])) });
+      } catch { publishState("unavailable"); }
+    };
+    try { await Promise.race([read(), finished]); }
+    finally {
+      clearTimeout(timeout);
+      if (pending.current?.abort === abort) pending.current = null;
+    }
+  }, [alive, canRead, retire, owner]);
+
+  useLayoutEffect(() => {
+    lifetime.current = { owner, mounted: document.visibilityState === "visible" };
     const first = setTimeout(() => { void reload(); }, 0);
     const poll = setInterval(() => { void reload(); }, refreshMs);
-    return () => { clearTimeout(first); clearInterval(poll); };
-  }, [reload, refreshMs]);
+    const refresh = () => { void reload(); };
+    const visibility = () => {
+      if (document.visibilityState === "visible") {
+        // A fresh owner is installed by the next committed effect. The old
+        // hidden owner's retry/focus closures remain retired in the meantime.
+        setForegroundEpoch((epoch) => epoch + 1);
+      } else {
+        lifetime.current.mounted = false; retire(); setSnapshot(null);
+      }
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      lifetime.current.mounted = false; retire(); setSnapshot(null);
+      clearTimeout(first); clearInterval(poll);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, [owner, reload, refreshMs, retire]);
 
-  return { byVisit, requireClearance, reload };
+  const current = canRead && snapshot?.owner === owner ? snapshot : null;
+  const state: TodayReadState = canRead ? current?.state ?? "loading" : "unavailable";
+  return {
+    byVisit: current?.byVisit ?? new Map<number, VisitReadiness>(),
+    requireClearance: current?.requireClearance ?? null,
+    state,
+    canClear, reload,
+  };
 }
 
 /**

@@ -246,6 +246,125 @@ async function freshDraft(f: Awaited<ReturnType<typeof fixture>>) {
   await blank(f.page); await fill(f.page); await f.assertQuiet(mark);
 }
 
+async function captureMobileTextView(page: Page, view: "upper" | "lower") {
+  const area = panel(page);
+  if (view === "upper") {
+    // Center the genuine field grid; do not offset, hide or restyle the mobile chrome.
+    await area.locator("label").first().evaluate(label =>
+      label.parentElement?.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+  } else {
+    await area.locator("details > p").evaluate(paragraph =>
+      paragraph.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
+  }
+  await settle(page);
+  const evidence = await area.evaluate((section, selectedView) => {
+    const rect = (box: DOMRect) => ({ left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+      width: box.width, height: box.height });
+    const inViewport = (box: DOMRect) => box.width > 0 && box.height > 0 && box.left >= 0
+      && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight;
+    const points = (element: Element, box: DOMRect, directText: boolean) => {
+      const midX = box.left + box.width / 2, midY = box.top + box.height / 2;
+      const dx = Math.min(directText ? 1 : 3, box.width / 4);
+      const dy = Math.min(directText ? 1 : 3, box.height / 4);
+      return [
+        { point: "centre", x: midX, y: midY }, { point: "top", x: midX, y: box.top + dy },
+        { point: "bottom", x: midX, y: box.bottom - dy }, { point: "left", x: box.left + dx, y: midY },
+        { point: "right", x: box.right - dx, y: midY },
+      ].map(sample => {
+        const hit = document.elementFromPoint(sample.x, sample.y);
+        // Text targets contain only direct text. A nested input cannot count as
+        // an unobscured label, and header/footer chrome cannot count as the owner.
+        return { ...sample, owned: hit === element || (!directText && !!hit && element.contains(hit)),
+          hitTag: hit?.tagName.toLowerCase() ?? null };
+      });
+    };
+    const labels = Array.from(section.querySelectorAll("label"));
+    const targets: Array<{ kind: string; element: Element }> = [];
+    if (selectedView === "upper") {
+      const intro = section.querySelector('p[role="note"]');
+      if (intro) targets.push({ kind: "introduction", element: intro });
+      for (const [index, label] of labels.slice(0, 5).entries()) targets.push({ kind: `field-label-${index}`, element: label });
+    } else {
+      const disclaimer = section.querySelector("details > p");
+      if (disclaimer) targets.push({ kind: "receipt-timing-disclaimer", element: disclaimer });
+    }
+    const text = targets.map(({ kind, element }) => {
+      const style = getComputedStyle(element);
+      const lines: Array<{ text: string; bounds: ReturnType<typeof rect>; inViewport: boolean;
+        hits: ReturnType<typeof points> }> = [];
+      let lineCount = 0;
+      // Direct label text only: select option labels are not painted field labels.
+      for (const node of Array.from(element.childNodes)) {
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const value = node.textContent ?? "", start = value.search(/\S/);
+        if (start < 0) continue;
+        const range = document.createRange(); range.setStart(node, start); range.setEnd(node, value.trimEnd().length);
+        for (const box of Array.from(range.getClientRects())) {
+          if (!box.width || !box.height) continue;
+          lineCount++;
+          if (lines.length < 16) lines.push({ text: value.trim().slice(0, 500), bounds: rect(box),
+            inViewport: inViewport(box), hits: points(element, box, true) });
+        }
+      }
+      return { kind, visibleStyle: style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0,
+        lineCount, truncated: lineCount > lines.length, lines };
+    });
+    const fields = selectedView === "upper"
+      ? labels.slice(0, 5).map(label => label.querySelector("input, select"))
+      : [section.querySelector("details > summary")];
+    const controls = fields.filter((element): element is Element => element !== null).map(element => {
+      const box = element.getBoundingClientRect();
+      return { tag: element.tagName.toLowerCase(), bounds: rect(box), inViewport: inViewport(box),
+        value: element instanceof HTMLInputElement || element instanceof HTMLSelectElement ? element.value : null,
+        hits: points(element, box, false) };
+    });
+    // Read-only checks that the genuine mobile header and navigation remain painted.
+    const chrome = (selector: string, required: readonly string[]) => Array.from(document.querySelectorAll(selector))
+      .filter(element => required.every(name => element.classList.contains(name)))
+      .filter(element => { const box = element.getBoundingClientRect(); return box.width > 0 && box.height > 0; })
+      .slice(0, 3).map(element => { const box = element.getBoundingClientRect();
+        return { bounds: rect(box), inViewport: inViewport(box), hits: points(element, box, false) }; });
+    return { view: selectedView, viewportWidth: innerWidth, viewportHeight: innerHeight, scrollY,
+      labelCount: labels.length, text, controls,
+      header: chrome("div", ["sticky", "top-0", "lg:hidden"]),
+      bottomNavigation: chrome("nav", ["fixed", "bottom-0", "lg:hidden"]) };
+  }, view);
+  const screenshot = `legacy-reconciliation-preview-390-${view}-viewport.png`;
+  // Genuine current viewport, including unmodified sticky header and bottom navigation.
+  await page.screenshot({ path: join(DIRECTORY, screenshot), fullPage: false });
+  return { screenshot, ...evidence };
+}
+
+function assertMobileTextViews(views: Awaited<ReturnType<typeof captureMobileTextView>>[]) {
+  expect(views.map(view => view.view)).toEqual(["upper", "lower"]);
+  for (const view of views) {
+    expect(view.viewportWidth).toBe(390); expect(view.viewportHeight).toBe(844);
+    expect(view.labelCount).toBe(4);
+    expect(view.text.map(target => target.kind)).toEqual(view.view === "upper"
+      ? ["introduction", "field-label-0", "field-label-1", "field-label-2", "field-label-3"]
+      : ["receipt-timing-disclaimer"]);
+    for (const target of view.text) {
+      expect(target.visibleStyle, target.kind).toBe(true); expect(target.truncated, target.kind).toBe(false);
+      expect(target.lineCount, target.kind).toBeGreaterThan(0);
+      for (const line of target.lines) {
+        expect(line.inViewport, target.kind).toBe(true);
+        expect(line.hits).toHaveLength(5); expect(line.hits.every(hit => hit.owned), target.kind).toBe(true);
+      }
+    }
+    expect(view.controls).toHaveLength(view.view === "upper" ? 4 : 1);
+    if (view.view === "upper") expect(view.controls.map(control => control.value)).toEqual(["SAR", "2026-09-01", "600", "250"]);
+    for (const control of view.controls) {
+      expect(control.inViewport).toBe(true); expect(control.bounds.width).toBeGreaterThanOrEqual(44);
+      expect(control.bounds.height).toBeGreaterThanOrEqual(44);
+      expect(control.hits).toHaveLength(5); expect(control.hits.every(hit => hit.owned)).toBe(true);
+    }
+    for (const chrome of [view.header, view.bottomNavigation]) {
+      expect(chrome).toHaveLength(1); expect(chrome[0].inViewport).toBe(true);
+      expect(chrome[0].hits.every(hit => hit.owned)).toBe(true);
+    }
+  }
+}
+
 async function captureGeometry(page: Page, width: number) {
   const area = panel(page);
   await page.evaluate(async () => { await document.fonts.ready; });
@@ -306,10 +425,14 @@ async function captureGeometry(page: Page, width: number) {
   // one viewport: the separate control samples above prove scrolled hit targets.
   // Save both artifacts before fatal geometry assertions, without altering CSS.
   await area.screenshot({ path: join(DIRECTORY, stem + ".png") });
+  const mobileTextViews = width === 390
+    ? [await captureMobileTextView(page, "upper"), await captureMobileTextView(page, "lower")]
+    : undefined;
   await writeFile(join(DIRECTORY, stem + "-bounds.json"), JSON.stringify({
     version: 1, fixture: "synthetic-read-only-built-account", screenshot: stem + ".png", width,
     capture: "full-preview-section; independent per-control scrolled viewport measurements",
     geometry, controls: controlBounds,
+    ...(mobileTextViews ? { mobileTextViews } : {}),
   }, null, 2) + "\n", "utf8");
   expect(geometry.direction).toBe("rtl"); expect(geometry.sectionDirection).toBe("rtl");
   expect(geometry.viewportWidth).toBe(width); expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
@@ -328,6 +451,8 @@ async function captureGeometry(page: Page, width: number) {
     expect(control.bottom, control.label).toBeLessThanOrEqual(control.viewportHeight + 1);
     expect(control.points.every(point => point.contained), control.label).toBe(true);
   }
+  // Both new viewport PNGs and the extended mobile JSON already exist on any assertion failure.
+  if (mobileTextViews) assertMobileTextViews(mobileTextViews);
 }
 
 describe("read-only legacy comparison on the actual built Account page", () => {
