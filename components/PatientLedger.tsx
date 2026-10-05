@@ -12,6 +12,7 @@ import { InvoiceCorrection } from "./InvoiceCorrection";
 import { ReceiptCorrection } from "./ReceiptCorrection";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
+import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -376,6 +377,11 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
             </p>
           </div>
         ))
+      ) : null}
+
+      {ledger && !loading && !error ? (
+        <LegacyReconciliationPreview patientId={patientId} ready
+          positions={ledger.legacyOpeningPositions} payments={ledger.payments} />
       ) : null}
 
       {ledger ? (
