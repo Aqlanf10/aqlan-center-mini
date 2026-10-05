@@ -849,6 +849,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic read-only Account comparison: no cookies, storage values,
+      # traces, HAR, broad directories or historical financial writes.
+      - name: Upload legacy reconciliation preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-reconciliation-preview-ui
+          path: |
+            .settings-ui-artifacts/legacy-reconciliation-preview-390.png
+            .settings-ui-artifacts/legacy-reconciliation-preview-1280.png
+            .settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json
+            .settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json
+            .settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png
+            .settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exactly two synthetic Cases navigation screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Cases orthodontic section navigation evidence
