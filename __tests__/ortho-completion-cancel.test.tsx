@@ -5,7 +5,7 @@ import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
 // Exercise PatientOrtho's real rendered button handlers with synthetic hook storage.
 // Child editors are not executed; fetch and the native prompt are fully mocked.
 const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false,
+  values: [] as unknown[], cursor: 0, changed: false, context: null as unknown,
   memos: new Map<number, { value: unknown; deps?: readonly unknown[] }>(),
   effects: new Map<number, readonly unknown[] | undefined>(),
   pending: [] as (() => void)[],
@@ -20,6 +20,7 @@ vi.mock("react", async (original) => {
     const value = compute(); hooks.memos.set(index, { value, deps }); return value;
   };
   return { ...react,
+    useContext: () => hooks.context,
     useState: (initial: unknown) => {
       const index = hooks.cursor++;
       if (!(index in hooks.values)) hooks.values[index] = typeof initial === "function" ? initial() : initial;
@@ -36,6 +37,11 @@ vi.mock("react", async (original) => {
     },
     useMemo: memo,
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
+    useLayoutEffect: (effect: () => void, deps?: readonly unknown[]) => {
+      const index = hooks.cursor++;
+      if (hooks.effects.has(index) && same(hooks.effects.get(index), deps)) return;
+      hooks.effects.set(index, deps); hooks.pending.push(effect);
+    },
     useEffect: (effect: () => void, deps?: readonly unknown[]) => {
       const index = hooks.cursor++;
       if (hooks.effects.has(index) && same(hooks.effects.get(index), deps)) return;
@@ -90,7 +96,10 @@ function render() {
   do {
     if (++rounds > 12) throw new Error("Synthetic render did not settle");
     hooks.cursor = 0; hooks.changed = false;
-    tree = PatientOrtho({ patientId: PATIENT_ID });
+    const provider = PatientOrtho({ patientId: PATIENT_ID });
+    hooks.context = provider.props.value;
+    const workspace = provider.props.children as ReactElement<Record<string, unknown>>;
+    tree = (workspace.type as (props: Record<string, unknown>) => ReactNode)(workspace.props);
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;
@@ -137,8 +146,8 @@ beforeEach(() => {
       return Response.json({ ok: true });
     }
     if (init?.method) throw new Error(`Unexpected synthetic write: ${url}`);
-    if (url === `/api/ortho?patientId=${PATIENT_ID}`) return Response.json({ cases: [caseRow] });
-    if (url === `/api/patients/${PATIENT_ID}`) return Response.json({ patient: { fullName: "Synthetic patient", phone: null } });
+    if (url === `/api/ortho?patientId=${PATIENT_ID}`) return Response.json({ cases: [{ ...caseRow, patientId: PATIENT_ID }] });
+    if (url === `/api/patients/${PATIENT_ID}`) return Response.json({ patient: { id: PATIENT_ID, fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { prompt });

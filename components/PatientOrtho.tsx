@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
 import {
@@ -27,7 +27,7 @@ import {
   LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore,
   type LegacyFinancialMode,
 } from "@/lib/ortho-baseline";
-import { useSession } from "./SessionProvider";
+import { useSession, type SessionInfo } from "./SessionProvider";
 
 /**
  * كابينة تقويم الأسنان التخصصية (Orthodontic Specialty Cockpit).
@@ -133,11 +133,202 @@ interface SavedAdjustment {
   visitId: number | null;
 }
 
+export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
+type OrthoReadState = "loading" | "ready" | "error" | "denied";
+type Draft = { values: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean;
+  activate: () => void; markUncertain: () => void;
+};
+type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
+type OrthoOwner = {
+  active: boolean; denied: boolean; clinical: boolean; contact: boolean; standalone: boolean;
+  readSequence: number; mutationSequence: number; denialSequence: number;
+  controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
+  cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
+  deny: () => void;
+  activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
+  bindDenial: (deny: () => void) => void; denyRead: () => void;
+  beginRead: (controller: AbortController) => number;
+  setTimer: (timer: ReturnType<typeof setTimeout>) => void; clearTimer: () => void; releaseTimer: () => void;
+  grantClinical: (cases: OrthoCase[]) => void; withdrawClinical: () => void; setContact: (granted: boolean) => void;
+};
+const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
+/** Mutable lifecycle storage owns its transitions; hooks only read it or call its methods. */
+function makeOwner(standalone = false): OrthoOwner {
+  const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
+    readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
+    cases: [], drafts: new Map(), mutations: new Set(), deny: () => {},
+    activate: () => { owner.active = true; },
+    activateStandaloneDraft: (key, draft) => {
+      owner.active = true; owner.clinical = true; owner.contact = true;
+      draft.activate(); owner.drafts.set(key, draft);
+    },
+    retire: () => retireOwner(owner),
+    bindDenial: (deny) => { owner.deny = deny; },
+    denyRead: () => {
+      owner.denied = true; owner.clinical = false; owner.contact = false;
+      owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
+      owner.clearTimer();
+      for (const operation of owner.mutations) {
+        operation.active = false; operation.draft.markUncertain();
+      }
+    },
+    beginRead: (controller) => {
+      owner.controller?.abort();
+      if (owner.timer !== null) clearTimeout(owner.timer);
+      owner.controller = controller;
+      const sequence = ++owner.readSequence;
+      owner.denied = false; owner.clinical = false; owner.contact = false; owner.cases = [];
+      return sequence;
+    },
+    setTimer: (timer) => { owner.timer = timer; },
+    clearTimer: () => { if (owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; } },
+    releaseTimer: () => { owner.timer = null; },
+    grantClinical: (cases) => { owner.cases = cases; owner.clinical = true; },
+    withdrawClinical: () => { owner.clinical = false; owner.cases = []; },
+    setContact: (granted) => { owner.contact = granted; },
+  };
+  return owner;
+}
+function makeDraft(): Draft {
+  const draft: Draft = { values: new Map(), urls: new Set(), active: true, busy: false, uncertain: false,
+    activate: () => { draft.active = true; },
+    markUncertain: () => { draft.uncertain = true; },
+  };
+  return draft;
+}
+function makeViewLease() {
+  let active = false;
+  return { get active() { return active; }, activate: () => { active = true; }, retire: () => { active = false; } };
+}
+function draftFor(owner: OrthoOwner, key: string): Draft {
+  let draft = owner.drafts.get(key);
+  if (!draft) { draft = makeDraft(); owner.drafts.set(key, draft); }
+  return draft;
+}
+function disposeDraft(owner: OrthoOwner, key: string) {
+  const draft = owner.drafts.get(key);
+  if (!draft) return;
+  draft.active = false;
+  for (const url of draft.urls) URL.revokeObjectURL(url);
+  draft.urls.clear(); draft.values.clear(); owner.drafts.delete(key);
+}
+function retireOwner(owner: OrthoOwner) {
+  owner.active = false; owner.clinical = false; owner.contact = false;
+  owner.readSequence++; owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
+  if (owner.timer !== null) clearTimeout(owner.timer);
+  for (const operation of owner.mutations) operation.active = false;
+  for (const key of owner.drafts.keys()) disposeDraft(owner, key);
+}
+function sessionScope(session: SessionInfo | null) {
+  return JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
+}
+function currentMutation(owner: OrthoOwner, operation: Mutation | null): operation is Mutation {
+  return !!operation && owner.active && !owner.denied && operation.active && operation.draft.active
+    && operation.denial === owner.denialSequence;
+}
+function beginMutation(owner: OrthoOwner, draft: Draft, allowed: boolean): Mutation | null {
+  if (!owner.active || owner.denied || !owner.clinical || !draft.active || draft.busy || draft.uncertain || !allowed) return null;
+  draft.busy = true;
+  const operation = { draft, sequence: ++owner.mutationSequence, denial: owner.denialSequence, active: true };
+  owner.mutations.add(operation); return operation;
+}
+function endMutation(owner: OrthoOwner, operation: Mutation) {
+  operation.active = false; operation.draft.busy = false; owner.mutations.delete(operation);
+}
+function mayUpload(session: SessionInfo | null) {
+  return !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
+    || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
+}
+
+/** A draft belongs to the workspace, not to a temporary rendered view. */
+function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
+  const parent = useContext(OrthoOwnerContext);
+  const session = useSession();
+  const authority = sessionScope(session);
+  const fallback = useMemo(() => makeOwner(true), [authority, patientId, caseId]);
+  const owner = parent ?? fallback;
+  const draft = draftFor(owner, key);
+  const lease = useMemo(() => makeViewLease(), [owner, draft]);
+  const [, render] = useState(0);
+  useLayoutEffect(() => {
+    if (!parent) owner.activateStandaloneDraft(key, draft);
+    lease.activate();
+    return () => { lease.retire(); if (!parent) owner.retire(); };
+  }, [owner, parent, lease, draft, key]);
+  const redraw = () => { if (lease.active && owner.active) render((value) => value + 1); };
+  const editable = () => lease.active && owner.active && owner.clinical && !owner.denied && draft.active && !draft.busy && !draft.uncertain;
+  const field = <T,>(name: string, initial: T | (() => T)): [T, (value: T | ((before: T) => T)) => void] => {
+    if (!draft.values.has(name)) draft.values.set(name, typeof initial === "function" ? (initial as () => T)() : initial);
+    return [draft.values.get(name) as T, (update) => {
+      if (!editable()) return;
+      draft.values.set(name, typeof update === "function" ? (update as (before: T) => T)(draft.values.get(name) as T) : update);
+      redraw();
+    }];
+  };
+  const caseGranted = () => owner.active && !owner.denied && owner.clinical
+    && (caseId === undefined || owner.standalone || owner.cases.some((row) => row.id === caseId));
+  return { owner, draft, session, editable, field, caseGranted,
+    commit: (name: string, value: unknown) => { if (!owner.active || owner.denied || !draft.active) return; draft.values.set(name, value); redraw(); },
+    begin: (allowed = true) => {
+      if (!lease.active) return null;
+      const operation = beginMutation(owner, draft, allowed && caseGranted());
+      redraw(); return operation;
+    },
+    current: (operation: Mutation) => currentMutation(owner, operation),
+    checkHeaders: (response: Response, operation: Mutation) => {
+      if (!currentMutation(owner, operation)) return false;
+      if (response.status === 401 || response.status === 403) { owner.deny(); return false; }
+      return true;
+    },
+    uncertain: () => { draft.markUncertain(); redraw(); },
+    finish: (operation: Mutation) => { endMutation(owner, operation); redraw(); },
+    release: (url: string) => { if (draft.urls.delete(url)) URL.revokeObjectURL(url); },
+  };
+}
+function UncertainWrite({ draft }: { draft: Draft }) {
+  return draft.uncertain ? <p role="alert" data-testid="ortho-write-uncertain" className="mt-2 text-xs font-bold text-amber-900">
+    تعذّر تأكيد نتيجة الطلب السابق. قد يكون نُفّذ؛ راجع السجل بعد إعادة التحميل قبل فتح نموذج جديد. إعادة التحميل لا تعيد إرسال الطلب.
+  </p> : null;
+}
+
+function readCases(payload: unknown, patientId: number): OrthoCase[] {
+  const list = payload && typeof payload === "object" ? (payload as { cases?: unknown }).cases : null;
+  if (!Array.isArray(list)) throw new Error("تعذّر التحقق من حالات التقويم.");
+  const ids = new Set<number>();
+  for (const row of list) {
+    if (!row || typeof row !== "object" || row.patientId !== patientId || !Number.isSafeInteger(row.id) || row.id <= 0
+      || ids.has(row.id) || !Array.isArray(row.adjustments) || !row.progress
+      || row.adjustments.some((entry: unknown) => {
+        if (!entry || typeof entry !== "object") return true;
+        const one = entry as Partial<Adjustment>;
+        return !Number.isSafeInteger(one.id) || Number(one.id) <= 0 || typeof one.doneOn !== "string"
+          || typeof one.visitSigned !== "boolean" || !(one.visitId === null || (Number.isSafeInteger(one.visitId) && Number(one.visitId) > 0))
+          || !Array.isArray(one.photos) || !Number.isFinite(one.nextWeeks);
+      })
+      || !Object.hasOwn(CASE_STATUS_LABEL, row.status) || !Object.hasOwn(PHASE_LABEL, row.phase)
+      || !Object.hasOwn(APPLIANCE_LABEL, row.appliance) || !Object.hasOwn(ARCHES_LABEL, row.arches)
+      || !Object.hasOwn(SLOT_LABEL, row.slot)) throw new Error("تعذّر التحقق من حالات التقويم.");
+    ids.add(row.id);
+  }
+  return list as OrthoCase[];
+}
+
 export function PatientOrtho({ patientId }: { patientId: number }) {
+  const session = useSession();
+  const authority = sessionScope(session);
+  const owner = useMemo(() => makeOwner(), [patientId, authority]);
+  useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
+  return <OrthoOwnerContext.Provider value={owner}>
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} />
+  </OrthoOwnerContext.Provider>;
+}
+
+function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
+  const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
   const [patient, setPatient] = useState<{ name: string; phone: string | null } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [readState, setReadState] = useState<OrthoReadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [recordingLegacy, setRecordingLegacy] = useState(false);
@@ -146,67 +337,136 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
   const [onboardingRevision, setOnboardingRevision] = useState(0);
+  const [, redrawMutation] = useState(0);
 
   // تبويب الركن النشط لكل حالة (افتراضيًا: الأسلاك والشدّات)
   const [activePillars, setActivePillars] = useState<Record<number, OrthoPillar>>({});
 
+  const renderRead = owner.readSequence;
+  const currentView = () => owner.active && !owner.denied && owner.clinical && owner.readSequence === renderRead;
+  const mayDiscard = (key: string) => { const draft = owner.drafts.get(key); return !draft?.busy && !draft?.uncertain; };
   const setPillarForCase = (caseId: number, pillar: OrthoPillar) => {
+    if (!currentView()) return;
     setActivePillars((prev) => ({ ...prev, [caseId]: pillar }));
   };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [orthoRes, patientRes] = await Promise.all([
-        fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
-        fetch(`/api/patients/${patientId}`, { cache: "no-store" }),
-      ]);
-      const payload = await orthoRes.json();
-      if (!orthoRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setCases(payload.cases as OrthoCase[]);
-      if (patientRes.ok) {
-        const file = await patientRes.json().catch(() => null);
-        setPatient(file?.patient
-          ? { name: file.patient.fullName, phone: file.patient.phone }
-          : null);
-      }
-      setError(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
-    } finally {
-      setLoading(false);
+  const deny = useCallback(() => {
+    if (!owner.active) return;
+    owner.denyRead();
+    setCases([]); setPatient(null); setReadState("denied");
+    setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
+  }, [owner]);
+  useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const load = useCallback(() => {
+    if (!owner.active) return;
+    const controller = new AbortController();
+    const sequence = owner.beginRead(controller);
+    const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
+    setReadState("loading"); setPatient(null); setError(null);
+    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+      deny(); return;
     }
-  }, [patientId]);
+    let finished = 0;
+    const finish = () => { if (++finished === 2 && owner.timer !== null && owner.readSequence === sequence) {
+      owner.clearTimer();
+    } };
+    owner.setTimer(setTimeout(() => {
+      if (!current()) return;
+      controller.abort();
+      if (!owner.clinical) { setCases([]); setReadState("error"); }
+      if (!owner.contact) setPatient(null);
+      setError("تعذّر إكمال قراءة كابينة التقويم. أعد التحميل.");
+      owner.releaseTimer();
+    }, ORTHO_PARENT_READ_TIMEOUT_MS));
+    const read = async (kind: "clinical" | "contact") => {
+      try {
+        const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}`,
+          { cache: "no-store", signal: controller.signal });
+        if (!current()) return;
+        // Both endpoints guard this patient/session; denial is authoritative at headers.
+        if (response.status === 401 || response.status === 403) { deny(); return; }
+        if (!response.ok) throw new Error("Read unavailable");
+        const payload: unknown = await response.json();
+        if (!current()) return;
+        if (kind === "clinical") {
+          const verified = readCases(payload, patientId);
+          owner.grantClinical(verified); setCases(verified); setReadState("ready");
+        } else {
+          const patient = payload && typeof payload === "object" ? (payload as { patient?: unknown }).patient : null;
+          if (!patient || typeof patient !== "object") throw new Error("Invalid patient");
+          const row = patient as { id?: unknown; fullName?: unknown; phone?: unknown };
+          if (row.id !== patientId || typeof row.fullName !== "string" || (row.phone !== null && typeof row.phone !== "string")) throw new Error("Invalid patient");
+          owner.setContact(true); setPatient({ name: row.fullName, phone: row.phone });
+        }
+      } catch {
+        if (!current()) return;
+        if (kind === "clinical") { owner.withdrawClinical(); setCases([]); setReadState("error"); }
+        else { owner.setContact(false); setPatient(null); }
+        setError(kind === "clinical" ? "تعذّر تحميل حالات التقويم. أعد التحميل." : "تعذّر التحقق من بيانات المريض؛ الحجز والتذكير متوقفان حتى نجاح القراءة.");
+      } finally { finish(); }
+    };
+    // Independent continuations: no stalled peer or JSON body can postpone denial.
+    void read("clinical"); void read("contact");
+  }, [owner, patientId, session?.username, session?.role, deny]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  // The case row may keep the same ID and plan ID after a confirmed change.
-  // Invalidate the independent classifier immediately, even if reloading cases fails.
   const refreshAfterConfirmedChange = () => {
+    if (!owner.active || owner.denied) return;
     setOnboardingRevision((value) => value + 1);
-    void load();
+    load();
   };
+  const currentCase = (id: number) => currentView() && owner.cases.some((row) => row.id === id);
+  const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
   const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
-  const signVisitId = saved?.visitId ?? unsignedTodayVisitId;
+  const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
+  const signVisitId = (savedCaseAvailable ? saved?.visitId : null) ?? unsignedTodayVisitId;
 
   const patch = async (id: number, body: Record<string, unknown>) => {
-    const response = await fetch(`/api/ortho/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) { setError(payload?.message ?? "تعذّر التنفيذ."); return false; }
-    setError(null);
-    setOnboardingRevision((value) => value + 1);
-    await load();
-    return true;
+    const draft = draftFor(owner, "case-patch");
+    const operation = beginMutation(owner, draft, currentCase(id));
+    if (!operation) return false;
+    redrawMutation((value) => value + 1);
+    try {
+      const response = await fetch(`/api/ortho/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!currentMutation(owner, operation)) return false;
+      if (response.status === 401 || response.status === 403) { deny(); return false; }
+      const payload = await response.json().catch(() => null);
+      if (!currentMutation(owner, operation)) return false;
+      if (!response.ok) { if (response.status >= 500) draft.markUncertain(); safeError(payload?.message ?? "تعذّر التنفيذ."); return false; }
+      safeError(null); refreshAfterConfirmedChange(); return true;
+    } catch {
+      if (currentMutation(owner, operation)) { draft.markUncertain(); safeError("تعذّر تأكيد نتيجة التعديل. راجع الحالة بعد إعادة التحميل قبل تكراره."); }
+      return false;
+    } finally { endMutation(owner, operation); if (owner.active) redrawMutation((value) => value + 1); }
   };
 
+  if (readState !== "ready" || !owner.clinical) {
+    return <div data-testid="patient-ortho-workspace" data-read-state={readState}
+      className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+      <p role={error ? "alert" : "status"}>{error ?? "جارٍ التحقق من كابينة التقويم…"}</p>
+      {owner.drafts.size > 0 ? <p className="text-xs text-slate-600">احتُفظ بالنماذج لهذه الجلسة دون عرضها؛ الحفظ متوقف حتى نجاح إعادة التحميل.</p> : null}
+      {[...owner.drafts.values()].some((draft) => draft.uncertain) ? <UncertainWrite draft={[...owner.drafts.values()].find((draft) => draft.uncertain)!} /> : null}
+      <button type="button" aria-label="إعادة تحميل كابينة التقويم" onClick={load}
+        className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold">إعادة تحميل كابينة التقويم</button>
+    </div>;
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="patient-ortho-workspace" data-read-state="ready">
+      <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
+        className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
+      {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
+      {(opening || recordingLegacy) && open ? <p role="status" className="text-xs text-slate-600">احتُفظ بالنموذج؛ توجد حالة مفتوحة في القراءة الحالية، لذلك لا يُعاد إرساله.</p> : null}
+      {adjusting !== null && !cases.some((row) => row.id === adjusting && (row.status === "active" || row.status === "retention")) ? <p role="status" className="text-xs text-slate-600">احتُفظ بمسودة الشدّة؛ الحالة المرتبطة بها غير متاحة للتعديل في القراءة الحالية.</p> : null}
+      {adjusting !== null && !cases.some((row) => row.id === adjusting) && owner.drafts.get(`adjust:${adjusting}`)?.uncertain ? (
+        <UncertainWrite draft={owner.drafts.get(`adjust:${adjusting}`)!} />
+      ) : null}
       {error ? (
         <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
           {error}
@@ -215,19 +475,23 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
       {signVisitId ? (
-        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={setError} />
+        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={safeError} />
       ) : null}
-      {saved ? (
+      {saved && !savedCaseAvailable ? (
+        <p role="status" className="text-xs text-slate-600">احتُفظ بمسودة الموعد دون عرضها؛ الحالة المرتبطة بها غير متاحة في القراءة الحالية.</p>
+      ) : null}
+      {saved && savedCaseAvailable ? (
         <NextAppointmentCard
           patientId={patientId}
           patientName={patient?.name ?? ""}
           patientPhone={patient?.phone ?? null}
+          draftKey={`next:${saved.adjustmentId}`} contactReady={owner.contact}
           caseId={saved.caseId}
           doneOn={saved.doneOn}
           nextWeeks={saved.nextWeeks}
           photosUploaded={saved.photosUploaded}
-          onDismiss={() => setSaved(null)}
-          onError={setError}
+          onDismiss={() => { if (!currentView() || !mayDiscard(`next:${saved.adjustmentId}`)) return; disposeDraft(owner, `next:${saved.adjustmentId}`); setSaved(null); }}
+          onError={safeError}
         />
       ) : null}
 
@@ -245,14 +509,14 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => { setOpening((value) => !value); setRecordingLegacy(false); }}
+                onClick={() => { if (!currentView() || !mayDiscard("new") || !mayDiscard("baseline")) return; if (opening) disposeDraft(owner, "new"); disposeDraft(owner, "baseline"); setOpening((value) => !value); setRecordingLegacy(false); }}
                 className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
               >
                 {opening ? "✕ إغلاق النموذج" : "+ فتح حالة تقويم جديدة"}
               </button>
               {canRecordBaseline ? (
                 <button
-                  onClick={() => { setRecordingLegacy((value) => !value); setOpening(false); }}
+                  onClick={() => { if (!currentView() || !mayDiscard("new") || !mayDiscard("baseline")) return; if (recordingLegacy) disposeDraft(owner, "baseline"); disposeDraft(owner, "new"); setRecordingLegacy((value) => !value); setOpening(false); }}
                   className="rounded-xl border border-navy-800 bg-white px-4 py-2 text-xs font-black text-navy-900 hover:bg-navy-50 transition-colors"
                 >
                   {recordingLegacy ? "✕ إغلاق النموذج" : "تسجيل حالة سابقة (قبل النظام)"}
@@ -265,8 +529,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <LegacyBaselineForm
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setRecordingLegacy(false); refreshAfterConfirmedChange(); }}
-                onError={setError}
+                onSaved={() => { if (!owner.active || owner.denied) return; disposeDraft(owner, "baseline"); setRecordingLegacy(false); refreshAfterConfirmedChange(); }}
+                onError={safeError}
               />
             </div>
           ) : null}
@@ -275,8 +539,8 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
               <NewCase
                 patientId={patientId}
                 today={today}
-                onSaved={() => { setOpening(false); refreshAfterConfirmedChange(); }}
-                onError={setError}
+                onSaved={() => { if (!owner.active || owner.denied) return; disposeDraft(owner, "new"); setOpening(false); refreshAfterConfirmedChange(); }}
+                onError={safeError}
               />
             </div>
           ) : null}
@@ -284,7 +548,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* إذا لم تكن هناك حالات مسجلة للمريض: نوفر مساحة التشخيص والسيفالومتري التمهيدي */}
-      {cases.length === 0 && !loading && (
+      {cases.length === 0 && (
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="mb-2">
@@ -300,11 +564,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
         </div>
       )}
 
-      {loading && cases.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          جارٍ تحميل كابينة التقويم…
-        </p>
-      ) : null}
+
 
       {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
       {cases.length > 0 && (
@@ -368,7 +628,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                       <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
                         canLink={session?.role === "admin" || session?.role === "reception"
                           || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
-                        onChanged={refreshAfterConfirmedChange} />
+                        onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
@@ -425,7 +685,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                     return (
                       <button
                         key={tab.key}
-                        onClick={() => setPillarForCase(row.id, tab.key)}
+                        onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, tab.key); }}
                         className={`flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 ${
                           isSelected
                             ? "border-navy-800 text-navy-900 bg-navy-50/40"
@@ -483,7 +743,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                             {PHASE_ORDER.map((phase) => (
                               <button
                                 key={phase}
-                                onClick={() => void patch(row.id, { phase })}
+                                disabled={owner.drafts.get("case-patch")?.busy || owner.drafts.get("case-patch")?.uncertain} onClick={() => void patch(row.id, { phase })}
                                 title={PHASE_HINT[phase]}
                                 className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
                                   row.phase === phase
@@ -511,15 +771,17 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                               wires={wires}
                               patientId={patientId}
                               onSaved={(result) => {
+                                if (!owner.active || owner.denied) return;
+                                disposeDraft(owner, `adjust:${row.id}`);
                                 setAdjusting(null);
                                 setSaved(result);
                                 refreshAfterConfirmedChange();
                               }}
-                              onError={setError}
+                              onError={safeError}
                             />
                           ) : (
                             <button
-                              onClick={() => { setSaved(null); setAdjusting(row.id); }}
+                              onClick={() => { if (!currentCase(row.id)) return; setSaved(null); setAdjusting(row.id); }}
                               className="w-full rounded-2xl bg-brand-orange py-3 text-sm font-black text-white shadow-xs hover:bg-amber-600 transition-colors"
                             >
                               ⚡ سجّل شدّة وجلسة جديدة الآن
@@ -635,7 +897,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
 
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
                       <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
-                        <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={setError} />
+                        <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
                       </section>
                     </div>
                   )}
@@ -712,7 +974,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                               {(Object.keys(RETAINER_LABEL) as RetainerType[]).map((type) => (
                                 <button
                                   key={type}
-                                  onClick={() => void patch(row.id, { retainer: type })}
+                                  disabled={owner.drafts.get("case-patch")?.busy || owner.drafts.get("case-patch")?.uncertain} onClick={() => void patch(row.id, { retainer: type })}
                                   className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition-all ${
                                     row.retainer === type
                                       ? "border-emerald-600 bg-emerald-600 text-white shadow-xs"
@@ -727,6 +989,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200">
                               <button
                                 onClick={async () => {
+                                  if (!currentCase(row.id) || owner.drafts.get("case-patch")?.busy || owner.drafts.get("case-patch")?.uncertain) return;
                                   const note = window.prompt("ملاحظة على إكمال الحالة (اختياري)");
                                   if (note === null) return;
                                   await patch(row.id, { status: "completed", note });
@@ -737,6 +1000,7 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
                               </button>
                               <button
                                 onClick={async () => {
+                                  if (!currentCase(row.id) || owner.drafts.get("case-patch")?.busy || owner.drafts.get("case-patch")?.uncertain) return;
                                   const note = window.prompt("سبب التوقّف أو الإلغاء؟");
                                   if (!note?.trim()) return;
                                   await patch(row.id, { status: "discontinued", note });
@@ -780,39 +1044,43 @@ export function PatientOrtho({ patientId }: { patientId: number }) {
  * من أراد إضافة إجراءٍ أو تشخيص يفتح «زيارة اليوم» ويوقّع من هناك.
  */
 function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (message: string | null) => void }) {
+  const form = useOrthoDraft(`sign:${visitId}`);
   const session = useSession();
   const canSign = session?.role === "doctor" || session?.role === "admin";
-  const [busy, setBusy] = useState(false);
-  const [signed, setSigned] = useState(false);
+  const busy = form.draft.busy;
+  const [signed] = form.field("signed", false);
 
   const sign = async () => {
-    if (busy || signed) return;
-    setBusy(true);
+    const operation = form.begin(canSign && form.draft.values.get("signed") !== true && (form.owner.standalone || form.owner.cases.some((row) => row.adjustments.some((entry) => entry.visitId === visitId && !entry.visitSigned))));
+    if (!operation) return;
     onError(null);
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "sign" }),
       });
+      if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر توقيع الزيارة."); return; }
-      setSigned(true);
+      if (!form.current(operation)) return;
+      if (!response.ok) { if (response.status >= 500) form.uncertain(); onError(payload?.message ?? "تعذّر توقيع الزيارة."); return; }
+      form.commit("signed", true);
     } catch {
-      onError("تعذّر الاتصال بالخادم.");
+      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد توقيع الزيارة. أعد قراءة السجل قبل المحاولة."); }
     } finally {
-      setBusy(false);
+      form.finish(operation);
     }
   };
 
   return (
     <div className="rounded-2xl border border-sky-300 bg-sky-50 p-3 text-xs text-sky-950 shadow-xs">
+      <UncertainWrite draft={form.draft} />
       {signed ? (
         <p className="font-black">✓ وُقّعت زيارة اليوم وأُرسل المريض إلى الاستقبال.</p>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="font-bold">سُجّلت الشدّة في زيارة اليوم.</p>
           {canSign ? (
-            <button type="button" onClick={() => void sign()} disabled={busy}
+            <button type="button" onClick={() => void sign()} disabled={busy || form.draft.uncertain}
               className="rounded-xl bg-sky-700 px-3 py-2 text-xs font-black text-white hover:bg-sky-800 disabled:opacity-60">
               {busy ? "جارٍ التوقيع…" : "وقّع الزيارة وأرسله للاستقبال"}
             </button>
@@ -825,20 +1093,31 @@ function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (m
 
 function NextAppointmentCard({
   patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
-  photosUploaded, onDismiss, onError,
+  photosUploaded, onDismiss, onError, draftKey, contactReady,
 }: {
   patientId: number; patientName: string; patientPhone: string | null;
   caseId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
+  draftKey: string; contactReady: boolean;
   onDismiss: () => void; onError: (message: string | null) => void;
 }) {
+  const form = useOrthoDraft(draftKey, patientId, caseId);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");
   const suggested = nextAdjustmentDate(doneOn, nextWeeks);
-  const [booking, setBooking] = useState(false);
-  const [date, setDate] = useState(suggested);
-  const [time, setTime] = useState("16:00");
-  const [busy, setBusy] = useState(false);
-  const [booked, setBooked] = useState<{ date: string; time: string } | null>(null);
+  const [booking, setBooking] = form.field("booking", false);
+  const [date, setDate] = form.field("date", suggested);
+  const [time, setTime] = form.field("time", "16:00");
+  const busy = form.draft.busy;
+  const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
+  // The card survives Back/success, but a captured form command must not.
+  // Retained draft values alone cannot distinguish two separate form openings.
+  const bookingView = useMemo(() => makeViewLease(), [booking, form.draft]);
+  useLayoutEffect(() => {
+    if (booking) bookingView.activate(); else bookingView.retire();
+    return () => { bookingView.retire(); };
+  }, [bookingView, booking]);
+  const currentBookingView = () => bookingView.active && form.draft.values.get("booking") === true
+    && !form.draft.values.get("booked");
 
   const message = booked
     ? orthoSessionBookedText({
@@ -847,7 +1126,7 @@ function NextAppointmentCard({
         clinic: { name: clinicName, phone: clinicPhone || "04-253028" },
       })
     : null;
-  const waLink = booked && patientPhone
+  const waLink = contactReady && booked && patientPhone
     ? (() => {
         const number = toWhatsAppNumber(patientPhone);
         return number
@@ -858,8 +1137,8 @@ function NextAppointmentCard({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busy) return;
-    setBusy(true);
+    const operation = form.begin(currentBookingView() && contactReady && form.owner.contact);
+    if (!operation) return;
     onError(null);
     try {
       const response = await fetch("/api/appointments", {
@@ -870,17 +1149,21 @@ function NextAppointmentCard({
           note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
       });
+      if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
+      if (!form.current(operation)) return;
       if (!response.ok) {
+        if (response.status >= 500) form.uncertain();
         onError(payload?.suggestionMessage || payload?.message || "تعذّر الحجز.");
         return;
       }
-      setBooked({ date, time });
-      setBooking(false);
+      form.commit("booked", { date, time });
+      bookingView.retire();
+      form.commit("booking", false);
     } catch {
-      onError("تعذّر الاتصال بالخادم.");
+      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة الحجز. راجع المواعيد قبل تكراره."); }
     } finally {
-      setBusy(false);
+      form.finish(operation);
     }
   };
 
@@ -889,6 +1172,8 @@ function NextAppointmentCard({
       <p className="mb-1 text-sm font-black text-emerald-900">
         {booked ? "تم حجز الجلسة القادمة بنجاح" : "📅 الجلسة القادمة المقترحة"}
       </p>
+      <UncertainWrite draft={form.draft} />
+      {!contactReady ? <p role="status">الحجز والتذكير متوقفان حتى التحقق من بيانات المريض.</p> : null}
       {photosUploaded > 0 ? (
         <p className="mb-1 text-xs font-bold text-emerald-700">
           📷 رُفعت {photosUploaded} صورة للجلسة وحُفظت مباشرة في ألبوم الحالة.
@@ -901,31 +1186,33 @@ function NextAppointmentCard({
 
       {booked ? (
         <>
-          {waLink && message ? (
+          {contactReady && waLink && message ? (
             <div className="flex flex-wrap gap-2">
               <a href={waLink} target="_blank" rel="noopener"
                 className="flex-1 rounded-xl bg-emerald-600 py-2 text-center text-xs font-black text-white hover:bg-emerald-700 transition-colors">
                 أرسل تأكيد الموعد واتساب
               </a>
               <button type="button"
-                onClick={() => void navigator.clipboard?.writeText(message).catch(() => {})}
+                onClick={() => { if (form.editable() && form.owner.contact) void navigator.clipboard?.writeText(message).catch(() => {}); }}
                 className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
                 انسخ الرسالة
               </button>
             </div>
           ) : null}
-          <button onClick={onDismiss}
+          <button onClick={() => { if (form.editable()) onDismiss(); }}
             className="mt-2 w-full rounded-xl border border-emerald-300 bg-white py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
             تم — إغلاق
           </button>
         </>
       ) : !booking ? (
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setBooking(true)}
+          <button disabled={!contactReady || busy || form.draft.uncertain} onClick={() => {
+            if (form.editable() && !form.draft.values.get("booking") && !form.draft.values.get("booked")) setBooking(true);
+          }}
             className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white hover:bg-emerald-700 transition-colors">
             📅 حجز الموعد المقترح الآن
           </button>
-          <button onClick={onDismiss}
+          <button onClick={() => { if (form.editable()) onDismiss(); }}
             className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
             لاحقًا
           </button>
@@ -935,23 +1222,26 @@ function NextAppointmentCard({
           <div className="mb-2 flex flex-wrap gap-2">
             <label className="min-w-[9rem] flex-1">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">التاريخ المقترح</span>
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)}
+              <input type="date" value={date} onChange={(event) => { if (currentBookingView()) setDate(event.target.value); }}
                 aria-label="تاريخ الجلسة القادمة"
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
             </label>
             <label className="w-32">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">الوقت</span>
-              <input type="time" value={time} onChange={(event) => setTime(event.target.value)}
+              <input type="time" value={time} onChange={(event) => { if (currentBookingView()) setTime(event.target.value); }}
                 aria-label="وقت الجلسة القادمة"
                 className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
             </label>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy || !date || !time}
+            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !date || !time}
               className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-black text-white disabled:opacity-50">
               {busy ? "جارٍ الحجز…" : "أكّد الحجز"}
             </button>
-            <button type="button" onClick={() => setBooking(false)}
+            <button type="button" onClick={() => {
+              if (!form.editable() || !currentBookingView()) return;
+              bookingView.retire(); setBooking(false);
+            }}
               className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-600">
               رجوع
             </button>
@@ -967,18 +1257,20 @@ function NextAppointmentCard({
 function NewCase({ patientId, today, onSaved, onError }: {
   patientId: number; today: string; onSaved: () => void; onError: (message: string | null) => void;
 }) {
-  const [appliance, setAppliance] = useState<Appliance>("fixed_metal");
-  const [arches, setArches] = useState<Arches>("both");
-  const [slot, setSlot] = useState<SlotSize>("022");
-  const [bracketSystem, setBracketSystem] = useState("MBT");
-  const [startDate, setStartDate] = useState(today);
-  const [plannedMonths, setPlannedMonths] = useState("18");
-  const [saving, setSaving] = useState(false);
+  const form = useOrthoDraft("new", patientId);
+  const [appliance, setAppliance] = form.field<Appliance>("appliance", "fixed_metal");
+  const [arches, setArches] = form.field<Arches>("arches", "both");
+  const [slot, setSlot] = form.field<SlotSize>("slot", "022");
+  const [bracketSystem, setBracketSystem] = form.field("bracketSystem", "MBT");
+  const [startDate, setStartDate] = form.field("startDate", today);
+  const [plannedMonths, setPlannedMonths] = form.field("plannedMonths", "18");
+  const saving = form.draft.busy;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving) return;
-    setSaving(true);
+    if (saving || form.draft.uncertain) return;
+    const operation = form.begin(!form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
+    if (!operation) return;
     onError(null);
     try {
       const response = await fetch("/api/ortho", {
@@ -988,18 +1280,21 @@ function NewCase({ patientId, today, onSaved, onError }: {
           plannedMonths: Number(plannedMonths) || 18,
         }),
       });
+      if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر الفتح."); return; }
+      if (!form.current(operation)) return;
+      if (!response.ok) { if (response.status >= 500) form.uncertain(); onError(payload?.message ?? "تعذّر الفتح."); return; }
       onSaved();
     } catch {
-      onError("تعذّر الاتصال بالخادم.");
+      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة الحفظ. راجع الحالة قبل تكرار الطلب."); }
     } finally {
-      setSaving(false);
+      form.finish(operation);
     }
   };
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-navy-800 bg-white p-4 shadow-xs">
+      <UncertainWrite draft={form.draft} />
       <h3 className="mb-3 text-sm font-black text-navy-900">فتح حالة تقويم جديدة</h3>
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[9rem] flex-1">
@@ -1060,7 +1355,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
         </label>
       </div>
 
-      <button type="submit" disabled={saving}
+      <button type="submit" disabled={saving || form.draft.uncertain}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         افتح الحالة
       </button>
@@ -1076,23 +1371,24 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   }) => void;
   onError: (message: string | null) => void;
 }) {
-  const [doneOn, setDoneOn] = useState(today);
+  const form = useOrthoDraft(`adjust:${caseRow.id}`, patientId, caseRow.id);
+  const [doneOn, setDoneOn] = form.field("doneOn", today);
   // Recording a session must not advance either arch without an explicit selection.
-  const [upperWire, setUpperWire] = useState(caseRow.upperWire ?? "");
-  const [lowerWire, setLowerWire] = useState(caseRow.lowerWire ?? "");
+  const [upperWire, setUpperWire] = form.field("upperWire", caseRow.upperWire ?? "");
+  const [lowerWire, setLowerWire] = form.field("lowerWire", caseRow.lowerWire ?? "");
   const previousAdjustment = caseRow.adjustments[0] ?? null;
   // The baseline stores a description, not an elastic class. Never infer one from its text.
   const baselineElasticNote = previousAdjustment ? "" : caseRow.elastics?.trim() ?? "";
-  const [elastics, setElastics] = useState<ElasticClass | "">(
+  const [elastics, setElastics] = form.field<ElasticClass | "">("elastics",
     previousAdjustment?.elastics ?? (baselineElasticNote ? "" : "none"),
   );
-  const [elasticNote, setElasticNote] = useState(previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
-  const [done, setDone] = useState("");
-  const [nextWeeks, setNextWeeks] = useState(String(previousAdjustment?.nextWeeks ?? 4));
-  const [saving, setSaving] = useState(false);
+  const [elasticNote, setElasticNote] = form.field("elasticNote", previousAdjustment ? previousAdjustment.elasticNote ?? "" : baselineElasticNote);
+  const [done, setDone] = form.field("done", "");
+  const [nextWeeks, setNextWeeks] = form.field("nextWeeks", String(previousAdjustment?.nextWeeks ?? 4));
+  const saving = form.draft.busy;
 
-  const [queue, setQueue] = useState<QueuedPhoto[]>([]);
-  const [stage, setStage] = useState<PhotoStage>(() =>
+  const [queue, setQueue] = form.field<QueuedPhoto[]>("queue", []);
+  const [stage, setStage] = form.field<PhotoStage>("stage", () =>
     suggestPhotoStage({
       date: today, startDate: caseRow.startDate, phase: caseRow.phase,
       isFirstSession: caseRow.adjustments.length === 0,
@@ -1102,71 +1398,82 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const galleryInput = useRef<HTMLInputElement>(null);
 
   const addFiles = (files: FileList | null) => {
-    if (!files) return;
+    if (!files || !form.editable() || !mayUpload(form.session)) return;
     const added: QueuedPhoto[] = [];
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      added.push({ file, preview: URL.createObjectURL(file), view: "" });
+      const preview = URL.createObjectURL(file); form.draft.urls.add(preview);
+      added.push({ file, preview, view: "" });
     }
     if (added.length > 0) setQueue((current) => [...current, ...added]);
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving) return;
     if (!elastics) {
-      onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
+      if (form.editable()) onError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
     }
-    setSaving(true);
+    const operation = form.begin(caseRow.status === "active" || caseRow.status === "retention");
+    if (!operation) return;
+    const submittedPhotos = [...queue];
     onError(null);
     try {
       const response = await fetch(`/api/ortho/${caseRow.id}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          doneOn, upperWire, lowerWire, elastics, elasticNote, done,
-          nextWeeks: Number(nextWeeks) || 4,
-        }),
+        body: JSON.stringify({ doneOn, upperWire, lowerWire, elastics, elasticNote, done,
+          nextWeeks: Number(nextWeeks) || 4 }),
       });
+      if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر التسجيل."); return; }
-
-      const adjustmentId = Number(payload?.id);
+      if (!form.current(operation)) return;
+      if (!response.ok) {
+        if (response.status >= 500) form.uncertain();
+        onError(payload?.message ?? "تعذّر التسجيل."); return;
+      }
+      const adjustmentId = payload?.id;
+      if (!Number.isSafeInteger(adjustmentId) || adjustmentId <= 0) {
+        form.uncertain(); onError("تم قبول الطلب دون مرجع شدّة يمكن التحقق منه. راجع السجل قبل أي محاولة جديدة."); return;
+      }
       const visitId = Number.isInteger(payload?.visitId) && payload.visitId > 0 ? Number(payload.visitId) : null;
-      let uploaded = 0;
-      let failed = 0;
-      for (const photo of queue) {
+      let uploaded = 0; let failed = 0;
+      for (const photo of submittedPhotos) {
+        if (!form.current(operation)) return;
+        // A refresh is not authority to start another command. Preserve the
+        // queued files and the no-replay latch if the submitted chain is interrupted.
+        if (!form.caseGranted() || !mayUpload(form.session)) {
+          form.uncertain(); onError("سُجّلت الشدّة؛ توقف رفع الصور حتى مراجعة الصلاحية والسجل. لا تعِد تسجيل الشدّة."); return;
+        }
         try {
-          const form = new FormData();
-          form.set("file", photo.file);
-          form.set("kind", "photo");
-          form.set("title", `صورة جلسة ${friendlyDateLong(doneOn)}`);
-          form.set("takenOn", doneOn);
-          form.set("orthoCaseId", String(caseRow.id));
-          form.set("adjustmentId", String(adjustmentId));
-          form.set("photoStage", stage);
-          if (photo.view) form.set("photoView", photo.view);
-          const upload = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: form });
-          if (upload.ok) uploaded += 1; else failed += 1;
+          const uploadForm = new FormData();
+          uploadForm.set("file", photo.file);
+          uploadForm.set("kind", "photo");
+          uploadForm.set("title", `صورة جلسة ${friendlyDateLong(doneOn)}`);
+          uploadForm.set("takenOn", doneOn);
+          uploadForm.set("orthoCaseId", String(caseRow.id));
+          uploadForm.set("adjustmentId", String(adjustmentId));
+          uploadForm.set("photoStage", stage);
+          if (photo.view) uploadForm.set("photoView", photo.view);
+          const upload = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: uploadForm });
+          if (!form.checkHeaders(upload, operation)) return;
+          if (upload.ok) uploaded++; else failed++;
         } catch {
-          failed += 1;
+          if (!form.current(operation)) return;
+          failed++;
         }
       }
-      if (failed > 0) {
-        onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
-      }
-      for (const photo of queue) URL.revokeObjectURL(photo.preview);
-
+      if (!form.current(operation)) return;
+      if (failed > 0) onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
+      for (const photo of submittedPhotos) form.release(photo.preview);
+      form.commit("queue", []);
       onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded, visitId });
     } catch {
-      onError("تعذّر الاتصال بالخادم.");
-    } finally {
-      setSaving(false);
-    }
+      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة تسجيل الشدّة. راجع السجل قبل تكرارها."); }
+    } finally { form.finish(operation); }
   };
 
   const options = [...new Set([...wires.map((wire) => wire.code),
-    caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
+    upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
 
   const fullSet = caseRow.photosVisible === false ? null : fullPhotoSetCheck({
     sessionDate: doneOn,
@@ -1181,6 +1488,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   return (
     <form onSubmit={submit} className="rounded-2xl border border-brand-orange bg-orange-50/50 p-4 shadow-xs">
       <p className="mb-2 text-xs font-black text-slate-800">تسجيل شدّة وتعديل جديد</p>
+      <UncertainWrite draft={form.draft} />
 
       {usesArchwires(caseRow.appliance) ? (
         <div className="mb-2 flex flex-wrap gap-2">
@@ -1264,11 +1572,11 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => cameraInput.current?.click()}
+          <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) cameraInput.current?.click(); }}
             className="min-w-[10rem] flex-1 rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white hover:bg-navy-900">
             📷 التقط بالكاميرا الآن
           </button>
-          <button type="button" onClick={() => galleryInput.current?.click()}
+          <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) galleryInput.current?.click(); }}
             className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
             اختيار من المعرض
           </button>
@@ -1312,7 +1620,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
                 </select>
                 <button type="button"
                   onClick={() => {
-                    URL.revokeObjectURL(photo.preview);
+                    if (!form.editable()) return;
+                    form.release(photo.preview);
                     setQueue((current) => current.filter((_, rowIndex) => rowIndex !== index));
                   }}
                   className="text-[11px] font-bold text-red-500">حذف</button>
@@ -1341,7 +1650,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         الموعد المقترح: {friendlyDateLong(nextAdjustmentDate(doneOn, Number(nextWeeks) || 4))}
       </p>
 
-      <button type="submit" disabled={saving}
+      <button type="submit" disabled={saving || form.draft.uncertain}
         className="w-full rounded-xl bg-brand-orange py-2.5 text-xs font-black text-white hover:bg-amber-600 disabled:opacity-50">
         {saving ? "جارٍ الحفظ والرفع…" : "احفظ الشدّة والصور"}
       </button>
@@ -1470,20 +1779,21 @@ function LegacyBaselineSummary({ row }: { row: OrthoCase }) {
 function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
   patientId: number; today: string; onSaved: () => void; onError: (message: string | null) => void;
 }) {
-  const [appliance, setAppliance] = useState<Appliance>("fixed_metal");
-  const [arches, setArches] = useState<Arches>("both");
-  const [slot, setSlot] = useState<SlotSize>("022");
-  const [phase, setPhase] = useState<OrthoPhase>("working");
-  const [upperWire, setUpperWire] = useState("");
-  const [lowerWire, setLowerWire] = useState("");
-  const [elastics, setElastics] = useState("");
-  const [monthsElapsed, setMonthsElapsed] = useState("6");
-  const [monthsRemaining, setMonthsRemaining] = useState("12");
-  const [financialMode, setFinancialMode] = useState<LegacyFinancialMode | "">("");
-  const [objectives, setObjectives] = useState("");
-  const [doctorId, setDoctorId] = useState("");
+  const form = useOrthoDraft("baseline", patientId);
+  const [appliance, setAppliance] = form.field<Appliance>("appliance", "fixed_metal");
+  const [arches, setArches] = form.field<Arches>("arches", "both");
+  const [slot, setSlot] = form.field<SlotSize>("slot", "022");
+  const [phase, setPhase] = form.field<OrthoPhase>("phase", "working");
+  const [upperWire, setUpperWire] = form.field("upperWire", "");
+  const [lowerWire, setLowerWire] = form.field("lowerWire", "");
+  const [elastics, setElastics] = form.field("elastics", "");
+  const [monthsElapsed, setMonthsElapsed] = form.field("monthsElapsed", "6");
+  const [monthsRemaining, setMonthsRemaining] = form.field("monthsRemaining", "12");
+  const [financialMode, setFinancialMode] = form.field<LegacyFinancialMode | "">("financialMode", "");
+  const [objectives, setObjectives] = form.field("objectives", "");
+  const [doctorId, setDoctorId] = form.field("doctorId", "");
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
-  const [saving, setSaving] = useState(false);
+  const saving = form.draft.busy;
 
   useEffect(() => {
     let alive = true;
@@ -1504,9 +1814,10 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (saving || form.draft.uncertain) return;
     if (!financialMode) { onError("اختر كيف عومل المال قبل النظام."); return; }
-    setSaving(true);
+    const operation = form.begin((form.session?.role === "admin" || form.session?.role === "doctor") && !form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
+    if (!operation) return;
     onError(null);
     try {
       const response = await fetch("/api/ortho/baseline", {
@@ -1518,13 +1829,15 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           responsibleDoctorId: doctorId ? Number(doctorId) : null,
         }),
       });
+      if (!form.checkHeaders(response, operation)) return;
       const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر التسجيل."); return; }
+      if (!form.current(operation)) return;
+      if (!response.ok) { if (response.status >= 500) form.uncertain(); onError(payload?.message ?? "تعذّر التسجيل."); return; }
       onSaved();
     } catch {
-      onError("تعذّر الاتصال بالخادم.");
+      if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد نتيجة الحفظ. راجع الحالة قبل تكرار الطلب."); }
     } finally {
-      setSaving(false);
+      form.finish(operation);
     }
   };
 
@@ -1533,6 +1846,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-amber-300 bg-white p-4 shadow-xs">
+      <UncertainWrite draft={form.draft} />
       <h3 className="text-sm font-black text-navy-900">تسجيل حالة سابقة (قبل النظام)</h3>
       <p className="mb-3 text-[11px] text-slate-500">
         لقطةٌ لحال العلاج اليوم — لا تُنشأ فواتير ولا زيارات عن الماضي.
@@ -1638,7 +1952,7 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
           aria-label="الأهداف المتبقية" placeholder="إغلاق فراغ القلع العلوي، تصحيح الخط المتوسط…" className={field} />
       </label>
 
-      <button type="submit" disabled={saving}
+      <button type="submit" disabled={saving || form.draft.uncertain}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         {saving ? "جارٍ التسجيل…" : "سجّل الحالة السابقة"}
       </button>
