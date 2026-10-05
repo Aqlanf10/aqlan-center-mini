@@ -2,6 +2,7 @@ import { build, type Plugin } from "esbuild";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OrthoFixtureSnapshot } from "../fixtures/patient-ortho-real-react";
+import { FULL_SET_VIEWS } from "../../lib/ortho-photos";
 import { baseUrl, harness } from "./_server";
 
 // Source-authored acceptance gate: run only in the isolated security HTTP job.
@@ -793,6 +794,141 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       expect(await panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");
       expect((await writes(f.page)).filter((one) => one.path === "/api/appointments")).toHaveLength(1);
       expect((await writes(f.page)).filter((one) => one.path === `/api/visits/${visitId}/clinical`)).toHaveLength(1);
+      await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+});
+
+
+// Photo-completeness regressions reuse the released real-React owner harness.
+// These are authored acceptance sources, not evidence of an executed browser run.
+type PhotoHistoryScenario = "one" | "complete" | "later-progress" | "mixed-stage" | "mixed-session"
+  | "undated" | "foreign-case" | "future";
+function photoAdjustment(id: number, date = "2026-09-01", stage = "initial", count = 8) {
+  return {
+    id, visitId: null, visitSigned: true, doneOn: date, phase: "working",
+    upperWire: "016 NiTi", lowerWire: "012 NiTi", elastics: "class_ii",
+    elasticNote: "synthetic prior regimen", done: "synthetic prior adjustment",
+    nextWeeks: 6, note: null, recordedBy: "synthetic doctor",
+    photos: FULL_SET_VIEWS.slice(0, count).map((view, index) => ({
+      id: id * 10 + index, patientId, orthoCaseId: caseId, adjustmentId: id,
+      title: `Synthetic saved ${view}`, isImage: true, removedAt: null,
+      photoStage: stage, photoView: view, takenOn: date as string | null,
+    })),
+  };
+}
+function photoHistory(scenario: PhotoHistoryScenario) {
+  const row = photoAdjustment(936101);
+  if (scenario === "one") row.photos = row.photos.slice(0, 1);
+  if (scenario === "mixed-stage") row.photos.slice(4).forEach(photo => { photo.photoStage = "progress"; });
+  if (scenario === "undated") row.photos[0].takenOn = null;
+  if (scenario === "foreign-case") row.photos[0].orthoCaseId = caseId + 1;
+  if (scenario === "future") row.photos[0].takenOn = "2026-11-01";
+  if (scenario === "later-progress") return [photoAdjustment(936101, "2026-01-04"), photoAdjustment(936102, "2026-09-01", "progress")];
+  if (scenario === "mixed-session") {
+    const other = photoAdjustment(936102);
+    row.photos = row.photos.slice(0, 4); other.photos = other.photos.slice(4);
+    return [row, other];
+  }
+  return [row];
+}
+async function grantPhotoHistory(page: Page, rows: ReturnType<typeof photoHistory>,
+  visibility: { photosVisible: boolean | undefined } = { photosVisible: true }) {
+  const ids = await pair(page);
+  const { photosVisible } = visibility;
+  await page.evaluate(({ ids, rows, photosVisible }) => {
+    const api = window.__patientOrthoFixture;
+    const body = api.caseBody();
+    Object.assign(body.cases[0], { photosVisible, adjustments: rows });
+    api.respond(ids.ortho, body); api.respond(ids.patient, api.patientBody());
+  }, { ids, rows, photosVisible });
+  await state(page, "ready");
+}
+
+describe("PatientOrtho saved photo completeness in mounted real React", () => {
+  it.each([
+    { scenario: "one", unknown: false, missing: true },
+    { scenario: "complete", unknown: false, missing: false },
+    { scenario: "later-progress", unknown: false, missing: false },
+    { scenario: "mixed-stage", unknown: false, missing: true },
+    { scenario: "mixed-session", unknown: false, missing: true },
+    { scenario: "undated", unknown: true, missing: false },
+    { scenario: "foreign-case", unknown: true, missing: false },
+    { scenario: "future", unknown: true, missing: false },
+  ] as const)("uses only authorized coherent persisted evidence: $scenario", async ({ scenario, unknown, missing }) => {
+    const f = await open();
+    try {
+      await grantPhotoHistory(f.page, photoHistory(scenario));
+      const form = await adjustment(f.page);
+      expect(await form.locator('[data-testid="ortho-photo-history-unknown"]').count()).toBe(unknown ? 1 : 0);
+      expect((await form.textContent())?.includes("ناقص:")).toBe(missing);
+      expect(await form.locator('button[type="submit"]').isEnabled()).toBe(true);
+      expect(await writes(f.page)).toHaveLength(0);
+      await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it.each([false, undefined])("keeps denied/omitted visibility unknown without changing gallery visibility or adding a submit gate (%s)", async photosVisible => {
+    const f = await open();
+    try {
+      await grantPhotoHistory(f.page, photoHistory("complete"), { photosVisible });
+      const form = await adjustment(f.page);
+      const text = await form.textContent();
+      expect(text).not.toContain("ناقص:");
+      expect(text?.includes("صور الجلسات السابقة محجوبة حسب صلاحياتك")).toBe(photosVisible === false);
+      expect(await form.locator('[data-testid="ortho-photo-history-unknown"]').count()).toBe(photosVisible === undefined ? 1 : 0);
+      expect(await form.locator('button[type="submit"]').isEnabled()).toBe(true);
+      expect(await writes(f.page)).toHaveLength(0); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("retires completeness with a failed refresh and derives it from the new accepted history while preserving the draft", async () => {
+    const f = await open();
+    try {
+      await grantPhotoHistory(f.page, photoHistory("complete"));
+      const form = await adjustment(f.page);
+      expect(await form.textContent()).not.toContain("ناقص:");
+      await ordinaryFailure(f.page);
+      expect(await panel(f.page).locator('[data-testid="ortho-photo-history-unknown"]').count()).toBe(0);
+      await retry(f.page); await grantPhotoHistory(f.page, photoHistory("one"));
+      expect(await panel(f.page).getByLabel("ما نُفّذ في الشدّة", { exact: true }).inputValue()).toBe("private-draft adjustment");
+      expect(await form.textContent()).toContain("ناقص:");
+      await refresh(f.page); const ids = await pair(f.page);
+      await f.page.evaluate(id => window.__patientOrthoFixture.headers(id, 403), ids.ortho);
+      await state(f.page, "denied"); await hidden(f.page);
+      expect(await writes(f.page)).toHaveLength(0); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("never turns a complete queue or a failed upload into a saved full set", async () => {
+    const f = await open();
+    try {
+      await grantPhotoHistory(f.page, photoHistory("one"));
+      const form = await adjustment(f.page); await addPhotos(f.page, 8);
+      for (const [index, view] of FULL_SET_VIEWS.entries()) {
+        await form.getByLabel("وجه الصورة", { exact: true }).nth(index).selectOption(view);
+      }
+      expect(await form.locator('[data-testid="ortho-photo-queue-preview"]').count()).toBe(1);
+      expect(await form.textContent()).toContain("لا تُعد مجموعة محفوظة");
+      expect(await form.textContent()).not.toContain("ناقص:");
+      await allow(f.page, "POST", mutationPath); await allow(f.page, "POST", photoPath, 8);
+      await submitTwice(form); const saved = await latestWrite(f.page, mutationPath);
+      await f.page.evaluate(id => window.__patientOrthoFixture.respond(id, { id: 934101, visitId: null }), saved.id);
+      for (let index = 0; index < 8; index++) {
+        await expect.poll(async () => (await writes(f.page)).filter(row => row.path === photoPath).length).toBe(index + 1);
+        const upload = (await writes(f.page)).filter(row => row.path === photoPath).at(-1)!;
+        await f.page.evaluate(({ id, failed }) => window.__patientOrthoFixture.respond(id, {}, failed ? 500 : 201), {
+          id: upload.id, failed: index === 7,
+        });
+      }
+      await state(f.page, "loading");
+      const sevenSaved = photoAdjustment(934101, "2026-10-04", "progress", 7);
+      await grantPhotoHistory(f.page, [...photoHistory("one"), sevenSaved]);
+      const fresh = await adjustment(f.page);
+      expect(await fresh.textContent()).toContain("ناقص:");
+      expect(await fresh.locator('[data-testid="ortho-photo-queue-preview"]').count()).toBe(0);
+      expect((await writes(f.page)).filter(row => row.path === mutationPath)).toHaveLength(1);
+      expect((await writes(f.page)).filter(row => row.path === photoPath)).toHaveLength(8);
       await f.assertIsolated();
     } finally { await f.context.close(); }
   });
