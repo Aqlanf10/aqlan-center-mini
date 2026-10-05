@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput, type DoctorCommissionConfig } from "../../lib/doctor-permissions";
 
 /**
  * P0-1 — محرّك عمولات الأطباء على PostgreSQL 18 الحقيقي.
@@ -451,6 +452,60 @@ describe("الحالات ١–١٨: صحة المحرّك", () => {
 });
 
 describe("سلامة السجل الزمني", () => {
+  it.each([false, true])("legacy normalization preserves history; explicit empty list = %s", async (explicitEmpty) => {
+    const d = await doctor("د. استقرار العمولة", 20);
+    const user = await doctorUser(d, "commissionRoundtrip");
+    const config: DoctorCommissionConfig = {
+      calculationMode: "by_category", defaultPercent: 25, categoryRates: {},
+      serviceRates: { "7": 61.25, "Legacy crown": 0 },
+      ...(explicitEmpty ? { customServiceRates: [] } : {}),
+      fixedAmountPerVisitMinor: 0, deductLabCost: false, deductMaterialCost: false,
+      basis: "invoiced", effectiveDate: "2024-03-10", rateHistory: [],
+    };
+    const expectedRates = explicitEmpty ? {} : config.serviceRates;
+    const history = async () => (await q<{ snapshot: Record<string, unknown> }>(
+      `SELECT to_jsonb(h) AS snapshot FROM doctor_commission_history h WHERE party_id = $1 ORDER BY id`, [d],
+    )).map(({ snapshot }) => snapshot);
+
+    // The existing fixture helpers own these rows. The real writer creates
+    // baseline + advanced history; no stored history is updated or deleted.
+    await updateUser(user, { commissionConfig: config }, { actor: "owner" });
+    const prefix = await history();
+    expect(prefix).toHaveLength(2);
+    expect(prefix[1]).toMatchObject({ source: "advanced", config: { serviceRates: expectedRates } });
+
+    // Re-reading the stored latest snapshot must compare equal to live state.
+    await updateParty(d, { commissionPercent: 20 }, { actor: "owner" });
+    expect(await history()).toEqual(prefix);
+
+    for (let pass = 0; pass < 2; pass += 1) {
+      const listed = (await db.listUsers()).find((entry) => entry.id === user);
+      expect(listed?.commissionConfig).toBeTruthy();
+      if (!listed?.commissionConfig) throw new Error("Owned doctor config missing");
+      const editor = parseDoctorCommissionConfig(JSON.parse(JSON.stringify(listed.commissionConfig)));
+      const checked = validateDoctorCommissionConfigInput(JSON.parse(JSON.stringify(editor)));
+      expect(checked.ok).toBe(true);
+      if (!checked.ok) throw new Error(checked.message);
+      const saved = await updateUser(user, { commissionConfig: checked.value }, { actor: "owner" });
+      expect(await history()).toEqual(prefix);
+      expect(saved?.commissionConfig?.serviceRates).toEqual(expectedRates);
+      expect(Object.prototype.hasOwnProperty.call(saved?.commissionConfig, "customServiceRates")).toBe(explicitEmpty);
+      if (explicitEmpty) expect(saved?.commissionConfig?.customServiceRates).toEqual([]);
+    }
+
+    const current = (await db.listUsers()).find((entry) => entry.id === user);
+    if (!current?.commissionConfig) throw new Error("Owned doctor config missing");
+    await updateUser(user, { commissionConfig: { ...current.commissionConfig, defaultPercent: 27.5 } },
+      { actor: "owner", reason: "intentional roundtrip change" });
+    const after = await history();
+    expect(after).toHaveLength(prefix.length + 1);
+    expect(after.slice(0, prefix.length)).toEqual(prefix);
+    expect(after[prefix.length]).toMatchObject({
+      percent: 20, source: "advanced", recorded_by: "owner", reason: "intentional roundtrip change",
+    });
+    expect(after[prefix.length].config).toEqual({ ...current.commissionConfig, defaultPercent: 27.5 });
+  });
+
   it("السجل append-only: لا تعديل ولا حذف حتى من SQL مباشر", async () => {
     const d = await doctor("د. سجل", 30);
     await expect(q(`UPDATE doctor_commission_history SET percent = 99 WHERE party_id = $1`, [d]))
