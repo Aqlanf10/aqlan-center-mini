@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PatientFilePage from "../app/patients/[id]/page";
+import { PatientCases } from "../components/PatientCases";
 import { PatientEndo } from "../components/PatientEndo";
 import { PatientCockpit } from "../components/patient/PatientCockpit";
 import { VitalsModal } from "../components/VitalsModal";
@@ -297,5 +298,64 @@ describe("patient page confirmed alert reconciliation", () => {
     expect(render().some(node => node.type === PatientCockpit || node.type === PatientEndo)).toBe(false);
     release(await original(source === "workflow" ? "/api/patients/91" : "/api/patients/91/workflow")); await settle();
     expect(render().some(node => node.type === PatientCockpit || node.type === PatientEndo)).toBe(false);
+  });
+});
+
+
+describe("Cases navigation uses the patient-owned guarded destination", () => {
+  async function settle() { await vi.waitFor(() => expect(cases()).toBeTruthy()); }
+  function cases() { return render().find(node => node.type === PatientCases)!; }
+  function register(node: Element, guard: () => boolean) {
+    return (node.props.onNavigationGuardChange as (guard: () => boolean) => () => void)(guard);
+  }
+  function open(node: Element) { return (node.props.onOpenOrtho as () => unknown)(); }
+  it("keeps URL/context on guard refusal, then changes only the section through goTo", () => {
+    click("patient-subtab-cases");
+    url.searchParams.set("review", "1"); url.searchParams.set("orthoCaseId", "123"); url.hash = "#reference";
+    const child = cases(), guard = vi.fn(() => false), cleanup = register(child, guard), before = url.href;
+    replaceState.mockClear();
+    expect(open(child)).toBe(false); expect(guard).toHaveBeenCalledOnce();
+    expect(url.href).toBe(before); expect(replaceState).not.toHaveBeenCalled();
+    expect(cases().props.patientId).toBe(91);
+    guard.mockReturnValue(true); expect(open(child)).toBe(true);
+    expect(replaceState).toHaveBeenCalledOnce();
+    expect(url.searchParams.get("tab")).toBe("treatment"); expect(url.searchParams.get("sub")).toBe("ortho");
+    expect(url.searchParams.get("review")).toBe("1"); expect(url.searchParams.get("orthoCaseId")).toBe("123");
+    expect(url.hash).toBe("#reference"); cleanup();
+    expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  });
+  it("old guard cleanup cannot remove a newer child guard", () => {
+    click("patient-subtab-cases"); const child = cases();
+    const first = vi.fn(() => true), newer = vi.fn(() => false);
+    const cleanup = register(child, first); const currentCleanup = register(child, newer); cleanup();
+    const before = url.href; expect(open(child)).toBe(false); expect(url.href).toBe(before);
+    expect(newer).toHaveBeenCalledOnce(); expect(first).not.toHaveBeenCalled(); currentCleanup();
+  });
+  it("blocks ordinary tab and mobile-section requests with the same Cases guard", () => {
+    click("patient-subtab-cases"); const guard = vi.fn(() => false); const cleanup = register(cases(), guard);
+    const before = url.href;
+    click("patient-tab-account"); click("patient-subtab-plans");
+    const event = { target: { value: "ortho" }, currentTarget: { value: "ortho" } };
+    (control("patient-treatment-section").props.onChange as (event: unknown) => void)(event);
+    expect(url.href).toBe(before); expect(event.currentTarget.value).toBe("cases");
+    expect(guard).toHaveBeenCalledTimes(3); cleanup();
+  });
+  it.each(["principal", "permission"])("retires old section/guard callbacks across %s A → B → A", async kind => {
+    click("patient-subtab-cases"); const old = cases(); const oldGuard = vi.fn(() => false);
+    register(old, oldGuard);
+    if (kind === "principal") hooks.username = "other"; else hooks.canEditPlans = false;
+    render(); await settle();
+    const guard = vi.fn(() => false); const cleanup = register(cases(), guard);
+    const before = url.href; expect(open(old)).toBe(false); expect(url.href).toBe(before);
+    const oldCleanup = register(old, vi.fn(() => true)); oldCleanup();
+    expect(open(cases())).toBe(false); expect(guard).toHaveBeenCalledOnce(); cleanup();
+    hooks.username = "synthetic"; hooks.canEditPlans = true; render(); await settle();
+    expect(open(old)).toBe(false); expect(url.href).toBe(before);
+    expect(oldGuard).not.toHaveBeenCalled();
+  });
+  it("a patient remount never lets the old child move the new patient's section", async () => {
+    click("patient-subtab-cases"); const old = cases(); await mount("92");
+    const before = url.href; expect(open(old)).toBe(false); expect(url.href).toBe(before);
+    await mount("91"); const returned = url.href; expect(open(old)).toBe(false); expect(url.href).toBe(returned);
   });
 });
