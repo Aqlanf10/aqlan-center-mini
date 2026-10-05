@@ -26,12 +26,12 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
       <label key={key} className="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2">
         <span className="min-w-0">
           <span className="block font-bold text-slate-800">{label}</span>
-          <span className="block break-all text-[11px] text-slate-500"><bdi>{key}</bdi> · {override ? "نسبة محددة للفئة" : "موروثة من النسبة العامة"}</span>
+          <span className="block break-all text-[11px] text-slate-500"><bdi>{key}</bdi> · {override ? "نسبة محددة في المسودة" : "موروثة من النسبة العامة للمسودة"}</span>
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
           <input
             aria-label={`نسبة فئة ${key}`}
-            type="number" min={0} max={100} value={value}
+            type="number" step="any" min={0} max={100} value={value}
             onChange={(event) => onCategoryChange(key, percent(event.target.value))}
             className="min-h-11 w-16 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
           />
@@ -43,12 +43,12 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
 
   return (
     <section aria-label="نسب فئات الخدمات" className="rounded-xl border border-slate-200 p-4">
-      <h4 className="font-black text-navy-900">نِسب الطبيب حسب فئات دليل الخدمات</h4>
+      <h4 className="font-black text-navy-900">مسودة نِسب الطبيب حسب فئات دليل الخدمات</h4>
       <p className="mt-1 text-xs text-slate-600">النسبة الخاصة بالخدمة لها الأولوية على نسبة الفئة. تسري التغييرات المحفوظة من لحظة الحفظ وفق أساس الاستحقاق، وتبقى الحسابات السابقة بشروطها.</p>
       <label className="my-3 flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
-        <span className="text-sm font-bold text-slate-800">النسبة العامة للفئات بلا نسبة محددة</span>
+        <span className="text-sm font-bold text-slate-800">النسبة العامة للمسودة، للفئات بلا نسبة محددة</span>
         <span className="flex shrink-0 items-center gap-1.5">
-          <input aria-label="النسبة العامة للفئات" type="number" min={0} max={100} value={config.defaultPercent}
+          <input aria-label="النسبة العامة للفئات" type="number" step="any" min={0} max={100} value={config.defaultPercent}
             onChange={(event) => onDefaultPercentChange(percent(event.target.value))}
             className="min-h-11 w-16 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" />
           <span className="text-[11px] text-slate-400">%</span>

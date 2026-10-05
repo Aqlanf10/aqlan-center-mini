@@ -46,7 +46,7 @@ describe("actual commission category editor and unchanged raw-key billing contra
     expect(v.input("نسبة فئة rct").props.value).toBe(0);
     const row = (key: string) => nodes(v.tree).find((node) => node.type === "label" && nodes(node.props.children as ReactNode).some((child) => child.props["aria-label"] === `نسبة فئة ${key}`));
     expect(JSON.stringify(row("filling")?.props.children)).toContain("موروثة من النسبة العامة");
-    expect(JSON.stringify(row("rct")?.props.children)).toContain("نسبة محددة للفئة");
+    expect(JSON.stringify(row("rct")?.props.children)).toContain("نسبة محددة في المسودة");
   });
   it("shows prototype-named raw catalog categories as inherited without inventing own overrides", () => {
     const config = fixture(); const onCategoryChange = vi.fn();
@@ -80,4 +80,14 @@ describe("actual commission category editor and unchanged raw-key billing contra
     expect(updated.categoryRates).not.toHaveProperty("rct");
     expect(updated.categoryRates.endo).toBe(72);
   });
+  it.each([0, 0.125, 12.345, 100])("preserves canonical fractional/boundary percentage %s on both category controls", value => {
+    const v = view();
+    for (const label of ["نسبة فئة rct", "النسبة العامة للفئات"]) {
+      const input = v.input(label); expect(input.props).toMatchObject({ step: "any", min: 0, max: 100 });
+      (input.props.onChange as (event: unknown) => void)({ target: { value: String(value) } });
+    }
+    expect(v.onCategoryChange).toHaveBeenCalledExactlyOnceWith("rct", value);
+    expect(v.onDefaultPercentChange).toHaveBeenCalledExactlyOnceWith(value);
+  });
+
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ROLES, ROLE_HINT, ROLE_LABEL, type Role } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
@@ -49,6 +49,15 @@ interface DoctorParty {
   name: string;
 }
 
+const EMPTY_SPECIAL_RATE = {
+  serviceMode: "from_list" as "from_list" | "custom_text",
+  serviceId: null as number | null,
+  serviceName: "",
+  category: "ortho",
+  percent: 35,
+  note: "",
+};
+
 export default function UsersAndDoctorsPage() {
   const [users, setUsers] = useState<StaffAccount[]>([]);
   const [clinicServices, setClinicServices] = useState<ClinicServiceItem[]>([]);
@@ -65,22 +74,10 @@ export default function UsersAndDoctorsPage() {
   const [editingUser, setEditingUser] = useState<StaffAccount | null>(null);
   const [activeEditorTab, setActiveEditorTab] = useState<"basic" | "permissions" | "commission">("basic");
 
+  const editorOwner = useRef<object | null>(null);
+
   // State for adding a new special service rate
-  const [newSpecialRate, setNewSpecialRate] = useState<{
-    serviceMode: "from_list" | "custom_text";
-    serviceId: number | null;
-    serviceName: string;
-    category: string;
-    percent: number;
-    note: string;
-  }>({
-    serviceMode: "from_list",
-    serviceId: null,
-    serviceName: "",
-    category: "ortho",
-    percent: 35,
-    note: "",
-  });
+  const [newSpecialRate, setNewSpecialRate] = useState({ ...EMPTY_SPECIAL_RATE });
 
   // Create Form State
   const [createForm, setCreateForm] = useState({
@@ -96,6 +93,9 @@ export default function UsersAndDoctorsPage() {
 
   // Edit Form State
   const [editForm, setEditForm] = useState<{
+    owner: object | null;
+    commissionBaseline: DoctorCommissionConfig;
+    legacyServiceRatesReadOnly: boolean;
     displayName: string;
     role: Role;
     isActive: boolean;
@@ -105,6 +105,9 @@ export default function UsersAndDoctorsPage() {
     permissions: DoctorPermissions;
     commissionConfig: DoctorCommissionConfig;
   }>({
+    owner: null,
+    commissionBaseline: DEFAULT_DOCTOR_COMMISSION_CONFIG,
+    legacyServiceRatesReadOnly: false,
     displayName: "",
     role: "doctor",
     isActive: true,
@@ -201,14 +204,7 @@ export default function UsersAndDoctorsPage() {
     });
 
     // Reset input fields
-    setNewSpecialRate({
-      serviceMode: "from_list",
-      serviceId: null,
-      serviceName: "",
-      category: "ortho",
-      percent: 35,
-      note: "",
-    });
+    setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
   };
 
   const handleRemoveSpecialRate = (rateId: string, serviceName: string, serviceId?: number) => {
@@ -282,10 +278,27 @@ export default function UsersAndDoctorsPage() {
     [busy, load],
   );
 
+  const closeEditor = () => {
+    editorOwner.current = null;
+    setEditingUser(null);
+    setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
+  };
+
   const openEditor = (user: StaffAccount, initialTab: "basic" | "permissions" | "commission" = "basic") => {
+    // The GET projection may contain a legacy map plus a synthesized empty rule
+    // array. Re-parsing loses that map, so detect it before producing the draft.
+    const legacyServiceRatesReadOnly = Object.keys(user.commissionConfig?.serviceRates ?? {}).length > 0
+      && !user.commissionConfig?.customServiceRates?.length;
+    const commissionBaseline = parseDoctorCommissionConfig(user.commissionConfig);
+    const owner = {};
+    editorOwner.current = owner;
+    setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
     setEditingUser(user);
     setActiveEditorTab(user.role === "doctor" || user.role === "reception" || user.role === "cashier" || user.role === "accountant" ? initialTab : "basic");
     setEditForm({
+      owner,
+      commissionBaseline,
+      legacyServiceRatesReadOnly,
       displayName: user.displayName,
       role: user.role,
       isActive: user.isActive,
@@ -293,7 +306,7 @@ export default function UsersAndDoctorsPage() {
       branch: user.branch ?? PRESET_BRANCHES[0],
       newPassword: "",
       permissions: parseDoctorPermissions(user.permissions, user.role),
-      commissionConfig: parseDoctorCommissionConfig(user.commissionConfig),
+      commissionConfig: commissionBaseline,
     });
   };
 
@@ -351,7 +364,16 @@ export default function UsersAndDoctorsPage() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingUser) return;
+    const owner = editForm.owner;
+    if (!editingUser || !owner || editorOwner.current !== owner) return;
+    // Identity records explicit financial interaction, including entering the
+    // same displayed number. Basic/permission changes retain the baseline.
+    const editsCommission = editForm.role === "doctor"
+      && editForm.commissionConfig !== editForm.commissionBaseline;
+    if (editsCommission && editForm.legacyServiceRatesReadOnly) {
+      setError("لا يمكن حفظ تعديل مالي لهذه القواعد القديمة بأمان. يمكنك حفظ البيانات الأساسية فقط.");
+      return;
+    }
     const patchBody: Record<string, unknown> = {
       displayName: editForm.displayName,
       role: editForm.role,
@@ -368,7 +390,7 @@ export default function UsersAndDoctorsPage() {
       patchBody.permissions = editForm.permissions;
     }
 
-    if (editForm.role === "doctor") {
+    if (editsCommission) {
       patchBody.commissionConfig = editForm.commissionConfig;
     }
 
@@ -380,9 +402,9 @@ export default function UsersAndDoctorsPage() {
       }),
     );
 
-    if (ok) {
+    if (ok && editorOwner.current === owner) {
       setSuccess(`تم تحديث بيانات وصلاحيات ${editForm.displayName} بنجاح.`);
-      setEditingUser(null);
+      closeEditor();
     }
   };
 
@@ -425,7 +447,7 @@ export default function UsersAndDoctorsPage() {
           <button
             onClick={() => {
               setAdding(true);
-              setEditingUser(null);
+              closeEditor();
             }}
             className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-sm transition-opacity hover:opacity-90"
           >
@@ -575,6 +597,7 @@ export default function UsersAndDoctorsPage() {
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
+                      step="any"
                       min={0}
                       max={100}
                       value={createForm.defaultPercent}
@@ -862,7 +885,7 @@ export default function UsersAndDoctorsPage() {
                 </p>
               </div>
               <button
-                onClick={() => setEditingUser(null)}
+                onClick={closeEditor}
                 className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 ✕
@@ -881,7 +904,7 @@ export default function UsersAndDoctorsPage() {
               >
                 👤 البيانات الأساسية
               </button>
-              {(editingUser.role === "doctor" || editingUser.role === "reception" || editingUser.role === "cashier" || editingUser.role === "accountant") && (
+              {(editForm.role === "doctor" || editForm.role === "reception" || editForm.role === "cashier" || editForm.role === "accountant") && (
                 <button
                   onClick={() => setActiveEditorTab("permissions")}
                   className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
@@ -893,7 +916,7 @@ export default function UsersAndDoctorsPage() {
                   🔒 الصلاحيات والخصوصية
                 </button>
               )}
-              {editingUser.role === "doctor" && (
+              {editForm.role === "doctor" && (
                 <button
                   onClick={() => setActiveEditorTab("commission")}
                   className={`border-b-2 px-4 py-2.5 text-xs font-bold transition-all ${
@@ -927,7 +950,16 @@ export default function UsersAndDoctorsPage() {
                       <label className="mb-1 block font-bold text-slate-700">الدور الوظيفي</label>
                       <select
                         value={editForm.role}
-                        onChange={(e) => setEditForm((c) => ({ ...c, role: e.target.value as Role }))}
+                        onChange={(e) => {
+                          const role = e.target.value as Role;
+                          setEditForm((current) => current.role === role ? current : ({
+                            ...current,
+                            role,
+                            commissionConfig: current.commissionBaseline,
+                          }));
+                          setNewSpecialRate({ ...EMPTY_SPECIAL_RATE });
+                          setActiveEditorTab("basic");
+                        }}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
                       >
                         {ROLES.map((role) => (
@@ -2359,12 +2391,21 @@ export default function UsersAndDoctorsPage() {
               )}
 
               {/* Tab 3: Commission & Rates Configuration */}
-              {activeEditorTab === "commission" && (
+              {activeEditorTab === "commission" && editForm.role === "doctor" && (
                 <div className="space-y-4">
+                  <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+                    هذه مسودة إعداد متقدم، وقد تختلف عن سياسة العمولة السارية حاليًا. فتح المسودة أو حفظ البيانات الأساسية لا يغيّر العمولة. يسري التعديل المالي الصريح عند حفظه من وقت الحفظ وفق أساس الاستحقاق.
+                  </p>
+                  {editForm.legacyServiceRatesReadOnly && (
+                    <p role="note" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+                      توجد قواعد خدمات قديمة لا يمكن إعادة حفظها بأمان في هذا المحرر حاليًا. الإعدادات المالية للقراءة فقط؛ يمكنك تعديل البيانات الأساسية وحفظها دون تغيير العمولة.
+                    </p>
+                  )}
+                  <fieldset disabled={editForm.legacyServiceRatesReadOnly} aria-label="مسودة العمولة" className="min-w-0 space-y-4 disabled:opacity-70">
                   {/* Calculation Mode */}
                   <div>
                     <label className="mb-1.5 block font-black text-navy-900">
-                      طريقة احتساب مستحقات الطبيب
+                      طريقة احتساب المستحقات في المسودة
                     </label>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                       {[
@@ -2400,10 +2441,11 @@ export default function UsersAndDoctorsPage() {
                   {/* Mode 1: Uniform Percentage */}
                   {editForm.commissionConfig.calculationMode === "percentage" && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                      <label className="mb-1 block font-bold text-slate-800">النسبة المئوية العامة للطبيب</label>
+                      <label className="mb-1 block font-bold text-slate-800">النسبة المئوية العامة في المسودة</label>
                       <div className="flex items-center gap-3">
                         <input
                           type="number"
+                          step="any"
                           min={0}
                           max={100}
                           value={editForm.commissionConfig.defaultPercent}
@@ -2480,7 +2522,7 @@ export default function UsersAndDoctorsPage() {
                             🎯
                           </span>
                           <h4 className="text-sm font-black text-navy-900">
-                            نسب خاصة لخدمات وإجراءات معينة (مثل التقويم أو الزراعة)
+                            نسب خاصة في المسودة لخدمات وإجراءات معينة (مثل التقويم أو الزراعة)
                           </h4>
                         </div>
                         <p className="mt-1 text-[11px] text-slate-600">
@@ -2489,7 +2531,7 @@ export default function UsersAndDoctorsPage() {
                         </p>
                       </div>
                       <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                        {editForm.commissionConfig.customServiceRates?.length || 0} نسب خاصة مضافة
+                        {editForm.legacyServiceRatesReadOnly ? "قواعد قديمة محفوظة" : `${editForm.commissionConfig.customServiceRates?.length || 0} نسب خاصة في المسودة`}
                       </span>
                     </div>
 
@@ -2648,6 +2690,7 @@ export default function UsersAndDoctorsPage() {
                           <div className="flex items-center gap-1">
                             <input
                               type="number"
+                              step="any"
                               min={0}
                               max={100}
                               value={newSpecialRate.percent}
@@ -2718,17 +2761,17 @@ export default function UsersAndDoctorsPage() {
                     {/* Active Custom Service Rates Table / List */}
                     <div className="mt-4">
                       <h5 className="mb-2 text-xs font-black text-navy-900">
-                        📋 جدول النسب الخاصة المعتمدة لهذا الطبيب:
+                        📋 جدول النسب الخاصة في المسودة:
                       </h5>
 
                       {(!editForm.commissionConfig.customServiceRates ||
                         editForm.commissionConfig.customServiceRates.length === 0) ? (
                         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-5 text-center text-xs text-slate-500">
                           <p className="font-bold text-slate-600">
-                            لا توجد نسب خاصة مضافة حتى الآن لهذا الطبيب.
+                            {editForm.legacyServiceRatesReadOnly ? "القواعد القديمة محفوظة، وتعديلها المالي غير متاح حاليًا." : "لا توجد نسب خاصة مضافة في هذه المسودة."}
                           </p>
                           <p className="mt-1 text-[11px] text-slate-400">
-                            سيتم احتساب جميع أعماله بناءً على النسبة العامة ({editForm.commissionConfig.defaultPercent}%)
+                            عند حفظ تعديل مالي صريح، تستخدم المسودة النسبة العامة ({editForm.commissionConfig.defaultPercent}%)
                             أو الأقسام المحددة أعلاه. أضف نسبة خاصة للتقويم أو الزراعة لتطبيقها بدلاً من النسبة العامة.
                           </p>
                         </div>
@@ -2777,6 +2820,7 @@ export default function UsersAndDoctorsPage() {
                                       <div className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1">
                                         <input
                                           type="number"
+                                          step="any"
                                           min={0}
                                           max={100}
                                           value={rate.percent}
@@ -2894,6 +2938,7 @@ export default function UsersAndDoctorsPage() {
                       </div>
                     </div>
                   </div>
+                  </fieldset>
                 </div>
               )}
             </div>
@@ -2902,7 +2947,7 @@ export default function UsersAndDoctorsPage() {
             <div className="flex items-center justify-between border-t border-slate-200 p-4">
               <button
                 type="button"
-                onClick={() => setEditingUser(null)}
+                onClick={closeEditor}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
               >
                 إغلاق

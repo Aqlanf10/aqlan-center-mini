@@ -2,11 +2,11 @@
 
 The users settings category editor now shows the fifteen raw catalog keys from
 `CATEGORY_LABEL`, plus additional raw keys present in the loaded catalog or saved
-configuration. A missing category override displays the actual general percentage,
+configuration. A missing category override displays the advanced draft's general percentage,
 including zero. Rendering, expanding the legacy section, or saving an untouched
 form does not create missing category overrides. Editing a category changes only
 that exact key; existing `endo`, other legacy keys, custom keys, and special service
-rules remain intact. Known legacy keys retain their Arabic labels alongside the
+rules remain intact for editable modern configurations. Legacy map-only configurations are read-only, as described below. Known legacy keys retain their Arabic labels alongside the
 raw key. Special service rules continue to take precedence.
 
 This changes display and explicit user editing only. Parser defaults, raw category
@@ -25,3 +25,15 @@ and special rates, persisted history and audit, reopening, focus, 44-pixel input
 targets, and viewport containment. Screenshot uploads allow exactly two synthetic
 PNG files. Full PostgreSQL/browser execution and visual acceptance require the
 exact-commit CI run; focused local tests alone do not establish those gates.
+
+## Explicit intent and fractional drafts
+
+An untouched save now omits the advanced configuration entirely, so an inherited
+raw SQL NULL policy is preserved. Category/general percentage inputs accept
+fractional values with `step="any"`, without rounding. Displayed values are labeled
+as the prospective advanced draft, not a claim about the currently effective
+ordinary policy. Legacy map-only financial drafts are read-only until their
+canonical parser contract is corrected; Basic-only saves remain available.
+
+See `COMMISSION_BASIC_INTENT_CHARACTERIZATION.md` for session ownership, legacy-map
+restrictions, retry/cutover acceptance, and the reconstruction's fresh CI gates.
