@@ -80,7 +80,7 @@ describe("guarded browser route teardown", () => {
     }, () => {
       expect(writes).toEqual([]); expect(unexpected).toEqual([]);
     });
-    const rejected = expect(run).rejects.toThrow(/during teardown/);
+    const rejected = expect(run).rejects.toHaveProperty("name", "AssertionError");
     await bodyDone.promise; await Promise.resolve();
     if (phase === "during drain") await f.dispatch(late);
     release.resolve(); await pending; await rejected;
@@ -103,8 +103,10 @@ describe("guarded browser route teardown", () => {
     const guard = await guardBrowserRoutes(f.context, "http://clinic.test", unexpected, async route => { await route.fetch(); });
     const late = f.route("GET", "https://outside.test/track");
     vi.mocked(f.context.close).mockImplementation(async () => { await f.dispatch(late); });
-    await expect(guard.run(async () => {}, () => expect(unexpected).toEqual([]))).rejects.toThrow(/outside.test/);
+    await expect(guard.run(async () => {}, () => expect(unexpected).toEqual([]))).rejects.toHaveProperty("name", "AssertionError");
     expect(late.abort).toHaveBeenCalledOnce(); expect(late.fetch).not.toHaveBeenCalled();
+    expect(late.fulfill).not.toHaveBeenCalled();
+    expect(unexpected).toEqual(["GET https://outside.test/track during teardown"]);
   });
 
   it.each(["during drain", "during close"])("fails on a page error delivered %s", async phase => {
