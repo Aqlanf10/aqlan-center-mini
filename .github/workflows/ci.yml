@@ -707,6 +707,33 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic category editor panels; no real account or financial data.
+      - name: Upload commission category editor screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: commission-category-editor-ui
+          path: |
+            .settings-ui-artifacts/commission-category-editor-1280.png
+            .settings-ui-artifacts/commission-category-editor-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exactly two synthetic long-doctor phone captures. Native bounds are
+      # logged by the test; no broad directory, trace, HAR, or state uploads.
+      - name: Upload long doctor phone filter screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-doctor-filter-ui
+          path: |
+            .settings-ui-artifacts/phone-doctor-filter-home-390.png
+            .settings-ui-artifacts/phone-doctor-filter-appointments-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4

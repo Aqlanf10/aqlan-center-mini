@@ -43,7 +43,16 @@ async function openBoard(width: number) {
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const unexpected: string[] = []; const errors: string[] = []; const downloads: string[] = [];
+  const boardUrl = `${baseUrl}/ortho`;
   const navigations: string[] = []; let followupReads = 0;
+  const documentNavigations: Array<{ url: string; method: string }> = [];
+  // Main-frame notifications can include same-document history updates. Count
+  // actual document requests separately so a reload/redirect cannot pass.
+  context.on("request", (request) => {
+    if (request.isNavigationRequest() && request.resourceType() === "document") {
+      documentNavigations.push({ url: request.url(), method: request.method() });
+    }
+  });
   await context.route("**/*", async (route) => {
     const request = route.request(); const url = new URL(request.url());
     if (url.origin !== new URL(baseUrl).origin) {
@@ -52,7 +61,7 @@ async function openBoard(width: number) {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
       unexpected.push(`mutation ${request.method()} ${url.pathname}`); await route.abort(); return;
     }
-    if (request.isNavigationRequest() && url.pathname !== "/ortho") {
+    if (request.isNavigationRequest() && request.url() !== boardUrl) {
       unexpected.push(`navigation ${url.pathname}`); await route.abort(); return;
     }
     if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
@@ -90,7 +99,9 @@ async function openBoard(width: number) {
     await invitation.waitFor(); await reminder.waitFor();
     return { page, context, invitation, reminder, assertIsolated: () => {
       expect(unexpected).toEqual([]); expect(errors).toEqual([]); expect(downloads).toEqual([]);
-      expect(navigations).toEqual([`${baseUrl}/ortho`]);
+      expect(navigations.length).toBeGreaterThan(0);
+      for (const target of navigations) expect(target).toBe(boardUrl);
+      expect(documentNavigations).toEqual([{ url: boardUrl, method: "GET" }]);
       expect(followupReads).toBe(1);
     } };
   } catch (error) { await context.close(); throw error; }
