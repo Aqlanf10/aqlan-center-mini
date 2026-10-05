@@ -63,7 +63,7 @@ export function normalizeCategory(raw: string | null | undefined): string {
   const cat = raw.trim();
   const lower = cat.toLowerCase();
   // المفاتيح المعيارية تمرّ كما هي
-  if (CANONICAL_CATEGORY_LABEL[lower]) return lower;
+  if (Object.hasOwn(CANONICAL_CATEGORY_LABEL, lower)) return lower;
   // فئات عربية قديمة أو نص حر → المفتاح المعياري
   if (/أشعة|xray/i.test(cat)) return "xray";
   if (/جراح|سويرجري/i.test(cat)) return "surgery";
@@ -91,7 +91,7 @@ export function normalizeCategory(raw: string | null | undefined): string {
 export function categoryDisplayName(cat: string): string {
   const found = DENTAL_SERVICE_CATEGORIES.find((c) => c.key === cat);
   if (found && found.key !== "all") return `${found.icon} ${found.label}`;
-  const canonical = CANONICAL_CATEGORY_LABEL[cat];
+  const canonical = Object.hasOwn(CANONICAL_CATEGORY_LABEL, cat) ? CANONICAL_CATEGORY_LABEL[cat] : undefined;
   if (canonical) return canonical;
   return cat;
 }
