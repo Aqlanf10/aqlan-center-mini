@@ -160,3 +160,132 @@ describe("PatientCeph creation lifetime in real React development StrictMode", (
     } finally { await f.context.close(); }
   });
 });
+
+describe("PatientCeph document selection in a reused real React component", () => {
+  const imageSelect = (page: Page) => panel(page).locator("select").first();
+
+  it("rejects a captured A image change while B's read is pending and preserves A's explicit choice", async () => {
+    const f = await open();
+    try {
+      await f.page.evaluate(() => { window.__patientCephFixture.setImages("a", [936201, 936203]); });
+      await f.page.locator("#patient-b").click(); await f.page.locator("#patient-a").click();
+      await openForm(f.page); await imageSelect(f.page).selectOption("936203");
+      await imageSelect(f.page).evaluate((element) => {
+        window.__patientCephFixture.captureChange("old-image", element as HTMLElement);
+        window.__patientCephFixture.holdDocuments();
+      });
+      await f.page.locator("#patient-b").click();
+      await expect.poll(async () => (await snapshot(f.page)).documentReads.length).toBe(1);
+      await f.page.evaluate(() => window.__patientCephFixture.replayChange("old-image", "936201"));
+      await f.page.locator("#patient-a").click(); await openForm(f.page);
+      expect(await imageSelect(f.page).inputValue()).toBe("936203");
+      await f.page.evaluate(() => {
+        window.__patientCephFixture.documentHeaders(0);
+        window.__patientCephFixture.documentBody(0, [936299]);
+      });
+      await settle(f.page);
+      expect(await imageSelect(f.page).inputValue()).toBe("936203");
+      expect((await snapshot(f.page)).requests).toHaveLength(0); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("recovers to patient B's only image and submits that image without an artificial change event", async () => {
+    const f = await open();
+    try {
+      await openForm(f.page);
+      await panel(f.page).getByRole("button", { name: OPEN, exact: true }).evaluate((element) => {
+        window.__patientCephFixture.capture("old-owner", element as HTMLElement);
+        window.__patientCephFixture.holdDocuments();
+      });
+      await f.page.locator("#patient-b").click();
+      await panel(f.page).getByRole("button", { name: NEW, exact: true }).click();
+      expect(await imageSelect(f.page).inputValue()).toBe("");
+      expect(await panel(f.page).getByRole("button", { name: OPEN, exact: true }).isDisabled()).toBe(true);
+      await f.page.evaluate(() => window.__patientCephFixture.replay("old-owner"));
+      expect((await snapshot(f.page)).requests).toHaveLength(0);
+      await f.page.evaluate(() => {
+        window.__patientCephFixture.documentHeaders(0);
+        window.__patientCephFixture.documentBody(0, [936202]);
+      });
+      await expect.poll(() => imageSelect(f.page).inputValue()).toBe("936202");
+      await expect.poll(() => panel(f.page).getByRole("button", { name: OPEN, exact: true }).isDisabled()).toBe(false);
+      expect((await snapshot(f.page)).requests).toHaveLength(0);
+      const id = await submit(f.page), state = await snapshot(f.page);
+      expect(state.requests[0].path).toBe("/api/patients/939202/ceph");
+      expect(state.requests[0].submitted).toMatchObject({ documentId: 936202 });
+      await f.page.evaluate((id) => window.__patientCephFixture.respond(id, { message: "Synthetic refusal" }, 409), id);
+      await expect.poll(() => panel(f.page).getByRole("alert").textContent()).toContain("Synthetic refusal");
+      expect((await snapshot(f.page)).callbacks).toEqual([]); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("clears old image options and stays disabled for an empty new image list", async () => {
+    const f = await open();
+    try {
+      await openForm(f.page);
+      await f.page.evaluate(() => { window.__patientCephFixture.setImages("b", []); });
+      await f.page.locator("#patient-b").click();
+      await panel(f.page).getByRole("button", { name: NEW, exact: true }).click();
+      await settle(f.page);
+      expect(await imageSelect(f.page).inputValue()).toBe("");
+      expect(await imageSelect(f.page).locator("option").allTextContents()).toEqual(["لا توجد صور في مستندات المريض"]);
+      expect(await panel(f.page).getByRole("button", { name: OPEN, exact: true }).isDisabled()).toBe(true);
+      expect((await snapshot(f.page)).requests).toHaveLength(0); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("keeps an explicit valid patient-wide choice through case A→B→A without extra GETs", async () => {
+    const f = await open();
+    try {
+      await f.page.evaluate(() => { window.__patientCephFixture.setImages("a", [936201, 936203]); });
+      await f.page.locator("#patient-b").click(); await f.page.locator("#patient-a").click();
+      await openForm(f.page); await imageSelect(f.page).selectOption("936203");
+      const readCount = (await snapshot(f.page)).reads.length;
+      await f.page.locator("#case-aba").click(); await openForm(f.page);
+      expect(await imageSelect(f.page).inputValue()).toBe("936203");
+      expect((await snapshot(f.page)).reads).toHaveLength(readCount);
+      expect((await snapshot(f.page)).requests).toHaveLength(0); await f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  for (const boundary of ["response", "body"] as const) {
+    it.each(["patient", "principal", "permission"])(
+      "does not republish retired %s A→B→A document " + boundary, async (kind) => {
+        const f = await open();
+        try {
+          await openForm(f.page);
+          await panel(f.page).getByRole("button", { name: OPEN, exact: true }).evaluate((element) => {
+            window.__patientCephFixture.capture("old-owner", element as HTMLElement);
+          });
+          await f.page.locator("#" + kind + "-b").click();
+          await settle(f.page);
+          await f.page.evaluate(() => window.__patientCephFixture.holdDocuments());
+          await f.page.locator("#" + kind + "-a").click(); // Hold this A generation's read.
+          await expect.poll(async () => (await snapshot(f.page)).documentReads.length).toBe(1);
+          if (boundary === "body") {
+            await f.page.evaluate(() => window.__patientCephFixture.documentHeaders(0));
+            await expect.poll(async () => (await snapshot(f.page)).documentReads[0].jsonCalls).toBe(1);
+          }
+          await f.page.locator("#" + kind + "-b").click(); await settle(f.page);
+          await f.page.evaluate(() => { window.__patientCephFixture.setImages("a", [936203]); });
+          await f.page.locator("#" + kind + "-a").click(); await openForm(f.page);
+          await expect.poll(() => imageSelect(f.page).inputValue()).toBe("936203");
+          await f.page.evaluate(() => {
+            window.__patientCephFixture.documentHeaders(0);
+            window.__patientCephFixture.documentBody(0, [936299]);
+            window.__patientCephFixture.replay("old-owner");
+          });
+          await settle(f.page);
+          expect(await imageSelect(f.page).inputValue()).toBe("936203");
+          expect(await imageSelect(f.page).locator("option").evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value))).toEqual(["936203"]);
+          expect(await panel(f.page).getByRole("button", { name: OPEN, exact: true }).isDisabled()).toBe(false);
+          const state = await snapshot(f.page);
+          expect(state.documentReads[0].aborted).toBe(true);
+          expect(state.documentReads[0].jsonCalls).toBe(boundary === "body" ? 1 : 0);
+          expect(state.requests).toHaveLength(0); expect(state.callbacks).toEqual([]);
+          await f.assertIsolated();
+        } finally { await f.context.close(); }
+      },
+    );
+  }
+});

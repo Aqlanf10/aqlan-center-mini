@@ -80,6 +80,11 @@ function pendingPost() {
   };
 }
 let posts: ReturnType<typeof pendingPost>[];
+let imageIds: number[], nextDocumentRead: ReturnType<typeof pendingPost> | null;
+const documents = (ids: number[]) => ({ documents: ids.map((id) => ({
+  id, title: "Synthetic image " + id, isImage: true, mimeType: "image/png",
+  takenOn: null, uploadedAt: "2026-01-01", removedAt: null,
+})) });
 function render() {
   if (!hooks.mounted) return null;
   for (let round = 0; round < 20; round++) {
@@ -101,6 +106,8 @@ const button = (label: string) => {
 const handler = (label: string) => button(label).props.onClick as () => unknown;
 const click = (label: string) => handler(label)();
 const writes = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+const imageSelect = () => nodes(render()).find((node) => node.type === "select")!;
+const chooseImage = (id: number) => (imageSelect().props.onChange as (event: { target: { value: string } }) => void)({ target: { value: String(id) } });
 const unmount = () => { hooks.mounted = false; hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); };
 async function open() { render(); await flush(); click(NEW); render(); }
 function retire(kind: string) {
@@ -122,17 +129,99 @@ beforeEach(() => {
   hooks.session = { username: "synthetic-admin", role: "admin", permissions: null };
   props = { patientId: PATIENT, orthoCaseId: CASE, embedded: true, currentPhase: "aligning", onAnalysisCreated: callback };
   location = { href: "/patients/11?tab=treatment&sub=ortho" }; posts = [];
+  imageIds = [DOC]; nextDocumentRead = null;
   fetchMock.mockReset(); callback.mockReset();
   fetchMock.mockImplementation((url: string, init?: RequestInit) => {
     if (init?.method === "POST") { const post = pendingPost(); posts.push(post); return post.headers.promise; }
+    if (url.endsWith("/documents") && nextDocumentRead) {
+      const read = nextDocumentRead; nextDocumentRead = null; return read.headers.promise;
+    }
     return Promise.resolve({ ok: true, status: 200, json: async () =>
       url.endsWith("/ceph") ? { analyses: [] }
-      : url.endsWith("/documents") ? { documents: [{ id: DOC, title: "Synthetic image", isImage: true, mimeType: "image/png", takenOn: null, uploadedAt: "2026-01-01", removedAt: null }] }
+      : url.endsWith("/documents") ? documents(imageIds)
       : url.startsWith("/api/ortho?") ? { cases: [{ id: CASE }, { id: 22 }] }
       : { sets: [] },
     } as Response);
   });
   vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { location });
+});
+
+describe("PatientCeph image selection follows owned document reads", () => {
+  it("rejects a captured A selection change while B is pending, before returning to A", async () => {
+    imageIds = [DOC, DOC + 1]; await open(); chooseImage(DOC + 1); render();
+    const oldChange = imageSelect().props.onChange as (event: { target: { value: string } }) => void;
+    const read = pendingPost(); nextDocumentRead = read;
+    props = { ...props, patientId: 12 }; render();
+    oldChange({ target: { value: String(DOC) } });
+    props = { ...props, patientId: PATIENT }; render(); await flush(); click(NEW); render();
+    expect(imageSelect().props.value).toBe(DOC + 1); expect(button(OPEN).props.disabled).toBe(false);
+    read.respond(documents([999]), 200); await flush();
+    expect(imageSelect().props.value).toBe(DOC + 1); expect(writes()).toHaveLength(0);
+  });
+
+  it("recovers to a new patient's only image without requiring a select change", async () => {
+    await open(); const oldSubmit = handler(OPEN), oldChange = imageSelect().props.onChange;
+    const read = pendingPost(); nextDocumentRead = read;
+    props = { ...props, patientId: 12 }; render(); click(NEW); render();
+    expect(imageSelect().props.value).toBe(""); expect(button(OPEN).props.disabled).toBe(true);
+    oldSubmit(); expect(writes()).toHaveLength(0);
+    read.respond(documents([DOC + 1]), 200); await flush();
+    expect(imageSelect().props.value).toBe(DOC + 1); expect(button(OPEN).props.disabled).toBe(false);
+    (oldChange as (event: { target: { value: string } }) => void)({ target: { value: String(DOC) } });
+    render(); expect(imageSelect().props.value).toBe(DOC + 1);
+    expect(writes()).toHaveLength(0); click(OPEN);
+    expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe("/api/patients/12/ceph");
+    expect(JSON.parse(writes()[0][1].body).documentId).toBe(DOC + 1);
+  });
+
+  it("clears the selection when the new document list has no images", async () => {
+    await open(); imageIds = []; props = { ...props, patientId: 12 }; render(); await flush();
+    click(NEW); render(); expect(imageSelect().props.value).toBe("");
+    expect(button(OPEN).props.disabled).toBe(true); handler(OPEN)(); expect(writes()).toHaveLength(0);
+  });
+
+  it("preserves a valid explicit same-patient choice across case and display-name changes", async () => {
+    imageIds = [DOC, DOC + 1]; await open(); chooseImage(DOC + 1); render();
+    hooks.session = { ...hooks.session!, displayName: "Updated visible name" }; render();
+    expect(imageSelect().props.value).toBe(DOC + 1);
+    props = { ...props, orthoCaseId: 22 }; render(); await flush(); click(NEW); render();
+    expect(imageSelect().props.value).toBe(DOC + 1); expect(button(OPEN).props.disabled).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(writes()).toHaveLength(0); click(OPEN);
+    expect(JSON.parse(writes()[0][1].body)).toMatchObject({ documentId: DOC + 1, orthoCaseId: 22 });
+  });
+
+  for (const boundary of ["response", "body"] as const) {
+    it.each(["patient", "principal", "permissions"])(
+      "ignores retired %s A→B→A document " + boundary, async (kind) => {
+        await open(); const oldSubmit = handler(OPEN), oldProps = props, oldSession = hooks.session;
+        retire(kind); await flush(); const replacementProps = props, replacementSession = hooks.session;
+        const read = pendingPost(); nextDocumentRead = read;
+        props = oldProps; hooks.session = oldSession; render(); // Hold this A generation's read.
+        if (boundary === "body") { read.sendHeaders(200); await flush(); expect(read.json).toHaveBeenCalledOnce(); }
+        props = replacementProps; hooks.session = replacementSession; render(); await flush();
+        imageIds = [DOC + 2]; props = oldProps; hooks.session = oldSession; render(); await flush();
+        click(NEW); render(); expect(imageSelect().props.value).toBe(DOC + 2);
+        read.respond(documents([999]), 200); await flush();
+        expect(imageSelect().props.value).toBe(DOC + 2); expect(button(OPEN).props.disabled).toBe(false);
+        expect(text(render())).not.toContain("Synthetic image 999");
+        if (boundary === "response") expect(read.json).not.toHaveBeenCalled();
+        oldSubmit(); expect(writes()).toHaveLength(0);
+        click(OPEN); expect(writes()).toHaveLength(1);
+        expect(JSON.parse(writes()[0][1].body).documentId).toBe(DOC + 2);
+      },
+    );
+  }
+
+  it("ignores a retired document-body rejection without overwriting the current form", async () => {
+    await open(); const read = pendingPost(); nextDocumentRead = read; retire("patient");
+    read.sendHeaders(200); await flush(); expect(read.json).toHaveBeenCalledOnce();
+    props = { ...props, patientId: PATIENT }; imageIds = [DOC + 1]; render(); await flush(); click(NEW); render();
+    read.body.reject(new SyntaxError("Retired documents")); await flush();
+    expect(imageSelect().props.value).toBe(DOC + 1); expect(button(OPEN).props.disabled).toBe(false);
+    expect(nodes(render()).some((node) => node.props.role === "alert")).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
 });
 afterEach(() => { unmount(); vi.unstubAllGlobals(); });
 

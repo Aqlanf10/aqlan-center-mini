@@ -131,6 +131,28 @@ function createWriteOwner() {
   };
 }
 
+function createReadOwner() {
+  let pending: AbortController | null = null;
+  return {
+    begin: () => {
+      pending?.abort();
+      pending = new AbortController();
+      return pending;
+    },
+    current: (operation: AbortController) => pending === operation && !operation.signal.aborted,
+    active: () => pending !== null && !pending.signal.aborted,
+    retire: () => { pending?.abort(); pending = null; },
+  };
+}
+
+type ImageSelection = {
+  owner: ReturnType<typeof createReadOwner>;
+  patientId: number;
+  authority: string;
+  images: PatientDocument[];
+  selectedDoc: number | null;
+};
+
 export function PatientCeph({
   patientId,
   orthoCaseId: propOrthoCaseId,
@@ -143,15 +165,21 @@ export function PatientCeph({
   // Display-name-only changes must not dismiss an ordinary same-owner draft.
   const authority = JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
   const owner = useMemo(createWriteOwner, [patientId, propOrthoCaseId, authority]);
+  // These endpoints and image options are patient-wide; case changes only
+  // retire writes and change the summary projection, without another read.
+  const readOwner = useMemo(createReadOwner, [patientId, authority]);
   const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
     || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
   useLayoutEffect(() => {
     owner.activate();
     return owner.retire;
   }, [owner]);
+  // Retire reads at commit, before a newer view can accept old response bodies.
+  useLayoutEffect(() => readOwner.retire, [readOwner]);
   const [analyses, setAnalyses] = useState<CephAnalysis[] | null>(null);
-  const [documents, setDocuments] = useState<PatientDocument[] | null>(null);
-  const [images, setImages] = useState<PatientDocument[]>([]);
+  const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
+  const images = imageSelection?.owner === readOwner ? imageSelection.images : [];
+  const selectedDoc = imageSelection?.owner === readOwner ? imageSelection.selectedDoc : null;
   const [orthoCases, setOrthoCases] = useState<OrthoCaseLite[]>([]);
   const [refSets, setRefSets] = useState<RefSetLite[]>([]);
 
@@ -163,7 +191,6 @@ export function PatientCeph({
   /* مقارنة تحليلين (من مستودع الوكيل الآخر): تُختار بالتحديد من الجدول، ولا
      تُقارَن إلا المكتملة — المسودة أرقامها لم تُختم فمقارنتها حكمٌ على لا شيء. */
   const [compareIds, setCompareIds] = useState<number[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<number | null>(null);
 
   const smartPhase = useMemo(
     () => suggestCephPhase(currentPhase, currentPhase === "aligning" ? 1 : 0),
@@ -188,43 +215,54 @@ export function PatientCeph({
     }
   }, [propOrthoCaseId, smartPhase]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (operation: AbortController) => {
+    const current = () => readOwner.current(operation);
     try {
       const [cephRes, docsRes, orthoRes, refsRes] = await Promise.all([
-        fetch(`/api/patients/${patientId}/ceph`),
-        fetch(`/api/patients/${patientId}/documents`),
-        fetch(`/api/ortho?patientId=${patientId}`),
-        fetch("/api/ceph-reference-sets"),
+        fetch(`/api/patients/${patientId}/ceph`, { signal: operation.signal }),
+        fetch(`/api/patients/${patientId}/documents`, { signal: operation.signal }),
+        fetch(`/api/ortho?patientId=${patientId}`, { signal: operation.signal }),
+        fetch("/api/ceph-reference-sets", { signal: operation.signal }),
       ]);
+      if (!current()) return;
       if (cephRes.ok) {
-        setAnalyses((await cephRes.json()).analyses);
+        const data = await cephRes.json();
+        if (!current()) return;
+        setAnalyses(data.analyses);
       } else {
         setError("تعذّر تحميل دراسات السيفالو.");
       }
       if (docsRes.ok) {
         const data = await docsRes.json();
+        if (!current()) return;
         const docs: PatientDocument[] = data.documents ?? [];
-        setDocuments(docs);
         const imgs = docs.filter((d) => d.isImage);
-        setImages(imgs);
-        setSelectedDoc((prev) => prev ?? imgs[0]?.id ?? null);
+        setImageSelection((previous) => {
+          const selected = previous?.patientId === patientId && previous.authority === authority
+            ? previous.selectedDoc : null;
+          return { owner: readOwner, patientId, authority, images: imgs,
+            selectedDoc: imgs.some((image) => image.id === selected) ? selected : imgs[0]?.id ?? null };
+        });
       }
       if (orthoRes.ok) {
         const data = await orthoRes.json();
+        if (!current()) return;
         setOrthoCases((data.cases ?? []) as OrthoCaseLite[]);
       }
       if (refsRes.ok) {
         const data = await refsRes.json();
+        if (!current()) return;
         setRefSets((data.sets ?? []) as RefSetLite[]);
       }
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (current()) setError("تعذّر الاتصال بالخادم.");
     }
-  }, [patientId]);
+  }, [patientId, authority, readOwner]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(readOwner.begin());
+    return readOwner.retire;
+  }, [load, readOwner]);
 
   const displayedAnalyses = useMemo(() => {
     if (!analyses) return [];
@@ -437,7 +475,11 @@ export function PatientCeph({
               <select
                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-xs focus:border-navy-800 focus:outline-hidden"
                 value={selectedDoc ?? ""}
-                onChange={(e) => setSelectedDoc(Number(e.target.value) || null)}
+                onChange={(e) => {
+                  const selected = Number(e.target.value) || null;
+                  setImageSelection((previous) => readOwner.active() && previous?.owner === readOwner
+                    ? { ...previous, selectedDoc: selected } : previous);
+                }}
               >
                 {images.length === 0 && <option value="">لا توجد صور في مستندات المريض</option>}
                 {images.map((doc) => (
