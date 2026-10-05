@@ -9652,14 +9652,17 @@ async function runPaymentTransaction(
      * أهداف التسوية — الخطوة الثانية في الترتيب الكانوني الموحّد (الأولى:
      * سند الأصل للردّ أعلاه). كان يُؤخَّر إلى ما قبل الإدراج، فتقاطع مع
      * recordPlanInstallment الذي يقفل الوردية أولًا ثم الخطة — دورة AB-BA
-     * مات بها أحد المتنافسين بـdeadlock (40P01). الكشف عن الوردية نفسه
-     * يبقى كما كان: في جملة الإدراج أدناه — من لا وردية له لا سند له، ومن
-     * فُتحت له ورديةٌ لحظة الإدراج استقر سنده فيها.
+     * مات بها أحد المتنافسين بـdeadlock (40P01). الإدراج الجديد يرتبط فقط
+     * بالوردية التي أعادها هذا القفل — لا بوردية فُتحت لاحقًا ولم تُقفل.
+     * النتيجة الفارغة لا تمنع إعادة سند ناجح بمفتاحه؛ يُفحص المفتاح قبل الرفض.
      *
      * ويعني تقديم القفل: كل فحوص الفاتورة/الخطة وإدراج السند يجري تحت قفل
      * صف الوردية — فلا تُغلق ورديةٌ فوق نصف معاملة، وكل المعاملات المالية
      * تتسلسل على الصف نفسه بالترتيب نفسه. */
-    await client.query(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+    const { rows: lockedShifts } = await client.query<{ id: number }>(
+      `SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`,
+    );
+    const lockedShiftId = lockedShifts[0]?.id ?? null;
 
     /* هدف التسوية الفعلي: للردود هدف الأصل الموروث؛ للمدفوعات ما قاله المتصل. */
     const effectiveInvoiceId = refundSnapshot ? refundSnapshot.invoiceId : (input.invoiceId ?? null);
@@ -9854,9 +9857,9 @@ async function runPaymentTransaction(
       }
     }
 
-    /* (الوردية مقفولة أعلاه منذ بدء المعاملة — الترتيب الكانوني. الإدراج
-       نفسه يعيد قراءة الوردية المفتوحة داخل جملته: من فُتحت له ورديةٌ في
-       هذه اللحظة استقر سنده فيها، ومن لا وردية له لا سند له.) */
+    /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
+       لاحقة بعد أقفال أهداف التسوية. المعرّف الفارغ لا يُنتج صفًا، فيبقى
+       فحص مفتاح الإعادة الثاني أدناه قبل رفض no_shift كما هو. */
     const { rows } = await client.query<{ id: number }>(
       `INSERT INTO payments (
          receipt_number, patient_id, invoice_id, plan_id, shift_id, kind, amount_minor, currency,
@@ -9867,7 +9870,7 @@ async function runPaymentTransaction(
          $1, $2::int, $3::int, s.id, $4, $5, $6, $7, $8, $9, $10, $11::text, $12,
          $13::text, $14::text, $15::int, $16::text
          FROM cashier_shifts s
-        WHERE s.status = 'open'
+        WHERE s.id = $17::int AND s.status = 'open'
         LIMIT 1
         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
        RETURNING id`,
@@ -9876,7 +9879,7 @@ async function runPaymentTransaction(
         input.kind, input.amountMinor, input.currency,
         effectiveExchangeRate, baseAmount, effectiveBaseCurrency, input.method, input.note,
         input.createdBy, prepared.idempotencyKey, requestHash, prepared.reversalOfId,
-        effectiveOpeningCurrency,
+        effectiveOpeningCurrency, lockedShiftId,
       ],
     );
 
