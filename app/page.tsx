@@ -592,7 +592,7 @@ export default function FlowBoard() {
               const value = event.target.value;
               setFilter((current) => ({ ...current, doctor: value === "" ? null : value === "none" ? "none" : Number(value) }));
             }}
-            className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700"
+            className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700"
           >
             <option value="">كل الأطباء</option>
             {dayDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
