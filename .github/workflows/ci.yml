@@ -837,6 +837,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Upload raw service category display screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-raw-category-display-ui
+          path: |
+            .settings-ui-artifacts/service-raw-category-1280.png
+            .settings-ui-artifacts/service-raw-category-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exactly two synthetic Cases navigation screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Cases orthodontic section navigation evidence
