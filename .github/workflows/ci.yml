@@ -804,3 +804,19 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
+      # Never upload cookies, browser state, traces, HAR or a whole directory.
+      - name: Upload truthful orthodontic follow-up invitation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-unbooked-followup-ui
+          path: |
+            .settings-ui-artifacts/ortho-unbooked-followup-390.png
+            .settings-ui-artifacts/ortho-unbooked-followup-1280.png
+            .settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json
+            .settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

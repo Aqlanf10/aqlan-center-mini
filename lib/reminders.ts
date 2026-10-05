@@ -76,6 +76,21 @@ export function friendlyDateLong(date: string): string {
 
 export type ReminderKind = "upcoming" | "missed";
 
+/** دعوة لترتيب متابعة بلا موعد محجوز — لا تؤكّد تاريخًا أو وقتًا أو حجزًا. */
+export function unbookedFollowupText(
+  patientName: string,
+  clinic: ClinicIdentity = DEFAULT_CLINIC,
+): string {
+  return [
+    `السلام عليكم ${patientName}،`,
+    ``,
+    `نودّ ترتيب موعد متابعة لكم في ${clinic.name}.`,
+    `يرجى التواصل معنا لاختيار موعد يناسبكم.`,
+    ``,
+    `للتواصل: ${clinic.phone}`,
+  ].join("\n");
+}
+
 /**
  * نص الرسالة.
  *
