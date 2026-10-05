@@ -882,3 +882,23 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Exact synthetic chart-ready/error regions and Retry bounds only.
+      # No traces, HAR, cookies, storage, broad directories or clinical writes.
+      - name: Upload dental chart read and retry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dental-chart-read-retry-ui
+          path: |
+            .settings-ui-artifacts/dental-chart-ready-390.png
+            .settings-ui-artifacts/dental-chart-ready-1280.png
+            .settings-ui-artifacts/dental-chart-ready-390-bounds.json
+            .settings-ui-artifacts/dental-chart-ready-1280-bounds.json
+            .settings-ui-artifacts/dental-chart-error-390.png
+            .settings-ui-artifacts/dental-chart-error-1280.png
+            .settings-ui-artifacts/dental-chart-error-390-bounds.json
+            .settings-ui-artifacts/dental-chart-error-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
