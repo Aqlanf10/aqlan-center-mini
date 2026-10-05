@@ -187,6 +187,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
+  const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const trackCasesGuard = useCallback((guard: () => boolean) => {
+    const lease = { guard, owner: alertOwner };
+    if (alertOwner.active) casesLeaveGuard.current = lease;
+    return () => { if (casesLeaveGuard.current === lease) casesLeaveGuard.current = null; };
+  }, [alertOwner]);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
   const trackEndoGuard = useCallback((guard: (() => boolean) | null) => { endoLeaveGuard.current = guard; }, []);
@@ -195,6 +201,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
     const controller = createPatientNavigation(window, {
       canLeave: () => {
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
+        const cases = casesLeaveGuard.current;
+        if (cases?.owner.active && !cases.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
@@ -1131,7 +1139,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {treatmentSubTab === "cases" && (
             <section aria-label="الحالات التخصصية وقائمة المشاكل">
-              <PatientCases patientId={patient.id} canWrite={session?.role === "doctor" || admin} />
+              <PatientCases patientId={patient.id} canWrite={session?.role === "doctor" || admin}
+                onNavigationGuardChange={trackCasesGuard}
+                onOpenOrtho={() => {
+                  if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
+                  return goTo("ortho");
+                }} />
             </section>
           )}
 
