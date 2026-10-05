@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { minutesSince } from "@/lib/flow";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { formatMoney } from "@/lib/money";
-import { suggestSpecialtyTab, type SpecialtyTab } from "@/lib/chair-readiness";
+import { suggestSpecialtyTab, type SpecialtyTab, type ConfirmedPatientAlert } from "@/lib/chair-readiness";
 import { useChairCount } from "@/components/SettingsProvider";
 import { usePatientCockpitReadiness } from "./usePatientCockpitReadiness";
 import type { WorkflowSummary } from "./SummaryTab";
@@ -33,12 +33,14 @@ const hhmm = (iso: string | null) => (iso
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
   compact = false, identity, primaryAction, secondaryActions, safety,
+  confirmedAlert,
 }: {
   patientId: number;
   patientName: string;
   patientPhone: string | null;
   /** التنبيه النصي في الملف — يُعرض إن لم يرجع الخادم تفاصيل الجاهزية. */
   fallbackAlert: string | null;
+  confirmedAlert?: ConfirmedPatientAlert;
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
@@ -52,7 +54,7 @@ export function PatientCockpit({
   const chairCount = useChairCount();
   const { visit, alerts, readiness, chairsState, coherent, canOperate, active, freeChairs, selectedChair,
     busy, message, canEnterChair, setChair, reload, clear, enterChair } = usePatientCockpitReadiness({
-    patientId, patientName, patientPhone, fallbackAlert, summary, chairCount, onChanged,
+    patientId, patientName, patientPhone, fallbackAlert, confirmedAlert, summary, chairCount, onChanged,
   });
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {

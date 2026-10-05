@@ -288,6 +288,26 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic prescription-context viewport captures and native bounds only.
+      # No real patients, traces, HAR, cookies, browser state, or broad uploads.
+      - name: Upload prescription patient context evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prescription-patient-context-ui
+          path: |
+            .settings-ui-artifacts/prescription-patient-context-warning-1280.png
+            .settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-unavailable-1280.png
+            .settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-warning-390.png
+            .settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json
+            .settings-ui-artifacts/prescription-patient-context-unavailable-390.png
+            .settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Only the synthetic prescription draft, never real clinical data.
       - name: Upload prescription diagnosis UI screenshot
         if: always()
@@ -427,6 +447,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exactly two synthetic saved-alert scenes; no clinical logs or browser state.
+      - name: Upload patient alert freshness screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-alert-freshness-ui
+          path: |
+            .settings-ui-artifacts/patient-alert-freshness-1280.png
+            .settings-ui-artifacts/patient-alert-freshness-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Synthetic case diagnosis reference only; no real patient data, traces,
       # HAR, authentication state, browser storage, or whole-directory uploads.
       - name: Upload case diagnosis reference screenshots
@@ -531,6 +564,21 @@ jobs:
           path: |
             .settings-ui-artifacts/endodontics-cockpit-1280.png
             .settings-ui-artifacts/endodontics-cockpit-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Bounded synthetic denial panel and retry-control geometry only.
+      - name: Upload endodontics reference read safety evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endodontics-reference-read-safety-ui
+          path: |
+            .settings-ui-artifacts/endodontics-read-denied-1280.png
+            .settings-ui-artifacts/endodontics-read-denied-390.png
+            .settings-ui-artifacts/endodontics-read-denied-1280-bounds.json
+            .settings-ui-artifacts/endodontics-read-denied-390-bounds.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -659,6 +707,33 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic category editor panels; no real account or financial data.
+      - name: Upload commission category editor screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: commission-category-editor-ui
+          path: |
+            .settings-ui-artifacts/commission-category-editor-1280.png
+            .settings-ui-artifacts/commission-category-editor-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exactly two synthetic long-doctor phone captures. Native bounds are
+      # logged by the test; no broad directory, trace, HAR, or state uploads.
+      - name: Upload long doctor phone filter screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-doctor-filter-ui
+          path: |
+            .settings-ui-artifacts/phone-doctor-filter-home-390.png
+            .settings-ui-artifacts/phone-doctor-filter-appointments-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -686,6 +761,82 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+      - name: Upload orthodontic parent read safety acceptance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-ortho-parent-read-safety-ui
+          path: |
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exactly two synthetic built-page Ceph warnings; no real patients,
+      # traces, HAR, authentication state, or broad artifact uploads.
+      - name: Upload ceph pending-write uncertainty screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-ceph-post-uncertainty-ui
+          path: |
+            .settings-ui-artifacts/patient-ceph-post-uncertain-1280.png
+            .settings-ui-artifacts/patient-ceph-post-uncertain-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
+      # Exactly two synthetic built-page scenes with unknown saved history and
+      # queued preview text. No real records, traces, HAR or authentication state.
+      - name: Upload orthodontic photo completeness screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-photo-completeness-ui
+          path: |
+            .settings-ui-artifacts/ortho-photo-completeness-1280.png
+            .settings-ui-artifacts/ortho-photo-completeness-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
+      # Never upload cookies, browser state, traces, HAR or a whole directory.
+      - name: Upload truthful orthodontic follow-up invitation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-unbooked-followup-ui
+          path: |
+            .settings-ui-artifacts/ortho-unbooked-followup-390.png
+            .settings-ui-artifacts/ortho-unbooked-followup-1280.png
+            .settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json
+            .settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exactly two synthetic built Today screenshots and target/occlusion bounds.
+      # No traces, HAR, cookies, browser state, real records or broad uploads.
+      - name: Upload Today readiness read lifetime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: today-readiness-read-lifetime-ui
+          path: |
+            .settings-ui-artifacts/today-readiness-1280.png
+            .settings-ui-artifacts/today-readiness-390.png
+            .settings-ui-artifacts/today-readiness-1280-bounds.json
+            .settings-ui-artifacts/today-readiness-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload raw service category display screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -697,4 +848,3 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-

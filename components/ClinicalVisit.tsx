@@ -308,31 +308,56 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
      يُعبّآن تلقائيًا مما كُتب في الزيارة — الطبيب يكتب التشخيص مرة واحدة. */
   const [rxOpen, setRxOpen] = useState(false);
   const [postOpOpen, setPostOpOpen] = useState(false);
-  /* سياق مريض الزيارة: التنبيه الطبي والهاتف — ليعمل فحص أمان الدواء داخل
-     نافذة الوصفة على بيانات المريض لا على فراغ (P0.10). */
-  const [patientContext, setPatientContext] = useState<{
-    medicalAlert: string | null; phone: string | null;
-  } | null>(null);
+  // Prescription context is a separate, read-only lifetime. Opening/reopening
+  // refreshes it without reloading the visit or replacing any clinical/Rx draft.
+  // Token identity retires patient/visit/principal/permissions A→B→A and even
+  // same-patient close→reopen responses, before and after body decoding.
+  const contextPatientId = ownsVisit && typeof visit?.patientId === "number"
+    && Number.isSafeInteger(visit.patientId) && visit.patientId > 0 ? visit.patientId : null;
+  const patientContextKey = JSON.stringify([owner.key, owner.generation, contextPatientId, rxOpen]);
+  const [patientContextOwner, setPatientContextOwner] = useState({ key: patientContextKey, active: false });
+  if (patientContextOwner.key !== patientContextKey) setPatientContextOwner({ key: patientContextKey, active: false });
+  useLayoutEffect(() => {
+    patientContextOwner.active = true;
+    return () => { patientContextOwner.active = false; };
+  }, [patientContextOwner]);
+  const [patientContext, setPatientContext] = useState<
+    | { owner: typeof patientContextOwner; status: "ready"; medicalAlert: string | null; phone: string | null }
+    | { owner: typeof patientContextOwner; status: "unavailable" }
+    | null
+  >(null);
+  const ownedPatientContext = patientContextOwner.key === patientContextKey
+    && patientContext?.owner === patientContextOwner ? patientContext : null;
+  const readyPatientContext = ownedPatientContext?.status === "ready" ? ownedPatientContext : null;
+  const patientContextStatus = !contextPatientId ? "unavailable" : ownedPatientContext?.status ?? "loading";
 
   useEffect(() => {
-    const patientId = visit?.patientId;
-    if (!patientId || !ownsVisit) {
-      setPatientContext(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/patients/${patientId}`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { medicalAlert?: string | null; phone?: string | null } | null) => {
-        if (!cancelled && currentOwner() && data) {
-          setPatientContext({ medicalAlert: data.medicalAlert ?? null, phone: data.phone ?? null });
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [visit?.patientId, ownsVisit, currentOwner]);
+    const patientId = contextPatientId;
+    if (!rxOpen || !patientId || !ownsVisit) return;
+    const controller = new AbortController();
+    const stillCurrent = () => !controller.signal.aborted && patientContextOwner.active && currentOwner();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}`, { cache: "no-store", signal: controller.signal });
+        if (!stillCurrent()) return;
+        if (!response.ok) throw new Error("Patient context unavailable");
+        const payload: unknown = await response.json();
+        if (!stillCurrent()) return;
+        const patient = payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).patient : null;
+        if (!patient || typeof patient !== "object" || Array.isArray(patient)) throw new Error("Invalid patient context");
+        const record = patient as Record<string, unknown>;
+        // Missing/malformed fields are unknown, never a verified empty alert.
+        if (record.id !== patientId
+          || !(record.medicalAlert === null || typeof record.medicalAlert === "string")
+          || !(record.phone === null || typeof record.phone === "string")) throw new Error("Invalid patient context");
+        setPatientContext({ owner: patientContextOwner, status: "ready", medicalAlert: record.medicalAlert, phone: record.phone });
+      } catch {
+        if (stillCurrent()) setPatientContext({ owner: patientContextOwner, status: "unavailable" });
+      }
+    })();
+    return () => { controller.abort(); };
+  }, [contextPatientId, ownsVisit, rxOpen, patientContextOwner, currentOwner]);
 
   const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false) => {
     if (!currentOwner()) return false;
@@ -1686,8 +1711,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientName={visit?.patientName ?? ""}
         /* التنبيه الطبي والهاتف يمرّان ليُفحص أمان الدواء داخل الزيارة نفسها —
            فحص السلامة بلا بيانات المريض نصٌّ فارغ (P0.10). */
-        medicalAlert={patientContext?.medicalAlert ?? null}
-        patientPhone={patientContext?.phone ?? null}
+        medicalAlert={readyPatientContext?.medicalAlert ?? null}
+        patientPhone={readyPatientContext?.phone ?? null}
+        patientContextStatus={patientContextStatus}
         defaultDiagnosis={notes.diagnosis}
         defaultDoctorName={doctors.find((d) => d.id === doctorId)?.name ?? ""}
       />

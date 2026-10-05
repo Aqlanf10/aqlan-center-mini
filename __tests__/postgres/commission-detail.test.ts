@@ -145,6 +145,135 @@ afterAll(async () => {
 });
 
 describe("F-8 — التفصيل من المحرّك نفسه", () => {
+  it.each([
+    ["collected_cash", 0], ["collected_cash", 12.345], ["invoiced", 0], ["invoiced", 12.345],
+  ] as const)("explicit general %s/%s preserves all prior facts and uses the existing event-time cutover", async (basis, percent) => {
+    const d = await doctor("د. قصد مالي", 20);
+    seq += 1;
+    const user = await createStaffUser({ username: `intent${seq}`, displayName: "قصد مالي", passwordHash: "x", role: "doctor", partyId: d });
+    const p = await patient(); const serviceId = await service("عمل قصد مالي", "rct");
+    const beforeAt = new Date(Date.now() - 3_600_000).toISOString();
+    const old = await visitInvoice({ patientId: p, at: beforeAt, items: [{ doctorId: d, serviceId, amount: 10000 }] });
+    await pay(p, old.invoiceId, 5000, beforeAt);
+    const facts = async () => ({
+      invoices: await q(`SELECT * FROM invoices WHERE id = $1`, [old.invoiceId]),
+      items: await q(`SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY id`, [old.invoiceId]),
+      visits: await q(`SELECT * FROM visits WHERE id = $1`, [old.visitId]),
+      procedures: await q(`SELECT * FROM visit_procedures WHERE visit_id = $1 ORDER BY id`, [old.visitId]),
+      initialPayment: await q(`SELECT * FROM payments WHERE invoice_id = $1 ORDER BY id LIMIT 1`, [old.invoiceId]),
+    });
+    const beforeFacts = await facts();
+    const history = async () => q(`SELECT * FROM doctor_commission_history WHERE party_id = $1 ORDER BY id`, [d]);
+    const audits = async () => q(`SELECT * FROM audit_log WHERE action = 'doctor.commission.update' AND entity = 'party' AND entity_id = $1 ORDER BY id`, [String(d)]);
+    const initialHistory = await history(); const initialAudits = await audits();
+    const before = (await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter(line => line.invoiceId === old.invoiceId);
+    expect(before).toHaveLength(1); expect(before[0]).toMatchObject({ percent: 20, earnedMinor: 1000 });
+    expect((await q(`SELECT commission_config FROM users WHERE id = $1`, [user.id]))[0].commission_config).toBeNull();
+    await updateUser(user.id, { displayName: "تحديث أساسي فقط" }, { actor: "intent-owner", actorRole: "admin" });
+    expect((await q(`SELECT commission_config FROM users WHERE id = $1`, [user.id]))[0].commission_config).toBeNull();
+    expect(await history()).toEqual(initialHistory); expect(await audits()).toEqual(initialAudits); expect(await facts()).toEqual(beforeFacts);
+    expect((await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter(line => line.invoiceId === old.invoiceId)).toEqual(before);
+    const { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput } = await import("../../lib/doctor-permissions");
+    const checked = validateDoctorCommissionConfigInput({ ...parseDoctorCommissionConfig(null), basis, defaultPercent: percent, deductLabCost: false, deductMaterialCost: false });
+    if (!checked.ok) throw new Error(checked.message);
+    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "intent-owner", actorRole: "admin", reason: "تعديل مالي صريح" });
+    const savedHistory = await history();
+    // createParty/createStaffUser already establish canonical history; preserve it.
+    expect(initialHistory.length).toBeGreaterThan(0);
+    expect(initialHistory[0]).toMatchObject({ config: null, source: "baseline" }); expect(Number(initialHistory[0].percent)).toBe(20);
+    expect(savedHistory).toHaveLength(initialHistory.length + 1);
+    expect(savedHistory.slice(0, initialHistory.length)).toEqual(initialHistory);
+    expect(savedHistory.at(-1)).toMatchObject({ config: { defaultPercent: percent, basis }, source: "advanced" });
+    expect(Number(savedHistory.at(-1)!.percent)).toBe(20);
+    const [cutover] = await q<{ at: string }>(`SELECT to_char(effective_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
+      FROM doctor_commission_history WHERE party_id = $1 ORDER BY effective_from DESC, id DESC LIMIT 1`, [d]);
+    expect(new Date(beforeAt).getTime()).toBeLessThan(new Date(cutover.at).getTime());
+    expect(await facts()).toEqual(beforeFacts);
+    expect((await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter(line => line.invoiceId === old.invoiceId)).toEqual(before);
+    const savedAudits = await audits(); expect(savedAudits).toHaveLength(initialAudits.length + 1);
+    expect(savedAudits.slice(0, initialAudits.length)).toEqual(initialAudits);
+    expect(savedAudits.at(-1)).toMatchObject({ actor: "intent-owner", details: { "قبل_القيمة": { percent: 20, config: null }, "بعد_القيمة": { percent: 20, config: { defaultPercent: percent, basis } } } });
+    expect(Number((await q(`SELECT commission_percent FROM parties WHERE id = $1`, [d]))[0].commission_percent)).toBe(20);
+    await pay(p, old.invoiceId, 5000, cutover.at);
+    const fresh = await visitInvoice({ patientId: p, at: cutover.at, items: [{ doctorId: d, serviceId, amount: 10000 }] });
+    await pay(p, fresh.invoiceId, 10000, cutover.at);
+    const detail = await expectLinesSumToTotals();
+    expect(detail.lines.find(line => line.invoiceId === fresh.invoiceId)).toMatchObject({ percent, earnedMinor: Math.round(10000 * percent / 100) });
+    const oldLine = detail.lines.find(line => line.invoiceId === old.invoiceId)!;
+    // The invoice predates the edit, so its ordinary collected-cash basis stays.
+    // Its later collection uses the new event-time percentage under either new basis.
+    // Preserve the engine's two-stage rounding: full share, then covered fraction.
+    const laterEarned = Math.round(Math.round(10000 * percent / 100) * 0.5);
+    expect(oldLine).toMatchObject({ percent: 20, basis: "collected_cash", accruedMinor: 2000, earnedMinor: 1000 + laterEarned });
+    expect(oldLine.earnedParts.find(part => part.percent === 20)).toEqual(before[0].earnedParts[0]);
+    if (percent === 0) expect(oldLine.earnedParts).toEqual(before[0].earnedParts);
+    else expect(oldLine.earnedParts.find(part => part.percent === percent)).toMatchObject({ coveredMinor: 5000, earnedMinor: laterEarned });
+    expect(await facts()).toEqual(beforeFacts); expect(await history()).toEqual(savedHistory); expect(await audits()).toEqual(savedAudits);
+  });
+
+  it.each(["collected_cash", "invoiced"] as const)("canonical category edits preserve old raw-key policies and facts under %s", async (basis) => {
+    const d = await doctor("د. فئات", 20);
+    const rct = await service("عصب عادي", "rct");
+    const legacy = await service("خدمة قديمة", "endo");
+    const special = await service("عصب خاص", "rct");
+    const filling = await service("حشوة", "filling");
+    const config = {
+      calculationMode: "by_category" as const, defaultPercent: 17,
+      categoryRates: { endo: 72, unknown_saved: 41 },
+      customServiceRates: [{ id: "specific", serviceId: special, serviceName: "عصب خاص", percent: 83 }],
+      deductLabCost: false, deductMaterialCost: false, basis,
+    };
+    await configure(d, config);
+    const [user] = await q<{ id: number; commission_config: string }>(`SELECT id, commission_config FROM users WHERE party_id = $1`, [d]);
+    const { parseDoctorCommissionConfig, validateDoctorCommissionConfigInput } = await import("../../lib/doctor-permissions");
+    const initial = parseDoctorCommissionConfig(user.commission_config);
+    expect(initial.categoryRates).not.toHaveProperty("rct");
+    const [first] = await q<{ at: string }>(`SELECT to_char(effective_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
+      FROM doctor_commission_history WHERE party_id = $1 ORDER BY effective_from DESC, id DESC LIMIT 1`, [d]);
+    const p = await patient();
+    const items = [rct, legacy, special, filling].map((serviceId) => ({ doctorId: d, serviceId, amount: 10000 }));
+    const old = await visitInvoice({ patientId: p, at: first.at, items });
+    await pay(p, old.invoiceId, 20000, first.at);
+    const before = (await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter((line) => line.invoiceId === old.invoiceId);
+    expect(before.find((line) => line.serviceName === "عصب عادي")).toMatchObject({ percent: 17, ruleSource: "default", earnedMinor: basis === "invoiced" ? 1700 : 850 });
+    expect(before.find((line) => line.serviceName === "خدمة قديمة")).toMatchObject({ percent: 72, ruleSource: "category", earnedMinor: basis === "invoiced" ? 7200 : 3600 });
+    expect(before.find((line) => line.serviceName === "عصب خاص")).toMatchObject({ percent: 83, ruleSource: "custom_service", earnedMinor: basis === "invoiced" ? 8300 : 4150 });
+    const facts = async () => q(`SELECT jsonb_build_object(
+      'invoice', (SELECT to_jsonb(i) FROM invoices i WHERE id = $1),
+      'initial_payment', (SELECT to_jsonb(p) FROM payments p WHERE invoice_id = $1 ORDER BY id LIMIT 1),
+      'initial_history', (SELECT jsonb_agg(to_jsonb(h) ORDER BY id) FROM doctor_commission_history h WHERE party_id = $2 AND effective_from <= $3::timestamptz)
+    ) AS snapshot`, [old.invoiceId, d, first.at]);
+    const beforeFacts = await facts();
+    const checked = validateDoctorCommissionConfigInput({ ...initial, categoryRates: { ...initial.categoryRates, rct: 55, filling: 49 } });
+    if (!checked.ok) throw new Error(checked.message);
+    await updateUser(user.id, { commissionConfig: checked.value }, { actor: "category-owner", actorRole: "admin", reason: "نسب فئات الدليل" });
+    const [cutover] = await q<{ at: string; config: typeof initial }>(`SELECT to_char(effective_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at, config
+      FROM doctor_commission_history WHERE party_id = $1 ORDER BY effective_from DESC, id DESC LIMIT 1`, [d]);
+    expect(cutover.config.categoryRates).toMatchObject({ endo: 72, unknown_saved: 41, rct: 55, filling: 49 });
+    expect(cutover.config.customServiceRates).toEqual(initial.customServiceRates);
+    expect(await facts()).toEqual(beforeFacts);
+    const unchanged = (await commissionDetailReport("1970-01-01", "2999-12-31")).lines.filter((line) => line.invoiceId === old.invoiceId);
+    expect(unchanged).toEqual(before);
+    await pay(p, old.invoiceId, 20000, cutover.at);
+    const fresh = await visitInvoice({ patientId: p, at: cutover.at, items });
+    await pay(p, fresh.invoiceId, 40000, cutover.at);
+    const detail = await expectLinesSumToTotals();
+    const earned = (invoiceId: number, name: string) => detail.lines.filter((line) => line.invoiceId === invoiceId && line.serviceName === name).reduce((sum, line) => sum + line.earnedMinor, 0);
+    expect(earned(old.invoiceId, "عصب عادي")).toBe(basis === "collected_cash" ? 3600 : 1700);
+    expect(earned(old.invoiceId, "حشوة")).toBe(basis === "collected_cash" ? 3300 : 1700);
+    expect(earned(fresh.invoiceId, "عصب عادي")).toBe(5500);
+    expect(earned(fresh.invoiceId, "حشوة")).toBe(4900);
+    for (const invoiceId of [old.invoiceId, fresh.invoiceId]) {
+      expect(earned(invoiceId, "خدمة قديمة")).toBe(7200);
+      expect(earned(invoiceId, "عصب خاص")).toBe(8300);
+    }
+    expect(await facts()).toEqual(beforeFacts);
+    const [audit] = await q<{ actor: string; details: Record<string, unknown> }>(`SELECT actor, details FROM audit_log WHERE action = 'doctor.commission.update' AND entity_id = $1 AND actor = 'category-owner'`, [String(d)]);
+    expect(audit.actor).toBe("category-owner");
+    expect(audit.details["قبل_القيمة"]).toMatchObject({ config: { defaultPercent: 17, categoryRates: { endo: 72 } } });
+    expect(audit.details["بعد_القيمة"]).toMatchObject({ config: { categoryRates: { rct: 55, filling: 49, endo: 72 } } });
+  });
+
   it("سطرٌ لكل حصة بالمريض والفاتورة والزيارة والخدمة والتخصص ومصدر النسبة — ومجموعها = المجاميع", async () => {
     const a = await doctor("د. أ", 30);
     const b = await doctor("د. ب", 40);

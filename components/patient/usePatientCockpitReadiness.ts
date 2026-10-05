@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { sendGatedMove, type VisitReadiness } from "@/components/today/useChairReadiness";
-import type { ChairStep, ChairStepKey } from "@/lib/chair-readiness";
+import { patientAlertScope, patientContextAlerts, type ChairStep, type ChairStepKey, type ConfirmedPatientAlert, type PatientAlertSources } from "@/lib/chair-readiness";
 import { isCurrency } from "@/lib/money";
 import type { WorkflowSummary } from "./SummaryTab";
 
@@ -38,6 +38,8 @@ function validReadiness(value: unknown, patientId: number): value is CockpitVisi
     && (row.checklist === null || (Array.isArray(row.checklist) && row.checklist.every((item) => item && typeof item.label === "string" && ["ok", "attention", "info"].includes(item.state))))
     && (row.attention === null || (Number.isSafeInteger(row.attention) && Number(row.attention) >= 0))
     && (row.alerts === null || (Array.isArray(row.alerts) && row.alerts.every((item) => typeof item === "string")))
+    && (row.historyAlerts === undefined || row.historyAlerts === null || (Array.isArray(row.historyAlerts) && row.historyAlerts.every((item) => typeof item === "string")))
+    && (row.editableAlert === undefined || row.editableAlert === null || typeof row.editableAlert === "string")
     && (row.balances === null || (Array.isArray(row.balances) && row.balances.every((item) => item && isCurrency(item.currency) && Number.isSafeInteger(item.dueMinor) && item.dueMinor >= 0 && typeof item.warn === "boolean")))
     && (row.stepper === undefined || (!!row.stepper && (row.stepper.current === null || stepValid(row.stepper.current))
       && Array.isArray(row.stepper.steps) && row.stepper.steps.every((step) => step && stepValid(step.key) && typeof step.label === "string" && typeof step.done === "boolean")));
@@ -68,16 +70,19 @@ function coherentVisit(snapshot: Snapshot, patientId: number): boolean {
 }
 
 /** Read/command ownership for the existing cockpit, not a second visit engine. */
-export function usePatientCockpitReadiness({ patientId, patientName, patientPhone, fallbackAlert, summary, chairCount, onChanged }: {
+export function usePatientCockpitReadiness({ patientId, patientName, patientPhone, fallbackAlert, confirmedAlert, summary, chairCount, onChanged }: {
   patientId: number; patientName: string; patientPhone: string | null; fallbackAlert: string | null;
+  confirmedAlert?: ConfirmedPatientAlert;
   summary: WorkflowSummary | null; chairCount: number; onChanged: () => void;
 }) {
   const session = useSession();
   const authority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
-  const scope = JSON.stringify([patientId, authority, summary ? summary.openVisit : "unknown", fallbackAlert, chairCount]);
-  const alertScope = JSON.stringify([patientId, authority]);
+  const alertScope = patientAlertScope(patientId, session);
+  const confirmed = confirmedAlert?.scope === alertScope ? confirmedAlert : undefined;
+  const confirmedRevision = confirmed?.revision ?? 0;
+  const scope = JSON.stringify([patientId, authority, summary ? summary.openVisit : "unknown", fallbackAlert, chairCount, confirmedRevision]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [cachedAlerts, setCachedAlerts] = useState<{ scope: string; alerts: string[] } | null>(null);
+  const [cachedAlerts, setCachedAlerts] = useState<{ scope: string; sources: PatientAlertSources } | null>(null);
   const [deniedScopes, setDeniedScopes] = useState<ReadonlySet<string>>(() => new Set());
   const [chairChoice, setChairChoice] = useState<{ scope: string; chair: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -125,8 +130,14 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
         if (!current()) return;
         if (next.denied) { publish(); return; }
         if (!payload || !Object.hasOwn(payload, "visit") || !validReadiness(payload.visit, patientId)) throw new Error("readiness");
+        // A 200 may still carry the API's deliberately redacted clinical view.
+        // It cannot grant a cached/local warning or restore a denied scope.
+        if (payload.visit !== null && payload.visit.alerts === null) { deny(); publish(); return; }
         next.visit = payload.visit; next.readiness = "ready";
-        setCachedAlerts({ scope: alertScope, alerts: payload.visit?.alerts ?? [] });
+        setCachedAlerts({ scope: alertScope, sources: {
+          alerts: payload.visit?.alerts ?? [], historyAlerts: payload.visit?.historyAlerts,
+          editableAlert: payload.visit?.editableAlert, confirmedAlertRevision: confirmedRevision,
+        } });
       } catch {
         if (!current()) return;
         next.readiness = "unavailable";
@@ -174,7 +185,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
       }
       return next;
     } finally { if (timeout !== undefined) clearTimeout(timeout); }
-  }, [alive, canRead, patientId, scope, alertScope]);
+  }, [alive, canRead, patientId, scope, alertScope, confirmedRevision]);
 
   useLayoutEffect(() => {
     lifetime.current = { scope, mounted: true };
@@ -218,10 +229,10 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
     || (visit.signedAt === null && ["waiting", "called"].includes(visit.status)));
   const active = readiness === "ready" && visit !== null && visit.signedAt === null && visit.status !== "done";
   const denied = deniedScopes.has(alertScope) || current?.denied === true;
-  const alertLabels = denied || !canRead ? [] : visit?.alerts ?? (cachedAlerts?.scope === alertScope ? cachedAlerts.alerts : []);
-  const alerts = denied || !canRead ? [] : [...new Set([
-    ...(cachedAlerts?.scope === alertScope && fallbackAlert ? [fallbackAlert] : []), ...alertLabels,
-  ])];
+  const grantedSources = cachedAlerts?.scope === alertScope ? cachedAlerts.sources : null;
+  // A confirmed write does not grant a new patient's/principal's clinical view.
+  const alerts = denied || !canRead || !grantedSources ? []
+    : patientContextAlerts(fallbackAlert, grantedSources, confirmed);
 
   const run = async (kind: "clear" | "seat") => {
     const expectedVisit = visit?.visitId ?? null; const requestedChair = selectedChair;

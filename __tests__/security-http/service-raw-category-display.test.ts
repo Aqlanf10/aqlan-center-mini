@@ -60,9 +60,12 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await browser?.close();
-    // Retire only this file's catalogue fixtures; preserve all historical facts.
-    if (serviceIds.size) await db.query("UPDATE services SET is_active = false WHERE id = ANY($1::int[])", [[...serviceIds.values()]]);
-  } finally { await db?.end(); }
+  } finally {
+    try {
+      // Retire only this file's catalogue fixtures; preserve all historical facts.
+      if (serviceIds.size) await db.query("UPDATE services SET is_active = false WHERE id = ANY($1::int[])", [[...serviceIds.values()]]);
+    } finally { await db?.end(); }
+  }
 });
 
 async function facts() {

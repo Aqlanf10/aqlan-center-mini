@@ -35,6 +35,14 @@ vi.mock("react", async (original) => {
     },
     useMemo: memo,
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
+    useLayoutEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined), previous = hooks.effects.get(index);
+      if (previous && same(previous.deps, deps)) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.(); const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
     useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
       const index = slot(undefined), previous = hooks.effects.get(index);
       if (previous && same(previous.deps, deps)) return;
@@ -45,6 +53,8 @@ vi.mock("react", async (original) => {
     },
   };
 });
+
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-admin", role: "admin", permissions: null }) }));
 
 type Element = ReactElement<Record<string, unknown>>;
 const nodes = (node: ReactNode): Element[] => Array.isArray(node) ? node.flatMap(nodes)

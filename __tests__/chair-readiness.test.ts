@@ -60,7 +60,7 @@ describe("(CHAIR-1 Slice 1) derived readiness checklist", () => {
 
   it("a walk-in without a file has one item: link or open the file", () => {
     expect(deriveReadiness(facts({ patientId: null }), 6, TODAY)).toEqual({
-      items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }], attention: 1, alerts: [],
+      items: [{ key: "file", state: "attention", label: "بلا ملف — اربطه بملفٍّ أو افتحه" }], attention: 1, alerts: [], historyAlerts: [],
     });
   });
 });
