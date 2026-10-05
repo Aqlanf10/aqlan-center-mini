@@ -925,7 +925,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
                           <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
                             <span className="block text-[10px] text-slate-500 font-bold">فلسفة البراكيت</span>
                             <span className="font-black text-navy-900 font-mono" dir="ltr">
-                              {row.bracketSystem ?? "Roth / MBT"}
+                              {row.bracketSystem?.trim() ? row.bracketSystem : "غير مسجّلة"}
                             </span>
                           </div>
                           <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
