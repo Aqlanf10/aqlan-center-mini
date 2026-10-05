@@ -6,6 +6,6 @@
     "@next/eslint-plugin-next": "16.3.5",
     "braces": "file:braces-local-candidate.tgz",
     "eslint": "9.39.5",
-    "tailwindcss": "3.4.19"
+    "tailwindcss": "4.3.3"
   }
 }
