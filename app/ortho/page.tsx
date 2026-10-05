@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, unbookedFollowupText,
 } from "@/lib/reminders";
-import { clinicDateString } from "@/lib/schedule";
+import { clinicDateString, getAppointmentTypeLabel } from "@/lib/schedule";
 import { sinceAdjustmentText } from "@/lib/ortho-followup";
 import {
   BUCKET_LABEL, BUCKET_ORDER, BUCKET_TONE,
@@ -44,8 +44,9 @@ const TONE_CLASS: Record<string, string> = {
 };
 
 export default function OrthoFollowupPage() {
-  const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
+  const fallbackToday = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [feed, setFeed] = useState<BoardFeed | null>(null);
+  const today = feed?.today ?? fallbackToday;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<FollowupBucket>("no_appointment");
@@ -71,9 +72,17 @@ export default function OrthoFollowupPage() {
   const buckets = feed?.buckets ?? [];
   const activeBucket = buckets.find((bucket) => bucket.bucket === active) ?? null;
 
+  const bookingContextKnown = (row: FollowupRow) => row.bookingContext?.verified === true
+    && Array.isArray(row.bookingContext.reviewAppointments) && Array.isArray(row.bookingContext.otherAppointments)
+    && Object.hasOwn(row.bookingContext, "pastUnresolvedAppointment");
+  const confirmedAppointment = (row: FollowupRow) => bookingContextKnown(row)
+    && row.nextAppointment && row.nextAppointment.date >= today
+    && (row.nextAppointment.status === "booked" || row.nextAppointment.status === "arrived")
+    ? row.nextAppointment : null;
+
   /** الاستحقاق المحسوب ليس حجزًا: ندعو لترتيب متابعة حتى يوجد موعد فعلي. */
   const reminderMessage = (row: FollowupRow): string => {
-    const appointment = row.nextAppointment;
+    const appointment = confirmedAppointment(row);
     if (!appointment) return unbookedFollowupText(row.patientName);
     return reminderText({
       id: appointment.id,
@@ -139,7 +148,16 @@ export default function OrthoFollowupPage() {
         </p>
       ) : (
         <ul className="space-y-2">
-          {activeBucket.rows.map((row) => (
+          {activeBucket.rows.map((row) => {
+            const contextKnown = bookingContextKnown(row);
+            const appointment = confirmedAppointment(row);
+            const past = contextKnown ? row.bookingContext?.pastUnresolvedAppointment : null;
+            const existing = contextKnown ? [
+              ...(row.bookingContext?.reviewAppointments ?? []).map((item) => ({ ...item, review: true })),
+              ...(row.bookingContext?.otherAppointments ?? []).map((item) => ({ ...item, review: false })),
+            ].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.id - b.id) : [];
+            const reviewDay = existing.find((item) => item.date >= today) ?? past ?? existing[0];
+            return (
             <li key={row.caseId} className="rounded-2xl border border-slate-200 bg-white p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -151,29 +169,80 @@ export default function OrthoFollowupPage() {
                     آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})
                     {" · الاستحقاق: "}{friendlyDateLong(row.dueDate)}
                   </p>
-                  {row.nextAppointment ? (
+                  {!contextKnown ? (
+                    <p role="status" className="mt-0.5 text-[11px] font-bold text-amber-700">
+                      تعذّر التحقق من سياق المواعيد — راجع المواعيد قبل إضافة حجز
+                    </p>
+                  ) : appointment ? (
                     <p className="mt-0.5 text-[11px] text-slate-500">
-                      الموعد المحجوز: {friendlyDateLong(row.nextAppointment.date)} الساعة {friendlyTime(row.nextAppointment.time)}
-                      {row.nextAppointment.date < today ? " — تجاوزه ولم يُنفَّذ" : ""}
+                      موعد متابعة التقويم المسجل: {friendlyDateLong(appointment.date)} الساعة {friendlyTime(appointment.time)}
+                      {appointment.serviceName ? ` · ${appointment.serviceName}` : ""}
+                      {appointment.doctorName ? ` · ${appointment.doctorName}` : ""}
+                      {appointment.status === "arrived" ? " · وصل" : " · محجوز"}
+                      {appointment.matchBasis === "legacy_type" ? " · مصنف حسب نوع الموعد القديم" : ""}
+                      {appointment.matchBasis === "designated_service" ? " · حسب تصنيف الخدمة الحالي" : ""}
                     </p>
                   ) : (
-                    <p className="mt-0.5 text-[11px] font-bold text-amber-700">لا موعد قادم محجوز</p>
+                    <p className="mt-0.5 text-[11px] font-bold text-amber-700">لا موعد متابعة تقويم مؤكد</p>
                   )}
+                  {past ? (
+                    <p className="mt-1 text-[11px] font-bold text-amber-800">
+                      موعد متابعة سابق لم يُغلق: {friendlyDateLong(past.date)} الساعة {friendlyTime(past.time)}
+                      {past.serviceName ? ` · ${past.serviceName}` : ""}
+                      {past.doctorName ? ` · ${past.doctorName}` : ""}
+                      {past.status === "arrived" ? " · وصل" : " · محجوز"}
+                      {past.matchBasis === "legacy_type" ? " · مصنف حسب نوع الموعد القديم" : ""}
+                      {past.matchBasis === "designated_service" ? " · حسب تصنيف الخدمة الحالي" : ""}
+                    </p>
+                  ) : null}
+                  {existing.length ? (
+                    <div className="mt-2 min-w-0 space-y-1 break-words rounded-xl border border-amber-200 bg-amber-50 p-2">
+                      <p className="text-[11px] font-bold text-amber-900">مواعيد قائمة للمريض — راجعها قبل إضافة حجز</p>
+                      {existing.map((item) => (
+                        <div key={item.id} className="text-[11px] text-slate-700">
+                          <p>
+                            {item.review ? "يحتاج مراجعة سياق المتابعة" : "موعد آخر"}
+                            {" · "}{friendlyDateLong(item.date)} الساعة {friendlyTime(item.time)}
+                            {" · "}{item.serviceName ?? getAppointmentTypeLabel(item.appointmentType) ?? "خدمة غير محددة"}
+                            {item.doctorName ? ` · ${item.doctorName}` : " · الطبيب غير محدد"}
+                            {item.status === "arrived" ? " · وصل" : item.status === "booked" ? " · محجوز" : " · حالة الموعد بحاجة مراجعة"}
+                          </p>
+                          <a href={`/appointments?date=${encodeURIComponent(item.date)}`} className="inline-flex min-h-11 items-center px-2 font-bold text-navy-800 underline">
+                            فتح يوم المواعيد
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <p className="mt-0.5 text-[10px] text-slate-400" dir="ltr">
                     {row.upperWire || row.lowerWire ? `U: ${row.upperWire ?? "—"} · L: ${row.lowerWire ?? "—"}` : ""}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  <button onClick={() => setRebook({ id: row.patientId, name: row.patientName })}
-                    className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-extrabold text-white">
-                    📅 احجز
-                  </button>
+                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">
+                  {reviewDay ? (
+                    <a href={`/appointments?date=${encodeURIComponent(reviewDay.date)}`}
+                      className="inline-flex min-h-11 items-center rounded-xl bg-navy-800 px-3 py-2 text-xs font-extrabold text-white">
+                      راجع يوم المواعيد أولًا
+                    </a>
+                  ) : !contextKnown ? (
+                    <a href={`/patients/${row.patientId}`} className="inline-flex min-h-11 items-center rounded-xl border border-amber-300 px-3 py-2 text-xs font-bold text-amber-800">
+                      افتح ملف المريض للمراجعة
+                    </a>
+                  ) : null}
+                  {contextKnown ? (
+                    <button onClick={() => setRebook({ id: row.patientId, name: row.patientName })}
+                      className={reviewDay
+                        ? "inline-flex min-h-11 items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600"
+                        : "inline-flex min-h-11 items-center rounded-xl bg-navy-800 px-3 py-2 text-xs font-extrabold text-white"}>
+                      {reviewDay ? "📅 احجز بعد المراجعة" : "📅 احجز"}
+                    </button>
+                  ) : null}
                   {reminderLink(row) ? (
                     <a
                       href={reminderLink(row) ?? "#"}
                       target="_blank" rel="noopener"
                       className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
-                      {row.nextAppointment ? "واتساب تذكير" : "واتساب لترتيب متابعة"}
+                      {appointment ? "واتساب تذكير" : "واتساب لترتيب متابعة"}
                     </a>
                   ) : null}
                   <a href={`/patients/${row.patientId}?tab=treatment`}
@@ -183,7 +252,8 @@ export default function OrthoFollowupPage() {
                 </div>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 
