@@ -11,7 +11,7 @@ import {
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
 import {
-  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck,
+  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, savedFullPhotoSetHistory,
   suggestPhotoStage, type PhotoStage, type PhotoView, type StagePhoto,
 } from "@/lib/ortho-photos";
 import {
@@ -1475,15 +1475,19 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const options = [...new Set([...wires.map((wire) => wire.code),
     upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
 
-  const fullSet = caseRow.photosVisible === false ? null : fullPhotoSetCheck({
+  const savedPhotoHistory = savedFullPhotoSetHistory({
+    patientId, orthoCaseId: caseRow.id, adjustments: caseRow.adjustments, today, asOfDate: doneOn,
+    photosVisible: form.caseGranted() ? caseRow.photosVisible : undefined,
+  });
+  const fullSet = savedPhotoHistory.status === "ready" ? fullPhotoSetCheck({
     sessionDate: doneOn,
     startDate: caseRow.startDate,
-    lastFullSetDate: caseRow.adjustments.find((entry) =>
-      entry.photos.some((photo) => photo.photoStage === "initial"))?.doneOn ?? null,
+    lastFullSetDate: savedPhotoHistory.latest?.takenOn ?? null,
     intervalMonths: 6,
     phase: caseRow.phase,
+    // This is only the prospective queue; it never establishes saved history.
     capturedViews: queue.map((photo) => photo.view).filter((view): view is PhotoView => view !== ""),
-  });
+  }) : null;
 
   return (
     <form onSubmit={submit} className="rounded-2xl border border-brand-orange bg-orange-50/50 p-4 shadow-xs">
@@ -1563,6 +1567,16 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         {caseRow.photosVisible === false ? (
           <p role="status" className="mb-1.5 text-[10px] text-slate-600">
             صور الجلسات السابقة محجوبة حسب صلاحياتك؛ لا يمكن تقييم اكتمال التوثيق الصوري.
+          </p>
+        ) : null}
+        {savedPhotoHistory.status === "unknown" && caseRow.photosVisible !== false ? (
+          <p role="status" data-testid="ortho-photo-history-unknown" className="mb-1.5 text-[10px] text-slate-600">
+            تعذّر تأكيد اكتمال مجموعات الصور المحفوظة من البيانات المتاحة؛ لا يعني ذلك عدم وجود صور.
+          </p>
+        ) : null}
+        {queue.length > 0 ? (
+          <p data-testid="ortho-photo-queue-preview" className="mb-1.5 text-[10px] text-slate-500">
+            الصور المختارة معاينة فقط؛ لا تُعد مجموعة محفوظة حتى تظهر في السجل بعد نجاح الرفع.
           </p>
         ) : null}
         {fullSet?.required ? (

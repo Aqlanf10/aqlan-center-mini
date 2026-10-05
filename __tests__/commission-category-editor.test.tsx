@@ -110,6 +110,7 @@ describe("actual commission category editor and unchanged raw-key billing contra
       expect(input.props.style).toEqual({ width: `calc(${String(value).length}ch + 2.5rem)` });
       expect(String(input.props.className).split(" ")).toContain("min-w-24");
       expect(String(input.props.className).split(" ")).toContain("shrink-0");
+      expect(String(input.props.className).split(" ")).toContain("font-mono");
       expect(String(input.props.className).split(" ")).not.toContain("w-16");
       const row = nodes(v.tree).find(node => node.type === "label" && nodes(node.props.children as ReactNode).includes(input));
       expect(String(row?.props.className).split(" ")).toContain("flex-wrap");

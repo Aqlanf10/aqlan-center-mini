@@ -790,3 +790,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+      # Exactly two synthetic built-page scenes with unknown saved history and
+      # queued preview text. No real records, traces, HAR or authentication state.
+      - name: Upload orthodontic photo completeness screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-photo-completeness-ui
+          path: |
+            .settings-ui-artifacts/ortho-photo-completeness-1280.png
+            .settings-ui-artifacts/ortho-photo-completeness-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
