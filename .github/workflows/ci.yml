@@ -804,3 +804,19 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Exactly two synthetic built Today screenshots and target/occlusion bounds.
+      # No traces, HAR, cookies, browser state, real records or broad uploads.
+      - name: Upload Today readiness read lifetime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: today-readiness-read-lifetime-ui
+          path: |
+            .settings-ui-artifacts/today-readiness-1280.png
+            .settings-ui-artifacts/today-readiness-390.png
+            .settings-ui-artifacts/today-readiness-1280-bounds.json
+            .settings-ui-artifacts/today-readiness-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
