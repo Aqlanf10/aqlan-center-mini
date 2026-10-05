@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page, type Route } from "playwright";
-import { mkdir } from "node:fs/promises";
+import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
+import { mkdir, writeFile } from "node:fs/promises";
+import { toWhatsAppNumber } from "../../lib/reminders";
 import { PROCEDURE_TEMPLATES } from "../../lib/prescription-procedure-templates";
 import { baseUrl, harness } from "./_server";
 
 // Exercise the real built /visits/[id] page and its persistently mounted Rx
 // modal. Authentication uses the isolated HTTP harness; every browser API read
-// and every mutation is intercepted. The patient, visit, medicine and safety
+// and every mutation is intercepted, except the explicitly allowlisted seeded
+// patient GET in the read-only HTTP contract case. The patient, visit, medicine and safety
 // response are synthetic. No clinical save or print-page DB read can escape.
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
@@ -27,9 +29,9 @@ const medicine = {
   instructions: "تعليمات تجريبية", instructionsEn: "Synthetic instructions",
 };
 
-function clinicalVisit(diagnosis: string) {
+function clinicalVisit(diagnosis: string, contextPatientId = patientId) {
   return {
-    id: visitId, patientId, patientName: "مريض وصفة تجريبي",
+    id: visitId, patientId: contextPatientId, patientName: "مريض وصفة تجريبي",
     chiefComplaint: "", examination: "", diagnosis, treatmentDone: "", nextPlan: "", addendum: null,
     doctorId: 98104, status: "open", signedAt: null, signedBy: null, invoiceId: null,
     procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
@@ -38,9 +40,14 @@ function clinicalVisit(diagnosis: string) {
   };
 }
 
-async function fixture(initialDiagnosis = "") {
+async function fixture(initialDiagnosis = "", patientRead: { id?: number; real?: boolean; body?: unknown; status?: number } = {}, width = 1280) {
+  const contextPatientId = patientRead.id ?? patientId;
+  let patientPayload: unknown = patientRead.body ?? { patient: { id: contextPatientId, medicalAlert: null, phone: null }, visits: [], appointments: [] };
+  let patientStatus = patientRead.status ?? 200;
+  let holdPatient = false;
+  const pendingPatients: Route[] = [];
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 1000 }, locale: "ar-YE", serviceWorkers: "block",
+    viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block",
   });
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -89,10 +96,14 @@ async function fixture(initialDiagnosis = "") {
       }
       return;
     }
-    if (path === `/api/visits/${visitId}/clinical`) await json(route, clinicalVisit(initialDiagnosis));
-    else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
-    else if (path === `/api/patients/${patientId}`) await json(route, { id: patientId, medicalAlert: null, phone: null });
-    else if (path === `/api/patients/${patientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
+    if (path === `/api/visits/${visitId}/clinical`) await json(route, clinicalVisit(initialDiagnosis, contextPatientId));
+    else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId: contextPatientId });
+    else if (path === `/api/patients/${contextPatientId}`) {
+      if (patientRead.real) await route.continue();
+      else if (holdPatient) pendingPatients.push(route);
+      else await json(route, patientPayload, patientStatus);
+    }
+    else if (path === `/api/patients/${contextPatientId}/prescriptions`) await json(route, { prescriptions: [], suggestions: [] });
     else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") await json(route, [{ id: 98104, name: "طبيب تجريبي" }]);
     else if (path === "/api/booking-requests") await json(route, []);
@@ -133,6 +144,15 @@ async function fixture(initialDiagnosis = "") {
       await diagnosis.waitFor({ state: "detached" });
     };
     return { context, page, visitDiagnosis, diagnosis, notes, open, close, requests, unexpected, errors,
+      setPatientResponse: (body: unknown, status = 200) => { patientPayload = body; patientStatus = status; },
+      holdPatientRead: () => { holdPatient = true; },
+      pendingPatientReads: () => pendingPatients.length,
+      releasePatientRead: async () => {
+        const pending = pendingPatients.shift();
+        if (!pending) throw new Error("No patient context read is pending");
+        holdPatient = false;
+        await json(pending, patientPayload, patientStatus);
+      },
       holdPrescriptionPreview: () => { holdPreview = true; },
       releasePrescriptionPreview: async () => {
         const pending = pendingPreviews.shift();
@@ -281,4 +301,132 @@ describe("prescription diagnosis draft in the built visit page", () => {
       } finally { await f.context.close(); }
     },
   );
+});
+
+
+/** Capture actual RTL viewport geometry and native hit targets, never fullPage. */
+async function capturePatientContext(page: Page, width: number, contextState: "warning" | "unavailable") {
+  const heading = page.getByRole("heading", { name: "إصدار وصفة طبية (روشتة)", exact: true });
+  // The unchanged modal panel owns its header, scrolling content, and footer.
+  const panel = heading.locator("../../../..");
+  const warning = contextState === "warning"
+    ? panel.getByText("Penicillin allergy", { exact: true }).locator("../..")
+    : panel.getByRole("status").filter({ hasText: "حالة الحساسية والمخاطر غير معروفة هنا" });
+  await warning.waitFor();
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await warning.evaluate((element) => element.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" }));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const targets: Array<{ label: string; locator: Locator }> = [
+    { label: `${contextState} patient-context notice`, locator: warning },
+    { label: "cancel", locator: panel.getByRole("button", { name: "إلغاء", exact: true }) },
+    { label: "print", locator: panel.getByRole("button", { name: "طباعة الروشتة (A5)", exact: true }) },
+    ...(contextState === "warning" ? [{ label: "synthetic phone action", locator: panel.getByRole("button", { name: /إرسال واتساب/ }) }] : []),
+  ];
+  const bounds = [];
+  for (const { label, locator } of targets) {
+    // Inspect every target at this one capture position. Scrolling individual
+    // controls into different viewports would not prove the screenshot's UI.
+    const geometry = await locator.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const insetX = Math.min(12, rect.width / 4); const insetY = Math.min(12, rect.height / 4);
+      const points = [[rect.left + insetX, rect.top + insetY], [rect.right - insetX, rect.top + insetY],
+        [rect.left + insetX, rect.bottom - insetY], [rect.right - insetX, rect.bottom - insetY],
+        [rect.left + rect.width / 2, rect.top + rect.height / 2]];
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+        viewport: { width: innerWidth, height: innerHeight }, direction: getComputedStyle(element).direction,
+        contentFits: element.scrollWidth <= element.clientWidth + 1,
+        hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+    });
+    expect(geometry.width).toBeGreaterThan(20); expect(geometry.height).toBeGreaterThan(20);
+    expect(geometry.viewport).toEqual({ width, height: 1000 }); expect(geometry.direction).toBe("rtl");
+    expect(geometry.left).toBeGreaterThanOrEqual(0); expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport.height);
+    expect(geometry.contentFits).toBe(true); expect(geometry.hits).toEqual([true, true, true, true, true]);
+    bounds.push({ label, ...geometry });
+  }
+  const containment = await panel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { documentFits: document.documentElement.scrollWidth <= innerWidth + 1,
+      panelFits: element.scrollWidth <= element.clientWidth + 1,
+      left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+      viewport: { width: innerWidth, height: innerHeight } };
+  });
+  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
+  expect(containment.documentFits).toBe(true); expect(containment.panelFits).toBe(true);
+  expect(containment.left).toBeGreaterThanOrEqual(0); expect(containment.top).toBeGreaterThanOrEqual(0);
+  expect(containment.right).toBeLessThanOrEqual(width); expect(containment.bottom).toBeLessThanOrEqual(1000);
+  await mkdir(".settings-ui-artifacts", { recursive: true });
+  const name = `prescription-patient-context-${contextState}-${width}`;
+  await writeFile(`.settings-ui-artifacts/${name}-bounds.json`, JSON.stringify({ contextState, containment, bounds }, null, 2));
+  await page.screenshot({ path: `.settings-ui-artifacts/${name}.png` });
+}
+
+describe("patient-file context in the built prescription consumer", () => {
+  it.each([1280, 390])("shows nested allergy and phone, refreshes on reopen, and keeps Rx/visit drafts through pending and failed reads at %ipx", async (width) => {
+    const f = await fixture("Visit draft diagnosis", { body: {
+      patient: { id: patientId, medicalAlert: "Penicillin allergy", phone: "777100099" }, visits: [], appointments: [],
+    } }, width);
+    try {
+      await f.open();
+      await f.page.getByText("Penicillin allergy", { exact: true }).waitFor();
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      await f.diagnosis.fill("Independent Rx draft");
+      await f.notes.fill(draftNotes);
+      await fillMedicine(f.page);
+      const drugName = f.page.getByPlaceholder("Drug name (e.g. Augmentin / Brufen)", { exact: true });
+      await drugName.fill("Amoxicillin");
+      await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).waitFor();
+      await capturePatientContext(f.page, width, "warning");
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      expect(await prints(f.page)).toEqual([expect.stringContaining("https://wa.me/967777100099?")]);
+      await f.close();
+      await f.visitDiagnosis.fill("Unsubmitted visit draft");
+      f.holdPatientRead(); await f.open();
+      await expect.poll(f.pendingPatientReads).toBe(1);
+      await f.page.getByText(/جارٍ تحميل التنبيهات الطبية وبيانات التواصل/).waitFor();
+      expect(await f.page.getByText("Penicillin allergy", { exact: true }).count()).toBe(0);
+      expect(await f.page.getByRole("button", { name: /إرسال واتساب/ }).count()).toBe(0);
+      expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
+      expect(await f.notes.inputValue()).toBe(draftNotes);
+      expect(await drugName.inputValue()).toBe("Amoxicillin");
+      f.setPatientResponse({ patient: { id: patientId, medicalAlert: null, phone: null }, visits: [], appointments: [] });
+      await f.releasePatientRead();
+      await f.page.getByText(/جارٍ تحميل التنبيهات الطبية وبيانات التواصل/).waitFor({ state: "detached" });
+      expect(await f.page.getByText("خطر تحسسي حرج (Penicillin Allergy)", { exact: true }).count()).toBe(0);
+      await f.close();
+      f.setPatientResponse({ message: "Synthetic unavailable read" }, 503); await f.open();
+      await f.page.getByText(/حالة الحساسية والمخاطر غير معروفة هنا/).waitFor();
+      expect(await f.diagnosis.inputValue()).toBe("Independent Rx draft");
+      expect(await drugName.inputValue()).toBe("Amoxicillin");
+      expect(await f.visitDiagnosis.inputValue()).toBe("Unsubmitted visit draft");
+      await capturePatientContext(f.page, width, "unavailable");
+      expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+    } finally { await f.context.close(); }
+  });
+
+  it("reads the isolated seeded patient's actual HTTP GET envelope into the built consumer without flattening it", async () => {
+    // The global harness owns this disposable synthetic database. This case
+    // allows exactly its patient GET; all other browser API reads and writes
+    // remain intercepted. No Production patient or clinical mutation is used.
+    const id = h.seeded.patientAId;
+    const before = await fetch(`${baseUrl}/api/patients/${id}`, { headers: { Cookie: h.sessions.admin.cookie } });
+    expect(before.status).toBe(200);
+    const payload = await before.json() as { patient: { id: number; medicalAlert: string | null; phone: string | null }; visits: unknown[]; appointments: unknown[] };
+    expect(payload.patient.id).toBe(id);
+    expect(Array.isArray(payload.visits)).toBe(true); expect(Array.isArray(payload.appointments)).toBe(true);
+    expect(payload.patient.phone).toBeTruthy();
+    const f = await fixture("Synthetic real-GET contract", { id, real: true });
+    try {
+      await f.open();
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).waitFor();
+      expect(await f.page.getByText(/تعذّر التحقق من التنبيهات الطبية/).count()).toBe(0);
+      if (payload.patient.medicalAlert) await f.page.getByText(payload.patient.medicalAlert, { exact: true }).waitFor();
+      await f.page.getByRole("button", { name: /إرسال واتساب/ }).click();
+      const opened = await prints(f.page);
+      expect(opened).toHaveLength(1);
+      expect(opened[0]).toContain(`https://wa.me/${toWhatsAppNumber(payload.patient.phone!)}?`);
+      expect(f.requests).toEqual([]); expect(f.unexpected).toEqual([]); expect(f.errors).toEqual([]);
+    } finally { await f.context.close(); }
+  });
 });
