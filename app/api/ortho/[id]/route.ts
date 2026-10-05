@@ -48,7 +48,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const doneOn = typeof source.doneOn === "string" && DATE_PATTERN.test(source.doneOn)
     ? source.doneOn : today;
-  const phase = typeof source.phase === "string" && source.phase in PHASE_LABEL
+  const phase = typeof source.phase === "string" && Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)
     ? (source.phase as keyof typeof PHASE_LABEL) : null;
   const elastics = isElasticClass(source.elastics) ? source.elastics : "none";
   const nextWeeks = Math.round(Number(source.nextWeeks ?? 4));
@@ -129,7 +129,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (typeof source.phase === "string") {
-      if (!(source.phase in PHASE_LABEL)) {
+      if (!Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)) {
         return NextResponse.json({ message: "مرحلة غير معروفة." }, { status: 400 });
       }
       const changed = await setOrthoPhase(caseId, source.phase as keyof typeof PHASE_LABEL);
@@ -138,7 +138,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (typeof source.retainer === "string") {
-      if (!(source.retainer in RETAINER_LABEL)) {
+      if (!Object.prototype.hasOwnProperty.call(RETAINER_LABEL, source.retainer)) {
         return NextResponse.json({ message: "نوع مثبّت غير معروف." }, { status: 400 });
       }
       const on = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
