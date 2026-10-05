@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber,
+  friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, unbookedFollowupText,
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { sinceAdjustmentText } from "@/lib/ortho-followup";
@@ -71,19 +71,22 @@ export default function OrthoFollowupPage() {
   const buckets = feed?.buckets ?? [];
   const activeBucket = buckets.find((bucket) => bucket.bucket === active) ?? null;
 
-  /** رسالة التذكير بقائمة اليوم — تُبنى من بيانات الصف لا من موعدٍ موجود. */
-  const reminderMessage = (row: FollowupRow): string =>
-    reminderText({
-      id: row.nextAppointment?.id ?? row.caseId,
+  /** الاستحقاق المحسوب ليس حجزًا: ندعو لترتيب متابعة حتى يوجد موعد فعلي. */
+  const reminderMessage = (row: FollowupRow): string => {
+    const appointment = row.nextAppointment;
+    if (!appointment) return unbookedFollowupText(row.patientName);
+    return reminderText({
+      id: appointment.id,
       patientId: row.patientId,
       patientName: row.patientName,
       patientPhone: row.patientPhone,
-      scheduledDate: row.nextAppointment?.date ?? row.dueDate,
-      scheduledTime: row.nextAppointment?.time ?? "16:00",
+      scheduledDate: appointment.date,
+      scheduledTime: appointment.time,
       durationMinutes: 15,
       note: null,
       status: "booked",
     }, "upcoming");
+  };
 
   /** رابط واتساب صحيح أو null — الرقم اليمني يُحوّل للصيغة الدولية المُتحقَّقة. */
   const reminderLink = (row: FollowupRow): string | null => {
@@ -169,8 +172,8 @@ export default function OrthoFollowupPage() {
                     <a
                       href={reminderLink(row) ?? "#"}
                       target="_blank" rel="noopener"
-                      className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
-                      واتساب تذكير
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-700">
+                      {row.nextAppointment ? "واتساب تذكير" : "واتساب لترتيب متابعة"}
                     </a>
                   ) : null}
                   <a href={`/patients/${row.patientId}?tab=treatment`}
