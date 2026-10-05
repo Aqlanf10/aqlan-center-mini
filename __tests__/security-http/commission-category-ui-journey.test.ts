@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Locator } from "playwright";
 import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,6 +20,38 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
+
+async function expectReadablePercent(input: Locator, expected: string, width: number) {
+  await input.scrollIntoViewIfNeeded(); await input.focus();
+  await input.evaluate(() => document.fonts.ready.then(() => undefined));
+  expect(await input.inputValue()).toBe(expected);
+  const metrics = await input.evaluate(element => {
+    const field = element as HTMLInputElement;
+    const style = getComputedStyle(field);
+    const text = document.createElement("span");
+    text.textContent = field.value;
+    Object.assign(text.style, { position: "fixed", visibility: "hidden", whiteSpace: "pre",
+      fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle, fontStretch: style.fontStretch, fontVariantNumeric: style.fontVariantNumeric,
+      fontFeatureSettings: style.fontFeatureSettings, fontVariationSettings: style.fontVariationSettings,
+      letterSpacing: style.letterSpacing });
+    document.body.appendChild(text);
+    const textWidth = text.getBoundingClientRect().width; text.remove();
+    const box = field.getBoundingClientRect();
+    const row = field.closest("label")!;
+    return { value: field.value, valid: field.checkValidity(), x: box.x, width: box.width, height: box.height,
+      // input.scrollWidth alone misses clipping inside the native number editor.
+      spareWidth: box.width - textWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth),
+      rowContained: row.scrollWidth <= row.clientWidth,
+      viewportContained: document.documentElement.scrollWidth <= innerWidth };
+  });
+  expect(metrics.value).toBe(expected); expect(metrics.valid).toBe(true);
+  expect(metrics.height).toBeGreaterThanOrEqual(44);
+  expect(metrics.x).toBeGreaterThanOrEqual(0); expect(metrics.x + metrics.width).toBeLessThanOrEqual(width);
+  expect(metrics.spareWidth).toBeGreaterThanOrEqual(20); // Native spinner plus caret space.
+  expect(metrics.rowContained).toBe(true); expect(metrics.viewportContained).toBe(true);
+}
 
 describe("actual prospective commission category editor", () => {
   it.each([1280, 390])("edits exact catalog keys at %s RTL without filling untouched overrides or rewriting legacy rates", async (width) => {
@@ -92,6 +124,7 @@ describe("actual prospective commission category editor", () => {
         const box = (await input.boundingBox())!;
         expect(box.height).toBeGreaterThanOrEqual(44);
         expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width);
+        await expectReadablePercent(input, await input.inputValue(), width);
       }
       await rct.scrollIntoViewIfNeeded(); await rct.focus();
       expect(await rct.evaluate((input) => getComputedStyle(input).outlineStyle)).not.toBe("none");
@@ -119,6 +152,21 @@ describe("actual prospective commission category editor", () => {
       expect(typeof details["نافذ_من"]).toBe("string");
       await open();
       expect(await rct.inputValue()).toBe("12.345"); expect(await filling.inputValue()).toBe("0");
+      // Exercise longer supported values only after the original same-value zero,
+      // exact persisted 12.345, legacy preservation, history and audit proof.
+      if (!(await region.locator("details").evaluate(element => (element as HTMLDetailsElement).open))) await disclosure.click();
+      const general = region.getByRole("spinbutton", { name: "النسبة العامة للفئات", exact: true });
+      const legacy = region.getByRole("spinbutton", { name: "نسبة فئة custom_saved", exact: true });
+      for (const input of [general, rct, legacy]) {
+        const original = await input.inputValue();
+        for (const value of [99.99999999999999, 0.0000010000000000000002, Number.MIN_VALUE]) {
+          await input.fill(String(value));
+          await expectReadablePercent(input, String(value), width);
+          expect(await fieldset.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+        }
+        await input.fill(original);
+      }
+      expect(writes).toHaveLength(2); // The supplemental readability drafts are never saved.
     } finally { await context.close(); }
   }, 180_000);
 });

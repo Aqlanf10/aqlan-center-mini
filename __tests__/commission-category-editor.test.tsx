@@ -80,7 +80,7 @@ describe("actual commission category editor and unchanged raw-key billing contra
     expect(updated.categoryRates).not.toHaveProperty("rct");
     expect(updated.categoryRates.endo).toBe(72);
   });
-  it.each([0, 0.125, 12.345, 100])("preserves canonical fractional/boundary percentage %s on both category controls", value => {
+  it.each([0, 0.125, 12.345, 99.99999999999999, 0.0000010000000000000002, Number.MIN_VALUE, 100])("preserves canonical fractional/boundary percentage %s on both category controls", value => {
     const v = view();
     for (const label of ["نسبة فئة rct", "النسبة العامة للفئات"]) {
       const input = v.input(label); expect(input.props).toMatchObject({ step: "any", min: 0, max: 100 });
@@ -99,6 +99,22 @@ describe("actual commission category editor and unchanged raw-key billing contra
     expect(v.onCategoryChange).not.toHaveBeenCalled();
     (input.props.onInput as (event: unknown) => void)({ currentTarget: { value: "0" } });
     expect(v.onCategoryChange).toHaveBeenCalledExactlyOnceWith("rct", 0);
+  });
+
+  it.each([0, 12.345, 99.99999999999999, 0.0000010000000000000002, Number.MIN_VALUE])("sizes the displayed value %s without changing it or creating input intent", value => {
+    const config = fixture(value); config.categoryRates.rct = value;
+    const v = view(config);
+    for (const label of ["نسبة فئة rct", "النسبة العامة للفئات"]) {
+      const input = v.input(label);
+      expect(input.props.value).toBe(value);
+      expect(input.props.style).toEqual({ width: `calc(${String(value).length}ch + 2.5rem)` });
+      expect(String(input.props.className).split(" ")).toContain("min-w-24");
+      expect(String(input.props.className).split(" ")).not.toContain("w-16");
+      const row = nodes(v.tree).find(node => node.type === "label" && nodes(node.props.children as ReactNode).includes(input));
+      expect(String(row?.props.className).split(" ")).toContain("flex-wrap");
+    }
+    expect(v.onCategoryChange).not.toHaveBeenCalled();
+    expect(v.onDefaultPercentChange).not.toHaveBeenCalled();
   });
 
 });
