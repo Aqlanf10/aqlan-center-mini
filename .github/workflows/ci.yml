@@ -734,3 +734,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+      - name: Upload orthodontic parent read safety acceptance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-ortho-parent-read-safety-ui
+          path: |
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
