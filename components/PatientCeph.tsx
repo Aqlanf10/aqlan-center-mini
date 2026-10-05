@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSession } from "./SessionProvider";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
   CEPH_DIAGNOSTIC_STAGES,
@@ -89,6 +90,69 @@ export interface PatientCephProps {
   onAnalysisCreated?: (analysisId: number) => void;
 }
 
+type Creation = { readonly controller: AbortController };
+type StudyForm = { readonly identity: symbol };
+function createWriteOwner() {
+  // Mutable leases stay inside this factory, never in React state/props or in
+  // a hook-returned object. React state below is only a redraw counter.
+  let active = false;
+  let form: StudyForm | null = null;
+  let pending: Creation | null = null;
+  const retireForm = () => {
+    form = null;
+    pending?.controller.abort();
+    pending = null;
+  };
+  const current = (candidate: StudyForm, operation: Creation) =>
+    active && form === candidate && pending === operation;
+  return {
+    activate: () => { active = true; },
+    retire: () => { active = false; retireForm(); },
+    snapshot: () => ({ form, creating: pending !== null }),
+    open: () => {
+      if (!active || form) return false;
+      form = { identity: Symbol("ceph-study-form") };
+      return true;
+    },
+    close: (candidate: StudyForm | null) => {
+      if (!active || !candidate || candidate !== form) return false;
+      retireForm(); return true;
+    },
+    begin: (candidate: StudyForm) => {
+      if (!active || candidate !== form || pending) return null;
+      pending = { controller: new AbortController() };
+      return pending;
+    },
+    current,
+    finish: (candidate: StudyForm, operation: Creation) => {
+      if (!current(candidate, operation)) return false;
+      pending = null; return true;
+    },
+  };
+}
+
+function createReadOwner() {
+  let pending: AbortController | null = null;
+  return {
+    begin: () => {
+      pending?.abort();
+      pending = new AbortController();
+      return pending;
+    },
+    current: (operation: AbortController) => pending === operation && !operation.signal.aborted,
+    active: () => pending !== null && !pending.signal.aborted,
+    retire: () => { pending?.abort(); pending = null; },
+  };
+}
+
+type ImageSelection = {
+  owner: ReturnType<typeof createReadOwner>;
+  patientId: number;
+  authority: string;
+  images: PatientDocument[];
+  selectedDoc: number | null;
+};
+
 export function PatientCeph({
   patientId,
   orthoCaseId: propOrthoCaseId,
@@ -96,18 +160,37 @@ export function PatientCeph({
   embedded = false,
   onAnalysisCreated,
 }: PatientCephProps) {
+  const session = useSession();
+  // Same canonical principal/role/permission scope as the orthodontic parent.
+  // Display-name-only changes must not dismiss an ordinary same-owner draft.
+  const authority = JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
+  const owner = useMemo(createWriteOwner, [patientId, propOrthoCaseId, authority]);
+  // These endpoints and image options are patient-wide; case changes only
+  // retire writes and change the summary projection, without another read.
+  const readOwner = useMemo(createReadOwner, [patientId, authority]);
+  const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
+    || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
+  useLayoutEffect(() => {
+    owner.activate();
+    return owner.retire;
+  }, [owner]);
+  // Retire reads at commit, before a newer view can accept old response bodies.
+  useLayoutEffect(() => readOwner.retire, [readOwner]);
   const [analyses, setAnalyses] = useState<CephAnalysis[] | null>(null);
-  const [documents, setDocuments] = useState<PatientDocument[] | null>(null);
-  const [images, setImages] = useState<PatientDocument[]>([]);
+  const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
+  const images = imageSelection?.owner === readOwner ? imageSelection.images : [];
+  const selectedDoc = imageSelection?.owner === readOwner ? imageSelection.selectedDoc : null;
   const [orthoCases, setOrthoCases] = useState<OrthoCaseLite[]>([]);
   const [refSets, setRefSets] = useState<RefSetLite[]>([]);
 
   // نموذج الفحص الجديد
-  const [showNewStudy, setShowNewStudy] = useState(false);
+  const [, setFormRevision] = useState(0);
+  const { form, creating } = owner.snapshot();
+  const showNewStudy = form !== null;
+  const redrawForm = () => setFormRevision((value) => value + 1);
   /* مقارنة تحليلين (من مستودع الوكيل الآخر): تُختار بالتحديد من الجدول، ولا
      تُقارَن إلا المكتملة — المسودة أرقامها لم تُختم فمقارنتها حكمٌ على لا شيء. */
   const [compareIds, setCompareIds] = useState<number[]>([]);
-  const [selectedDoc, setSelectedDoc] = useState<number | null>(null);
 
   const smartPhase = useMemo(
     () => suggestCephPhase(currentPhase, currentPhase === "aligning" ? 1 : 0),
@@ -121,7 +204,6 @@ export function PatientCeph({
     propOrthoCaseId ? String(propOrthoCaseId) : "",
   );
   const [refSet, setRefSet] = useState("builtin_default");
-  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterThisCase, setFilterThisCase] = useState<boolean>(Boolean(propOrthoCaseId && embedded));
 
@@ -133,43 +215,54 @@ export function PatientCeph({
     }
   }, [propOrthoCaseId, smartPhase]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (operation: AbortController) => {
+    const current = () => readOwner.current(operation);
     try {
       const [cephRes, docsRes, orthoRes, refsRes] = await Promise.all([
-        fetch(`/api/patients/${patientId}/ceph`),
-        fetch(`/api/patients/${patientId}/documents`),
-        fetch(`/api/ortho?patientId=${patientId}`),
-        fetch("/api/ceph-reference-sets"),
+        fetch(`/api/patients/${patientId}/ceph`, { signal: operation.signal }),
+        fetch(`/api/patients/${patientId}/documents`, { signal: operation.signal }),
+        fetch(`/api/ortho?patientId=${patientId}`, { signal: operation.signal }),
+        fetch("/api/ceph-reference-sets", { signal: operation.signal }),
       ]);
+      if (!current()) return;
       if (cephRes.ok) {
-        setAnalyses((await cephRes.json()).analyses);
+        const data = await cephRes.json();
+        if (!current()) return;
+        setAnalyses(data.analyses);
       } else {
         setError("تعذّر تحميل دراسات السيفالو.");
       }
       if (docsRes.ok) {
         const data = await docsRes.json();
+        if (!current()) return;
         const docs: PatientDocument[] = data.documents ?? [];
-        setDocuments(docs);
         const imgs = docs.filter((d) => d.isImage);
-        setImages(imgs);
-        setSelectedDoc((prev) => prev ?? imgs[0]?.id ?? null);
+        setImageSelection((previous) => {
+          const selected = previous?.patientId === patientId && previous.authority === authority
+            ? previous.selectedDoc : null;
+          return { owner: readOwner, patientId, authority, images: imgs,
+            selectedDoc: imgs.some((image) => image.id === selected) ? selected : imgs[0]?.id ?? null };
+        });
       }
       if (orthoRes.ok) {
         const data = await orthoRes.json();
+        if (!current()) return;
         setOrthoCases((data.cases ?? []) as OrthoCaseLite[]);
       }
       if (refsRes.ok) {
         const data = await refsRes.json();
+        if (!current()) return;
         setRefSets((data.sets ?? []) as RefSetLite[]);
       }
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (current()) setError("تعذّر الاتصال بالخادم.");
     }
-  }, [patientId]);
+  }, [patientId, authority, readOwner]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(readOwner.begin());
+    return readOwner.retire;
+  }, [load, readOwner]);
 
   const displayedAnalyses = useMemo(() => {
     if (!analyses) return [];
@@ -188,14 +281,29 @@ export function PatientCeph({
     return displayedAnalyses.find((a) => a.status === "completed") ?? null;
   }, [displayedAnalyses]);
 
+  const openStudyForm = () => {
+    if (!mayCreate || !owner.open()) return;
+    redrawForm();
+    setError(null);
+  };
+  const closeStudyForm = () => {
+    // A saved Close handler cannot close a newer form from the same owner.
+    if (owner.close(form)) redrawForm();
+  };
   const openDraft = async () => {
-    if (!selectedDoc) return;
-    setCreating(true);
+    // The form identity and synchronous latch also guard captured handlers and
+    // repeated events before React paints the disabled button.
+    if (!mayCreate || !form || !selectedDoc || !images.some((image) => image.id === selectedDoc)) return;
+    const operation = owner.begin(form);
+    if (!operation) return;
+    const current = () => owner.current(form, operation);
+    redrawForm();
     setError(null);
     try {
       const res = await fetch(`/api/patients/${patientId}/ceph`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: operation.controller.signal,
         body: JSON.stringify({
           documentId: selectedDoc,
           phase,
@@ -205,19 +313,22 @@ export function PatientCeph({
           refSet: refSet || null,
         }),
       });
+      if (!current()) return;
       const data = await res.json();
+      if (!current()) return;
       if (res.ok) {
-        if (onAnalysisCreated) {
-          onAnalysisCreated(data.id);
-        }
+        if (!Number.isSafeInteger(data?.id) || data.id <= 0) throw new Error("Invalid study response");
+        onAnalysisCreated?.(data.id);
+        // A callback may synchronously change patient/view/session or unmount.
+        if (!current()) return;
         window.location.href = `/ceph/${data.id}`;
       } else {
-        setError(data.message ?? "تعذّر فتح التحليل.");
+        setError(typeof data?.message === "string" ? data.message : "تعذّر فتح التحليل.");
       }
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (current()) setError("تعذّر تأكيد فتح التحليل. قد يكون الطلب نُفّذ؛ راجع الدراسات قبل المحاولة مجددًا.");
     } finally {
-      setCreating(false);
+      if (owner.finish(form, operation)) redrawForm();
     }
   };
 
@@ -263,7 +374,8 @@ export function PatientCeph({
 
           <button
             type="button"
-            onClick={() => setShowNewStudy((prev) => !prev)}
+            onClick={showNewStudy ? closeStudyForm : openStudyForm}
+            disabled={!mayCreate}
             className="inline-flex items-center gap-1.5 rounded-xl bg-brand-orange px-3.5 py-1.5 text-xs font-black text-white shadow-xs hover:bg-amber-600 transition-colors"
           >
             <span>{showNewStudy ? "✕ إغلاق النموذج" : "+ دراسة سيفالومترية جديدة"}</span>
@@ -363,7 +475,11 @@ export function PatientCeph({
               <select
                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-xs focus:border-navy-800 focus:outline-hidden"
                 value={selectedDoc ?? ""}
-                onChange={(e) => setSelectedDoc(Number(e.target.value) || null)}
+                onChange={(e) => {
+                  const selected = Number(e.target.value) || null;
+                  setImageSelection((previous) => readOwner.active() && previous?.owner === readOwner
+                    ? { ...previous, selectedDoc: selected } : previous);
+                }}
               >
                 {images.length === 0 && <option value="">لا توجد صور في مستندات المريض</option>}
                 {images.map((doc) => (
@@ -487,14 +603,14 @@ export function PatientCeph({
             <button
               type="button"
               onClick={() => void openDraft()}
-              disabled={!selectedDoc || creating || images.length === 0}
+              disabled={!mayCreate || !selectedDoc || creating || !images.some((image) => image.id === selectedDoc)}
               className="rounded-xl bg-navy-800 px-5 py-2.5 text-xs font-black text-white shadow-xs hover:bg-navy-900 disabled:opacity-40 transition-colors"
             >
               {creating ? "جارٍ فتح كابينة الرسم…" : "📐 افتح مساحة التتبع والتحليل"}
             </button>
             <button
               type="button"
-              onClick={() => setShowNewStudy(false)}
+              onClick={closeStudyForm}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors"
             >
               إلغاء
@@ -528,7 +644,8 @@ export function PatientCeph({
           {images.length > 0 && (
             <button
               type="button"
-              onClick={() => setShowNewStudy(true)}
+              onClick={openStudyForm}
+              disabled={!mayCreate}
               className="mt-3 inline-flex items-center gap-1 rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900"
             >
               + ابدأ فحص سيفالومتري الآن

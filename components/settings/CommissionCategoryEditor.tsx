@@ -39,7 +39,7 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
             type="number" step="any" min={0} max={100} value={value}
             onInput={(event) => onCategoryChange(key, percent(event.currentTarget.value))}
             style={{ width: inputWidth(value) }}
-            className="min-h-11 min-w-24 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
+            className="min-h-11 min-w-24 shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue"
           />
           <span className="text-[11px] text-slate-400">%</span>
         </span>
@@ -57,7 +57,7 @@ export function CommissionCategoryEditor({ config, services, onCategoryChange, o
           <input aria-label="النسبة العامة للفئات" type="number" step="any" min={0} max={100} value={config.defaultPercent}
             onInput={(event) => onDefaultPercentChange(percent(event.currentTarget.value))}
             style={{ width: inputWidth(config.defaultPercent) }}
-            className="min-h-11 min-w-24 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" />
+            className="min-h-11 min-w-24 shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-center font-bold text-navy-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue" />
           <span className="text-[11px] text-slate-400">%</span>
         </span>
       </label>

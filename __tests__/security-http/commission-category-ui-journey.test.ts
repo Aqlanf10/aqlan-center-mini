@@ -24,7 +24,6 @@ afterAll(async () => { await browser?.close(); await db?.end(); });
 async function expectReadablePercent(input: Locator, expected: string, width: number) {
   await input.scrollIntoViewIfNeeded(); await input.focus();
   await input.evaluate(() => document.fonts.ready.then(() => undefined));
-  expect(await input.inputValue()).toBe(expected);
   const metrics = await input.evaluate(element => {
     const field = element as HTMLInputElement;
     const style = getComputedStyle(field);
@@ -36,21 +35,45 @@ async function expectReadablePercent(input: Locator, expected: string, width: nu
       fontFeatureSettings: style.fontFeatureSettings, fontVariationSettings: style.fontVariationSettings,
       letterSpacing: style.letterSpacing });
     document.body.appendChild(text);
-    const textWidth = text.getBoundingClientRect().width; text.remove();
+    const textWidth = text.getBoundingClientRect().width;
+    Object.assign(text.style, { width: field.style.width, minWidth: style.minWidth, maxWidth: style.maxWidth,
+      boxSizing: style.boxSizing });
+    const declaredWidthPx = text.getBoundingClientRect().width; text.remove();
     const box = field.getBoundingClientRect();
     const row = field.closest("label")!;
+    const wrapper = field.parentElement!;
+    const bounds = (node: Element) => {
+      const rect = node.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+        left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    };
+    const wrapperStyle = getComputedStyle(wrapper);
     return { value: field.value, valid: field.checkValidity(), x: box.x, width: box.width, height: box.height,
+      control: field.getAttribute("aria-label"), numericValue: field.valueAsNumber,
+      canonicalValue: String(field.valueAsNumber), inputBounds: bounds(field), textWidth, declaredWidthPx,
+      inputStyle: { declaredWidth: field.style.width, computedWidth: style.width, minWidth: style.minWidth,
+        maxWidth: style.maxWidth, flexBasis: style.flexBasis, flexShrink: style.flexShrink, boxSizing: style.boxSizing,
+        paddingLeft: style.paddingLeft, paddingRight: style.paddingRight,
+        borderLeftWidth: style.borderLeftWidth, borderRightWidth: style.borderRightWidth,
+        fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight,
+        fontVariantNumeric: style.fontVariantNumeric, letterSpacing: style.letterSpacing },
+      wrapper: { bounds: bounds(wrapper), clientWidth: wrapper.clientWidth, scrollWidth: wrapper.scrollWidth,
+        width: wrapperStyle.width, minWidth: wrapperStyle.minWidth, flexBasis: wrapperStyle.flexBasis,
+        flexShrink: wrapperStyle.flexShrink, gap: wrapperStyle.gap },
+      row: { bounds: bounds(row), clientWidth: row.clientWidth, scrollWidth: row.scrollWidth },
       // input.scrollWidth alone misses clipping inside the native number editor.
       spareWidth: box.width - textWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
         - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth),
       rowContained: row.scrollWidth <= row.clientWidth,
       viewportContained: document.documentElement.scrollWidth <= innerWidth };
   });
-  expect(metrics.value).toBe(expected); expect(metrics.valid).toBe(true);
-  expect(metrics.height).toBeGreaterThanOrEqual(44);
-  expect(metrics.x).toBeGreaterThanOrEqual(0); expect(metrics.x + metrics.width).toBeLessThanOrEqual(width);
-  expect(metrics.spareWidth).toBeGreaterThanOrEqual(20); // Native spinner plus caret space.
-  expect(metrics.rowContained).toBe(true); expect(metrics.viewportContained).toBe(true);
+  const diagnostic = JSON.stringify({ viewportWidth: width, expected, ...metrics });
+  expect(await input.inputValue(), diagnostic).toBe(expected);
+  expect(metrics.value, diagnostic).toBe(expected); expect(metrics.valid, diagnostic).toBe(true);
+  expect(metrics.height, diagnostic).toBeGreaterThanOrEqual(44);
+  expect(metrics.x, diagnostic).toBeGreaterThanOrEqual(0); expect(metrics.x + metrics.width, diagnostic).toBeLessThanOrEqual(width);
+  expect(metrics.spareWidth, diagnostic).toBeGreaterThanOrEqual(20); // Native spinner plus caret space.
+  expect(metrics.rowContained, diagnostic).toBe(true); expect(metrics.viewportContained, diagnostic).toBe(true);
 }
 
 describe("actual prospective commission category editor", () => {

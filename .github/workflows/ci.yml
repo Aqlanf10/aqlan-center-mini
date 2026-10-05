@@ -775,3 +775,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Exactly two synthetic built-page Ceph warnings; no real patients,
+      # traces, HAR, authentication state, or broad artifact uploads.
+      - name: Upload ceph pending-write uncertainty screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-ceph-post-uncertainty-ui
+          path: |
+            .settings-ui-artifacts/patient-ceph-post-uncertain-1280.png
+            .settings-ui-artifacts/patient-ceph-post-uncertain-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
