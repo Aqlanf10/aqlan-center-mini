@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -108,23 +108,71 @@ async function captureRetry(page: Page, width: number) {
   const retry = workspace(page).getByRole("button", { name: "إعادة تحميل كابينة التقويم", exact: true });
   await retry.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
   await page.evaluate(async () => { await document.fonts.ready; });
-  expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   const geometry = await retry.evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    const points = [[rect.left + 3, rect.top + 3], [rect.right - 3, rect.top + 3],
+    const style = getComputedStyle(element);
+    const radii = [style.borderTopLeftRadius, style.borderTopRightRadius,
+      style.borderBottomLeftRadius, style.borderBottomRightRadius];
+    const transforms = [];
+    for (let node: Element | null = element; node !== null; node = node.parentElement) {
+      const css = getComputedStyle(node);
+      transforms.push({ tag: node.tagName, transform: css.transform,
+        translate: css.getPropertyValue("translate"), rotate: css.getPropertyValue("rotate"),
+        scale: css.getPropertyValue("scale"), zoom: css.getPropertyValue("zoom") });
+    }
+    const untransformed = transforms.every((css) => css.transform === "none"
+      && [css.translate, css.rotate, css.scale].every((value) => value === "" || value === "none")
+      && ["", "1", "normal"].includes(css.zoom));
+    // This control has one circular rounded-xl radius. Refuse other shapes
+    // instead of moving probes until an occluded point happens to pass.
+    const supportedShape = radii.every((value) => /^\d+(?:\.\d+)?px$/.test(value) && value === radii[0])
+      && untransformed && style.clipPath === "none";
+    const radius = Math.min(Number.parseFloat(radii[0]), rect.width / 2, rect.height / 2);
+    const insidePaintedShape = (x: number, y: number) => {
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return false;
+      const dx = Math.max(rect.left + radius - x, 0, x - (rect.right - radius));
+      const dy = Math.max(rect.top + radius - y, 0, y - (rect.bottom - radius));
+      return dx * dx + dy * dy <= radius * radius;
+    };
+    const describe = (hit: Element | null) => hit === null ? null : ({
+      tag: hit.tagName, id: hit.id, role: hit.getAttribute("role"), testId: hit.getAttribute("data-testid"),
+      classes: hit.getAttribute("class")?.slice(0, 200) ?? null,
+    });
+    const inspect = ([x, y]: number[]) => {
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, insidePaintedShape: insidePaintedShape(x, y),
+        hit: hit !== null && (hit === element || element.contains(hit)), target: describe(hit),
+        stack: document.elementsFromPoint(x, y).slice(0, 4).map(describe) };
+    };
+    const originalPoints = [[rect.left + 3, rect.top + 3], [rect.right - 3, rect.top + 3],
       [rect.left + 3, rect.bottom - 3], [rect.right - 3, rect.bottom - 3],
+      [rect.left + rect.width / 2, rect.top + rect.height / 2]];
+    // At a circular corner the diagonal reaches the curve at r*(1-1/sqrt(2)).
+    // Keep all four near-corner probes 2px further inside, plus the center.
+    const inset = Math.max(3, radius * (1 - Math.SQRT1_2) + 2);
+    const points = [[rect.left + inset, rect.top + inset], [rect.right - inset, rect.top + inset],
+      [rect.left + inset, rect.bottom - inset], [rect.right - inset, rect.bottom - inset],
       [rect.left + rect.width / 2, rect.top + rect.height / 2]];
     return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height,
       width: rect.width, viewportWidth: innerWidth, viewportHeight: innerHeight,
-      hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+      dir: document.documentElement.getAttribute("dir"), noHorizontalOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
+      radii, radius, inset, supportedShape, transforms, clipPath: style.clipPath,
+      original: originalPoints.map(inspect), painted: points.map(inspect) };
   });
+  // Preserve the actual failure state before any fatal geometry assertion.
+  // Exactly two synthetic viewport images and two JSON records are allowed.
+  const artifact = `.settings-ui-artifacts/patient-ortho-parent-read-safety-${width}`;
+  await writeFile(`${artifact}-bounds.json`, `${JSON.stringify(geometry, null, 2)}\n`);
+  await page.screenshot({ path: `${artifact}.png` });
+  expect(geometry.dir).toBe("rtl"); expect(geometry.noHorizontalOverflow).toBe(true);
   expect(geometry.width).toBeGreaterThan(100); expect(geometry.height).toBeGreaterThanOrEqual(44);
   expect(geometry.left).toBeGreaterThanOrEqual(0); expect(geometry.top).toBeGreaterThanOrEqual(0);
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth); expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
-  expect(geometry.hits).toEqual([true, true, true, true, true]);
-  // Exactly two review images across this gate; no broad artifact glob needed.
-  await page.screenshot({ path: `.settings-ui-artifacts/patient-ortho-parent-read-safety-${width}.png` });
+  expect(geometry.supportedShape).toBe(true);
+  expect(geometry.painted.map((point) => point.insidePaintedShape)).toEqual([true, true, true, true, true]);
+  expect(geometry.painted.map((point) => point.hit)).toEqual([true, true, true, true, true]);
+  // Original probes remain fatal whenever they are inside the painted control.
+  expect(geometry.original.every((point) => !point.insidePaintedShape || point.hit)).toBe(true);
 }
 
 describe("PatientOrtho parent-read safety on the real built RTL patient page", () => {

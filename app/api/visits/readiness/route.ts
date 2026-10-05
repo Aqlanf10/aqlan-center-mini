@@ -90,6 +90,8 @@ export async function GET(request: Request) {
         checklist: checklist?.items ?? null,
         attention: checklist?.attention ?? null,
         alerts: checklist?.alerts ?? null,
+        historyAlerts: checklist?.historyAlerts ?? null,
+        editableAlert: open ? row.medicalAlert : null,
         balances,
         ...(patientId !== null ? { stepper: stepperFor(row, balances) } : {}),
       };

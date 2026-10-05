@@ -447,6 +447,19 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exactly two synthetic saved-alert scenes; no clinical logs or browser state.
+      - name: Upload patient alert freshness screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-alert-freshness-ui
+          path: |
+            .settings-ui-artifacts/patient-alert-freshness-1280.png
+            .settings-ui-artifacts/patient-alert-freshness-390.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Synthetic case diagnosis reference only; no real patient data, traces,
       # HAR, authentication state, browser storage, or whole-directory uploads.
       - name: Upload case diagnosis reference screenshots
@@ -730,6 +743,8 @@ jobs:
           path: |
             .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
             .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json
+            .settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

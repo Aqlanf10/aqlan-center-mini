@@ -105,7 +105,7 @@ describe("CHAIR-1 — readiness permissions and messages", () => {
 
     const other = await jsonOf(await authedGet("/api/visits/readiness", h.sessions.doctorB));
     const hidden = (other.items as { visitId: number; checklist: unknown; balances: unknown; alerts: unknown }[]).find((row) => row.visitId === visitId);
-    expect(hidden).toMatchObject({ checklist: null, alerts: null, balances: null });
+    expect(hidden).toMatchObject({ checklist: null, alerts: null, historyAlerts: null, editableAlert: null, balances: null });
 
     const denied = await authedGet(`/api/visits/readiness?patientId=${patientId}`, h.sessions.doctorB);
     expect(denied.status).toBe(403);

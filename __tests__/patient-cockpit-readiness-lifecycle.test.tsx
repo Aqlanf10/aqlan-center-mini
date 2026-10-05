@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientCockpit } from "../components/patient/PatientCockpit";
 import type { SessionInfo } from "../components/SessionProvider";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
+import { patientAlertScope } from "../lib/chair-readiness";
 
 // Actual cockpit, hook and canonical sendGatedMove handlers; only React's small
 // state/effect driver, session/settings and transport are synthetic. No browser,
@@ -102,6 +103,79 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { retire(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+describe("confirmed alert saves within the existing readiness owner", () => {
+  const old = "تنبيه قديم قابل للتعديل", history = "تحذير تاريخ طبي مستقل", saved = "تنبيه محفوظ جديد";
+  const split = (value: string | null) => visit({ alerts: [...(value ? [value] : []), history], historyAlerts: [history], editableAlert: value });
+  const confirm = (value: string | null) => {
+    props.confirmedAlert = { scope: patientAlertScope(props.patientId, hooks.session), revision: (props.confirmedAlert?.revision ?? 0) + 1, value };
+  };
+  it.each(["addition", "replacement", "removal"])("shows a confirmed %s before a delayed/failed refresh without parent GET success", async kind => {
+    props.fallbackAlert = kind === "addition" ? null : old;
+    ready = response({ visit: split(props.fallbackAlert) }); await mounted();
+    const pending = deferred<MockResponse>(); ready = pending.promise;
+    confirm(kind === "removal" ? null : saved);
+    let displayed = text(render()); expect(displayed).toContain(history); expect(displayed).not.toContain(old);
+    if (kind !== "removal") expect(displayed).toContain(saved);
+    await settle(); pending.resolve(response({}, 503)); await settle();
+    displayed = text(render()); expect(displayed).toContain(history); expect(displayed).not.toContain(old);
+    if (kind !== "removal") expect(displayed).toContain(saved);
+    expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+  });
+  it("retires a delayed pre-save GET body without reviving a removed warning", async () => {
+    props.fallbackAlert = old; ready = response({ visit: split(old) }); await mounted();
+    const body = deferred<unknown>(); ready = { ...response(null), json: () => body.promise };
+    fire("focus"); await settle(); confirm(null); ready = response({}, 503); render(); await settle();
+    body.resolve({ visit: split(old) }); await settle();
+    expect(text(render())).toContain(history); expect(text(render())).not.toContain(old); expect(writes()).toHaveLength(0);
+  });
+  it("accepts later authoritative remote replacement/removal after a locally confirmed save", async () => {
+    props.fallbackAlert = old; ready = response({ visit: split(old) }); await mounted();
+    confirm(saved); ready = response({}, 503); render(); await settle(); expect(text(render())).toContain(saved);
+    ready = response({ visit: split("تنبيه أحدث من موظف آخر") }); fire("focus"); await settle();
+    expect(text(render())).toContain("تنبيه أحدث من موظف آخر"); expect(text(render())).not.toContain(saved); expect(text(render())).not.toContain(old);
+    ready = response({ visit: split(null) }); fire("focus"); await settle();
+    expect(text(render())).toContain(history); expect(text(render())).not.toContain("تنبيه أحدث من موظف آخر"); expect(text(render())).not.toContain(saved);
+  });
+  it("keeps old-server combined warnings conservatively until a split response arrives", async () => {
+    props.fallbackAlert = old; ready = response({ visit: visit({ alerts: [old, history] }) }); await mounted();
+    confirm(saved); ready = response({}, 503); render(); await settle();
+    for (const label of [saved, old, history]) expect(text(render())).toContain(label);
+    ready = response({ visit: split(saved) }); fire("focus"); await settle();
+    expect(text(render())).not.toContain(old); expect(text(render())).toContain(saved); expect(text(render())).toContain(history);
+  });
+  it("preserves an independent history warning identical to the removed editable value", async () => {
+    props.fallbackAlert = history; ready = response({ visit: split(history) }); await mounted();
+    confirm(null); ready = response({}, 503); render(); await settle();
+    expect(text(render())).toContain(history);
+  });
+  it("does not use a confirmed save to bypass a denial or new principal's clinical grant", async () => {
+    props.fallbackAlert = old; ready = response({ visit: split(old) }); await mounted();
+    confirm(saved); ready = response({}, 403); render(); await settle();
+    expect(text(render())).not.toContain(saved); expect(text(render())).not.toContain(history);
+    hooks.session = { ...hooks.session!, username: "other-principal" }; render();
+    ready = response({ visit: split(null) }); await settle();
+    expect(text(render())).not.toContain(saved); expect(text(render())).not.toContain(old); expect(text(render())).toContain(history);
+  });
+  it("does not expose a confirmed alert before any successful readiness grant", async () => {
+    confirm(saved); ready = response({}, 503); await mounted();
+    expect(text(render())).not.toContain(saved); expect(writes()).toHaveLength(0);
+  });
+  it("revokes clinical warnings on a successful deliberately redacted visit, including confirmed text", async () => {
+    props.fallbackAlert = old; ready = response({ visit: split(old) }); await mounted();
+    confirm(saved); ready = response({ visit: visit({ checklist: null, attention: null, alerts: null, historyAlerts: null, editableAlert: null, balances: null }) });
+    render(); await settle();
+    for (const label of [old, saved, history]) expect(text(render())).not.toContain(label);
+    expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+    ready = response({}, 503); fire("focus"); await settle(); expect(text(render())).not.toContain(saved);
+    ready = response({ visit: split("تنبيه منح صلاحية جديد") }); fire("focus"); await settle();
+    expect(text(render())).toContain("تنبيه منح صلاحية جديد"); expect(text(render())).not.toContain(saved);
+  });
+  it.each([{ historyAlerts: [123] }, { editableAlert: {} }])("rejects malformed split sources %#", async sources => {
+    ready = response({ visit: visit(sources) }); await mounted();
+    expect(text(render())).toContain("غير متاحة"); expect(entry()).toBeUndefined(); expect(writes()).toHaveLength(0);
+  });
+});
 
 describe("cockpit only commands from known current readiness", () => {
   it("starts visibly unknown, with no entry/clear command and no write on mount", async () => {

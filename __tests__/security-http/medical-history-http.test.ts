@@ -53,10 +53,12 @@ describe("(PAT-2) /api/patients/[id]/medical-history and /vitals", () => {
       JSON.stringify({ pulse: 72, recordedAt: "2025-03-04", medicalAlert: "تنبيه سابق" }));
     expect(old.status).toBe(201);
     const oldVital = await old.json() as { id: number };
+    expect(oldVital).toMatchObject({ patientId, medicalAlert: "تنبيه سابق" });
     const { rows: [saved] } = await db.query<{ day: string; medical_alert: string }>(
       `SELECT to_char(v.recorded_at AT TIME ZONE 'Asia/Aden', 'YYYY-MM-DD') AS day, p.medical_alert
        FROM patient_vitals v JOIN patients p ON p.id = v.patient_id WHERE v.id = $1`, [oldVital.id]);
     expect(saved).toEqual({ day: "2025-03-04", medical_alert: "تنبيه سابق" });
+    expect((oldVital as { medicalAlert?: string }).medicalAlert).toBe(saved.medical_alert);
     const list = await (await authedGet(`/api/patients/${patientId}/vitals`, h.sessions.reception)).json() as { vitals: { id: number }[] };
     expect(list.vitals[0].id).not.toBe(oldVital.id);
     expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
