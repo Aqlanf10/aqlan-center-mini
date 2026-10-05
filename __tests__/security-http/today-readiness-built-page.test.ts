@@ -139,6 +139,11 @@ describe("Today readiness on the built RTL board", () => {
       if (url.pathname === "/api/lab") { await route.fulfill({ json: { late: 0 } }); return; }
       if (url.pathname === "/api/messages") { await route.fulfill({ json: { unread: 0, urgent: 0 } }); return; }
       if (url.pathname.startsWith("/api/")) { unexpected.push(method + " " + url.pathname); await route.abort(); return; }
+      // Existing ClinicLogo asset only; queries, other methods and off-origin
+      // requests still reach their rejection paths.
+      if (method === "GET" && url.pathname === "/logo.png" && url.search === "") {
+        await route.continue(); return;
+      }
       // Original built page, its same-origin assets, and harmless metadata only.
       if (url.pathname === "/" || url.pathname.startsWith("/_next/") ||
         ["/favicon.ico", "/icon.png", "/apple-icon.png", "/manifest.webmanifest", "/sw.js"].includes(url.pathname)) {

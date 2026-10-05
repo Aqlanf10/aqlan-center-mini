@@ -37,7 +37,13 @@ async function reload(page: Page) {
   const count = (await snapshot(page)).reads.length;
   await page.evaluate(() => window.__todayReadinessFixture.reload());
   await expect.poll(async () => (await snapshot(page)).reads.length).toBe(count + 1);
-  return latest(page);
+  const id = await latest(page);
+  // Request creation is synchronous; React's loading commit is not. Observe
+  // both before delivering a body so a preceding ready view cannot satisfy
+  // the completion check for this request.
+  await expect.poll(() => state(page)).toBe("loading");
+  expect((await snapshot(page)).reads.find(read => read.id === id)).toMatchObject({ id, aborted: false, jsonCalls: 0 });
+  return id;
 }
 async function respond(page: Page, id: number, patient = 91) {
   await page.evaluate(({ id, patient }) => window.__todayReadinessFixture.respond(id, patient), { id, patient });
@@ -181,6 +187,10 @@ describe("Today read lifetimes in real React development StrictMode", () => {
       const redacted = await reload(page);
       await page.evaluate(id => window.__todayReadinessFixture.respond(id, 91, { redacted: true }), redacted);
       await expect.poll(() => state(page)).toBe("ready");
+      // This text exists only in the committed redacted view. Waiting on ready
+      // alone previously observed the old ready view before its replacement.
+      await expect.poll(() => panel(page).innerText()).toBe("لم تُقَرّ الجاهزية");
+      expect((await snapshot(page)).reads.find(read => read.id === redacted)).toMatchObject({ id: redacted, aborted: false, jsonCalls: 1 });
       expect(await panel(page).innerText()).not.toContain("عليه"); expect(await panel(page).innerText()).not.toContain("تحذير المريض");
       const malformed = await reload(page);
       await page.evaluate(id => { window.__todayReadinessFixture.headers(id);
