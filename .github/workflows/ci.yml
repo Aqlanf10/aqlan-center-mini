@@ -902,3 +902,21 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Exact synthetic prescription cards and text bounds only. No traces, HAR,
+      # cookies, browser state, real records, or broad artifact directories.
+      - name: Upload orthodontic prescription truth evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-prescription-truth-ui
+          path: |
+            .settings-ui-artifacts/ortho-prescription-unrecorded-390.png
+            .settings-ui-artifacts/ortho-prescription-unrecorded-1280.png
+            .settings-ui-artifacts/ortho-prescription-closed-custom-390.png
+            .settings-ui-artifacts/ortho-prescription-closed-custom-1280.png
+            .settings-ui-artifacts/ortho-prescription-390-bounds.json
+            .settings-ui-artifacts/ortho-prescription-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

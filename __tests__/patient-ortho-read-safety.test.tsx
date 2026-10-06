@@ -238,6 +238,68 @@ afterEach(() => {
   finally { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); }
 });
 
+describe("PatientOrtho recorded bracket prescription truth", () => {
+  // Uses the actual parent/workspace and the existing semantic label, so these
+  // assertions also execute against the pre-fix render without new selectors.
+  function prescriptionValue() {
+    const cell = one((node) => node.type === "div" && Array.isArray(node.props.children)
+      && node.props.children.some((child: ReactNode) => child && typeof child === "object"
+        && "props" in child && child.type === "span" && text(child) === "فلسفة البراكيت"));
+    return elements(cell).filter((node) => node.type === "span").at(-1)!;
+  }
+  async function openPrescription(changes: Partial<Case>) {
+    const row = fixture(19, changes);
+    const before = structuredClone(row);
+    render(); const current = pair();
+    respond(current.ortho, { cases: [row] }); respond(current.patient, contact()); await flush();
+    click(one((node) => node.type === "button" && elements(node)
+      .some((child) => child.type === "span" && text(child) === "خطة العلاج والميكانيكا")));
+    return { row, before };
+  }
+
+  it.each([null, "", "   "])("labels absent prescription %j as unrecorded rather than inventing Roth/MBT", async (bracketSystem) => {
+    const { row, before } = await openPrescription({ bracketSystem });
+    expect(text(prescriptionValue())).toBe("غير مسجّلة");
+    expect(text(render())).not.toContain("Roth / MBT");
+    expect(row).toEqual(before);
+    expect(writes()).toEqual([]);
+    expect(reads()).toHaveLength(2);
+  });
+
+  it.each(["Roth", "MBT 022", "Roth / MBT", "وصفة خاصة مسجّلة", "  Custom / prescribed  "])(
+    "preserves the exact recorded prescription %j without substituting a default", async (bracketSystem) => {
+      const { row, before } = await openPrescription({ bracketSystem, planId: 73, note: "Canonical plan notes" });
+      expect(text(prescriptionValue())).toBe(bracketSystem);
+      expect(text(render())).toContain("Canonical plan notes");
+      expect(row).toEqual(before);
+      expect(writes()).toEqual([]);
+    },
+  );
+
+  it("does not carry a previous recorded prescription through a refresh with unrecorded data", async () => {
+    await openPrescription({ bracketSystem: "Prior recorded prescription", planId: 73 });
+    expect(text(prescriptionValue())).toBe("Prior recorded prescription");
+    const current = refresh();
+    expect(text(render())).not.toContain("Prior recorded prescription");
+    respond(current.ortho, { cases: [fixture(19, { bracketSystem: null, planId: 73 })] });
+    respond(current.patient, contact()); await flush();
+    expect(text(prescriptionValue())).toBe("غير مسجّلة");
+    expect(text(render())).not.toMatch(/Prior recorded prescription|Roth \/ MBT/);
+    expect(writes()).toEqual([]);
+  });
+
+  it("keeps closed and legacy case prescriptions unrecorded without altering their context", async () => {
+    const { row, before } = await openPrescription({ bracketSystem: null, status: "completed", phase: "retention",
+      baselineKind: "legacy", legacyFinancialMode: "installments", planId: 73,
+      remainingObjectives: "Recorded baseline objectives", note: "Original plan notes" });
+    expect(text(prescriptionValue())).toBe("غير مسجّلة");
+    expect(text(render())).toContain("Recorded baseline objectives");
+    expect(text(render())).toContain("Original plan notes");
+    expect(row).toEqual(before);
+    expect(writes()).toEqual([]);
+  });
+});
+
 describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNRUN)", () => {
   it.each([{ key: "ortho" as const, status: 401 }, { key: "patient" as const, status: 403 }])(
     "existing package callback withdraws accepted case/photo/saved references before $key $status (preimage counterfactual, UNRUN)", async ({ key, status }) => {
