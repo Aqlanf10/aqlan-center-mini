@@ -1,0 +1,58 @@
+name: Isolated dependency resolution proof
+
+on:
+  push:
+    branches: [codex/dependency-resolution-proof]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    if: github.repository == 'Aqlanf10/aqlan-center-mini' && github.ref == 'refs/heads/codex/dependency-resolution-proof'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out reviewed candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up supported Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Use npm bulk audit support
+        run: npm install -g npm@11 --ignore-scripts --no-fund
+      - name: Generate isolated lock and compatibility evidence
+        run: node scripts/dependency-review/generate-parser-repair-proof.mjs
+      - name: Preserve exact synthetic proof outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dependency-resolution-proof
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            .dependency-repair-proof/root-package-lock.json
+            .dependency-repair-proof/consumer-package-lock.json
+            .dependency-repair-proof/registry-postcss-selector-parser-7.1.6.json
+            .dependency-repair-proof/registry-source-map-js-1.2.2.json
+            .dependency-repair-proof/candidate-full-audit.json
+            .dependency-repair-proof/candidate-full-audit.stderr.txt
+            .dependency-repair-proof/candidate-production-audit.json
+            .dependency-repair-proof/candidate-production-audit.stderr.txt
+            .dependency-repair-proof/baseline-compatibility.json
+            .dependency-repair-proof/candidate-compatibility.json
+            .dependency-repair-proof/baseline-app.css
+            .dependency-repair-proof/candidate-app.css
+            .dependency-repair-proof/baseline-nested.css
+            .dependency-repair-proof/candidate-nested.css
+            .dependency-repair-proof/baseline-braces-consumer.json
+            .dependency-repair-proof/candidate-braces-consumer.json
+            .dependency-repair-proof/generation-proof.json
+            .dependency-repair-proof/commands.json
+            .dependency-repair-proof/failure.json

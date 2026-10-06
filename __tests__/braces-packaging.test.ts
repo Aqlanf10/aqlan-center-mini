@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { REVIEWED_OVERRIDES } from "../scripts/dependency-security/reviewed-overrides.mjs";
 
 const read = (name: string) => readFileSync(new URL("../" + name, import.meta.url));
 const manifest = JSON.parse(read("package.json").toString());
@@ -9,10 +10,11 @@ const artifact = "vendor/braces-3.0.3-local.tgz";
 const integrity = "sha512-" + createHash("sha512").update(read(artifact)).digest("base64");
 
 describe("development-only braces artifact packaging", () => {
-  it("pins the unchanged package identity as a local development dependency without overrides", () => {
+  it("pins the unchanged package identity as a local development dependency without overriding braces", () => {
     expect(manifest.dependencies).not.toHaveProperty("braces");
     expect(manifest.devDependencies.braces).toBe("file:" + artifact);
-    expect(manifest.overrides).toBeUndefined();
+    expect(manifest.overrides).toEqual(REVIEWED_OVERRIDES);
+    expect(JSON.parse(read("scripts/dependency-review/consumer-fixture/package.json").toString()).overrides).toEqual(REVIEWED_OVERRIDES);
     expect(lock.packages[""].devDependencies.braces).toBe(manifest.devDependencies.braces);
     const copies = Object.entries(lock.packages).filter(([name]) => name === "node_modules/braces" || name.endsWith("/node_modules/braces"));
     expect(copies.length).toBeGreaterThan(0);
