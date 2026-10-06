@@ -170,10 +170,10 @@ describe("built recall mutation refusal and explicit retry", () => {
         await waitForRequest(f.page, 2);
         expect(await requestDetails(f.page, 2)).toEqual({ method: "GET", path: "/api/recall", query: "?weeks=12", body: null });
         await finish(f.page, 1, { message: refusal }, 409);
-        await expect.poll(() => f.page.getByRole("alert").textContent()).toBe(refusal);
+        await expect.poll(() => f.page.locator('main p[role="alert"]').textContent()).toBe(refusal);
         await finish(f.page, 2, { ...feed, weeks: 12 });
         await expect.poll(() => button.isVisible()).toBe(true);
-        expect(await f.page.getByRole("alert").textContent()).toBe(refusal);
+        expect(await f.page.locator('main p[role="alert"]').textContent()).toBe(refusal);
         expect(await requestCount(f.page)).toBe(3);
         expect(await button.isEnabled()).toBe(true);
         expect(await f.page.getByText("✓ تم التواصل مع جميع المرضى ومتابعة كافة المواعيد بنجاح!", { exact: true }).count()).toBe(0);
@@ -181,7 +181,7 @@ describe("built recall mutation refusal and explicit retry", () => {
         if (command.name === "close_done") {
           const output = ".settings-ui-artifacts";
           await mkdir(output, { recursive: true });
-          const alertBounds = await paintedBounds(f.page.getByRole("alert"));
+          const alertBounds = await paintedBounds(f.page.locator('main p[role="alert"]'));
           await f.page.screenshot({ path: join(output, `recall-refusal-${width}.png`) });
           const retryBounds = await paintedBounds(button);
           await f.page.screenshot({ path: join(output, `recall-retry-${width}.png`) });
@@ -201,7 +201,7 @@ describe("built recall mutation refusal and explicit retry", () => {
         expect(await requestCount(f.page)).toBe(5);
         await finish(f.page, 4, emptyFeed);
         await expect.poll(() => f.page.getByText("✓ تم التواصل مع جميع المرضى ومتابعة كافة المواعيد بنجاح!", { exact: true }).isVisible()).toBe(true);
-        expect(await f.page.getByRole("alert").count()).toBe(0);
+        expect(await f.page.locator('main p[role="alert"]').count()).toBe(0);
         expect(await requestCount(f.page)).toBe(5);
         f.assertIsolated();
       } finally { await f.context.close(); }
