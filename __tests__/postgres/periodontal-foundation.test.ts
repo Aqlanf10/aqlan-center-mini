@@ -262,7 +262,10 @@ describe("inactive periodontal domain with real PostgreSQL and audit", () => {
   it("provides the existing deletion owner's count while database RESTRICT preserves history", async () => {
     const a = await patient(); await save(a); const before = await state(a);
     await transaction(async (client) => { expect(await periodontalHistoryCount(client, a)).toBe(1); });
-    await expect(pool().query("DELETE FROM patients WHERE id=$1", [a])).rejects.toMatchObject({ code: "23503" });
+    // PG18 reports RESTRICT as 23001; bind the refusal to the intended clinical-history FK.
+    await expect(pool().query("DELETE FROM patients WHERE id=$1", [a])).rejects.toMatchObject({
+      code: "23001", constraint: "periodontal_records_patient_id_fkey",
+    });
     expect(await state(a)).toEqual(before);
     // deletePatientCascade's new refusal hook is only in the separate activation proposal.
   });
