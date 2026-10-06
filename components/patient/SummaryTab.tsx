@@ -40,6 +40,8 @@ export interface WorkflowSummary {
     appointmentDate: string | null; appointmentTime: string | null; note: string | null;
   }[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
+  /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
+  assessmentCases?: { id: number; specialty: string; title: string }[];
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;

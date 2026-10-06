@@ -107,6 +107,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/inventory/patient-cost": { GET: CLINIC },
   "/api/inventory/value": { GET: ADMIN },
   "/api/invoices": { GET: ["admin", "reception", "cashier", "accountant"], POST: FRONT_DESK },
+  "/api/invoices/clinical-preview": { POST: FRONT_DESK },
   "/api/invoices/[id]": { GET: ["admin", "reception", "cashier", "accountant"], PATCH: FRONT_DESK },
   "/api/invoices/[id]/correct": { POST: ADMIN },
   "/api/lab": { GET: CLINIC, POST: CLINIC },

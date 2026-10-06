@@ -19950,6 +19950,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     }>;
   } | null;
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
+  /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
+  assessmentCases: { id: number; specialty: string; title: string }[];
 }> {
   await ensureSchema();
   const pool = getPool();
@@ -20227,6 +20229,10 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
+  const assessmentCases = (await listPatientCases(patientId))
+    .filter((one) => one.needsAssessment && one.id !== null)
+    .map((one) => ({ id: one.id as number, specialty: one.specialty, title: one.title }));
+
   return {
     patient,
     openVisit, lastVisit, nextAppointment,
@@ -20235,6 +20241,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     counts,
     financial: financialView,
     alerts,
+    assessmentCases,
   };
 }
 
@@ -20982,8 +20989,10 @@ export async function createOrthoCase(input: {
     const planProblem = await orthoPlanProblem(getPool(), input.planId, input.patientId);
     if (planProblem) return { ok: false, message: planProblem };
   }
+  const client = await getPool().connect();
   try {
-    const { rows } = await getPool().query<{ id: number }>(
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ id: number }>(
       `INSERT INTO ortho_cases
          (patient_id, appliance, arches, slot, bracket_system, start_date,
           planned_months, plan_id, note, created_by)
@@ -20996,13 +21005,33 @@ export async function createOrthoCase(input: {
         input.planId, input.note?.trim() || null, input.createdBy,
       ],
     );
+    /* (INV-LINK D) حالة التقويم الأولية التي فتحتها فاتورة («تحتاج تقييمًا سريريًّا») تُجسَر إلى الحالة الحقيقية
+       في المعاملة نفسها — فلا يبقى للمريض سياقان للتقويم، وبند الباقة المفوتر يموّل الشدّات. واحدةٌ فقط تُجسَر. */
+    const { rows: shells } = await client.query<{ id: number }>(
+      `SELECT id FROM clinical_cases
+        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL AND origin = 'invoice'
+          AND status IN ('active', 'waiting')
+        ORDER BY id FOR UPDATE`, [input.patientId]);
+    if (shells.length === 1) {
+      await client.query(
+        `UPDATE clinical_cases SET ortho_case_id = $2, title = 'تقويم الأسنان' WHERE id = $1`, [shells[0].id, rows[0].id]);
+      await insertAuditRow(client, {
+        action: "ortho.plan_link", entity: "patient", entityId: input.patientId, entityLabel: "تقويم الأسنان",
+        details: { الحالة_التخصصية: shells[0].id, حالة_التقويم: rows[0].id, المصدر: "تقييم حالة فتحتها فاتورة" },
+        actor: input.createdBy, actorRole: null,
+      });
+    }
+    await client.query("COMMIT");
     return { ok: true, id: rows[0].id };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     // الفهرس الفريد يمنع حالتين مفتوحتين — والرسالة تقول السبب لا رقم الخطأ.
     if ((error as { code?: string }).code === "23505") {
       return { ok: false, message: "للمريض حالة تقويم مفتوحة سلفًا. أغلقها قبل فتح حالة جديدة." };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -25552,6 +25581,10 @@ export interface SpecialtyCase {
   createdBy: string;
   /** (REF-2) ما تنتظره الحالة من إحالاتٍ داخلية مفتوحة («علاج الجذور 21 (إحالة #7 إلى د. محمد)»). */
   waitingOn?: string[];
+  /** (INV-LINK D) من أين جاءت الحالة: `invoice` (فاتورة علاجية) / `clinical` / null (قبل التتبّع). */
+  origin?: string | null;
+  /** فتحتها فاتورة ولم يبدأ علاجها بعد — تحتاج تقييم الطبيب. */
+  needsAssessment?: boolean;
 }
 
 export interface PatientProblem {
@@ -25597,6 +25630,7 @@ interface SpecialtyCaseRow {
   specialty: string; title: string; site: string | null; problem: string | null;
   responsible_party_id: number | null; responsible_name: string | null; status: string; started_on: string;
   completed_at: Date | null; outcome: string | null; items_total: number; items_done: number; created_by: string;
+  origin: string | null; needs_assessment: boolean;
 }
 
 const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
@@ -25606,6 +25640,7 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
   status: row.status as SpecialtyCaseStatus, startedOn: row.started_on,
   completedAt: row.completed_at ? row.completed_at.toISOString() : null, outcome: row.outcome,
   itemsTotal: row.items_total, itemsDone: row.items_done, createdBy: row.created_by,
+  origin: row.origin ?? null, needsAssessment: row.needs_assessment === true,
 });
 
 /*
@@ -25627,7 +25662,15 @@ const SPECIALTY_CASE_SELECT = `
          CASE WHEN o.id IS NULL THEN c.outcome ELSE o.closed_note END AS outcome,
          c.created_by, c.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
-         (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done
+         (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done,
+         c.origin,
+         -- (INV-LINK D) حالةٌ فتحتها فاتورة ولم يبدأ علاجها بعد: لا زيارة موقَّعة عليها، ولا جلسة منجزة لبنودها،
+         -- والتقويم لم يُجسَر بعد إلى حالة تقويمٍ حقيقية — «تحتاج تقييمًا سريريًّا».
+         (c.origin = 'invoice' AND c.status IN ('active', 'waiting')
+           AND (c.specialty <> 'orthodontics' OR c.ortho_case_id IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.case_id = c.id AND v.signed_at IS NOT NULL)
+           AND NOT EXISTS (SELECT 1 FROM treatment_sessions s JOIN plan_items si ON si.id = s.plan_item_id
+                            WHERE si.case_id = c.id AND s.status = 'done')) AS needs_assessment
     FROM clinical_cases c
     LEFT JOIN ortho_cases o ON o.id = c.ortho_case_id
     LEFT JOIN parties d ON d.id = CASE WHEN o.id IS NULL THEN c.responsible_party_id
@@ -25640,7 +25683,8 @@ const SPECIALTY_CASE_SELECT = `
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END,
          o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status <> 'cancelled')::int,
-         (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int
+         (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int,
+         NULL, FALSE
     FROM ortho_cases o
     LEFT JOIN treatment_plans t ON t.id = o.plan_id
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)

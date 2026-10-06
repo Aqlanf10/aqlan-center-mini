@@ -377,3 +377,120 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     client.release();
   }
 }
+
+// ─── المعاينة (قراءة فقط) ─────────────────────────────────────────────────────
+
+export interface LinePreview {
+  line: number;
+  kind: "financial" | "clinical";
+  specialty: LinkageSpecialty | null;
+  specialtyLabel: string | null;
+  /** بند الخطة: قائمٌ مطابق يُعاد، أو جديد. */
+  item: { mode: "existing" | "new"; id: number | null } | null;
+  /** الحالة: قائمة تُربط، أو أولية تُنشأ، أو جسرٌ لحالة تقويم قائمة، أو يلزم الاختيار، أو لا حاجة. */
+  case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null;
+    options: { id: number; title: string }[] } | null;
+  /** سبب رفضٍ متوقَّع (المعاينة تحذّر؛ الحفظ يرفض فعلًا). */
+  refusal: InvoiceLinkageRefusal | null;
+}
+
+/**
+ * ماذا ستفعل الفاتورة بالعلاج — قبل الحفظ. قراءةٌ بلا أقفال ولا كتابة، بالقواعد نفسها التي يطبّقها
+ * `createLinkedInvoice` (والحفظ يعيد الفحص تحت القفل؛ المعاينة ليست وعدًا).
+ */
+export async function previewInvoiceLinkage(input: {
+  patientId: number; baseCurrency: Currency;
+  items: { serviceId: number | null; category: string | null; quantity: number; unitPriceMinor: number;
+    toothCode: number | null; caseId: number | null; sessions?: number | null }[];
+}): Promise<LinePreview[]> {
+  await ensureSchema();
+  const pool = getPool();
+  const claimed: number[] = [];
+  const newCaseForGroup = new Set<string>();
+  const previews: LinePreview[] = [];
+  for (const [line, item] of input.items.entries()) {
+    const linkage = lineLinkage({ serviceId: item.serviceId, category: item.category });
+    if (linkage.kind !== "clinical") {
+      previews.push({ line, kind: "financial", specialty: null, specialtyLabel: null, item: null, case: null, refusal: null });
+      continue;
+    }
+    const preview: LinePreview = {
+      line, kind: "clinical", specialty: linkage.specialty, specialtyLabel: LINKAGE_SPECIALTY_LABEL[linkage.specialty],
+      item: { mode: "new", id: null }, case: linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
+      refusal: null,
+    };
+    if (item.toothCode !== null && !isValidTooth(item.toothCode)) { preview.refusal = "bad_tooth"; previews.push(preview); continue; }
+    const { rows: [billed] } = await pool.query(
+      `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id JOIN invoices v ON v.id = i.billed_invoice_id
+        WHERE t.patient_id = $1 AND i.service_id = $2 AND i.tooth_code IS NOT DISTINCT FROM $3::smallint
+          AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
+        LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
+    if (billed) { preview.refusal = "already_billed"; previews.push(preview); continue; }
+    const { rows: open } = await pool.query<{
+      id: number; quantity: number; unit_price_minor: string; case_id: number | null; session_count: number; surfaces: string | null;
+    }>(`${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`,
+      [input.patientId, input.baseCurrency, item.serviceId, item.toothCode, claimed]);
+    let linkedCase: number | null = null;
+    if (open.length > 0) {
+      // نفس قاعدة الحفظ: المبلغ، ثم شكل العمل (الكمية/الأسطح/الجلسات)، ثم التفرّد.
+      const quantity = Math.max(1, Math.round(item.quantity));
+      const totalMinor = quantity * Math.round(item.unitPriceMinor);
+      const sessions = item.sessions ?? null;
+      const sameTotal = open.filter((row) => row.quantity * Number(row.unit_price_minor) === totalMinor);
+      const exact = sameTotal.filter((row) => row.quantity === quantity && (row.surfaces ?? "").trim() === ""
+        && (sessions === null || row.session_count === sessions));
+      if (sameTotal.length === 0) preview.refusal = "amount_mismatch";
+      else if (exact.length === 0) preview.refusal = "shape_mismatch";
+      else if (exact.length > 1) preview.refusal = "ambiguous_item";
+      const match = exact.length === 1 ? exact[0] : null;
+      if (match) {
+        claimed.push(match.id);
+        preview.item = { mode: "existing", id: match.id };
+        linkedCase = match.case_id;
+        if (item.caseId !== null && match.case_id !== null && match.case_id !== item.caseId) preview.refusal = "case_mismatch";
+      } else {
+        preview.item = { mode: "existing", id: null };
+      }
+    }
+    if (linkage.needsCase) {
+      const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(
+        `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE} ORDER BY id`,
+        [input.patientId, linkage.specialty]);
+      // الحالة المختارة صراحةً تُقبل من أي حالة مفتوحة للتخصص (كالحفظ)؛ والتلقائية من الحالات الموافقة للسن فقط.
+      const all = sameSpecialty.map(({ id, title }) => ({ id, title }));
+      const open = sameSpecialty.filter((row) => caseSiteCompatible(linkage.specialty, row.site, item.toothCode))
+        .map(({ id, title }) => ({ id, title }));
+      const groupKey = caseGroupKey(linkage.specialty, item.toothCode);
+      if (item.caseId !== null) {
+        const chosen = all.find((one) => one.id === item.caseId);
+        preview.case = chosen ? { mode: "existing", id: chosen.id, title: chosen.title, options: open.length > 1 ? open : all }
+          : { mode: "choose", id: null, title: null, options: open.length > 0 ? open : all };
+        if (!chosen) preview.refusal = preview.refusal ?? "bad_case";
+      } else if (linkedCase !== null) {
+        const found = all.find((one) => one.id === linkedCase);
+        preview.case = { mode: "existing", id: linkedCase, title: found?.title ?? null, options: [] };
+      } else if (newCaseForGroup.has(groupKey)) {
+        preview.case = { mode: "new", id: null, title: shellCaseTitle(linkage.specialty, item.toothCode), options: [] };
+      } else if (open.length > 1) {
+        preview.case = { mode: "choose", id: null, title: null, options: open };
+        preview.refusal = preview.refusal ?? "ambiguous_case";
+      } else if (open.length === 1) {
+        preview.case = { mode: "existing", id: open[0].id, title: open[0].title, options: [] };
+      } else {
+        let bridge = false;
+        if (linkage.specialty === "orthodontics") {
+          const { rows: [ortho] } = await pool.query(
+            `SELECT 1 FROM ortho_cases o WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+                AND NOT EXISTS (SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id = o.id) LIMIT 1`, [input.patientId]);
+          bridge = Boolean(ortho);
+        }
+        newCaseForGroup.add(groupKey);
+        preview.case = bridge
+          ? { mode: "bridge", id: null, title: "تقويم الأسنان", options: [] }
+          : { mode: "new", id: null, title: shellCaseTitle(linkage.specialty, item.toothCode), options: [] };
+      }
+    }
+    previews.push(preview);
+  }
+  return previews;
+}

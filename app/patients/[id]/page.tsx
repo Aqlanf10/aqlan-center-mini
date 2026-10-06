@@ -26,7 +26,9 @@ import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
+import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
+import { AssessmentBanner } from "@/components/AssessmentBanner";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
@@ -276,6 +278,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           financial: data.financial ?? null,
           alerts: data.alerts ?? [],
           canSeeFinancial: data.canSeeFinancial ?? false,
+          assessmentCases: data.assessmentCases ?? [],
         });
         setSummaryOwner(alertOwner);
       }
@@ -345,6 +348,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         (visit) => visit.status === "planned" && !visit.appointmentDate,
       ) ? { id: 1 } : null,
       activePlan: summary.activePlans[0] ? { id: summary.activePlans[0].id } : null,
+      assessmentCase: summary.assessmentCases?.[0] ? { id: summary.assessmentCases[0].id } : null,
     });
   }, [summary, today]);
 
@@ -428,6 +432,20 @@ function PatientFileWorkspace({ id }: { id: string }) {
         return summary?.canSeeFinancial
           ? { label: "تحصيل دفعة", run: () => setShowCollect(true), primary: true }
           : null;
+      case "clinical_assessment": {
+        /* (INV-LINK D) علاجٌ مفوترٌ ينتظر تقييم الطبيب — يفتح مكانه في التخصص لا «إنشاء خطة». */
+        const pending = summary?.assessmentCases?.find((one) => one.id === step.targetId);
+        const specialty = pending?.specialty ?? "";
+        const label = specialty in SPECIALTY_LABEL ? SPECIALTY_LABEL[specialty as keyof typeof SPECIALTY_LABEL] : "";
+        return {
+          label: `بدء التقييم السريري${label ? ` — ${label}` : ""}`,
+          run: () => {
+            setTab("treatment");
+            setTreatmentSubTab(specialty === "orthodontics" ? "ortho" : specialty === "endodontics" ? "endo" : "cases");
+          },
+          primary: true,
+        };
+      }
       case "schedule_next_visit":
         return { label: "حجز الجلسة القادمة", run: () => setTab("summary"), primary: true };
       default:
@@ -1118,6 +1136,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {treatmentSubTab === "ortho" && (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
+              <AssessmentBanner patientId={patient.id} specialty="orthodontics"
+                hint="افتح حالة التقويم أدناه بعد التقييم — تُربط بهذه الحالة وبباقتها المفوترة تلقائيًا." />
               <PatientOrtho patientId={patient.id} />
             </section>
           )}
@@ -1130,6 +1150,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {treatmentSubTab === "endo" && (
             <section aria-label="علاج الجذور">
+              <AssessmentBanner patientId={patient.id} specialty="endodontics"
+                hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
               <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}

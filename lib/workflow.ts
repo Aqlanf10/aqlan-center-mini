@@ -454,6 +454,7 @@ export type NextStepKind =
   | "continue_visit"
   | "start_today_visit"
   | "collect_payment"
+  | "clinical_assessment"
   | "schedule_next_visit"
   | "follow_up"
   | "create_plan";
@@ -462,6 +463,7 @@ export const NEXT_STEP_LABEL: Record<NextStepKind, string> = {
   continue_visit: "استكمال زيارة اليوم",
   start_today_visit: "بدء زيارة اليوم",
   collect_payment: "تحصيل دفعة",
+  clinical_assessment: "بدء التقييم السريري",
   schedule_next_visit: "حجز الجلسة القادمة",
   follow_up: "متابعة المريض",
   create_plan: "إنشاء خطة علاج",
@@ -478,6 +480,8 @@ export interface NextStepInput {
   unscheduledPlannedVisit: { id: number } | null;
   /** خطة علاج جارية. */
   activePlan: { id: number } | null;
+  /** (INV-LINK D) حالةٌ فتحتها فاتورة علاجية ولم يُقيَّم المريض بعد. */
+  assessmentCase?: { id: number } | null;
 }
 
 export function nextStep(input: NextStepInput): { kind: NextStepKind; targetId: number | null } {
@@ -486,6 +490,8 @@ export function nextStep(input: NextStepInput): { kind: NextStepKind; targetId: 
   if (input.debtMinor !== null && input.debtMinor > 0) {
     return { kind: "collect_payment", targetId: null };
   }
+  /* (INV-LINK D) علاجٌ مقبولٌ ماليًّا لم يبدأ سريريًّا: الخطوة تقييم الطبيب — لا «إنشاء خطة» ولا متابعةٌ عامة. */
+  if (input.assessmentCase) return { kind: "clinical_assessment", targetId: input.assessmentCase.id };
   if (input.unscheduledPlannedVisit) {
     return { kind: "schedule_next_visit", targetId: input.unscheduledPlannedVisit.id };
   }

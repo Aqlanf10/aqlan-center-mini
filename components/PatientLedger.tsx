@@ -13,6 +13,8 @@ import { ReceiptCorrection } from "./ReceiptCorrection";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
+import { lineLinkage } from "@/lib/invoice-clinical-linkage";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -256,6 +258,7 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
 
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [services, setServices] = useState<Service[]>([]);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -427,6 +430,12 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
+      {linkNotice ? (
+        <p role="status" data-testid="invoice-clinical-notice" className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs font-bold text-sky-900">
+          {linkNotice}
+        </p>
+      ) : null}
+
       {mode === "invoice" ? (
         <InvoiceForm
           patientId={patientId} base={base} services={services} busy={busy}
@@ -434,8 +443,15 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
             const created = await send(() => fetch("/api/invoices", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ patientId, ...body }),
-            }));
-            if (created) setMode("none");
+            })) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] } } | null;
+            if (created) {
+              setMode("none");
+              /* (INV-LINK D) ما فعلته الفاتورة بالعلاج — يُقال صراحةً بعد الحفظ. */
+              const clinical = created.clinical?.links.filter((link) => link.kind === "clinical") ?? [];
+              setLinkNotice(clinical.length === 0 ? null
+                : `رُبطت الفاتورة بالعلاج: ${clinical.length} بند خطة${clinical.some((l) => l.planItemCreated) ? " (منها جديد)" : ""}`
+                  + `${clinical.some((l) => l.caseCreated) ? " — وفُتحت حالة أولية تحتاج تقييم الطبيب" : clinical.some((l) => l.caseId) ? " — مربوطة بحالتها القائمة" : ""}.`);
+            }
           }}
         />
       ) : null}
@@ -710,16 +726,26 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
   );
 }
 
-function InvoiceForm({ base, services, busy, onSubmit }: {
+interface LinePreview {
+  line: number; kind: "financial" | "clinical"; specialtyLabel: string | null;
+  item: { mode: "existing" | "new"; id: number | null } | null;
+  case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null; options: { id: number; title: string }[] } | null;
+  refusalMessage: string | null;
+}
+
+function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   patientId: number;
   base: Currency;
   services: Service[];
   busy: boolean;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
-  const [rows, setRows] = useState<{ serviceId: string; description: string; price: string; quantity: string; priceReason: string }[]>(
-    [{ serviceId: "", description: "", price: "", quantity: "1", priceReason: "" }],
+  const [rows, setRows] = useState<{ serviceId: string; description: string; price: string; quantity: string; priceReason: string; toothCode: string; caseId: string }[]>(
+    [{ serviceId: "", description: "", price: "", quantity: "1", priceReason: "", toothCode: "", caseId: "" }],
   );
+  /* (INV-LINK B) مفتاح الإعادة لهذا النموذج: نقرةٌ مزدوجة أو ردٌّ ضائع يعيد الفاتورة نفسها لا فاتورةً ثانية. */
+  const [idempotencyKey] = useState(() => newIdempotencyKey("inv"));
+  const [previews, setPreviews] = useState<LinePreview[]>([]);
   const [discount, setDiscount] = useState("");
   /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
   const [discountReason, setDiscountReason] = useState("");
@@ -738,8 +764,46 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
     return sum + unit * quantity;
   }, 0), [rows, services, base, currency]);
 
+  const previewAmount = (index: number) => {
+    const row = rows[index];
+    const service = services.find((item) => String(item.id) === row.serviceId);
+    const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
+    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
+    return unit * Math.max(1, Math.round(Number(row.quantity) || 1));
+  };
   const discountMinor = discount.trim() ? parseAmount(discount, currency) ?? 0 : 0;
   const net = Math.max(0, total - discountMinor);
+
+  /* (INV-LINK D) معاينة ما ستفعله الفاتورة بالعلاج: بند خطة قائم/جديد، حالة قائمة/أولية — قبل الحفظ. */
+  const isClinical = (serviceId: string) => {
+    const service = services.find((item) => String(item.id) === serviceId);
+    return service ? lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical" : false;
+  };
+  const previewKey = JSON.stringify([currency, rows.map((row) => [row.serviceId, row.price, row.quantity, row.toothCode, row.caseId])]);
+  useEffect(() => {
+    const payloadRows = JSON.parse(previewKey)[1] as string[][];
+    const clinicalRow = (serviceId: string) => {
+      const service = services.find((item) => String(item.id) === serviceId);
+      return service ? lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical" : false;
+    };
+    if (!payloadRows.some((row) => clinicalRow(row[0]))) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch("/api/invoices/clinical-preview", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({
+          patientId, currency,
+          items: payloadRows.map(([serviceId, price, quantity, toothCode, caseId]) => ({
+            serviceId: serviceId ? Number(serviceId) : null, price, quantity, toothCode, caseId,
+          })),
+        }),
+      }).then(async (response) => {
+        const payload = await response.json().catch(() => null) as { lines?: LinePreview[] } | null;
+        setPreviews(response.ok && payload?.lines ? payload.lines : []);
+      }).catch(() => undefined);
+    }, 350);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [previewKey, patientId, currency, services]);
 
   return (
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
@@ -832,6 +896,22 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
                 className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
               />
             </div>
+            {isClinical(row.serviceId) ? (
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-bold text-slate-500">السن:</label>
+                <input
+                  value={row.toothCode}
+                  onChange={(event) => setRows((current) => current.map((item, i) =>
+                    i === index ? { ...item, toothCode: event.target.value } : item))}
+                  placeholder="FDI"
+                  aria-label="السن"
+                  inputMode="numeric"
+                  dir="ltr"
+                  data-testid={`invoice-tooth-${index}`}
+                  className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
+                />
+              </div>
+            ) : null}
             {rows.length > 1 ? (
               <button
                 type="button"
@@ -843,11 +923,38 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
               </button>
             ) : null}
           </div>
+          {(() => {
+            const preview = previews.find((one) => one.line === index);
+            if (!preview || preview.kind !== "clinical" || !isClinical(row.serviceId)) return null;
+            const caseText = !preview.case ? null
+              : preview.case.mode === "existing" ? `سيتم الربط بالحالة الموجودة: ${preview.case.title ?? `#${preview.case.id}`}`
+              : preview.case.mode === "new" ? "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب"
+              : preview.case.mode === "bridge" ? "سيتم الربط بحالة التقويم القائمة"
+              : preview.case.mode === "choose" ? "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة"
+              : null;
+            return (
+              <div data-testid={`invoice-clinical-preview-${index}`}
+                className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${preview.refusalMessage ? "border-rose-200 bg-rose-50 text-rose-800" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
+                <p>هذه الفاتورة ستنشئ/تربط علاجًا سريريًّا للمريض — {preview.specialtyLabel}: {preview.item?.mode === "existing" ? (preview.item.id !== null ? `بند الخطة القائم #${preview.item.id}` : "بند خطة قائم لا يطابق هذا السطر") : "بند خطة جديد"}
+                  {` · ${formatMoney(previewAmount(index), currency)}`}</p>
+                {caseText ? <p>{caseText}</p> : null}
+                {preview.case?.mode === "choose" || (preview.case?.options.length ?? 0) > 1 ? (
+                  <select value={row.caseId} aria-label="الحالة"
+                    onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, caseId: event.target.value } : item))}
+                    className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                    <option value="">— اختر الحالة —</option>
+                    {preview.case?.options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+                  </select>
+                ) : null}
+                {preview.refusalMessage ? <p>{preview.refusalMessage}</p> : null}
+              </div>
+            );
+          })()}
         </div>
       ))}
 
       <button type="button"
-        onClick={() => setRows((current) => [...current, { serviceId: "", description: "", price: "", quantity: "1", priceReason: "" }])}
+        onClick={() => setRows((current) => [...current, { serviceId: "", description: "", price: "", quantity: "1", priceReason: "", toothCode: "", caseId: "" }])}
         className="mb-3 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
         + بند آخر
       </button>
@@ -888,7 +995,10 @@ function InvoiceForm({ base, services, busy, onSubmit }: {
               price: row.price,
               priceReason: row.priceReason,
               quantity: Number(row.quantity) || 1,
+              toothCode: isClinical(row.serviceId) && row.toothCode.trim() ? Number(row.toothCode) : undefined,
+              caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
             })),
+          idempotencyKey,
         })}
         disabled={busy || !rows.some((row) => row.serviceId || row.description.trim())}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"

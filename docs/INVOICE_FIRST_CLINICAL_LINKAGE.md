@@ -137,6 +137,23 @@ pre-billed item would invoice it again), so they are not separable safely. Imple
 service+tooth already pre-billed by a live invoice and not started ⇒ `already_billed` (two tabs with different keys).
 Audit-detail keys avoid the sanitizer's secret pattern (`سر`).
 
+**PR D (UI) as delivered:**
+
+- `POST /api/invoices/clinical-preview` (front desk, read-only, audit-exempt) runs `previewInvoiceLinkage`. It uses
+  the same rules as the save, without writing: existing/new plan item, existing/new/bridge/choose/none case, and
+  the refusal the save would return.
+- Invoice form (`PatientLedger`):
+  - tooth field per row;
+  - debounced preview per clinical line, with a case picker when the specialty has more than one open case;
+  - an idempotency key per form, so a double click or retry gives one invoice.
+- `listPatientCases` exposes `origin` and `needsAssessment`. An invoice-origin case needs assessment while it is
+  open, is not bridged to an ortho case, has no signed visit, and has no completed session.
+- `patientWorkflow.assessmentCases` feeds the next step `clinical_assessment` («بدء التقييم السريري — <تخصص>»).
+  It comes after debt and before scheduling, and opens the specialty tab, which shows an `AssessmentBanner`.
+- `createOrthoCase` bridges the single open invoice-origin orthodontics shell to the new ortho case (audited
+  `ortho.plan_link`). The doctor's clinical record then picks up the pre-billed item, so the ortho case is funded
+  without a second invoice. Ortho clinical details are still entered only by the doctor.
+
 ## 10. Original split
 
 A (this doc) · B migration 0041 + pure classification + transactional linkage + idempotency + cancel/correct
