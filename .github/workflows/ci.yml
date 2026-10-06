@@ -938,6 +938,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Only synthetic recall refusal/retry panels and their native bounds.
+      - name: Upload recall mutation refusal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recall-mutation-refusal-ui
+          path: |
+            .settings-ui-artifacts/recall-refusal-390.png
+            .settings-ui-artifacts/recall-refusal-1280.png
+            .settings-ui-artifacts/recall-retry-390.png
+            .settings-ui-artifacts/recall-retry-1280.png
+            .settings-ui-artifacts/recall-refusal-390-bounds.json
+            .settings-ui-artifacts/recall-refusal-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
       # Only synthetic patient lab refusal/retry viewports and measured bounds.
       # No cookies, storage, HAR, traces, real patients or broad directories.
       - name: Upload patient lab status refusal evidence

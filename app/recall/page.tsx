@@ -50,6 +50,7 @@ export default function RecallPage() {
   const [weeks, setWeeks] = useState<LapseWeeks>(6);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
@@ -88,6 +89,7 @@ export default function RecallPage() {
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
+      setMutationError(null);
       try {
         const response = await fetch(`/api/appointments/${id}`, {
           method: "PATCH",
@@ -95,11 +97,14 @@ export default function RecallPage() {
           body: JSON.stringify({ action: outcome }),
         });
         const payload = await response.json().catch(() => null);
-        if (!response.ok) setError(payload?.message ?? "تعذّر إغلاق الموعد.");
-        else setError(null);
+        if (!response.ok) {
+          setMutationError(payload?.message ?? "تعذّر إغلاق الموعد.");
+          return;
+        }
+        setMutationError(null);
         await load(weeks, false);
       } catch {
-        setError("تعذّر الاتصال بالخادم.");
+        setMutationError("تعذّر الاتصال بالخادم.");
       } finally {
         inFlight.current = false;
         setBusy(false);
@@ -113,6 +118,7 @@ export default function RecallPage() {
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
+      setMutationError(null);
       try {
         const response = await fetch("/api/recall", {
           method: "POST",
@@ -120,11 +126,14 @@ export default function RecallPage() {
           body: JSON.stringify({ kind: row.kind, id: row.id }),
         });
         const payload = await response.json().catch(() => null);
-        if (!response.ok) setError(payload?.message ?? "تعذّر التسجيل.");
-        else setError(null);
+        if (!response.ok) {
+          setMutationError(payload?.message ?? "تعذّر التسجيل.");
+          return;
+        }
+        setMutationError(null);
         await load(weeks);
       } catch {
-        setError("تعذّر الاتصال بالخادم.");
+        setMutationError("تعذّر الاتصال بالخادم.");
       } finally {
         inFlight.current = false;
         setBusy(false);
@@ -154,6 +163,7 @@ export default function RecallPage() {
   const filteredLapsed = useMemo(() => filterRows(feed.lapsed), [feed.lapsed, search]);
 
   const total = feed.openPast.length + feed.missed.length + feed.lapsed.length;
+  const displayedError = mutationError ?? error;
 
   return (
     <main className="mx-auto max-w-4xl p-4 pb-24">
@@ -162,9 +172,9 @@ export default function RecallPage() {
         subtitle="استعادة المرضى المتغيبين والمنقطعين مع التواصل المباشر وإعادة الجدولة الفورية"
       />
 
-      {error ? (
+      {displayedError ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
-          {error}
+          {displayedError}
         </p>
       ) : null}
 
