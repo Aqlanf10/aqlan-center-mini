@@ -1,0 +1,121 @@
+name: Isolated official sharp repair proof
+
+on:
+  push:
+    branches: [codex/sharp-resolution-proof]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    if: github.repository == 'Aqlanf10/aqlan-center-mini' && github.ref == 'refs/heads/codex/sharp-resolution-proof'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out reviewed proof source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up supported Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Use current npm bulk audit support
+        run: npm install -g npm@11 --ignore-scripts --no-fund
+      - name: Generate official lock and fresh installed audit proof
+        run: node scripts/dependency-review/generate-sharp-repair-proof.mjs
+      - name: Build actual unchanged Alpine runner with generated lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=ea312ad872897b07ad2241c09084837dee355dae
+          context="$(mktemp -d /tmp/aqlan-sharp-build.XXXXXX)"
+          archive="$(mktemp /tmp/aqlan-sharp-base.XXXXXX.tar)"
+          # Only these two freshly created, disposable proof paths are cleaned.
+          trap 'rm -rf -- "$context"; rm -f -- "$archive"' EXIT
+          git archive --format=tar "$base" --output="$archive"
+          tar -xf "$archive" -C "$context"
+          cp .sharp-repair-proof/root-package-lock.json "$context/package-lock.json"
+          # No build secrets/credentials/Production URLs are supplied.
+          # The repository Dockerfile performs both builds and its unchanged
+          # braces runtime-absence verifier before producing the actual runner.
+          docker build --progress=plain --tag aqlan-sharp-proof:local "$context" 2>&1 | tee .sharp-repair-proof/alpine-build.log
+          docker image inspect --format '{{.Id}} {{json .RepoDigests}}' aqlan-sharp-proof:local > .sharp-repair-proof/alpine-image-identity.txt
+          docker pull node:22-bookworm-slim
+          docker image inspect --format '{{.Id}} {{json .RepoDigests}}' node:22-bookworm-slim > .sharp-repair-proof/glibc-image-identity.txt
+      - name: Verify bounded images in network-disabled glibc and actual Alpine runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$PWD/.sharp-repair-proof"
+          worker="$PWD/scripts/dependency-review/sharp-runtime-worker.mjs"
+          candidate="$(cat "$proof/candidate-directory.txt")"
+          glibc=""
+          alpine=""
+          cleanup_proof_containers() {
+            for id in "$glibc" "$alpine"; do
+              if [[ "$id" =~ ^[0-9a-f]{64}$ ]]; then
+                docker rm --force "$id" >/dev/null 2>&1 || true
+              fi
+            done
+          }
+          trap cleanup_proof_containers EXIT
+          glibc="$(docker create --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=128 --memory=1g --cpus=2 \
+            --tmpfs /tmp:size=67108864,nosuid,noexec \
+            --mount "type=bind,source=$candidate,target=/app,readonly" \
+            --mount "type=bind,source=$worker,target=/proof/worker.mjs,readonly" \
+            --mount "type=bind,source=$proof/root-package-lock.json,target=/proof/package-lock.json,readonly" \
+            --mount "type=bind,source=$proof/official-package-files.json,target=/proof/official-package-files.json,readonly" \
+            --entrypoint node node:22-bookworm-slim /proof/worker.mjs /app /proof/package-lock.json /proof/official-package-files.json glibc)"
+          docker inspect --format '{"network":{{json .HostConfig.NetworkMode}},"readonly":{{json .HostConfig.ReadonlyRootfs}},"image":{{json .Image}}}' "$glibc" > "$proof/glibc-container-isolation.json"
+          timeout --signal=TERM --kill-after=10s 90s docker start -a "$glibc" > "$proof/glibc-runtime.json"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$glibc")" = 0
+          alpine="$(docker create --network=none --read-only --user=1001:1001 --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=128 --memory=1g --cpus=2 \
+            --tmpfs /tmp:size=67108864,nosuid,noexec \
+            --mount "type=bind,source=$worker,target=/proof/worker.mjs,readonly" \
+            --mount "type=bind,source=$proof/root-package-lock.json,target=/proof/package-lock.json,readonly" \
+            --mount "type=bind,source=$proof/official-package-files.json,target=/proof/official-package-files.json,readonly" \
+            --entrypoint node aqlan-sharp-proof:local /proof/worker.mjs /app /proof/package-lock.json /proof/official-package-files.json alpine-musl)"
+          docker inspect --format '{"network":{{json .HostConfig.NetworkMode}},"readonly":{{json .HostConfig.ReadonlyRootfs}},"image":{{json .Image}},"user":{{json .Config.User}}}' "$alpine" > "$proof/alpine-container-isolation.json"
+          timeout --signal=TERM --kill-after=10s 90s docker start -a "$alpine" > "$proof/alpine-runtime.json"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$alpine")" = 0
+          node --input-type=module -e 'import assert from "node:assert/strict"; import {readFileSync,writeFileSync} from "node:fs"; const p=".sharp-repair-proof/"; const read=n=>JSON.parse(readFileSync(p+n)); for (const k of ["glibc","alpine"]) { const i=read(k+"-container-isolation.json"),r=read(k+"-runtime.json"); assert.equal(i.network,"none"); assert.equal(i.readonly,true); assert.equal(r.status,"bounded image and native provenance proof passed"); } assert.equal(read("alpine-container-isolation.json").user,"1001:1001"); writeFileSync(p+"proof-completion.json",JSON.stringify({status:"isolated official repair proof passed; full exact release CI and review still mandatory",generation:read("generation-proof.json"),glibc:read("glibc-container-isolation.json"),alpine:read("alpine-container-isolation.json")},null,2)+"\n");'
+      - name: Preserve only exact synthetic dependency proof outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sharp-resolution-proof
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            .sharp-repair-proof/root-package-lock.json
+            .sharp-repair-proof/official-packages.json
+            .sharp-repair-proof/official-package-files.json
+            .sharp-repair-proof/lock-delta.json
+            .sharp-repair-proof/installed-package-bytes.json
+            .sharp-repair-proof/candidate-full-audit.json
+            .sharp-repair-proof/candidate-full-audit.stderr.txt
+            .sharp-repair-proof/candidate-full-audit.process.json
+            .sharp-repair-proof/candidate-production-audit.json
+            .sharp-repair-proof/candidate-production-audit.stderr.txt
+            .sharp-repair-proof/candidate-production-audit.process.json
+            .sharp-repair-proof/exception-proof.json
+            .sharp-repair-proof/consumer-chains.json
+            .sharp-repair-proof/generation-proof.json
+            .sharp-repair-proof/alpine-build.log
+            .sharp-repair-proof/alpine-image-identity.txt
+            .sharp-repair-proof/glibc-image-identity.txt
+            .sharp-repair-proof/alpine-container-isolation.json
+            .sharp-repair-proof/glibc-container-isolation.json
+            .sharp-repair-proof/alpine-runtime.json
+            .sharp-repair-proof/glibc-runtime.json
+            .sharp-repair-proof/proof-completion.json
+            .sharp-repair-proof/commands.json
+            .sharp-repair-proof/failure.json
