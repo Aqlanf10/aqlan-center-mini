@@ -16,12 +16,19 @@ const unbooked: FollowupCase = {
   caseId: 91401, patientId: 91101, patientName: "مريض متابعة اصطناعي بلا حجز", patientPhone: "770111001",
   status: "retention", phase: "retention", startDate: "2025-01-01", lastAdjustmentDate: "2026-07-01",
   nextWeeks: 4, upperWire: null, lowerWire: null, nextAppointment: null, lastWasNoShow: false,
+  bookingContext: { verified: true, pastUnresolvedAppointment: null,
+    reviewAppointments: [{ id: 91602, date: "2026-10-07", time: "11:20", status: "booked", serviceName: "بدء علاج تقويم", doctorName: "طبيب الموعد غير المصنف" }],
+    otherAppointments: [{ id: 91601, date: "2026-10-06", time: "09:45", status: "booked", serviceName: "استشارة علاج جذور", doctorName: "طبيب العصب المسند" }],
+  },
 };
 const booked: FollowupCase = {
   ...unbooked, caseId: 91402, patientId: 91102, patientName: "مريض متابعة اصطناعي بموعد محجوز", patientPhone: "770111002",
   nextAppointment: { id: 91501, date: "2026-10-08", time: "10:30", status: "booked" },
+  bookingContext: { verified: true, pastUnresolvedAppointment: null, reviewAppointments: [], otherAppointments: [] },
 };
-const rows = classifyFollowups({ cases: [unbooked, booked], today: TODAY });
+const unknownContext: FollowupCase = { ...unbooked, caseId: 91403, patientId: 91103,
+  patientName: "مريض اصطناعي بحاجة تحقق من سياق الحجز", patientPhone: null, bookingContext: undefined };
+const rows = classifyFollowups({ cases: [unbooked, booked, unknownContext], today: TODAY });
 const groups = groupByBucket(rows);
 const feed = { today: TODAY, buckets: BUCKET_ORDER.map((bucket) => ({
   bucket, count: groups.get(bucket)?.length ?? 0, rows: groups.get(bucket) ?? [],
@@ -143,7 +150,11 @@ async function geometry(link: Locator) {
 async function capture(page: Page, invitation: Locator, reminder: Locator, width: number,
   messages: { unbooked: Awaited<ReturnType<typeof messageFrom>>; booked: Awaited<ReturnType<typeof messageFrom>> }) {
   await page.evaluate(async () => { await document.fonts.ready; });
+  const dayLinks = await page.locator('a[href^="/appointments?date="]').all();
+  expect(dayLinks.length).toBeGreaterThanOrEqual(3);
+  const unknownReview = page.getByRole("link", { name: "افتح ملف المريض للمراجعة", exact: true });
   const controls = [await geometry(invitation), await geometry(reminder)];
+  for (const link of [...dayLinks, unknownReview]) controls.push(await geometry(link));
   const artifact = `.settings-ui-artifacts/ortho-unbooked-followup-${width}`;
   // Save actual failure geometry and the real built page before fatal assertions.
   // Only two PNGs and their two synthetic evidence records are allowlisted.
@@ -184,6 +195,19 @@ describe("truthful unbooked follow-up on the real built orthodontic board", () =
         note: null, status: "booked" }, "upcoming"));
       expect(reminder.text).toContain("الخميس 08/10 الساعة 10:30 صباحًا");
       expect(reminder.text).not.toContain(friendlyDate(due));
+      const unbookedRow = f.page.locator("li").filter({ has: f.page.getByRole("link", { name: unbooked.patientName, exact: true }) });
+      const content = await unbookedRow.textContent();
+      expect(content).toContain("لا موعد متابعة تقويم مؤكد");
+      expect(content).toContain("استشارة علاج جذور");
+      expect(content).toContain("طبيب العصب المسند");
+      expect(content).toContain("بدء علاج تقويم");
+      expect(content).toContain("طبيب الموعد غير المصنف");
+      const actualDays = await unbookedRow.locator('a[href^="/appointments?date="]').evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+      expect(actualDays).toContain("/appointments?date=2026-10-06");
+      expect(actualDays).toContain("/appointments?date=2026-10-07");
+      for (const link of await unbookedRow.locator('a[href^="/appointments?date="]').all()) {
+        expect(await link.textContent()).toMatch(/يوم المواعيد/);
+      }
       await capture(f.page, f.invitation, f.reminder, width, { unbooked: invitation, booked: reminder });
       expect(f.context.pages()).toHaveLength(1);
       f.assertIsolated();

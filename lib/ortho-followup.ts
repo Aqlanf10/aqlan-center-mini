@@ -70,6 +70,19 @@ export interface NextAppointmentInfo {
   date: string;
   time: string;
   status: string;
+  /** Read-only booking context, not proof that the clinical work is complete. */
+  serviceName?: string | null;
+  doctorName?: string | null;
+  appointmentType?: string | null;
+  matchBasis?: "designated_service" | "legacy_type" | null;
+  reason?: string;
+}
+
+export interface FollowupBookingContext {
+  verified: true;
+  pastUnresolvedAppointment: NextAppointmentInfo | null;
+  reviewAppointments: NextAppointmentInfo[];
+  otherAppointments: NextAppointmentInfo[];
 }
 
 export interface FollowupCase {
@@ -85,8 +98,10 @@ export interface FollowupCase {
   nextWeeks: number;
   upperWire: string | null;
   lowerWire: string | null;
-  /** أقرب موعدٍ محجوز (booked) لهذا المريض — ماضٍ أو مستقبل. */
+  /** الموعد القادم المحدد لمتابعة دورية؛ لا يُستنتج من أي موعد آخر للمريض. */
   nextAppointment: NextAppointmentInfo | null;
+  /** Absence means an older/unverified projection, not absence of bookings. */
+  bookingContext?: FollowupBookingContext;
   /** هل آخر موعدٍ له كان غيابًا no_show؟ */
   lastWasNoShow: boolean;
 }
@@ -115,7 +130,7 @@ export function classifyFollowups(input: {
     const daysSinceLast = daysBetween(since, input.today);
     const dueDate = nextAdjustmentDate(since, row.nextWeeks);
 
-    const appointment = row.nextAppointment;
+    const appointment = row.nextAppointment ?? row.bookingContext?.pastUnresolvedAppointment ?? null;
     if (appointment) {
       const offset = daysBetween(input.today, appointment.date);
       const stillBooked = appointment.status === "booked" || appointment.status === "arrived";

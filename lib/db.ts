@@ -21249,29 +21249,17 @@ export async function closeOrthoCase(input: {
  * يبقى تاريخًا يُقرأ، والخطّ الزمني يعرض القصة كلّها في صفحةٍ واحدة.
  */
 
-export interface OrthoFollowupRow {
-  caseId: number;
-  patientId: number;
-  patientName: string;
-  patientPhone: string | null;
-  status: "active" | "retention";
-  phase: string;
-  startDate: string;
-  lastAdjustmentDate: string | null;
-  nextWeeks: number;
-  upperWire: string | null;
-  lowerWire: string | null;
-  nextAppointment: { id: number; date: string; time: string; status: string } | null;
-  lastWasNoShow: boolean;
+import { projectFollowupBookings, type ProjectedFollowupBooking } from "./ortho-followup-board";
+import type { FollowupCase, FollowupBookingContext } from "./ortho-followup";
+
+export interface OrthoFollowupRow extends FollowupCase {
+  bookingContext: FollowupBookingContext;
 }
 
 /**
- * لوحة متابعة التقويم — صفٌّ لكل حالةٍ جارية بكل ما يلزم لتصنيفها.
- *
- * أقربُ موعدٍ يُختار بقاعدةٍ واحدة: المستقبل الأقرب أولًا فإن لم يوجد فأحدث ماضٍ
- * محجوز (تجاوزوه ولم يُنفَّذ). وقاعدةُ «لم يحضروا» تُقرأ من آخر موعدٍ غيابيّ
- * للمريض — فيرى الاستقبال الغياب حتى لو حُجز موعدٌ جديد بعده، لأن الحجز الجديد
- * لا يمحو الغياب ولا الدرس فيه.
+ * Read-only board: classify every open booking before selecting the next
+ * periodic follow-up. Other/uncertain bookings remain visible for review.
+ * Existing no-show history is intentionally independent of this selection.
  */
 export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
   await ensureSchema();
@@ -21279,36 +21267,48 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
     case_id: number; patient_id: number; full_name: string; phone: string | null;
     status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
-    appt_id: number | null; appt_date: string | null; appt_time: string | null;
-    appt_status: string | null; last_no_show: boolean;
+    clinical_case_id: number | null; bookings: ProjectedFollowupBooking[]; last_no_show: boolean;
   }>(
-    `WITH nearest AS (
-       SELECT ap.id, ap.patient_id, ap.scheduled_date::text AS date,
-              to_char(ap.scheduled_time, 'HH24:MI') AS time, ap.status,
-              ROW_NUMBER() OVER (
-                PARTITION BY ap.patient_id
-                ORDER BY (ap.scheduled_date < $1::date),
-                        CASE WHEN ap.scheduled_date >= $1::date THEN ap.scheduled_date END ASC,
-                        CASE WHEN ap.scheduled_date <  $1::date THEN ap.scheduled_date END DESC
-              ) AS rn
-         FROM appointments ap
-        WHERE ap.status IN ('booked', 'arrived')
-     ),
-     noshow AS (
+    `WITH noshow AS (
        SELECT patient_id, TRUE AS was
          FROM appointments a
         WHERE a.status = 'no_show'
           AND a.id = (SELECT a2.id FROM appointments a2
                        WHERE a2.patient_id = a.patient_id AND a2.status = 'no_show'
                        ORDER BY a2.scheduled_date DESC, a2.id DESC LIMIT 1)
+     ),
+     bookings AS (
+       SELECT ap.patient_id, jsonb_agg(jsonb_build_object(
+           'id', ap.id, 'patientId', ap.patient_id,
+           'scheduledDate', ap.scheduled_date::text,
+           'scheduledTime', to_char(ap.scheduled_time, 'HH24:MI'), 'status', ap.status,
+           'appointmentType', ap.appointment_type, 'serviceId', ap.service_id,
+           'service', CASE WHEN svc.id IS NULL THEN NULL ELSE jsonb_build_object(
+             'id', svc.id, 'code', svc.code, 'specialty', svc.specialty, 'legacyType', svc.legacy_type) END,
+           'serviceName', svc.name_ar, 'doctorName', doc.name,
+           'referralId', ap.referral_id,
+           'referral', CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object(
+             'id', r.id, 'patientId', r.patient_id, 'toSpecialty', r.to_specialty,
+             'caseId', r.case_id, 'casePatientId', rc.patient_id, 'orthoCaseId', linked_ortho.id) END,
+           'plannedVisitId', ap.planned_visit_id
+         ) ORDER BY ap.scheduled_date, ap.scheduled_time, ap.id) AS items
+           FROM appointments ap
+           LEFT JOIN appointment_services svc ON svc.id = ap.service_id
+           LEFT JOIN parties doc ON doc.id = ap.doctor_id
+           LEFT JOIN patient_referrals r ON r.id = ap.referral_id AND r.patient_id = ap.patient_id
+           LEFT JOIN clinical_cases rc ON rc.id = r.case_id AND rc.patient_id = ap.patient_id
+           LEFT JOIN ortho_cases linked_ortho ON linked_ortho.id = rc.ortho_case_id AND linked_ortho.patient_id = ap.patient_id
+          WHERE ap.status IN ('booked', 'arrived')
+          GROUP BY ap.patient_id
      )
      SELECT c.id AS case_id, c.patient_id, p.full_name, p.phone, c.status, c.phase,
             c.start_date, a.last_adjustment_date, a.next_weeks,
-            a.upper_wire, a.lower_wire,
-            n.id AS appt_id, n.date AS appt_date, n.time AS appt_time, n.status AS appt_status,
+            a.upper_wire, a.lower_wire, bridge.id AS clinical_case_id,
+            COALESCE(bookings.items, '[]'::jsonb) AS bookings,
             COALESCE(ns.was, FALSE) AS last_no_show
        FROM ortho_cases c
        JOIN patients p ON p.id = c.patient_id
+       LEFT JOIN clinical_cases bridge ON bridge.ortho_case_id = c.id AND bridge.patient_id = c.patient_id
        LEFT JOIN LATERAL (
          SELECT oa.done_on::text AS last_adjustment_date, oa.next_weeks,
                 oa.upper_wire, oa.lower_wire
@@ -21316,31 +21316,33 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
           WHERE oa.case_id = c.id
           ORDER BY oa.done_on DESC, oa.id DESC LIMIT 1
        ) a ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT id, date, time, status FROM nearest
-          WHERE nearest.patient_id = c.patient_id AND nearest.rn = 1
-       ) n ON TRUE
+       LEFT JOIN bookings ON bookings.patient_id = c.patient_id
        LEFT JOIN noshow ns ON ns.patient_id = c.patient_id
       WHERE c.status IN ('active', 'retention')`,
-    [today],
   );
-  return rows.map((row) => ({
-    caseId: row.case_id,
-    patientId: row.patient_id,
-    patientName: row.full_name,
-    patientPhone: row.phone,
-    status: row.status as "active" | "retention",
-    phase: row.phase,
-    startDate: dateText(row.start_date),
-    lastAdjustmentDate: row.last_adjustment_date,
-    nextWeeks: row.next_weeks ?? 4,
-    upperWire: row.upper_wire,
-    lowerWire: row.lower_wire,
-    nextAppointment: row.appt_id && row.appt_date && row.appt_time && row.appt_status
-      ? { id: row.appt_id, date: row.appt_date, time: row.appt_time, status: row.appt_status }
-      : null,
-    lastWasNoShow: row.last_no_show,
-  }));
+  return rows.map((row) => {
+    const startDate = dateText(row.start_date);
+    const bookingProjection = projectFollowupBookings({
+      target: { patientId: row.patient_id, orthoCaseId: row.case_id, clinicalCaseId: row.clinical_case_id, startDate },
+      today,
+      appointments: row.bookings,
+    });
+    return {
+      caseId: row.case_id,
+      patientId: row.patient_id,
+      patientName: row.full_name,
+      patientPhone: row.phone,
+      status: row.status as "active" | "retention",
+      phase: row.phase,
+      startDate,
+      lastAdjustmentDate: row.last_adjustment_date,
+      nextWeeks: row.next_weeks ?? 4,
+      upperWire: row.upper_wire,
+      lowerWire: row.lower_wire,
+      ...bookingProjection,
+      lastWasNoShow: row.last_no_show,
+    };
+  });
 }
 
 /** Read projection only: suppress inconsistent legacy links, never rewrite them. */
