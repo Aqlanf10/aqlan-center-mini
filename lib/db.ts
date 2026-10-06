@@ -18097,12 +18097,18 @@ export interface OpeningBalanceHistoryEntry {
 }
 
 /** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
-async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency) {
+async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency, addOnly = false) {
+  // Serialize even an absent currency row, before touching the opening table.
+  // Corrections must remain compatible with the patient FK KEY SHARE acquired by
+  // a payment that already holds the opening row. Reception keeps its add fence.
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR ${addOnly ? "UPDATE" : "NO KEY UPDATE"}`, [patientId]);
   const { rows } = await client.query<{ amount_minor: string; as_of_date: string }>(
     `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances
-      WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+      WHERE patient_id = $1 AND currency = $2${addOnly ? "" : " FOR UPDATE"}`,
     [patientId, currency],
   );
+  // Add-only never modifies an existing row, so it must not wait on its payment
+  // reader while holding the stronger patient fence; it only needs to refuse it.
   return rows[0] ? { amountMinor: toMinor(rows[0].amount_minor), asOfDate: rows[0].as_of_date } : null;
 }
 
@@ -18112,6 +18118,25 @@ async function lockedOpeningBalance(client: DbClient, patientId: number, currenc
  */
 export class OpeningBalanceExists extends Error {
   constructor() { super("للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير."); }
+}
+
+/** The route's checked financial predecessor, not a client-supplied version. */
+export type OpeningBalanceExpectation = Pick<OpeningBalance, "amountMinor" | "asOfDate">;
+
+export class OpeningBalanceChanged extends Error {
+  constructor() { super("تغيّر الرصيد الافتتاحي. أعد تحميله وراجع التعديل."); }
+}
+
+function assertOpeningBalanceExpectation(
+  actual: OpeningBalanceExpectation | null,
+  expected: OpeningBalanceExpectation | null | undefined,
+): void {
+  // Existing internal callers may omit the preflight. Explicit null means that
+  // the route checked absence; it must never become an implicit correction.
+  if (expected === undefined) return;
+  if (actual?.amountMinor !== expected?.amountMinor || actual?.asOfDate !== expected?.asOfDate) {
+    throw new OpeningBalanceChanged();
+  }
 }
 
 export async function setPatientOpeningBalance(input: {
@@ -18128,14 +18153,15 @@ export async function setPatientOpeningBalance(input: {
    * لحظتها من جهازٍ آخر) يُرفض بـ`OpeningBalanceExists` ولا يُستبدل.
    */
   addOnly?: boolean;
+  /** Recheck route reason/period/audit preconditions under the mutation lock. */
+  expectedBefore?: OpeningBalanceExpectation | null;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
-    // أمر الإضافة يتسلسل على صف المريض: إضافتان متزامنتان لا تمرّان كلتاهما.
-    if (input.addOnly) await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    const before = await lockedOpeningBalance(client, input.patientId, currency);
+    const before = await lockedOpeningBalance(client, input.patientId, currency, input.addOnly);
     if (before && input.addOnly) throw new OpeningBalanceExists();
+    assertOpeningBalanceExpectation(before, input.expectedBefore);
     const { rows } = await client.query<{ patient_id: number }>(
       `INSERT INTO patient_opening_balances
          (patient_id, amount_minor, as_of_date, note, created_by, currency)
@@ -18147,10 +18173,17 @@ export async function setPatientOpeningBalance(input: {
               note         = EXCLUDED.note,
               created_by   = EXCLUDED.created_by,
               updated_at   = NOW()
+        WHERE $7::boolean
        RETURNING patient_id`,
-      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency],
+      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency, before !== null],
     );
-    if (!rows[0]) return null;
+    if (!rows[0]) {
+      // A legacy import can insert without this writer's patient fence. Never
+      // turn a checked-absent row into an unreviewed ON CONFLICT correction.
+      const patient = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+      if (patient.rows[0]) throw input.addOnly ? new OpeningBalanceExists() : new OpeningBalanceChanged();
+      return null;
+    }
     await client.query(
       `INSERT INTO patient_opening_balance_history
          (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
@@ -18168,10 +18201,12 @@ export async function clearPatientOpeningBalance(
   actor = "system",
   reason: string | null = null,
   currency: Currency = CLINIC_BASE_CURRENCY,
+  expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
   return withTransaction(getPool(), async (client): Promise<boolean> => {
     const before = await lockedOpeningBalance(client, patientId, currency);
+    assertOpeningBalanceExpectation(before, expectedBefore);
     if (!before) return false;
     await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
     await client.query(
