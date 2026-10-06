@@ -149,7 +149,9 @@ describe("Dental chart real React identity boundaries", () => {
       const readCount = (await reads(f.page)).length;
       await f.page.evaluate((id) => window.__dentalChartFixture.respond(id, { id: 402 }, 201), next);
       await expect.poll(async () => (await reads(f.page)).length).toBe(readCount + 1);
-      await grant(f.page, "accepted-chart-saved"); expect(await panel(f.page).textContent()).toContain("accepted-chart-saved");
+      await grant(f.page, "accepted-chart-saved");
+      // The prior ready DOM can outlive the refresh request; wait for its new payload to commit.
+      await expect.poll(() => panel(f.page).textContent()).toContain("accepted-chart-saved");
       await f.isolated();
     } finally { await f.context.close(); }
   });

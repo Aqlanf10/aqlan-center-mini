@@ -15086,7 +15086,7 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
-import { insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -15190,7 +15190,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       withSerialId.push(table);
     }
 
-    const { rows } = await pool.query(`SELECT * FROM "${table}"`);
+    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
       if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
