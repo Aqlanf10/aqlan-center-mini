@@ -78,7 +78,7 @@ patterns.
 
 An isolated npm 11 scratch override first proved that a packed local tarball,
 still identified as `braces@3.0.3`, remains visible to the registry audit. The final
-packaging uses an explicit `devDependencies.braces` file spec, with no override:
+braces packaging uses an explicit `devDependencies.braces` file spec, with no braces override:
 `file:vendor/braces-3.0.3-local.tgz`. This avoids npm's relative override path
 ambiguity. Only that root dev-dependency edge and the braces lockfile URL/integrity
 change; all other package entries stay unchanged. **npm audit still submits the
@@ -164,7 +164,11 @@ are retained and must have matching registry discovery. Missing/malformed audit
 evidence fails this manual proof. A known advisory remains a release blocker;
 successful reproduction does not grant a disposition exception.
 
-The final package uses no override, forced upgrade or lifecycle patch script.
+The braces package uses no override, forced upgrade or lifecycle patch script.
+A later, separately reviewed official `postcss-selector-parser` resolution repair
+uses only exact version-scoped overrides for Tailwind 3.4.19 and postcss-nested
+6.2.0; it does not override braces or expand its advisory disposition. See
+[official parser dependency repair](DEPENDENCY_RESOLUTION_REPAIR.md).
 Existing consumer ranges accept the local artifact's unchanged 3.0.3 identity.
 The Docker dependency stage copies only the exact local tarball before `npm ci`;
 a runtime-absence verifier runs after both build commands. The runner stage stays

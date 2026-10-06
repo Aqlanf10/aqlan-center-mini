@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { inspectInstalledBraces } from "../scripts/dependency-security/installed-braces.mjs";
+import { REVIEWED_OVERRIDES } from "../scripts/dependency-security/reviewed-overrides.mjs";
 import { BRACES_EXCEPTION as PIN } from "../lib/braces-exception-pins.mjs";
 
 const repo = fileURLToPath(new URL("../", import.meta.url));
@@ -15,7 +16,7 @@ async function addPackage(name, pkg) { await json(`node_modules/${name}/package.
 beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), "braces-verifier-test-"));
   await cp(path.join(repo, "vendor"), path.join(root, "vendor"), { recursive: true });
-  const manifest = { name: "synthetic-verifier", version: "1.0.0", dependencies: { runtime: "1.0.0" }, devDependencies: { braces: "file:vendor/braces-3.0.3-local.tgz", consumer: "1.0.0" } };
+  const manifest = { overrides: structuredClone(REVIEWED_OVERRIDES), name: "synthetic-verifier", version: "1.0.0", dependencies: { runtime: "1.0.0" }, devDependencies: { braces: "file:vendor/braces-3.0.3-local.tgz", consumer: "1.0.0" } };
   const upstreamManifest = JSON.parse(await readFile(path.join(root, "vendor/braces/package.json"), "utf8"));
   await json("package.json", manifest);
   await json("package-lock.json", { name: manifest.name, version: manifest.version, lockfileVersion: 3, packages: {
