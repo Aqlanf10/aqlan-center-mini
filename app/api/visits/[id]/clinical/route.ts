@@ -1,3 +1,4 @@
+import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -217,20 +218,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     // حفظ التوثيق والإجراءات معًا: الطبيب يكتب ويختار في شاشة واحدة.
-    const saved = await saveClinicalNotes({
-      visitId,
+    const clinicalNotes = {
       chiefComplaint: text(source.chiefComplaint, 500),
       examination: text(source.examination),
       diagnosis: text(source.diagnosis),
       treatmentDone: text(source.treatmentDone),
       nextPlan: text(source.nextPlan, 500),
       doctorId: Number(source.doctorId) || null,
-    });
-    if (!saved) {
-      return NextResponse.json(
-        { message: "الزيارة موقَّعة — لا تُعدَّل. أضف ملحقًا." }, { status: 409 },
-      );
-    }
+    };
 
     if (Array.isArray(source.procedures) && !assistant) {
       const procedures = source.procedures
@@ -259,6 +254,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const ok = await setVisitProcedures({
         visitId,
         procedures,
+        clinicalNotes,
         authority: { role: session.role, maxDiscountPercent: Number.isFinite(maxDiscount) ? maxDiscount : 0 },
         overrides,
         billingCurrency: isCurrency(source.billingCurrency) ? source.billingCurrency : undefined,
@@ -283,10 +279,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           actor: session.username, actorRole: session.role,
         });
       }
+    } else if (!(await saveClinicalNotes({ ...clinicalNotes, visitId }))) {
+      return NextResponse.json(
+        { message: "الزيارة موقَّعة — لا تُعدَّل. أضف ملحقًا." }, { status: 409 },
+      );
     }
 
     return NextResponse.json(await getClinicalVisit(visitId, { actorPartyId: session.partyId ?? null }));
   } catch (error) {
+    if (error instanceof ClinicalDoctorIdentityConflict) {
+      return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });
+    }
     if (error instanceof ClinicalPlanConflict) {
       return NextResponse.json({ message: error.message }, { status: 409 });
     }

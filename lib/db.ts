@@ -1,3 +1,4 @@
+import { lockClinicalDoctors } from "./clinical-doctor-identity";
 import { readRecoveryDocumentStates, publicRecoveryRead, hasInstallmentReversalSignal, type PatientInstallmentRecoveryRead } from "./reversed-installment-recovery-db";
 import {
   REVERSED_INSTALLMENT_RECOVERY_PURPOSE, parseRecoveryIntent, recoveryIntentFingerprintSource, type RecoveryIntent,
@@ -16402,9 +16403,9 @@ export async function saveClinicalNotes(input: {
   treatmentDone: string | null;
   nextPlan: string | null;
   doctorId: number | null;
-}): Promise<boolean> {
-  await ensureSchema();
-  const { rowCount } = await getPool().query(
+}, client?: DbClient): Promise<boolean> {
+  if (!client) await ensureSchema();
+  const { rowCount } = await (client ?? getPool()).query(
     `UPDATE visits SET chief_complaint = $2::text, examination = $3::text,
             diagnosis = $4::text, treatment_done = $5::text, next_plan = $6::text,
             doctor_id = COALESCE($7::int, doctor_id)
@@ -16433,6 +16434,8 @@ export interface ProcedurePriceOverride {
 export async function setVisitProcedures(input: {
   visitId: number;
   procedures: VisitProcedureInput[];
+  /** HTTP saves notes and procedures atomically; other callers retain procedure-only behavior. */
+  clinicalNotes?: Omit<Parameters<typeof saveClinicalNotes>[0], "visitId">;
   /**
    * (P1-6) سلطة التسعير لمستخدمٍ حقيقي: السعر من الدليل، والانحراف بسببٍ وضمن
    * صلاحيته. المسارات الداخلية (رحلات التحقق) تمرّ بلا سلطة كما كانت.
@@ -16457,6 +16460,11 @@ export async function setVisitProcedures(input: {
       [input.visitId],
     );
     if (!rows[0]) { await client.query("ROLLBACK"); return false; }
+    await lockClinicalDoctors(client, input.procedures.map((line) => line.doctorId));
+    if (input.clinicalNotes && !(await saveClinicalNotes({ ...input.clinicalNotes, visitId: input.visitId }, client))) {
+      await client.query("ROLLBACK");
+      return false;
+    }
     const visitCurrency: Currency = input.billingCurrency
       ?? (isCurrency(rows[0].billing_currency) ? (rows[0].billing_currency as Currency) : CLINIC_BASE_CURRENCY);
     if (input.billingCurrency) {
@@ -16943,6 +16951,14 @@ export async function signClinicalVisit(input: {
       await client.query("ROLLBACK");
       return emptyResult("empty", { visit: existing });
     }
+    // Validate every explicit performer under the visit lock before side effects.
+    // Keep party kind stable until sign commits; fallback candidates use the same locks.
+    const candidates = [locked[0].doctor_id, input.signerDoctorPartyId ?? null]
+      .filter((id): id is number => typeof id === "number" && id > 0);
+    const realDoctors = await lockClinicalDoctors(
+      client, existing.procedures.map((line) => line.doctorId), candidates,
+    );
+    const defaultDoctorId = candidates.find((id) => realDoctors.has(id)) ?? null;
     /* (P6) القرار من المصنِّف المشترك نفسه الذي تعرضه معاينة المراجعة — مقفولًا هنا. */
     const linkedDecisions = await classifyLinkedProcedureLines(client, existing.procedures, patientId, true);
     /* (BILL-1) سطور جلساتٍ مشمولة في اتفاق أقساط خطتها: تُنجَز ولا تدخل الفاتورة. */
@@ -16971,13 +16987,6 @@ export async function signClinicalVisit(input: {
      * يُفوتر عملٌ بلا صاحب.
      */
     /* الافتراض طبيبٌ حقًّا: طبيب الزيارة ثم الموقِّع، كلٌّ يُقبل إن كانت جهته «طبيب» فقط. */
-    const candidates = [locked[0].doctor_id, input.signerDoctorPartyId ?? null]
-      .filter((id): id is number => typeof id === "number" && id > 0);
-    const { rows: doctorRows } = candidates.length === 0 ? { rows: [] as { id: number }[] }
-      : await client.query<{ id: number }>(
-        `SELECT id FROM parties WHERE id = ANY($1::int[]) AND kind = 'doctor'`, [candidates]);
-    const realDoctors = new Set(doctorRows.map((row) => row.id));
-    const defaultDoctorId = candidates.find((id) => realDoctors.has(id)) ?? null;
     for (const line of existing.procedures) {
       if (line.doctorId !== null || defaultDoctorId === null) continue;
       line.doctorId = defaultDoctorId;
