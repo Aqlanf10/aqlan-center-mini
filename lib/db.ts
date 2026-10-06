@@ -6694,9 +6694,30 @@ export async function updateLabOrderAccounting(
     const resolvedRate = input.exchangeRate != null && input.exchangeRate > 0
       ? input.exchangeRate
       : order.exchange_rate != null ? Number(order.exchange_rate) : 1;
-    const baseAmount = resolvedCost != null && resolvedCost > 0
-      ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
-      : null;
+    // A posting/category-only change must not revalue an existing snapshot.
+    // Positive cost edits carry amount, currency, rate and converted base together.
+    const hasMoneyUpdate = input.costMinor !== undefined
+      || input.costCurrency != null || input.exchangeRate != null;
+    const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
+    if (hasPositiveMoneyUpdate) {
+      if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
+        throw new Error("lab_order_accounting_price_invalid");
+      }
+      // Both columns are NUMERIC(18,6): never calculate with precision that
+      // disappears on storage, or admit rates above the settings maximum.
+      if (!Number.isFinite(resolvedRate) || resolvedRate <= 0 || resolvedRate > 1_000_000
+        || Number(resolvedRate.toFixed(6)) !== resolvedRate) {
+        throw new Error("lab_order_exchange_rate_invalid");
+      }
+    }
+    const baseAmount = !hasMoneyUpdate && order.base_amount_minor != null
+      ? Number(order.base_amount_minor)
+      : resolvedCost != null && resolvedCost > 0
+        ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
+        : null;
+    if (hasPositiveMoneyUpdate && (baseAmount == null || !Number.isSafeInteger(baseAmount) || baseAmount < 0)) {
+      throw new Error("lab_order_accounting_price_invalid");
+    }
 
     await client.query(
       `UPDATE lab_orders
@@ -6711,11 +6732,13 @@ export async function updateLabOrderAccounting(
                 WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
                 ELSE financial_status
               END,
-              cost_minor = COALESCE($5, cost_minor),
-              cost_currency = COALESCE($6, cost_currency),
-              base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE base_amount_minor END
+              cost_minor = CASE WHEN $8::boolean THEN COALESCE($5, cost_minor) ELSE cost_minor END,
+              cost_currency = CASE WHEN $8::boolean THEN COALESCE($6, cost_currency) ELSE cost_currency END,
+              base_amount_minor = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $9::bigint ELSE base_amount_minor END,
+              exchange_rate = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
         WHERE id = $7`,
-      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId],
+      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId,
+        hasMoneyUpdate, baseAmount, resolvedRate],
     );
 
     // الالتزام المرتبط: يحدَّث بالربط المحاسبي نفسه، أو يُنشأ إن غاب وثمة تكلفة.
@@ -6726,11 +6749,13 @@ export async function updateLabOrderAccounting(
                 expense_account_code = $2,
                 payable_account_code = $3,
                 is_posted = $4,
-                amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
-                currency = COALESCE($6, currency),
-                base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $7 ELSE base_amount_minor END
+                amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
+                currency = CASE WHEN $9::boolean THEN COALESCE($6, currency) ELSE currency END,
+                base_amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $7::bigint ELSE base_amount_minor END,
+                exchange_rate = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
           WHERE id = $8`,
-        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id],
+        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id,
+          hasMoneyUpdate, resolvedRate],
       );
     } else if (order.party_id && resolvedCost != null && resolvedCost > 0) {
       const { rows: payRows } = await client.query<{ id: number }>(
@@ -6743,16 +6768,17 @@ export async function updateLabOrderAccounting(
              expense_account_code = EXCLUDED.expense_account_code,
              payable_account_code = EXCLUDED.payable_account_code,
              is_posted = EXCLUDED.is_posted,
-             amount_minor = EXCLUDED.amount_minor,
-             currency = EXCLUDED.currency,
-             base_amount_minor = EXCLUDED.base_amount_minor
+             amount_minor = CASE WHEN $14::boolean THEN EXCLUDED.amount_minor ELSE payables.amount_minor END,
+             currency = CASE WHEN $14::boolean THEN EXCLUDED.currency ELSE payables.currency END,
+             exchange_rate = CASE WHEN $14::boolean THEN EXCLUDED.exchange_rate ELSE payables.exchange_rate END,
+             base_amount_minor = CASE WHEN $14::boolean THEN EXCLUDED.base_amount_minor ELSE payables.base_amount_minor END
          RETURNING id`,
         [
           order.party_id,
           `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
           resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
           orderId, dateText(order.due_date), input.actor || "system",
-          expenseCatId, expenseAccCode, payableAccCode, isPosted,
+          expenseCatId, expenseAccCode, payableAccCode, isPosted, hasMoneyUpdate,
         ],
       );
       if (payRows[0]) {
@@ -18071,12 +18097,18 @@ export interface OpeningBalanceHistoryEntry {
 }
 
 /** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
-async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency) {
+async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency, addOnly = false) {
+  // Serialize even an absent currency row, before touching the opening table.
+  // Corrections must remain compatible with the patient FK KEY SHARE acquired by
+  // a payment that already holds the opening row. Reception keeps its add fence.
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR ${addOnly ? "UPDATE" : "NO KEY UPDATE"}`, [patientId]);
   const { rows } = await client.query<{ amount_minor: string; as_of_date: string }>(
     `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances
-      WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+      WHERE patient_id = $1 AND currency = $2${addOnly ? "" : " FOR UPDATE"}`,
     [patientId, currency],
   );
+  // Add-only never modifies an existing row, so it must not wait on its payment
+  // reader while holding the stronger patient fence; it only needs to refuse it.
   return rows[0] ? { amountMinor: toMinor(rows[0].amount_minor), asOfDate: rows[0].as_of_date } : null;
 }
 
@@ -18086,6 +18118,25 @@ async function lockedOpeningBalance(client: DbClient, patientId: number, currenc
  */
 export class OpeningBalanceExists extends Error {
   constructor() { super("للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير."); }
+}
+
+/** The route's checked financial predecessor, not a client-supplied version. */
+export type OpeningBalanceExpectation = Pick<OpeningBalance, "amountMinor" | "asOfDate">;
+
+export class OpeningBalanceChanged extends Error {
+  constructor() { super("تغيّر الرصيد الافتتاحي. أعد تحميله وراجع التعديل."); }
+}
+
+function assertOpeningBalanceExpectation(
+  actual: OpeningBalanceExpectation | null,
+  expected: OpeningBalanceExpectation | null | undefined,
+): void {
+  // Existing internal callers may omit the preflight. Explicit null means that
+  // the route checked absence; it must never become an implicit correction.
+  if (expected === undefined) return;
+  if (actual?.amountMinor !== expected?.amountMinor || actual?.asOfDate !== expected?.asOfDate) {
+    throw new OpeningBalanceChanged();
+  }
 }
 
 export async function setPatientOpeningBalance(input: {
@@ -18102,14 +18153,15 @@ export async function setPatientOpeningBalance(input: {
    * لحظتها من جهازٍ آخر) يُرفض بـ`OpeningBalanceExists` ولا يُستبدل.
    */
   addOnly?: boolean;
+  /** Recheck route reason/period/audit preconditions under the mutation lock. */
+  expectedBefore?: OpeningBalanceExpectation | null;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
-    // أمر الإضافة يتسلسل على صف المريض: إضافتان متزامنتان لا تمرّان كلتاهما.
-    if (input.addOnly) await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    const before = await lockedOpeningBalance(client, input.patientId, currency);
+    const before = await lockedOpeningBalance(client, input.patientId, currency, input.addOnly);
     if (before && input.addOnly) throw new OpeningBalanceExists();
+    assertOpeningBalanceExpectation(before, input.expectedBefore);
     const { rows } = await client.query<{ patient_id: number }>(
       `INSERT INTO patient_opening_balances
          (patient_id, amount_minor, as_of_date, note, created_by, currency)
@@ -18121,10 +18173,17 @@ export async function setPatientOpeningBalance(input: {
               note         = EXCLUDED.note,
               created_by   = EXCLUDED.created_by,
               updated_at   = NOW()
+        WHERE $7::boolean
        RETURNING patient_id`,
-      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency],
+      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency, before !== null],
     );
-    if (!rows[0]) return null;
+    if (!rows[0]) {
+      // A legacy import can insert without this writer's patient fence. Never
+      // turn a checked-absent row into an unreviewed ON CONFLICT correction.
+      const patient = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+      if (patient.rows[0]) throw input.addOnly ? new OpeningBalanceExists() : new OpeningBalanceChanged();
+      return null;
+    }
     await client.query(
       `INSERT INTO patient_opening_balance_history
          (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
@@ -18142,10 +18201,12 @@ export async function clearPatientOpeningBalance(
   actor = "system",
   reason: string | null = null,
   currency: Currency = CLINIC_BASE_CURRENCY,
+  expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
   return withTransaction(getPool(), async (client): Promise<boolean> => {
     const before = await lockedOpeningBalance(client, patientId, currency);
+    assertOpeningBalanceExpectation(before, expectedBefore);
     if (!before) return false;
     await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
     await client.query(
