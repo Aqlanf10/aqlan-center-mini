@@ -22,12 +22,15 @@ for (const [consumer, expected] of [["tailwindcss", "3.4.19"], ["postcss-nested"
   const parserFile = consumerRequire.resolve("postcss-selector-parser/package.json");
   assert.equal(readJson(parserFile).version, versions.parser);
   assert(realpathSync(parserFile).startsWith(directory + "/"));
+  assert.equal(relative(directory, parserFile), mode === "candidate"
+    ? `node_modules/${consumer}/node_modules/postcss-selector-parser/package.json`
+    : "node_modules/postcss-selector-parser/package.json");
   resolutions.push({ consumer, consumerVersion: expected, parserVersion: versions.parser, parserPath: relative(directory, parserFile) });
 }
 const postcss = require("postcss");
 const tailwind = require("tailwindcss");
 const nested = require("postcss-nested");
-const parser = require("postcss-selector-parser");
+const parser = createRequire(require.resolve("tailwindcss/package.json"))("postcss-selector-parser");
 const config = require("tailwindcss/loadConfig")(join(repo, "tailwind.config.ts"));
 const rawClasses = "rtl:space-x-reverse md:grid-cols-2 focus:ring-2 hover:bg-accent-500 [&>svg]:size-4 [&:not(:first-child)]:mt-2 data-[state=open]:bg-navy-900 group-hover:text-danger-600 peer-checked:border-accent-500 before:content-['عربي'] bg-[rgb(1_2_3)] w-[calc(100%-1rem)] !text-sm -mt-2 print:hidden";
 const globals = readFileSync(join(repo, "app/globals.css"), "utf8");

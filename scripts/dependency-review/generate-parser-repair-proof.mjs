@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,10 +91,18 @@ try {
     run(kind + "-generate-lock", "npm", ["update", "source-map-js", "--package-lock-only", "--ignore-scripts", "--no-fund", "--audit=true", ...npmOptions], directory);
     assert.deepEqual(json(join(directory, "package.json")), manifest, "npm changed the requested manifest");
     const generated = json(join(directory, "package-lock.json"));
-    assert.deepEqual(Object.keys(generated.packages).sort(), Object.keys(originalLock.packages).sort(), "Unrelated package inventory drift");
-    for (const [location, previous] of Object.entries(originalLock.packages)) {
+    // Preserve raw npm output even when a later check rejects it. Only a passed
+    // generation-proof.json establishes acceptance of these generated locks.
+    copyFileSync(join(directory, "package-lock.json"), join(output, kind + "-package-lock.json"));
+    const oldParserPath = "node_modules/postcss-selector-parser";
+    const parserPaths = ["node_modules/postcss-nested/node_modules/postcss-selector-parser",
+      "node_modules/tailwindcss/node_modules/postcss-selector-parser"];
+    assert.equal(originalLock.packages[oldParserPath]?.version, "6.1.4");
+    const expectedPaths = Object.keys(originalLock.packages).filter(location => location !== oldParserPath).concat(parserPaths);
+    assert.deepEqual(Object.keys(generated.packages).sort(), expectedPaths.sort(), "Unrelated package inventory drift");
+    for (const [location, next] of Object.entries(generated.packages)) {
+      const previous = parserPaths.includes(location) ? originalLock.packages[oldParserPath] : originalLock.packages[location];
       const name = location.slice(location.lastIndexOf("node_modules/") + "node_modules/".length);
-      const next = generated.packages[location];
       if (location === "" && kind === "root") {
         const expectedRoot = structuredClone(previous);
         expectedRoot.devDependencies.tailwindcss = "3.4.19";
@@ -107,9 +115,10 @@ try {
         assert.deepEqual(next.engines || {}, metadata.engines || {});
         assert.equal(next.license, metadata.license); assert.equal(next.dev, previous.dev);
         assert.equal(next.optional, previous.optional); assert.equal(next.hasInstallScript, previous.hasInstallScript);
+        assert.deepEqual(next, { ...previous, version: targets[name], resolved: metadata.dist.tarball, integrity: metadata.dist.integrity },
+          "Unexpected target metadata drift: " + location);
       }
     }
-    copyFileSync(join(directory, "package-lock.json"), join(output, kind + "-package-lock.json"));
     baseline[kind] = { directory, originalManifest, originalLock, manifestBytes, lockBytes,
       originalLockSha256: hash(lockBytes), generatedLockSha256: hash(readFileSync(join(directory, "package-lock.json"))) };
   }
@@ -128,12 +137,30 @@ try {
     const before = hash(readFileSync(join(directory, "package-lock.json")));
     run(mode + "-consumer-ci", "npm", ["ci", "--ignore-scripts", "--no-fund", "--audit=true", ...npmOptions], directory);
     assert.equal(hash(readFileSync(join(directory, "package-lock.json"))), before, "npm ci mutated locked evidence");
-    for (const [name, version] of Object.entries(targets)) {
-      const pkg = json(join(directory, "node_modules", name, "package.json"));
-      const expected = mode === "candidate" ? version : (name === "source-map-js" ? "1.2.1" : "6.1.4");
-      assert.equal(pkg.version, expected);
+    const installedPaths = mode === "candidate"
+      ? ["node_modules/postcss-nested/node_modules/postcss-selector-parser", "node_modules/tailwindcss/node_modules/postcss-selector-parser", "node_modules/source-map-js"]
+      : ["node_modules/postcss-selector-parser", "node_modules/source-map-js"];
+    for (const location of installedPaths) {
+      const name = location.slice(location.lastIndexOf("node_modules/") + "node_modules/".length);
+      const pkg = json(join(directory, location, "package.json"));
+      const expected = mode === "candidate" ? targets[name] : (name === "source-map-js" ? "1.2.1" : "6.1.4");
+      assert.equal(pkg.name, name); assert.equal(pkg.version, expected);
       if (mode === "candidate") assert.deepEqual(pkg.dependencies || {}, published[name].dependencies || {});
     }
+    const foundParsers = [];
+    const pending = [join(directory, "node_modules")];
+    while (pending.length) {
+      const current = pending.pop();
+      for (const entry of readdirSync(current, { withFileTypes: true })) {
+        const file = join(current, entry.name);
+        if (entry.isDirectory()) pending.push(file);
+        else if (entry.isFile() && entry.name === "package.json" && json(file).name === "postcss-selector-parser") {
+          assert.equal(json(file).version, mode === "candidate" ? "7.1.6" : "6.1.4");
+          foundParsers.push(file.slice(directory.length + 1, -"/package.json".length));
+        } else if (entry.isSymbolicLink() && entry.name === "postcss-selector-parser") assert.fail("Unexpected parser symlink");
+      }
+    }
+    assert.deepEqual(foundParsers.sort(), installedPaths.filter(location => location.endsWith("/postcss-selector-parser")).sort(), "Additional/missing installed parser copy");
     run(mode + "-compatibility", process.execPath, ["--max-old-space-size=512", join(repo, "scripts/dependency-review/parser-compatibility-worker.mjs"), directory, mode, output], repo, [0], 90000);
     const braces = run(mode + "-braces-consumer", process.execPath, ["--max-old-space-size=192", join(repo, "scripts/dependency-review/braces-consumer-worker.mjs"), directory, "candidate"], repo, [0], 30000);
     writeFileSync(join(output, mode + "-braces-consumer.json"), braces.stdout);
