@@ -55,7 +55,13 @@ manifest still fails. Changing these pins requires independent patch and verifie
 review, not automatic regeneration.
 
 The installation check reconciles the root package/lock declarations and all
-installed package identities/dependency maps. It scans every installed file tree,
+installed package identities/dependency maps. The root override object must equal
+the separately reviewed exact pair for Tailwind 3.4.19/postcss-nested 6.2.0 to
+official postcss-selector-parser 7.1.6. Missing, additional, ranged, renamed or
+changed overrides and workspaces fail. This dependency resolution repair adds no
+advisory exception and never overrides braces. See
+[repair evidence and scope](DEPENDENCY_RESOLUTION_REPAIR.md).
+It scans every installed file tree,
 including nested directories not reported by npm audit, and verifies every braces
 copy's complete file inventory and hashes. Missing files, additional executable
 files, changed versions, unknown copies, unmanifested Node directory/file shadows
