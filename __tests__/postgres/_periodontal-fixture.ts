@@ -21,7 +21,10 @@ export function assertPeriodontalFixtureIdentity(name: string, expectedOid: stri
 }
 
 /** CI-only caller. Fresh UUID database, never drop/reset a pre-existing target. */
-export async function openPeriodontalFixture(environment: NodeJS.ProcessEnv = process.env) {
+export async function openPeriodontalFixture(
+  environment: NodeJS.ProcessEnv = process.env,
+  options: { pristine?: boolean } = {},
+) {
   const target = validatePeriodontalFixtureTarget(environment);
   const name = `aqlan_perio_${randomUUID().replaceAll("-", "")}`;
   if (!NAME.test(name)) throw new Error("Unsafe periodontal fixture name.");
@@ -84,12 +87,14 @@ export async function openPeriodontalFixture(environment: NodeJS.ProcessEnv = pr
     const { rows: [empty] } = await pool.query<{ count: number }>(
       "SELECT COUNT(*)::int AS count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'");
     if (empty.count !== 0) throw new Error("Periodontal fixture must be a pristine owned database.");
+    // Only the restore rehearsal opts out. Identity and emptiness were still verified.
+    if (options.pristine === true) return { db, pool, name, url: url.toString(), close };
     await db.ensureSchema(); // Existing baseline only, in the fresh owned fixture.
     const { rows: [inactive] } = await pool.query<{ records: string | null; sites: string | null }>(
       "SELECT to_regclass('public.periodontal_records')::text AS records, to_regclass('public.periodontal_sites')::text AS sites");
     if (inactive.records !== null || inactive.sites !== null) throw new Error("Periodontal foundation unexpectedly activated by runtime.");
     await pool.query(PERIODONTAL_SQL); // Test-only proposal application; no runtime registration.
-    return { db, pool, name, close };
+    return { db, pool, name, url: url.toString(), close };
   } catch (error) {
     try { await close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Periodontal fixture setup/cleanup failed."); }
     throw error;

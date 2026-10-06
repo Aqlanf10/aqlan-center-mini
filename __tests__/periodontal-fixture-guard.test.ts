@@ -36,4 +36,13 @@ describe("periodontal PG fixture admission (pure; no connection or SQL)", () => 
     expect(source).toContain("created = true");
     expect(source).toContain("assertPeriodontalFixtureIdentity(name, identity.oid, rows[0], identity.owner)");
   });
+  it("keeps pristine restore mode opt-in and behind owned-target verification", () => {
+    const source = readFileSync("__tests__/postgres/_periodontal-fixture.ts", "utf8");
+    const pristine = source.indexOf("if (options.pristine === true)");
+    expect(pristine).toBeGreaterThan(source.indexOf("assertPeriodontalFixtureIdentity(name, identity.oid, actual, identity.owner)"));
+    expect(pristine).toBeGreaterThan(source.indexOf("if (empty.count !== 0)"));
+    expect(pristine).toBeLessThan(source.indexOf("await db.ensureSchema()"));
+    expect(source).toContain("options: { pristine?: boolean } = {}");
+    expect(source).toContain("await pool.query(PERIODONTAL_SQL)");
+  });
 });
