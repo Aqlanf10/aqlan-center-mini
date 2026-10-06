@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { INVOICE_LINKAGE_SQL } from "../lib/invoice-linkage-schema";
 import {
-  INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, lineLinkage, sessionsFor, shellCaseTitle,
+  caseGroupKey, caseSiteCompatible, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, lineLinkage, sessionsFor, shellCaseTitle,
 } from "../lib/invoice-clinical-linkage";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../lib/specialty-templates";
 
@@ -15,7 +15,7 @@ describe("(INV-LINK B) schema 0041", () => {
   it("is additive only: nullable columns, no defaults, no rewrite, no drop", () => {
     expect(INVOICE_LINKAGE_SQL).not.toMatch(/DROP\s|^\s*(DELETE|UPDATE|INSERT)\s/im);
     expect(INVOICE_LINKAGE_SQL).not.toMatch(/ADD COLUMN[^;]*(NOT NULL|DEFAULT)/);
-    expect(INVOICE_LINKAGE_SQL.match(/ADD COLUMN IF NOT EXISTS/g)).toHaveLength(7);
+    expect(INVOICE_LINKAGE_SQL.match(/ADD COLUMN IF NOT EXISTS/g)).toHaveLength(8);
     expect(INVOICE_LINKAGE_SQL).not.toMatch(/ON DELETE CASCADE/);
   });
 });
@@ -53,5 +53,19 @@ describe("(INV-LINK B) line classification uses the catalog category only", () =
     expect(invoiceRequestFingerprint(base)).not.toBe(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], unitPriceMinor: 11 }] }));
     expect(invoiceRequestFingerprint(base)).not.toBe(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], toothCode: 36 }] }));
     for (const message of Object.values(INVOICE_LINKAGE_MESSAGE)) expect(message).toMatch(/[؀-ۿ]/);
+  });
+});
+
+describe("(INV-LINK) case site compatibility", () => {
+  it("tooth-bound specialties need an empty or matching site; whole-mouth specialties match by specialty", () => {
+    expect(caseSiteCompatible("endodontics", "11", 36)).toBe(false);
+    expect(caseSiteCompatible("endodontics", "36", 36)).toBe(true);
+    expect(caseSiteCompatible("endodontics", "36، 37", 37)).toBe(true);
+    expect(caseSiteCompatible("endodontics", "136", 36)).toBe(false);
+    expect(caseSiteCompatible("endodontics", null, 36)).toBe(true);
+    expect(caseSiteCompatible("endodontics", "11", null)).toBe(true);
+    expect(caseSiteCompatible("orthodontics", "11", 36)).toBe(true);
+    expect(caseGroupKey("prosthodontics", 36)).not.toBe(caseGroupKey("prosthodontics", 46));
+    expect(caseGroupKey("orthodontics", 36)).toBe(caseGroupKey("orthodontics", null));
   });
 });

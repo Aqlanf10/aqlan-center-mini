@@ -42,7 +42,8 @@ Visit(case_id) → visit_procedures(plan_item_id=item) → sign → progress; no
 
 Questions answered by the contract: who created the treatment (`origin` + audit actor), who created the invoice
 (`invoices.created_by`), which plan item / case (`source_id`, `case_id`), is it pre-billed and by how much
-(`billed_invoice_id` + that line's total), and does the current visit execute it (`visit_procedures.plan_item_id`).
+(`billed_invoice_id` + the line naming it through `invoice_items.plan_item_id`), and does the current visit
+execute it (`visit_procedures.plan_item_id`).
 
 ## 4. Rules (PR B — transactional linkage inside `createInvoice`)
 
@@ -53,19 +54,33 @@ Questions answered by the contract: who created the treatment (`origin` + audit 
    `filling/sealant→restorative (plan item, no case)`; `consultation`, `xray`, unknown ⇒ financial-only.
    Pediatric is not inferred (no category carries it).
 2. One transaction, patient row locked (serialises two tabs / concurrent posts), idempotency key checked first.
+   The fingerprint covers everything persisted from the request (patient, currency, discount, note, and per line
+   service/description/quantity/price/doctor/tooth/case/sessions); the same key with any other body ⇒ 409.
+   **Cross-entry serialisation:** candidate plan items are locked `FOR UPDATE` and their eligibility is re-read in a
+   new statement after the lock wait — the same item lock `signClinicalVisit` takes — so an invoice and a visit
+   sign-off cannot both treat one unbilled item as billable. Lock order everywhere is *plan item → invoice*:
+   sign-off locks the item then share-locks its covering invoice; cancellation and correction lock the invoice's
+   billed items before the invoice itself.
 3. **Find, then create.** Reuse an existing item only if it is an *exact compatible open item*: same patient,
    service, tooth, currency; plan active + consented + not funded by an installment agreement; item `planned`,
-   `unbilled`, no sessions done, not already sourced by an invoice line; **and the same total**. A compatible item
-   with a different amount ⇒ refused (fail-closed, Arabic message) — the price of agreed work is not silently
-   changed and partial coverage is not assumed.
+   `unbilled`, no sessions done, not already sourced by an invoice line; **and the same work shape**: same total,
+   same quantity, no surfaces (the invoice carries none) and, when the line states a session count, the same
+   session count. Different total ⇒ `amount_mismatch`; same total but a different shape ⇒ `shape_mismatch`; more
+   than one exact match ⇒ `ambiguous_item` (all refused, fail-closed, Arabic message) — the price or shape of
+   agreed work is not silently changed, partial coverage is not assumed, and no item is picked arbitrarily.
+   A `caseId` that differs from the reused item's case ⇒ `case_mismatch` (the invoice never moves an item between
+   cases).
 4. Otherwise all new clinical lines of the invoice go to **one new plan** (one master plan per invoice, never one
    per specialty), consented at creation with an explicit note "قبول مالي بالفاتورة … — التقييم السريري لدى
    الطبيب" — consistent with `canEditItems` ("المستجدّ بخطة جديدة"). Session count comes from the request, else
    the specialty template step for that category, else 1.
-5. **Cases.** Specialties that need a case reuse the patient's single open case of that specialty (or the
-   `caseId` supplied per line); none ⇒ a minimal shell `«<تخصص> — تحتاج تقييم سريري»` with `site = tooth`,
-   `origin='invoice'`, no responsible doctor, no problem text; more than one open case and no `caseId` ⇒ refused
-   (never guessed). Lines of the same specialty in one invoice share the case.
+5. **Cases.** Specialties that need a case reuse the patient's single open *compatible* case of that specialty
+   (or the `caseId` supplied per line). For tooth-bound specialties (endodontics, prosthodontics, implantology,
+   surgery) a case is compatible only if its `site` is empty or names the line's tooth — an RCT on 36 never joins
+   the open endodontic case of 11; whole-mouth specialties (orthodontics, periodontics, cosmetic) match by
+   specialty. None ⇒ a minimal shell `«<تخصص> — تحتاج تقييم سريري»` with `site = tooth`, `origin='invoice'`, no
+   responsible doctor, no problem text; more than one compatible open case and no `caseId` ⇒ refused (never
+   guessed). Lines of one invoice share a case per specialty, and per tooth for tooth-bound specialties.
 6. **Nothing clinical is invented.** Ortho: no `ortho_cases` row, no wires/appliance/diagnosis/ceph — the
    clinical case says "needs clinical assessment" and the doctor's intake bridges it later. Endo: no
    `endo_treatments`, no diagnosis, canals or working length. Prostho: no lab order (labs stay at the clinical point).
@@ -86,6 +101,13 @@ Cancel ⇒ clinical records untouched; the item's financial link is cleared (`bi
 `billed_invoice_id=NULL`) and audited — the UI shows "الفاتورة أُلغيت — يحتاج مراجعة مالية". Correction
 (cancel + reissue) ⇒ items whose line survives move `billed_invoice_id` to the replacement; items whose line was
 removed are cleared as on cancel. No delete, no re-pricing of history, no linking of old invoices to new plans.
+
+**Line lineage across corrections.** The unique source (`source_type='plan_item'`, `source_id`) stays on the
+original line, which keeps its history after cancellation. Every invoice line also carries
+`invoice_items.plan_item_id` (migration 0041): written with the original line and **copied to its replacement**
+on each correction. Kept items, duplicate service lines and changed quantity/price are resolved line by line from
+it, and a second or third correction keeps the link on the newest live invoice. A corrected line with a lower
+price still covers its item (the admin's correction reason and the `invoice.correct` audit record the change).
 
 ## 7. UI (PR D)
 

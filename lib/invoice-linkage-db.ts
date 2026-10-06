@@ -21,7 +21,7 @@ import type { Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import type { SpecialtyTemplate } from "./specialty-templates";
 import {
-  LINKAGE_SPECIALTY_LABEL, lineLinkage, sessionsFor, shellCaseTitle,
+  LINKAGE_SPECIALTY_LABEL, caseGroupKey, caseSiteCompatible, lineLinkage, sessionsFor, shellCaseTitle,
   type InvoiceLinkageRefusal, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
@@ -59,29 +59,40 @@ class Refusal extends Error {
 
 const OPEN_CASE = `status IN ('active', 'waiting')`;
 
+/** بند خطةٍ مفتوح يصلح أن تقبله الفاتورة ماليًّا: خطةٌ نشطة موافَق عليها بعملة الفاتورة بلا أقساط، والبند لم يبدأ ولم يُفوتر. */
+const OPEN_ITEM_SQL = `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces
+       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL AND t.base_currency = $2
+        AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)
+        AND i.service_id = $3 AND i.tooth_code IS NOT DISTINCT FROM $4::smallint
+        AND i.status = 'planned' AND i.billing_status = 'unbilled' AND i.started_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.plan_item_id = i.id AND s.status = 'done')
+        AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.source_type = 'plan_item' AND ii.source_id = i.id)
+        AND NOT EXISTS (SELECT 1 FROM invoice_items ij WHERE ij.plan_item_id = i.id)`;
+
 async function audit(client: DbClient, entry: AuditInput) { await insertAuditRow(client, entry); }
 
-/** روابط فاتورةٍ قائمة كما كُتبت — لإعادة الطلب نفسه بلا أثرٍ ثانٍ. */
+/** روابط فاتورةٍ قائمة كما كُتبت — لإعادة الطلب نفسه بلا أثرٍ ثانٍ (والخطة هي التي أنشأتها الفاتورة وحدها). */
 async function existingLinks(client: Pick<DbClient, "query">, invoiceId: number): Promise<{ planId: number | null; links: LineLink[] }> {
   const { rows } = await client.query<{
-    source_id: string | null; case_id: number | null; plan_id: number | null; specialty: string | null;
+    plan_item_id: number | null; case_id: number | null; service_id: number | null; category: string | null;
   }>(
-    `SELECT ii.source_id::text, i.case_id, i.plan_id, c.specialty
+    `SELECT ii.plan_item_id, i.case_id, i.service_id, i.category
        FROM invoice_items ii
-       LEFT JOIN plan_items i ON ii.source_type = 'plan_item' AND i.id = ii.source_id
-       LEFT JOIN clinical_cases c ON c.id = i.case_id
+       LEFT JOIN plan_items i ON i.id = ii.plan_item_id
       WHERE ii.invoice_id = $1 ORDER BY ii.id`, [invoiceId]);
-  let planId: number | null = null;
+  const { rows: [created] } = await client.query<{ plan_id: number }>(
+    `SELECT plan_id FROM plan_items WHERE origin_invoice_id = $1 ORDER BY id LIMIT 1`, [invoiceId]);
   const links = rows.map((row, line) => {
-    planId = planId ?? row.plan_id;
+    const linkage = lineLinkage({ serviceId: row.service_id, category: row.category });
     return {
-      line, kind: row.source_id === null ? "financial" as const : "clinical" as const,
-      specialty: (row.specialty as LinkageSpecialty | null) ?? null,
-      planItemId: row.source_id === null ? null : Number(row.source_id), planItemCreated: false,
+      line, kind: row.plan_item_id === null ? "financial" as const : "clinical" as const,
+      specialty: row.plan_item_id !== null && linkage.kind === "clinical" ? linkage.specialty : null,
+      planItemId: row.plan_item_id, planItemCreated: false,
       caseId: row.case_id, caseCreated: false,
     };
   });
-  return { planId, links };
+  return { planId: created?.plan_id ?? null, links };
 }
 
 export async function createLinkedInvoice(input: {
@@ -164,22 +175,33 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
             AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
           LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
       if (billed) throw new Refusal("already_billed", line);
-      const { rows: [match] } = await client.query<{ id: number; quantity: number; unit_price_minor: string; case_id: number | null }>(
-        `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id
-           FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-          WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL AND t.base_currency = $2
-            AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)
-            AND i.service_id = $3 AND i.tooth_code IS NOT DISTINCT FROM $4::smallint
-            AND i.status = 'planned' AND i.billing_status = 'unbilled' AND i.started_at IS NULL
-            AND NOT EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.plan_item_id = i.id AND s.status = 'done')
-            AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.source_type = 'plan_item' AND ii.source_id = i.id)
-            AND i.id <> ALL($5::int[])
-          ORDER BY i.id LIMIT 1
-            FOR UPDATE OF i`,
-        [input.patientId, input.baseCurrency, item.serviceId, item.toothCode, claimed]);
-      if (!match) { fresh.push(line); continue; }
-      if (match.quantity * Number(match.unit_price_minor) !== Math.max(1, Math.round(item.quantity)) * Math.round(item.unitPriceMinor)) {
-        throw new Refusal("amount_mismatch", line);
+      /* بند الخطة يُقفل أولًا ثم تُعاد قراءة أهليته في جملةٍ جديدة بعد انتظار القفل — بالترتيب نفسه الذي يقفل به
+         التوقيعُ البنود (loadPlanItemsForPricing): زيارةٌ وقّعت جلسته أثناء الانتظار تُرى، فلا يفوتره البابان معًا. */
+      const params = [input.patientId, input.baseCurrency, item.serviceId, item.toothCode];
+      const { rows: candidates } = await client.query<{ id: number }>(
+        `${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`, [...params, claimed]);
+      const candidateIds = candidates.map((row) => row.id);
+      if (candidateIds.length > 0) {
+        await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [candidateIds]);
+      }
+      const { rows: open } = candidateIds.length === 0 ? { rows: [] } : await client.query<{
+        id: number; quantity: number; unit_price_minor: string; case_id: number | null;
+        session_count: number; surfaces: string | null;
+      }>(`${OPEN_ITEM_SQL} AND i.id = ANY($5::int[]) ORDER BY i.id`, [...params, candidateIds]);
+      if (open.length === 0) { fresh.push(line); continue; }
+      /* المطابقة على شكل العمل كله لا المبلغ وحده: الكمية، والمبلغ، وبلا أسطح (الفاتورة لا تحملها)، وعدد الجلسات إن طُلب. */
+      const quantity = Math.max(1, Math.round(item.quantity));
+      const totalMinor = quantity * Math.round(item.unitPriceMinor);
+      const sameTotal = open.filter((row) => row.quantity * Number(row.unit_price_minor) === totalMinor);
+      if (sameTotal.length === 0) throw new Refusal("amount_mismatch", line);
+      const exact = sameTotal.filter((row) => row.quantity === quantity && (row.surfaces ?? "").trim() === ""
+        && (item.sessions === null || row.session_count === item.sessions));
+      if (exact.length === 0) throw new Refusal("shape_mismatch", line);
+      if (exact.length > 1) throw new Refusal("ambiguous_item", line);
+      const match = exact[0];
+      /* حالةٌ اختارها المستخدم تخالف حالة البند المطابق: رفضٌ صريح — لا يُنقل البند بين الحالات من الفاتورة. */
+      if (item.caseId !== null && match.case_id !== null && match.case_id !== item.caseId) {
+        throw new Refusal("case_mismatch", line);
       }
       claimed.push(match.id);
       links[line].planItemId = match.id;
@@ -243,7 +265,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     }
 
     // ── الحالات التخصصية: حالةٌ مفتوحة واحدة تُعاد، أو أولية تُنشأ، أو رفضٌ إن تعدّدت بلا اختيار ──
-    const caseBySpecialty = new Map<LinkageSpecialty, { id: number; created: boolean }>();
+    const caseBySpecialty = new Map<string, { id: number; created: boolean }>();
     for (const [line, item] of input.items.entries()) {
       const linkage = linkages[line];
       if (linkage.kind !== "clinical" || !linkage.needsCase) continue;
@@ -257,13 +279,16 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         if (!chosen) throw new Refusal("bad_case", line);
         caseId = chosen.id;
       } else if (caseId === null) {
-        const known = caseBySpecialty.get(specialty);
+        const groupKey = caseGroupKey(specialty, item.toothCode);
+        const known = caseBySpecialty.get(groupKey);
         if (known) {
           caseId = known.id;
         } else {
-          const { rows: open } = await client.query<{ id: number }>(
-            `SELECT id FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE} ORDER BY id FOR UPDATE`,
+          /* حالةٌ مفتوحة للتخصص تُعاد فقط إن وافق موضعُها سنَّ البند (للتخصص الموضعي): علاج عصب 36 لا يُلحق بحالة 11. */
+          const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
+            `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE} ORDER BY id FOR UPDATE`,
             [input.patientId, specialty]);
+          const open = sameSpecialty.filter((row) => caseSiteCompatible(specialty, row.site, item.toothCode));
           if (open.length > 1) throw new Refusal("ambiguous_case", line);
           if (open.length === 1) {
             caseId = open[0].id;
@@ -295,7 +320,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
               actor: input.createdBy, actorRole: input.actorRole,
             });
           }
-          caseBySpecialty.set(specialty, { id: caseId, created: caseCreated });
+          caseBySpecialty.set(groupKey, { id: caseId, created: caseCreated });
         }
       }
       links[line].caseId = caseId;
@@ -317,10 +342,10 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       const source = links[line].planItemId;
       await client.query(
         `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
-                                    source_type, source_id)
-         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::text, $9::bigint)`,
+                                    source_type, source_id, plan_item_id)
+         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::text, $9::bigint, $10::int)`,
         [invoiceId, item.serviceId, item.doctorId, item.description, quantity, unit, quantity * unit,
-          source === null ? null : "plan_item", source]);
+          source === null ? null : "plan_item", source, source]);
     }
 
     const clinical = links.filter((link) => link.kind === "clinical");

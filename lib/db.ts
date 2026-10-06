@@ -8929,6 +8929,14 @@ async function itemsFor(invoiceIds: number[]): Promise<Map<number, InvoiceItem[]
 }
 
 /**
+ * (INV-LINK) بنود الخطة التي قبلتها الفاتورة تُقفل **قبل** الفاتورة — ترتيب التوقيع نفسه (البند ثم فاتورته)،
+ * فلا يتقاطع الإلغاء أو التصحيح مع توقيع جلسة البند (لا جمود ولا قراءة فاتورةٍ تُلغى في اللحظة نفسها).
+ */
+async function lockPlanItemsBilledBy(client: DbClient, invoiceId: number): Promise<void> {
+  await client.query(`SELECT id FROM plan_items WHERE billed_invoice_id = $1 ORDER BY id FOR UPDATE`, [invoiceId]);
+}
+
+/**
  * (INV-LINK B) فاتورةٌ أُلغيت لا تبقى سندًا لقبول بند الخطة ماليًّا: يعود البند «غير مفوتر» (يحتاج مراجعةً
  * مالية) ويبقى سجلّه السريري والحالة كما هما — لا حذف ولا مسح. في معاملة الإلغاء نفسها، ومُدقَّقًا.
  */
@@ -9049,6 +9057,7 @@ export async function setInvoiceStatus(
   // الفاتورة الملغاة لا تعود: إلغاءٌ ثم فتحٌ يعيد مبلغًا أُسقط من رصيد المريض بعد
   // أن رآه مسدّدًا. التصحيح يكون بفاتورة جديدة لا بإحياء ملغاة.
   const changed = await withTransaction(getPool(), async (client) => {
+    if (status === "cancelled") await lockPlanItemsBilledBy(client, id);
     const { rows: [invoice] } = await client.query<{
       status: string; invoice_number: string; total_minor: string; discount_minor: string; base_currency: string;
     }>(
@@ -9123,6 +9132,7 @@ export async function correctInvoice(input: {
 }): Promise<InvoiceCorrectionResult> {
   await ensureSchema();
   const outcome = await withTransaction(getPool(), async (client) => {
+    await lockPlanItemsBilledBy(client, input.invoiceId);
     const { rows: [original] } = await client.query<{
       id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
       discount_minor: string; base_currency: string; plan_id: number | null; created_at: Date;
@@ -9137,9 +9147,9 @@ export async function correctInvoice(input: {
     }
     const { rows: items } = await client.query<{
       id: number; service_id: number | null; doctor_id: number | null; description: string;
-      quantity: number; unit_price_minor: string; source_type: string | null; source_id: string | null;
+      quantity: number; unit_price_minor: string; plan_item_id: number | null;
     }>(
-      `SELECT id, service_id, doctor_id, description, quantity, unit_price_minor, source_type, source_id::text
+      `SELECT id, service_id, doctor_id, description, quantity, unit_price_minor, plan_item_id
          FROM invoice_items WHERE invoice_id = $1 ORDER BY id`,
       [input.invoiceId],
     );
@@ -9170,20 +9180,22 @@ export async function correctInvoice(input: {
     for (const line of plan.lines) {
       const item = itemById.get(line.itemId)!;
       await client.query(
-        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor)
-         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7)`,
-        [created.id, item.service_id, item.doctor_id, item.description, line.quantity, line.unitPriceMinor, line.totalMinor],
+        `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
+                                    plan_item_id)
+         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int)`,
+        [created.id, item.service_id, item.doctor_id, item.description, line.quantity, line.unitPriceMinor, line.totalMinor,
+          item.plan_item_id],
       );
     }
     const { rowCount: relinked } = await client.query(
       `UPDATE visits SET invoice_id = $2 WHERE invoice_id = $1`, [original.id, created.id],
     );
     /* (INV-LINK B) بند خطةٍ قبلته الفاتورة الأصل: إن بقي سطره في المصحَّحة انتقل رابطه المالي إليها، وإن حُذف
-       سطره عاد البند غير مفوتر (يحتاج مراجعة مالية). السجل السريري لا يُمسّ. */
+       سطره عاد البند غير مفوتر (يحتاج مراجعة مالية). السجل السريري لا يُمسّ. نسب السطر إلى بنده (`plan_item_id`)
+       يُنسخ إلى سطر المصحَّحة — فيبقى في التصحيح الثاني والثالث (المصدر الفريد يبقى لسطر الأصل وحده). */
     const keptPlanItems = plan.lines
-      .map((line) => itemById.get(line.itemId)!)
-      .filter((item) => item.source_type === "plan_item" && item.source_id !== null)
-      .map((item) => Number(item.source_id));
+      .map((line) => itemById.get(line.itemId)!.plan_item_id)
+      .filter((planItemId): planItemId is number => planItemId !== null);
     if (keptPlanItems.length > 0) {
       await client.query(
         `UPDATE plan_items SET billed_invoice_id = $2 WHERE id = ANY($3::int[]) AND billed_invoice_id = $1`,
@@ -16750,7 +16762,15 @@ async function loadPlanItemsForPricing(
   }>();
   if (planItemIds.length === 0) return map;
   // Count sessions in a new statement after any lock wait, so concurrent signatures are visible.
-  if (lock) await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [planItemIds]);
+  if (lock) {
+    await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [planItemIds]);
+    /* (INV-LINK) الفاتورة التي قبلت البند تُقفل للقراءة بعد البند — الترتيب نفسه في الإلغاء والتصحيح (البند ثم
+       الفاتورة): إلغاءٌ جارٍ يُنتظر حتى يلتزم، فلا يرى التوقيع فاتورةً «حيّة» يُلغيها غيره في اللحظة نفسها. */
+    await client.query(
+      `SELECT v.id FROM invoices v
+        WHERE v.id IN (SELECT billed_invoice_id FROM plan_items WHERE id = ANY($1::int[]) AND billed_invoice_id IS NOT NULL)
+        ORDER BY v.id FOR SHARE`, [planItemIds]);
+  }
   const { rows } = await client.query<{
     id: number; quantity: number; unit_price_minor: string;
     billing_rule: string; session_count: number; done_sessions: string;

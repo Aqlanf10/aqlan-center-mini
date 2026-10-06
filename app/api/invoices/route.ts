@@ -185,7 +185,7 @@ export async function POST(request: Request) {
       patientId, baseCurrency: base, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
-      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, items }) : null,
+      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, note, items }) : null,
       auditDetails: {
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
         ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
