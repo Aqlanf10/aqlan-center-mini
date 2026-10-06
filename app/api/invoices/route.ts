@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInvoice, getSettings, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
+import { getSettings, listParties, listPatientInvoices, listServices } from "@/lib/db";
+import { createLinkedInvoice, type LinkedInvoiceLineInput } from "@/lib/invoice-linkage-db";
+import {
+  INVOICE_IDEMPOTENCY_PATTERN, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint,
+} from "@/lib/invoice-clinical-linkage";
+import { effectiveTemplates } from "@/lib/specialty-templates";
 import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -70,10 +75,14 @@ export async function POST(request: Request) {
   // مختبر أو مورّد.
   const doctors = new Set((await listParties("doctor")).map((party) => party.id));
 
-  const items: {
-    serviceId: number | null; doctorId: number | null;
-    description: string; quantity: number; unitPriceMinor: number;
-  }[] = [];
+  /* (INV-LINK B) مفتاح الإعادة: نقرةٌ مزدوجة أو ردٌّ ضائع يعيد الفاتورة نفسها لا فاتورةً ثانية. */
+  const idempotencyKey = typeof source.idempotencyKey === "string" && source.idempotencyKey.trim()
+    ? source.idempotencyKey.trim() : null;
+  if (idempotencyKey !== null && !INVOICE_IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
+    return NextResponse.json({ message: "مفتاح الطلب غير صالح." }, { status: 400 });
+  }
+
+  const items: LinkedInvoiceLineInput[] = [];
   /* (FIN-4) ما تحتاجه سلطة السعر لكل بند: خدمة الدليل، وهل كُتب السعر، وسببه. */
   const authorityLines: InvoiceLineAuthorityInput[] = [];
   for (const raw of rawItems as Record<string, unknown>[]) {
@@ -121,7 +130,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "الطبيب المختار غير مسجّل." }, { status: 400 });
     }
 
-    items.push({ serviceId: service ? service.id : null, doctorId, description, quantity, unitPriceMinor });
+    /* (INV-LINK B) السنّ والحالة والجلسات للبند العلاجي — اختيارية؛ والخاطئ يُرفض لا يُسقط صامتًا. */
+    const optionalInt = (value: unknown, min: number, max: number): number | null | undefined => {
+      if (value === undefined || value === null || String(value).trim() === "") return null;
+      const number = Number(value);
+      return Number.isInteger(number) && number >= min && number <= max ? number : undefined;
+    };
+    const toothCode = optionalInt(raw.toothCode, 11, 85);
+    const caseId = optionalInt(raw.caseId, 1, 2_147_483_647);
+    const sessions = optionalInt(raw.sessions, 1, 60);
+    if (toothCode === undefined) return NextResponse.json({ message: "رقم السن غير صحيح بالترقيم الدولي." }, { status: 400 });
+    if (caseId === undefined) return NextResponse.json({ message: "الحالة المختارة غير صالحة." }, { status: 400 });
+    if (sessions === undefined) return NextResponse.json({ message: "عدد جلسات البند بين ١ و٦٠." }, { status: 400 });
+
+    items.push({
+      serviceId: service ? service.id : null, category: service?.category ?? null, doctorId, description, quantity,
+      unitPriceMinor, toothCode, caseId, sessions,
+    });
     authorityLines.push({
       description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
       explicit: !(priceRaw === undefined || String(priceRaw).trim() === ""),
@@ -156,26 +181,27 @@ export async function POST(request: Request) {
   }
 
   try {
-    const invoice = await createInvoice({
-      patientId, baseCurrency: base, discountMinor, note,
-      createdBy: session.username, items,
-    });
-    if (!invoice) return NextResponse.json({ message: "تعذّر إنشاء الفاتورة." }, { status: 500 });
-    await recordAudit({
-      action: "invoice.create",
-      entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoiceNumber,
-      details: {
-        المريض: patientId, الإجمالي: invoice.totalMinor, الخصم: invoice.discountMinor,
-        عدد_البنود: invoice.items.length,
+    const result = await createLinkedInvoice({
+      patientId, baseCurrency: base, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
+      idempotencyKey,
+      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, items }) : null,
+      auditDetails: {
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
-        ...(authority.overrides.length ? {
-          أسعار_معدلة: formatPriceOverrides(authority.overrides),
-        } : {}),
+        ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
       },
-      actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(invoice, { status: 201 });
+    if (!result.ok) {
+      if (result.reason === "no_patient") return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+      const prefix = result.line !== null ? `البند ${result.line + 1}: ` : "";
+      const status = result.reason === "bad_tooth" || result.reason === "bad_case" ? 400 : 409;
+      return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
+    }
+    return NextResponse.json(
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links }, replayed: result.replayed },
+      { status: result.replayed ? 200 : 201 },
+    );
   } catch {
-    return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. تأكد من المريض." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. أعد المحاولة." }, { status: 500 });
   }
 }

@@ -105,7 +105,17 @@ file: the item in Plans, the case in Cases/specialty tab, the invoice in Account
 Plus: same service different tooth ⇒ two items; two open cases of one specialty ⇒ refused without `caseId`;
 amount mismatch with an exact open item ⇒ refused; line without `serviceId` ⇒ financial-only.
 
-## 9. PR split
+## 9. PR split (as delivered)
+
+B and C ship in **one PR**: linkage without sign-off containment would leave a double-billing window (a visit on a
+pre-billed item would invoice it again), so they are not separable safely. Implemented: `lib/invoice-clinical-linkage.ts`
+(pure), `lib/invoice-linkage-db.ts` (`createLinkedInvoice`), `insertPlanV2InTx` (plan creation core shared with
+`createPlanV2`, behaviour unchanged), `PLAN_ITEM_PREBILLED_SQL` in the sign/preview pricing, walkout and
+`ORTHO_CASE_FUNDED_SQL`, cancel/correct link maintenance. Additional refusal found while testing: the same
+service+tooth already pre-billed by a live invoice and not started ⇒ `already_billed` (two tabs with different keys).
+Audit-detail keys avoid the sanitizer's secret pattern (`سر`).
+
+## 10. Original split
 
 A (this doc) · B migration 0041 + pure classification + transactional linkage + idempotency + cancel/correct
 link maintenance, PG18 + HTTP · C sign-off containment · D invoice preview + patient-file surfacing + browser
