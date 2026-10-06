@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", findUserByUsername: vi.fn(), doctorOwnedPatientIds: vi.fn(), labWorkForPatients: vi.fn(), listAppointmentsByDate: vi.fn(),
-  getAppointment: vi.fn(), insertAppointmentOnClient: vi.fn(), moveAppointmentOnClient: vi.fn(), recordAudit: vi.fn(),
+  lockAppointmentServiceForBooking: vi.fn(), getAppointment: vi.fn(), insertAppointmentOnClient: vi.fn(), moveAppointmentOnClient: vi.fn(), recordAudit: vi.fn(),
   writeAppointmentAcrossDays: vi.fn(), writeAppointmentInDay: vi.fn(),
 }));
 vi.mock("../lib/capacity-context", () => ({ evaluateCapacity: vi.fn(), loadCapacityContext: vi.fn(), resolveService: vi.fn() }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn() }));
 import { bookAppointment, type BookAppointmentInput } from "../lib/book-appointment";
-import { findUserByUsername, insertAppointmentOnClient, writeAppointmentInDay } from "../lib/db";
-import { loadCapacityContext, resolveService } from "../lib/capacity-context";
+import { findUserByUsername, insertAppointmentOnClient, lockAppointmentServiceForBooking, writeAppointmentInDay } from "../lib/db";
+import { evaluateCapacity, loadCapacityContext, resolveService } from "../lib/capacity-context";
 import { requireSession } from "../lib/session";
 import { POST } from "../app/api/appointments/route";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE } from "../lib/ortho-booking-intent";
@@ -25,7 +25,13 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(loadCapacityContext).mockResolvedValue({ chairs: 3, shifts: [{ start: "09:00", end: "20:00" }], nearCapacityPercent: 80, emergencyReserveMinutes: 0, newPatientDailyLimit: 0 });
   vi.mocked(resolveService).mockResolvedValue(service());
-  vi.mocked(writeAppointmentInDay).mockImplementation(async ({ commit }) => ({ ok: true, value: await commit({} as never) }));
+  vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(service());
+  vi.mocked(evaluateCapacity).mockResolvedValue({ state: "AVAILABLE", occupiedChairs: 0, chairs: 3, dayPercent: 0, outsideHours: false, message: "Synthetic capacity available", reasons: [] });
+  vi.mocked(writeAppointmentInDay).mockImplementation(async ({ judge, commit }) => {
+    const client = {} as never;
+    const verdict = await judge([], client);
+    return verdict.ok ? { ok: true, value: await commit(client) } : verdict;
+  });
   vi.mocked(insertAppointmentOnClient).mockResolvedValue({ id: 101 } as never);
   vi.mocked(requireSession).mockResolvedValue({ username: "synthetic", role: "reception", userId: 1, expiresAt: Date.now() + 60_000 });
   vi.mocked(findUserByUsername).mockResolvedValue(null);
@@ -53,8 +59,9 @@ describe("untouched board intent validates the exact resolved scheduling service
     expect(await bookAppointment({ ...request(), appointmentType: "consultation" }, actor)).toMatchObject({ ok: false, status: 400 });
     expect(writeAppointmentInDay).not.toHaveBeenCalled();
   });
-  it.each(["follow_up", null])("persists the same validated service without re-resolving (legacy %s)", async (legacyType) => {
+  it.each(["follow_up", null])("persists the current locked service without a second unguarded resolution (legacy %s)", async (legacyType) => {
     vi.mocked(resolveService).mockResolvedValueOnce({ ...service(), legacyType }).mockResolvedValue(null);
+    vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue({ ...service(), legacyType });
     expect(await bookAppointment(request(), actor)).toMatchObject({ ok: true });
     expect(resolveService).toHaveBeenCalledTimes(1);
     expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ patientId: 19, serviceId: 81,
@@ -64,6 +71,28 @@ describe("untouched board intent validates the exact resolved scheduling service
     vi.mocked(resolveService).mockResolvedValue({ ...service(), specialty: "endodontics", legacyType: "endo", code: "ENDO" });
     expect(await bookAppointment({ ...request(), bookingIntent: undefined, appointmentType: "endo" }, actor)).toMatchObject({ ok: true });
     expect(writeAppointmentInDay).toHaveBeenCalledTimes(1);
+  });
+  it.each(["removed", "inactive", "specialty"])("revalidates %s identity on the day transaction client before capacity or insert", async (change) => {
+    const current = service();
+    if (change === "inactive") current.isActive = false;
+    if (change === "specialty") current.specialty = "endodontics";
+    vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(change === "removed" ? null : current);
+    expect(await bookAppointment(request(), actor)).toEqual({ ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE });
+    expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith({}, 81);
+    expect(lockAppointmentServiceForBooking).toHaveBeenCalledTimes(1);
+    expect(evaluateCapacity).not.toHaveBeenCalled(); expect(insertAppointmentOnClient).not.toHaveBeenCalled();
+  });
+  it.each([undefined, 45])("uses locked metadata and preserves only explicit duration %s", async (durationMinutes) => {
+    const current = { ...service(), defaultDurationMinutes: 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, requiresChair: false };
+    vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(current);
+    expect(await bookAppointment({ ...request(), durationMinutes }, actor)).toMatchObject({ ok: true });
+    expect(evaluateCapacity).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: {} }));
+    expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ serviceId: 81,
+      durationMinutes: durationMinutes ?? 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, occupiesChair: false }));
+  });
+  it("does not acquire a follow-up service lock for explicit generic/manual bookings", async () => {
+    expect(await bookAppointment({ ...request(), bookingIntent: undefined }, actor)).toMatchObject({ ok: true });
+    expect(lockAppointmentServiceForBooking).not.toHaveBeenCalled();
   });
   it("forwards protected intent through the actual HTTP handler and refuses a stale resolved service", async () => {
     vi.mocked(resolveService).mockResolvedValue({ ...service(), specialty: "endodontics" });

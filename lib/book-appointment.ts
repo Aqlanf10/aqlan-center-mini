@@ -14,7 +14,7 @@ import { isAdmin } from "./roles";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import type { Role } from "./roles";
 import {
-  getAppointment, insertAppointmentOnClient, moveAppointmentOnClient, recordAudit,
+  getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
   writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
 } from "./db";
 import {
@@ -285,6 +285,7 @@ export async function judgeBookingInDay(input: {
  *
  * الترتيب مقصود: تُقرأ التهيئة والخدمة أولًا (خارج القفل، فلا يطول)، ثم يُقفل
  * اليوم، ثم يُحكم على مواعيده كما قرأها القفل نفسه، ثم يُكتب في المعاملة نفسها.
+ * لمقترح متابعة التقويم المحميّ تُقرأ الخدمة ثانيةً تحت قفل صفّ يبقى حتى نهاية المعاملة.
  */
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
@@ -301,13 +302,12 @@ export async function bookAppointment(
   }
 
   const context = await loadCapacityContext();
-  const service = await resolveService({
+  let service = await resolveService({
     serviceId: input.serviceId ?? null,
     appointmentType: input.appointmentType ?? null,
   });
-  // Validate the very same resolved object used for capacity and persistence.
-  // A stale client catalogue must not silently book changed/removed identities,
-  // and missing explicit IDs must not fall through the shared legacy resolver.
+  // Fast rejection only. The transaction below must re-read and lock the row
+  // before trusting identity or metadata; this preflight object may become stale.
   if (input.bookingIntent === "ortho_follow_up"
     && (!input.serviceId || input.appointmentType !== "follow_up"
       || service?.id !== input.serviceId || !isPeriodicFollowupService(service))) {
@@ -318,7 +318,7 @@ export async function bookAppointment(
   /* المدّة: ما طلبه المستخدم، وإلا مدّة الخدمة، وإلا ثلاثون. والخدمة تُقترح ولا
      تفرض: قد يحتاج مريضٌ بعينه ضعف المدّة. */
   const requested = Number(input.durationMinutes);
-  const durationMinutes = Number.isFinite(requested) && requested > 0
+  let durationMinutes = Number.isFinite(requested) && requested > 0
     ? Math.round(requested)
     : (service?.defaultDurationMinutes ?? 30);
   if (durationMinutes < MIN_DURATION || durationMinutes > MAX_DURATION) {
@@ -347,12 +347,25 @@ export async function bookAppointment(
 
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean } =
-    { verdict: null, overridden: false };
+  const state: { verdict: CapacityVerdict | null; overridden: boolean; followupServiceRejected: boolean } =
+    { verdict: null, overridden: false, followupServiceRejected: false };
 
   const result = await writeAppointmentInDay({
     date: input.date,
     judge: async (sameDay, client) => {
+      if (input.bookingIntent === "ortho_follow_up") {
+        // Existing order: day advisory lock, then this service row. The row lock
+        // lasts through capacity, insertion and owner commit/rollback, so a
+        // concurrent catalogue editor cannot invalidate an accepted proposal.
+        service = await lockAppointmentServiceForBooking(client, input.serviceId!);
+        if (service?.id !== input.serviceId || !isPeriodicFollowupService(service)) {
+          state.followupServiceRejected = true;
+          return { ok: false as const, conflict: null };
+        }
+        // Keep an explicit duration; otherwise use the current locked default.
+        durationMinutes = Number.isFinite(requested) && requested > 0
+          ? Math.round(requested) : service.defaultDurationMinutes;
+      }
       const judged = await judgeBookingInDay({
         sameDay, client, date: input.date, time: input.time, durationMinutes,
         service, context, providerId: doctorId, chairNo,
@@ -387,6 +400,7 @@ export async function bookAppointment(
   });
 
   if (!result.ok) {
+    if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };
   }
   const appointment = result.value;
