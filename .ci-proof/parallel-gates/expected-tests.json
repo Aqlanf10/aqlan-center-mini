@@ -1,0 +1,32 @@
+{
+  "candidateManifestSha256": "194a3cfee6e03267dedd9c15565ad07605fffa14047a1a96d38278498500ce4e",
+  "testIds": [
+    "test_evidence.ArtifactFaults.test_all_executed_audit_attempts_are_contiguous_complete_triples",
+    "test_evidence.ArtifactFaults.test_every_required_family_and_every_member_are_verified",
+    "test_evidence.ArtifactFaults.test_invalid_images_json_pdf_and_empty_reports_fail",
+    "test_evidence.ArtifactFaults.test_no_network_fallback_or_disabled_validation",
+    "test_evidence.ArtifactFaults.test_upload_metadata_cannot_cross_run_head_id_digest_or_expiry",
+    "test_evidence.ArtifactFaults.test_zip_digest_path_traversal_symlink_duplicate_are_rejected",
+    "test_evidence.EventIdentityFaults.test_duplicate_json_keys_are_not_silently_overwritten",
+    "test_evidence.EventIdentityFaults.test_pr_merge_push_and_dispatch_identity",
+    "test_evidence.FinalGateStatusFaults.test_each_receipt_family_required_and_exact_identity",
+    "test_evidence.FinalGateStatusFaults.test_every_required_step_must_really_succeed",
+    "test_evidence.FinalGateStatusFaults.test_missing_receipt_output_or_digest_never_passes",
+    "test_evidence.FinalGateStatusFaults.test_only_complete_all_success_can_pass",
+    "test_evidence.FinalGateStatusFaults.test_rerun_all_uses_new_names_partial_rerun_is_rejected",
+    "test_evidence.GateEndToEndFaults.test_cancel_skip_failure_and_tampered_receipt_cannot_pass",
+    "test_evidence.GateEndToEndFaults.test_complete_four_lane_gate_passes",
+    "test_evidence.GateEndToEndFaults.test_every_missing_artifact_download_fails_gate",
+    "test_evidence.GateEndToEndFaults.test_shared_database_container_or_runner_fails",
+    "test_workflow.WorkflowDagFaults.test_all_original_trigger_and_ref_cancellation_cases",
+    "test_workflow.WorkflowDagFaults.test_complete_source_graph_and_inventory",
+    "test_workflow.WorkflowDagFaults.test_every_lane_failure_skip_condition_dependency_and_coe_are_forbidden",
+    "test_workflow.WorkflowDagFaults.test_every_original_command_and_artifact_remains",
+    "test_workflow.WorkflowDagFaults.test_final_always_legacy_context_and_gate_cannot_be_weakened",
+    "test_workflow.WorkflowDagFaults.test_legacy_hidden_directory_remains_non_evidence",
+    "test_workflow.WorkflowDagFaults.test_runtime_audit_and_database_dependence",
+    "test_workflow.WorkflowDagFaults.test_yaml_is_deterministically_bound_to_parsed_graph"
+  ],
+  "expectedCount": 25,
+  "scope": "all reviewed Python unit/contract fault test methods; no skipped or expected-failing tests accepted"
+}

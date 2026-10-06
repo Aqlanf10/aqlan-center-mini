@@ -1,0 +1,79 @@
+# Temporary proof-only workflow. The repository's real ci.yml is unchanged.
+# The parallel candidate is nested under .ci-proof and is never activated here.
+name: Temporary CI gate source proof
+on:
+  push:
+    branches: [ci-proof/parallel-gates-20261006]
+concurrency:
+  group: ci-source-proof-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  gate_contract_proof:
+    name: Source-only CI gate proof (not release CI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact proof commit
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Execute pinned isolated contract and fault tests
+        id: run_proof
+        run: python3 .ci-proof/parallel-gates/run_proof.py run
+      - name: Retain actual platform step-context shape
+        id: capture_context
+        if: always()
+        env:
+          PROOF_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 .ci-proof/parallel-gates/run_proof.py capture
+      - name: Retain exact bounded raw proof evidence
+        id: evidence_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-gate-source-proof--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .ci-proof-results/identity.json
+            .ci-proof-results/candidate-bytes.json
+            .ci-proof-results/inventory.json
+            .ci-proof-results/contract.stdout.txt
+            .ci-proof-results/contract.stderr.txt
+            .ci-proof-results/contract.process.json
+            .ci-proof-results/contract-results.json
+            .ci-proof-results/unit.stdout.txt
+            .ci-proof-results/unit.stderr.txt
+            .ci-proof-results/unit.process.json
+            .ci-proof-results/unit-results.json
+            .ci-proof-results/source-after.json
+            .ci-proof-results/summary.json
+            .ci-proof-results/steps-context.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require actual subprocess and evidence-upload success
+        id: proof_result
+        if: always()
+        env:
+          CHECKOUT_RESULT: ${{ steps.checkout.outcome }}
+          RUN_RESULT: ${{ steps.run_proof.outcome }}
+          CAPTURE_RESULT: ${{ steps.capture_context.outcome }}
+          UPLOAD_RESULT: ${{ steps.evidence_upload.outcome }}
+          ARTIFACT_ID: ${{ steps.evidence_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence_upload.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          for key in ('CHECKOUT_RESULT', 'RUN_RESULT', 'CAPTURE_RESULT', 'UPLOAD_RESULT'):
+              if os.environ.get(key) != 'success':
+                  raise SystemExit('Source proof failed: ' + key)
+          if not re.fullmatch(r'[1-9][0-9]*', os.environ.get('ARTIFACT_ID', '')):
+              raise SystemExit('Source proof artifact ID missing')
+          if not re.fullmatch(r'[0-9a-f]{64}', os.environ.get('ARTIFACT_DIGEST', '')):
+              raise SystemExit('Source proof artifact digest missing')
+          print('Source/contract proof and raw upload succeeded. Full release CI remains unproved.')
+          PY

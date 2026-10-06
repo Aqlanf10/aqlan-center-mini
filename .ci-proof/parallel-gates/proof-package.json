@@ -1,0 +1,113 @@
+{
+  "format": "aqlan-temporary-ci-source-proof-v1",
+  "baseCommit": "5da6085f283e88c73305b789e6211946324c69f7",
+  "baseTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+  "candidateManifestSha256": "194a3cfee6e03267dedd9c15565ad07605fffa14047a1a96d38278498500ce4e",
+  "proofRef": "refs/heads/ci-proof/parallel-gates-20261006",
+  "unchangedClinicalWorkflowGitBlob": "8c6c05b480ccf667be716bca44d9ca6c2ba00758",
+  "files": [
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/contract.json",
+      "bytes": 107722,
+      "sha256": "740c5f7844d40c795e27923219eb9db80c31f4be604a6fa57dcd6a83f4f49078",
+      "gitBlob": "bda4a2790148f598d22c6931daf277d894aa3c93"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/evidence.py",
+      "bytes": 24207,
+      "sha256": "45c5aa231fbc226cacdce5b05e1e3db4be586ec1726fa2a022a705da8bb7afb9",
+      "gitBlob": "2e8f8d6a48f57b13e876971c81aae4ad6883b7f0"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/tests/fixtures.py",
+      "bytes": 4611,
+      "sha256": "da8eb6f956341c6bf0d94174575c2b02e059f51929cf07a65db4f973bf9d81df",
+      "gitBlob": "3204d3ddf908750c7cdb161fba3b501f15661784"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/tests/test_evidence.py",
+      "bytes": 13492,
+      "sha256": "0b71b824555f61cc87a83651653c4c4934d50a13129a1706dd71cf9c01fffb86",
+      "gitBlob": "6e31f64b405f180290294c9698e93bcbff5d904d"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/tests/test_workflow.py",
+      "bytes": 5342,
+      "sha256": "643324504cedee7303655158e3543c9b9ad48b3beadf14ca51ae68d840c65c34",
+      "gitBlob": "190a7b3572e6ac2f49dd4382d9262cf598b0e3de"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/workflow.json",
+      "bytes": 59794,
+      "sha256": "9bd5dcde59f49e7ad14ddd3099895de3eb0a5199ae96a8e33c0c032d79e66ffc",
+      "gitBlob": "b629396e99f10325b2494f7a4e6e652a3667a6af"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/ci/workflow.py",
+      "bytes": 14774,
+      "sha256": "72d44a594e891f895a8b2fc7f00ba802da97dd08f7a4618b49bd1e02e2e1451a",
+      "gitBlob": "5e9ef9ca9941611ff02797e4aef1384d329a560d"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/.github/workflows/ci.yml",
+      "bytes": 52996,
+      "sha256": "c84ad7d5703357e7ce5bf7b109f77210c4110fcafc1b78cc6d4dd965882fc89b",
+      "gitBlob": "36ffbe5a04f866c14933d2c1587a8f87a0509de3"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/__tests__/environment-parity.test.ts",
+      "bytes": 39564,
+      "sha256": "efe6383ed2ba40e5e9ce79def93bf459975e9c4bbf1d78dc1025607e5026e5cf",
+      "gitBlob": "6fdce92935c1da1138b34a4d14eb7b5b5594c06e"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/docs/CI_PARALLEL_GATES.md",
+      "bytes": 6989,
+      "sha256": "98a2ced65bb285e1cc800446cfb35667d9538d0b4419585db0e28f73e92d9dc7",
+      "gitBlob": "17ed3227b240078e13350e72c3c47ad829c62faf"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate/docs/ENVIRONMENT_CI_PARITY.md",
+      "bytes": 26491,
+      "sha256": "eace598f1f86558331fc3e5c0053e51fdf2c8ee4f68b83cdfe8745bd87f3dbf0",
+      "gitBlob": "359668881c2bce609a53d80da52a5f179497f6e7"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/candidate-manifest.json",
+      "bytes": 4101,
+      "sha256": "194a3cfee6e03267dedd9c15565ad07605fffa14047a1a96d38278498500ce4e",
+      "gitBlob": "a919dc7b5e44c8a7441a2d962e5cb42eb084dc6f"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/expected-tests.json",
+      "bytes": 2539,
+      "sha256": "42a5e89d184f8912699422ae6ca7da8a9baba7742642a473ab06b0d114dfcc62",
+      "gitBlob": "bee63e623c9a7ade0a726b768d1ae89be1703998"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/inventory-reference.json",
+      "bytes": 52753,
+      "sha256": "c7a6ee503b273431a29a1f6c920dfe7e1adf1f42e47c55475b93ec8ff3be9b8f",
+      "gitBlob": "4130f00105edefe8b0883793750f676a5cc1ceb8"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/run_proof.py",
+      "bytes": 16650,
+      "sha256": "fed3a42e4b3a4ec994f95a38cf7fd63ef94e6acc1692d3d0bbd417eaca0f26ef",
+      "gitBlob": "75544620976305fd180759cd247c3c0821244c27"
+    },
+    {
+      "path": ".ci-proof/parallel-gates/safe_child.py",
+      "bytes": 4961,
+      "sha256": "250d82180d220402342572397d2c12707c342132f5251d5c57c2613dd15f3ac4",
+      "gitBlob": "e0e72d4d09af4d4a21748762ea9939083fd5e620"
+    },
+    {
+      "path": ".github/workflows/ci-gate-source-proof.yml",
+      "bytes": 3369,
+      "sha256": "39d3a3e08374f86d00ce68dd29eb9e47022368a69760184d9e8813bb6e58b2d1",
+      "gitBlob": "ea1145cc07efd594934cc43fd460b8d89deb1c94"
+    }
+  ],
+  "note": "This manifest excludes itself to avoid a recursive digest. The proof event commit and reviewed publication manifest bind it."
+}

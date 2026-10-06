@@ -1,0 +1,1114 @@
+{
+  "baseCommit": "5da6085f283e88c73305b789e6211946324c69f7",
+  "baseTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+  "workflowGitBlob": "8c6c05b480ccf667be716bca44d9ca6c2ba00758",
+  "workflowSha256": "8b1bee23cdbb8cf8f397859ed352636d8bd125be0330792760018b722b926ba5",
+  "triggers": {
+    "pull_request": {
+      "branches": [
+        "main"
+      ]
+    },
+    "push": {
+      "branches": [
+        "main",
+        "feat/**",
+        "hardening/**"
+      ]
+    },
+    "workflow_dispatch": null
+  },
+  "concurrency": {
+    "group": "ci-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  "environment": {
+    "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+    "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+    "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+    "CLINIC_TIME_ZONE": "Asia/Aden"
+  },
+  "services": {
+    "postgres": {
+      "image": "postgres:18-alpine",
+      "env": {
+        "POSTGRES_USER": "ci",
+        "POSTGRES_PASSWORD": "ci",
+        "POSTGRES_DB": "aqlan_p1_test"
+      },
+      "ports": [
+        "5432:5432"
+      ],
+      "options": "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5"
+    }
+  },
+  "originalSteps": [
+    {
+      "name": "Check out repository",
+      "uses": "actions/checkout@v7"
+    },
+    {
+      "name": "Set up Node.js",
+      "uses": "actions/setup-node@v7",
+      "with": {
+        "node-version": 22,
+        "cache": "npm"
+      }
+    },
+    {
+      "name": "Upgrade npm to bulk advisory endpoint",
+      "run": "npm install -g npm@11"
+    },
+    {
+      "name": "Install locked dependencies",
+      "run": "npm ci"
+    },
+    {
+      "name": "Verify environment contract",
+      "run": "npm run verify:environment"
+    },
+    {
+      "name": "Typecheck",
+      "run": "npm run typecheck"
+    },
+    {
+      "name": "Lint",
+      "run": "npm run lint"
+    },
+    {
+      "name": "Money aggregation guard",
+      "run": "npm run scan:money"
+    },
+    {
+      "name": "Unit tests",
+      "run": "npm test"
+    },
+    {
+      "name": "PostgreSQL integration tests",
+      "env": {
+        "CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE": "1",
+        "MANUAL_CASH_CI_DISPOSABLE_FIXTURE": "1"
+      },
+      "run": "npm run test:postgres"
+    },
+    {
+      "name": "Generate current schema contract on PostgreSQL 18",
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+      },
+      "run": "git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json\nnpm run schema:contract\ncp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json\nnpm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json\ngit checkout -- schema/current-schema-contract.pg18.json\n"
+    },
+    {
+      "name": "Upload PostgreSQL 18 schema contract",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "current-schema-contract-pg18",
+        "path": "/tmp/current-schema-contract.pg18.json",
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Characterize schema ownership on ephemeral PostgreSQL 18",
+      "env": {
+        "SCHEMA_OWNERSHIP_SOURCE_COMMIT_SHA": "${{ github.event.pull_request.head.sha || github.sha }}"
+      },
+      "run": "npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json"
+    },
+    {
+      "name": "Upload schema ownership characterization",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "schema-ownership-characterization-pg18",
+        "path": "/tmp/schema-ownership-characterization.json",
+        "if-no-files-found": "warn",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Operational verification journeys",
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+      },
+      "run": "npm run verify:ci"
+    },
+    {
+      "name": "Generate PostgreSQL 18 baseline manifest candidate",
+      "run": "npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json"
+    },
+    {
+      "name": "Verify committed baseline manifest against fresh generation",
+      "run": "npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json"
+    },
+    {
+      "name": "Upload baseline manifest candidate",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "baseline-schema-manifest-pg18",
+        "path": "/tmp/baseline-schema-manifest.json",
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Dependency audit",
+      "run": "node --import tsx scripts/ci-audit.mjs"
+    },
+    {
+      "name": "Upload exact dependency audit evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "scoped-dependency-audit",
+        "path": ".dependency-audit/full-attempt-1.json\n.dependency-audit/full-attempt-1.stderr.txt\n.dependency-audit/full-attempt-1.process.json\n.dependency-audit/full-attempt-2.json\n.dependency-audit/full-attempt-2.stderr.txt\n.dependency-audit/full-attempt-2.process.json\n.dependency-audit/full-attempt-3.json\n.dependency-audit/full-attempt-3.stderr.txt\n.dependency-audit/full-attempt-3.process.json\n.dependency-audit/production-attempt-1.json\n.dependency-audit/production-attempt-1.stderr.txt\n.dependency-audit/production-attempt-1.process.json\n.dependency-audit/production-attempt-2.json\n.dependency-audit/production-attempt-2.stderr.txt\n.dependency-audit/production-attempt-2.process.json\n.dependency-audit/production-attempt-3.json\n.dependency-audit/production-attempt-3.stderr.txt\n.dependency-audit/production-attempt-3.process.json\n.dependency-audit/exception-proof.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Raw body parser scanner",
+      "run": "npm run ci:scan:body"
+    },
+    {
+      "name": "Production build",
+      "run": "npm run build"
+    },
+    {
+      "name": "Build and smoke-test read-only preflight artifact",
+      "run": "npm run build:preflight"
+    },
+    {
+      "name": "Verify braces absence in actual runtime artifacts",
+      "run": "node scripts/verify-braces-runtime.mjs"
+    },
+    {
+      "name": "Upload exact runtime dependency proof",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "braces-runtime-absence",
+        "path": ".dependency-audit/runtime-proof.json",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Install Chromium for Settings browser journey",
+      "run": "npx playwright install --with-deps chromium"
+    },
+    {
+      "name": "Install PDF text inspection tool",
+      "run": "sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils"
+    },
+    {
+      "name": "HTTP security integration tests",
+      "run": "npm run test:security-http"
+    },
+    {
+      "name": "Upload daily report selected-date screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "daily-report-selected-date-ui",
+        "path": ".settings-ui-artifacts/daily-report-selected-day-1280.png\n.settings-ui-artifacts/daily-report-selected-day-390.png\n.settings-ui-artifacts/daily-report-selected-day-print-1280.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload patient statement cutoff screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-statement-cutoff-ui",
+        "path": ".settings-ui-artifacts/patient-statement-cutoff-screen.png\n.settings-ui-artifacts/patient-statement-cutoff-print.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload lab pricing UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "lab-pricing-ui-screenshots",
+        "path": ".settings-ui-artifacts/lab-pricing-scope.png\n.settings-ui-artifacts/lab-pricing-scope-mobile.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload pending booking UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "quick-booking-frozen-ui-screenshots",
+        "path": ".settings-ui-artifacts/quick-booking-frozen-desktop.png\n.settings-ui-artifacts/quick-booking-frozen-mobile.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload prescription patient context evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "prescription-patient-context-ui",
+        "path": ".settings-ui-artifacts/prescription-patient-context-warning-1280.png\n.settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-warning-390.png\n.settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-390.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload prescription diagnosis UI screenshot",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "prescription-diagnosis-ui-screenshot",
+        "path": ".settings-ui-artifacts/prescription-diagnosis-pinned.png",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload finance report visibility screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "finance-report-visibility-ui-screenshots",
+        "path": ".settings-ui-artifacts/finance-report-revenue-only-1280.png\n.settings-ui-artifacts/finance-report-revenue-only-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload finance shift read UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "finance-shift-read-ui-screenshots",
+        "path": ".settings-ui-artifacts/finance-shift-unavailable.png\n.settings-ui-artifacts/finance-shift-draft-restored.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload expense catalogue visibility screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "expense-catalogue-visibility-ui-screenshots",
+        "path": ".settings-ui-artifacts/expense-catalogue-restricted-1280.png\n.settings-ui-artifacts/expense-catalogue-restricted-390.png\n.settings-ui-artifacts/expense-catalogue-revoked-open-report.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload patient dossier ENDO print artifacts",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-dossier-endo-print-ui",
+        "path": ".settings-ui-artifacts/patient-dossier-endo-screen.png\n.settings-ui-artifacts/patient-dossier-endo-mobile-390.png\n.settings-ui-artifacts/patient-dossier-endo-print.png\n.settings-ui-artifacts/patient-dossier-endo-a4.pdf\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload pending clinical notes UI screenshot",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "clinical-visit-pending-notes-ui",
+        "path": ".settings-ui-artifacts/clinical-visit-pending-notes.png",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload clinical visit owner UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "clinical-visit-owner-ui",
+        "path": ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png\n.settings-ui-artifacts/clinical-visit-owner-pending-390.png\n.settings-ui-artifacts/clinical-visit-owner-ready-1280.png\n.settings-ui-artifacts/clinical-visit-owner-ready-390.png\n.settings-ui-artifacts/clinical-visit-owner-stay-1280.png\n.settings-ui-artifacts/clinical-visit-owner-stay-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload standalone orthodontic wire screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-adjustment-wire-defaults-ui",
+        "path": ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-390.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json\n.settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic regimen screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-regimen-defaults-ui",
+        "path": ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png\n.settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-ongoing-390.png\n.settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-1280.png\n.settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-390.png\n.settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload patient alert freshness screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-alert-freshness-ui",
+        "path": ".settings-ui-artifacts/patient-alert-freshness-1280.png\n.settings-ui-artifacts/patient-alert-freshness-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload case diagnosis reference screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "clinical-visit-diagnosis-reference-ui",
+        "path": ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic chairside entry screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "clinical-visit-ortho-entry-ui",
+        "path": ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png\n.settings-ui-artifacts/clinical-visit-ortho-entry-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload accounting carry-forward UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "accounting-carry-forward-ui",
+        "path": ".settings-ui-artifacts/accounting-carry-forward.png\n.settings-ui-artifacts/accounting-carry-forward-mobile.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload manual cash containment UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "manual-cash-containment-ui",
+        "path": ".settings-ui-artifacts/manual_cash_requires_linked_movement.png\n.settings-ui-artifacts/manual_cash_shift_busy.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload patient navigation draft screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-navigation-draft-ui",
+        "path": ".settings-ui-artifacts/patient-navigation-draft-1280.png\n.settings-ui-artifacts/patient-navigation-draft-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload compact patient context screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-compact-context-ui",
+        "path": ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-today-ordinary-390.png\n.settings-ui-artifacts/patient-compact-today-long-1280.png\n.settings-ui-artifacts/patient-compact-today-long-390.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-390.png\n.settings-ui-artifacts/patient-compact-treatment-long-1280.png\n.settings-ui-artifacts/patient-compact-treatment-long-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload endodontics cockpit screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "endodontics-cockpit-ui",
+        "path": ".settings-ui-artifacts/endodontics-cockpit-1280.png\n.settings-ui-artifacts/endodontics-cockpit-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload endodontics reference read safety evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "endodontics-reference-read-safety-ui",
+        "path": ".settings-ui-artifacts/endodontics-read-denied-1280.png\n.settings-ui-artifacts/endodontics-read-denied-390.png\n.settings-ui-artifacts/endodontics-read-denied-1280-bounds.json\n.settings-ui-artifacts/endodontics-read-denied-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload cockpit UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-cockpit-readiness-ui",
+        "path": ".settings-ui-artifacts/patient-cockpit-readiness-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-390.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload legacy UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "legacy-patient-guidance-ui",
+        "path": ".settings-ui-artifacts/legacy-patient-plan-1280.png\n.settings-ui-artifacts/legacy-patient-plan-390.png\n.settings-ui-artifacts/legacy-opening-guidance-1280.png\n.settings-ui-artifacts/legacy-opening-guidance-390.png\n.settings-ui-artifacts/legacy-current-collection-1280.png\n.settings-ui-artifacts/legacy-current-collection-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic diagnosis case screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-diagnosis-case-ui",
+        "path": ".settings-ui-artifacts/ortho-diagnosis-case-1280.png\n.settings-ui-artifacts/ortho-diagnosis-case-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload legacy archive reader screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "legacy-archive-reader-screenshots",
+        "path": ".settings-ui-artifacts/legacy-archive-reader-1280.png\n.settings-ui-artifacts/legacy-archive-reader-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic agreement read-state screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-package-read-state-ui",
+        "path": ".settings-ui-artifacts/ortho-package-unavailable-1280.png\n.settings-ui-artifacts/ortho-package-unavailable-390.png\n.settings-ui-artifacts/ortho-package-funded-1280.png\n.settings-ui-artifacts/ortho-package-funded-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload plan payment visibility screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "plan-payment-visibility-ui",
+        "path": ".settings-ui-artifacts/plan-payment-hidden-1280.png\n.settings-ui-artifacts/plan-payment-hidden-390.png\n.settings-ui-artifacts/plan-payment-denied-1280.png\n.settings-ui-artifacts/plan-payment-denied-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic record case screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-records-case-ui",
+        "path": ".settings-ui-artifacts/ortho-records-case-1280.png\n.settings-ui-artifacts/ortho-records-references-1280.png\n.settings-ui-artifacts/ortho-records-case-390.png\n.settings-ui-artifacts/ortho-records-profile-390.png\n.settings-ui-artifacts/ortho-records-references-390.png\n.settings-ui-artifacts/ortho-records-unavailable-390.png\n.settings-ui-artifacts/ortho-records-ceph-summary-1280.png\n.settings-ui-artifacts/ortho-records-ceph-summary-390.png\n.settings-ui-artifacts/ortho-records-capture-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload legacy checklist refresh screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "legacy-checklist-refresh-ui",
+        "path": ".settings-ui-artifacts/legacy-checklist-independent-1280.png\n.settings-ui-artifacts/legacy-checklist-independent-390.png\n.settings-ui-artifacts/legacy-checklist-unavailable-1280.png\n.settings-ui-artifacts/legacy-checklist-unavailable-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload commission category editor screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "commission-category-editor-ui",
+        "path": ".settings-ui-artifacts/commission-category-editor-1280.png\n.settings-ui-artifacts/commission-category-editor-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload long doctor phone filter screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "phone-doctor-filter-ui",
+        "path": ".settings-ui-artifacts/phone-doctor-filter-home-390.png\n.settings-ui-artifacts/phone-doctor-filter-appointments-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload Settings UI screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "settings-ui-screenshots",
+        "path": ".settings-ui-artifacts/",
+        "if-no-files-found": "ignore",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload reversed installment invoice label evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-invoice-recovery-labels-ui",
+        "path": ".settings-ui-artifacts/invoice-recovery-partial-1280.png\n.settings-ui-artifacts/invoice-recovery-credit-1280.png\n.settings-ui-artifacts/invoice-recovery-partial-390.png\n.settings-ui-artifacts/invoice-recovery-credit-390.png\n.settings-ui-artifacts/invoice-recovery-1280-bounds.json\n.settings-ui-artifacts/invoice-recovery-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic parent read safety acceptance",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-ortho-parent-read-safety-ui",
+        "path": ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload ceph pending-write uncertainty screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-ceph-post-uncertainty-ui",
+        "path": ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png\n.settings-ui-artifacts/patient-ceph-post-uncertain-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic photo completeness screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-photo-completeness-ui",
+        "path": ".settings-ui-artifacts/ortho-photo-completeness-1280.png\n.settings-ui-artifacts/ortho-photo-completeness-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload truthful orthodontic follow-up invitation evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-unbooked-followup-ui",
+        "path": ".settings-ui-artifacts/ortho-unbooked-followup-390.png\n.settings-ui-artifacts/ortho-unbooked-followup-1280.png\n.settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json\n.settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload Today readiness read lifetime evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "today-readiness-read-lifetime-ui",
+        "path": ".settings-ui-artifacts/today-readiness-1280.png\n.settings-ui-artifacts/today-readiness-390.png\n.settings-ui-artifacts/today-readiness-1280-bounds.json\n.settings-ui-artifacts/today-readiness-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload raw service category display screenshots",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "service-raw-category-display-ui",
+        "path": ".settings-ui-artifacts/service-raw-category-1280.png\n.settings-ui-artifacts/service-raw-category-390.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload legacy reconciliation preview evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "legacy-reconciliation-preview-ui",
+        "path": ".settings-ui-artifacts/legacy-reconciliation-preview-390.png\n.settings-ui-artifacts/legacy-reconciliation-preview-1280.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload Cases orthodontic section navigation evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-cases-navigation-ui",
+        "path": ".settings-ui-artifacts/patient-cases-navigation-1280.png\n.settings-ui-artifacts/patient-cases-navigation-390.png\n.settings-ui-artifacts/patient-cases-navigation-1280-bounds.json\n.settings-ui-artifacts/patient-cases-navigation-390-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload dental chart read and retry evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "dental-chart-read-retry-ui",
+        "path": ".settings-ui-artifacts/dental-chart-ready-390.png\n.settings-ui-artifacts/dental-chart-ready-1280.png\n.settings-ui-artifacts/dental-chart-ready-390-bounds.json\n.settings-ui-artifacts/dental-chart-ready-1280-bounds.json\n.settings-ui-artifacts/dental-chart-error-390.png\n.settings-ui-artifacts/dental-chart-error-1280.png\n.settings-ui-artifacts/dental-chart-error-390-bounds.json\n.settings-ui-artifacts/dental-chart-error-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic prescription truth evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-prescription-truth-ui",
+        "path": ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png\n.settings-ui-artifacts/ortho-prescription-unrecorded-1280.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-390.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-1280.png\n.settings-ui-artifacts/ortho-prescription-390-bounds.json\n.settings-ui-artifacts/ortho-prescription-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload orthodontic booking default evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "ortho-booking-default-ui",
+        "path": ".settings-ui-artifacts/ortho-booking-service-390.png\n.settings-ui-artifacts/ortho-booking-service-1280.png\n.settings-ui-artifacts/ortho-booking-duration-390.png\n.settings-ui-artifacts/ortho-booking-duration-1280.png\n.settings-ui-artifacts/ortho-booking-390-bounds.json\n.settings-ui-artifacts/ortho-booking-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload recall mutation refusal evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "recall-mutation-refusal-ui",
+        "path": ".settings-ui-artifacts/recall-refusal-390.png\n.settings-ui-artifacts/recall-refusal-1280.png\n.settings-ui-artifacts/recall-retry-390.png\n.settings-ui-artifacts/recall-retry-1280.png\n.settings-ui-artifacts/recall-refusal-390-bounds.json\n.settings-ui-artifacts/recall-refusal-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    },
+    {
+      "name": "Upload patient lab status refusal evidence",
+      "if": "always()",
+      "uses": "actions/upload-artifact@v4",
+      "with": {
+        "name": "patient-lab-status-refusal-ui",
+        "path": ".settings-ui-artifacts/lab-status-refusal-390.png\n.settings-ui-artifacts/lab-status-refusal-1280.png\n.settings-ui-artifacts/lab-status-retry-390.png\n.settings-ui-artifacts/lab-status-retry-1280.png\n.settings-ui-artifacts/lab-status-refusal-390-bounds.json\n.settings-ui-artifacts/lab-status-refusal-1280-bounds.json\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7
+      }
+    }
+  ],
+  "artifactPaths": {
+    "current-schema-contract-pg18": [
+      "/tmp/current-schema-contract.pg18.json"
+    ],
+    "schema-ownership-characterization-pg18": [
+      "/tmp/schema-ownership-characterization.json"
+    ],
+    "baseline-schema-manifest-pg18": [
+      "/tmp/baseline-schema-manifest.json"
+    ],
+    "scoped-dependency-audit": [
+      ".dependency-audit/full-attempt-1.json",
+      ".dependency-audit/full-attempt-1.stderr.txt",
+      ".dependency-audit/full-attempt-1.process.json",
+      ".dependency-audit/full-attempt-2.json",
+      ".dependency-audit/full-attempt-2.stderr.txt",
+      ".dependency-audit/full-attempt-2.process.json",
+      ".dependency-audit/full-attempt-3.json",
+      ".dependency-audit/full-attempt-3.stderr.txt",
+      ".dependency-audit/full-attempt-3.process.json",
+      ".dependency-audit/production-attempt-1.json",
+      ".dependency-audit/production-attempt-1.stderr.txt",
+      ".dependency-audit/production-attempt-1.process.json",
+      ".dependency-audit/production-attempt-2.json",
+      ".dependency-audit/production-attempt-2.stderr.txt",
+      ".dependency-audit/production-attempt-2.process.json",
+      ".dependency-audit/production-attempt-3.json",
+      ".dependency-audit/production-attempt-3.stderr.txt",
+      ".dependency-audit/production-attempt-3.process.json",
+      ".dependency-audit/exception-proof.json"
+    ],
+    "braces-runtime-absence": [
+      ".dependency-audit/runtime-proof.json"
+    ],
+    "daily-report-selected-date-ui": [
+      ".settings-ui-artifacts/daily-report-selected-day-1280.png",
+      ".settings-ui-artifacts/daily-report-selected-day-390.png",
+      ".settings-ui-artifacts/daily-report-selected-day-print-1280.png"
+    ],
+    "patient-statement-cutoff-ui": [
+      ".settings-ui-artifacts/patient-statement-cutoff-screen.png",
+      ".settings-ui-artifacts/patient-statement-cutoff-print.png"
+    ],
+    "lab-pricing-ui-screenshots": [
+      ".settings-ui-artifacts/lab-pricing-scope.png",
+      ".settings-ui-artifacts/lab-pricing-scope-mobile.png"
+    ],
+    "quick-booking-frozen-ui-screenshots": [
+      ".settings-ui-artifacts/quick-booking-frozen-desktop.png",
+      ".settings-ui-artifacts/quick-booking-frozen-mobile.png"
+    ],
+    "prescription-patient-context-ui": [
+      ".settings-ui-artifacts/prescription-patient-context-warning-1280.png",
+      ".settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json",
+      ".settings-ui-artifacts/prescription-patient-context-unavailable-1280.png",
+      ".settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json",
+      ".settings-ui-artifacts/prescription-patient-context-warning-390.png",
+      ".settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json",
+      ".settings-ui-artifacts/prescription-patient-context-unavailable-390.png",
+      ".settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json"
+    ],
+    "prescription-diagnosis-ui-screenshot": [
+      ".settings-ui-artifacts/prescription-diagnosis-pinned.png"
+    ],
+    "finance-report-visibility-ui-screenshots": [
+      ".settings-ui-artifacts/finance-report-revenue-only-1280.png",
+      ".settings-ui-artifacts/finance-report-revenue-only-390.png"
+    ],
+    "finance-shift-read-ui-screenshots": [
+      ".settings-ui-artifacts/finance-shift-unavailable.png",
+      ".settings-ui-artifacts/finance-shift-draft-restored.png"
+    ],
+    "expense-catalogue-visibility-ui-screenshots": [
+      ".settings-ui-artifacts/expense-catalogue-restricted-1280.png",
+      ".settings-ui-artifacts/expense-catalogue-restricted-390.png",
+      ".settings-ui-artifacts/expense-catalogue-revoked-open-report.png"
+    ],
+    "patient-dossier-endo-print-ui": [
+      ".settings-ui-artifacts/patient-dossier-endo-screen.png",
+      ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png",
+      ".settings-ui-artifacts/patient-dossier-endo-print.png",
+      ".settings-ui-artifacts/patient-dossier-endo-a4.pdf"
+    ],
+    "clinical-visit-pending-notes-ui": [
+      ".settings-ui-artifacts/clinical-visit-pending-notes.png"
+    ],
+    "clinical-visit-owner-ui": [
+      ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png",
+      ".settings-ui-artifacts/clinical-visit-owner-pending-390.png",
+      ".settings-ui-artifacts/clinical-visit-owner-ready-1280.png",
+      ".settings-ui-artifacts/clinical-visit-owner-ready-390.png",
+      ".settings-ui-artifacts/clinical-visit-owner-stay-1280.png",
+      ".settings-ui-artifacts/clinical-visit-owner-stay-390.png"
+    ],
+    "ortho-adjustment-wire-defaults-ui": [
+      ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png",
+      ".settings-ui-artifacts/ortho-adjustment-current-wires-390.png",
+      ".settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json",
+      ".settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json"
+    ],
+    "ortho-regimen-defaults-ui": [
+      ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png",
+      ".settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json",
+      ".settings-ui-artifacts/ortho-regimen-ongoing-390.png",
+      ".settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json",
+      ".settings-ui-artifacts/ortho-regimen-baseline-1280.png",
+      ".settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json",
+      ".settings-ui-artifacts/ortho-regimen-baseline-390.png",
+      ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png",
+      ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png",
+      ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png",
+      ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-regimen-baseline-390.png",
+      ".settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json"
+    ],
+    "patient-alert-freshness-ui": [
+      ".settings-ui-artifacts/patient-alert-freshness-1280.png",
+      ".settings-ui-artifacts/patient-alert-freshness-390.png"
+    ],
+    "clinical-visit-diagnosis-reference-ui": [
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png",
+      ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json"
+    ],
+    "clinical-visit-ortho-entry-ui": [
+      ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png",
+      ".settings-ui-artifacts/clinical-visit-ortho-entry-390.png"
+    ],
+    "accounting-carry-forward-ui": [
+      ".settings-ui-artifacts/accounting-carry-forward.png",
+      ".settings-ui-artifacts/accounting-carry-forward-mobile.png"
+    ],
+    "manual-cash-containment-ui": [
+      ".settings-ui-artifacts/manual_cash_requires_linked_movement.png",
+      ".settings-ui-artifacts/manual_cash_shift_busy.png"
+    ],
+    "patient-navigation-draft-ui": [
+      ".settings-ui-artifacts/patient-navigation-draft-1280.png",
+      ".settings-ui-artifacts/patient-navigation-draft-390.png"
+    ],
+    "patient-compact-context-ui": [
+      ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png",
+      ".settings-ui-artifacts/patient-compact-today-ordinary-390.png",
+      ".settings-ui-artifacts/patient-compact-today-long-1280.png",
+      ".settings-ui-artifacts/patient-compact-today-long-390.png",
+      ".settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png",
+      ".settings-ui-artifacts/patient-compact-treatment-ordinary-390.png",
+      ".settings-ui-artifacts/patient-compact-treatment-long-1280.png",
+      ".settings-ui-artifacts/patient-compact-treatment-long-390.png"
+    ],
+    "endodontics-cockpit-ui": [
+      ".settings-ui-artifacts/endodontics-cockpit-1280.png",
+      ".settings-ui-artifacts/endodontics-cockpit-390.png"
+    ],
+    "endodontics-reference-read-safety-ui": [
+      ".settings-ui-artifacts/endodontics-read-denied-1280.png",
+      ".settings-ui-artifacts/endodontics-read-denied-390.png",
+      ".settings-ui-artifacts/endodontics-read-denied-1280-bounds.json",
+      ".settings-ui-artifacts/endodontics-read-denied-390-bounds.json"
+    ],
+    "patient-cockpit-readiness-ui": [
+      ".settings-ui-artifacts/patient-cockpit-readiness-1280.png",
+      ".settings-ui-artifacts/patient-cockpit-readiness-390.png",
+      ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png",
+      ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png"
+    ],
+    "legacy-patient-guidance-ui": [
+      ".settings-ui-artifacts/legacy-patient-plan-1280.png",
+      ".settings-ui-artifacts/legacy-patient-plan-390.png",
+      ".settings-ui-artifacts/legacy-opening-guidance-1280.png",
+      ".settings-ui-artifacts/legacy-opening-guidance-390.png",
+      ".settings-ui-artifacts/legacy-current-collection-1280.png",
+      ".settings-ui-artifacts/legacy-current-collection-390.png"
+    ],
+    "ortho-diagnosis-case-ui": [
+      ".settings-ui-artifacts/ortho-diagnosis-case-1280.png",
+      ".settings-ui-artifacts/ortho-diagnosis-case-390.png"
+    ],
+    "legacy-archive-reader-screenshots": [
+      ".settings-ui-artifacts/legacy-archive-reader-1280.png",
+      ".settings-ui-artifacts/legacy-archive-reader-390.png"
+    ],
+    "ortho-package-read-state-ui": [
+      ".settings-ui-artifacts/ortho-package-unavailable-1280.png",
+      ".settings-ui-artifacts/ortho-package-unavailable-390.png",
+      ".settings-ui-artifacts/ortho-package-funded-1280.png",
+      ".settings-ui-artifacts/ortho-package-funded-390.png"
+    ],
+    "plan-payment-visibility-ui": [
+      ".settings-ui-artifacts/plan-payment-hidden-1280.png",
+      ".settings-ui-artifacts/plan-payment-hidden-390.png",
+      ".settings-ui-artifacts/plan-payment-denied-1280.png",
+      ".settings-ui-artifacts/plan-payment-denied-390.png"
+    ],
+    "ortho-records-case-ui": [
+      ".settings-ui-artifacts/ortho-records-case-1280.png",
+      ".settings-ui-artifacts/ortho-records-references-1280.png",
+      ".settings-ui-artifacts/ortho-records-case-390.png",
+      ".settings-ui-artifacts/ortho-records-profile-390.png",
+      ".settings-ui-artifacts/ortho-records-references-390.png",
+      ".settings-ui-artifacts/ortho-records-unavailable-390.png",
+      ".settings-ui-artifacts/ortho-records-ceph-summary-1280.png",
+      ".settings-ui-artifacts/ortho-records-ceph-summary-390.png",
+      ".settings-ui-artifacts/ortho-records-capture-bounds.json"
+    ],
+    "legacy-checklist-refresh-ui": [
+      ".settings-ui-artifacts/legacy-checklist-independent-1280.png",
+      ".settings-ui-artifacts/legacy-checklist-independent-390.png",
+      ".settings-ui-artifacts/legacy-checklist-unavailable-1280.png",
+      ".settings-ui-artifacts/legacy-checklist-unavailable-390.png"
+    ],
+    "commission-category-editor-ui": [
+      ".settings-ui-artifacts/commission-category-editor-1280.png",
+      ".settings-ui-artifacts/commission-category-editor-390.png"
+    ],
+    "phone-doctor-filter-ui": [
+      ".settings-ui-artifacts/phone-doctor-filter-home-390.png",
+      ".settings-ui-artifacts/phone-doctor-filter-appointments-390.png"
+    ],
+    "settings-ui-screenshots": [
+      ".settings-ui-artifacts/"
+    ],
+    "patient-invoice-recovery-labels-ui": [
+      ".settings-ui-artifacts/invoice-recovery-partial-1280.png",
+      ".settings-ui-artifacts/invoice-recovery-credit-1280.png",
+      ".settings-ui-artifacts/invoice-recovery-partial-390.png",
+      ".settings-ui-artifacts/invoice-recovery-credit-390.png",
+      ".settings-ui-artifacts/invoice-recovery-1280-bounds.json",
+      ".settings-ui-artifacts/invoice-recovery-390-bounds.json"
+    ],
+    "patient-ortho-parent-read-safety-ui": [
+      ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png",
+      ".settings-ui-artifacts/patient-ortho-parent-read-safety-390.png",
+      ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json",
+      ".settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json"
+    ],
+    "patient-ceph-post-uncertainty-ui": [
+      ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png",
+      ".settings-ui-artifacts/patient-ceph-post-uncertain-390.png"
+    ],
+    "ortho-photo-completeness-ui": [
+      ".settings-ui-artifacts/ortho-photo-completeness-1280.png",
+      ".settings-ui-artifacts/ortho-photo-completeness-390.png"
+    ],
+    "ortho-unbooked-followup-ui": [
+      ".settings-ui-artifacts/ortho-unbooked-followup-390.png",
+      ".settings-ui-artifacts/ortho-unbooked-followup-1280.png",
+      ".settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json",
+      ".settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json"
+    ],
+    "today-readiness-read-lifetime-ui": [
+      ".settings-ui-artifacts/today-readiness-1280.png",
+      ".settings-ui-artifacts/today-readiness-390.png",
+      ".settings-ui-artifacts/today-readiness-1280-bounds.json",
+      ".settings-ui-artifacts/today-readiness-390-bounds.json"
+    ],
+    "service-raw-category-display-ui": [
+      ".settings-ui-artifacts/service-raw-category-1280.png",
+      ".settings-ui-artifacts/service-raw-category-390.png"
+    ],
+    "legacy-reconciliation-preview-ui": [
+      ".settings-ui-artifacts/legacy-reconciliation-preview-390.png",
+      ".settings-ui-artifacts/legacy-reconciliation-preview-1280.png",
+      ".settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json",
+      ".settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json",
+      ".settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png",
+      ".settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png"
+    ],
+    "patient-cases-navigation-ui": [
+      ".settings-ui-artifacts/patient-cases-navigation-1280.png",
+      ".settings-ui-artifacts/patient-cases-navigation-390.png",
+      ".settings-ui-artifacts/patient-cases-navigation-1280-bounds.json",
+      ".settings-ui-artifacts/patient-cases-navigation-390-bounds.json"
+    ],
+    "dental-chart-read-retry-ui": [
+      ".settings-ui-artifacts/dental-chart-ready-390.png",
+      ".settings-ui-artifacts/dental-chart-ready-1280.png",
+      ".settings-ui-artifacts/dental-chart-ready-390-bounds.json",
+      ".settings-ui-artifacts/dental-chart-ready-1280-bounds.json",
+      ".settings-ui-artifacts/dental-chart-error-390.png",
+      ".settings-ui-artifacts/dental-chart-error-1280.png",
+      ".settings-ui-artifacts/dental-chart-error-390-bounds.json",
+      ".settings-ui-artifacts/dental-chart-error-1280-bounds.json"
+    ],
+    "ortho-prescription-truth-ui": [
+      ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png",
+      ".settings-ui-artifacts/ortho-prescription-unrecorded-1280.png",
+      ".settings-ui-artifacts/ortho-prescription-closed-custom-390.png",
+      ".settings-ui-artifacts/ortho-prescription-closed-custom-1280.png",
+      ".settings-ui-artifacts/ortho-prescription-390-bounds.json",
+      ".settings-ui-artifacts/ortho-prescription-1280-bounds.json"
+    ],
+    "ortho-booking-default-ui": [
+      ".settings-ui-artifacts/ortho-booking-service-390.png",
+      ".settings-ui-artifacts/ortho-booking-service-1280.png",
+      ".settings-ui-artifacts/ortho-booking-duration-390.png",
+      ".settings-ui-artifacts/ortho-booking-duration-1280.png",
+      ".settings-ui-artifacts/ortho-booking-390-bounds.json",
+      ".settings-ui-artifacts/ortho-booking-1280-bounds.json"
+    ],
+    "recall-mutation-refusal-ui": [
+      ".settings-ui-artifacts/recall-refusal-390.png",
+      ".settings-ui-artifacts/recall-refusal-1280.png",
+      ".settings-ui-artifacts/recall-retry-390.png",
+      ".settings-ui-artifacts/recall-retry-1280.png",
+      ".settings-ui-artifacts/recall-refusal-390-bounds.json",
+      ".settings-ui-artifacts/recall-refusal-1280-bounds.json"
+    ],
+    "patient-lab-status-refusal-ui": [
+      ".settings-ui-artifacts/lab-status-refusal-390.png",
+      ".settings-ui-artifacts/lab-status-refusal-1280.png",
+      ".settings-ui-artifacts/lab-status-retry-390.png",
+      ".settings-ui-artifacts/lab-status-retry-1280.png",
+      ".settings-ui-artifacts/lab-status-refusal-390-bounds.json",
+      ".settings-ui-artifacts/lab-status-refusal-1280-bounds.json"
+    ]
+  }
+}

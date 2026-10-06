@@ -1,0 +1,104 @@
+{
+  "state": "PREPARED_SOURCE_ONLY_NOT_PUBLISHED_NOT_EXECUTED",
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "baselineRef": "05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f",
+  "baselineWorkflowBlob": "cb390bbe7a88b730143c5884afcbbeda971d2825",
+  "provisionalClinicalTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+  "provisionalClinicalParentTree": "5c62d79bbd4c645793946c8c29201487ff5af9d5",
+  "finalReconciledBase": null,
+  "sourceFiles": [
+    {
+      "path": ".github/ci/contract.json",
+      "bytes": 107722,
+      "sha256": "740c5f7844d40c795e27923219eb9db80c31f4be604a6fa57dcd6a83f4f49078",
+      "gitBlob": "bda4a2790148f598d22c6931daf277d894aa3c93",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/evidence.py",
+      "bytes": 24207,
+      "sha256": "45c5aa231fbc226cacdce5b05e1e3db4be586ec1726fa2a022a705da8bb7afb9",
+      "gitBlob": "2e8f8d6a48f57b13e876971c81aae4ad6883b7f0",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/tests/fixtures.py",
+      "bytes": 4611,
+      "sha256": "da8eb6f956341c6bf0d94174575c2b02e059f51929cf07a65db4f973bf9d81df",
+      "gitBlob": "3204d3ddf908750c7cdb161fba3b501f15661784",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/tests/test_evidence.py",
+      "bytes": 13492,
+      "sha256": "0b71b824555f61cc87a83651653c4c4934d50a13129a1706dd71cf9c01fffb86",
+      "gitBlob": "6e31f64b405f180290294c9698e93bcbff5d904d",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/tests/test_workflow.py",
+      "bytes": 5342,
+      "sha256": "643324504cedee7303655158e3543c9b9ad48b3beadf14ca51ae68d840c65c34",
+      "gitBlob": "190a7b3572e6ac2f49dd4382d9262cf598b0e3de",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/workflow.json",
+      "bytes": 59794,
+      "sha256": "9bd5dcde59f49e7ad14ddd3099895de3eb0a5199ae96a8e33c0c032d79e66ffc",
+      "gitBlob": "b629396e99f10325b2494f7a4e6e652a3667a6af",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/ci/workflow.py",
+      "bytes": 14774,
+      "sha256": "72d44a594e891f895a8b2fc7f00ba802da97dd08f7a4618b49bd1e02e2e1451a",
+      "gitBlob": "5e9ef9ca9941611ff02797e4aef1384d329a560d",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "bytes": 52996,
+      "sha256": "c84ad7d5703357e7ce5bf7b109f77210c4110fcafc1b78cc6d4dd965882fc89b",
+      "gitBlob": "36ffbe5a04f866c14933d2c1587a8f87a0509de3",
+      "originalGitBlob": "cb390bbe7a88b730143c5884afcbbeda971d2825",
+      "originalSha256": "24f3b059c140a36210eb181d568be6ea935419635de88ac0ff0fc7428c670e2f"
+    },
+    {
+      "path": "__tests__/environment-parity.test.ts",
+      "bytes": 39564,
+      "sha256": "efe6383ed2ba40e5e9ce79def93bf459975e9c4bbf1d78dc1025607e5026e5cf",
+      "gitBlob": "6fdce92935c1da1138b34a4d14eb7b5b5594c06e",
+      "originalGitBlob": "9f483c2d5dfdf3edebf904ec9a9f8a3ad634dc94",
+      "originalSha256": "11a97c073a780e3c6e6891f191df4238efb6710f6e00b891d7d072d514e867fe"
+    },
+    {
+      "path": "docs/CI_PARALLEL_GATES.md",
+      "bytes": 6989,
+      "sha256": "98a2ced65bb285e1cc800446cfb35667d9538d0b4419585db0e28f73e92d9dc7",
+      "gitBlob": "17ed3227b240078e13350e72c3c47ad829c62faf",
+      "originalGitBlob": null,
+      "originalSha256": null
+    },
+    {
+      "path": "docs/ENVIRONMENT_CI_PARITY.md",
+      "bytes": 26491,
+      "sha256": "eace598f1f86558331fc3e5c0053e51fdf2c8ee4f68b83cdfe8745bd87f3dbf0",
+      "gitBlob": "359668881c2bce609a53d80da52a5f179497f6e7",
+      "originalGitBlob": "ee259924a7b2abfac81fa543274d5ac6521210b2",
+      "originalSha256": "431c9f7fef3eede05a97edd8103ff34e2ad87a6deb86636f53d316ad059e526e"
+    }
+  ],
+  "changedRepositoryFiles": 11,
+  "patchSha256": "7ac7938a94f14b3e2a018e7b4267f74ca63177ada6b683de07c3c7e26d1bcba0",
+  "runtimeTestsRun": false,
+  "independentReviewComplete": false,
+  "publicationAuthorized": false
+}
