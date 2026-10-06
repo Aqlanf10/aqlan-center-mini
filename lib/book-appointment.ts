@@ -11,6 +11,7 @@
  * وقناة الطلب (`channel`) تُسجَّل للتدقيق فقط — لا تغيّر قاعدةً واحدة.
  */
 import { isAdmin } from "./roles";
+import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import type { Role } from "./roles";
 import {
   getAppointment, insertAppointmentOnClient, moveAppointmentOnClient, recordAudit,
@@ -48,6 +49,8 @@ export interface BookAppointmentInput {
   durationMinutes?: number | null;
   serviceId?: number | null;
   appointmentType?: string | null;
+  /** Restricts the untouched board proposal; never grants extra booking authority. */
+  bookingIntent?: "ortho_follow_up" | null;
   note?: string | null;
   doctorId?: number | null;
   /** كرسيٌّ بعينه، أو `null` = «لم يُخصَّص» — وهو يستهلك طاقةً عامة لا ينفيها. */
@@ -302,6 +305,15 @@ export async function bookAppointment(
     serviceId: input.serviceId ?? null,
     appointmentType: input.appointmentType ?? null,
   });
+  // Validate the very same resolved object used for capacity and persistence.
+  // A stale client catalogue must not silently book changed/removed identities,
+  // and missing explicit IDs must not fall through the shared legacy resolver.
+  if (input.bookingIntent === "ortho_follow_up"
+    && (!input.serviceId || input.appointmentType !== "follow_up"
+      || service?.id !== input.serviceId || !isPeriodicFollowupService(service))) {
+    return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
+  }
+
 
   /* المدّة: ما طلبه المستخدم، وإلا مدّة الخدمة، وإلا ثلاثون. والخدمة تُقترح ولا
      تفرض: قد يحتاج مريضٌ بعينه ضعف المدّة. */

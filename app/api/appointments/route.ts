@@ -94,6 +94,7 @@ export async function POST(request: Request) {
       durationMinutes: source.durationMinutes == null ? null : Number(source.durationMinutes),
       serviceId: integer("serviceId"),
       appointmentType: text("appointmentType", 60),
+      bookingIntent: source.bookingIntent === "ortho_follow_up" ? "ortho_follow_up" : undefined,
       note: text("note", 300),
       doctorId: integer("doctorId"),
       chairNo: source.chairNo == null || source.chairNo === "" ? null : Number(source.chairNo),

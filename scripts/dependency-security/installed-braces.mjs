@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { createRequire, isBuiltin } from "node:module";
+import { validateReviewedOverrides } from "./reviewed-overrides.mjs";
 import { BRACES_EXCEPTION as PIN } from "../../lib/braces-exception-pins.mjs";
 import { canonical, equal, invariant, isRecord, packagePath } from "../../lib/scoped-braces-exception.mjs";
 
@@ -54,7 +55,8 @@ export function validateRootManifest(manifest, lock) {
   const root = lock.packages[""];
   invariant(manifest.name === root.name && manifest.version === root.version, "root package/lock identity mismatch");
   for (const field of [...mapFields, "devDependencies"]) invariant(equal(dependencyMap(manifest, field), dependencyMap(root, field)), `root package/lock ${field} mismatch`);
-  invariant(!Object.hasOwn(manifest, "overrides") && !Object.hasOwn(manifest, "workspaces"), "unreviewed overrides/workspaces");
+  invariant(!Object.hasOwn(manifest, "workspaces"), "unreviewed workspaces");
+  validateReviewedOverrides(manifest);
   invariant(manifest.devDependencies?.braces === "file:vendor/braces-3.0.3-local.tgz", "local braces package disposition removed or changed");
   invariant(!Object.hasOwn(manifest.dependencies ?? {}, "braces") && !Object.hasOwn(manifest.optionalDependencies ?? {}, "braces"), "braces declared in production root");
 }

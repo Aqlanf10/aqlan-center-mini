@@ -920,3 +920,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Only synthetic default-service/duration controls and their geometry.
+      - name: Upload orthodontic booking default evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-booking-default-ui
+          path: |
+            .settings-ui-artifacts/ortho-booking-service-390.png
+            .settings-ui-artifacts/ortho-booking-service-1280.png
+            .settings-ui-artifacts/ortho-booking-duration-390.png
+            .settings-ui-artifacts/ortho-booking-duration-1280.png
+            .settings-ui-artifacts/ortho-booking-390-bounds.json
+            .settings-ui-artifacts/ortho-booking-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

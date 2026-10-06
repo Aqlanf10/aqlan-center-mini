@@ -8,6 +8,7 @@ import {
 import { Modal } from "./Modal";
 import { APPOINTMENT_TYPES } from "@/lib/schedule";
 import type { AppointmentService } from "@/lib/appointment-services";
+import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "@/lib/ortho-booking-intent";
 import type { DoctorSlot } from "@/lib/appointment-availability";
 
 function tomorrow() {
@@ -23,20 +24,37 @@ interface PatientMatch {
   phone: string | null;
 }
 
+// A catalogue row is a real scheduling service, not an invented clinical action.
+// Do not infer a periodic visit from an arbitrary orthodontic/legacy mapping.
+function periodicFollowupService(services: AppointmentService[]) {
+  const matches = services.filter(isPeriodicFollowupService);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function QuickAppointmentModal({
   patientId,
   patientName,
+  bookingIntent,
   isOpen,
   onClose,
   onSuccess,
 }: {
   patientId?: number;
   patientName?: string;
+  /** Explicit entry-point intent; ordinary quick booking retains its defaults. */
+  bookingIntent?: "ortho_follow_up";
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const formId = useId();
+  const initialType = bookingIntent === "ortho_follow_up" ? "follow_up" : "consultation";
+  const initialDuration = APPOINTMENT_TYPES.find((type) => type.id === initialType)!.defaultDuration;
+  const bookingChoiceEdited = useRef(false);
+  const bookingStarted = useRef(false);
+  const [protectFollowupIntent, setProtectFollowupIntent] = useState(bookingIntent === "ortho_follow_up");
+  const [catalogueAttempt, setCatalogueAttempt] = useState(0);
+  const durationEdited = useRef(false);
   const [selectedPatientId, setSelectedPatientId] = useState<number | undefined>(patientId);
   const [newPatientCreated, setNewPatientCreated] = useState(false);
   const [selectedPatientName, setSelectedPatientName] = useState<string>(patientName || "");
@@ -46,8 +64,8 @@ export function QuickAppointmentModal({
 
   const [date, setDate] = useState(tomorrow);
   const [time, setTime] = useState("16:00");
-  const [appointmentType, setAppointmentType] = useState<string>("consultation");
-  const [duration, setDuration] = useState("30");
+  const [appointmentType, setAppointmentType] = useState<string>(initialType);
+  const [duration, setDuration] = useState(String(initialDuration));
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const bookingInFlight = useRef(false);
@@ -145,18 +163,33 @@ export function QuickAppointmentModal({
 
   useEffect(() => {
     if (!isOpen) return;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const res = await fetch("/api/settings/appointment-services", { cache: "no-store" });
+        const res = await fetch("/api/settings/appointment-services", { cache: "no-store", signal: controller.signal });
         if (!res.ok) return;
         const data = await res.json();
-        if (Array.isArray(data?.services)) setServices(data.services);
+        // A late response cannot replace a closed session or the request being saved.
+        if (controller.signal.aborted || bookingInFlight.current) return;
+        if (Array.isArray(data?.services)) {
+          setServices(data.services);
+          if (bookingIntent === "ortho_follow_up" && !bookingChoiceEdited.current && !bookingStarted.current) {
+            const service = periodicFollowupService(data.services);
+            if (service) {
+              setSelectedServiceId(service.id);
+              setAppointmentType("follow_up");
+              if (!durationEdited.current) setDuration(String(service.defaultDurationMinutes));
+              if (!service.requiresChair) setChairNo("");
+            }
+          }
+        }
         if (Number.isFinite(data?.chairs)) setChairs(Number(data.chairs));
       } catch {
         /* الكتالوج تعذّر — تبقى الأنواع المدمجة أدناه. */
       }
     })();
-  }, [isOpen]);
+    return () => controller.abort();
+  }, [isOpen, bookingIntent, catalogueAttempt]);
 
   useEffect(() => {
     if (patientId) {
@@ -191,6 +224,8 @@ export function QuickAppointmentModal({
   if (!isOpen) return null;
 
   const handleTypeChange = (typeId: string) => {
+    bookingChoiceEdited.current = true;
+    setProtectFollowupIntent(false);
     setAppointmentType(typeId);
     setSelectedServiceId(undefined);
     const preset = APPOINTMENT_TYPES.find((t) => t.id === typeId);
@@ -200,12 +235,15 @@ export function QuickAppointmentModal({
   /* اختيار الخدمة يقترح مدّتها ولا يفرضها: مريضٌ بعينه قد يحتاج ضعفها، والمدّة
      المكتوبة هي ما يُحجز فعلًا وما يُحفظ لقطةً مع الموعد. */
   const handleServiceChange = (service: AppointmentService) => {
+    bookingChoiceEdited.current = true;
+    setProtectFollowupIntent(false);
     setSelectedServiceId(service.id);
     setAppointmentType(service.legacyType ?? "");
     setDuration(String(service.defaultDurationMinutes));
     if (!service.requiresChair) setChairNo("");
   };
 
+  const needsFollowupService = protectFollowupIntent && !selectedServiceId;
   const activeService = services.find((service) => service.id === selectedServiceId);
   /* خدمةٌ لا تشغل كرسيًّا لا يُعرض لها اختيار كرسي — والحقل يُفرَّغ لا يُخفى وقيمته باقية. */
   const chairApplies = !activeService || activeService.requiresChair;
@@ -256,6 +294,11 @@ export function QuickAppointmentModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (bookingInFlight.current || busy || !date || !time) return;
+    const guardedFollowup = bookingIntent === "ortho_follow_up" && !bookingChoiceEdited.current;
+    if (guardedFollowup && !selectedServiceId) {
+      setError(FOLLOWUP_SERVICE_REVIEW_MESSAGE);
+      return;
+    }
     const name = (patientQuery || selectedPatientName).trim();
     if (!selectedPatientId && !name) {
       setError("يرجى اختيار مريض أو كتابة اسم المريض الجديد.");
@@ -264,6 +307,7 @@ export function QuickAppointmentModal({
 
     // Lock the whole booking, including patient creation, before the first await.
     // State alone cannot reject another submit from the same render.
+    bookingStarted.current = true;
     bookingInFlight.current = true;
     setBusy(true);
     setError(null);
@@ -312,6 +356,7 @@ export function QuickAppointmentModal({
           durationMinutes: Number(duration) || 30,
           serviceId: selectedServiceId || undefined,
           appointmentType: appointmentType || undefined,
+          bookingIntent: guardedFollowup ? "ortho_follow_up" : undefined,
           note: note.trim() || undefined,
           doctorId: selectedDoctorId || undefined,
           chairNo: chairApplies && chairNo ? Number(chairNo) : undefined,
@@ -335,6 +380,10 @@ export function QuickAppointmentModal({
         return;
       }
       if (!res.ok) {
+        if (guardedFollowup && data?.message === FOLLOWUP_SERVICE_REVIEW_MESSAGE) {
+          setSelectedServiceId(undefined);
+          bookingStarted.current = false;
+        }
         setError(data?.message ?? "تعذّر حجز الموعد.");
         return;
       }
@@ -351,8 +400,12 @@ export function QuickAppointmentModal({
       setPhone("");
       setDate(tomorrow());
       setTime("16:00");
-      setAppointmentType("consultation");
-      setDuration("30");
+      setAppointmentType(initialType);
+      setDuration(String(initialDuration));
+      bookingChoiceEdited.current = false;
+      bookingStarted.current = false;
+      setProtectFollowupIntent(bookingIntent === "ortho_follow_up");
+      durationEdited.current = false;
       setNote("");
       setSelectedDoctorId(undefined);
       onSuccess();
@@ -637,6 +690,18 @@ export function QuickAppointmentModal({
 
           {/* اختيار نوع الموعد */}
           <div>
+            {bookingIntent === "ortho_follow_up" && !selectedServiceId && appointmentType === "follow_up" ? (
+              <p role="status" className="mb-2 text-xs font-bold text-navy-800">
+                نوع الموعد: متابعة دورية / شد تقويم — راجع الخدمة والمدة قبل التأكيد
+              </p>
+            ) : null}
+            {needsFollowupService ? (
+              <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                <p role="status">{FOLLOWUP_SERVICE_REVIEW_MESSAGE}</p>
+                <button type="button" onClick={() => setCatalogueAttempt((attempt) => attempt + 1)}
+                  className="mt-1 min-h-11 px-2 font-bold underline">إعادة تحميل الخدمات</button>
+              </div>
+            ) : null}
             <div id={`${formId}-type`} className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
               <span>نوع الموعد / الإجراء</span>
               <span className="text-[10px] text-slate-600">يحدد المدة التقديرية تلقائياً</span>
@@ -720,9 +785,12 @@ export function QuickAppointmentModal({
             <select
                 id={`${formId}-duration`}
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
+              onChange={(e) => { durationEdited.current = true; setDuration(e.target.value); }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
             >
+              {!["15", "20", "30", "45", "60", "90"].includes(duration) ? (
+                <option value={duration}>{duration} دقيقة</option>
+              ) : null}
               <option value="15">15 دقيقة (متابعة سريعة / شد سلك / كشف مستعجل)</option>
               <option value="20">20 دقيقة (طوارئ وتسكين ألم)</option>
               <option value="30">30 دقيقة (كشف واستشارة / حشوة بسيطة / تنظيف)</option>
@@ -842,7 +910,7 @@ export function QuickAppointmentModal({
             </button>
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || needsFollowupService}
               className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-bold text-white shadow-xs hover:opacity-90 disabled:opacity-50"
             >
               {busy ? "جارٍ الحجز…" : "تأكيد الحجز"}
