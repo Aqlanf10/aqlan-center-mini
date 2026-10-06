@@ -8,8 +8,15 @@ import { isPeriodontalId, parsePeriodontalCommand, parsePeriodontalSites,
 /** Unregistered domain: no production adapter, route, initializer or UI calls this factory. */
 export interface PeriodontalPorts {
   pool: DbPool;
-  /** Must use requireSession + the canonical canAccessPatient on EVERY invocation. */
-  authorizePatient(patientId: number): Promise<{ username: string; role: string } | null>;
+  /**
+   * Trusted adapter must call requireSession(client), then canonical
+   * canAccessPatient(session, patientId, undefined, client) on EVERY invocation.
+   * Both use this transaction's client: current account FOR SHARE plus one
+   * granting ownership row stay locked through audit/commit. A preflight check,
+   * pool query or cached principal is not an implementation of this contract.
+   * No production adapter is registered by this inactive foundation.
+   */
+  authorizePatient(client: DbClient, patientId: number): Promise<{ username: string; role: string } | null>;
   /** Activation must pass the canonical throwing insertAuditRow, on this same client. */
   insertAudit(client: DbClient, input: AuditInput): Promise<void>;
 }
@@ -65,19 +72,23 @@ export function createPeriodontalDomain(ports: PeriodontalPorts) {
     ok: true; replayed: boolean; record: PeriodontalRecord;
   }> {
     if (!isPeriodontalId(patientId)) return refusal("invalid", "رقم المريض غير صالح.");
-    const authorized = await ports.authorizePatient(patientId);
-    if (!authorized || !authorized.username.trim() || !["doctor", "admin"].includes(authorized.role)) return denied();
-    const principal = { username: authorized.username, role: authorized.role };
-    const checked = parsePeriodontalCommand(raw);
-    if (!checked.ok) return refusal("invalid", checked.message);
-    // Detached, validated values: changing a caller's draft during an await cannot retarget this save.
-    const command = checked.value;
-    const hash = fingerprint(patientId, principal.username, command);
+    // Detach caller-owned intent before any connection/account/row-lock await.
+    // Validation (including capture exceptions) is disclosed only after locked admission.
+    const checked: ReturnType<typeof parsePeriodontalCommand> = (() => {
+      try { return parsePeriodontalCommand(raw); }
+      catch { return { ok: false, message: "طلب قياسات اللثة غير صالح." }; }
+    })();
     try {
       return await withTransaction(ports.pool, async (client) => {
         // Patient first: serialize first saves, corrections, canonical merge and patient deletion.
         const { rows: patients } = await client.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [patientId]);
+        const authorized = await ports.authorizePatient(client, patientId);
+        if (!authorized || !authorized.username.trim() || !["doctor", "admin"].includes(authorized.role)) return denied();
+        const principal = { username: authorized.username, role: authorized.role };
+        if (!checked.ok) return refusal("invalid", checked.message);
         if (!patients[0]) return missing();
+        const command = checked.value;
+        const hash = fingerprint(patientId, principal.username, command);
         const { rows: replays } = await client.query<{
           id: number; patient_id: number; tooth_code: number; request_fingerprint: string;
         }>(`SELECT id, patient_id, tooth_code, request_fingerprint FROM periodontal_records
@@ -127,13 +138,19 @@ export function createPeriodontalDomain(ports: PeriodontalPorts) {
     ok: true; records: PeriodontalRecord[]; nextBeforeId: number | null;
   }> {
     if (!isPeriodontalId(patientId)) return refusal("invalid", "رقم المريض غير صالح.");
-    if (!await ports.authorizePatient(patientId)) return denied();
-    if (history && (!isValidTooth(history.toothCode) || (history.beforeId !== null && !isPeriodontalId(history.beforeId)))) {
-      return refusal("invalid", "مرجع سجل السن غير صالح.");
-    }
-    const scope = history ? { ...history } : undefined;
+    let scope: typeof history;
+    let invalidHistory = false;
+    try {
+      scope = history ? { toothCode: history.toothCode, beforeId: history.beforeId } : undefined;
+      invalidHistory = Boolean(scope && (!isValidTooth(scope.toothCode)
+        || (scope.beforeId !== null && !isPeriodontalId(scope.beforeId))));
+    } catch { invalidHistory = true; }
     return withTransaction(ports.pool, async (client) => {
       const { rows: patients } = await client.query("SELECT id FROM patients WHERE id = $1 FOR KEY SHARE", [patientId]);
+      if (!await ports.authorizePatient(client, patientId)) return denied();
+      if (invalidHistory) {
+        return refusal("invalid", "مرجع سجل السن غير صالح.");
+      }
       if (!patients[0]) return missing();
       const { rows } = await client.query<RecordRow>(scope
         ? `${RECORD_SELECT} WHERE r.patient_id = $1 AND r.tooth_code = $2 AND ($3::int IS NULL OR r.id < $3)

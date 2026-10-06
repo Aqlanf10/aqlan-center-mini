@@ -1,4 +1,4 @@
-import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday } from "./db";
+import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import type { DoctorPermissions } from "./doctor-permissions";
 import { canViewMoney } from "./roles";
@@ -8,21 +8,25 @@ export async function canAccessPatient(
   session: SessionPayload,
   patientId: number,
   permission?: keyof DoctorPermissions,
+  client?: DbClient,
 ): Promise<boolean> {
+  if (client && session.expiresAt < Date.now()) return false;
   if (session.role === "admin" || session.role === "reception") return true;
   /* (P0-F) المساعد السريري: مرضى زيارات اليوم وحدهم — وبلا صلاحيات طبيبٍ إضافية (مدفوعات، أشعة…). */
   if (session.role === "assistant") {
     if (permission) return false;
-    return patientHasVisitToday(patientId).catch(() => false);
+    const allowed = await (client ? patientHasVisitToday(patientId, client) : patientHasVisitToday(patientId)).catch(() => false);
+    return allowed && (!client || session.expiresAt >= Date.now());
   }
   if (session.role !== "doctor") return false;
   try {
-    const user = await findUserByUsername(session.username);
-    if (!user || !user.isActive) return false;
+    const user = client ? await findUserByUsername(session.username, client) : await findUserByUsername(session.username);
+    if (!user || !user.isActive || (client && session.expiresAt < Date.now())) return false;
     if (permission && user.permissions?.[permission] !== true) return false;
     if (user.permissions?.canViewAllPatients) return true;
     if (!user.partyId) return false;
-    return await doctorOwnsPatient(user.partyId, patientId);
+    const allowed = await (client ? doctorOwnsPatient(user.partyId, patientId, client) : doctorOwnsPatient(user.partyId, patientId));
+    return allowed && (!client || session.expiresAt >= Date.now());
   } catch { return false; }
 }
 

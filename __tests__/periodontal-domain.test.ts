@@ -16,7 +16,7 @@ function fixture() {
   let saved: { records: Stored[]; audits: AuditInput[] } | null = null;
   let failAudit = false; let failRead = false; let failCommit = false; let duplicateRace = false;
   const principal: { username: string; role: string } = { username: "synthetic-doctor", role: "doctor" };
-  const authorizePatient = vi.fn(async (_patientId: number): Promise<typeof principal | null> => principal);
+  const authorizePatient = vi.fn(async (_client: DbClient, _patientId: number): Promise<typeof principal | null> => principal);
   const release = vi.fn();
   const query = async <T>(sql: string, values: unknown[] = []): Promise<QueryResult<T>> => {
     calls.push({ sql, values: structuredClone(values) });
@@ -75,6 +75,15 @@ const command = (key = "perio:request-001", expectedHeadId: number | null = null
   return { toothCode, expectedHeadId, requestKey: key, sites };
 };
 
+function pausedFixture(stage: "connect" | "authorization") {
+  const f = fixture(); let open!: () => void; let entered!: () => void;
+  const wait = new Promise<void>((resolve) => { open = resolve; });
+  const waiting = new Promise<void>((resolve) => { entered = resolve; });
+  if (stage === "connect") f.connect.mockImplementationOnce(async () => { entered(); await wait; return f.client; });
+  else f.authorizePatient.mockImplementationOnce(async () => { entered(); await wait; return f.principal; });
+  return { ...f, waiting, open };
+}
+
 describe("unregistered periodontal domain protocol, with no SQL execution", () => {
   it("writes one detached six-site revision and audit inside the existing transaction helper", async () => {
     const f = fixture(); const result = await f.domain.save(1, command());
@@ -86,11 +95,14 @@ describe("unregistered periodontal domain protocol, with no SQL execution", () =
       details: { recordId: 1, toothCode: 16, priorRecordId: null, depthSites: 1, bleedingSitesRecorded: 1 } })]);
     expect(f.calls[0].sql).toBe("BEGIN"); expect(f.calls[1].sql).toContain("patients WHERE id = $1 FOR UPDATE");
     expect(f.calls.at(-1)?.sql).toBe("COMMIT"); expect(f.release).toHaveBeenCalledOnce();
+    expect(f.authorizePatient).toHaveBeenCalledExactlyOnceWith(f.client, 1);
   });
-  it.each(["reception", "assistant", "cashier", "accountant", "portal", "other"])("refuses %s before payload inspection or connection", async (role) => {
+  it.each(["reception", "assistant", "cashier", "accountant", "portal", "other"])("refuses %s before validation details, missing-patient disclosure or mutation", async (role) => {
     const f = fixture(); f.principal.role = role;
-    expect(await f.domain.save(1, null)).toMatchObject({ ok: false, reason: "denied" });
-    expect(f.connect).not.toHaveBeenCalled();
+    expect(await f.domain.save(3, null)).toMatchObject({ ok: false, reason: "denied" });
+    expect(f.authorizePatient).toHaveBeenCalledExactlyOnceWith(f.client, 3);
+    expect(f.records()).toEqual([]); expect(f.audits()).toEqual([]);
+    expect(f.calls.map((call) => call.sql)).toEqual(["BEGIN", "SELECT id FROM patients WHERE id = $1 FOR UPDATE", "COMMIT"]);
   });
   it("rechecks current access before reads, writes and old replay keys", async () => {
     const f = fixture(); await f.domain.save(1, command()); f.authorizePatient.mockResolvedValue(null);
@@ -98,17 +110,35 @@ describe("unregistered periodontal domain protocol, with no SQL execution", () =
     expect(await f.domain.read(1)).toMatchObject({ reason: "denied" });
     expect(f.authorizePatient).toHaveBeenCalledTimes(3); expect(f.records()).toHaveLength(1);
   });
+  it("authorizes on the active client after locking but before any replay or observation query", async () => {
+    const f = fixture();
+    f.authorizePatient.mockImplementation(async (client, patientId) => {
+      expect(client).toBe(f.client); expect(patientId).toBe(1);
+      expect(f.calls.at(-1)?.sql).toMatch(/FROM patients .*FOR (UPDATE|KEY SHARE)$/);
+      return f.principal;
+    });
+    await f.domain.save(1, command()); await f.domain.save(1, command()); await f.domain.read(1);
+    expect(f.authorizePatient).toHaveBeenCalledTimes(3); expect(f.audits()).toHaveLength(1);
+  });
+  it("fails closed on authorization error with no observation or audit", async () => {
+    const f = fixture(); f.authorizePatient.mockRejectedValue(new Error("authorization lock failed"));
+    await expect(f.domain.save(1, command())).rejects.toThrow("authorization lock failed");
+    expect(f.records()).toEqual([]); expect(f.audits()).toEqual([]);
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+  });
   it("allows an admin without pretending that the author is a treating doctor", async () => {
     const f = fixture(); f.principal.role = "admin"; f.principal.username = "synthetic-admin";
     expect(await f.domain.save(1, command())).toMatchObject({ ok: true, record: { recordedBy: "synthetic-admin" } });
     expect(f.audits()[0].actorRole).toBe("admin");
   });
-  it("refuses invalid identities and payloads before opening a transaction", async () => {
+  it("refuses invalid identities before connecting and validates payload only after locked admission", async () => {
     const f = fixture();
     expect(await f.domain.save(0, command())).toMatchObject({ reason: "invalid" });
     expect(await f.domain.save(1, { ...command(), visitId: 4 })).toMatchObject({ reason: "invalid" });
     expect(await f.domain.read(1, { toothCode: 99, beforeId: null })).toMatchObject({ reason: "invalid" });
-    expect(f.connect).not.toHaveBeenCalled();
+    expect(f.connect).toHaveBeenCalledTimes(2);
+    expect(f.authorizePatient).toHaveBeenCalledTimes(2);
+    expect(f.records()).toEqual([]); expect(f.audits()).toEqual([]);
   });
   it("keeps a missing patient distinct from a successfully empty chart", async () => {
     const f = fixture();
@@ -187,6 +217,62 @@ describe("unregistered periodontal domain protocol, with no SQL execution", () =
     if (!result.ok) throw new Error(result.message);
     expect(result.records.map((r) => r.id)).toEqual([2, 1]);
     expect(f.records().map((r) => ({ ...r, patient_id: 0 }))).toEqual(before.map((r) => ({ ...r, patient_id: 0 })));
+  });
+  it.each(["connect", "authorization"] as const)("captures nested save intent before the %s wait", async (stage) => {
+    const f = pausedFixture(stage); const input = command(); const original = structuredClone(input);
+    const pending = f.domain.save(1, input);
+    try {
+      await f.waiting;
+      input.toothCode = 17; input.expectedHeadId = 123; input.requestKey = "perio:mutated-key";
+      input.sites[0].depthMm = "8"; input.sites[1].bleeding = true; input.sites.reverse();
+    } finally { f.open(); }
+    expect(await pending).toMatchObject({ ok: true, record: { toothCode: 16, priorRecordId: null } });
+    expect(f.records()[0]).toMatchObject({ tooth_code: 16, request_key: original.requestKey, prior_record_id: null });
+    expect(f.records()[0].sites[0].depthMm).toBe("3.5"); expect(f.records()[0].sites[1].bleeding).toBe(false);
+    expect(await f.domain.save(1, original)).toMatchObject({ ok: true, replayed: true });
+    expect(f.records()).toHaveLength(1); expect(f.audits()).toHaveLength(1);
+  });
+  it.each(["connect", "authorization"] as const)("captures history tooth and cursor before the %s wait", async (stage) => {
+    const f = fixture(); await f.domain.save(1, command()); await f.domain.save(1, command("perio:other-0001", null, 17));
+    let open!: () => void; let entered!: () => void;
+    const wait = new Promise<void>((resolve) => { open = resolve; });
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    if (stage === "connect") f.connect.mockImplementationOnce(async () => { entered(); await wait; return f.client; });
+    else f.authorizePatient.mockImplementationOnce(async () => { entered(); await wait; return f.principal; });
+    const history = { toothCode: 16, beforeId: 2 as number | null }; const pending = f.domain.read(1, history);
+    try { await waiting; history.toothCode = 17; history.beforeId = 1; } finally { open(); }
+    const result = await pending; expect(result).toMatchObject({ ok: true, nextBeforeId: null });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.records.map((r) => [r.id, r.toothCode])).toEqual([[1, 16]]);
+  });
+  it("retains an invalid invocation even when the save input becomes valid during admission", async () => {
+    const f = pausedFixture("authorization"); const input = command(); input.toothCode = 99;
+    const pending = f.domain.save(1, input);
+    try { await f.waiting; input.toothCode = 16; } finally { f.open(); }
+    expect(await pending).toMatchObject({ reason: "invalid" }); expect(f.records()).toEqual([]); expect(f.audits()).toEqual([]);
+  });
+  it("retains an invalid history invocation even when its cursor becomes valid during admission", async () => {
+    const f = pausedFixture("authorization"); const history = { toothCode: 16, beforeId: -1 };
+    const pending = f.domain.read(1, history);
+    try { await f.waiting; history.beforeId = 1; } finally { f.open(); }
+    expect(await pending).toMatchObject({ reason: "invalid" });
+  });
+  it("returns denial for invalid and throwing command capture without validation or existence disclosure", async () => {
+    const f = fixture(); f.authorizePatient.mockResolvedValue(null);
+    const throwing = Object.defineProperty(command(), "toothCode", { get() { throw new Error("private getter detail"); } });
+    expect(await f.domain.save(3, null)).toMatchObject({ reason: "denied" });
+    expect(await f.domain.save(3, throwing)).toMatchObject({ reason: "denied" });
+    expect(f.records()).toEqual([]); expect(f.audits()).toEqual([]);
+  });
+  it("returns denial for throwing history capture without validation or existence disclosure", async () => {
+    const f = fixture(); f.authorizePatient.mockResolvedValue(null);
+    const history = Object.defineProperty({ toothCode: 16, beforeId: null }, "beforeId", { get() { throw new Error("private cursor detail"); } });
+    expect(await f.domain.read(3, history)).toMatchObject({ reason: "denied" });
+  });
+  it("returns only a generic invalid result for capture errors after authorized admission", async () => {
+    const f = fixture(); const throwing = Object.defineProperty(command(), "toothCode", { get() { throw new Error("private getter detail"); } });
+    const result = await f.domain.save(1, throwing); expect(result).toMatchObject({ reason: "invalid" });
+    expect(JSON.stringify(result)).not.toContain("private getter detail"); expect(f.audits()).toEqual([]);
   });
   it("supplies a fail-closed history count for the existing deletion owner", async () => {
     const f = fixture(); expect(await periodontalHistoryCount(f.client, 1)).toBe(0);
