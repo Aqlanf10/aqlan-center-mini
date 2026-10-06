@@ -131,6 +131,24 @@ export function sqlValueForColumn(value: unknown, dataType: string | undefined):
   return sqlValue(value);
 }
 
+/**
+ * Preserve PostgreSQL timestamp precision before a driver can create a JS Date.
+ * PostgreSQL's JSON datetime encoder emits ISO text independently of DateStyle,
+ * retaining microseconds, timezone offsets and infinity. Extracting its scalar
+ * text also preserves SQL NULL. Only backup SELECTs use this projection; normal
+ * application reads keep their existing Date/number/JSON/array decoders.
+ */
+export function backupSelectColumns(columns: readonly { column_name: string; data_type: string }[]): string {
+  if (!columns.some(({ data_type }) =>
+    data_type === "timestamp with time zone" || data_type === "timestamp without time zone")) return "*";
+  return columns.map(({ column_name, data_type }) => {
+    const identifier = `"${column_name.replace(/"/g, '""')}"`;
+    return data_type === "timestamp with time zone" || data_type === "timestamp without time zone"
+      ? `(pg_catalog.to_json(${identifier}) #>> '{}') AS ${identifier}`
+      : identifier;
+  }).join(", ");
+}
+
 /** literal مصفوفة PostgreSQL: '{...}' بعناصر مقتبسة ومهرَّبة. */
 function arrayLiteral(value: unknown[]): string {
   if (value.length === 0) return "'{}'";
