@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER,
   STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName, toUniversal,
   calculatePerioAssessment, type ConditionStage, type ToothCondition, type ToothRecord, type ToothState,
   type ToothPerioRecord, type PerioAssessmentSummary, type PerioSite,
 } from "@/lib/dental";
-import { useSession } from "./SessionProvider";
+import { useSession, type SessionInfo } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 
@@ -44,12 +44,35 @@ const ORDERED_CONDITIONS: ToothCondition[] = [
 
 export function DentalChart({ patientId }: { patientId: number }) {
   const session = useSession();
+  // A chart and its unsaved tooth editor belong to this patient and principal.
+  // A keyed lifetime also protects A → B → A navigation from older callbacks.
+  const owner = JSON.stringify([patientId, session?.username, session?.role,
+    Object.entries(session?.permissions ?? {}).sort(([a], [b]) => a.localeCompare(b))]);
+  return <DentalChartWorkspace key={owner} patientId={patientId} session={session} />;
+}
+
+function DentalChartWorkspace({ patientId, session }: { patientId: number; session: SessionInfo | null }) {
   const canEdit = isAdmin(session?.role) || session?.role === "doctor";
 
   const [records, setRecords] = useState<ToothRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [readReady, setReadReady] = useState(false);
+  const lifetime = useRef<symbol | null>(null);
+  const activeRead = useRef<AbortController | null>(null);
+  const readable = useRef(false);
+  const saving = useRef(false);
+
+  useLayoutEffect(() => {
+    lifetime.current = Symbol("dental chart owner");
+    return () => {
+      lifetime.current = null;
+      readable.current = false;
+      activeRead.current?.abort();
+      activeRead.current = null;
+    };
+  }, []);
   const [selected, setSelected] = useState<number | null>(null);
   const [showPrimary, setShowPrimary] = useState(false);
   const [numberingSystem, setNumberingSystem] = useState<"fdi" | "universal">("fdi");
@@ -65,17 +88,35 @@ export function DentalChart({ patientId }: { patientId: number }) {
 
 
   const load = useCallback(async () => {
+    const owner = lifetime.current;
+    if (!owner) return;
+    activeRead.current?.abort();
+    const controller = new AbortController();
+    activeRead.current = controller;
+    const current = () => lifetime.current === owner && activeRead.current === controller;
+    readable.current = false;
+    setReadReady(false);
+    setRecords([]);
     setLoading(true);
+    setError(null);
     try {
-      const response = await fetch(`/api/patients/${patientId}/chart`, { cache: "no-store" });
+      const response = await fetch(`/api/patients/${patientId}/chart`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
       const payload = await response.json();
+      if (!current()) return;
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      if (!Array.isArray(payload?.records)) throw new Error("تعذّر قراءة مخطط الأسنان.");
       setRecords(payload.records as ToothRecord[]);
-      setError(null);
+      readable.current = true;
+      setReadReady(true);
     } catch (loadError) {
+      if (!current()) return;
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
-      setLoading(false);
+      if (current()) {
+        activeRead.current = null;
+        setLoading(false);
+      }
     }
   }, [patientId]);
 
@@ -85,30 +126,57 @@ export function DentalChart({ patientId }: { patientId: number }) {
   const chart = useMemo(() => buildChart(records), [records]);
   const summary = useMemo(() => chartSummary(chart), [chart]);
 
-  const save = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+  const save = useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
+    const owner = lifetime.current;
+    if (!owner || !canEdit || !readable.current || saving.current) return false;
+    saving.current = true; // Same-event repeated clicks cannot dispatch twice.
     setBusy(true);
+    let definiteRejection = false;
     try {
       const response = await fetch(`/api/patients/${patientId}/chart`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (lifetime.current !== owner) return false;
+      definiteRejection = [400, 409, 422].includes(response.status);
       const payload = await response.json();
+      if (lifetime.current !== owner) return false;
       if (!response.ok) throw new Error(payload?.message ?? "تعذّر الحفظ.");
       setError(null);
       await load();
+      return lifetime.current === owner;
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
+      if (lifetime.current === owner) {
+        if (!definiteRejection) {
+          // A transport/5xx failure may follow a committed chart event. Never
+          // offer a blind retry, and retire data after an authorization failure.
+          readable.current = false;
+          setReadReady(false);
+          setRecords([]);
+        }
+        setError(definiteRejection
+          ? saveError instanceof Error ? saveError.message : "تعذّر الحفظ."
+          : "تعذّر تأكيد الحفظ. أعد تحميل المخطط وتحقّق من السجل قبل إعادة المحاولة.");
+      }
+      return false;
     } finally {
-      setBusy(false);
+      if (lifetime.current === owner) {
+        saving.current = false;
+        setBusy(false);
+      }
     }
-  }, [busy, load, patientId]);
+  }, [canEdit, load, patientId]);
+
+  const pickTooth = useCallback((code: number) => {
+    if (lifetime.current && readable.current && !saving.current) setSelected(code);
+  }, []);
 
   const state = selected !== null ? (chart.get(selected) ?? null) : null;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+    <div data-testid="dental-chart-workspace" data-read-state={loading ? "loading" : readReady ? "ready" : "error"}
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <h2 className="text-base font-extrabold text-navy-900">مخطط الأسنان السريري</h2>
@@ -120,7 +188,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
         {/* أزرار التبديل والخيارات */}
         <div className="flex flex-wrap items-center gap-2">
           {/* تبديل وضع المخطط: أسنان / لثة */}
-          <div className="flex rounded-xl bg-slate-100 p-1">
+          <fieldset disabled={busy} className="flex rounded-xl bg-slate-100 p-1">
             <button
               type="button"
               onClick={() => setChartMode("odontogram")}
@@ -143,7 +211,7 @@ export function DentalChart({ patientId }: { patientId: number }) {
             >
               <span>مخطط اللثة (Perio Chart)</span>
             </button>
-          </div>
+          </fieldset>
 
           {/* نظام الترقيم: FDI / Universal */}
           <div className="flex rounded-xl border border-slate-200 bg-white p-0.5">
@@ -185,14 +253,14 @@ export function DentalChart({ patientId }: { patientId: number }) {
         <>
           {/* ملخص المخطط السني */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-2.5 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
+            {readReady ? <div className="flex flex-wrap items-center gap-3">
               <span className="font-bold text-slate-700">الملخص:</span>
               <span className="text-slate-600">المسجّل: <strong>{summary.charted}</strong></span>
               <span className="text-red-700">تسوّس: <strong>{summary.caries}</strong></span>
               <span className="text-amber-700">مخطط: <strong>{summary.planned}</strong></span>
               <span className="text-emerald-700">منجز: <strong>{summary.completed}</strong></span>
               <span className="text-slate-500">مفقود: <strong>{summary.absent}</strong></span>
-            </div>
+            </div> : null}
 
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
@@ -207,30 +275,35 @@ export function DentalChart({ patientId }: { patientId: number }) {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+          {readReady ? <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
             <div className="mx-auto w-fit">
-              <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
+              <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} />
               {showPrimary ? (
                 <>
-                  <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
+                  <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} small />
                   <div className="my-1 h-px bg-slate-200" />
-                  <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} small />
+                  <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} small />
                 </>
               ) : (
                 <div className="my-2 h-px bg-slate-200" />
               )}
-              <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={setSelected} system={numberingSystem} />
+              <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} />
             </div>
-          </div>
+          </div> : null}
 
           {loading ? (
             <p className="mt-3 text-center text-xs text-slate-400">جارٍ التحميل…</p>
+          ) : !readReady ? (
+            <button type="button" onClick={() => { void load(); }}
+              className="mt-3 min-h-[44px] rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold text-navy-900">
+              إعادة تحميل مخطط الأسنان
+            </button>
           ) : selected === null ? (
             <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs font-semibold text-slate-400">
               انقر أي سن لترى حالته وتسجّل الإجراءات السريرية عليه.
             </p>
           ) : (
-            <ToothPanel
+            <ToothPanel key={selected}
               toothCode={selected} state={state} canEdit={canEdit} busy={busy}
               onSave={save} onClose={() => setSelected(null)} system={numberingSystem}
               onSwitchToPerio={(code) => {
@@ -258,11 +331,12 @@ export function DentalChart({ patientId }: { patientId: number }) {
   );
 }
 
-function Row({ teeth, chart, selected, onPick, system = "fdi", small = false }: {
+function Row({ teeth, chart, selected, onPick, disabled = false, system = "fdi", small = false }: {
   teeth: number[];
   chart: Map<number, ToothState>;
   selected: number | null;
   onPick: (code: number) => void;
+  disabled?: boolean;
   system?: "fdi" | "universal";
   small?: boolean;
 }) {
@@ -280,6 +354,7 @@ function Row({ teeth, chart, selected, onPick, system = "fdi", small = false }: 
           <button
             key={code}
             onClick={() => onPick(code)}
+            disabled={disabled}
             title={`${toothName(code)} (FDI: ${code}, Univ: ${toUniversal(code)})`}
             aria-label={toothName(code)}
             className={`flex flex-col items-center rounded-md px-0.5 py-1 transition-colors ${
@@ -328,7 +403,7 @@ function ToothPanel({
   state: ToothState | null;
   canEdit: boolean;
   busy: boolean;
-  onSave: (body: Record<string, unknown>) => void;
+  onSave: (body: Record<string, unknown>) => Promise<boolean>;
   onClose: () => void;
   system?: "fdi" | "universal";
   onSwitchToPerio?: (code: number) => void;
@@ -337,6 +412,15 @@ function ToothPanel({
   const [stage, setStage] = useState<ConditionStage>("existing");
   const [surfaces, setSurfaces] = useState<string[]>([]);
   const [note, setNote] = useState("");
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const saveForTooth = async (body: Record<string, unknown>) => {
+    if (!mounted.current) return false;
+    return onSave(body);
+  };
 
   const needsSurfaces = condition === "caries" || condition === "filling" || condition === "sealant";
 
@@ -393,6 +477,7 @@ function ToothPanel({
             <button
               type="button"
               onClick={() => onSwitchToPerio(toothCode)}
+              disabled={busy}
               className="flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors"
             >
               <span>🌿 سبر اللثة (Perio Probe)</span>
@@ -431,7 +516,7 @@ function ToothPanel({
                 <button
                   type="button"
                   onClick={() =>
-                    onSave({
+                    saveForTooth({
                       toothCode,
                       condition: plan.condition,
                       stage: "completed",
@@ -451,7 +536,7 @@ function ToothPanel({
       ) : null}
 
       {canEdit ? (
-        <div className="space-y-4">
+        <fieldset disabled={busy} className="space-y-4">
           {/* اختيار نوع الحالة السريرية */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-2">
@@ -565,16 +650,18 @@ function ToothPanel({
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
-              onClick={() => {
-                onSave({
+              onClick={async () => {
+                const saved = await saveForTooth({
                   toothCode,
                   condition,
                   stage,
                   surfaces: surfaces.join("") || null,
                   note: note.trim() || null,
                 });
-                setNote("");
-                setSurfaces([]);
+                if (saved && mounted.current) {
+                  setNote((current) => current === note ? "" : current);
+                  setSurfaces((current) => current === surfaces ? [] : current);
+                }
               }}
               disabled={busy}
               className="flex-1 rounded-xl bg-navy-900 py-3 text-xs font-extrabold text-white shadow-md shadow-navy-900/20 hover:bg-navy-800 active:scale-95 disabled:opacity-40 transition-all"
@@ -582,7 +669,7 @@ function ToothPanel({
               {busy ? "جارٍ الحفظ..." : "تثبيت الحالة على المخطط السني"}
             </button>
           </div>
-        </div>
+        </fieldset>
       ) : (
         <p className="text-xs font-semibold text-slate-400">
           المخطط السني يُسجَّل بواسطة الطبيب أو المساعد المرخص.
