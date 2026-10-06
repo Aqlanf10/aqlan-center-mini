@@ -141,12 +141,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Object.prototype.hasOwnProperty.call(RETAINER_LABEL, source.retainer)) {
         return NextResponse.json({ message: "نوع مثبّت غير معروف." }, { status: 400 });
       }
-      const on = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
-        ? source.retainerOn : today;
+      const explicitOn = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
+        ? source.retainerOn : null;
       const saved = await setRetainer({
         id: caseId,
         retainer: source.retainer as keyof typeof RETAINER_LABEL,
-        deliveredOn: source.retainer === "none" ? null : on,
+        deliveredOn: source.retainer === "none" ? null : explicitOn ?? today,
+        preserveExistingDeliveryDate: explicitOn === null,
       });
       if (!saved) return NextResponse.json({ message: "الحالة مغلقة أو غير موجودة." }, { status: 409 });
       return NextResponse.json({ ok: true });
