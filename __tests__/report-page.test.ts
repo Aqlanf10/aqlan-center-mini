@@ -318,6 +318,119 @@ describe("daily report late-response containment", () => {
   });
 });
 
+describe("daily report JSON completion after effect retirement", () => {
+  it.each([
+    ["success", "pending"], ["rejection", "pending"],
+    ["success", "success"], ["rejection", "success"],
+    ["success", "failure"], ["rejection", "failure"],
+  ] as const)("ignores late JSON %s while the newer selected day is %s", async (outcome, currentState) => {
+    const a = addDays(today(), -1), b = addDays(today(), -3);
+    harness.states[DATE] = a;
+    const oldBody = deferred<unknown>();
+    const bodyStarted = deferred<void>();
+    const current = deferred<Response>();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ status: 200, ok: true, json: () => {
+        bodyStarted.resolve();
+        return oldBody.promise;
+      } } as Response)
+      .mockReturnValueOnce(current.promise);
+    const cleanup = start();
+    // The first ownership check has passed and json() is really in flight.
+    // Retiring before this barrier would only exercise stale response headers.
+    await bodyStarted.promise;
+    cleanup?.();
+    expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true);
+    harness.states[DATE] = b;
+    start();
+    if (currentState === "success") current.resolve(response(dayPayload(b, 42)));
+    if (currentState === "failure") current.resolve(response({ message: "Current report failure" }, 500));
+    await settle();
+    if (outcome === "success") oldBody.resolve(dayPayload(a, 17));
+    else oldBody.reject(new Error("Obsolete JSON failure"));
+    const html = await settle();
+    expect(html).not.toContain(friendlyDateLong(a));
+    if (currentState === "success") {
+      expect(harness.states[LOADED]).toEqual({ requestedDate: b, feed: dayPayload(b, 42) });
+      expect(html).toContain(`تقرير يوم: ${friendlyDateLong(b)}`);
+      expect(shareText(html)).toContain("الحضور: 42");
+    } else {
+      noReport(html);
+      expect(harness.states[LOADED]).toBeNull();
+    }
+    expect(harness.states[FAILURE]).toEqual(currentState === "failure"
+      ? { requestedDate: b, message: "Current report failure" } : null);
+    expect(harness.states[LOADING]).toBe(currentState === "pending");
+    if (currentState === "pending") {
+      expect(html).toContain("جارٍ إعداد التقرير اليومي");
+      current.resolve(response(dayPayload(b, 42)));
+      expect(await settle()).toContain(`تقرير يوم: ${friendlyDateLong(b)}`);
+    }
+  });
+});
+
+describe("daily report StrictMode same-date effect replay", () => {
+  it.each([
+    ["headers", "success", false], ["headers", "rejection", false],
+    ["headers", "success", true], ["headers", "rejection", true],
+    ["body", "success", false], ["body", "rejection", false],
+    ["body", "success", true], ["body", "rejection", true],
+  ] as const)("ignores retired setup %s %s (replacement completes first: %s)", async (boundary, outcome, currentFirst) => {
+    const selected = today();
+    const oldHeaders = deferred<Response>();
+    const oldBody = deferred<unknown>();
+    const bodyStarted = deferred<void>();
+    const current = deferred<Response>();
+    const delayedResponse = { status: 200, ok: true, json: () => {
+      bodyStarted.resolve();
+      return oldBody.promise;
+    } } as Response;
+    vi.mocked(fetch)
+      .mockReturnValueOnce(boundary === "headers" ? oldHeaders.promise : Promise.resolve(delayedResponse))
+      .mockReturnValueOnce(current.promise);
+    render();
+    const setup = harness.effects[0];
+    const cleanup = setup();
+    // Headers: synchronous setup → cleanup → setup, as StrictMode replays it.
+    // Body: also prove ownership if cleanup occurs after json() has started.
+    if (boundary === "body") await bodyStarted.promise;
+    // Use the exact same committed effect: no date or retry change, no new
+    // render closure and no reset of the page's state.
+    if (typeof cleanup === "function") cleanup();
+    const replacementCleanup = setup();
+    expect(fetchedDate(0)).toBe(selected);
+    expect(fetchedDate(1)).toBe(selected);
+    expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(vi.mocked(fetch).mock.calls[1][1]?.signal?.aborted).toBe(false);
+    if (currentFirst) {
+      current.resolve(response(dayPayload(selected, 23)));
+      await settle();
+    }
+    if (boundary === "headers") {
+      if (outcome === "success") oldHeaders.resolve(response(dayPayload(selected, 17)));
+      else oldHeaders.reject(new Error("Retired same-date request failure"));
+    } else {
+      if (outcome === "success") oldBody.resolve(dayPayload(selected, 17));
+      else oldBody.reject(new Error("Retired same-date JSON failure"));
+    }
+    const html = await settle();
+    expect(harness.states[FAILURE]).toBeNull();
+    expect(harness.states[LOADING]).toBe(!currentFirst);
+    if (currentFirst) {
+      expect(harness.states[LOADED]).toEqual({ requestedDate: selected, feed: dayPayload(selected, 23) });
+      expect(shareText(html)).toContain("الحضور: 23");
+    } else {
+      noReport(html);
+      expect(harness.states[LOADED]).toBeNull();
+      expect(html).toContain("جارٍ إعداد التقرير اليومي");
+      current.resolve(response(dayPayload(selected, 23)));
+      expect(shareText(await settle())).toContain("الحضور: 23");
+    }
+    expect(fetch).toHaveBeenCalledTimes(2);
+    if (typeof replacementCleanup === "function") replacementCleanup();
+  });
+});
+
 describe("daily report failure, retry and invalid dates", () => {
   it("leaves nothing from a previous success printable or shareable when the new day fails", async () => {
     const a = addDays(today(), -1), b = addDays(today(), -3);

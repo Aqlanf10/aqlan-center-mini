@@ -23,6 +23,7 @@ type Pending = {
   viewAtRequest: { date: string | null; hasReport: boolean; hasPrintAction: boolean; hasShare: boolean };
   respond: (status: number) => void;
   body: (payload: unknown) => void;
+  rejectBody: () => void;
 };
 type FixtureWindow = Window & { __dailyReports: Pending[] };
 const json = (route: Route, body: unknown, status = 200) =>
@@ -81,8 +82,9 @@ async function fixture(width = 1280) {
       if (url.origin !== window.location.origin || url.pathname !== "/api/report") return originalFetch(input, init);
       let respond!: (response: Response) => void;
       let body!: (payload: unknown) => void;
+      let rejectBody!: (error: Error) => void;
       const response = new Promise<Response>((resolve) => { respond = resolve; });
-      const payload = new Promise<unknown>((resolve) => { body = resolve; });
+      const payload = new Promise<unknown>((resolve, reject) => { body = resolve; rejectBody = reject; });
       // The date selection has committed by the time its passive effect fetches.
       // Capture synchronously: guards that clear old state inside that effect
       // have not committed yet, so polling the DOM afterward would miss the gap.
@@ -90,6 +92,7 @@ async function fixture(width = 1280) {
       const dateInput = report?.querySelector<HTMLInputElement>('input[type="date"]');
       const record: Pending = {
         url: url.toString(), bodyStarted: false, body,
+        rejectBody: () => rejectBody(new Error("Obsolete JSON failure")),
         viewAtRequest: {
           date: dateInput?.value ?? null,
           hasReport: Boolean(report?.querySelector('[aria-label="الحضور"]')),
@@ -122,6 +125,12 @@ async function body(page: Page, index: number, payload: unknown) {
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   }, { i: index, payload });
 }
+async function rejectBody(page: Page, index: number) {
+  await page.evaluate(async (i) => {
+    (window as unknown as FixtureWindow).__dailyReports[i].rejectBody();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }, index);
+}
 async function complete(page: Page, index: number, payload: unknown, status = 200) {
   await respond(page, index, status);
   await body(page, index, payload);
@@ -134,6 +143,16 @@ async function noReport(page: Page) {
   await expect.poll(() => page.locator('[aria-label="الحضور"]').count()).toBe(0);
   await expect.poll(() => page.locator(".print-actions").count()).toBe(0);
   await expect.poll(() => page.locator('a[href*="wa.me"]').count()).toBe(0);
+}
+async function assertReportBounds(page: Page, width: number) {
+  const bounds = await page.getByTestId("daily-report").evaluate((report) => {
+    const { left, right, width: renderedWidth } = report.getBoundingClientRect();
+    return { left, right, renderedWidth, scrollWidth: report.scrollWidth, clientWidth: report.clientWidth };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(width + 1);
+  expect(bounds.renderedWidth).toBeGreaterThan(0);
+  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth + 1);
 }
 async function shareParams(page: Page) {
   const href = await page.locator('a[href*="wa.me"]').getAttribute("href");
@@ -153,8 +172,10 @@ describe("built daily report page date identity and stale-response containment",
       expect(shared).toContain("الحضور: 17");
       expect(shared).toContain("تراكيب متأخرة: 3");
       expect(await f.page.getByText("تراكيب متأخرة بالمختبر: 3", { exact: false }).count()).toBe(1);
-      const screenshot = process.env.REPORT_PAGE_UI_SCREENSHOT ?? ".settings-ui-artifacts/daily-report-selected-day.png";
+      // Keep the output names aligned with the exact CI artifact allowlist.
+      const screenshot = ".settings-ui-artifacts/daily-report-selected-day.png";
       await mkdir(dirname(screenshot), { recursive: true });
+      await assertReportBounds(f.page, width);
       await f.page.getByTestId("daily-report").screenshot({ path: screenshot.replace(/\.png$/, `-${width}.png`) });
 
       // Browser print keeps the center identity and the report's own date, and
@@ -164,6 +185,7 @@ describe("built daily report page date identity and stale-response containment",
       expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).isVisible()).toBe(true);
       expect(await f.page.locator('a[href*="wa.me"]').isHidden()).toBe(true);
       expect(await f.page.getByTestId("daily-report").locator(".print-actions").isHidden()).toBe(true);
+      await assertReportBounds(f.page, width);
       if (width === 1280) {
         await f.page.getByTestId("daily-report").screenshot({ path: screenshot.replace(/\.png$/, "-print-1280.png") });
       }
@@ -238,6 +260,52 @@ describe("built daily report page date identity and stale-response containment",
       await complete(f.page, 4, dayPayload(a, 23, 1));
       await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(a)}`, { exact: false }).count()).toBe(1);
       expect(await shareParams(f.page)).toContain(`تقرير ${friendlyDateLong(a)}`);
+      f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it.each([
+    ["success", "pending"], ["rejection", "pending"],
+    ["success", "success"], ["rejection", "success"],
+    ["success", "failure"], ["rejection", "failure"],
+  ] as const)("contains late JSON %s after the newer day is %s", async (outcome, currentState) => {
+    const f = await fixture();
+    try {
+      const today = await requestDate(f.page, 0);
+      const a = addDays(today, -1), b = addDays(today, -3);
+      await complete(f.page, 0, dayPayload(today, 17, 3));
+      await expect.poll(() => f.page.locator('[aria-label="الحضور"]').count()).toBe(1);
+      const dateInput = f.page.getByTestId("daily-report").locator('input[type="date"]');
+      await dateInput.fill(a);
+      await waitForRequest(f.page, 1);
+      await respond(f.page, 1);
+      // Pass the headers ownership check first, then retire A while json() is
+      // awaiting its payload. Without this barrier a stale-header check alone
+      // can satisfy a test that claims to cover late JSON.
+      await expect.poll(() => f.page.evaluate(() => (window as unknown as FixtureWindow).__dailyReports[1].bodyStarted)).toBe(true);
+      await dateInput.fill(b);
+      await waitForRequest(f.page, 2);
+      if (currentState === "success") await complete(f.page, 2, dayPayload(b, 42, 5));
+      if (currentState === "failure") await complete(f.page, 2, { message: "Current report failure" }, 500);
+      if (outcome === "success") await body(f.page, 1, dayPayload(a, 17, 3));
+      else await rejectBody(f.page, 1);
+
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(a)}`, { exact: false }).count()).toBe(0);
+      expect(await f.page.getByText("Obsolete JSON failure", { exact: true }).count()).toBe(0);
+      if (currentState === "success") {
+        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(b)}`, { exact: false }).count()).toBe(1);
+        expect(await shareParams(f.page)).toContain("الحضور: 42");
+        expect(await f.page.locator(".print-actions").count()).toBe(1);
+      } else {
+        await noReport(f.page);
+      }
+      expect(await f.page.getByRole("alert").filter({ hasText: "Current report failure" }).count()).toBe(currentState === "failure" ? 1 : 0);
+      expect(await f.page.getByText("جارٍ إعداد التقرير اليومي", { exact: false }).count()).toBe(currentState === "pending" ? 1 : 0);
+      if (currentState === "pending") {
+        await complete(f.page, 2, dayPayload(b, 42, 5));
+        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(b)}`, { exact: false }).count()).toBe(1);
+        expect(await shareParams(f.page)).toContain("الحضور: 42");
+      }
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
