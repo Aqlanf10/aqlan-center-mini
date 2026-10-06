@@ -126,6 +126,7 @@ function openBooking(patientId = 19): Element {
   const modal = elements(render()).find((node) => node.type === QuickAppointmentModal);
   expect(modal).toBeDefined();
   expect(modal!.props.patientId).toBe(patientId);
+  expect(modal!.props.bookingIntent).toBe("ortho_follow_up");
   return modal!;
 }
 function expectReadOnlyFeedRequests(count: number) {

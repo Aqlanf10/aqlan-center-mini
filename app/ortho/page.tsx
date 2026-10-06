@@ -259,6 +259,8 @@ export default function OrthoFollowupPage() {
 
       {rebook ? (
         <QuickAppointmentModal
+          key={rebook.id}
+          bookingIntent="ortho_follow_up"
           patientId={rebook.id}
           patientName={rebook.name}
           isOpen
