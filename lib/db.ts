@@ -21150,13 +21150,21 @@ export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<bool
 /** يسجّل المثبّت — وهو شرط إغلاق الحالة. */
 export async function setRetainer(input: {
   id: number; retainer: RetainerType; deliveredOn: string | null;
+  /** Type-only saves preserve a known date only when the current stored type matches. */
+  preserveExistingDeliveryDate?: boolean;
 }): Promise<boolean> {
   await ensureSchema();
   const { rowCount } = await getPool().query(
-    `UPDATE ortho_cases SET retainer = $2, retainer_on = $3::date,
+    `UPDATE ortho_cases SET retainer = $2,
+            retainer_on = CASE
+              WHEN $4::boolean AND $2::text <> 'none'
+                AND retainer = $2::text AND retainer_on IS NOT NULL
+              THEN retainer_on
+              ELSE $3::date
+            END,
             status = CASE WHEN status = 'active' THEN 'retention' ELSE status END
       WHERE id = $1 AND status IN ('active','retention')`,
-    [input.id, input.retainer, input.deliveredOn],
+    [input.id, input.retainer, input.deliveredOn, input.preserveExistingDeliveryDate === true],
   );
   return (rowCount ?? 0) > 0;
 }
