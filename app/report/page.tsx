@@ -157,9 +157,10 @@ export default function ReportPage() {
         subtitle="إحصاءات الحضور، أزمنة الانتظار، وجاهزية أعمال الغد"
       >
         {/* لا طباعة إلا لتقريرٍ صحيحٍ للتاريخ المختار — والطباعة من المتصفح
-            نفسها لا تجد في الصفحة تقريرًا قديمًا لأن جسم التقرير غير موجود. */}
+            نفسها لا تجد في الصفحة تقريرًا قديمًا لأن جسم التقرير غير موجود،
+            ولا زرًّا تفاعليًّا على الورقة. */}
         {feed ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 print:hidden">
             <PrintButton />
           </div>
         ) : null}

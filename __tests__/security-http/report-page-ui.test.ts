@@ -288,7 +288,7 @@ describe("built daily report page date identity and stale-response containment",
       await f.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       expect(await f.page.evaluate(() => (window as unknown as FixtureWindow).__dailyReports.length)).toBe(1);
       await noReport(f.page);
-      expect(await f.page.getByRole("button", { name: "اليوم السابق", exact: true }).isDisabled()).toBe(true);
+      expect(await f.page.getByRole("button", { name: "‹ اليوم السابق", exact: true }).isDisabled()).toBe(true);
       expect(await f.page.getByRole("button", { name: "اليوم التالي ›", exact: true }).isDisabled()).toBe(true);
 
       await f.page.getByRole("button", { name: /^اليوم \(/ }).click();
