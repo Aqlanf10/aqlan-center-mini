@@ -1,0 +1,64 @@
+name: Patient lab status refusal counterfactual
+
+on:
+  push:
+    branches: [codex/lab-status-counterfactual-20261006]
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out temporary proof commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Resolve sole candidate parent and fetch exact baseline
+        env:
+          BASELINE_COMMIT: 05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f
+        run: |
+          candidate="$(git show -s --format=%P HEAD)"
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+          echo "LAB_STATUS_CANDIDATE_COMMIT=$candidate" >> "$GITHUB_ENV"
+          git fetch --no-tags --depth=1 origin "$BASELINE_COMMIT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use supported npm and locked dependencies
+        run: |
+          npm install -g npm@11
+          npm ci
+
+      - name: Prove candidate baseline and restored candidate
+        run: node scripts/prove-patient-lab-status-refusal.mjs
+
+      - name: Upload exact synthetic counterfactual reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-lab-status-refusal-counterfactual
+          path: |
+            .lab-status-counterfactual-artifacts/manifest.json
+            .lab-status-counterfactual-artifacts/candidate-before.json
+            .lab-status-counterfactual-artifacts/candidate-before.stdout.txt
+            .lab-status-counterfactual-artifacts/candidate-before.stderr.txt
+            .lab-status-counterfactual-artifacts/candidate-before.process.json
+            .lab-status-counterfactual-artifacts/original.json
+            .lab-status-counterfactual-artifacts/original.stdout.txt
+            .lab-status-counterfactual-artifacts/original.stderr.txt
+            .lab-status-counterfactual-artifacts/original.process.json
+            .lab-status-counterfactual-artifacts/candidate-after.json
+            .lab-status-counterfactual-artifacts/candidate-after.stdout.txt
+            .lab-status-counterfactual-artifacts/candidate-after.stderr.txt
+            .lab-status-counterfactual-artifacts/candidate-after.process.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
