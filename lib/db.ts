@@ -24329,6 +24329,17 @@ export async function getAppointmentService(id: number): Promise<AppointmentServ
   return rows[0] ? toAppointmentService(rows[0]) : null;
 }
 
+/** Read current scheduling identity on the existing booking transaction.
+ * Call only after its day lock. SHARE blocks ordinary non-key catalogue edits
+ * and deletion until commit/rollback, while allowing concurrent service readers.
+ * No schema initialization or second pool connection inside the transaction. */
+export async function lockAppointmentServiceForBooking(client: DbClient, id: number): Promise<AppointmentService | null> {
+  const { rows } = await client.query<AppointmentServiceRow>(
+    `${SERVICE_SELECT} WHERE id = $1 FOR SHARE`, [id],
+  );
+  return rows[0] ? toAppointmentService(rows[0]) : null;
+}
+
 /**
  * يحسم الخدمة من موعدٍ قديم بالرمز النصّيّ المخزَّن.
  *
