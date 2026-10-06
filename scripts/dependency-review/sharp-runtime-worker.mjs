@@ -82,7 +82,7 @@ inspect(libvipsName, libvipsDirectory);
 const nativeModules = Object.keys(require.cache).filter(path => path.endsWith(".node") && /sharp/.test(path));
 assert.equal(nativeModules.length, 1);
 assert(nativeModules[0].startsWith(nativePackage.directory + "/"));
-assert(/sharp-(linux|linuxmusl)-x64\.node$/.test(nativeModules[0]));
+assert.equal(nativeModules[0], join(nativePackage.directory, "lib", "sharp-" + platform + "-0.35.5.node"));
 const tests = [];
 const image = { create: { width: 8, height: 6, channels: 3, background: { r: 255, g: 0, b: 0 } } };
 for (const format of ["png", "jpeg", "webp"]) {
@@ -134,4 +134,3 @@ console.log(JSON.stringify({
   shippedFiles, tests,
   limitations: ["No public HTTP or application authorization proof", "No exploit payload or vulnerability baseline execution", "No Production or Railway access"],
 }, null, 2));
-
