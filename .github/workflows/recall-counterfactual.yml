@@ -1,0 +1,52 @@
+name: Recall refusal controlled counterfactual
+
+on:
+  push:
+    branches: ["codex/recall-counterfactual-20261006"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  counterfactual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      # Closed local endpoint; the DB-free focused page harness must not connect.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/aqlan_recall_proof?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install unchanged locked dependencies
+        run: npm ci --no-audit
+      - name: Execute fixed candidate, original and restored candidate assertions
+        run: node scripts/prove-recall-refusal-counterfactual.mjs
+      - name: Retain exact synthetic focused evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recall-refusal-counterfactual
+          path: |
+            .recall-counterfactual-artifacts/manifest.json
+            .recall-counterfactual-artifacts/candidate-before.json
+            .recall-counterfactual-artifacts/candidate-before.stdout.txt
+            .recall-counterfactual-artifacts/candidate-before.stderr.txt
+            .recall-counterfactual-artifacts/candidate-before.process.json
+            .recall-counterfactual-artifacts/original.json
+            .recall-counterfactual-artifacts/original.stdout.txt
+            .recall-counterfactual-artifacts/original.stderr.txt
+            .recall-counterfactual-artifacts/original.process.json
+            .recall-counterfactual-artifacts/candidate-after.json
+            .recall-counterfactual-artifacts/candidate-after.stdout.txt
+            .recall-counterfactual-artifacts/candidate-after.stderr.txt
+            .recall-counterfactual-artifacts/candidate-after.process.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
