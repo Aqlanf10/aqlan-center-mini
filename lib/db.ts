@@ -6694,9 +6694,30 @@ export async function updateLabOrderAccounting(
     const resolvedRate = input.exchangeRate != null && input.exchangeRate > 0
       ? input.exchangeRate
       : order.exchange_rate != null ? Number(order.exchange_rate) : 1;
-    const baseAmount = resolvedCost != null && resolvedCost > 0
-      ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
-      : null;
+    // A posting/category-only change must not revalue an existing snapshot.
+    // Positive cost edits carry amount, currency, rate and converted base together.
+    const hasMoneyUpdate = input.costMinor !== undefined
+      || input.costCurrency != null || input.exchangeRate != null;
+    const hasPositiveMoneyUpdate = hasMoneyUpdate && resolvedCost != null && resolvedCost > 0;
+    if (hasPositiveMoneyUpdate) {
+      if (!Number.isSafeInteger(resolvedCost) || !isCurrency(resolvedCurrency)) {
+        throw new Error("lab_order_accounting_price_invalid");
+      }
+      // Both columns are NUMERIC(18,6): never calculate with precision that
+      // disappears on storage, or admit rates above the settings maximum.
+      if (!Number.isFinite(resolvedRate) || resolvedRate <= 0 || resolvedRate > 1_000_000
+        || Number(resolvedRate.toFixed(6)) !== resolvedRate) {
+        throw new Error("lab_order_exchange_rate_invalid");
+      }
+    }
+    const baseAmount = !hasMoneyUpdate && order.base_amount_minor != null
+      ? Number(order.base_amount_minor)
+      : resolvedCost != null && resolvedCost > 0
+        ? toBaseAmount(resolvedCost, resolvedCurrency, "YER", resolvedRate)
+        : null;
+    if (hasPositiveMoneyUpdate && (baseAmount == null || !Number.isSafeInteger(baseAmount) || baseAmount < 0)) {
+      throw new Error("lab_order_accounting_price_invalid");
+    }
 
     await client.query(
       `UPDATE lab_orders
@@ -6711,11 +6732,13 @@ export async function updateLabOrderAccounting(
                 WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN 'payable_created'
                 ELSE financial_status
               END,
-              cost_minor = COALESCE($5, cost_minor),
-              cost_currency = COALESCE($6, cost_currency),
-              base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE base_amount_minor END
+              cost_minor = CASE WHEN $8::boolean THEN COALESCE($5, cost_minor) ELSE cost_minor END,
+              cost_currency = CASE WHEN $8::boolean THEN COALESCE($6, cost_currency) ELSE cost_currency END,
+              base_amount_minor = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $9::bigint ELSE base_amount_minor END,
+              exchange_rate = CASE WHEN $8::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
         WHERE id = $7`,
-      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId],
+      [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, orderId,
+        hasMoneyUpdate, baseAmount, resolvedRate],
     );
 
     // الالتزام المرتبط: يحدَّث بالربط المحاسبي نفسه، أو يُنشأ إن غاب وثمة تكلفة.
@@ -6726,11 +6749,13 @@ export async function updateLabOrderAccounting(
                 expense_account_code = $2,
                 payable_account_code = $3,
                 is_posted = $4,
-                amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
-                currency = COALESCE($6, currency),
-                base_amount_minor = CASE WHEN $5::bigint IS NOT NULL AND $5::bigint > 0 THEN $7 ELSE base_amount_minor END
+                amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $5 ELSE amount_minor END,
+                currency = CASE WHEN $9::boolean THEN COALESCE($6, currency) ELSE currency END,
+                base_amount_minor = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $7::bigint ELSE base_amount_minor END,
+                exchange_rate = CASE WHEN $9::boolean AND $5::bigint > 0 THEN $10::numeric ELSE exchange_rate END
           WHERE id = $8`,
-        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id],
+        [expenseCatId, expenseAccCode, payableAccCode, isPosted, resolvedCost, resolvedCurrency, baseAmount, order.payable_id,
+          hasMoneyUpdate, resolvedRate],
       );
     } else if (order.party_id && resolvedCost != null && resolvedCost > 0) {
       const { rows: payRows } = await client.query<{ id: number }>(
@@ -6743,16 +6768,17 @@ export async function updateLabOrderAccounting(
              expense_account_code = EXCLUDED.expense_account_code,
              payable_account_code = EXCLUDED.payable_account_code,
              is_posted = EXCLUDED.is_posted,
-             amount_minor = EXCLUDED.amount_minor,
-             currency = EXCLUDED.currency,
-             base_amount_minor = EXCLUDED.base_amount_minor
+             amount_minor = CASE WHEN $14::boolean THEN EXCLUDED.amount_minor ELSE payables.amount_minor END,
+             currency = CASE WHEN $14::boolean THEN EXCLUDED.currency ELSE payables.currency END,
+             exchange_rate = CASE WHEN $14::boolean THEN EXCLUDED.exchange_rate ELSE payables.exchange_rate END,
+             base_amount_minor = CASE WHEN $14::boolean THEN EXCLUDED.base_amount_minor ELSE payables.base_amount_minor END
          RETURNING id`,
         [
           order.party_id,
           `${order.work_type}${order.tooth_numbers ? ` [سن ${order.tooth_numbers}]` : ""}${order.details ? ` — ${order.details}` : ""}`,
           resolvedCost, resolvedCurrency, resolvedRate, baseAmount,
           orderId, dateText(order.due_date), input.actor || "system",
-          expenseCatId, expenseAccCode, payableAccCode, isPosted,
+          expenseCatId, expenseAccCode, payableAccCode, isPosted, hasMoneyUpdate,
         ],
       );
       if (payRows[0]) {
@@ -18071,12 +18097,18 @@ export interface OpeningBalanceHistoryEntry {
 }
 
 /** (P2-5) الرصيد الافتتاحي الحالي تحت قفل — «قبل» في التعديل والمسح. */
-async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency) {
+async function lockedOpeningBalance(client: DbClient, patientId: number, currency: Currency, addOnly = false) {
+  // Serialize even an absent currency row, before touching the opening table.
+  // Corrections must remain compatible with the patient FK KEY SHARE acquired by
+  // a payment that already holds the opening row. Reception keeps its add fence.
+  await client.query(`SELECT id FROM patients WHERE id = $1 FOR ${addOnly ? "UPDATE" : "NO KEY UPDATE"}`, [patientId]);
   const { rows } = await client.query<{ amount_minor: string; as_of_date: string }>(
     `SELECT amount_minor::text, as_of_date::text FROM patient_opening_balances
-      WHERE patient_id = $1 AND currency = $2 FOR UPDATE`,
+      WHERE patient_id = $1 AND currency = $2${addOnly ? "" : " FOR UPDATE"}`,
     [patientId, currency],
   );
+  // Add-only never modifies an existing row, so it must not wait on its payment
+  // reader while holding the stronger patient fence; it only needs to refuse it.
   return rows[0] ? { amountMinor: toMinor(rows[0].amount_minor), asOfDate: rows[0].as_of_date } : null;
 }
 
@@ -18086,6 +18118,25 @@ async function lockedOpeningBalance(client: DbClient, patientId: number, currenc
  */
 export class OpeningBalanceExists extends Error {
   constructor() { super("للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير."); }
+}
+
+/** The route's checked financial predecessor, not a client-supplied version. */
+export type OpeningBalanceExpectation = Pick<OpeningBalance, "amountMinor" | "asOfDate">;
+
+export class OpeningBalanceChanged extends Error {
+  constructor() { super("تغيّر الرصيد الافتتاحي. أعد تحميله وراجع التعديل."); }
+}
+
+function assertOpeningBalanceExpectation(
+  actual: OpeningBalanceExpectation | null,
+  expected: OpeningBalanceExpectation | null | undefined,
+): void {
+  // Existing internal callers may omit the preflight. Explicit null means that
+  // the route checked absence; it must never become an implicit correction.
+  if (expected === undefined) return;
+  if (actual?.amountMinor !== expected?.amountMinor || actual?.asOfDate !== expected?.asOfDate) {
+    throw new OpeningBalanceChanged();
+  }
 }
 
 export async function setPatientOpeningBalance(input: {
@@ -18102,14 +18153,15 @@ export async function setPatientOpeningBalance(input: {
    * لحظتها من جهازٍ آخر) يُرفض بـ`OpeningBalanceExists` ولا يُستبدل.
    */
   addOnly?: boolean;
+  /** Recheck route reason/period/audit preconditions under the mutation lock. */
+  expectedBefore?: OpeningBalanceExpectation | null;
 }): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
-    // أمر الإضافة يتسلسل على صف المريض: إضافتان متزامنتان لا تمرّان كلتاهما.
-    if (input.addOnly) await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
-    const before = await lockedOpeningBalance(client, input.patientId, currency);
+    const before = await lockedOpeningBalance(client, input.patientId, currency, input.addOnly);
     if (before && input.addOnly) throw new OpeningBalanceExists();
+    assertOpeningBalanceExpectation(before, input.expectedBefore);
     const { rows } = await client.query<{ patient_id: number }>(
       `INSERT INTO patient_opening_balances
          (patient_id, amount_minor, as_of_date, note, created_by, currency)
@@ -18121,10 +18173,17 @@ export async function setPatientOpeningBalance(input: {
               note         = EXCLUDED.note,
               created_by   = EXCLUDED.created_by,
               updated_at   = NOW()
+        WHERE $7::boolean
        RETURNING patient_id`,
-      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency],
+      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency, before !== null],
     );
-    if (!rows[0]) return null;
+    if (!rows[0]) {
+      // A legacy import can insert without this writer's patient fence. Never
+      // turn a checked-absent row into an unreviewed ON CONFLICT correction.
+      const patient = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+      if (patient.rows[0]) throw input.addOnly ? new OpeningBalanceExists() : new OpeningBalanceChanged();
+      return null;
+    }
     await client.query(
       `INSERT INTO patient_opening_balance_history
          (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
@@ -18142,10 +18201,12 @@ export async function clearPatientOpeningBalance(
   actor = "system",
   reason: string | null = null,
   currency: Currency = CLINIC_BASE_CURRENCY,
+  expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
   return withTransaction(getPool(), async (client): Promise<boolean> => {
     const before = await lockedOpeningBalance(client, patientId, currency);
+    assertOpeningBalanceExpectation(before, expectedBefore);
     if (!before) return false;
     await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
     await client.query(
@@ -21115,13 +21176,21 @@ export async function setOrthoPhase(id: number, phase: OrthoPhase): Promise<bool
 /** يسجّل المثبّت — وهو شرط إغلاق الحالة. */
 export async function setRetainer(input: {
   id: number; retainer: RetainerType; deliveredOn: string | null;
+  /** Type-only saves preserve a known date only when the current stored type matches. */
+  preserveExistingDeliveryDate?: boolean;
 }): Promise<boolean> {
   await ensureSchema();
   const { rowCount } = await getPool().query(
-    `UPDATE ortho_cases SET retainer = $2, retainer_on = $3::date,
+    `UPDATE ortho_cases SET retainer = $2,
+            retainer_on = CASE
+              WHEN $4::boolean AND $2::text <> 'none'
+                AND retainer = $2::text AND retainer_on IS NOT NULL
+              THEN retainer_on
+              ELSE $3::date
+            END,
             status = CASE WHEN status = 'active' THEN 'retention' ELSE status END
       WHERE id = $1 AND status IN ('active','retention')`,
-    [input.id, input.retainer, input.deliveredOn],
+    [input.id, input.retainer, input.deliveredOn, input.preserveExistingDeliveryDate === true],
   );
   return (rowCount ?? 0) > 0;
 }
@@ -21180,29 +21249,17 @@ export async function closeOrthoCase(input: {
  * يبقى تاريخًا يُقرأ، والخطّ الزمني يعرض القصة كلّها في صفحةٍ واحدة.
  */
 
-export interface OrthoFollowupRow {
-  caseId: number;
-  patientId: number;
-  patientName: string;
-  patientPhone: string | null;
-  status: "active" | "retention";
-  phase: string;
-  startDate: string;
-  lastAdjustmentDate: string | null;
-  nextWeeks: number;
-  upperWire: string | null;
-  lowerWire: string | null;
-  nextAppointment: { id: number; date: string; time: string; status: string } | null;
-  lastWasNoShow: boolean;
+import { projectFollowupBookings, type ProjectedFollowupBooking } from "./ortho-followup-board";
+import type { FollowupCase, FollowupBookingContext } from "./ortho-followup";
+
+export interface OrthoFollowupRow extends FollowupCase {
+  bookingContext: FollowupBookingContext;
 }
 
 /**
- * لوحة متابعة التقويم — صفٌّ لكل حالةٍ جارية بكل ما يلزم لتصنيفها.
- *
- * أقربُ موعدٍ يُختار بقاعدةٍ واحدة: المستقبل الأقرب أولًا فإن لم يوجد فأحدث ماضٍ
- * محجوز (تجاوزوه ولم يُنفَّذ). وقاعدةُ «لم يحضروا» تُقرأ من آخر موعدٍ غيابيّ
- * للمريض — فيرى الاستقبال الغياب حتى لو حُجز موعدٌ جديد بعده، لأن الحجز الجديد
- * لا يمحو الغياب ولا الدرس فيه.
+ * Read-only board: classify every open booking before selecting the next
+ * periodic follow-up. Other/uncertain bookings remain visible for review.
+ * Existing no-show history is intentionally independent of this selection.
  */
 export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRow[]> {
   await ensureSchema();
@@ -21210,36 +21267,48 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
     case_id: number; patient_id: number; full_name: string; phone: string | null;
     status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
-    appt_id: number | null; appt_date: string | null; appt_time: string | null;
-    appt_status: string | null; last_no_show: boolean;
+    clinical_case_id: number | null; bookings: ProjectedFollowupBooking[]; last_no_show: boolean;
   }>(
-    `WITH nearest AS (
-       SELECT ap.id, ap.patient_id, ap.scheduled_date::text AS date,
-              to_char(ap.scheduled_time, 'HH24:MI') AS time, ap.status,
-              ROW_NUMBER() OVER (
-                PARTITION BY ap.patient_id
-                ORDER BY (ap.scheduled_date < $1::date),
-                        CASE WHEN ap.scheduled_date >= $1::date THEN ap.scheduled_date END ASC,
-                        CASE WHEN ap.scheduled_date <  $1::date THEN ap.scheduled_date END DESC
-              ) AS rn
-         FROM appointments ap
-        WHERE ap.status IN ('booked', 'arrived')
-     ),
-     noshow AS (
+    `WITH noshow AS (
        SELECT patient_id, TRUE AS was
          FROM appointments a
         WHERE a.status = 'no_show'
           AND a.id = (SELECT a2.id FROM appointments a2
                        WHERE a2.patient_id = a.patient_id AND a2.status = 'no_show'
                        ORDER BY a2.scheduled_date DESC, a2.id DESC LIMIT 1)
+     ),
+     bookings AS (
+       SELECT ap.patient_id, jsonb_agg(jsonb_build_object(
+           'id', ap.id, 'patientId', ap.patient_id,
+           'scheduledDate', ap.scheduled_date::text,
+           'scheduledTime', to_char(ap.scheduled_time, 'HH24:MI'), 'status', ap.status,
+           'appointmentType', ap.appointment_type, 'serviceId', ap.service_id,
+           'service', CASE WHEN svc.id IS NULL THEN NULL ELSE jsonb_build_object(
+             'id', svc.id, 'code', svc.code, 'specialty', svc.specialty, 'legacyType', svc.legacy_type) END,
+           'serviceName', svc.name_ar, 'doctorName', doc.name,
+           'referralId', ap.referral_id,
+           'referral', CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object(
+             'id', r.id, 'patientId', r.patient_id, 'toSpecialty', r.to_specialty,
+             'caseId', r.case_id, 'casePatientId', rc.patient_id, 'orthoCaseId', linked_ortho.id) END,
+           'plannedVisitId', ap.planned_visit_id
+         ) ORDER BY ap.scheduled_date, ap.scheduled_time, ap.id) AS items
+           FROM appointments ap
+           LEFT JOIN appointment_services svc ON svc.id = ap.service_id
+           LEFT JOIN parties doc ON doc.id = ap.doctor_id
+           LEFT JOIN patient_referrals r ON r.id = ap.referral_id AND r.patient_id = ap.patient_id
+           LEFT JOIN clinical_cases rc ON rc.id = r.case_id AND rc.patient_id = ap.patient_id
+           LEFT JOIN ortho_cases linked_ortho ON linked_ortho.id = rc.ortho_case_id AND linked_ortho.patient_id = ap.patient_id
+          WHERE ap.status IN ('booked', 'arrived')
+          GROUP BY ap.patient_id
      )
      SELECT c.id AS case_id, c.patient_id, p.full_name, p.phone, c.status, c.phase,
             c.start_date, a.last_adjustment_date, a.next_weeks,
-            a.upper_wire, a.lower_wire,
-            n.id AS appt_id, n.date AS appt_date, n.time AS appt_time, n.status AS appt_status,
+            a.upper_wire, a.lower_wire, bridge.id AS clinical_case_id,
+            COALESCE(bookings.items, '[]'::jsonb) AS bookings,
             COALESCE(ns.was, FALSE) AS last_no_show
        FROM ortho_cases c
        JOIN patients p ON p.id = c.patient_id
+       LEFT JOIN clinical_cases bridge ON bridge.ortho_case_id = c.id AND bridge.patient_id = c.patient_id
        LEFT JOIN LATERAL (
          SELECT oa.done_on::text AS last_adjustment_date, oa.next_weeks,
                 oa.upper_wire, oa.lower_wire
@@ -21247,31 +21316,33 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
           WHERE oa.case_id = c.id
           ORDER BY oa.done_on DESC, oa.id DESC LIMIT 1
        ) a ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT id, date, time, status FROM nearest
-          WHERE nearest.patient_id = c.patient_id AND nearest.rn = 1
-       ) n ON TRUE
+       LEFT JOIN bookings ON bookings.patient_id = c.patient_id
        LEFT JOIN noshow ns ON ns.patient_id = c.patient_id
       WHERE c.status IN ('active', 'retention')`,
-    [today],
   );
-  return rows.map((row) => ({
-    caseId: row.case_id,
-    patientId: row.patient_id,
-    patientName: row.full_name,
-    patientPhone: row.phone,
-    status: row.status as "active" | "retention",
-    phase: row.phase,
-    startDate: dateText(row.start_date),
-    lastAdjustmentDate: row.last_adjustment_date,
-    nextWeeks: row.next_weeks ?? 4,
-    upperWire: row.upper_wire,
-    lowerWire: row.lower_wire,
-    nextAppointment: row.appt_id && row.appt_date && row.appt_time && row.appt_status
-      ? { id: row.appt_id, date: row.appt_date, time: row.appt_time, status: row.appt_status }
-      : null,
-    lastWasNoShow: row.last_no_show,
-  }));
+  return rows.map((row) => {
+    const startDate = dateText(row.start_date);
+    const bookingProjection = projectFollowupBookings({
+      target: { patientId: row.patient_id, orthoCaseId: row.case_id, clinicalCaseId: row.clinical_case_id, startDate },
+      today,
+      appointments: row.bookings,
+    });
+    return {
+      caseId: row.case_id,
+      patientId: row.patient_id,
+      patientName: row.full_name,
+      patientPhone: row.phone,
+      status: row.status as "active" | "retention",
+      phase: row.phase,
+      startDate,
+      lastAdjustmentDate: row.last_adjustment_date,
+      nextWeeks: row.next_weeks ?? 4,
+      upperWire: row.upper_wire,
+      lowerWire: row.lower_wire,
+      ...bookingProjection,
+      lastWasNoShow: row.last_no_show,
+    };
+  });
 }
 
 /** Read projection only: suppress inconsistent legacy links, never rewrite them. */

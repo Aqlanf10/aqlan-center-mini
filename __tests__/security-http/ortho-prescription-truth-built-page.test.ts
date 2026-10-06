@@ -69,8 +69,23 @@ async function openPrescription(card: Locator) {
 }
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
-  await value.scrollIntoViewIfNeeded();
   await card.page().evaluate(async () => { await document.fonts.ready; });
+  // Keep the complete case card below the app's fixed top bar. Scrolling only
+  // its prescription into view allowed the header to cover case identity/status
+  // in the first CI screenshots even though the changed value remained readable.
+  await card.evaluate((element) => {
+    window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - 80), behavior: "instant" });
+  });
+  const frame = await card.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const identifier = Array.from(element.querySelectorAll("span")).find((span) => /^#\d+$/.test(span.textContent ?? ""))!;
+    const label = identifier.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, viewportHeight: innerHeight, caseLabel: identifier.textContent,
+      identityExposed: identifier.contains(document.elementFromPoint(label.left + label.width / 2, label.top + label.height / 2)) };
+  });
+  expect(frame.top).toBeGreaterThanOrEqual(79);
+  expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+  expect(frame.identityExposed).toBe(true);
   const geometry = await value.evaluate((element) => {
     const box = element.getBoundingClientRect(); const cell = element.parentElement!.getBoundingClientRect();
     const range = document.createRange(); range.selectNodeContents(element); const text = range.getBoundingClientRect();
@@ -93,7 +108,7 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(geometry.cell.right).toBeLessThanOrEqual(width + 1);
   expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
   await card.screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png` });
-  return geometry;
+  return { ...geometry, frame };
 }
 
 describe("built orthodontic prescription truth", () => {

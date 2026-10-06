@@ -19,6 +19,7 @@ const row = (overrides: Partial<FollowupCase> = {}): FollowupCase => ({
   upperWire: "016 NiTi",
   lowerWire: "014 NiTi",
   nextAppointment: null,
+  bookingContext: { verified: true, pastUnresolvedAppointment: null, reviewAppointments: [], otherAppointments: [] },
   lastWasNoShow: false,
   ...overrides,
 });
@@ -55,6 +56,53 @@ describe("تصنيف قوائم المتابعة", () => {
     });
     expect(rows[0].buckets).toContain("overdue");
     expect(rows[0].buckets).not.toContain("no_appointment");
+  });
+
+  it.each(["booked", "arrived"])("keeps a separate past unresolved %s visit overdue without manufacturing a next appointment", (status) => {
+    const past = { id: 20, date: "2026-08-28", time: "16:00", status };
+    const input = row({ bookingContext: {
+      verified: true, pastUnresolvedAppointment: past, reviewAppointments: [], otherAppointments: [],
+    } });
+    const [classified] = classifyFollowups({ today: TODAY, cases: [input] });
+    expect(classified.buckets).toContain("overdue");
+    expect(classified.buckets).not.toContain("no_appointment");
+    for (const bucket of ["today", "tomorrow", "this_week", "upcoming"]) {
+      expect(classified.buckets).not.toContain(bucket);
+    }
+    expect(classified.nextAppointment).toBeNull();
+    expect(classified.bookingContext?.pastUnresolvedAppointment).toEqual(past);
+    expect(groupByBucket([classified]).get("overdue")?.map((entry) => entry.caseId)).toEqual([input.caseId]);
+  });
+
+  it("prioritizes a confirmed future periodic visit over an older unresolved visit without discarding the latter", () => {
+    const future = { id: 21, date: "2026-09-10", time: "10:15", status: "booked" };
+    const past = { id: 22, date: "2026-08-28", time: "16:00", status: "booked" };
+    const [classified] = classifyFollowups({ today: TODAY, cases: [row({
+      nextAppointment: future,
+      bookingContext: { verified: true, pastUnresolvedAppointment: past, reviewAppointments: [], otherAppointments: [] },
+    })] });
+    expect(classified.buckets).toContain("upcoming");
+    expect(classified.buckets).not.toContain("overdue");
+    expect(classified.buckets).not.toContain("no_appointment");
+    expect(classified.nextAppointment).toEqual(future);
+    expect(classified.bookingContext?.pastUnresolvedAppointment).toEqual(past);
+  });
+
+  it("does not let unrelated or review-only future bookings fill a periodic follow-up calendar bucket", () => {
+    const context = { verified: true as const, pastUnresolvedAppointment: null,
+      otherAppointments: [{ id: 23, date: TODAY, time: "09:00", status: "booked", serviceName: "تنظيف الأسنان" }],
+      reviewAppointments: [{ id: 24, date: "2026-09-02", time: "11:00", status: "arrived", serviceName: "خدمة غير مصنّفة" }],
+    };
+    const input = row({ bookingContext: context });
+    const original = JSON.stringify(input);
+    const [classified] = classifyFollowups({ today: TODAY, cases: [input] });
+    expect(classified.buckets).toContain("no_appointment");
+    for (const bucket of ["today", "tomorrow", "this_week", "upcoming", "overdue"]) {
+      expect(classified.buckets).not.toContain(bucket);
+    }
+    expect(classified.nextAppointment).toBeNull();
+    expect(classified.bookingContext).toEqual(context);
+    expect(JSON.stringify(input)).toBe(original);
   });
 
   it("الغياب الأخير يضع المريض في «لم يحضروا» حتى لو حُجز بعده", () => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, OpeningBalanceExists, clearPatientOpeningBalance, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, OpeningBalanceChanged, OpeningBalanceExists, clearPatientOpeningBalance, getPatientOpeningBalance, getSettings, isPeriodLocked, listOpeningBalanceHistory, listOpeningBalances, recordAudit, setPatientOpeningBalance } from "@/lib/db";
 import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
@@ -120,6 +120,7 @@ export async function POST(request: Request) {
     const balance = await setPatientOpeningBalance({
       patientId, currency, amountMinor, asOfDate, note, createdBy: session.username, reason,
       addOnly: !access.edit,
+      expectedBefore: before ? { amountMinor: before.amountMinor, asOfDate: before.asOfDate } : null,
     });
     if (!balance) {
       return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
@@ -136,6 +137,7 @@ export async function POST(request: Request) {
     return NextResponse.json(balance, { status: 201 });
   } catch (error) {
     if (error instanceof OpeningBalanceExists) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حفظ الرصيد الافتتاحي." }, { status: 500 });
   }
 }
@@ -166,7 +168,9 @@ export async function DELETE(request: Request) {
     if (await isPeriodLocked(existing.asOfDate)) {
       return NextResponse.json({ message: "الفترة مقفلة. لا يُحذف رصيد افتتاحي داخلها." }, { status: 409 });
     }
-    await clearPatientOpeningBalance(patientId, session.username, reason, currencyParam);
+    const cleared = await clearPatientOpeningBalance(patientId, session.username, reason, currencyParam,
+      { amountMinor: existing.amountMinor, asOfDate: existing.asOfDate });
+    if (!cleared) return NextResponse.json({ message: "لا رصيد افتتاحي لهذا المريض." }, { status: 404 });
     await recordAudit({
       action: "opening_balance.clear", entity: "patient", entityId: patientId,
       entityLabel: existing.patientName,
@@ -174,7 +178,8 @@ export async function DELETE(request: Request) {
       actor: session.username, actorRole: session.role,
     });
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حذف الرصيد الافتتاحي." }, { status: 500 });
   }
 }
