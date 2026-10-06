@@ -937,3 +937,21 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Only synthetic patient lab refusal/retry viewports and measured bounds.
+      # No cookies, storage, HAR, traces, real patients or broad directories.
+      - name: Upload patient lab status refusal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-lab-status-refusal-ui
+          path: |
+            .settings-ui-artifacts/lab-status-refusal-390.png
+            .settings-ui-artifacts/lab-status-refusal-1280.png
+            .settings-ui-artifacts/lab-status-retry-390.png
+            .settings-ui-artifacts/lab-status-retry-1280.png
+            .settings-ui-artifacts/lab-status-refusal-390-bounds.json
+            .settings-ui-artifacts/lab-status-refusal-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
