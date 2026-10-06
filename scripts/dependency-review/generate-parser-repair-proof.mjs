@@ -63,6 +63,9 @@ try {
   // Pin the independently observed Dependabot version/integrity, not an alias or
   // an unreviewed newer resolution returned by a registry.
   assert.equal(published["source-map-js"].dist.integrity, "sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==");
+  // Official registry metadata and packed bytes independently preserved by
+  // generation run 37401926790; refuse a changed published parser artifact.
+  assert.equal(published["postcss-selector-parser"].dist.integrity, "sha512-7qASPzhKF2l2KLboRZux8CCTRMdGiV08vWmyKzPz22qZ7ZjQBOeY7rNzNoCLSUiftJ7HUq0GERHmxw/t0dCdMw==");
   const baseline = {};
   for (const kind of ["root", "consumer"]) {
     const prefix = kind === "root" ? "" : fixturePath + "/";
@@ -73,7 +76,9 @@ try {
     const manifest = json(join(repo, prefix, "package.json"));
     validateReviewedOverrides(manifest);
     const withoutOverrides = structuredClone(manifest); delete withoutOverrides.overrides;
-    assert.deepEqual(withoutOverrides, originalManifest, "Only the reviewed overrides may change the manifest");
+    const expectedManifest = structuredClone(originalManifest);
+    if (kind === "root") expectedManifest.devDependencies.tailwindcss = "3.4.19";
+    assert.deepEqual(withoutOverrides, expectedManifest, "Only the reviewed overrides and already-locked Tailwind pin may change the manifest");
     const directory = join(work, kind + "-candidate"); mkdirSync(directory);
     writeFileSync(join(directory, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
     writeFileSync(join(directory, "package-lock.json"), lockBytes);
@@ -90,7 +95,11 @@ try {
     for (const [location, previous] of Object.entries(originalLock.packages)) {
       const name = location.slice(location.lastIndexOf("node_modules/") + "node_modules/".length);
       const next = generated.packages[location];
-      if (!Object.hasOwn(targets, name)) assert.deepEqual(next, previous, "Unrelated lock drift: " + location);
+      if (location === "" && kind === "root") {
+        const expectedRoot = structuredClone(previous);
+        expectedRoot.devDependencies.tailwindcss = "3.4.19";
+        assert.deepEqual(next, expectedRoot, "Unrelated root lock declaration drift");
+      } else if (!Object.hasOwn(targets, name)) assert.deepEqual(next, previous, "Unrelated lock drift: " + location);
       else {
         const metadata = published[name];
         assert.equal(next.version, targets[name]); assert.equal(next.resolved, metadata.dist.tarball); assert.equal(next.integrity, metadata.dist.integrity);
