@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/services-catalog";
 
@@ -42,27 +42,45 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /* أحدث طلبٍ وحده يملك الشاشة: ردٌّ متأخر لمرشّحٍ سابق لا يُعرض تحت مرشّحٍ أحدث،
+     والسطور القديمة تُخفى فور تغيير المرشّح أو فشل التحميل — لا تبقى تحت عنوانٍ جديد. */
+  const latestRequestRef = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++latestRequestRef.current;
     setLoading(true);
+    setData(null);
+    setError(null);
+    /* رسالةٌ عربية دائمًا: رسالة الخادم إن وُجدت، لا نصّ استثناء المتصفح. */
+    let failure = "تعذّر تحميل التفصيل.";
     try {
       const query = new URLSearchParams({ detail: "1", from, to });
       if (doctorId) query.set("doctorId", doctorId);
       if (specialty) query.set("specialty", specialty);
       if (currency) query.set("currency", currency);
       const response = await fetch(`/api/finance/commissions?${query}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل التفصيل.");
+      const payload = await response.json().catch(() => null);
+      if (requestId !== latestRequestRef.current) return;
+      if (!response.ok) {
+        if (typeof payload?.message === "string" && payload.message) failure = payload.message;
+        throw new Error(failure);
+      }
+      if (!payload || !Array.isArray(payload.lines)) {
+        failure = "وصل ردٌّ غير صالح من الخادم.";
+        throw new Error(failure);
+      }
       setData(payload as DetailPayload);
-      setError(null);
       if (!doctorId) {
         const seen = new Map<number, string>();
         for (const line of (payload as DetailPayload).lines) seen.set(line.doctorId, line.doctorName);
         setDoctors([...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar")));
       }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل التفصيل.");
+    } catch {
+      if (requestId !== latestRequestRef.current) return;
+      setData(null);
+      setError(failure);
     } finally {
-      setLoading(false);
+      if (requestId === latestRequestRef.current) setLoading(false);
     }
   }, [from, to, doctorId, specialty, currency]);
 
@@ -79,7 +97,9 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
     return CURRENCIES.filter((code) => map.has(code)).map((code) => [code, map.get(code)!] as const);
   }, [data]);
 
-  const printDoctor = data?.isPersonalOnly ? data.lines[0]?.doctorId ?? null : doctorId ? Number(doctorId) : null;
+  const printDoctor = data?.isPersonalOnly
+    ? data.lines[0]?.doctorId ?? data.rows[0]?.doctorId ?? null
+    : doctorId ? Number(doctorId) : null;
   const printHref = printDoctor
     ? `/print/commission-statement/${printDoctor}?from=${from}&to=${to}${currency ? `&currency=${currency}` : ""}${specialty ? `&specialty=${specialty}` : ""}`
     : null;
@@ -131,7 +151,7 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
             <p className="mb-3 text-center text-[11px] text-slate-500">اختر طبيبًا لطباعة كشفه.</p>
           )}
           {error ? <p role="alert" className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
-          {loading && !data ? <p className="text-center text-xs text-slate-400">جارٍ التحميل…</p> : null}
+          {loading ? <p role="status" className="text-center text-xs text-slate-400">جارٍ التحميل…</p> : null}
           {data ? (
             <>
               <div className="mb-2 flex flex-wrap gap-2">

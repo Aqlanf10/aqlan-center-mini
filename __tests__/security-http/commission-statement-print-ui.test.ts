@@ -153,7 +153,7 @@ beforeAll(async () => {
   const p2 = await patient(`مريض الزراعة ${stamp}`);
   const p3 = await patient(`مريض بلا حالة ${stamp}`);
   const orthoCase = await caseWithPlanItem(p1, "orthodontics", ORTHO_CASE, ortho.id);
-  const implantCase = await caseWithPlanItem(p2, "implants", IMPLANT_CASE, implant.id);
+  const implantCase = await caseWithPlanItem(p2, "implantology", IMPLANT_CASE, implant.id);
 
   /* ٣٩ سطرًا تكفي لصفحاتٍ عدة: تقويم مدفوع كاملًا، وزراعة نصفها، وأعمال بلا حالة بلا دفع،
      وزراعة بالدولار — فالكشف يحمل عملتين لا تُجمعان. */
