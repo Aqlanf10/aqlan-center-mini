@@ -6,23 +6,24 @@
  * - البند المالي (بلا خدمة، أو كشف/أشعة/فئة مجهولة) يبقى فاتورةً فقط — لا يُستنتج تخصصٌ من نص.
  * - سطر الفاتورة يحمل `source_type='plan_item'` (الفهرس الفريد القائم يمنع فوترة البند مرتين)،
  *   والبند يحمل `billed_invoice_id` (رابطه المالي الحي) و`origin='invoice'`.
- * - الحالة: تُعاد الحالة المفتوحة الوحيدة للتخصص، أو تُنشأ حالةٌ أولية «تحتاج تقييمًا سريريًّا» بلا أي تفاصيل
+ * - الحالة: تُعاد الحالة المفتوحة المطابقة للنطاق والتخصص، أو تُنشأ حالةٌ أولية «تحتاج تقييمًا سريريًّا» بلا أي تفاصيل
  *   سريرية، أو يُرفض الطلب إن تعدّدت الحالات بلا اختيار. لا ortho_cases، لا نتائج عصب، لا طلب مختبر.
  * - قفل صف المريض يسلسل الطلبات المتزامنة؛ ومفتاح الإعادة يعيد الفاتورة نفسها لا فاتورةً ثانية.
  * التصميم: docs/INVOICE_FIRST_CLINICAL_LINKAGE.md.
  */
 import {
-  CLINIC_TIME_ZONE, ensureSchema, getInvoice, getPool, insertAuditRow, insertPlanV2InTx,
+  CLINIC_TIME_ZONE, PLAN_ITEM_FINANCIAL_REVIEW_SQL, PLAN_ITEM_INVOICE_LINEAGE_SQL, ensureSchema, getInvoice, getPool, insertAuditRow, insertPlanV2InTx,
   type AuditInput, type DbClient, type Invoice,
 } from "./db";
+import { lockClinicalDoctors } from "./clinical-doctor-identity";
 import { documentNumberSql } from "./document-numbers";
-import { isValidTooth } from "./dental";
+import { normalizeSurfaces } from "./dental";
 import type { Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import type { SpecialtyTemplate } from "./specialty-templates";
 import {
-  LINKAGE_SPECIALTY_LABEL, caseGroupKey, caseSiteCompatible, lineLinkage, sessionsFor, shellCaseTitle,
-  type InvoiceLinkageRefusal, type LinkageSpecialty,
+  LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
+  validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
@@ -37,6 +38,12 @@ export interface LinkedInvoiceLineInput {
   caseId: number | null;
   /** عدد جلسات البند إن أُعطي؛ وإلا من قالب التخصص. */
   sessions: number | null;
+  /** (INV-LINK TOOTH) أسطح الحشوة كما اختيرت من المخطط (تُطبَّع). */
+  surfaces?: string | null;
+  /** (INV-LINK TOOTH) أسنان حلقة التاج/القشرة/الجسر كلها — سطرٌ لكل سن، وحالةٌ واحدة للحلقة. */
+  episodeTeeth?: number[] | null;
+  /** (INV-LINK TOOTH) نطاقٌ بلا سن: علوي/سفلي/الفكّان/كامل الفم. */
+  scope?: string | null;
 }
 
 export interface LineLink {
@@ -59,16 +66,90 @@ class Refusal extends Error {
 
 const OPEN_CASE = `status IN ('active', 'waiting')`;
 
-/** بند خطةٍ مفتوح يصلح أن تقبله الفاتورة ماليًّا: خطةٌ نشطة موافَق عليها بعملة الفاتورة بلا أقساط، والبند لم يبدأ ولم يُفوتر. */
-const OPEN_ITEM_SQL = `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces
+interface ExistingWork {
+  id: number; quantity: number; unit_price_minor: string; case_id: number | null;
+  session_count: number; surfaces: string | null; doctor_id: number | null; tooth_code: number | null;
+  plan_status: string; base_currency: string; status: string; started_at: Date | null;
+  billing_status: string; has_invoice_lineage: boolean; has_sessions: boolean; installments: boolean;
+  case_site: string | null; case_status: string | null; financial_review: boolean;
+}
+
+type WorkInspection = { item: ExistingWork | null; refusal: InvoiceLinkageRefusal | null };
+
+/** The same evidence/shape rules feed save and preview. Never erase historical work identity. */
+async function inspectExistingWork(
+  db: Pick<DbClient, "query">, patientId: number, currency: Currency,
+  item: { serviceId: number | null; quantity: number; unitPriceMinor: number; sessions?: number | null; caseId: number | null },
+  site: LineSite, claimed: readonly number[],
+): Promise<WorkInspection> {
+  const { rows } = await db.query<ExistingWork>(
+    `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces, i.doctor_id, i.tooth_code,
+       t.status AS plan_status, t.base_currency, i.status, i.started_at, i.billing_status, c.site AS case_site, c.status AS case_status, ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,
+       (i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS (
+         SELECT 1 FROM invoice_items ii WHERE ii.plan_item_id = i.id OR (ii.source_type = 'plan_item' AND ii.source_id = i.id))) AS has_invoice_lineage,
+       EXISTS (SELECT 1 FROM treatment_sessions ts WHERE ts.plan_item_id = i.id AND ts.status = 'done') AS has_sessions,
+       EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id) AS installments
+     FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN clinical_cases c ON c.id = i.case_id
+     WHERE t.patient_id = $1 AND i.service_id = $2
+       AND (i.tooth_code IS NOT DISTINCT FROM $3::smallint OR i.tooth_code IS NULL OR $3::smallint IS NULL)
+     ORDER BY i.id`, [patientId, item.serviceId, site.toothCode]);
+  // Unknown case scope must be resolved rather than manufactured as a fresh item.
+  const scoped = rows.filter((row) => {
+    // Explicit different active case can identify a genuinely new episode after completed care.
+    // A cancelled, started, or financially unresolved item is never bypassed this way.
+    if (item.caseId !== null && row.case_id !== null && item.caseId !== row.case_id
+      && row.status === "done" && (row.case_status === "completed" || row.case_status === "closed")
+      && row.financial_review === false) return false;
+    return caseSiteOverlaps(row.case_site ?? (row.tooth_code === null ? null : String(row.tooth_code)), site);
+  });
+  if (scoped.some((row) => claimed.includes(row.id))) return { item: null, refusal: "existing_work" };
+  if (scoped.some((row) => row.financial_review)) return { item: null, refusal: "needs_financial_review" };
+  if (scoped.some((row) => row.billing_status === "billed")) return { item: null, refusal: "already_billed" };
+  if (scoped.some((row) => row.has_invoice_lineage)) return { item: null, refusal: "needs_financial_review" };
+  if (scoped.some((row) => row.status !== "planned" || row.started_at !== null || row.has_sessions || row.plan_status !== "active")) {
+    return { item: null, refusal: "existing_work" };
+  }
+  if (scoped.some((row) => row.base_currency !== currency || row.installments || row.billing_status !== "unbilled")) {
+    return { item: null, refusal: "incompatible_plan" };
+  }
+  if (scoped.length === 0) return { item: null, refusal: null };
+  const priced = scoped.filter((row) => Number(row.unit_price_minor) === item.unitPriceMinor);
+  if (priced.length === 0) return { item: null, refusal: "amount_mismatch" };
+  const exact = priced.filter((row) => row.tooth_code === site.toothCode
+    && (site.scope === null || row.case_site === siteText(site) || row.case_site === site.scope)
+    && row.quantity === item.quantity && normalizeSurfaces(row.surfaces) === site.surfaces
+    && (item.sessions == null || row.session_count === item.sessions));
+  if (exact.length === 0) return { item: null, refusal: "shape_mismatch" };
+  if (exact.length > 1) return { item: null, refusal: "ambiguous_item" };
+  const match = exact[0];
+  if (item.caseId !== null && match.case_id !== null && item.caseId !== match.case_id) return { item: null, refusal: "case_mismatch" };
+  return { item: match, refusal: null };
+}
+
+/** Reclassifying a catalog service cannot erase an existing therapeutic financial identity. */
+async function financialOnlyLineRefusal(
+  db: Pick<DbClient, "query">, patientId: number, serviceId: number | null,
+): Promise<InvoiceLinkageRefusal | null> {
+  if (serviceId === null) return null;
+  const { rows: existingWork } = await db.query<{
+    service_id: number | null; category: string | null; has_invoice_lineage: boolean;
+  }>(
+    `SELECT i.service_id, i.category, ${PLAN_ITEM_INVOICE_LINEAGE_SQL} AS has_invoice_lineage
        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-      WHERE t.patient_id = $1 AND t.status = 'active' AND t.consent_at IS NOT NULL AND t.base_currency = $2
-        AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)
-        AND i.service_id = $3 AND i.tooth_code IS NOT DISTINCT FROM $4::smallint
-        AND i.status = 'planned' AND i.billing_status = 'unbilled' AND i.started_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.plan_item_id = i.id AND s.status = 'done')
-        AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.source_type = 'plan_item' AND ii.source_id = i.id)
-        AND NOT EXISTS (SELECT 1 FROM invoice_items ij WHERE ij.plan_item_id = i.id)`;
+      WHERE t.patient_id = $1 AND i.service_id = $2 ORDER BY i.id`, [patientId, serviceId]);
+  const protectedWork = existingWork.some((item) => item.has_invoice_lineage
+    || lineLinkage({ serviceId: item.service_id, category: item.category }).kind === "clinical");
+  return protectedWork ? "needs_financial_review" : null;
+}
+
+async function reusableMaster(db: Pick<DbClient, "query">, patientId: number, currency: Currency): Promise<number | null | false> {
+  const { rows } = await db.query<{ id: number; compatible: boolean }>(
+    `SELECT t.id, (t.consent_at IS NULL AND t.base_currency = $2 AND t.billing_mode = 'per_procedure'
+      AND t.total_from_items AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)) AS compatible
+     FROM treatment_plans t WHERE t.patient_id = $1 AND t.status = 'active' ORDER BY t.id`, [patientId, currency]);
+  if (rows.length === 0) return null;
+  return rows.length === 1 && rows[0].compatible ? rows[0].id : false;
+}
 
 async function audit(client: DbClient, entry: AuditInput) { await insertAuditRow(client, entry); }
 
@@ -125,7 +206,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
     if (!patient[0]) throw new Refusal("no_patient", null);
 
     if (input.idempotencyKey) {
@@ -141,13 +222,32 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       }
     }
 
+    await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
+    await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [input.patientId]);
     const linkages = input.items.map((item) => lineLinkage({ serviceId: item.serviceId, category: item.category }));
-    input.items.forEach((item, line) => {
-      if (linkages[line].kind === "clinical" && item.toothCode !== null && !isValidTooth(item.toothCode)) {
-        throw new Refusal("bad_tooth", line);
+    for (const [line, item] of input.items.entries()) {
+      if (linkages[line].kind === "financial") {
+        const refusal = await financialOnlyLineRefusal(client, input.patientId, item.serviceId);
+        if (refusal) throw new Refusal(refusal, line);
       }
+    }
+    /* (INV-LINK TOOTH) موضع كل بندٍ علاجي يُتحقق قبل أي كتابة: خدمةٌ تخص سنًّا بلا سن لا تُحفظ مرتبطةً (fail closed). */
+    const sites: (LineSite | null)[] = input.items.map((item, line) => {
+      if (linkages[line].kind !== "clinical") return null;
+      const checked = validateLineSite(item);
+      if (!checked.ok) throw new Refusal(checked.reason, line);
+      return checked.site;
     });
 
+    const clinicalDoctorIds = input.items.flatMap((item, line) => linkages[line].kind === "clinical" && item.doctorId !== null ? [item.doctorId] : []);
+    const doctors = await lockClinicalDoctors(client, [], clinicalDoctorIds);
+    input.items.forEach((item, line) => {
+      if (linkages[line].kind === "clinical" && item.doctorId !== null && !doctors.has(item.doctorId)) throw new Refusal("bad_provider", line);
+      if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
+        throw new Refusal("shape_mismatch", line);
+      }
+    });
     const total = input.items.reduce((sum, item) => sum + Math.max(0, item.quantity) * Math.max(0, item.unitPriceMinor), 0);
     const discount = Math.min(Math.max(0, input.discountMinor), total);
     const { rows: [created] } = await client.query<{ id: number; invoice_number: string }>(
@@ -164,50 +264,31 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       line, kind: linkages[line].kind, specialty: linkages[line].kind === "clinical" ? (linkages[line] as { specialty: LinkageSpecialty }).specialty : null,
       planItemId: null, planItemCreated: false, caseId: null, caseCreated: false,
     }));
+    const financialDoctors = input.items.map((item) => item.doctorId);
     const claimed: number[] = [];
     const fresh: number[] = [];
+    const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
     for (const [line, item] of input.items.entries()) {
       if (linkages[line].kind !== "clinical") continue;
-      /* العمل نفسه مفوترٌ مسبقًا بفاتورةٍ حيّة ولم يبدأ: تبويبان أو نقرتان بمفتاحين ⇒ رفضٌ لا التزامٌ ثانٍ. */
-      const { rows: [billed] } = await client.query(
-        `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id JOIN invoices v ON v.id = i.billed_invoice_id
-          WHERE t.patient_id = $1 AND i.service_id = $2 AND i.tooth_code IS NOT DISTINCT FROM $3::smallint
-            AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
-          LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
-      if (billed) throw new Refusal("already_billed", line);
-      /* بند الخطة يُقفل أولًا ثم تُعاد قراءة أهليته في جملةٍ جديدة بعد انتظار القفل — بالترتيب نفسه الذي يقفل به
-         التوقيعُ البنود (loadPlanItemsForPricing): زيارةٌ وقّعت جلسته أثناء الانتظار تُرى، فلا يفوتره البابان معًا. */
-      const params = [input.patientId, input.baseCurrency, item.serviceId, item.toothCode];
-      const { rows: candidates } = await client.query<{ id: number }>(
-        `${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`, [...params, claimed]);
-      const candidateIds = candidates.map((row) => row.id);
-      if (candidateIds.length > 0) {
-        await client.query(`SELECT id FROM plan_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`, [candidateIds]);
-      }
-      const { rows: open } = candidateIds.length === 0 ? { rows: [] } : await client.query<{
-        id: number; quantity: number; unit_price_minor: string; case_id: number | null;
-        session_count: number; surfaces: string | null;
-      }>(`${OPEN_ITEM_SQL} AND i.id = ANY($5::int[]) ORDER BY i.id`, [...params, candidateIds]);
-      if (open.length === 0) { fresh.push(line); continue; }
-      /* المطابقة على شكل العمل كله لا المبلغ وحده: الكمية، والمبلغ، وبلا أسطح (الفاتورة لا تحملها)، وعدد الجلسات إن طُلب. */
-      const quantity = Math.max(1, Math.round(item.quantity));
-      const totalMinor = quantity * Math.round(item.unitPriceMinor);
-      const sameTotal = open.filter((row) => row.quantity * Number(row.unit_price_minor) === totalMinor);
-      if (sameTotal.length === 0) throw new Refusal("amount_mismatch", line);
-      const exact = sameTotal.filter((row) => row.quantity === quantity && (row.surfaces ?? "").trim() === ""
-        && (item.sessions === null || row.session_count === item.sessions));
-      if (exact.length === 0) throw new Refusal("shape_mismatch", line);
-      if (exact.length > 1) throw new Refusal("ambiguous_item", line);
-      const match = exact[0];
-      /* حالةٌ اختارها المستخدم تخالف حالة البند المطابق: رفضٌ صريح — لا يُنقل البند بين الحالات من الفاتورة. */
-      if (item.caseId !== null && match.case_id !== null && match.case_id !== item.caseId) {
-        throw new Refusal("case_mismatch", line);
+      const site = sites[line]!;
+      if (requestedWork.some((prior) => prior.serviceId === item.serviceId && (
+        (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
+          && caseSiteOverlaps(siteText(prior.site), site))))) throw new Refusal("existing_work", line);
+      requestedWork.push({ serviceId: item.serviceId, site });
+      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed);
+      if (inspection.refusal) throw new Refusal(inspection.refusal, line);
+      const match = inspection.item;
+      if (!match) { fresh.push(line); continue; }
+      if (match.doctor_id !== null && item.doctorId !== null && match.doctor_id !== item.doctorId) throw new Refusal("bad_provider", line);
+      financialDoctors[line] = match.doctor_id ?? item.doctorId;
+      if (financialDoctors[line] !== null && !(await lockClinicalDoctors(client, [], [financialDoctors[line]])).has(financialDoctors[line]!)) {
+        throw new Refusal("bad_provider", line);
       }
       claimed.push(match.id);
       links[line].planItemId = match.id;
       links[line].caseId = match.case_id;
       await client.query(
-        `UPDATE plan_items SET billing_status = 'billed', billed_invoice_id = $2 WHERE id = $1`, [match.id, invoiceId]);
+        `UPDATE plan_items SET billing_status = CASE WHEN $3::int IS NULL THEN 'needs_financial_review' ELSE 'billed' END, billed_invoice_id = $2, doctor_id = $3 WHERE id = $1`, [match.id, invoiceId, financialDoctors[line]]);
       await audit(client, {
         action: "plan.item_update", entity: "patient", entityId: input.patientId, entityLabel: item.description,
         details: { البند: match.id, الرابط_المالي: `قُبل ماليًّا بالفاتورة ${created.invoice_number}`, المصدر: "فاتورة علاجية" },
@@ -217,6 +298,8 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
 
     let planId: number | null = null;
     if (fresh.length > 0) {
+      const masterId = await reusableMaster(client, input.patientId, input.baseCurrency);
+      if (masterId === false) throw new Refusal("incompatible_plan", fresh[0]);
       const specialties = [...new Set(fresh.map((line) => links[line].specialty))];
       const plan = await insertPlanV2InTx(client, {
         patientId: input.patientId,
@@ -231,35 +314,32 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           const item = input.items[line];
           return {
             serviceId: item.serviceId, serviceName: item.description, category: item.category,
-            toothCode: item.toothCode, surfaces: null,
+            toothCode: sites[line]!.toothCode, surfaces: sites[line]!.surfaces,
             quantity: Math.max(1, Math.round(item.quantity)), unitPriceMinor: Math.round(item.unitPriceMinor),
             billingRule: "on_completion" as const,
-            sessionCount: sessionsFor(item.category, item.sessions, input.templates), note: null,
+            sessionCount: sessionsFor(item.category, item.sessions, input.templates), note: scopeNote(sites[line]!),
           };
         }),
         installments: [],
         createdBy: input.createdBy,
-      });
+      }, masterId);
       if (!plan.ok) throw new Error(plan.message);
       planId = plan.planId;
-      /* القبول المالي بالفاتورة اتفاقٌ على هذه البنود بأسعارها — يُسجَّل صراحةً بمصدره، والتقييم السريري لدى الطبيب. */
-      await client.query(
-        `UPDATE treatment_plans SET consent_at = NOW(), consent_by = $2, consent_note = $3 WHERE id = $1`,
-        [planId, input.createdBy, `قبول مالي بالفاتورة ${created.invoice_number} — التقييم السريري لدى الطبيب`]);
+      // Invoice provenance is financial acceptance only. Clinical consent is recorded solely by recordPlanConsent.
       for (const [index, line] of fresh.entries()) {
         const itemId = plan.itemIds[index];
         links[line].planItemId = itemId;
         links[line].planItemCreated = true;
         await client.query(
           `UPDATE plan_items
-              SET billing_status = 'billed', billed_invoice_id = $2, origin = 'invoice', origin_invoice_id = $2,
+              SET billing_status = CASE WHEN $3::int IS NULL THEN 'needs_financial_review' ELSE 'billed' END, billed_invoice_id = $2, origin = 'invoice', origin_invoice_id = $2,
                   doctor_id = COALESCE(doctor_id, $3::int)
             WHERE id = $1`,
-          [itemId, invoiceId, input.items[line].doctorId]);
+          [itemId, invoiceId, financialDoctors[line]]);
       }
       await audit(client, {
-        action: "plan.create", entity: "patient", entityId: input.patientId, entityLabel: `علاج مفوتر — ${created.invoice_number}`,
-        details: { الخطة: planId, البنود: fresh.length, المصدر: `فاتورة ${created.invoice_number}`, الموافقة: "قبول مالي بالفاتورة" },
+        action: masterId === null ? "plan.create" : "plan.item_update", entity: "patient", entityId: input.patientId, entityLabel: `علاج مفوتر — ${created.invoice_number}`,
+        details: { الخطة: planId, البنود: fresh.length, المصدر: `فاتورة ${created.invoice_number}`, القبول_المالي: "سجل الفاتورة؛ الموافقة السريرية لم تُسجّل" },
         actor: input.createdBy, actorRole: input.actorRole,
       });
     }
@@ -272,23 +352,29 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       const specialty = linkage.specialty;
       let caseId = links[line].caseId;
       let caseCreated = false;
-      if (item.caseId !== null) {
-        const { rows: [chosen] } = await client.query<{ id: number }>(
-          `SELECT id FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND ${OPEN_CASE} FOR UPDATE`,
-          [item.caseId, input.patientId, specialty]);
+      if (item.caseId !== null || caseId !== null) {
+        const { rows: [chosen] } = await client.query<{ id: number; site: string | null }>(
+          `SELECT id, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND ${OPEN_CASE}
+            AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('active', 'retention')))
+            FOR UPDATE`, [item.caseId ?? caseId, input.patientId, specialty]);
         if (!chosen) throw new Refusal("bad_case", line);
+        if (!caseSiteFits(specialty, chosen.site, sites[line]!)) throw new Refusal("bad_site", line);
         caseId = chosen.id;
       } else if (caseId === null) {
-        const groupKey = caseGroupKey(specialty, item.toothCode);
+        const site = sites[line]!;
+        const groupKey = siteGroupKey(specialty, site);
         const known = caseBySpecialty.get(groupKey);
         if (known) {
           caseId = known.id;
         } else {
           /* حالةٌ مفتوحة للتخصص تُعاد فقط إن وافق موضعُها سنَّ البند (للتخصص الموضعي): علاج عصب 36 لا يُلحق بحالة 11. */
           const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
-            `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE} ORDER BY id FOR UPDATE`,
+            `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
+              AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+              ORDER BY id FOR UPDATE`,
             [input.patientId, specialty]);
-          const open = sameSpecialty.filter((row) => caseSiteCompatible(specialty, row.site, item.toothCode));
+          if (sameSpecialty.some((row) => !(row.site ?? "").trim())) throw new Refusal("bad_site", line);
+          const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
           if (open.length > 1) throw new Refusal("ambiguous_case", line);
           if (open.length === 1) {
             caseId = open[0].id;
@@ -296,18 +382,20 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
             // التقويم: حالة تقويمٍ جارية غير مجسورة تُجسَر — لا حالةٌ ثانية للمريض نفسه.
             let orthoCaseId: number | null = null;
             if (specialty === "orthodontics") {
-              const { rows: [ortho] } = await client.query<{ id: number }>(
-                `SELECT o.id FROM ortho_cases o
+              const { rows: orthos } = await client.query<{ id: number; arches: string }>(
+                `SELECT o.id, o.arches FROM ortho_cases o
                   WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
                     AND NOT EXISTS (SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id = o.id)
-                  ORDER BY o.id DESC LIMIT 1`, [input.patientId]);
-              orthoCaseId = ortho?.id ?? null;
+                  ORDER BY o.id FOR UPDATE`, [input.patientId]);
+              if (orthos.length > 1) throw new Refusal("ambiguous_case", line);
+              if (orthos.length === 1 && orthos[0].arches !== site.scope) throw new Refusal("bad_site", line);
+              orthoCaseId = orthos[0]?.id ?? null;
             }
-            const title = orthoCaseId !== null ? "تقويم الأسنان" : shellCaseTitle(specialty, item.toothCode);
+            const title = orthoCaseId !== null ? "تقويم الأسنان" : shellCaseTitleFor(specialty, site);
             const { rows: [shell] } = await client.query<{ id: number }>(
               `INSERT INTO clinical_cases (patient_id, specialty, title, site, ortho_case_id, created_by, origin, origin_invoice_id)
                VALUES ($1, $2, $3, $4::text, $5::int, $6, 'invoice', $7) RETURNING id`,
-              [input.patientId, specialty, title, item.toothCode !== null ? String(item.toothCode) : null, orthoCaseId,
+              [input.patientId, specialty, title, siteText(site), orthoCaseId,
                 input.createdBy, invoiceId]);
             caseId = shell.id;
             caseCreated = true;
@@ -344,7 +432,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
                                     source_type, source_id, plan_item_id)
          VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::text, $9::bigint, $10::int)`,
-        [invoiceId, item.serviceId, item.doctorId, item.description, quantity, unit, quantity * unit,
+        [invoiceId, item.serviceId, financialDoctors[line], item.description, quantity, unit, quantity * unit,
           source === null ? null : "plan_item", source, source]);
     }
 
@@ -376,4 +464,129 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
   } finally {
     client.release();
   }
+}
+
+// ─── المعاينة (قراءة فقط) ─────────────────────────────────────────────────────
+
+export interface LinePreview {
+  line: number;
+  kind: "financial" | "clinical";
+  specialty: LinkageSpecialty | null;
+  specialtyLabel: string | null;
+  /** بند الخطة: قائمٌ مطابق يُعاد، أو جديد. */
+  item: { mode: "existing" | "new"; id: number | null } | null;
+  /** الحالة: قائمة تُربط، أو أولية تُنشأ، أو جسرٌ لحالة تقويم قائمة، أو يلزم الاختيار، أو لا حاجة. */
+  case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null;
+    options: { id: number; title: string }[] } | null;
+  /** سبب رفضٍ متوقَّع (المعاينة تحذّر؛ الحفظ يرفض فعلًا). */
+  refusal: InvoiceLinkageRefusal | null;
+  financialReviewRequired?: boolean;
+}
+
+/**
+ * ماذا ستفعل الفاتورة بالعلاج — قبل الحفظ. قراءةٌ بلا أقفال ولا كتابة، بالقواعد نفسها التي يطبّقها
+ * `createLinkedInvoice` (والحفظ يعيد الفحص تحت القفل؛ المعاينة ليست وعدًا).
+ */
+export async function previewInvoiceLinkage(input: {
+  patientId: number; baseCurrency: Currency;
+  items: { serviceId: number | null; category: string | null; quantity: number; unitPriceMinor: number;
+    toothCode: number | null; caseId: number | null; sessions?: number | null;
+    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null }[];
+}): Promise<LinePreview[]> {
+  await ensureSchema();
+  const pool = getPool();
+  const claimed: number[] = [];
+  const newCaseForGroup = new Set<string>();
+  const previews: LinePreview[] = [];
+  const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
+  for (const [line, item] of input.items.entries()) {
+    const linkage = lineLinkage({ serviceId: item.serviceId, category: item.category });
+    if (linkage.kind !== "clinical") {
+      const refusal = await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
+      previews.push({ line, kind: "financial", specialty: null, specialtyLabel: null, item: null, case: null,
+        refusal, financialReviewRequired: refusal !== null });
+      continue;
+    }
+    const preview: LinePreview = {
+      line, kind: "clinical", specialty: linkage.specialty, specialtyLabel: LINKAGE_SPECIALTY_LABEL[linkage.specialty],
+      item: { mode: "new", id: null }, case: linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
+      refusal: null,
+    };
+    const checked = validateLineSite(item);
+    if (!checked.ok) { preview.refusal = checked.reason; previews.push(preview); continue; }
+    const site = checked.site;
+    if (requestedWork.some((prior) => prior.serviceId === item.serviceId && (
+      (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
+        && caseSiteOverlaps(siteText(prior.site), site))))) preview.refusal = "existing_work";
+    requestedWork.push({ serviceId: item.serviceId, site });
+    const { rows: [doctor] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [item.doctorId ?? null]);
+    if (item.doctorId != null && !doctor) preview.refusal = "bad_provider";
+    preview.financialReviewRequired = item.doctorId == null;
+    const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed);
+    preview.refusal = inspected.refusal ?? preview.refusal;
+    const match = inspected.item;
+    let linkedCase: number | null = null;
+    if (match) {
+      if (match.doctor_id !== null && item.doctorId != null && item.doctorId !== match.doctor_id) preview.refusal = "bad_provider";
+      preview.financialReviewRequired = (match.doctor_id ?? item.doctorId) == null;
+      if (match.doctor_id !== null) {
+        const { rows: [assigned] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [match.doctor_id]);
+        if (!assigned) preview.refusal = "bad_provider";
+      }
+      claimed.push(match.id);
+      preview.item = { mode: "existing", id: match.id };
+      linkedCase = match.case_id;
+    } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency) === false) {
+      preview.refusal = "incompatible_plan";
+    }
+    if (linkage.needsCase) {
+      const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(
+        `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+          ORDER BY id`,
+        [input.patientId, linkage.specialty]);
+      if (item.caseId === null && linkedCase === null && sameSpecialty.some((row) => !(row.site ?? "").trim())) {
+        preview.refusal = preview.refusal ?? "bad_site";
+      }
+      // Explicit, inherited, and automatic choices all require exact patient/specialty/site/lifecycle compatibility.
+      const all = sameSpecialty.map(({ id, title }) => ({ id, title }));
+      const open = sameSpecialty.filter((row) => caseSiteFits(linkage.specialty, row.site, site))
+        .map(({ id, title }) => ({ id, title }));
+      const groupKey = siteGroupKey(linkage.specialty, site);
+      if (item.caseId !== null) {
+        const chosen = open.find((one) => one.id === item.caseId);
+        preview.case = chosen ? { mode: "existing", id: chosen.id, title: chosen.title, options: open.length > 1 ? open : all }
+          : { mode: "choose", id: null, title: null, options: open.length > 0 ? open : all };
+        if (!chosen) preview.refusal = preview.refusal ?? (all.some((one) => one.id === item.caseId) ? "bad_site" : "bad_case");
+      } else if (linkedCase !== null) {
+        const found = open.find((one) => one.id === linkedCase);
+        if (!found) preview.refusal = preview.refusal ?? "bad_case";
+        preview.case = { mode: "existing", id: linkedCase, title: found?.title ?? null, options: [] };
+      } else if (newCaseForGroup.has(groupKey)) {
+        preview.case = { mode: "new", id: null, title: shellCaseTitleFor(linkage.specialty, site), options: [] };
+      } else if (open.length > 1) {
+        preview.case = { mode: "choose", id: null, title: null, options: open };
+        preview.refusal = preview.refusal ?? "ambiguous_case";
+      } else if (open.length === 1) {
+        preview.case = { mode: "existing", id: open[0].id, title: open[0].title, options: [] };
+      } else {
+        if (sameSpecialty.some((row) => !(row.site ?? "").trim())) preview.refusal = preview.refusal ?? "bad_site";
+        let bridge = false;
+        if (linkage.specialty === "orthodontics") {
+          const { rows: orthos } = await pool.query<{ arches: string }>(
+            `SELECT o.arches FROM ortho_cases o WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+                AND NOT EXISTS (SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id = o.id) ORDER BY o.id`, [input.patientId]);
+          if (orthos.length > 1) preview.refusal = preview.refusal ?? "ambiguous_case";
+          if (orthos.length === 1 && orthos[0].arches !== site.scope) preview.refusal = preview.refusal ?? "bad_site";
+          bridge = orthos.length === 1;
+        }
+        newCaseForGroup.add(groupKey);
+        preview.case = bridge
+          ? { mode: "bridge", id: null, title: "تقويم الأسنان", options: [] }
+          : { mode: "new", id: null, title: shellCaseTitleFor(linkage.specialty, site), options: [] };
+      }
+    }
+    previews.push(preview);
+  }
+  return previews;
 }
