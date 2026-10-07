@@ -40,7 +40,8 @@ describe("(INV-LEGACY) request parsing — the same computation as the preview",
     expect(parseLegacyTreatmentRequest(base, TODAY)).toEqual({
       ok: true,
       value: {
-        serviceId: 7, toothCode: null, caseId: null, sessions: null, currency: "YER", note: null, idempotencyKey: null,
+        serviceId: 7, toothCode: null, surfaces: null, episodeTeeth: null, scope: null,
+        caseId: null, sessions: null, currency: "YER", note: null, idempotencyKey: null,
         agreedMinor: 300_000, previouslyPaidMinor: 120_000, remainingMinor: 180_000, historicalAsOf: "2026-09-30",
       },
     });
@@ -90,8 +91,12 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
   });
 
   it("the legacy case title states its origin without inventing a diagnosis", () => {
-    expect(legacyCaseTitle("orthodontics", null)).toBe("تقويم — حالة بدأت قبل النظام");
-    expect(legacyCaseTitle("endodontics", 36)).toBe("علاج جذور — سن 36 — حالة بدأت قبل النظام");
+    const none = { toothCode: null, episodeTeeth: null, scope: null };
+    expect(legacyCaseTitle("orthodontics", none)).toBe("تقويم — حالة بدأت قبل النظام");
+    expect(legacyCaseTitle("orthodontics", { ...none, scope: "upper" })).toBe("تقويم — الفك العلوي — حالة بدأت قبل النظام");
+    expect(legacyCaseTitle("endodontics", { ...none, toothCode: 36 })).toBe("علاج جذور — سن 36 — حالة بدأت قبل النظام");
+    expect(legacyCaseTitle("prosthodontics", { ...none, toothCode: 14, episodeTeeth: [14, 15, 16] }))
+      .toBe("تركيبات — أسنان 14، 15، 16 — حالة بدأت قبل النظام");
   });
 
   it("an ortho adjustment covered by a live historical agreement is LEGACY_INCLUDED, whatever the baseline mode", () => {

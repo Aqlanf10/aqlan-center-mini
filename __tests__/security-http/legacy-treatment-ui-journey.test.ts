@@ -15,6 +15,7 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let patientId = 0;
 let serviceId = 0;
+let rctId = 0;
 const stamp = Date.now();
 
 beforeAll(async () => {
@@ -29,6 +30,9 @@ beforeAll(async () => {
   ({ rows: [{ id: serviceId }] } = await db.query<{ id: number }>(
     `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 300000, TRUE, TRUE, 'ortho') RETURNING id`,
     [`تقويم ثابت قديم ${stamp}`]));
+  ({ rows: [{ id: rctId }] } = await db.query<{ id: number }>(
+    `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 80000, TRUE, TRUE, 'rct') RETURNING id`,
+    [`علاج عصب قديم ${stamp}`]));
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
@@ -96,6 +100,34 @@ describe("INV-LEGACY — pre-system treatment journey", () => {
     await page.getByTestId("legacy-agreements").waitFor();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+    await context.close();
+  });
+
+  it("(INV-LINK TOOTH) a legacy endodontic treatment takes its tooth from the shared Dental Chart; no tooth ⇒ cannot save", async () => {
+    // a patient without an opening yet: adding to an existing opening is an admin edit (covered elsewhere)
+    const { rows: [{ id: endoPatient }] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض عصب قديم') RETURNING id`, [`LTE-${stamp}`]);
+    const { context, page } = await open("reception", `/patients/${endoPatient}?tab=account`);
+    await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+    await page.getByLabel("الخدمة العلاجية", { exact: true }).selectOption(String(rctId));
+    await page.getByLabel("المبلغ المتفق عليه أصلًا").fill("80000");
+    await page.getByLabel("المدفوع قبل النظام").fill("30000");
+    await page.getByLabel("تاريخ المعلومات التاريخية").fill("2026-09-30");
+    await page.getByTestId("legacy-tooth-problem").waitFor();
+    expect(await page.getByRole("button", { name: "احفظ العلاج السابق" }).isDisabled()).toBe(true);
+    expect(await page.getByLabel("سن العلاج السابق").count()).toBe(0); // no free-text tooth field
+    await page.getByTestId("legacy-tooth-button").click();
+    await page.getByTestId("tooth-dialog").waitFor();
+    await page.getByTestId("odontogram-tooth-36").click();
+    await page.getByTestId("tooth-dialog-confirm").click();
+    await page.getByTestId("legacy-tooth-chip").filter({ hasText: "36" }).waitFor();
+    await page.getByTestId("legacy-case-preview").filter({ hasText: "حالة بدأت قبل النظام" }).waitFor();
+    await page.getByRole("button", { name: "احفظ العلاج السابق" }).click();
+    await page.getByTestId("legacy-agreements").filter({ hasText: "50,000" }).waitFor();
+    const { rows } = await db.query<{ tooth_code: number; site: string }>(
+      `SELECT a.tooth_code, c.site FROM legacy_treatment_agreements a JOIN clinical_cases c ON c.id = a.case_id
+        WHERE a.patient_id = $1 AND a.service_id = $2`, [endoPatient, rctId]);
+    expect(rows).toEqual([{ tooth_code: 36, site: "36" }]);
     await context.close();
   });
 });

@@ -345,3 +345,32 @@ describe("void: coverage released, opening corrected by the engine, nothing dele
     expect(deleted).toMatchObject({ ok: false, reason: "has_financial_history" });
   });
 });
+
+describe("(INV-LINK TOOTH) the legacy agreement follows the same tooth/site rules as an invoice line", () => {
+  it("a tooth-bound legacy treatment without a tooth is refused before any opening is written", async () => {
+    const patient = await newPatient("LEGACY-TOOTH-REQ");
+    expect(await create(patient, { serviceId: services.rct })).toMatchObject({ ok: false, reason: "tooth_required" });
+    expect(await create(patient, { serviceId: services.rct, toothCode: 36, episodeTeeth: [36, 46] }))
+      .toMatchObject({ ok: false, reason: "episode_split_required" });
+    expect(await opening(patient)).toBeNull();
+    expect(await q(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1`, [patient])).toHaveLength(0);
+  });
+
+  it("a legacy crown/bridge episode keeps all its teeth on the case site; ortho keeps its arch scope", async () => {
+    const patient = await newPatient("LEGACY-BRIDGE");
+    const bridge = await create(patient, { serviceId: services.crown, toothCode: 14, episodeTeeth: [16, 14, 15] });
+    expect(bridge.ok).toBe(true);
+    const [kase] = await q<{ site: string; title: string }>(`SELECT site, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
+    expect(kase.site).toBe("14، 15، 16");
+    expect(kase.title).toContain("حالة بدأت قبل النظام");
+    const [item] = await q<{ tooth_code: number; note: string }>(
+      `SELECT i.tooth_code, i.note FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1`, [patient]);
+    expect(item).toMatchObject({ tooth_code: 14, note: "الأسنان: 14، 15، 16" });
+
+    const ortho = await newPatient("LEGACY-ORTHO-SCOPE");
+    expect(await create(ortho, { serviceId: services.ortho, toothCode: 11 })).toMatchObject({ ok: false, reason: "bad_scope" });
+    expect((await create(ortho, { serviceId: services.ortho, scope: "both" })).ok).toBe(true);
+    expect((await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE patient_id = $1`, [ortho]))[0].site).toBe("الفكّان");
+    expect((await opening(ortho))?.amount_minor).toBe("180000");
+  });
+});

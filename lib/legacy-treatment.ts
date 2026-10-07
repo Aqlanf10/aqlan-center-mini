@@ -8,7 +8,10 @@
  * التصميم: docs/INVOICE_FIRST_LEGACY_TREATMENT.md.
  */
 import { previewLegacyReconciliation } from "./legacy-reconciliation-preview";
-import { LINKAGE_SPECIALTY_LABEL, type LinkageSpecialty } from "./invoice-clinical-linkage";
+import {
+  INVOICE_LINKAGE_MESSAGE, LINKAGE_SPECIALTY_LABEL, SITE_SCOPE_LABEL, parseLineSiteFields,
+  type LineSite, type LinkageSpecialty,
+} from "./invoice-clinical-linkage";
 import { isValidTooth } from "./dental";
 import { isCurrency, type Currency } from "./money";
 
@@ -17,6 +20,10 @@ export const LEGACY_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 export interface LegacyTreatmentRequest {
   serviceId: number;
   toothCode: number | null;
+  /** (INV-LINK TOOTH) أسطح الحشوة، أسنان حلقة التاج/الجسر، ونطاق التقويم/اللثة — من مخطط الأسنان نفسه. */
+  surfaces: string | null;
+  episodeTeeth: number[] | null;
+  scope: string | null;
   caseId: number | null;
   sessions: number | null;
   currency: Currency;
@@ -48,6 +55,8 @@ export function parseLegacyTreatmentRequest(source: Record<string, unknown>, tod
   if (toothCode === undefined || (toothCode !== null && !isValidTooth(toothCode))) {
     return { ok: false, message: "رقم السن غير صحيح بالترقيم الدولي." };
   }
+  const site = parseLineSiteFields(source);
+  if (!site) return { ok: false, message: "بيانات موضع العلاج (الأسنان/الأسطح/النطاق) غير صالحة." };
   const caseId = optionalInt(source.caseId, 1, 2_147_483_647);
   if (caseId === undefined) return { ok: false, message: "الحالة المختارة غير صالحة." };
   const sessions = optionalInt(source.sessions, 1, 60);
@@ -78,7 +87,7 @@ export function parseLegacyTreatmentRequest(source: Record<string, unknown>, tod
   return {
     ok: true,
     value: {
-      serviceId, toothCode, caseId, sessions, currency, note, idempotencyKey,
+      serviceId, toothCode, ...site, caseId, sessions, currency, note, idempotencyKey,
       agreedMinor: preview.historical.agreedMinor,
       previouslyPaidMinor: preview.historical.previouslyPaidMinor,
       remainingMinor: preview.historical.remainingMinor,
@@ -90,14 +99,18 @@ export function parseLegacyTreatmentRequest(source: Record<string, unknown>, tod
 /** بصمة الطلب لمفتاح الإعادة: كل ما يُحفظ منه — بترتيبٍ ثابت. */
 export function legacyTreatmentFingerprint(patientId: number, request: LegacyTreatmentRequest): string {
   return JSON.stringify([
-    patientId, request.serviceId, request.toothCode, request.caseId, request.sessions, request.currency,
+    patientId, request.serviceId, request.toothCode, request.surfaces, request.episodeTeeth, request.scope,
+    request.caseId, request.sessions, request.currency,
     request.agreedMinor, request.previouslyPaidMinor, request.historicalAsOf, request.note,
   ]);
 }
 
 /** عنوان حالةٍ تُفتح لعلاجٍ سابق: التخصص والسن، ووسمها أنها بدأت قبل النظام — بلا تشخيص مختلق. */
-export function legacyCaseTitle(specialty: LinkageSpecialty, toothCode: number | null): string {
-  return `${LINKAGE_SPECIALTY_LABEL[specialty]}${toothCode ? ` — سن ${toothCode}` : ""} — حالة بدأت قبل النظام`;
+export function legacyCaseTitle(specialty: LinkageSpecialty, site: Pick<LineSite, "toothCode" | "episodeTeeth" | "scope">): string {
+  const where = site.episodeTeeth && site.episodeTeeth.length > 1 ? ` — أسنان ${site.episodeTeeth.join("، ")}`
+    : site.toothCode !== null ? ` — سن ${site.toothCode}`
+    : site.scope !== null ? ` — ${SITE_SCOPE_LABEL[site.scope]}` : "";
+  return `${LINKAGE_SPECIALTY_LABEL[specialty]}${where} — حالة بدأت قبل النظام`;
 }
 
 export const LEGACY_CASE_LABEL = "حالة بدأت قبل النظام";
@@ -105,7 +118,7 @@ export const LEGACY_CASE_LABEL = "حالة بدأت قبل النظام";
 export type LegacyTreatmentRefusal =
   | "no_patient" | "bad_service" | "bad_tooth" | "bad_case" | "ambiguous_case" | "idempotency_conflict"
   | "duplicate_live" | "open_item_exists" | "opening_not_owned" | "opening_edit_forbidden" | "period_locked"
-  | "opening_changed";
+  | "opening_changed" | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope";
 
 export type LegacyVoidRefusal =
   | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason";
@@ -123,6 +136,10 @@ export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoi
   opening_edit_forbidden: "للمريض رصيدٌ سابق بهذه العملة — إضافة متبقي اتفاقٍ آخر إليه للمدير.",
   period_locked: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال أو راجع المدير.",
   opening_changed: "تغيّر الرصيد السابق لهذه العملة بعد تسجيل الاتفاق — يراجعه المدير قبل الإبطال.",
+  tooth_required: INVOICE_LINKAGE_MESSAGE.tooth_required,
+  episode_split_required: "العلاج السابق للعصب/الزراعة/الخلع اتفاقٌ مستقل لكل سن — سجّل كل سنٍّ وحده.",
+  bad_surfaces: INVOICE_LINKAGE_MESSAGE.bad_surfaces,
+  bad_scope: INVOICE_LINKAGE_MESSAGE.bad_scope,
   not_found: "الاتفاق التاريخي غير موجود لهذا المريض.",
   already_void: "هذا الاتفاق التاريخي مُبطَل مسبقًا.",
   opening_settled: "سُدِّد من الرصيد السابق ما لا يبقى مغطًّى بعد إبطال الاتفاق — لا يُبطَل حتى تُراجع الدفعات (ردّ أو تصحيح سند).",
@@ -132,5 +149,5 @@ export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoi
 export const LEGACY_TREATMENT_STATUS: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, number> = {
   no_patient: 404, bad_service: 400, bad_tooth: 400, bad_case: 400, ambiguous_case: 409, idempotency_conflict: 409,
   duplicate_live: 409, open_item_exists: 409, opening_not_owned: 409, opening_edit_forbidden: 403, period_locked: 409,
-  opening_changed: 409, not_found: 404, already_void: 409, opening_settled: 409, bad_reason: 400,
+  opening_changed: 409, tooth_required: 400, episode_split_required: 400, bad_surfaces: 400, bad_scope: 400, not_found: 404, already_void: 409, opening_settled: 409, bad_reason: 400,
 };

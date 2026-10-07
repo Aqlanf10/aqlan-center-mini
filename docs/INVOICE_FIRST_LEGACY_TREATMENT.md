@@ -67,6 +67,16 @@ opening via the engine → plan + item → case → agreement row → audit rows
 - `createOrthoCase` bridges the single open ortho shell whose origin is `invoice` **or** that carries a live legacy
   agreement, so the doctor's later ortho intake continues on the same case.
 
+### 3b. Tooth / site — the same chart and rules as an invoice line
+
+The legacy form picks the tooth from the shared Dental Chart dialog (`components/dental/ToothSelectionDialog`); there
+is no free-text tooth field. The server applies the invoice line's validator, `validateLineSite`, before anything is
+written, opening balance included. That means `tooth_required` for tooth-bound services, and endo/implant/extraction
+covering one tooth per agreement (several teeth ⇒ `episode_split_required`: register each tooth separately). A
+crown/veneer/bridge agreement covers its whole episode: the case `site` is «14، 15، 16», and the plan item carries the
+first tooth plus the note «الأسنان: …». Filling surfaces are stored. Ortho/perio take a scope, which becomes the case
+site and the plan item note.
+
 ## 4. Coverage (no per-visit invoicing of covered work)
 
 - `PLAN_ITEM_LEGACY_COVERED_SQL` = item `included_in_package` **and** a live agreement on it. `PLAN_ITEM_PREBILLED_SQL` is now

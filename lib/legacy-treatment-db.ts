@@ -15,8 +15,9 @@ import {
   getPool, insertAuditRow, insertPlanV2InTx, isPeriodLocked, setPatientOpeningBalanceInTx,
   type AuditInput, type DbClient,
 } from "./db";
-import { isValidTooth } from "./dental";
-import { caseSiteCompatible, LINKAGE_SPECIALTY_LABEL, lineLinkage, sessionsFor } from "./invoice-clinical-linkage";
+import {
+  LINKAGE_SPECIALTY_LABEL, caseSiteFits, lineLinkage, scopeNote, sessionsFor, siteText, validateLineSite,
+} from "./invoice-clinical-linkage";
 import { openingPosition } from "./legacy-balance-arrangements-db";
 import {
   legacyCaseTitle, legacyTreatmentFingerprint,
@@ -170,19 +171,25 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       `SELECT id, name, category FROM services WHERE id = $1 AND is_active = TRUE`, [request.serviceId]);
     const linkage = service ? lineLinkage({ serviceId: service.id, category: service.category }) : { kind: "financial" as const };
     if (!service || linkage.kind !== "clinical") throw new Refusal("bad_service");
-    if (request.toothCode !== null && !isValidTooth(request.toothCode)) throw new Refusal("bad_tooth");
+    /* (INV-LINK TOOTH) القاعدة نفسها التي تحكم بند الفاتورة: خدمةٌ تخص سنًّا بلا سن لا تُسجَّل (fail closed). */
+    const checked = validateLineSite({
+      category: service.category, toothCode: request.toothCode, surfaces: request.surfaces,
+      episodeTeeth: request.episodeTeeth, scope: request.scope,
+    });
+    if (!checked.ok) throw new Refusal(checked.reason as LegacyTreatmentRefusal);
+    const site = checked.site;
 
     /* لا اتفاقان حيّان للعمل نفسه، ولا اتفاقٌ تاريخي فوق بند خطةٍ مفتوح للعمل نفسه (مفوترٍ أو مخطَّط في النظام). */
     const { rows: [duplicate] } = await client.query(
       `SELECT 1 FROM legacy_treatment_agreements
         WHERE patient_id = $1 AND service_id = $2 AND tooth_code IS NOT DISTINCT FROM $3::smallint AND status = 'live'`,
-      [patientId, service.id, request.toothCode]);
+      [patientId, service.id, site.toothCode]);
     if (duplicate) throw new Refusal("duplicate_live");
     const { rows: [openItem] } = await client.query(
       `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
         WHERE t.patient_id = $1 AND t.status = 'active' AND i.service_id = $2
           AND i.tooth_code IS NOT DISTINCT FROM $3::smallint AND i.status IN ('planned', 'in_progress')`,
-      [patientId, service.id, request.toothCode]);
+      [patientId, service.id, site.toothCode]);
     if (openItem) throw new Refusal("open_item_exists");
 
     const amounts = `المتفق ${formatMoney(request.agreedMinor, request.currency)} · المدفوع قبل النظام `
@@ -231,15 +238,17 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     // ── بند الخطة: هوية العمل، في خطةٍ للاتفاق التاريخي، موافَقٌ عليها به، ومغطّى ──
     const specialty = linkage.specialty;
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    const planTitle = `علاج بدأ قبل النظام — ${service.name}${request.toothCode ? ` — سن ${request.toothCode}` : ""}`;
+    const where = siteText(site);
+    const planTitle = `علاج بدأ قبل النظام — ${service.name}${where ? ` — ${site.toothCode !== null && !site.episodeTeeth?.[1] ? `سن ${where}` : where}` : ""}`;
     const plan = await insertPlanV2InTx(client, {
       patientId, title: planTitle, specialty, primaryDoctorId: null, billingMode: "per_procedure",
       baseCurrency: request.currency, startDate: request.historicalAsOf <= today ? request.historicalAsOf : today,
       note: `اتفاق تاريخي حتى ${request.historicalAsOf}: ${amounts}. لا يُفوتر — المتبقي في الرصيد السابق.`,
       items: [{
-        serviceId: service.id, serviceName: service.name, category: service.category, toothCode: request.toothCode,
-        surfaces: null, quantity: 1, unitPriceMinor: request.agreedMinor, billingRule: "on_completion" as const,
-        sessionCount: sessionsFor(service.category, request.sessions, input.templates), note: null,
+        serviceId: service.id, serviceName: service.name, category: service.category, toothCode: site.toothCode,
+        surfaces: site.surfaces, quantity: 1, unitPriceMinor: request.agreedMinor, billingRule: "on_completion" as const,
+        sessionCount: sessionsFor(service.category, request.sessions, input.templates),
+        note: scopeNote(site) ?? (site.episodeTeeth && site.episodeTeeth.length > 1 ? `الأسنان: ${site.episodeTeeth.join("، ")}` : null),
       }],
       installments: [],
       createdBy: input.actor,
@@ -270,7 +279,7 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
         const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
           `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
             ORDER BY id FOR UPDATE`, [patientId, specialty]);
-        const open = sameSpecialty.filter((row) => caseSiteCompatible(specialty, row.site, request.toothCode));
+        const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
         if (open.length > 1) throw new Refusal("ambiguous_case");
         if (open.length === 1) {
           caseId = open[0].id;
@@ -284,11 +293,11 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
                 ORDER BY o.id DESC LIMIT 1`, [patientId]);
             orthoCaseId = ortho?.id ?? null;
           }
-          const title = orthoCaseId !== null ? "تقويم الأسنان" : legacyCaseTitle(specialty, request.toothCode);
+          const title = orthoCaseId !== null ? "تقويم الأسنان" : legacyCaseTitle(specialty, site);
           const { rows: [created] } = await client.query<{ id: number }>(
             `INSERT INTO clinical_cases (patient_id, specialty, title, site, ortho_case_id, created_by, origin)
              VALUES ($1, $2, $3, $4::text, $5::int, $6, 'clinical') RETURNING id`,
-            [patientId, specialty, title, request.toothCode !== null ? String(request.toothCode) : null, orthoCaseId, input.actor]);
+            [patientId, specialty, title, siteText(site), orthoCaseId, input.actor]);
           caseId = created.id;
           caseCreated = true;
           await audit(client, {
@@ -317,7 +326,7 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
        VALUES ($1, $2, $3::int, $4, $5, $6, $7::smallint, $8, $9, $10, $11, $12::date, $13, $14::int, $15::text,
                $16::text, $17::text, $18)
        RETURNING id`,
-      [patientId, itemId, caseId, service.id, service.name, specialty, request.toothCode, request.currency,
+      [patientId, itemId, caseId, service.id, service.name, specialty, site.toothCode, request.currency,
         request.agreedMinor, request.previouslyPaidMinor, request.remainingMinor, request.historicalAsOf, openingEffect,
         openingHistoryId, request.note, request.idempotencyKey, requestHash, input.actor]);
 
@@ -335,7 +344,7 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     await audit(client, {
       action: "legacy_treatment.create", entity: "patient", entityId: patientId, entityLabel: service.name,
       details: {
-        الاتفاق: agreement.id, التخصص: LINKAGE_SPECIALTY_LABEL[specialty], السن: request.toothCode ?? "—",
+        الاتفاق: agreement.id, التخصص: LINKAGE_SPECIALTY_LABEL[specialty], السن: siteText(site) ?? "—",
         العملة: request.currency, المتفق: request.agreedMinor, المدفوع_قبل_النظام: request.previouslyPaidMinor,
         المتبقي: request.remainingMinor, حتى_تاريخ: request.historicalAsOf, البند: itemId, الحالة: caseId ?? "—",
         الرصيد_السابق: openingEffect === "none" ? "لا رصيد (مسدَّد تاريخيًّا)" : openingEffect === "created" ? "أُنشئ بالمتبقي" : "أُضيف إليه المتبقي",
