@@ -83,6 +83,19 @@ function isActiveLabStatus(status: string): boolean {
   return status === "booked" || status === "arrived";
 }
 
+/* عقدا نجاح الإجراء مختلفان: PATCH يؤكّد بـ ok:true، أمّا DELETE فيعيد رسالة.
+   قابلية تحليل JSON وحدها لا تثبت أنّ الخادم نفّذ الإجراء. */
+function isAppointmentPatchSuccess(payload: unknown): boolean {
+  return payload !== null && typeof payload === "object" && !Array.isArray(payload)
+    && (payload as Record<string, unknown>).ok === true;
+}
+
+function isAppointmentDeleteSuccess(payload: unknown): boolean {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const message = (payload as Record<string, unknown>).message;
+  return typeof message === "string" && message.trim().length > 0;
+}
+
 export default function AppointmentsPage() {
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -98,7 +111,9 @@ export default function AppointmentsPage() {
   /* اليوم المعروض الآن — يقرؤه الإجراء بعد انتهاء طلبه ليعرف هل انتقل المستخدم
      إلى يومٍ آخر أثناء الانتظار. */
   const dateRef = useRef(today);
+  const dateRevisionRef = useRef(0);
   useEffect(() => {
+    if (dateRef.current !== date) dateRevisionRef.current += 1;
     dateRef.current = date;
   }, [date]);
   const [items, setItems] = useState<Appointment[]>([]);
@@ -290,10 +305,12 @@ export default function AppointmentsPage() {
     async (
       run: () => Promise<Response>,
       after?: (context: { current: boolean }) => string | void,
+      isSuccess: (payload: unknown) => boolean = isAppointmentPatchSuccess,
     ) => {
       if (inFlight.current) return;
       inFlight.current = true;
       const actionDate = dateRef.current;
+      const actionDateRevision = dateRevisionRef.current;
       setBusy(true);
       setHint(null);
       let failure: string | null = null;
@@ -306,14 +323,15 @@ export default function AppointmentsPage() {
             ? payload.message
             : "تعذّر تنفيذ الإجراء.";
           if (typeof payload?.suggestionMessage === "string") suggestion = payload.suggestionMessage;
-        } else if (payload === undefined || payload === null) {
+        } else if (!isSuccess(payload)) {
           failure = "وصل ردٌّ غير صالح من الخادم ولم يتأكّد تنفيذ الإجراء — راجع حالة الموعد في القائمة قبل إعادة المحاولة.";
         }
       } catch {
         failure = "تعذّر الاتصال بالخادم ولم يتأكّد تنفيذ الإجراء — راجع حالة الموعد في القائمة قبل إعادة المحاولة.";
       }
 
-      const current = dateRef.current === actionDate;
+      /* الخروج ثم العودة إلى اليوم نفسه سياقٌ أحدث أيضًا؛ لا يُحيي أثرًا قديمًا. */
+      const current = dateRef.current === actionDate && dateRevisionRef.current === actionDateRevision;
       let reloadDate = dateRef.current;
       if (failure === null) {
         setActionError(null);
@@ -943,6 +961,8 @@ export default function AppointmentsPage() {
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({ reason: "حذف من صفحة المواعيد" }),
                             }),
+                            undefined,
+                            isAppointmentDeleteSuccess,
                           );
                         }}
                         disabled={busy}
@@ -1244,3 +1264,4 @@ function ReminderButton({ item, onSent }: { item: Appointment; onSent: () => voi
     </a>
   );
 }
+

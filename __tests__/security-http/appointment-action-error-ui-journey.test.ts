@@ -394,3 +394,131 @@ describe("سببُ رفض إجراء الموعد يبقى ظاهرًا بعد �
     expect(await page.getByRole("alert").filter({ hasText: /تعذّر|رفض|غير صالح/ }).count()).toBe(0);
   });
 });
+
+describe("عقد نجاح الإجراء وملكيّة التنقّل", () => {
+  it.each(["false", "0", '"proxy"', "[]", "{}", '{"ok":false}', '{"ok":"true"}'])(
+    "JSON بلا تأكيد نجاح (%s): يبقى رفض النقل ومدخلاته واليوم المعروض",
+    async (body) => {
+      const id = await seedAppointment(today);
+      await openDay(today);
+      await row(id).waitFor({ timeout: 60_000 });
+      let attempts = 0;
+      await page.route(`**/api/appointments/${id}`, (route) => {
+        if (route.request().method() !== "PATCH") return route.continue();
+        attempts += 1;
+        return route.fulfill({ status: 200, contentType: "application/json", body });
+      });
+
+      await row(id).locator('[data-action="reschedule"]').click();
+      await row(id).locator('input[type="date"]').fill(tomorrow);
+      await row(id).locator('input[type="time"]').fill("15:30");
+      await row(id).locator('[data-field="reschedule-reason"]').fill("طلب المريض وقتًا آخر");
+      await clickAndSettle(id, () => row(id).locator('[data-action="reschedule-submit"]').click());
+
+      expect(await alertWith("وصل ردٌّ غير صالح").isVisible()).toBe(true);
+      expect(await row(id).locator('input[type="date"]').inputValue()).toBe(tomorrow);
+      expect(await row(id).locator('input[type="time"]').inputValue()).toBe("15:30");
+      expect(await row(id).locator('[data-field="reschedule-reason"]').inputValue()).toBe("طلب المريض وقتًا آخر");
+      expect(await page.locator('input[type="date"]').first().inputValue()).toBe(today);
+      expect((await statusOf(id)).date).toBe(today);
+      expect(attempts).toBe(1);
+    },
+  );
+
+  it.each(["arrive", "cancel"] as const)(
+    "ردّ 200 بجسم ok:false لا يفتح آثار النجاح: %s",
+    async (action) => {
+      const id = await seedAppointment(today);
+      await openDay(today);
+      await row(id).waitFor({ timeout: 60_000 });
+      let candidateReads = 0;
+      await page.route("**/api/waiting-list?*", (route) => {
+        candidateReads += 1;
+        return route.fulfill({ status: 200, contentType: "application/json", body: '{"candidates":[]}' });
+      });
+      await page.route(`**/api/appointments/${id}`, (route) => route.request().method() === "PATCH"
+        ? route.fulfill({ status: 200, contentType: "application/json", body: '{"ok":false}' })
+        : route.continue());
+
+      await clickAndSettle(id, () => row(id).getByRole("button", {
+        name: action === "arrive" ? /وصل للعيادة/ : "إلغاء",
+        exact: action === "cancel",
+      }).click());
+
+      expect(await alertWith("وصل ردٌّ غير صالح").isVisible()).toBe(true);
+      expect((await statusOf(id)).status).toBe("booked");
+      expect(await page.getByRole("dialog", { name: "لوحة الوصول" }).count()).toBe(0);
+      expect(await page.locator("[data-freed-slot]").count()).toBe(0);
+      expect(candidateReads).toBe(0);
+    },
+  );
+
+  it("الخروج من اليوم والعودة إليه أثناء النقل لا يُحيي انتقالًا قديمًا", async () => {
+    const id = await seedAppointment(today);
+    const tomorrowId = await seedAppointment(tomorrow, "B");
+    await openDay(today);
+    await row(id).waitFor({ timeout: 60_000 });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(`**/api/appointments/${id}`, async (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      await gate;
+      return route.continue();
+    });
+
+    await row(id).locator('[data-action="reschedule"]').click();
+    await row(id).locator('input[type="date"]').fill(afterTomorrow);
+    await row(id).locator('input[type="time"]').fill("15:00");
+    await row(id).locator('[data-field="reschedule-reason"]').fill("نقلٌ أثناء الخروج والعودة");
+    await row(id).locator('[data-action="reschedule-submit"]').click();
+
+    const tomorrowLoaded = page.waitForResponse((r) => isListGet(r.url(), r.request().method(), tomorrow));
+    await page.getByRole("button", { name: "غداً", exact: true }).click();
+    await tomorrowLoaded;
+    await row(tomorrowId).waitFor({ timeout: 30_000 });
+
+    const todayLoaded = page.waitForResponse((r) => isListGet(r.url(), r.request().method(), today));
+    await page.getByRole("button", { name: /^اليوم \(/ }).click();
+    await todayLoaded;
+    await row(id).waitFor({ timeout: 30_000 });
+
+    const patch = page.waitForResponse((r) => isActionOn(r.url(), r.request().method(), id));
+    const reloaded = page.waitForResponse((r) => isListGet(r.url(), r.request().method()));
+    release();
+    expect((await patch).status()).toBe(200);
+    await reloaded;
+    await page.waitForTimeout(400);
+
+    expect(await statusOf(id)).toMatchObject({ status: "booked", date: afterTomorrow, time: "15:00" });
+    expect(await page.locator('input[type="date"]').first().inputValue()).toBe(today);
+    expect(await row(id).count()).toBe(0);
+    expect(await page.getByRole("alert").filter({ hasText: /تعذّر|رفض|غير صالح/ }).count()).toBe(0);
+  });
+
+  it("حذف المدير الحقيقي يبقى ناجحًا بعقد الرسالة بلا حقل ok", async () => {
+    const id = await seedAppointment(today);
+    await context.addCookies([{ ...sessionCookie(h.sessions.admin.cookie), url: baseUrl }]);
+    try {
+      await openDay(today);
+      await row(id).waitFor({ timeout: 60_000 });
+      const deletion = page.waitForResponse((r) =>
+        new URL(r.url()).pathname === `/api/appointments/${id}` && r.request().method() === "DELETE");
+      page.once("dialog", (dialog) => { void dialog.accept(); });
+      await clickAndSettle(id, () => row(id).getByRole("button", { name: /حذف/ }).click());
+
+      const response = await deletion;
+      expect(response.status()).toBe(200);
+      expect(await response.json()).toEqual({ message: "حُذف الموعد وسُجِّل في التدقيق." });
+      expect(await row(id).count()).toBe(0);
+      expect(await page.getByRole("alert").filter({ hasText: /تعذّر|رفض|غير صالح/ }).count()).toBe(0);
+      const { rows: [remaining] } = await db.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM appointments WHERE id = $1", [id],
+      );
+      expect(remaining.count).toBe(0);
+    } finally {
+      await context.addCookies([{ ...sessionCookie(h.sessions.reception.cookie), url: baseUrl }]);
+    }
+  });
+});
+
