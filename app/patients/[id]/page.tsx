@@ -1136,7 +1136,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {treatmentSubTab === "ortho" && (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
-              <AssessmentBanner patientId={patient.id} specialty="orthodontics"
+              <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="افتح حالة التقويم أدناه بعد التقييم — تُربط بهذه الحالة وبباقتها المفوترة تلقائيًا." />
               <PatientOrtho patientId={patient.id} />
             </section>
@@ -1150,7 +1150,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
           {treatmentSubTab === "endo" && (
             <section aria-label="علاج الجذور">
-              <AssessmentBanner patientId={patient.id} specialty="endodontics"
+              <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="endodontics"
                 hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
               <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
