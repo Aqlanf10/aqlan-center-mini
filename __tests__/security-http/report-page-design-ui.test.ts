@@ -412,9 +412,11 @@ function referenceSpecs(date: string, clinic: string): ReferenceSpec[] {
     { key: "date", parts: [{ text: friendlyDateNamed(date), selector: '[data-testid="print-report-date"]' }] },
     { key: "next", parts: [{ text: `حجوزات اليوم التالي — ${friendlyDateNamed(addDays(date, 1))}`, selector: '[aria-label="حجوزات اليوم التالي"] h2' }] },
     { key: "lab", parts: [{ text: "أعمال المختبر — الحالة الآن", selector: '[aria-label="أعمال المختبر الآن"] h2' }] },
+    // Each flex row has its own intrinsic text width. Reusing the first row's
+    // width can wrap a longer expected line only in the calibration PDF.
     ...plannedRows().map((row, index) => ({ key: `row${index}`, parts: [
-      { text: row.patientName, selector: '[data-planned-row] p:first-child' },
-      { text: `${row.title} · ${row.durationMinutes} دقيقة · ${row.doctorName}`, selector: '[data-planned-row] p:last-child' },
+      { text: row.patientName, selector: `[data-planned-row]:nth-child(${index + 1}) p:first-child` },
+      { text: `${row.title} · ${row.durationMinutes} دقيقة · ${row.doctorName}`, selector: `[data-planned-row]:nth-child(${index + 1}) p:last-child` },
     ] })),
   ];
 }
