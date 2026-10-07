@@ -107,7 +107,7 @@ async function evidence(name: string, width: 390 | 1280, text: string): Promise<
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
   await mkdir(ARTIFACTS, { recursive: true });
-  await page.screenshot({ path: join(ARTIFACTS, `appointment-action-error-${name}-${width}.png`), fullPage: false });
+  await page.screenshot({ path: join(ARTIFACTS, `appointment-action-error-${name}-${width}.png`), fullPage: true });
 }
 
 beforeAll(async () => {

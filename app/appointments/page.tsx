@@ -95,11 +95,22 @@ export default function AppointmentsPage() {
   /* رابطٌ مباشر إلى يومٍ وفلتر: «غدًا · لم يُذكَّر» من بطاقة الشاشة الرئيسية يفتح
      القائمة جاهزةً للجولة — بلا تنقّلٍ ولا ضغطتين إضافيتين. */
   const [date, setDate] = useState(today);
+  /* اليوم المعروض الآن — يقرؤه الإجراء بعد انتهاء طلبه ليعرف هل انتقل المستخدم
+     إلى يومٍ آخر أثناء الانتظار. */
+  const dateRef = useRef(today);
+  useEffect(() => {
+    dateRef.current = date;
+  }, [date]);
   const [items, setItems] = useState<Appointment[]>([]);
   /* (P0-D) المريض الذي سُجّل وصوله للتو — تُفتح له لوحة الوصول. */
   const [arrivalPatient, setArrivalPatient] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  /* خطأ تحميل القائمة وحده — يمسحه أي تحميلٍ ناجح. */
   const [error, setError] = useState<string | null>(null);
+  /* نتيجةُ آخر إجراءٍ مرفوض — حالةٌ مستقلّة عن تحميل القائمة: كانت مشتركة معه،
+     فيرفض الخادم الإلغاء ثم يمسح تحديثُ القائمة الناجح سببَ الرفض في اللحظة نفسها.
+     لا يمسحها إلا نجاحُ إجراءٍ لاحق أو إخفاؤها يدويًّا. */
+  const [actionError, setActionError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -233,19 +244,29 @@ export default function AppointmentsPage() {
   const load = useCallback(async (target: string) => {
     const requestId = ++latestLoadRequestRef.current;
     setLoading(true);
+    /* رسالةٌ عربية من عندنا دائمًا: نصّ استثناء المتصفح («Failed to fetch» أو خطأ
+       تحليل JSON) لا يُعرض للموظّف. */
+    let failure = "تعذّر الاتصال بالخادم لتحديث القائمة.";
     try {
       const response = await fetch(`/api/appointments?date=${target}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+      const payload = await response.json().catch(() => undefined);
+      if (!response.ok) {
+        failure = typeof payload?.message === "string" && payload.message ? payload.message : "تعذّر التحميل.";
+        throw new Error(failure);
+      }
+      if (!Array.isArray(payload)) {
+        failure = "وصل ردٌّ غير صالح من الخادم أثناء تحديث القائمة.";
+        throw new Error(failure);
+      }
 
       /* إن بدأ تحميل أحدث أثناء انتظار هذا الطلب فهذه الاستجابة stale:
          لا items ولا error ولا loading يجوز أن تعود بالواجهة إلى يومٍ سابق. */
       if (requestId !== latestLoadRequestRef.current) return;
       setItems(payload as Appointment[]);
       setError(null);
-    } catch (loadError) {
+    } catch {
       if (requestId !== latestLoadRequestRef.current) return;
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      setError(failure);
     } finally {
       if (requestId === latestLoadRequestRef.current) setLoading(false);
     }
@@ -258,32 +279,57 @@ export default function AppointmentsPage() {
 
   const load_ = useMemo(() => dayLoad(items, date, CHAIRS, dayStart, dayEnd), [items, date, CHAIRS, dayStart, dayEnd]);
 
+  /* تنفيذُ إجراءٍ على موعد ثم تحديثُ القائمة.
+     - نتيجةُ الإجراء في actionError، وخطأُ التحديث في error: نجاحُ التحديث لا يمحو
+       سببَ الرفض، وفشلُه لا يُخفيه — يظهر الاثنان معًا.
+     - لا تُنفَّذ آثار النجاح (`after`) إلا على ردٍّ ناجح صالح.
+     - انقطاعُ الشبكة أو ردٌّ غير مفهوم لا يُعَدّ نجاحًا ولا يُعاد إرساله تلقائيًّا.
+     - إن انتقل المستخدم إلى يومٍ آخر أثناء الطلب فالردّ قديم: يُحدَّث اليوم المعروض
+       الآن، ولا يُعاد المستخدم إلى يومٍ آخر ولا تُفتح لوحاتٌ لسياقٍ تركه. */
   const act = useCallback(
-    async (run: () => Promise<Response>, after?: () => string | void) => {
+    async (
+      run: () => Promise<Response>,
+      after?: (context: { current: boolean }) => string | void,
+    ) => {
       if (inFlight.current) return;
       inFlight.current = true;
+      const actionDate = dateRef.current;
       setBusy(true);
       setHint(null);
+      let failure: string | null = null;
+      let suggestion: string | null = null;
       try {
         const response = await run();
-        const payload = await response.json().catch(() => null);
-        let reloadDate = date;
+        const payload = await response.json().catch(() => undefined);
         if (!response.ok) {
-          setError(payload?.message ?? "تعذّر تنفيذ الإجراء.");
-          if (payload?.suggestionMessage) setHint(payload.suggestionMessage);
-        } else {
-          setError(null);
-          reloadDate = after?.() ?? date;
+          failure = typeof payload?.message === "string" && payload.message
+            ? payload.message
+            : "تعذّر تنفيذ الإجراء.";
+          if (typeof payload?.suggestionMessage === "string") suggestion = payload.suggestionMessage;
+        } else if (payload === undefined || payload === null) {
+          failure = "وصل ردٌّ غير صالح من الخادم ولم يتأكّد تنفيذ الإجراء — راجع حالة الموعد في القائمة قبل إعادة المحاولة.";
         }
-        await load(reloadDate);
       } catch {
-        setError("تعذّر الاتصال بالخادم.");
+        failure = "تعذّر الاتصال بالخادم ولم يتأكّد تنفيذ الإجراء — راجع حالة الموعد في القائمة قبل إعادة المحاولة.";
+      }
+
+      const current = dateRef.current === actionDate;
+      let reloadDate = dateRef.current;
+      if (failure === null) {
+        setActionError(null);
+        reloadDate = after?.({ current }) || reloadDate;
+      } else {
+        setActionError(current ? failure : `${failure} (الإجراء على مواعيد ${friendlyDateLong(actionDate)})`);
+        if (suggestion && current) setHint(suggestion);
+      }
+      try {
+        await load(reloadDate);
       } finally {
         inFlight.current = false;
         setBusy(false);
       }
     },
-    [date, load],
+    [load],
   );
 
   /* تنفيذُ النقل. والتاريخُ المعروض يتبع الموعد: إن نُقل إلى يومٍ آخر انتقلت
@@ -304,8 +350,10 @@ export default function AppointmentsPage() {
             reason: target.reason,
           }),
         }),
-      () => {
+      ({ current }) => {
         setMoving(null);
+        /* نُقل الموعد، لكنّ المستخدم انتقل أثناء الطلب إلى يومٍ آخر: لا نسحبه منه. */
+        if (!current) return;
         if (target.date !== date) setDate(target.date);
         /* act() يعيد تحميل يوم الهدف نفسه؛ لا يستخدم closure لليوم القديم. */
         return target.date;
@@ -322,9 +370,9 @@ export default function AppointmentsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "arrive" }),
       });
-    }, () => {
+    }, ({ current }) => {
       /* (P0-D) لوحة الوصول المالية بعد الوصول — معلومةٌ واقتراح، لا شرط للدخول. */
-      if (item.patientId) setArrivalPatient(item.patientId);
+      if (current && item.patientId) setArrivalPatient(item.patientId);
     });
   };
 
@@ -625,8 +673,26 @@ export default function AppointmentsPage() {
         </div>
       )}
 
+      {actionError ? (
+        <div
+          role="alert"
+          data-action-error
+          className="mb-3 flex items-start justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
+        >
+          <p className="min-w-0 break-words">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="إخفاء رسالة الإجراء"
+            className="shrink-0 rounded-lg px-1.5 text-red-700 hover:bg-red-100"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
       {error ? (
-        <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+        <p role="alert" data-load-error className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
+          {actionError ? "وتعذّر أيضًا تحديث القائمة — ما يظهر قد لا يكون آخر حالة: " : null}
           {error}
         </p>
       ) : null}
@@ -834,7 +900,7 @@ export default function AppointmentsPage() {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ action: "no_show" }),
                               }),
-                              () => void findCandidates(item),
+                              ({ current }) => { if (current) void findCandidates(item); },
                             )
                           }
                           disabled={busy}
@@ -850,7 +916,7 @@ export default function AppointmentsPage() {
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ action: "cancel" }),
                               }),
-                              () => void findCandidates(item),
+                              ({ current }) => { if (current) void findCandidates(item); },
                             )
                           }
                           disabled={busy}
