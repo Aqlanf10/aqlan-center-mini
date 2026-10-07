@@ -80,9 +80,13 @@ async function observeForbiddenTitles(page: Page) {
 
 async function assertNoTitleLeak(page: Page) {
   await settle(page);
-  const hits = await page.evaluate(() => (window as Window & {
-    __workflowEndoTitleAudit: { hits: string[] };
-  }).__workflowEndoTitleAudit.hits);
+  const hits = await page.evaluate(() => {
+    const audit = (window as Window & {
+      __workflowEndoTitleAudit?: { hits: string[]; observer: MutationObserver };
+    }).__workflowEndoTitleAudit;
+    if (!audit) throw new Error("The workflow title audit was not installed.");
+    return audit.hits;
+  });
   expect(hits).toEqual([]);
   for (const title of forbiddenTitles) expect(await page.getByText(title, { exact: false }).count()).toBe(0);
 }
