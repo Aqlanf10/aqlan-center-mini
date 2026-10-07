@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ClinicalDoctorIdentityConflict, lockClinicalDoctors } from "../lib/clinical-doctor-identity";
 import type { DbClient } from "../lib/db";
 import { isCurrency, requireCurrency } from "../lib/money";
+import { toWhatsAppNumber } from "../lib/reminders";
+import { priceForSession } from "../lib/workflow";
 
 // DB-free protocol tests. Real guard and exact source-extracted domain bodies run
 // against a deterministic query double, never db.ts bootstrap or a SQL engine.
@@ -55,7 +57,9 @@ function domain<T>(name: string, dependencies: Record<string, unknown>): T {
     if (name === "./endodontics-db") return { hasMeaningfulEndoVisit: async () => false };
     throw new Error(`Unexpected dependency in isolated domain protocol: ${name}`);
   };
-  new Function("exports", "require", ...Object.keys(dependencies), compiled)(output, load, ...Object.values(dependencies));
+  // Private helpers use the same exact-source extraction as exported domain functions.
+  const exposed = `${compiled}\nexports[${JSON.stringify(name)}] = ${name};`;
+  new Function("exports", "require", ...Object.keys(dependencies), exposed)(output, load, ...Object.values(dependencies));
   return output[name] as T;
 }
 
@@ -78,6 +82,10 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   const query = vi.fn(async (sql: string, values: unknown[] = []) => {
     if (sql === "BEGIN") before = structuredClone(state);
     if (sql === "ROLLBACK") state = structuredClone(before);
+    if (sql === "SELECT patient_id, patient_phone FROM visits WHERE id = $1") {
+      return { rows: [{ patient_id: 101, patient_phone: null }] };
+    }
+    if (sql === "SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE") return { rows: [{ id: 101 }] };
     if (sql.includes("FROM parties")) return { rows: (values[0] as number[]).filter((id) => [11, 12].includes(id)).map((id) => ({ id })) };
     if (sql.includes("FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE")) return { rows: state.signed ? [] : [{
       id: 201, patient_id: 101, patient_name: "Synthetic patient", patient_phone: null, planned_visit_id: null,
@@ -104,7 +112,7 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   const client = { query, release: vi.fn() } as unknown as DbClient;
   const dependencies: Record<string, unknown> = {
     ensureSchema: async () => {}, getPool: () => ({ connect: async () => client, query }),
-    lockClinicalDoctors, isCurrency, requireCurrency, CLINIC_BASE_CURRENCY: "YER",
+    lockClinicalDoctors, isCurrency, requireCurrency, priceForSession, CLINIC_BASE_CURRENCY: "YER",
     loadPlanItemsForPricing: async () => new Map(), normalizeSurfaces: (value: unknown) => value,
     ClinicalPlanConflict: class extends Error {},
     getClinicalVisit: async () => ({ id: 201, patientId: 101, patientName: "Synthetic patient", status: state.signed ? "signed" : "open",
@@ -121,6 +129,9 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
     closePlannedVisitAndSuggestNext: async () => null, createAutoLabOrders: writeEffects,
     deductServiceMaterials: writeEffects, progressReferralsOnSign: writeEffects,
   };
+  dependencies.normalizePatientPhone = domain("normalizePatientPhone", { toWhatsAppNumber });
+  dependencies.phoneLookupForms = domain("phoneLookupForms", { toWhatsAppNumber });
+  dependencies.lockVisitPatientFirst = domain("lockVisitPatientFirst", dependencies);
   dependencies.saveClinicalNotes = domain("saveClinicalNotes", dependencies);
   return { state: () => structuredClone(state), query, writeEffects, dependencies,
     save: domain<(input: Record<string, unknown>) => Promise<boolean>>("setVisitProcedures", dependencies),
@@ -128,17 +139,31 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
   };
 }
 
+function expectPatientFirst(query: ReturnType<typeof protocol>["query"]) {
+  expect(query.mock.calls.slice(0, 3)).toEqual([
+    ["BEGIN"],
+    ["SELECT patient_id, patient_phone FROM visits WHERE id = $1", [201]],
+    ["SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [101]],
+  ]);
+  const visitLock = query.mock.calls.findIndex(([sql]) =>
+    sql.includes("FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE"));
+  expect(visitLock).toBe(3);
+  expect(query.mock.calls[visitLock]?.[1]).toEqual([201]);
+}
+
 describe("exact domain bodies reject bad performer identities without effects (query protocol)", () => {
   it.each([91, 92, 93])("save refuses explicit non-doctor/missing %s and keeps existing notes and procedures", async (id) => {
     const p = protocol(procedure(12)); const before = p.state();
     await expect(p.save({ visitId: 201, procedures: [procedure(id)], clinicalNotes: notes }))
       .rejects.toBeInstanceOf(ClinicalDoctorIdentityConflict);
+    expectPatientFirst(p.query);
     expect(p.state()).toEqual(before);
     expect(p.query.mock.calls.some(([sql]) => /DELETE FROM visit_procedures|UPDATE visits SET chief_complaint/.test(sql))).toBe(false);
   });
   it("valid save combines notes/procedures on the owned transaction and preserves explicit doctor B", async () => {
     const p = protocol(procedure(11));
     expect(await p.save({ visitId: 201, procedures: [procedure(12)], clinicalNotes: notes })).toBe(true);
+    expectPatientFirst(p.query);
     expect(p.state()).toMatchObject({ diagnosis: notes.diagnosis, doctorId: 11, procedures: [expect.objectContaining({ doctorId: 12 })] });
     const statements = p.query.mock.calls.map(([sql]) => sql);
     expect(statements.indexOf("COMMIT")).toBeGreaterThan(statements.findIndex((sql) => sql.startsWith("UPDATE visits SET chief_complaint")));
@@ -148,6 +173,7 @@ describe("exact domain bodies reject bad performer identities without effects (q
       const p = protocol(procedure(id, price), doctor); const before = p.state();
       await expect(p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic-admin", signerDoctorPartyId: 12 }))
         .rejects.toBeInstanceOf(ClinicalDoctorIdentityConflict);
+      expectPatientFirst(p.query);
       expect(p.state()).toEqual(before); expect(p.writeEffects).not.toHaveBeenCalled();
       expect(p.dependencies.progressTreatmentSessions).not.toHaveBeenCalled();
       expect(p.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
@@ -157,12 +183,14 @@ describe("exact domain bodies reject bad performer identities without effects (q
     "keeps explicit/null fallback attribution %s/%s/%s → %s", async (explicit, doctor, signer, expected) => {
       const p = protocol(procedure(explicit), doctor);
       expect((await p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: signer })).reason).toBeNull();
+      expectPatientFirst(p.query);
       expect(p.state()).toMatchObject({ signed: true, invoiceDoctors: [expected], procedures: [expect.objectContaining({ doctorId: expected })] });
     },
   );
   it("keeps the no-treating-doctor refusal when all fallbacks are non-doctors", async () => {
     const p = protocol(procedure(null), 91);
     expect((await p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 92 })).reason).toBe("no_treating_doctor");
+    expectPatientFirst(p.query);
     expect(p.state()).toMatchObject({ signed: false, invoiceCount: 0 });
   });
 });
