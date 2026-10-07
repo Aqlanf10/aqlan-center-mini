@@ -2,7 +2,7 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
 import {
@@ -49,6 +49,9 @@ export function PatientLabOrders({
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Keep a refused status command visible even if an unrelated read finishes.
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const mutationPending = useRef(false);
 
   // حقول الإضافة
   const [labName, setLabName] = useState("");
@@ -120,7 +123,8 @@ export function PatientLabOrders({
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!labName.trim() || busy) return;
+    if (!labName.trim() || busy || mutationPending.current) return;
+    setStatusError(null);
 
     /* التكلفة التزام على جهة مسجلة: نطابق اسم المختبر المكتوب مع المختبرات
        المسجلة؛ فإن لم يوجد فالتكلفة تُترك للمالية من لوحة أعمال المختبر. */
@@ -133,6 +137,7 @@ export function PatientLabOrders({
       return;
     }
 
+    mutationPending.current = true;
     setBusy(true);
     setError(null);
 
@@ -173,28 +178,44 @@ export function PatientLabOrders({
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   };
 
   const updateStatus = async (orderId: number, nextStatus: "received" | "delivered") => {
+    if (busy || mutationPending.current) return;
+    const target = orders.find((order) => order.id === orderId && order.patientId === patientId);
+    if (!target) return;
+    mutationPending.current = true;
     setBusy(true);
+    setStatusError(null);
     try {
       const res = await fetch(`/api/lab/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) {
-        await load();
-        if (nextStatus === "received") {
-          const target = orders.find((o) => o.id === orderId);
-          if (target) {
-            setDeliveryAppointmentOrder({ ...target, status: "received" });
-          }
-        }
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const message = typeof data?.message === "string" && data.message.trim()
+          ? data.message
+          : "تعذّر تحديث حالة طلب المعمل.";
+        // The API's existing conflict text claims a refresh that did not happen.
+        setStatusError(res.status === 409 && message === "حالة العمل تغيّرت من جهاز آخر. حدّثت القائمة — راجعها."
+          ? "حالة العمل تغيّرت من جهاز آخر. أعد تحميل القائمة وراجعها قبل إعادة المحاولة."
+          : message);
+        return;
       }
+      await load();
+      if (nextStatus === "received") {
+        setDeliveryAppointmentOrder({ ...target, status: "received" });
+      }
+    } catch {
+      // A lost response does not establish whether the server committed.
+      setStatusError("تعذّر تأكيد تحديث حالة طلب المعمل. تحقّق من حالته قبل إعادة المحاولة.");
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   };
@@ -202,12 +223,15 @@ export function PatientLabOrders({
   /* إلغاء إرسالية قائمة عند المختبر — من ملف المريض، والمدير وحده: الخادم يحرس
    * البوابة نفسها (رسالة واضحة لغيره)، والزر لا يظهر له أصلًا. */
   const cancelSubmission = async (order: LabOrder) => {
+    if (busy || mutationPending.current) return;
     const hasCost = Number(order.costMinor) > 0;
     const message = hasCost
       ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
       : `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟`;
     if (!window.confirm(message)) return;
+    mutationPending.current = true;
     setBusy(true);
+    setStatusError(null);
     setError(null);
     try {
       const res = await fetch(`/api/lab/${order.id}`, {
@@ -224,6 +248,7 @@ export function PatientLabOrders({
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
+      mutationPending.current = false;
       setBusy(false);
     }
   };
@@ -244,8 +269,8 @@ export function PatientLabOrders({
         </button>
       </div>
 
-      {error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{error}</div>
+      {statusError || error ? (
+        <div role="alert" className="min-w-0 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 [overflow-wrap:anywhere]">{statusError ?? error}</div>
       ) : null}
 
       {showAdd ? (
@@ -549,6 +574,7 @@ export function PatientLabOrders({
                         <button
                           type="button"
                           onClick={() => setDeliveryAppointmentOrder(order)}
+                          disabled={busy}
                           className="rounded-lg border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 hover:bg-blue-100 flex items-center gap-1 shadow-2xs"
                           title="حجز موعد تسليم وتركيب للعمل في جدول المواعيد"
                         >

@@ -2,11 +2,12 @@ import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, type SessionPayload } from "./auth";
 import { sessionPermissionVersion } from "./auth";
 import { financeAccessFor } from "./finance-permissions";
-import { findUserByUsername } from "./db";
+import { findUserByUsername, type DbClient } from "./db";
 
-async function currentSession(payload: SessionPayload | null): Promise<SessionPayload | null> {
+async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
-  const user = await findUserByUsername(payload.username);
+  const user = client ? await findUserByUsername(payload.username, client) : await findUserByUsername(payload.username);
+  if (client && payload.expiresAt < Date.now()) return null;
   if (!user || !user.isActive || user.id !== payload.userId
     || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
   /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
@@ -60,13 +61,13 @@ export async function readSessionPayload(): Promise<SessionPayload | null> {
   return null;
 }
 
-export async function requireSession(): Promise<SessionPayload | null> {
+export async function requireSession(client?: DbClient): Promise<SessionPayload | null> {
   const payload = await readSessionPayload();
   if (!payload?.credentialVersion) return null;
   // فشل التحقق (قاعدة ساقطة مثلًا) فشلٌ مغلق: جلسة null لا استثناء يطيح بالمسار —
   // نفس سلوك النسخة السابقة التي كانت تحيط الاستدعاء كله بالـtry.
   try {
-    return await currentSession(payload);
+    return await currentSession(payload, client);
   } catch {
     return null;
   }
