@@ -278,19 +278,58 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     expect(field("② التشخيص").props.value).toBe("Synthetic submitted diagnosis");
   });
 
-  it("failed post-save refresh unlocks editing without discarding the submitted draft", async () => {
+  it("failed post-save refresh preserves the exact draft, blocks writes, and recovers without accepting stale persisted notes", async () => {
     pendingRefresh = deferred<MockResponse>();
     noteLabels.forEach((label, index) => enter(label, `Synthetic submitted ${noteKeys[index]}`));
+    const capturedSave = render().find((node) => node.type === "button" && contents(node.props.children as ReactNode).trim() === "احفظ بلا توقيع");
     click("احفظ بلا توقيع");
     await vi.waitFor(() => expect(reads).toBe(2));
     expectNotesLocked(true);
-    pendingRefresh.resolve(response(503, { message: "Synthetic refresh failed" }));
+    pendingRefresh.resolve(response(503, { message: "Private refresh error must stay hidden" }));
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("تعذّر تحميل الزيارة الحالية"));
+    expect(elements(render().tree).some((node) => node.props.label === "② التشخيص")).toBe(false);
+    expect(contents(render().tree)).toContain("احتُفظ بمسودة الزيارة");
+    expect(contents(render().tree)).not.toContain("Private refresh error must stay hidden");
+    await (capturedSave.props.onClick as () => void | Promise<void>)();
+    expect(writes()).toHaveLength(1);
+
+    // A successful read restores authority, not permission to overwrite the
+    // local draft with a stale server snapshot after the failed save refresh.
+    stored = { ...stored, ...savedNotes };
+    pendingRefresh = null;
+    click("أعد تحميل الزيارة");
     await settleSave();
     expectNotesLocked(false);
     noteLabels.forEach((label, index) => expect(field(label).props.value).toBe(`Synthetic submitted ${noteKeys[index]}`));
-    expect(contents(render().tree)).toContain("Synthetic refresh failed");
-    enter("② التشخيص", "Synthetic correction after refresh error");
-    expect(field("② التشخيص").props.value).toBe("Synthetic correction after refresh error");
+    expect(writes()).toHaveLength(1);
+    enter("② التشخيص", "Synthetic correction after recovery");
+    click("احفظ بلا توقيع");
+    await settleSave();
+    expect(writes()).toHaveLength(2);
+    expect(JSON.parse(writes()[1][1].body).diagnosis).toBe("Synthetic correction after recovery");
+    expect(field("② التشخيص").props.value).toBe("Synthetic correction after recovery");
+  });
+
+  it("preserves an explicitly blank treatment note across failed refresh, stale retry and confirmed save with procedures", async () => {
+    enter("③ ما نُفّذ", "");
+    const add = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (add.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
+    expect(String(field("③ ما نُفّذ").props.value)).toContain(service.name);
+    enter("③ ما نُفّذ", "");
+    pendingRefresh = deferred<MockResponse>(); click("احفظ بلا توقيع");
+    await vi.waitFor(() => expect(reads).toBe(2));
+    pendingRefresh.resolve(response(503, {}));
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("تعذّر تحميل الزيارة الحالية"));
+    stored = { ...stored, treatmentDone: "Stale nonblank persisted treatment" };
+    pendingRefresh = null; click("أعد تحميل الزيارة"); await settleSave();
+    expect(field("③ ما نُفّذ").props.value).toBe("");
+    expect(elements(render().tree).filter((node) => node.props["aria-label"] === "الكمية")).toHaveLength(1);
+    click("احفظ بلا توقيع"); await settleSave();
+    expect(JSON.parse(writes()[1][1].body).treatmentDone).toBe("");
+    expect(field("③ ما نُفّذ").props.value).toBe("");
+    // A later deliberate procedure change still resumes the established auto-fill.
+    (render().find((node) => node.props["aria-label"] === "الكمية").props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "2" } });
+    expect(String(field("③ ما نُفّذ").props.value)).toContain(service.name);
   });
 
   it("control: quick phrases work again after the successful save completes", async () => {
@@ -447,3 +486,4 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     expect(writes()).toHaveLength(1);
   });
 });
+

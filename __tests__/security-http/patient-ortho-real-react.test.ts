@@ -518,9 +518,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await ordinaryFailure(f.page);
       // This command was already sent under a valid grant. Ordinary read
       // failure retires rendered views, not its independent mutation ticket.
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, {}), write.id);
-      await state(f.page, "error"); await hidden(f.page);
-      await retry(f.page); await grant(f.page, { unsigned: true });
+      await f.page.evaluate(({ id, patientId }) => window.__patientOrthoFixture.respond(id, { patientId, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }), { id: write.id, patientId });
+      await state(f.page, "loading"); await hidden(f.page);
+      expect(await panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم");
+      await grant(f.page, { unsigned: true });
       expect(await panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم");
       expect(await panel(f.page).getByRole("button", { name: "وقّع الزيارة وأرسله للاستقبال", exact: true }).count()).toBe(0);
       expect(await writes(f.page)).toHaveLength(1); await f.assertIsolated();
@@ -672,8 +673,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await captureCallback(sign, "sign-before-success", "onClick");
       await allow(f.page, "POST", `/api/visits/${visitId}/clinical`); await sign.click();
       const command = await latestWrite(f.page, `/api/visits/${visitId}/clinical`);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, {}), command.id);
+      await f.page.evaluate(({ id, patientId }) => window.__patientOrthoFixture.respond(id, { patientId, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }), { id: command.id, patientId });
       await expect.poll(() => panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم");
+      await state(f.page, "loading"); await hidden(f.page);
+      await grant(f.page, { unsigned: true });
       expect(await sign.count()).toBe(0);
       // Replays the committed pre-success closure itself, beyond native DOM
       // disabled/removal behavior. The stored signed state must reject it.
@@ -772,8 +775,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await sign.evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
       const signed = await latestWrite(f.page, `/api/visits/${visitId}/clinical`);
       expect(await writes(f.page)).toHaveLength(1);
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, {}), signed.id);
+      await f.page.evaluate(({ id, patientId }) => window.__patientOrthoFixture.respond(id, { patientId, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }), { id: signed.id, patientId });
       await expect.poll(() => panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم");
+      await state(f.page, "loading"); await hidden(f.page);
+      await grant(f.page, { unsigned: true });
       await ordinaryFailure(f.page); await retry(f.page); await grant(f.page, { unsigned: true });
       expect(await panel(f.page).textContent()).toContain("وُقّعت زيارة اليوم"); expect(await sign.count()).toBe(0);
       const form = await adjustment(f.page); await allow(f.page, "POST", mutationPath); await submitTwice(form);
@@ -933,3 +938,4 @@ describe("PatientOrtho saved photo completeness in mounted real React", () => {
     } finally { await f.context.close(); }
   });
 });
+
