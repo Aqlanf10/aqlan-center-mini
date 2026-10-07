@@ -1,0 +1,214 @@
+# Temporary targeted proof only. No PR; ORIGINAL .github/workflows/ci.yml is byte-identical.
+name: Temporary patient lab read proof
+on:
+  push:
+    branches: [ci-proof/patient-lab-read-20261007]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patient-lab-read-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patient_lab_read_proof:
+    name: Synthetic read counterfactual and real React proof (not release CI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      DATABASE_ENVIRONMENT: test
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      SECURITY_HTTP_PORT: "3217"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out exact proof commit and pinned main parent
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Set up supported Node.js
+        id: node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Refuse unsafe targets and source or original-CI drift before installation
+        id: preflight
+        run: node .ci-proof/patient-lab-read/run.mjs preflight
+
+      - name: Install supported npm and locked dependencies
+        id: install
+        run: |
+          npm install -g npm@11
+          npm ci
+
+      - name: Install isolated Chromium
+        id: chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Focused source and clean-built browser candidate-original-restored proof
+        id: proof
+        run: node --import tsx .ci-proof/patient-lab-read/run.mjs run
+
+      - name: Preserve only exact synthetic proof reports and native viewports
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-lab-read-proof--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .patient-lab-read-proof-results/preflight.json
+            .patient-lab-read-proof-results/identity.json
+            .patient-lab-read-proof-results/target-guard.json
+            .patient-lab-read-proof-results/summary.json
+            .patient-lab-read-proof-results/environment-contract.stdout.txt
+            .patient-lab-read-proof-results/environment-contract.stderr.txt
+            .patient-lab-read-proof-results/environment-contract.process.json
+            .patient-lab-read-proof-results/typecheck.stdout.txt
+            .patient-lab-read-proof-results/typecheck.stderr.txt
+            .patient-lab-read-proof-results/typecheck.process.json
+            .patient-lab-read-proof-results/lint.stdout.txt
+            .patient-lab-read-proof-results/lint.stderr.txt
+            .patient-lab-read-proof-results/lint.process.json
+            .patient-lab-read-proof-results/unit-candidate-before.json
+            .patient-lab-read-proof-results/unit-candidate-before.stdout.txt
+            .patient-lab-read-proof-results/unit-candidate-before.stderr.txt
+            .patient-lab-read-proof-results/unit-candidate-before.process.json
+            .patient-lab-read-proof-results/browser-candidate-before.json
+            .patient-lab-read-proof-results/browser-candidate-before.stdout.txt
+            .patient-lab-read-proof-results/browser-candidate-before.stderr.txt
+            .patient-lab-read-proof-results/browser-candidate-before.process.json
+            .patient-lab-read-proof-results/build-candidate-before.stdout.txt
+            .patient-lab-read-proof-results/build-candidate-before.stderr.txt
+            .patient-lab-read-proof-results/build-candidate-before.process.json
+            .patient-lab-read-proof-results/candidate-before.build.json
+            .patient-lab-read-proof-results/extra-candidate-before.json
+            .patient-lab-read-proof-results/extra-candidate-before.stdout.txt
+            .patient-lab-read-proof-results/extra-candidate-before.stderr.txt
+            .patient-lab-read-proof-results/extra-candidate-before.process.json
+            .patient-lab-read-proof-results/candidate-before.evidence.json
+            .patient-lab-read-proof-results/candidate-before-ui/unavailable-390.png
+            .patient-lab-read-proof-results/candidate-before-ui/unavailable-390-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/confirmed-empty-390.png
+            .patient-lab-read-proof-results/candidate-before-ui/confirmed-empty-390-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-booking-390.png
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-booking-390-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-unavailable-390.png
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-unavailable-390-bounds.json
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-refusal-390.png
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-retry-390.png
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-refusal-390-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/unavailable-1280.png
+            .patient-lab-read-proof-results/candidate-before-ui/unavailable-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/confirmed-empty-1280.png
+            .patient-lab-read-proof-results/candidate-before-ui/confirmed-empty-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-booking-1280.png
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-booking-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-unavailable-1280.png
+            .patient-lab-read-proof-results/candidate-before-ui/accepted-receipt-unavailable-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-refusal-1280.png
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-retry-1280.png
+            .patient-lab-read-proof-results/candidate-before-status-ui/lab-status-refusal-1280-bounds.json
+            .patient-lab-read-proof-results/unit-original.json
+            .patient-lab-read-proof-results/unit-original.stdout.txt
+            .patient-lab-read-proof-results/unit-original.stderr.txt
+            .patient-lab-read-proof-results/unit-original.process.json
+            .patient-lab-read-proof-results/browser-original.json
+            .patient-lab-read-proof-results/browser-original.stdout.txt
+            .patient-lab-read-proof-results/browser-original.stderr.txt
+            .patient-lab-read-proof-results/browser-original.process.json
+            .patient-lab-read-proof-results/build-original.stdout.txt
+            .patient-lab-read-proof-results/build-original.stderr.txt
+            .patient-lab-read-proof-results/build-original.process.json
+            .patient-lab-read-proof-results/original.build.json
+            .patient-lab-read-proof-results/unit-candidate-after.json
+            .patient-lab-read-proof-results/unit-candidate-after.stdout.txt
+            .patient-lab-read-proof-results/unit-candidate-after.stderr.txt
+            .patient-lab-read-proof-results/unit-candidate-after.process.json
+            .patient-lab-read-proof-results/browser-candidate-after.json
+            .patient-lab-read-proof-results/browser-candidate-after.stdout.txt
+            .patient-lab-read-proof-results/browser-candidate-after.stderr.txt
+            .patient-lab-read-proof-results/browser-candidate-after.process.json
+            .patient-lab-read-proof-results/build-candidate-after.stdout.txt
+            .patient-lab-read-proof-results/build-candidate-after.stderr.txt
+            .patient-lab-read-proof-results/build-candidate-after.process.json
+            .patient-lab-read-proof-results/candidate-after.build.json
+            .patient-lab-read-proof-results/extra-candidate-after.json
+            .patient-lab-read-proof-results/extra-candidate-after.stdout.txt
+            .patient-lab-read-proof-results/extra-candidate-after.stderr.txt
+            .patient-lab-read-proof-results/extra-candidate-after.process.json
+            .patient-lab-read-proof-results/candidate-after.evidence.json
+            .patient-lab-read-proof-results/candidate-after-ui/unavailable-390.png
+            .patient-lab-read-proof-results/candidate-after-ui/unavailable-390-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/confirmed-empty-390.png
+            .patient-lab-read-proof-results/candidate-after-ui/confirmed-empty-390-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-booking-390.png
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-booking-390-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-unavailable-390.png
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-unavailable-390-bounds.json
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-refusal-390.png
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-retry-390.png
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-refusal-390-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/unavailable-1280.png
+            .patient-lab-read-proof-results/candidate-after-ui/unavailable-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/confirmed-empty-1280.png
+            .patient-lab-read-proof-results/candidate-after-ui/confirmed-empty-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-booking-1280.png
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-booking-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-unavailable-1280.png
+            .patient-lab-read-proof-results/candidate-after-ui/accepted-receipt-unavailable-1280-bounds.json
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-refusal-1280.png
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-retry-1280.png
+            .patient-lab-read-proof-results/candidate-after-status-ui/lab-status-refusal-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require actual proof and evidence upload success
+        if: always()
+        env:
+          CHECKOUT_RESULT: ${{ steps.checkout.outcome }}
+          NODE_RESULT: ${{ steps.node.outcome }}
+          PREFLIGHT_RESULT: ${{ steps.preflight.outcome }}
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          CHROMIUM_RESULT: ${{ steps.chromium.outcome }}
+          PROOF_RESULT: ${{ steps.proof.outcome }}
+          UPLOAD_RESULT: ${{ steps.evidence.outcome }}
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          node --input-type=module - <<'JS'
+          import { readFileSync } from "node:fs";
+          for (const key of ["CHECKOUT_RESULT", "NODE_RESULT", "PREFLIGHT_RESULT", "INSTALL_RESULT", "CHROMIUM_RESULT", "PROOF_RESULT", "UPLOAD_RESULT"]) {
+            if (process.env[key] !== "success") throw new Error(`Proof failed: ${key}`);
+          }
+          if (!/^[1-9][0-9]*$/.test(process.env.ARTIFACT_ID ?? "")) throw new Error("Missing exact artifact ID");
+          if (!/^[0-9a-f]{64}$/.test(process.env.ARTIFACT_DIGEST ?? "")) throw new Error("Missing exact artifact digest");
+          const proof = JSON.parse(readFileSync(".patient-lab-read-proof-results/summary.json", "utf8"));
+          if (!proof.completed || !proof.expectedUnitRed || !proof.expectedBrowserRed || !proof.restoredCandidateGreen || proof.failure !== null) {
+            throw new Error("Focused/browser counterfactual or restoration evidence is incomplete");
+          }
+          console.log("Temporary synthetic proof and evidence upload passed. Original full release CI and Production remain unproved.");
+          JS

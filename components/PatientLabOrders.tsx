@@ -2,7 +2,7 @@
 
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong } from "@/lib/reminders";
 import {
@@ -29,6 +29,49 @@ const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = 
   cancelled: { label: "ملغى", bg: "bg-slate-50 border-slate-200", text: "text-slate-500" },
 };
 
+type LabReadOwner = { active: boolean; sequence: number; controller: AbortController | null };
+type LabName = { labName: string; labPhone: string | null };
+type LabReadState =
+  | { owner: LabReadOwner; status: "loading" }
+  | { owner: LabReadOwner; status: "error"; message: string }
+  | { owner: LabReadOwner; status: "success"; orders: LabOrder[]; labs: LabName[] };
+type OwnedOrder = { owner: LabReadOwner; order: LabOrder };
+const READ_ERROR = "تعذّر تحميل طلبات المعمل. أعد المحاولة.";
+
+const initialSentDate = () => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+const initialDueDate = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 5);
+  return date.toISOString().slice(0, 10);
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Check list identity and renderable fields; this is not an exhaustive LabOrder schema. */
+function isPatientLabList(value: unknown, patientId: number): value is { orders: LabOrder[]; labs: LabName[] } {
+  if (!isRecord(value) || !Array.isArray(value.orders) || !Array.isArray(value.labs)) return false;
+  const ids = new Set<number>();
+  const ordersValid = value.orders.every((order: unknown) => {
+    if (!isRecord(order) || typeof order.id !== "number" || !Number.isSafeInteger(order.id) || order.id <= 0
+      || ids.has(order.id) || order.patientId !== patientId
+      || !["patientName", "labName", "workType", "sentDate", "dueDate"].every((key) => typeof order[key] === "string")
+      || typeof order.status !== "string" || !Object.hasOwn(STATUS_MAP, order.status)
+      || !["patientNumber", "patientPhone", "labPhone", "details", "toothNumbers", "shade", "stumpShade",
+        "doctorName", "qualityNotes", "remakeReason", "technicianName", "note"].every(
+        (key) => order[key] == null || typeof order[key] === "string",
+      )
+      || !["costMinor", "baseAmountMinor"].every(
+        (key) => order[key] == null || (typeof order[key] === "number" && Number.isFinite(order[key])),
+      )) return false;
+    ids.add(order.id);
+    return true;
+  });
+  return ordersValid && value.labs.every((lab: unknown) =>
+    isRecord(lab) && typeof lab.labName === "string" && (lab.labPhone === null || typeof lab.labPhone === "string"));
+}
+
 export function PatientLabOrders({
   patientId,
   patientName,
@@ -43,9 +86,16 @@ export function PatientLabOrders({
   const session = useSession();
   const admin = isAdmin(session?.role);
 
-  const [orders, setOrders] = useState<LabOrder[]>([]);
-  const [labs, setLabs] = useState<{ labName: string; labPhone: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Match the patient workspace's principal scope without using object identity.
+  const scope = JSON.stringify([patientId, session?.username, session?.role, session?.permissions ?? null]);
+  const hasPrincipal = !!session?.username && !!session?.role;
+  const hasContext = hasPrincipal && Number.isSafeInteger(patientId) && patientId > 0;
+  const owner = useMemo<LabReadOwner>(() => ({ active: false, sequence: 0, controller: null }), [scope]);
+  const [readState, setReadState] = useState<LabReadState | null>(null);
+  const currentRead = readState?.owner === owner ? readState : null;
+  const loading = !currentRead || currentRead.status === "loading";
+  const orders = currentRead?.status === "success" ? currentRead.orders : [];
+  const labs = currentRead?.status === "success" ? currentRead.labs : [];
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,45 +112,87 @@ export function PatientLabOrders({
   const [priority, setPriority] = useState<"normal" | "urgent" | "rush">("normal");
   const [details, setDetails] = useState("");
   const [showChart, setShowChart] = useState(false);
-  const [sentDate, setSentDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-  const [dueDate, setDueDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 5);
-    return d.toISOString().slice(0, 10);
-  });
+  const [sentDate, setSentDate] = useState(initialSentDate);
+  const [dueDate, setDueDate] = useState(initialDueDate);
   const [cost, setCost] = useState("");
   const [note, setNote] = useState("");
   /* المختبرات المسجّلة (جهات المختبر): التكلفة لا تُسجّل إلا على جهة، وإلا رفضها
      الخادم — فكان حقل التكلفة هنا يفشل دائمًا بلا جهة. */
   const [registeredLabs, setRegisteredLabs] = useState<{ id: number; name: string }[]>([]);
-  const [prescriptionOrder, setPrescriptionOrder] = useState<LabOrder | null>(null);
-  const [deliveryAppointmentOrder, setDeliveryAppointmentOrder] = useState<LabOrder | null>(null);
+  const [prescriptionSelection, setPrescriptionSelection] = useState<OwnedOrder | null>(null);
+  const [deliverySelection, setDeliverySelection] = useState<OwnedOrder | null>(null);
+  const prescriptionOrder = prescriptionSelection?.owner === owner ? prescriptionSelection.order : null;
+  const deliveryAppointmentOrder = deliverySelection?.owner === owner ? deliverySelection.order : null;
+  const setPrescriptionOrder = (order: LabOrder | null) => {
+    if (owner.active) setPrescriptionSelection(order ? { owner, order } : null);
+  };
+  const setDeliveryAppointmentOrder = (order: LabOrder | null) => {
+    if (owner.active) setDeliverySelection(order ? { owner, order } : null);
+  };
+
+  useLayoutEffect(() => {
+    owner.active = hasContext;
+    if (!hasContext) setReadState({ owner, status: "error", message: hasPrincipal
+      ? "تعذّر التحقق من سياق المريض."
+      : "انتهت الجلسة. سجّل الدخول من جديد." });
+    mutationPending.current = false;
+    setBusy(false);
+    setError(null);
+    setStatusError(null);
+    setShowAdd(false);
+    setPrescriptionSelection(null);
+    setDeliverySelection(null);
+    setRegisteredLabs([]);
+    // A reused instance must not carry a patient-specific draft into its new scope.
+    setLabName("");
+    setWorkType(WORK_TYPES[0]);
+    setCustomWork("");
+    setToothNumbers("");
+    setShade("");
+    setPriority("normal");
+    setDetails("");
+    setShowChart(false);
+    setSentDate(initialSentDate());
+    setDueDate(initialDueDate());
+    setCost("");
+    setNote("");
+    return () => {
+      owner.active = false;
+      ++owner.sequence;
+      owner.controller?.abort();
+      owner.controller = null;
+    };
+  }, [owner, hasContext, hasPrincipal]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!owner.active) return;
+    const sequence = ++owner.sequence;
+    owner.controller?.abort();
+    const controller = new AbortController();
+    owner.controller = controller;
+    const current = () => owner.active && owner.sequence === sequence && !controller.signal.aborted;
+    setReadState({ owner, status: "loading" });
     try {
-      const res = await fetch(`/api/lab?patientId=${patientId}`, { cache: "no-store" });
+      const res = await fetch(`/api/lab?patientId=${patientId}`, { cache: "no-store", signal: controller.signal });
+      if (!current()) return;
       if (!res.ok) {
-        // Fallback: fetch all and filter
-        const allRes = await fetch("/api/lab", { cache: "no-store" });
-        if (allRes.ok) {
-          const data = await allRes.json();
-          const list = (data.orders ?? []) as LabOrder[];
-          setOrders(list.filter((o) => o.patientId === patientId));
-          setLabs(data.labs ?? []);
-        }
-      } else {
-        const data = await res.json();
-        setOrders((data.orders ?? data) as LabOrder[]);
-        if (data.labs) setLabs(data.labs);
+        // Failure of the scoped endpoint is not permission to request all orders.
+        setReadState({ owner, status: "error", message: READ_ERROR });
+        return;
       }
-      setError(null);
+      const data: unknown = await res.json();
+      if (!current()) return;
+      if (!isPatientLabList(data, patientId)) {
+        setReadState({ owner, status: "error", message: READ_ERROR });
+        return;
+      }
+      setReadState({ owner, status: "success", orders: data.orders, labs: data.labs });
     } catch {
-      setError("تعذّر تحميل طلبات المعمل.");
+      if (current()) setReadState({ owner, status: "error", message: READ_ERROR });
     } finally {
-      setLoading(false);
+      if (current()) owner.controller = null;
     }
-  }, [patientId]);
+  }, [owner, patientId]);
 
   useEffect(() => {
     void load();
@@ -108,22 +200,29 @@ export function PatientLabOrders({
 
   // تحميل المختبرات المسجلة لربط التكلفة بجهتها
   useEffect(() => {
+    if (!owner.active) return;
+    const controller = new AbortController();
+    const current = () => owner.active && !controller.signal.aborted;
     void (async () => {
       try {
-        const res = await fetch("/api/laboratories", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const list = (data.laboratories ?? []) as { id: number; name: string; isActive?: boolean }[];
-        setRegisteredLabs(list.filter((l) => l.isActive !== false).map((l) => ({ id: l.id, name: l.name })));
+        const res = await fetch("/api/laboratories", { cache: "no-store", signal: controller.signal });
+        if (!current() || !res.ok) return;
+        const data: unknown = await res.json();
+        if (!current() || !isRecord(data) || !Array.isArray(data.laboratories)) return;
+        const list = data.laboratories;
+        if (!list.every((lab: unknown) => isRecord(lab) && typeof lab.id === "number"
+          && Number.isSafeInteger(lab.id) && lab.id > 0 && typeof lab.name === "string")) return;
+        setRegisteredLabs(list.filter((lab) => lab.isActive !== false).map((lab) => ({ id: lab.id, name: lab.name })));
       } catch {
         /* تجاهل — تبقى التكلفة بلا ربط ويرفضها الخادم برسالة واضحة */
       }
     })();
-  }, []);
+    return () => controller.abort();
+  }, [owner]);
 
   const submitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!labName.trim() || busy || mutationPending.current) return;
+    if (!owner.active || !labName.trim() || busy || mutationPending.current) return;
     setStatusError(null);
 
     /* التكلفة التزام على جهة مسجلة: نطابق اسم المختبر المكتوب مع المختبرات
@@ -163,7 +262,9 @@ export function PatientLabOrders({
           note: note.trim() || null,
         }),
       });
+      if (!owner.active) return;
       const data = await res.json().catch(() => null);
+      if (!owner.active) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر حفظ طلب المعمل.");
         return;
@@ -176,15 +277,17 @@ export function PatientLabOrders({
       setNote("");
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.active) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      mutationPending.current = false;
-      setBusy(false);
+      if (owner.active) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   };
 
   const updateStatus = async (orderId: number, nextStatus: "received" | "delivered") => {
-    if (busy || mutationPending.current) return;
+    if (!owner.active || busy || mutationPending.current) return;
     const target = orders.find((order) => order.id === orderId && order.patientId === patientId);
     if (!target) return;
     mutationPending.current = true;
@@ -196,8 +299,10 @@ export function PatientLabOrders({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
+      if (!owner.active) return;
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        if (!owner.active) return;
         const message = typeof data?.message === "string" && data.message.trim()
           ? data.message
           : "تعذّر تحديث حالة طلب المعمل.";
@@ -208,22 +313,24 @@ export function PatientLabOrders({
         return;
       }
       await load();
-      if (nextStatus === "received") {
+      if (owner.active && nextStatus === "received") {
         setDeliveryAppointmentOrder({ ...target, status: "received" });
       }
     } catch {
       // A lost response does not establish whether the server committed.
-      setStatusError("تعذّر تأكيد تحديث حالة طلب المعمل. تحقّق من حالته قبل إعادة المحاولة.");
+      if (owner.active) setStatusError("تعذّر تأكيد تحديث حالة طلب المعمل. تحقّق من حالته قبل إعادة المحاولة.");
     } finally {
-      mutationPending.current = false;
-      setBusy(false);
+      if (owner.active) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   };
 
   /* إلغاء إرسالية قائمة عند المختبر — من ملف المريض، والمدير وحده: الخادم يحرس
    * البوابة نفسها (رسالة واضحة لغيره)، والزر لا يظهر له أصلًا. */
   const cancelSubmission = async (order: LabOrder) => {
-    if (busy || mutationPending.current) return;
+    if (!owner.active || busy || mutationPending.current) return;
     const hasCost = Number(order.costMinor) > 0;
     const message = hasCost
       ? `إلغاء إرسالية «${order.workType}» إلى «${order.labName}»؟\nالتزامها غير المسدَّد يُمحى معها. إن كان مسدَّدًا بسند صرف يبقى أثره المالي للتدقيق.`
@@ -239,17 +346,21 @@ export function PatientLabOrders({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "cancelled", note: "إلغاء من ملف المريض" }),
       });
+      if (!owner.active) return;
       const data = await res.json().catch(() => null);
+      if (!owner.active) return;
       if (!res.ok) {
         setError(data?.message ?? "تعذّر إلغاء الإرسالية.");
         return;
       }
       await load();
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (owner.active) setError("تعذّر الاتصال بالخادم.");
     } finally {
-      mutationPending.current = false;
-      setBusy(false);
+      if (owner.active) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   };
 
@@ -257,12 +368,13 @@ export function PatientLabOrders({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-bold text-navy-900">أعمال وتركيبات المعمل ({orders.length})</h3>
+          <h3 className="text-sm font-bold text-navy-900">أعمال وتركيبات المعمل{currentRead?.status === "success" ? ` (${orders.length})` : ""}</h3>
           <p className="text-xs text-slate-500">متابعة التركيبات والتيجان والأطقم للمريض وتاريخ استلامها</p>
         </div>
         <button
           type="button"
           onClick={() => setShowAdd(!showAdd)}
+          disabled={!hasContext}
           className="rounded-xl bg-navy-800 px-3.5 py-1.5 text-xs font-bold text-white transition-opacity hover:opacity-90"
         >
           {showAdd ? "إلغاء" : "+ طلب معمل جديد"}
@@ -455,9 +567,17 @@ export function PatientLabOrders({
       ) : null}
 
       {loading ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
+        <p role="status" className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
           جارٍ التحميل…
         </p>
+      ) : currentRead?.status === "error" ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-xs text-red-700">
+          <p role="alert">{currentRead.message}</p>
+          <button type="button" onClick={() => void load()} disabled={busy || !hasContext}
+            className="mt-2 rounded-lg border border-red-200 bg-white px-3 py-1.5 font-bold disabled:opacity-40">
+            إعادة تحميل طلبات المعمل
+          </button>
+        </div>
       ) : orders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
           <p className="text-sm font-bold text-slate-600">لا توجد طلبات معمل مسجلة لهذا المريض</p>

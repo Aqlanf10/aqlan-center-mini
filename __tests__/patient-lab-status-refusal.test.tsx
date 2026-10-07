@@ -53,6 +53,16 @@ vi.mock("react", async (original) => {
         hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
       });
     },
+    useLayoutEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
+      const index = slot(undefined);
+      const previous = hooks.effects.get(index);
+      if (previous && same(previous.deps, deps)) return;
+      hooks.pending.push(() => {
+        previous?.cleanup?.();
+        const cleanup = effect();
+        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+      });
+    },
   };
 });
 vi.mock("../components/SessionProvider", () => ({
