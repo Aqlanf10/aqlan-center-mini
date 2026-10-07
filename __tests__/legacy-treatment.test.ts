@@ -7,6 +7,7 @@ import {
 } from "../lib/legacy-treatment";
 import { classifyOrthoAdjustment } from "../lib/billing-classification";
 import { planLedgerSummary, unlinkedSessionConflicts } from "../lib/plans";
+import { legacyCoverageStateFromSnapshot, type LegacyCoverageSnapshotRow } from "../lib/legacy-treatment-coverage";
 
 const TODAY = "2026-10-06";
 const base = { serviceId: 7, currency: "YER", agreedAmount: "300000", previouslyPaidAmount: "120000", historicalAsOf: "2026-09-30" };
@@ -122,7 +123,7 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
     } as unknown as Parameters<typeof planLedgerSummary>[0];
     expect(planLedgerSummary({ ...plan, items: [{ legacyAgreementId: 5 }] }).legacy).toBe(true);
     // The identifier represents durable origin, not a claim that financial coverage is still live.
-    const reviewItem = { legacyAgreementId: 5, billingStatus: "needs_financial_review" };
+    const reviewItem = { legacyAgreementId: 5, billingStatus: "needs_financial_review" as const };
     expect(planLedgerSummary({ ...plan, items: [reviewItem] }).legacy).toBe(true);
     expect(planLedgerSummary({ ...plan, items: [{}] })).not.toHaveProperty("legacy");
   });
@@ -131,10 +132,24 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
 
 
 describe("durable legacy history in free-procedure protection", () => {
+  function verifiedCoverage(overrides: Partial<LegacyCoverageSnapshotRow> = {}) {
+    const snapshot: LegacyCoverageSnapshotRow = {
+      agreement_id: 5, format_version: 1, service_id: 7, service_category: "rct",
+      anchor_tooth_code: 36, snapshot_mode: "per_tooth_episode", snapshot_tooth_codes: [36],
+      snapshot_scope: null, snapshot_surfaces: null, recorded_by: "synthetic-reception",
+      recorded_at: "2026-10-06T12:00:00.000Z", ...overrides,
+    };
+    const coverage = legacyCoverageStateFromSnapshot(snapshot, {
+      agreementId: snapshot.agreement_id, serviceId: snapshot.service_id, anchorToothCode: snapshot.anchor_tooth_code,
+    });
+    if (coverage.kind !== "verified") throw new Error("Invalid legacy coverage fixture");
+    return coverage;
+  }
+
   const historicalItem = {
     id: 41, serviceId: 7, toothCode: 36, serviceName: "Historical root canal", status: "done",
     sessionCount: 1, doneSessions: 1, hasInvoiceLineage: false, hasLegacyLineage: true,
-    billingStatus: "included_in_package" as const, caseSite: "36",
+    billingStatus: "included_in_package" as const, caseSite: "36", legacyCoverage: verifiedCoverage(),
   };
 
   it("does not let a done or single-session legacy item become a fresh free procedure", () => {
@@ -147,8 +162,19 @@ describe("durable legacy history in free-procedure protection", () => {
     expect(unlinkedSessionConflicts([historicalItem], [{ serviceId: 7, toothCode: 46 }])).toEqual([]);
   });
 
-  it("retains legacy region overlap protection without pretending it has invoice provenance", () => {
-    expect(unlinkedSessionConflicts([{ ...historicalItem, toothCode: null, caseSite: "الفك السفلي" }], [{ serviceId: 7, toothCode: 36 }]))
-      .toHaveLength(1);
+  it.each([undefined, { kind: "unknown", reason: "missing_snapshot" }] as const)(
+    "holds another same-service tooth when immutable historical coverage is unavailable: %j", (legacyCoverage) => {
+      expect(unlinkedSessionConflicts([{ ...historicalItem, legacyCoverage }], [{ serviceId: 7, toothCode: 46 }]))
+        .toHaveLength(1);
+    },
+  );
+
+  it("retains verified lower-arch protection despite mutable case-label drift and without invoice provenance", () => {
+    const lowerArch = { ...historicalItem, toothCode: null, caseSite: "الفك العلوي",
+      legacyCoverage: verifiedCoverage({ service_category: "ortho", anchor_tooth_code: null,
+        snapshot_mode: "arch", snapshot_tooth_codes: [], snapshot_scope: "lower" }),
+    };
+    expect(unlinkedSessionConflicts([lowerArch], [{ serviceId: 7, toothCode: 36 }])).toHaveLength(1);
+    expect(unlinkedSessionConflicts([lowerArch], [{ serviceId: 7, toothCode: 16 }])).toEqual([]);
   });
 });
