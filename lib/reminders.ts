@@ -74,6 +74,25 @@ export function friendlyDateLong(date: string): string {
   return `${friendlyDate(date)}/${parsed.getFullYear()}`;
 }
 
+const MONTHS_NAMED = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+/**
+ * «الأربعاء 7 أكتوبر 2026» — تاريخٌ لا يُقرأ خطأً في أي اتجاه.
+ *
+ * «07/10/2026» يومٌ سابع في متصفحٍ وشهري عاشر في آخر: حقل input[type=date] يرسم
+ * قيمته وفق لغة النظام لا وفق لغة الشاشة، فتقف أمام التقرير تسأل أيُّ القراءتين
+ * المقصودة. أما اسم الشهر فلا يحتمل القراءتين — والأرقام تبقى غربية لأنها أرقام
+ * الحقول نفسها، والجملة عربيةٌ خالصة فلا تتشابك اتجاهاتها.
+ */
+export function friendlyDateNamed(date: string): string {
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return `${WEEKDAYS[parsed.getDay()]} ${parsed.getDate()} ${MONTHS_NAMED[parsed.getMonth()]} ${parsed.getFullYear()}`;
+}
+
 export type ReminderKind = "upcoming" | "missed";
 
 /** دعوة لترتيب متابعة بلا موعد محجوز — لا تؤكّد تاريخًا أو وقتًا أو حجزًا. */
