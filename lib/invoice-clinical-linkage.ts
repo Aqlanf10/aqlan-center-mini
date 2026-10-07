@@ -102,7 +102,7 @@ export function invoiceRequestFingerprint(input: {
 
 export type InvoiceLinkageRefusal =
   | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
-  | "case_mismatch" | "shape_mismatch" | "ambiguous_item";
+  | "case_mismatch" | "shape_mismatch" | "ambiguous_item" | "legacy_covered";
 
 export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   idempotency_conflict: "هذا الطلب أُرسل سابقًا ببنودٍ مختلفة — أعد فتح نموذج الفاتورة.",
@@ -113,5 +113,6 @@ export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   case_mismatch: "بند الخطة المطابق لهذا العلاج مرتبط بحالةٍ أخرى — اختر حالته أو اترك الحالة للربط التلقائي.",
   shape_mismatch: "يوجد بند خطة مفتوح لنفس الخدمة والسن بكميةٍ أو عدد جلساتٍ أو أسطحٍ مختلفة — طابِق الفاتورة مع الخطة أو اطلب من الطبيب تعديلها أولًا.",
   ambiguous_item: "يوجد أكثر من بند خطة مفتوح مطابق لهذا العلاج — راجع الخطة قبل إصدار الفاتورة.",
+  legacy_covered: "هذا العلاج مسجّل «علاجًا بدأ قبل النظام» باتفاقٍ تاريخي قائم — لا تُصدر له فاتورة: المتبقي في الرصيد السابق والجلسات مشمولة.",
   already_billed: "هذا العلاج مفوتر مسبقًا لهذا المريض بفاتورةٍ قائمة ولم يبدأ بعد — لا تُصدر فاتورةً ثانية للعمل نفسه (ألغِ الأولى أو صحّحها إن كان خطأ).",
 };

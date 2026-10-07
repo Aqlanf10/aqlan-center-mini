@@ -135,6 +135,8 @@ async function fixture(width: number) {
       if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
       // The existing Account sibling performs this read, independently of the preview.
       if (target === prefix + "/legacy") { await json(route, { treatments: [], orphanPayments: [] }); return; }
+      // (INV-LEGACY) The historical-agreement panel is another independent Account sibling read.
+      if (target === prefix + "/legacy-treatments") { await json(route, { agreements: [], access: { add: false, edit: false, void: false } }); return; }
       if (target === prefix + "/documents") { await json(route, { documents: [], storageReady: false, storageMessage: null }); return; }
       if (target === `/api/visits/readiness?patientId=${id}`) { await json(route, { visit: null }); return; }
     }

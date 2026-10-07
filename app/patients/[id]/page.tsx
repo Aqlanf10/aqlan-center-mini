@@ -29,6 +29,7 @@ import { PatientOrtho } from "@/components/PatientOrtho";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
 import { AssessmentBanner } from "@/components/AssessmentBanner";
+import { LegacyCaseBanner } from "@/components/LegacyCaseBanner";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
@@ -1138,12 +1139,14 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner patientId={patient.id} specialty="orthodontics"
                 hint="افتح حالة التقويم أدناه بعد التقييم — تُربط بهذه الحالة وبباقتها المفوترة تلقائيًا." />
+              <LegacyCaseBanner patientId={patient.id} specialty="orthodontics" />
               <PatientOrtho patientId={patient.id} />
             </section>
           )}
 
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">
+              <LegacyCaseBanner patientId={patient.id} specialty="prosthodontics" />
               <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
             </section>
           )}
@@ -1152,6 +1155,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <section aria-label="علاج الجذور">
               <AssessmentBanner patientId={patient.id} specialty="endodontics"
                 hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
+              <LegacyCaseBanner patientId={patient.id} specialty="endodontics" />
               <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}

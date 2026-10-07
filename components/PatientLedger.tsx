@@ -13,6 +13,8 @@ import { ReceiptCorrection } from "./ReceiptCorrection";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
+import { LegacyTreatmentForm } from "./LegacyTreatmentForm";
+import { LegacyTreatmentAgreements } from "./LegacyTreatmentAgreements";
 import { lineLinkage } from "@/lib/invoice-clinical-linkage";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 
@@ -45,6 +47,8 @@ interface OpeningBalance {
 interface PlanSummary {
   id: number; title: string; status: "active" | "completed" | "cancelled";
   totalMinor: number; consented: boolean; baseCurrency?: Currency;
+  /** (INV-LEGACY) خطة اتفاقٍ تاريخي — مالها في الرصيد السابق لا في الخطة. */
+  legacy?: boolean;
   installments: {
     paidMinor: number; remainingMinor: number; overdueMinor: number;
     nextDueDate: string | null; nextDueAmountMinor: number; paidCount: number; count: number;
@@ -262,7 +266,9 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"none" | "invoice" | "opening">("none");
+  const [mode, setMode] = useState<"none" | "invoice" | "opening" | "legacy">("none");
+  /* (INV-LEGACY) إعادة قراءة لوحة الاتفاقات التاريخية بعد التسجيل. */
+  const [legacyRefresh, setLegacyRefresh] = useState(0);
   /* القبض من المكوّن الموحّد — نفس المكون ونفس الواجهة البرمجية من كل الأبواب (AC-09). */
   const [collectOpen, setCollectOpen] = useState(false);
   const [lastReceiptId, setLastReceiptId] = useState<number | null>(null);
@@ -402,6 +408,13 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white">
           {mode === "invoice" ? "إغلاق" : "فاتورة يدوية"}
         </button>
+        {canAddOpening ? (
+          <button type="button" onClick={() => setMode(mode === "legacy" ? "none" : "legacy")}
+            aria-pressed={mode === "legacy"}
+            className="rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-bold text-indigo-800">
+            {mode === "legacy" ? "إغلاق" : "علاج بدأ قبل النظام"}
+          </button>
+        ) : null}
         <button onClick={() => setCollectOpen(true)}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
@@ -456,6 +469,30 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         />
       ) : null}
 
+      {mode === "legacy" && canAddOpening ? (
+        <LegacyTreatmentForm
+          patientId={patientId} base={base} services={services} busy={busy}
+          positions={ledger?.legacyOpeningPositions}
+          onCancel={() => setMode("none")}
+          onSubmit={async (body) => {
+            const saved = await send(() => fetch(`/api/patients/${patientId}/legacy-treatments`, {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+            })) as { agreement?: { remainingMinor: number; caseId: number | null } } | null;
+            if (saved?.agreement) {
+              setMode("none");
+              setLegacyRefresh((value) => value + 1);
+              setLinkNotice(`سُجّل العلاج السابق للنظام: ${saved.agreement.remainingMinor > 0
+                ? "المتبقي وحده دخل الحساب رصيدًا سابقًا" : "مسدَّد تاريخيًّا بلا رصيد"} — لا سند للمدفوع سابقًا`
+                + `${saved.agreement.caseId ? "، والحالة موسومة «حالة بدأت قبل النظام»" : ""}.`);
+            }
+          }}
+        />
+      ) : null}
+
+      {ledger ? (
+        <LegacyTreatmentAgreements patientId={patientId} refreshKey={legacyRefresh} onChanged={() => { void load(); }} />
+      ) : null}
+
       {/* التحصيل الموحّد — نفس مكون التحصيل من كل الأبواب (المواصفة §٢٦) */}
       <CollectPaymentModal
         patientId={patientId}
@@ -481,7 +518,8 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         /* (TD-05 owner review — Finding 5) خطة الاتفاق هدفٌ صريح للدفع المقدَّم
            قبل الفوترة — الدفعات عليها تسوّي دلو عملتها. */
         plans={(ledger?.plans ?? [])
-          .filter((plan) => plan.status === "active")
+          /* (INV-LEGACY) خطة الاتفاق التاريخي ليست هدف تحصيل: متبقيها يُحصَّل على الرصيد السابق. */
+          .filter((plan) => plan.status === "active" && !plan.legacy)
           .map((plan) => ({
             id: plan.id,
             title: plan.title,
@@ -530,6 +568,9 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-extrabold">{plan.title}</span>
                   <span className="flex items-center gap-1.5">
+                    {plan.legacy ? (
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">حالة بدأت قبل النظام</span>
+                    ) : null}
                     {!plan.consented ? (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">مسوّدة</span>
                     ) : null}

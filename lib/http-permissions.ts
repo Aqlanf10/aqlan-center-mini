@@ -153,6 +153,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/legacy": { GET: CLINIC },
   "/api/patients/[id]/legacy-balance-arrangement": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: FRONT_DESK, PATCH: FRONT_DESK },
   "/api/patients/[id]/legacy-onboarding": { GET: CLINIC },
+  "/api/patients/[id]/legacy-treatments": { GET: CLINIC, POST: FRONT_DESK },
+  "/api/patients/[id]/legacy-treatments/[agreementId]/void": { POST: ADMIN },
   "/api/patients/[id]/materials": { GET: CLINIC },
   "/api/patients/[id]/medical-history": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/merge": { POST: ADMIN },

@@ -239,6 +239,8 @@ export interface PlanItemLike {
   doctorId?: number | null;
   doctorName?: string | null;
   note?: string | null;
+  /** (INV-LEGACY) اتفاقٌ تاريخي حيّ يغطّي البند — «حالة بدأت قبل النظام». */
+  legacyAgreementId?: number;
 }
 
 export interface PlannedVisitGroup<T extends PlanItemLike = PlanItemLike> {
@@ -378,6 +380,8 @@ export interface PlanLedgerSummary {
   baseCurrency: import("./money").Currency;
   /** هل وافق المريض؟ المسوّدة ليست اتفاقًا بعد. */
   consented: boolean;
+  /** (INV-LEGACY) خطة اتفاقٍ تاريخي لعلاجٍ بدأ قبل النظام — مالها في الرصيد السابق. */
+  legacy?: boolean;
   /** خطة الأقساط: قصتها المالية. null لخطة البنود. */
   installments: {
     paidMinor: number;
@@ -407,9 +411,13 @@ export function planLedgerSummary(plan: {
   installments: { number: number }[];
   progress: PlanProgress;
   itemsProgress: PlanItemsProgress;
+  items?: readonly { legacyAgreementId?: number }[];
 }): PlanLedgerSummary {
   const hasInstallments = plan.installments.length > 0;
+  /* (INV-LEGACY) خطة اتفاقٍ تاريخي (علاجٌ بدأ قبل النظام): مالها في الرصيد السابق لا في الخطة. */
+  const legacy = plan.items?.some((item) => item.legacyAgreementId !== undefined) ?? false;
   return {
+    ...(legacy ? { legacy: true } : {}),
     id: plan.id,
     title: plan.title,
     status: plan.status,

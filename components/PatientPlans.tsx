@@ -54,6 +54,8 @@ interface PlanItem {
   plannedVisitNumber?: number; billingRule?: BillingRule;
   billingStatus?: BillingStatus; sessionCount?: number;
   sessionsCompleted?: number; doctorId?: number | null; doctorName?: string | null;
+  /** (INV-LEGACY) اتفاقٌ تاريخي حيّ يغطّي البند. */
+  legacyAgreementId?: number;
 }
 interface Plan {
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
@@ -1099,7 +1101,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                         {(item.sessionCount ?? 1) > 1 ? (
                           <span className="shrink-0 text-slate-400">· جلسة {item.sessionsCompleted ?? 0}/{item.sessionCount ?? 1}</span>
                         ) : null}
-                        {item.billingStatus === "billed" ? (
+                        {item.legacyAgreementId ? (
+                          <span className="shrink-0 rounded bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-800">حالة بدأت قبل النظام · مشمول بالاتفاق التاريخي</span>
+                        ) : item.billingStatus === "billed" ? (
                           <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">مفوتر</span>
                         ) : item.billingStatus === "included_in_package" ? (
                           <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">ضمن الباقة</span>

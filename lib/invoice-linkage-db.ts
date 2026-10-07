@@ -70,6 +70,11 @@ const OPEN_ITEM_SQL = `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i
         AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.source_type = 'plan_item' AND ii.source_id = i.id)
         AND NOT EXISTS (SELECT 1 FROM invoice_items ij WHERE ij.plan_item_id = i.id)`;
 
+/** (INV-LEGACY) اتفاقٌ تاريخي حيّ (علاجٌ بدأ قبل النظام) يغطّي الخدمة والسن، وبنده لم يكتمل ولم يُلغَ. */
+const LEGACY_COVERED_SQL = `SELECT 1 FROM legacy_treatment_agreements la JOIN plan_items li ON li.id = la.plan_item_id
+  WHERE la.patient_id = $1 AND la.service_id = $2 AND la.tooth_code IS NOT DISTINCT FROM $3::smallint
+    AND la.status = 'live' AND li.status NOT IN ('done', 'cancelled') LIMIT 1`;
+
 async function audit(client: DbClient, entry: AuditInput) { await insertAuditRow(client, entry); }
 
 /** روابط فاتورةٍ قائمة كما كُتبت — لإعادة الطلب نفسه بلا أثرٍ ثانٍ (والخطة هي التي أنشأتها الفاتورة وحدها). */
@@ -175,6 +180,9 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
             AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
           LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
       if (billed) throw new Refusal("already_billed", line);
+      /* (INV-LEGACY) العمل نفسه يغطّيه اتفاقٌ تاريخي حيّ لم يكتمل بنده: فاتورةٌ له تحسب المال مرةً ثانية. */
+      const { rows: [legacy] } = await client.query(LEGACY_COVERED_SQL, [input.patientId, item.serviceId, item.toothCode]);
+      if (legacy) throw new Refusal("legacy_covered", line);
       /* بند الخطة يُقفل أولًا ثم تُعاد قراءة أهليته في جملةٍ جديدة بعد انتظار القفل — بالترتيب نفسه الذي يقفل به
          التوقيعُ البنود (loadPlanItemsForPricing): زيارةٌ وقّعت جلسته أثناء الانتظار تُرى، فلا يفوتره البابان معًا. */
       const params = [input.patientId, input.baseCurrency, item.serviceId, item.toothCode];
@@ -426,6 +434,8 @@ export async function previewInvoiceLinkage(input: {
           AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
         LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
     if (billed) { preview.refusal = "already_billed"; previews.push(preview); continue; }
+    const { rows: [legacy] } = await pool.query(LEGACY_COVERED_SQL, [input.patientId, item.serviceId, item.toothCode]);
+    if (legacy) { preview.refusal = "legacy_covered"; previews.push(preview); continue; }
     const { rows: open } = await pool.query<{
       id: number; quantity: number; unit_price_minor: string; case_id: number | null; session_count: number; surfaces: string | null;
     }>(`${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`,

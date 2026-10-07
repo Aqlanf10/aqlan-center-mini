@@ -1,0 +1,136 @@
+/**
+ * (INV-LEGACY) علاجٌ بدأ قبل النظام — المنطق الخالص.
+ *
+ * المستخدم يُدخل: الخدمة العلاجية من الدليل (التصنيف نفسه الذي يربط بنود الفاتورة)، والسن، والمبلغ المتفق عليه
+ * أصلًا، والمدفوع قبل النظام، وتاريخ المعلومات، والعملة. والرقم المشتق الوحيد: المتبقي = المتفق − المدفوع.
+ * الحساب والتحقق بالدالة نفسها التي تعرض المعاينة (`previewLegacyReconciliation`) — فلا تختلف الشاشة عن الخادم.
+ * لا سند للمدفوع سابقًا، ولا فاتورة بكامل الاتفاق؛ الرصيد السابق = المتبقي وحده.
+ * التصميم: docs/INVOICE_FIRST_LEGACY_TREATMENT.md.
+ */
+import { previewLegacyReconciliation } from "./legacy-reconciliation-preview";
+import { LINKAGE_SPECIALTY_LABEL, type LinkageSpecialty } from "./invoice-clinical-linkage";
+import { isValidTooth } from "./dental";
+import { isCurrency, type Currency } from "./money";
+
+export const LEGACY_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+export interface LegacyTreatmentRequest {
+  serviceId: number;
+  toothCode: number | null;
+  caseId: number | null;
+  sessions: number | null;
+  currency: Currency;
+  agreedMinor: number;
+  previouslyPaidMinor: number;
+  remainingMinor: number;
+  historicalAsOf: string;
+  note: string | null;
+  idempotencyKey: string | null;
+}
+
+function optionalInt(value: unknown, min: number, max: number): number | null | undefined {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max ? number : undefined;
+}
+
+function amountText(value: unknown): string {
+  return typeof value === "number" || typeof value === "string" ? String(value) : "";
+}
+
+/** طلب التسجيل → قيمٌ مؤكَّدة، أو أول خطأ برسالةٍ عربية. `today` يوم العيادة (لا ساعة هنا). */
+export function parseLegacyTreatmentRequest(source: Record<string, unknown>, today: string):
+  | { ok: true; value: LegacyTreatmentRequest }
+  | { ok: false; message: string } {
+  const serviceId = Number(source.serviceId);
+  if (!Number.isInteger(serviceId) || serviceId <= 0) return { ok: false, message: "اختر الخدمة العلاجية من الدليل." };
+  const toothCode = optionalInt(source.toothCode, 11, 85);
+  if (toothCode === undefined || (toothCode !== null && !isValidTooth(toothCode))) {
+    return { ok: false, message: "رقم السن غير صحيح بالترقيم الدولي." };
+  }
+  const caseId = optionalInt(source.caseId, 1, 2_147_483_647);
+  if (caseId === undefined) return { ok: false, message: "الحالة المختارة غير صالحة." };
+  const sessions = optionalInt(source.sessions, 1, 60);
+  if (sessions === undefined) return { ok: false, message: "عدد الجلسات المتبقية بين ١ و٦٠." };
+  if (!isCurrency(source.currency)) return { ok: false, message: "اختر عملة الاتفاق: YER أو SAR أو USD." };
+  const currency = source.currency;
+  const preview = previewLegacyReconciliation({
+    draft: {
+      currency,
+      agreedAmount: amountText(source.agreedAmount),
+      previouslyPaidAmount: amountText(source.previouslyPaidAmount),
+      historicalAsOf: typeof source.historicalAsOf === "string" ? source.historicalAsOf : "",
+    },
+    today,
+  });
+  if (preview.draftState !== "valid" || !preview.historical) {
+    return { ok: false, message: preview.message ?? "بيانات الاتفاق التاريخي غير صالحة." };
+  }
+  if (preview.historical.agreedMinor <= 0) {
+    return { ok: false, message: "المبلغ المتفق عليه أصلًا يجب أن يكون أكبر من صفر." };
+  }
+  const idempotencyKey = typeof source.idempotencyKey === "string" && source.idempotencyKey.trim()
+    ? source.idempotencyKey.trim() : null;
+  if (idempotencyKey !== null && !LEGACY_IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
+    return { ok: false, message: "مفتاح الطلب غير صالح." };
+  }
+  const note = typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null;
+  return {
+    ok: true,
+    value: {
+      serviceId, toothCode, caseId, sessions, currency, note, idempotencyKey,
+      agreedMinor: preview.historical.agreedMinor,
+      previouslyPaidMinor: preview.historical.previouslyPaidMinor,
+      remainingMinor: preview.historical.remainingMinor,
+      historicalAsOf: preview.historical.historicalAsOf,
+    },
+  };
+}
+
+/** بصمة الطلب لمفتاح الإعادة: كل ما يُحفظ منه — بترتيبٍ ثابت. */
+export function legacyTreatmentFingerprint(patientId: number, request: LegacyTreatmentRequest): string {
+  return JSON.stringify([
+    patientId, request.serviceId, request.toothCode, request.caseId, request.sessions, request.currency,
+    request.agreedMinor, request.previouslyPaidMinor, request.historicalAsOf, request.note,
+  ]);
+}
+
+/** عنوان حالةٍ تُفتح لعلاجٍ سابق: التخصص والسن، ووسمها أنها بدأت قبل النظام — بلا تشخيص مختلق. */
+export function legacyCaseTitle(specialty: LinkageSpecialty, toothCode: number | null): string {
+  return `${LINKAGE_SPECIALTY_LABEL[specialty]}${toothCode ? ` — سن ${toothCode}` : ""} — حالة بدأت قبل النظام`;
+}
+
+export const LEGACY_CASE_LABEL = "حالة بدأت قبل النظام";
+
+export type LegacyTreatmentRefusal =
+  | "no_patient" | "bad_service" | "bad_tooth" | "bad_case" | "ambiguous_case" | "idempotency_conflict"
+  | "duplicate_live" | "open_item_exists" | "opening_not_owned" | "opening_edit_forbidden" | "period_locked"
+  | "opening_changed";
+
+export type LegacyVoidRefusal =
+  | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason";
+
+export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, string> = {
+  no_patient: "المريض غير موجود.",
+  bad_service: "اختر خدمةً علاجية من الدليل (تقويم، علاج جذور، تركيبات، زراعة…) — الكشف والأشعة ليست علاجًا سابقًا.",
+  bad_tooth: "رقم السن غير صحيح بالترقيم الدولي.",
+  bad_case: "الحالة المختارة ليست حالة مفتوحة لهذا المريض وبتخصص العلاج.",
+  ambiguous_case: "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة التي يرتبط بها العلاج السابق.",
+  idempotency_conflict: "هذا الطلب أُرسل سابقًا ببياناتٍ مختلفة — أعد فتح النموذج.",
+  duplicate_live: "للمريض اتفاقٌ تاريخي قائم لنفس العلاج والسن — لا يُسجَّل مرتين.",
+  open_item_exists: "للمريض بند خطة مفتوح لنفس العلاج والسن في النظام — لا يُسجَّل علاجٌ سابق فوقه. راجع الخطة أو ألغِ البند أولًا.",
+  opening_not_owned: "للمريض رصيدٌ سابق بهذه العملة لم يُسجَّل من اتفاق علاجٍ سابق — قد يشمل هذا العلاج فيُحسب مرتين. يراجعه المدير ويصحّحه أولًا ثم يُسجَّل الاتفاق.",
+  opening_edit_forbidden: "للمريض رصيدٌ سابق بهذه العملة — إضافة متبقي اتفاقٍ آخر إليه للمدير.",
+  period_locked: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال أو راجع المدير.",
+  opening_changed: "تغيّر الرصيد السابق لهذه العملة بعد تسجيل الاتفاق — يراجعه المدير قبل الإبطال.",
+  not_found: "الاتفاق التاريخي غير موجود لهذا المريض.",
+  already_void: "هذا الاتفاق التاريخي مُبطَل مسبقًا.",
+  opening_settled: "سُدِّد من الرصيد السابق ما لا يبقى مغطًّى بعد إبطال الاتفاق — لا يُبطَل حتى تُراجع الدفعات (ردّ أو تصحيح سند).",
+  bad_reason: "اكتب سبب إبطال الاتفاق (ثلاثة أحرف على الأقل).",
+};
+
+export const LEGACY_TREATMENT_STATUS: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, number> = {
+  no_patient: 404, bad_service: 400, bad_tooth: 400, bad_case: 400, ambiguous_case: 409, idempotency_conflict: 409,
+  duplicate_live: 409, open_item_exists: 409, opening_not_owned: 409, opening_edit_forbidden: 403, period_locked: 409,
+  opening_changed: 409, not_found: 404, already_void: 409, opening_settled: 409, bad_reason: 400,
+};

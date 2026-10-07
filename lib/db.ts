@@ -48,6 +48,7 @@ import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
+import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2044,6 +2045,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(ENDODONTICS_SQL);
     /* (INV-LINK B) الربط السريري للفاتورة (مفتاح إعادة، رابط مالي للبند، مصدر البند والحالة) — جسد الهجرة 0041 حرفيًّا. */
     await getPool().query(INVOICE_LINKAGE_SQL);
+    /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
+    await getPool().query(LEGACY_TREATMENT_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -5145,7 +5148,8 @@ export async function mergeDuplicatePatient(
               (SELECT COUNT(*)::int FROM inventory_movements
                 WHERE patient_id = $1 OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS movements,
               (SELECT COUNT(*)::int FROM patient_opening_balances WHERE patient_id = $1) AS opening,
-              (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1) AS legacy_treatments,
+              (SELECT COUNT(*)::int FROM legacy_treatments WHERE patient_id = $1)
+                + (SELECT COUNT(*)::int FROM legacy_treatment_agreements WHERE patient_id = $1) AS legacy_treatments,
               (SELECT COUNT(*)::int FROM legacy_payments WHERE patient_id = $1) AS legacy_payments`,
       [sourceId],
     );
@@ -5513,7 +5517,9 @@ export async function deletePatientCascade(
          /* (P1-5ج) معالجات النظام القديم ودفعاته أثرٌ ماليٌّ تاريخي كالرصيد الافتتاحي. */
          (SELECT COUNT(*) FROM patient_opening_balances WHERE patient_id = $1)
            + (SELECT COUNT(*) FROM legacy_treatments WHERE patient_id = $1)
-           + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1) AS opening_balances,
+           + (SELECT COUNT(*) FROM legacy_payments WHERE patient_id = $1)
+           /* (INV-LEGACY) الاتفاق التاريخي لعلاجٍ بدأ قبل النظام شاهدٌ ماليّ كذلك. */
+           + (SELECT COUNT(*) FROM legacy_treatment_agreements WHERE patient_id = $1) AS opening_balances,
          (SELECT COUNT(*) FROM inventory_movements
            WHERE patient_id = $1
               OR visit_id IN (SELECT id FROM visits WHERE patient_id = $1)) AS inventory_movements,
@@ -16092,18 +16098,28 @@ export const ORTHO_CASE_FUNDED_SQL =
                   AND EXISTS (SELECT 1 FROM invoices ov WHERE ov.id = oi.billed_invoice_id AND ov.status <> 'cancelled')
                   AND (op.id = c.plan_id OR oi.case_id IN (SELECT cc.id FROM clinical_cases cc WHERE cc.ortho_case_id = c.id))))`;
 
+/**
+ * (INV-LEGACY) حالة تقويمٍ يغطّيها اتفاقٌ تاريخي حيّ (علاجٌ بدأ قبل النظام): بند التقويم المغطّى في خطتها أو في
+ * الحالة التخصصية المجسورة إليها. الشدّات مشمولة بالعلاج السابق — لا فاتورة ولا قرارٌ معلّق.
+ */
+export const ORTHO_CASE_LEGACY_AGREEMENT_SQL =
+  `EXISTS (SELECT 1 FROM legacy_treatment_agreements la JOIN plan_items li ON li.id = la.plan_item_id
+            WHERE la.status = 'live' AND la.patient_id = c.patient_id AND li.category = 'ortho'
+              AND (li.plan_id = c.plan_id OR li.case_id IN (SELECT lc.id FROM clinical_cases lc WHERE lc.ortho_case_id = c.id)))`;
+
 /** One source of truth for the adjustment, in preview and in the sign transaction. */
 async function orthoAdjustmentBillingClass(
   db: DbClient | DbPool, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
   const { rows: [evidence] } = await db.query<{
     baseline_kind: string | null; legacy_financial_mode: string | null;
-    opening_currencies: string[]; funded_plan: boolean;
+    opening_currencies: string[]; funded_plan: boolean; legacy_agreement: boolean;
   }>(
     `SELECT c.baseline_kind, c.legacy_financial_mode,
             ARRAY(SELECT o.currency FROM patient_opening_balances o
                    WHERE o.patient_id = c.patient_id ORDER BY o.currency) AS opening_currencies,
-            ${ORTHO_CASE_FUNDED_SQL} AS funded_plan
+            ${ORTHO_CASE_FUNDED_SQL} AS funded_plan,
+            ${ORTHO_CASE_LEGACY_AGREEMENT_SQL} AS legacy_agreement
        FROM ortho_cases c WHERE c.id = $1 AND c.patient_id = $2`,
     [caseId, patientId],
   );
@@ -16114,6 +16130,7 @@ async function orthoAdjustmentBillingClass(
       ? evidence.legacy_financial_mode : null,
     openingCurrencies: evidence.opening_currencies,
     fundedPlan: evidence.funded_plan,
+    legacyAgreement: evidence.legacy_agreement,
   });
 }
 
@@ -16677,8 +16694,16 @@ export class ClinicalPlanConflict extends Error {
  * (INV-LINK) بند خطةٍ قبلته فاتورةٌ حيّة ماليًّا (فاتورة علاجية سابقة): جلساته لا تُفوتر مرةً ثانية عند التوقيع.
  * فاتورته الملغاة لا تغطّيه (الإلغاء يعيده «غير مفوتر» أصلًا — وهذا حارسٌ ثانٍ).
  */
+export const PLAN_ITEM_LEGACY_COVERED_SQL =
+  `(i.billing_status = 'included_in_package' AND EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.plan_item_id = i.id AND la.status = 'live'))`;
+
+/**
+ * (INV-LEGACY) …أو بندٌ يغطّيه اتفاقٌ تاريخي حيّ لعلاجٍ بدأ قبل النظام: المال (المدفوع قبل النظام + المتبقي في
+ * الرصيد السابق) خارج الفوترة الحالية، فجلساته لا تُفوتر. إبطال الاتفاق يحرّر التغطية (حارسٌ ثانٍ: حالته `live`).
+ */
 export const PLAN_ITEM_PREBILLED_SQL =
-  `(i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled'))`;
+  `((i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled'))
+    OR ${PLAN_ITEM_LEGACY_COVERED_SQL})`;
 
 export const PLAN_FUNDED_BY_AGREEMENT_SQL =
   `EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)`;
@@ -16770,6 +16795,10 @@ async function loadPlanItemsForPricing(
       `SELECT v.id FROM invoices v
         WHERE v.id IN (SELECT billed_invoice_id FROM plan_items WHERE id = ANY($1::int[]) AND billed_invoice_id IS NOT NULL)
         ORDER BY v.id FOR SHARE`, [planItemIds]);
+    /* (INV-LEGACY) والاتفاق التاريخي الذي يغطّي البند — بعد البند، كما يقفله الإبطال (البند ثم الاتفاق). */
+    await client.query(
+      `SELECT id FROM legacy_treatment_agreements WHERE plan_item_id = ANY($1::int[]) AND status = 'live'
+        ORDER BY id FOR SHARE`, [planItemIds]);
   }
   const { rows } = await client.query<{
     id: number; quantity: number; unit_price_minor: string;
@@ -18224,7 +18253,7 @@ function assertOpeningBalanceExpectation(
   }
 }
 
-export async function setPatientOpeningBalance(input: {
+export interface SetOpeningBalanceInput {
   patientId: number;
   /** (P1-5ب) عملة الرصيد — الأساس إن غابت. */
   currency?: Currency;
@@ -18240,45 +18269,81 @@ export async function setPatientOpeningBalance(input: {
   addOnly?: boolean;
   /** Recheck route reason/period/audit preconditions under the mutation lock. */
   expectedBefore?: OpeningBalanceExpectation | null;
-}): Promise<OpeningBalance | null> {
+}
+
+/**
+ * (INV-LEGACY) قلب المحرّك داخل معاملةٍ قائمة — الأقفال نفسها والسجلّ نفسه؛ يعيد سطر السجلّ الذي كتبه
+ * فيُربط به من يحتاج (الاتفاق التاريخي). `setPatientOpeningBalance` هو هذا القلب في معاملته الخاصة.
+ */
+export async function setPatientOpeningBalanceInTx(
+  client: DbClient, input: SetOpeningBalanceInput,
+): Promise<{ patientId: number; historyId: number } | null> {
+  const currency = input.currency ?? CLINIC_BASE_CURRENCY;
+  const before = await lockedOpeningBalance(client, input.patientId, currency, input.addOnly);
+  if (before && input.addOnly) throw new OpeningBalanceExists();
+  assertOpeningBalanceExpectation(before, input.expectedBefore);
+  const { rows } = await client.query<{ patient_id: number }>(
+    `INSERT INTO patient_opening_balances
+       (patient_id, amount_minor, as_of_date, note, created_by, currency)
+     SELECT $1, $2, $3::date, $4, $5, $6
+      WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
+     ON CONFLICT (patient_id, currency) DO UPDATE
+        SET amount_minor = EXCLUDED.amount_minor,
+            as_of_date   = EXCLUDED.as_of_date,
+            note         = EXCLUDED.note,
+            created_by   = EXCLUDED.created_by,
+            updated_at   = NOW()
+      WHERE $7::boolean
+     RETURNING patient_id`,
+    [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency, before !== null],
+  );
+  if (!rows[0]) {
+    // A legacy import can insert without this writer's patient fence. Never
+    // turn a checked-absent row into an unreviewed ON CONFLICT correction.
+    const patient = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+    if (patient.rows[0]) throw input.addOnly ? new OpeningBalanceExists() : new OpeningBalanceChanged();
+    return null;
+  }
+  const { rows: [history] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_opening_balance_history
+       (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
+     VALUES ($1, 'set', $2, $3::date, $4, $5::date, $6, $7, $8, $9)
+     RETURNING id`,
+    [input.patientId, before?.amountMinor ?? null, before?.asOfDate ?? null, input.amountMinor, input.asOfDate,
+      input.note, input.reason ?? null, input.createdBy, currency],
+  );
+  return { patientId: rows[0].patient_id, historyId: history.id };
+}
+
+export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): Promise<OpeningBalance | null> {
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
-  const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
-    const before = await lockedOpeningBalance(client, input.patientId, currency, input.addOnly);
-    if (before && input.addOnly) throw new OpeningBalanceExists();
-    assertOpeningBalanceExpectation(before, input.expectedBefore);
-    const { rows } = await client.query<{ patient_id: number }>(
-      `INSERT INTO patient_opening_balances
-         (patient_id, amount_minor, as_of_date, note, created_by, currency)
-       SELECT $1, $2, $3::date, $4, $5, $6
-        WHERE EXISTS (SELECT 1 FROM patients WHERE id = $1)
-       ON CONFLICT (patient_id, currency) DO UPDATE
-          SET amount_minor = EXCLUDED.amount_minor,
-              as_of_date   = EXCLUDED.as_of_date,
-              note         = EXCLUDED.note,
-              created_by   = EXCLUDED.created_by,
-              updated_at   = NOW()
-        WHERE $7::boolean
-       RETURNING patient_id`,
-      [input.patientId, input.amountMinor, input.asOfDate, input.note, input.createdBy, currency, before !== null],
-    );
-    if (!rows[0]) {
-      // A legacy import can insert without this writer's patient fence. Never
-      // turn a checked-absent row into an unreviewed ON CONFLICT correction.
-      const patient = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
-      if (patient.rows[0]) throw input.addOnly ? new OpeningBalanceExists() : new OpeningBalanceChanged();
-      return null;
-    }
-    await client.query(
-      `INSERT INTO patient_opening_balance_history
-         (patient_id, action, before_amount_minor, before_as_of_date, after_amount_minor, after_as_of_date, note, reason, actor, currency)
-       VALUES ($1, 'set', $2, $3::date, $4, $5::date, $6, $7, $8, $9)`,
-      [input.patientId, before?.amountMinor ?? null, before?.asOfDate ?? null, input.amountMinor, input.asOfDate,
-        input.note, input.reason ?? null, input.createdBy, currency],
-    );
-    return rows[0].patient_id;
-  });
+  const saved = await withTransaction(getPool(), async (client): Promise<number | null> =>
+    (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null);
   return saved === null ? null : getPatientOpeningBalance(saved, currency);
+}
+
+/** (INV-LEGACY) قلب المسح داخل معاملةٍ قائمة — يعيد سطر السجلّ، أو null إن لم يكن رصيد. */
+export async function clearPatientOpeningBalanceInTx(
+  client: DbClient,
+  patientId: number,
+  actor: string,
+  reason: string | null,
+  currency: Currency,
+  expectedBefore?: OpeningBalanceExpectation | null,
+): Promise<number | null> {
+  const before = await lockedOpeningBalance(client, patientId, currency);
+  assertOpeningBalanceExpectation(before, expectedBefore);
+  if (!before) return null;
+  await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
+  const { rows: [history] } = await client.query<{ id: number }>(
+    `INSERT INTO patient_opening_balance_history
+       (patient_id, action, before_amount_minor, before_as_of_date, reason, actor, currency)
+     VALUES ($1, 'clear', $2, $3::date, $4, $5, $6)
+     RETURNING id`,
+    [patientId, before.amountMinor, before.asOfDate, reason, actor, currency],
+  );
+  return history.id;
 }
 
 export async function clearPatientOpeningBalance(
@@ -18289,19 +18354,8 @@ export async function clearPatientOpeningBalance(
   expectedBefore?: OpeningBalanceExpectation | null,
 ): Promise<boolean> {
   await ensureSchema();
-  return withTransaction(getPool(), async (client): Promise<boolean> => {
-    const before = await lockedOpeningBalance(client, patientId, currency);
-    assertOpeningBalanceExpectation(before, expectedBefore);
-    if (!before) return false;
-    await client.query(`DELETE FROM patient_opening_balances WHERE patient_id = $1 AND currency = $2`, [patientId, currency]);
-    await client.query(
-      `INSERT INTO patient_opening_balance_history
-         (patient_id, action, before_amount_minor, before_as_of_date, reason, actor, currency)
-       VALUES ($1, 'clear', $2, $3::date, $4, $5, $6)`,
-      [patientId, before.amountMinor, before.asOfDate, reason, actor, currency],
-    );
-    return true;
-  });
+  return withTransaction(getPool(), async (client): Promise<boolean> =>
+    (await clearPatientOpeningBalanceInTx(client, patientId, actor, reason, currency, expectedBefore)) !== null);
 }
 
 export async function listOpeningBalanceHistory(patientId: number): Promise<OpeningBalanceHistoryEntry[]> {
@@ -18389,6 +18443,8 @@ export interface PlanItem {
   sessionsCompleted: number;
   doctorId: number | null;
   doctorName: string | null;
+  /** (INV-LEGACY) الاتفاق التاريخي الحيّ الذي يغطّي البند (علاجٌ بدأ قبل النظام) — غائبٌ لغيره. */
+  legacyAgreementId?: number;
 }
 
 interface PlanRow {
@@ -18487,13 +18543,15 @@ interface PlanItemRow {
   planned_visit_number: number | null; billing_rule: string | null;
   billing_status: string | null; session_count: number | null;
   sessions_completed: number | null; doctor_id: number | null; doctor_name: string | null;
+  legacy_agreement_id?: number | null;
 }
 
 const PLAN_ITEM_SELECT = `
   SELECT pi.id, pi.plan_id, pi.service_id, pi.service_name, pi.category, pi.tooth_code, pi.surfaces, pi.quantity,
          pi.unit_price_minor, pi.status, pi.visit_id, pi.done_at, pi.note, pi.sort_order,
          pi.planned_visit_number, pi.billing_rule, pi.billing_status, pi.session_count, pi.sessions_completed,
-         pi.doctor_id, doc.name AS doctor_name
+         pi.doctor_id, doc.name AS doctor_name,
+         (SELECT la.id FROM legacy_treatment_agreements la WHERE la.plan_item_id = pi.id AND la.status = 'live') AS legacy_agreement_id
     FROM plan_items pi
     LEFT JOIN parties doc ON doc.id = pi.doctor_id`;
 
@@ -18521,6 +18579,7 @@ function toPlanItem(row: PlanItemRow): PlanItem {
     sessionsCompleted: row.sessions_completed ?? 0,
     doctorId: row.doctor_id ?? null,
     doctorName: row.doctor_name ?? null,
+    ...(row.legacy_agreement_id ? { legacyAgreementId: row.legacy_agreement_id } : {}),
   };
 }
 
@@ -21009,7 +21068,9 @@ export async function createOrthoCase(input: {
        في المعاملة نفسها — فلا يبقى للمريض سياقان للتقويم، وبند الباقة المفوتر يموّل الشدّات. واحدةٌ فقط تُجسَر. */
     const { rows: shells } = await client.query<{ id: number }>(
       `SELECT id FROM clinical_cases
-        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL AND origin = 'invoice'
+        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL
+          AND (origin = 'invoice'
+               OR id IN (SELECT case_id FROM legacy_treatment_agreements WHERE patient_id = $1 AND status = 'live'))
           AND status IN ('active', 'waiting')
         ORDER BY id FOR UPDATE`, [input.patientId]);
     if (shells.length === 1) {
@@ -25585,6 +25646,8 @@ export interface SpecialtyCase {
   origin?: string | null;
   /** فتحتها فاتورة ولم يبدأ علاجها بعد — تحتاج تقييم الطبيب. */
   needsAssessment?: boolean;
+  /** (INV-LEGACY) يغطّي علاجَها اتفاقٌ تاريخي حيّ — «حالة بدأت قبل النظام». */
+  legacy?: boolean;
 }
 
 export interface PatientProblem {
@@ -25630,7 +25693,7 @@ interface SpecialtyCaseRow {
   specialty: string; title: string; site: string | null; problem: string | null;
   responsible_party_id: number | null; responsible_name: string | null; status: string; started_on: string;
   completed_at: Date | null; outcome: string | null; items_total: number; items_done: number; created_by: string;
-  origin: string | null; needs_assessment: boolean;
+  origin: string | null; needs_assessment: boolean; legacy: boolean;
 }
 
 const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
@@ -25641,6 +25704,7 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
   completedAt: row.completed_at ? row.completed_at.toISOString() : null, outcome: row.outcome,
   itemsTotal: row.items_total, itemsDone: row.items_done, createdBy: row.created_by,
   origin: row.origin ?? null, needsAssessment: row.needs_assessment === true,
+  legacy: row.legacy === true,
 });
 
 /*
@@ -25664,9 +25728,12 @@ const SPECIALTY_CASE_SELECT = `
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status <> 'cancelled')::int AS items_total,
          (SELECT COUNT(*) FROM plan_items i WHERE i.case_id = c.id AND i.status = 'done')::int AS items_done,
          c.origin,
+         -- (INV-LEGACY) حالةٌ يغطّي علاجها اتفاقٌ تاريخي حيّ — «حالة بدأت قبل النظام»، لا تحتاج تقييمًا أوليًّا.
+         EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.case_id = c.id AND la.status = 'live') AS legacy,
          -- (INV-LINK D) حالةٌ فتحتها فاتورة ولم يبدأ علاجها بعد: لا زيارة موقَّعة عليها، ولا جلسة منجزة لبنودها،
          -- والتقويم لم يُجسَر بعد إلى حالة تقويمٍ حقيقية — «تحتاج تقييمًا سريريًّا».
          (c.origin = 'invoice' AND c.status IN ('active', 'waiting')
+           AND NOT EXISTS (SELECT 1 FROM legacy_treatment_agreements lx WHERE lx.case_id = c.id AND lx.status = 'live')
            AND (c.specialty <> 'orthodontics' OR c.ortho_case_id IS NULL)
            AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.case_id = c.id AND v.signed_at IS NOT NULL)
            AND NOT EXISTS (SELECT 1 FROM treatment_sessions s JOIN plan_items si ON si.id = s.plan_item_id
@@ -25684,7 +25751,10 @@ const SPECIALTY_CASE_SELECT = `
          o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status <> 'cancelled')::int,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int,
-         NULL, FALSE
+         NULL,
+         EXISTS (SELECT 1 FROM legacy_treatment_agreements la JOIN plan_items li ON li.id = la.plan_item_id
+                  WHERE la.status = 'live' AND li.plan_id = o.plan_id),
+         FALSE
     FROM ortho_cases o
     LEFT JOIN treatment_plans t ON t.id = o.plan_id
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)

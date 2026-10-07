@@ -53,7 +53,8 @@ function rowToArrangement(row: ArrangementRow): LegacyBalanceArrangement {
   };
 }
 
-async function openingPosition(
+/** (INV-LEGACY) يُقرأ أيضًا داخل معاملة إبطال الاتفاق التاريخي: كم سُدِّد من الرصيد السابق. */
+export async function openingPosition(
   client: Pick<DbClient, "query">,
   patientId: number,
   currency: Currency,

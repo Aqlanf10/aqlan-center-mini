@@ -159,3 +159,9 @@ Audit-detail keys avoid the sanitizer's secret pattern (`سر`).
 A (this doc) · B migration 0041 + pure classification + transactional linkage + idempotency + cancel/correct
 link maintenance, PG18 + HTTP · C sign-off containment · D invoice preview + patient-file surfacing + browser
 journeys. Each PR ends `READY_FOR_DOT_REVIEW`; merge, deploy and production verification are Dot's.
+
+## 11. Pre-system (legacy) treatment
+
+A treatment that started before the system uses the same work identity (plan item + case) with a historical agreement
+instead of an invoice: the remaining amount alone becomes an opening balance through the existing opening engine, and a live
+agreement covers the item like a live invoice does. See `docs/INVOICE_FIRST_LEGACY_TREATMENT.md`.
