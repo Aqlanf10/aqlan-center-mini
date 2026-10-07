@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { addDays } from "../../lib/schedule";
 import { friendlyDateNamed } from "../../lib/reminders";
-import { baseUrl, harness } from "./_server";
+import { authedGet, baseUrl, harness } from "./_server";
 
 // Design evidence for the daily-report screen: real built page, synthetic
 // intercepted /api/report payloads only, and every screenshot/PDF below is a
@@ -12,13 +13,64 @@ import { baseUrl, harness } from "./_server";
 // the WhatsApp share link is only inspected, never opened.
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
+let expectedClinicName: string;
 beforeAll(async () => {
   h = await harness();
+  // Independently bind the paper identity to this isolated harness's settings.
+  const settingsResponse = await authedGet("/api/settings", h.sessions.admin);
+  expect(settingsResponse.status).toBe(200);
+  expectedClinicName = (await settingsResponse.json())["clinic.name"];
+  expect(typeof expectedClinicName).toBe("string");
+  expect(expectedClinicName.length).toBeGreaterThan(3);
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  try { await packageDesignEvidence(); } finally { await browser?.close(); }
+});
 
 const ARTIFACTS = ".settings-ui-artifacts";
+let designAcceptance: Record<string, unknown> = { synthetic: true, completedPdfWitnesses: false };
+
+// Existing CI already uploads design-proof.json. This explicit synthetic-only
+// package keeps the workflow unchanged and preserves diagnostics on failure.
+// No directory scan, browser storage, credentials or unrelated files are read.
+const EXTRA_EVIDENCE = [
+  ["daily-report-initial-1280.png", "image/png"],
+  ["daily-report-initial-390.png", "image/png"],
+  ["daily-report-initial-320.png", "image/png"],
+  ["daily-report-viewport-1280.json", "application/json"],
+  ["daily-report-viewport-390.json", "application/json"],
+  ["daily-report-viewport-320.json", "application/json"],
+  ["daily-report-state-proof.json", "application/json"],
+  ["daily-report-font-reference.pdf", "application/pdf"],
+  ["daily-report-association-negative.pdf", "application/pdf"],
+  ["daily-report-cutoff-negative.pdf", "application/pdf"],
+] as const;
+async function packageDesignEvidence() {
+  await mkdir(ARTIFACTS, { recursive: true });
+  const files = [], missing: string[] = [];
+  let total = 0;
+  for (const [name, mime] of EXTRA_EVIDENCE) {
+    let bytes: Buffer;
+    try { bytes = await readFile(`${ARTIFACTS}/${name}`); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") { missing.push(name); continue; }
+      throw error;
+    }
+    expect(bytes.length, `bounded synthetic evidence ${name}`).toBeLessThanOrEqual(2 * 1024 * 1024);
+    total += bytes.length;
+    expect(total, "bounded aggregate synthetic evidence").toBeLessThanOrEqual(8 * 1024 * 1024);
+    if (mime === "image/png") expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    if (mime === "application/pdf") expect(bytes.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    if (mime === "application/json") JSON.parse(bytes.toString("utf8"));
+    files.push({ name, mime, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
+      encoding: "base64", data: bytes.toString("base64") });
+  }
+  const path = `${ARTIFACTS}/daily-report-design-proof.json`;
+  await writeFile(path, JSON.stringify({ ...designAcceptance,
+    evidenceBundle: { version: 1, synthetic: true, totalBytes: total, files, missing },
+  }, null, 2));
+}
 
 type Pending = {
   respond: (status: number) => void;
@@ -144,6 +196,42 @@ async function assertNoOverflow(page: Page, width: number) {
   expect(clipped, "no horizontally clipped text at this width").toEqual([]);
 }
 
+/** Check the actual initial viewport before screenshot helpers can scroll a
+ * tall element under sticky app chrome. Hit-test corners as well as the center. */
+async function initialViewport(page: Page, width: number) {
+  await page.evaluate(async () => {
+    window.scrollTo(0, 0);
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const observations = [];
+  for (const selector of ['h1', 'header p', '[data-testid="print-report"]']) {
+    const element = page.getByTestId("daily-report").locator(selector).first();
+    const result = await element.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const insetX = Math.min(14, rect.width / 4), insetY = Math.min(14, rect.height / 4);
+      const points = [[rect.left + insetX, rect.top + insetY], [rect.right - insetX, rect.top + insetY],
+        [rect.left + insetX, rect.bottom - insetY], [rect.right - insetX, rect.bottom - insetY],
+        [(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2]];
+      return { text: element.textContent, scrollY, top: rect.top, bottom: rect.bottom,
+        left: rect.left, right: rect.right, viewportHeight: innerHeight,
+        uncovered: points.every(([x, y]) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit === element || (hit !== null && element.contains(hit));
+        }) };
+    });
+    expect(result.scrollY).toBe(0);
+    expect(result.top).toBeGreaterThanOrEqual(0);
+    expect(result.bottom).toBeLessThanOrEqual(result.viewportHeight);
+    expect(result.left).toBeGreaterThanOrEqual(0);
+    expect(result.right).toBeLessThanOrEqual(width);
+    expect(result.uncovered, `initial viewport is not occluded: ${result.text}`).toBe(true);
+    observations.push(result);
+  }
+  await page.screenshot({ path: `${ARTIFACTS}/daily-report-initial-${width}.png` });
+  await writeFile(`${ARTIFACTS}/daily-report-viewport-${width}.json`, JSON.stringify({ synthetic: true, width, observations }, null, 2));
+}
+
 /** Composite each text/background pixel through its ancestor opacity groups.
  * Canvas resolves browser-supported CSS colors (rgb/rgba, space syntax, oklch,
  * color(srgb...), etc.) to sRGB, rather than guessing from one serialization. */
@@ -216,7 +304,6 @@ async function assertStatContrast(page: Page) {
 type PdfWord = { text: string; xMin: number; xMax: number; yMin: number; yMax: number };
 type PdfPage = { width: number; height: number; words: PdfWord[] };
 const plain = (text: string) => text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
-const wordsOf = (text: string) => plain(text).split(/\s+/).map((word) => word.replace(/[^\p{L}\p{N}]/gu, "")).filter(Boolean);
 
 async function inspectPdf(page: Page, path: string) {
   const text = plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], {
@@ -241,15 +328,102 @@ async function inspectPdf(page: Page, path: string) {
   return { text, pages };
 }
 
+type ReferenceSpec = { key: string; parts: { text: string; selector: string }[] };
+type PdfReference = Record<string, string>;
+
+/** Poppler serializes the bundled Arabic font's shaped glyph clusters in visual
+ * order, sometimes splitting words or reversing characters inside ligatures.
+ * Calibrate independently authored expected text with that same loaded font.
+ * Compare ordered glyph sequences, never sorted letters or fuzzy matches. */
+function glyphSequence(words: PdfWord[]): string {
+  const lines: { center: number; words: PdfWord[] }[] = [];
+  for (const word of [...words].sort((a, b) => a.yMin - b.yMin)) {
+    const center = (word.yMin + word.yMax) / 2;
+    let line = lines.find((candidate) => Math.abs(candidate.center - center) < 4);
+    if (!line) { line = { center, words: [] }; lines.push(line); }
+    line.words.push(word);
+  }
+  return lines.sort((a, b) => a.center - b.center).map((line) =>
+    line.words.sort((a, b) => a.xMin - b.xMin).map((word) =>
+      plain(word.text).replace(/[^\p{Script=Arabic}0-9]/gu, ""),
+    ).join(""),
+  ).filter(Boolean).join("|");
+}
+
+async function calibratePdf(page: Page, specs: ReferenceSpec[]): Promise<PdfReference> {
+  const saved = await page.getByTestId("daily-report").evaluate((report, specs) => {
+    const saved = report.innerHTML;
+    const rows = specs.map((spec, index) => {
+      const row = document.createElement("section");
+      row.style.cssText = "break-inside:avoid;margin:0 0 12px;direction:rtl";
+      const marker = (suffix: string) => {
+        const p = document.createElement("p");
+        p.style.cssText = "font:8px monospace;line-height:12px;margin:6px 0;direction:ltr";
+        p.textContent = `REF_${index}_${suffix}`;
+        return p;
+      };
+      row.append(marker("START"));
+      for (const part of spec.parts) {
+        const source = report.querySelector(part.selector);
+        if (!source) throw new Error(`Missing reference style ${part.selector}`);
+        const computed = getComputedStyle(source);
+        const p = document.createElement("p");
+        p.style.margin = "0";
+        p.style.width = `${source.getBoundingClientRect().width}px`;
+        for (const property of ["font-family", "font-size", "font-weight", "font-style", "line-height", "letter-spacing", "direction"]) {
+          p.style.setProperty(property, computed.getPropertyValue(property));
+        }
+        p.textContent = part.text;
+        row.append(p);
+      }
+      row.append(marker("END"));
+      return row;
+    });
+    report.replaceChildren(...rows);
+    return saved;
+  }, specs);
+  try {
+    const reference = await savePdf(page, `${ARTIFACTS}/daily-report-font-reference.pdf`);
+    return Object.fromEntries(specs.map((spec, index) => {
+      const page = reference.pages.find((page) => page.words.some((word) => word.text === `REF_${index}_START`));
+      expect(page, `PDF reference ${spec.key}`).toBeDefined();
+      const start = page!.words.find((word) => word.text === `REF_${index}_START`)!;
+      const end = page!.words.find((word) => word.text === `REF_${index}_END`);
+      expect(end, `reference ${spec.key} stays on one page`).toBeDefined();
+      const glyphs = glyphSequence(page!.words.filter((word) => word.yMin >= start.yMax && word.yMax <= end!.yMin));
+      expect(glyphs.length, `reference ${spec.key} contains Arabic glyphs`).toBeGreaterThan(0);
+      return [spec.key, glyphs];
+    }));
+  } finally {
+    await page.getByTestId("daily-report").evaluate((report, saved) => { report.innerHTML = saved; }, saved);
+  }
+}
+
+const statLabels = ["إجمالي الحضور", "اكتملت زيارتهم", "لم يحضروا", "متوسط وقت الانتظار", "أطول وقت انتظار", "متوسط الجلسة على الكرسي"];
+const statValues = ["117", "113", "104", "37", "58", "43"];
+function referenceSpecs(date: string, clinic: string): ReferenceSpec[] {
+  const header = '[data-testid="report-paper-header"]';
+  return [
+    ...statLabels.map((text, index) => ({ key: `stat${index}`, parts: [{ text, selector: `[data-report-stat]:nth-child(${index % 3 + 1}) [data-stat-label]` }] })),
+    ...["تراكيب متأخرة بالمختبر:", "جاهزة للتركيب:"].map((text, index) => ({ key: `lab${index}`, parts: [{ text, selector: `[aria-label="أعمال المختبر الآن"] li:nth-child(${index + 1}) span` }] })),
+    { key: "unclosed", parts: [{ text: "مواعيد غير مغلقة ليوم التقرير:", selector: '[aria-label="مواعيد غير مغلقة"] p' }] },
+    { key: "clinic", parts: [{ text: clinic, selector: `${header} p` }] },
+    { key: "title", parts: [{ text: "تقرير الأداء اليومي", selector: `${header} > div > div:last-child p:first-child` }] },
+    { key: "date", parts: [{ text: friendlyDateNamed(date), selector: '[data-testid="print-report-date"]' }] },
+    { key: "next", parts: [{ text: `حجوزات اليوم التالي — ${friendlyDateNamed(addDays(date, 1))}`, selector: '[aria-label="حجوزات اليوم التالي"] h2' }] },
+    { key: "lab", parts: [{ text: "أعمال المختبر — الحالة الآن", selector: '[aria-label="أعمال المختبر الآن"] h2' }] },
+    ...plannedRows().map((row, index) => ({ key: `row${index}`, parts: [
+      { text: row.patientName, selector: '[data-planned-row] p:first-child' },
+      { text: `${row.title} · ${row.durationMinutes} دقيقة · ${row.doctorName}`, selector: '[data-planned-row] p:last-child' },
+    ] })),
+  ];
+}
+
 type PdfEvidence = Awaited<ReturnType<typeof inspectPdf>>;
-/** A unique value anchors the actual PDF glyphs, then its full label must be
- * nearby in the same card. A repeated chair count/time cannot satisfy this. */
-function assertPdfContent(evidence: PdfEvidence) {
-  const { text, pages } = evidence;
+function assertPdfContent(evidence: PdfEvidence, reference: PdfReference) {
+  const { pages } = evidence;
   expect(pages.length).toBeGreaterThanOrEqual(1);
   for (const page of pages) {
-    // Chromium quantizes mm dimensions through CSS pixels; allow 1.5pt
-    // rounding while still rejecting Letter and other page formats.
     expect(Math.abs(page.width - 595.28), "A4 paper width").toBeLessThanOrEqual(1.5);
     expect(Math.abs(page.height - 841.89), "A4 paper height").toBeLessThanOrEqual(1.5);
     for (const word of page.words) {
@@ -259,32 +433,38 @@ function assertPdfContent(evidence: PdfEvidence) {
       expect(word.yMax, `PDF bottom cutoff: ${word.text}`).toBeLessThanOrEqual(page.height);
     }
   }
-  const nearby = (anchor: string, label: string, horizontal: number, above: number, below: number) => {
+  const nearby = (anchor: string, key: string, horizontal: number, above: number, below: number, onlyBelow = false) => {
     const hits = pages.flatMap((page) => page.words.filter((word) => word.text === anchor).map((word) => ({ page, word })));
     expect(hits, `PDF unique anchor ${anchor}`).toHaveLength(1);
     const { page, word } = hits[0];
     const neighbors = page.words.filter((candidate) =>
-      candidate.yMin >= word.yMin - above && candidate.yMax <= word.yMax + below
+      candidate.yMin >= (onlyBelow ? word.yMax + 1 : word.yMin - above) && candidate.yMax <= word.yMax + below
       && candidate.xMax >= word.xMin - horizontal && candidate.xMin <= word.xMax + horizontal,
-    ).flatMap((candidate) => wordsOf(candidate.text));
-    for (const token of wordsOf(label)) {
-      expect(neighbors, `PDF association ${anchor} with ${label}`).toContain(token);
-    }
+    );
+    expect(glyphSequence(neighbors.filter((candidate) => candidate !== word)), `PDF association ${anchor} with ${key}`).toBe(reference[key]);
   };
-  for (const [label, value] of [
-    ["إجمالي الحضور", "117"], ["اكتملت زيارتهم", "113"], ["لم يحضروا", "104"],
-    ["متوسط وقت الانتظار", "37"], ["أطول وقت انتظار", "58"], ["متوسط الجلسة على الكرسي", "43"],
-  ]) nearby(value, label, 62, 1, 35);
-  for (const [label, value] of [
-    ["تراكيب متأخرة بالمختبر:", "103"], ["جاهزة للتركيب:", "105"],
-    ["مواعيد غير مغلقة ليوم التقرير:", "109"],
-  ]) nearby(value, label, 260, 4, 4);
-  for (const row of plannedRows()) {
-    expect(text, `PDF contains planned patient ${row.patientName}`).toContain(row.patientName);
-    expect(text, `PDF contains planned title ${row.title}`).toContain(row.title);
-    // Each unique name's final word anchors its own time, title, duration and doctor.
-    nearby(wordsOf(row.patientName).at(-1)!, `${row.title} ${row.durationMinutes} دقيقة ${row.doctorName}`, 350, 1, 24);
-    nearby(wordsOf(row.patientName).at(-1)!, row.time, 350, 3, 3);
+  statValues.forEach((value, index) => nearby(value, `stat${index}`, 62, 1, 35, true));
+  nearby("103", "lab0", 260, 4, 4);
+  nearby("105", "lab1", 260, 4, 4);
+  nearby("109", "unclosed", 260, 4, 4);
+  plannedRows().forEach((row, index) => nearby(row.time, `row${index}`, 350, 3, 24));
+
+  // Header and dated section titles must occur exactly once in actual PDF
+  // lines. Group by glyph baseline, retaining order within every line.
+  const lineSequences = pages.flatMap((page, pageIndex) => {
+    const groups: { center: number; words: PdfWord[] }[] = [];
+    for (const word of [...page.words].sort((a, b) => a.yMin - b.yMin)) {
+      const center = (word.yMin + word.yMax) / 2;
+      let group = groups.find((candidate) => Math.abs(candidate.center - center) < 4);
+      if (!group) { group = { center, words: [] }; groups.push(group); }
+      group.words.push(word);
+    }
+    return groups.map((group) => ({ pageIndex, glyphs: glyphSequence(group.words) }));
+  });
+  for (const key of ["clinic", "title", "date", "next", "lab"]) {
+    const hits = lineSequences.filter((line) => line.glyphs.includes(reference[key]));
+    expect(hits, `PDF exact heading ${key}`).toHaveLength(1);
+    if (["clinic", "title", "date"].includes(key)) expect(hits[0].pageIndex).toBe(0);
   }
 }
 
@@ -320,6 +500,7 @@ describe("built daily report design evidence", () => {
 
       await assertNoOverflow(f.page, width);
       await assertStatContrast(f.page);
+      await initialViewport(f.page, width);
       const occupancy = await f.page.getByTestId("report-occupancy-track").evaluate((track) => {
         const fill = track.firstElementChild!;
         const a = track.getBoundingClientRect(), b = fill.getBoundingClientRect();
@@ -332,7 +513,7 @@ describe("built daily report design evidence", () => {
       expect(occupancy.proportion).toBeCloseTo(0.75, 2);
 
       await mkdir(ARTIFACTS, { recursive: true });
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-design-${width}.png` });
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-design-${width}.png` });
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -346,7 +527,7 @@ describe("built daily report design evidence", () => {
       await expect.poll(() => f.page.getByText("جارٍ إعداد التقرير اليومي", { exact: false }).count()).toBe(1);
       expect(await f.page.getByText(`ليوم ${friendlyDateNamed(requested)}`, { exact: false }).isVisible()).toBe(true);
       expect(await f.page.locator('[data-testid="print-report"]').count()).toBe(0);
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-loading-390.png` });
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-loading-390.png` });
 
       // Error: an explicit alert with a retry, and nothing printable.
       await f.complete({ message: "Synthetic design failure" }, 500);
@@ -355,7 +536,7 @@ describe("built daily report design evidence", () => {
       expect(await f.page.locator('[aria-label="الحضور"]').count()).toBe(0);
       expect(await f.page.locator('[data-testid="print-report"]').count()).toBe(0);
       expect(await f.page.locator('a[href*="wa.me"]').count()).toBe(0);
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-error-390.png` });
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-error-390.png` });
 
       // Valid empty day: a valid report that says so — no alert, print and share intact.
       await f.page.getByRole("button", { name: "أعد المحاولة", exact: true }).click();
@@ -375,10 +556,24 @@ describe("built daily report design evidence", () => {
         plannedToday: [],
       });
       await expect.poll(() => f.page.getByText("لا حضور ولا مواعيد مسجّلة في هذا اليوم", { exact: false }).count()).toBe(1);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-empty-day-390.png` });
+      const alerts = await f.page.getByRole("alert").evaluateAll((elements) => elements.map((element) => {
+        const root = element.getRootNode();
+        return { tag: element.tagName, id: element.id, text: element.textContent,
+          inReport: !!element.closest('[data-testid="daily-report"]'),
+          shadowHost: root instanceof ShadowRoot ? root.host.tagName : null };
+      }));
+      await writeFile(`${ARTIFACTS}/daily-report-state-proof.json`, JSON.stringify({ synthetic: true, zeroStateAlerts: alerts }, null, 2));
+      expect(await f.page.getByTestId("daily-report").getByRole("alert").count()).toBe(0);
+      // Next's screen-reader route announcer is not a report error. Allow only
+      // that exact outside identity; an urgent app banner or other alert fails.
+      for (const alert of alerts) {
+        expect(alert.inReport).toBe(false);
+        expect(alert.shadowHost).toBe("NEXT-ROUTE-ANNOUNCER");
+        expect(alert.id).toBe("__next-route-announcer__");
+      }
       expect(await f.page.locator('[data-testid="print-report"]').count()).toBe(1);
       expect(await f.page.locator('a[href*="wa.me"]').count()).toBe(1);
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-empty-day-390.png` });
 
       // Cleared date: a truthful notice, no request, nothing stale.
       await f.page.getByTestId("daily-report").locator('input[type="date"]').fill("");
@@ -386,7 +581,7 @@ describe("built daily report design evidence", () => {
       await f.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       expect(await f.page.evaluate(() => (window as unknown as FixtureWindow).__dailyDesignReports.length)).toBe(2);
       expect(await f.page.locator('[data-testid="print-report"]').count()).toBe(0);
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-invalid-date-390.png` });
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-invalid-date-390.png` });
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -425,7 +620,7 @@ describe("built daily report design evidence", () => {
       await expect.poll(() => f.page.locator('[data-report-stat]').count()).toBe(6);
       await assertNoOverflow(f.page, 320);
       const screenContrast = await assertStatContrast(f.page);
-      await f.page.getByTestId("daily-report").screenshot({ path: `${ARTIFACTS}/daily-report-high-occupancy-320.png` });
+      await f.page.screenshot({ fullPage: true, path: `${ARTIFACTS}/daily-report-high-occupancy-320.png` });
 
       // Actual controls receive unique witnesses before print: a leaked next-day
       // button is detectable without banning the legitimate next-day heading.
@@ -436,7 +631,9 @@ describe("built daily report design evidence", () => {
           return marker;
         }),
       );
-      await f.page.setViewportSize({ width: 1280, height: 1000 });
+      // Match the named A4 page content width (210mm minus two 10mm margins)
+      // when sampling font metrics for the independent reference rendering.
+      await f.page.setViewportSize({ width: Math.round(190 * 96 / 25.4), height: 1000 });
       await f.page.emulateMedia({ media: "print" });
       await f.page.evaluate(async () => {
         await document.fonts.ready;
@@ -448,6 +645,7 @@ describe("built daily report design evidence", () => {
       }
       const header = f.page.getByTestId("report-paper-header");
       const paperIdentity = (await header.locator("p").first().innerText()).trim();
+      expect(paperIdentity).toBe(expectedClinicName);
       const paperContrast = await assertStatContrast(f.page);
       const paperColors = await f.page.getByTestId("daily-report").evaluate((report) => ({
         body: getComputedStyle(document.body).backgroundColor,
@@ -462,23 +660,13 @@ describe("built daily report design evidence", () => {
 
       const pdfPath = `${ARTIFACTS}/daily-report-print-a4.pdf`;
       const evidence = await savePdf(f.page, pdfPath);
-      assertPdfContent(evidence);
+      const reference = await calibratePdf(f.page, referenceSpecs(requested, expectedClinicName));
+      assertPdfContent(evidence, reference);
       expect(evidence.pages.length, "dense fixture actually exercises pagination").toBeGreaterThanOrEqual(2);
-      const pages = evidence.text.split("\f").filter((text) => text.trim());
-      expect(pages[0]).toContain(paperIdentity);
-      expect(pages[0]).toContain("تقرير الأداء اليومي");
-      expect(pages[0]).toContain(friendlyDateNamed(requested));
-      expect(evidence.text.split("تقرير الأداء اليومي")).toHaveLength(2);
-      expect(evidence.text.split(friendlyDateNamed(requested))).toHaveLength(2);
-      const nextPage = pages.find((text) => text.includes("حجوزات اليوم التالي"));
-      expect(nextPage, "next-day heading keeps its explicit date on the same page").toContain(friendlyDateNamed(addDays(requested, 1)));
-      expect(evidence.text).toContain("أعمال المختبر — الحالة الآن");
-      expect(evidence.text).toContain("إشغال 95٪");
+      expect(evidence.pages[0].words.some((word) => word.text === requested.slice(0, 4))).toBe(true);
+      expect(evidence.pages.some((page) => page.words.some((word) => word.text.includes("95")))).toBe(true);
       for (const marker of controlMarkers) expect(evidence.text).not.toContain(marker);
-      for (const interactive of [
-        "طباعة التقرير", "افتح الملف", "إرسال ملخص التقرير عبر واتساب", "اليوم السابق",
-        "كل المواعيد", "فتح شاشة المختبر", "متابعتها في المواعيد", "أعد المحاولة", "تاريخ التقرير",
-      ]) expect(evidence.text).not.toContain(interactive);
+
 
       // Move one unique stat value away from its card in a real PDF. The
       // association check must reject it even though the value still exists.
@@ -488,7 +676,7 @@ describe("built daily report design evidence", () => {
       });
       const separated = await savePdf(f.page, `${ARTIFACTS}/daily-report-association-negative.pdf`);
       expect(separated.text).toContain("117");
-      expect(() => assertPdfContent(separated)).toThrow(/PDF association/);
+      expect(() => assertPdfContent(separated, reference)).toThrow(/PDF association/);
       await f.page.locator('[data-moved-stat-value]').evaluate((value) => {
         document.querySelector('[data-report-stat]')!.prepend(value);
         value.removeAttribute("data-moved-stat-value");
@@ -505,15 +693,15 @@ describe("built daily report design evidence", () => {
         row.style.overflow = "hidden";
       });
       const negative = await savePdf(f.page, `${ARTIFACTS}/daily-report-cutoff-negative.pdf`);
-      expect(() => assertPdfContent(negative)).toThrow(/PDF/);
-      expect(negative.text).not.toContain(plannedRows().at(-1)!.patientName);
-      await writeFile(`${ARTIFACTS}/daily-report-design-proof.json`, JSON.stringify({
-        synthetic: true, workflowCommit: process.env.GITHUB_SHA || null,
-        screenContrast, paperContrast, paperColors, pdfPages: evidence.pages.length,
+      expect(() => assertPdfContent(negative, reference)).toThrow(/PDF/);
+      expect(negative.pages.flatMap((page) => page.words).some((word) => word.text === plannedRows().at(-1)!.time)).toBe(false);
+      designAcceptance = {
+        synthetic: true, completedPdfWitnesses: true, workflowCommit: process.env.GITHUB_SHA || null,
+        screenContrast, paperContrast, paperColors, pdfPages: evidence.pages.length, reference,
         coveredStats: 6, coveredPlannedRows: plannedRows().length,
         uniqueControlMarkersAbsent: controlMarkers.length,
         separatedStatValueRejected: true, clippedFinalRowRejected: true,
-      }, null, 2));
+      };
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
