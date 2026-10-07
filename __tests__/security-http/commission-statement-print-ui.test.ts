@@ -136,7 +136,10 @@ beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
-  const [shift] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by) VALUES ('cstmt') RETURNING id`);
+  /* وردية مغلقة: الدفعات الاصطناعية تحتاج ورديةً تُسند إليها، ولا يجوز أن نترك ورديةً
+     مفتوحة أو نصطدم بوردية مفتوحة لملف اختبار آخر (وردية مفتوحة واحدة فقط). */
+  const [shift] = await q<{ id: number }>(
+    `INSERT INTO cashier_shifts (opened_by, status, closed_by, closed_at) VALUES ('cstmt', 'closed', 'cstmt', NOW()) RETURNING id`);
   shiftId = shift.id;
   const [s] = await q<{ id: number }>(
     `INSERT INTO parties (name, kind, commission_percent) VALUES ($1, 'doctor', 40) RETURNING id`, [`د. كشف اصطناعي ${stamp}`]);
