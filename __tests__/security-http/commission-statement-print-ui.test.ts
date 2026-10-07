@@ -32,6 +32,11 @@ const OTHER_PATIENT = `مريض طبيب آخر ${stamp}`;
 const ORTHO_CASE = `تقويم ثابت ${stamp}`;
 const IMPLANT_CASE = `زراعة ٣٦ ${stamp}`;
 const PAYOUT_YER = 150_000;
+const MARCH_FROM = "2023-03-01";
+const MARCH_TO = "2023-03-31";
+const COORDINATED_CASE = `حالة بمنسّقٍ آخر ${stamp}`;
+const COORDINATED_PATIENT = `مريض الحالة المنسّقة ${stamp}`;
+let coordinatedInvoice = { invoiceId: 0, invoiceNumber: "" };
 
 let doctorS = 0;
 let doctorB = 0;
@@ -63,10 +68,10 @@ async function patient(name: string): Promise<number> {
 /** زيارة موقّعة وفاتورتها: بند واحد للطبيب، واختياريًّا من بند خطةٍ مربوطٍ بحالة. */
 async function work(input: {
   patientId: number; doctorId: number; day: number; amount: number; currency?: string;
-  serviceId?: number; planItemId?: number; paid?: number;
+  serviceId?: number; planItemId?: number; paid?: number; month?: number;
 }): Promise<number> {
   seq += 1;
-  const at = `2023-02-${String(input.day).padStart(2, "0")} 10:00+03`;
+  const at = `2023-${String(input.month ?? 2).padStart(2, "0")}-${String(input.day).padStart(2, "0")} 10:00+03`;
   const currency = input.currency ?? "YER";
   const [invoice] = await q<{ id: number }>(
     `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at)
@@ -100,16 +105,55 @@ async function work(input: {
   return invoice.id;
 }
 
-async function caseWithPlanItem(patientId: number, specialty: string, title: string, serviceId: number) {
+async function caseWithPlanItem(patientId: number, specialty: string, title: string, serviceId: number, responsiblePartyId: number | null = null) {
   const [kase] = await q<{ id: number }>(
-    `INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, $2, $3, 'test') RETURNING id`,
-    [patientId, specialty, title]);
+    `INSERT INTO clinical_cases (patient_id, specialty, title, created_by, responsible_party_id) VALUES ($1, $2, $3, 'test', $4) RETURNING id`,
+    [patientId, specialty, title, responsiblePartyId]);
   const [plan] = await q<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor) VALUES ($1, $2, 0) RETURNING id`, [patientId, `خطة ${title}`]);
   const [item] = await q<{ id: number }>(
     `INSERT INTO plan_items (plan_id, service_id, service_name, quantity, unit_price_minor, case_id)
      VALUES ($1, $2, 'بند', 1, 0, $3) RETURNING id`, [plan.id, serviceId, kase.id]);
   return { caseId: kase.id, planItemId: item.id };
+}
+
+/** فاتورة واحدة بعدة بنود — كل بندٍ بطبيبه المنفّذ وبند خطته — مدفوعة كاملًا. */
+async function multiLineInvoice(input: {
+  patientId: number; at: string; items: Array<{ doctorId: number; amount: number; serviceId: number; planItemId: number }>;
+}): Promise<{ invoiceId: number; invoiceNumber: string }> {
+  seq += 1;
+  const total = input.items.reduce((sum, item) => sum + item.amount, 0);
+  const invoiceNumber = `S${tag}-${seq}`;
+  const [invoice] = await q<{ id: number }>(
+    `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at)
+     VALUES ($1, $2, $3, 0, 'YER', 'test', $4::timestamptz) RETURNING id`, [invoiceNumber, input.patientId, total, input.at]);
+  const [visit] = await q<{ id: number }>(
+    `INSERT INTO visits (patient_name, patient_id, doctor_id, status, invoice_id, arrived_at, signed_at, signed_by)
+     VALUES ('مريض', $1, $2, 'done', $3, $4::timestamptz, $4::timestamptz, 'test') RETURNING id`,
+    [input.patientId, input.items[0].doctorId, invoice.id, input.at]);
+  for (const item of input.items) {
+    const [procedure] = await q<{ id: number }>(
+      `INSERT INTO visit_procedures (visit_id, service_id, doctor_id, quantity, unit_price_minor, plan_item_id)
+       VALUES ($1, $2, $3, 1, $4, $5) RETURNING id`, [visit.id, item.serviceId, item.doctorId, item.amount, item.planItemId]);
+    await q(
+      `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id, source_type, source_id)
+       VALUES ($1, $2, 'عمل', 1, $3, $3, $4, 'visit_procedure', $5)`, [invoice.id, item.serviceId, item.amount, item.doctorId, procedure.id]);
+  }
+  seq += 1;
+  await q(
+    `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency,
+       exchange_rate, base_amount_minor, base_currency, method, created_by, created_at)
+     VALUES ($1, $2, $3, $4, 'payment', $5, 'YER', 1, $5, 'YER', 'cash', 'test', $6::timestamptz)`,
+    [`CS-R-${stamp}-${seq}`, input.patientId, invoice.id, shiftId, total, input.at]);
+  return { invoiceId: invoice.id, invoiceNumber };
+}
+
+async function payout(at: string, currency: "YER" | "USD", amount: number, rate: number): Promise<void> {
+  seq += 1;
+  await q(
+    `INSERT INTO expenses (voucher_number, category, party_id, shift_id, amount_minor, currency, exchange_rate, base_amount_minor, base_currency, created_at)
+     VALUES ($1, 'commission', $2, $3, $4, $5, $6, $7, 'YER', $8::timestamptz)`,
+    [`CS-EXP-${stamp}-${seq}`, doctorS, shiftId, amount, currency, rate, Math.round(amount * rate), at]);
 }
 
 async function api<T>(path: string, who: "admin" | "doctorA" = "admin"): Promise<T> {
@@ -180,6 +224,22 @@ beforeAll(async () => {
     `INSERT INTO expenses (voucher_number, category, party_id, shift_id, amount_minor, currency, exchange_rate, base_amount_minor, base_currency, created_at)
      VALUES ($1, 'commission', $2, $3, $4, 'YER', 1, $4, 'YER', '2023-02-20 12:00+03')`,
     [`CS-EXP-${stamp}`, doctorS, shiftId, PAYOUT_YER]);
+
+  /* ما قبل بداية الفترة (يناير): عملٌ محصَّل وسند صرف بكل عملة — يدخل الرصيد التراكمي
+     حتى نهاية فبراير ولا يدخل نتيجة فبراير. */
+  await work({ month: 1, patientId: p1, doctorId: doctorS, day: 10, amount: 20_000, serviceId: ortho.id, planItemId: orthoCase.planItemId, paid: 20_000 });
+  await work({ month: 1, patientId: p2, doctorId: doctorS, day: 11, amount: 500, currency: "USD", serviceId: implant.id, planItemId: implantCase.planItemId, paid: 500 });
+  await payout("2023-01-20 12:00+03", "YER", 5_000, 1);
+  await payout("2023-01-21 12:00+03", "USD", 100, 530);
+
+  /* مارس: حالةٌ منسّقها الطبيب ب، وفاتورة واحدة فيها بندان للطبيب المنفّذ (س) وبندٌ للطبيب ب. */
+  const coordinatedPatient = await patient(COORDINATED_PATIENT);
+  const coordinated = await caseWithPlanItem(coordinatedPatient, "orthodontics", COORDINATED_CASE, ortho.id, doctorB);
+  coordinatedInvoice = await multiLineInvoice({ patientId: coordinatedPatient, at: "2023-03-07 10:00+03", items: [
+    { doctorId: doctorS, amount: 12_000, serviceId: ortho.id, planItemId: coordinated.planItemId },
+    { doctorId: doctorS, amount: 8_000, serviceId: implant.id, planItemId: coordinated.planItemId },
+    { doctorId: doctorB, amount: 5_000, serviceId: ortho.id, planItemId: coordinated.planItemId },
+  ] });
 
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
@@ -375,51 +435,288 @@ describe("كشف العمولة المطبوع — الورق والشاشة", (
   });
 });
 
-describe("لوحة تفصيل العمولة — المرشّحات أثناء التحميل والفشل", () => {
-  async function openPanel(): Promise<Page> {
-    const page = await openAs("admin", "/finance/commissions");
-    await page.locator('input[type="date"]').first().fill(FROM);
-    await page.locator('input[type="date"]').nth(1).fill(TO);
-    await page.getByRole("button", { name: /تفصيل العمولة/ }).click();
-    await page.getByText(OTHER_PATIENT).first().waitFor({ timeout: 60_000 });
-    return page;
-  }
-
-  it("ردٌّ متأخر لطبيبٍ سابق لا يظهر تحت طبيبٍ اختير بعده", async () => {
-    const page = await openPanel();
+describe("كشف العمولة المطبوع — الرصيد قبل الفترة والمنفّذ لا المنسّق", () => {
+  it("نتيجة الفترة تختلف عن الرصيد التراكمي حتى نهايتها — لكل عملة، وكلاهما من المحرّك", async () => {
+    const feb = await api<{ rows: ApiRow[] }>(`/api/finance/commissions?from=${FROM}&to=${TO}`);
+    const jan = await api<{ rows: ApiRow[] }>(`/api/finance/commissions?from=2023-01-01&to=2023-01-31`);
+    const page = await openAs("admin", statementPath(doctorS));
     try {
-      await page.route("**/api/finance/commissions?*", async (route) => {
-        const url = new URL(route.request().url());
-        if (url.searchParams.get("doctorId") === String(doctorS)) await new Promise((resolve) => setTimeout(resolve, 2_000));
-        await route.continue();
-      });
-      const select = page.locator("label", { hasText: "الطبيب" }).locator("select");
-      await select.selectOption(String(doctorS));
-      /* أثناء التحميل لا تبقى سطور «كل الأطباء» معروضةً تحت الطبيب الجديد. */
-      await page.waitForTimeout(300);
-      expect(await page.getByText(OTHER_PATIENT).count()).toBe(0);
-      await select.selectOption(String(doctorB));
-      await page.getByText(OTHER_PATIENT).first().waitFor({ timeout: 30_000 });
-      await page.waitForTimeout(2_500);
-      expect(await page.getByText(OTHER_PATIENT).count()).toBeGreaterThan(0);
-      expect(await page.getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+      await page.locator("[data-statement-line]").first().waitFor({ timeout: 60_000 });
+      for (const currency of ["YER", "USD"]) {
+        const before = jan.rows.find((row) => row.doctorId === doctorS && row.currency === currency)!;
+        const row = feb.rows.find((entry) => entry.doctorId === doctorS && entry.currency === currency)!;
+        /* نشاطٌ قبل بداية الفترة: عمولةٌ وصرف في يناير. */
+        expect(before.earnedMinor, currency).toBeGreaterThan(0);
+        expect(before.paidMinor, currency).toBeGreaterThan(0);
+        /* الرصيد التراكمي حتى نهاية فبراير = ما حمله يناير + نتيجة فبراير — علاقة المحرّك نفسه. */
+        expect(row.balanceMinor, currency).toBe(before.balanceMinor + row.dueMinor);
+        expect(row.dueMinor, currency).not.toBe(row.balanceMinor);
+        const summary = page.locator(`[data-currency-summary="${currency}"]`);
+        expect(Number(await summary.getAttribute("data-period-due"))).toBe(row.dueMinor);
+        expect(Number(await summary.getAttribute("data-balance"))).toBe(row.balanceMinor);
+        const text = await summary.innerText();
+        expect(text).toContain("نتيجة الفترة");
+        expect(text).toContain(`حتى ${TO}`);
+      }
     } finally {
       await page.context().close();
     }
   });
 
-  it("فشل المصدر يُعلن ولا يصير «لا سطور» ولا يُبقي سطورًا قديمة", async () => {
-    const page = await openPanel();
+  it("المنفّذ لا المنسّق: بندا المنفّذ في فاتورة واحدة يظهران مرةً واحدة لكلٍّ، والإجماليات = المحرّك", async () => {
+    const range = `from=${MARCH_FROM}&to=${MARCH_TO}`;
+    const detailS = await api<{ lines: ApiLine[] }>(`/api/finance/commissions?detail=1&${range}&doctorId=${doctorS}`);
+    const detailB = await api<{ lines: ApiLine[] }>(`/api/finance/commissions?detail=1&${range}&doctorId=${doctorB}`);
+    const totals = await api<{ rows: ApiRow[] }>(`/api/finance/commissions?${range}`);
+    expect(detailS.lines.filter((line) => line.invoiceId === coordinatedInvoice.invoiceId).map((line) => line.amountMinor).sort())
+      .toEqual([12_000, 8_000].sort());
+    expect(detailB.lines.filter((line) => line.invoiceId === coordinatedInvoice.invoiceId).map((line) => line.amountMinor))
+      .toEqual([5_000]);
+
+    const page = await openAs("admin", `/print/commission-statement/${doctorS}?${range}`);
     try {
-      await page.route("**/api/finance/commissions?*", (route) => route.fulfill({
-        status: 500, contentType: "application/json", body: JSON.stringify({ message: "تعذّر تحميل العمولات." }),
-      }));
-      await page.locator("label", { hasText: "العملة" }).locator("select").selectOption("USD");
-      await page.getByRole("alert").filter({ hasText: "تعذّر تحميل العمولات." }).waitFor({ timeout: 10_000 });
-      expect(await page.getByText(OTHER_PATIENT).count()).toBe(0);
-      expect(await page.getByText("لا سطور في هذه الفترة").count()).toBe(0);
+      await page.locator("[data-statement-line]").first().waitFor({ timeout: 60_000 });
+      const shown = await page.locator("[data-statement-line]").evaluateAll((nodes) => nodes.map((node) => ({
+        invoice: Number(node.getAttribute("data-invoice")), amount: Number(node.getAttribute("data-amount")),
+        earned: Number(node.getAttribute("data-earned")), accrued: Number(node.getAttribute("data-accrued")),
+      })));
+      /* لا تكرار ولا نقصان: سطور الكشف = سطور المحرّك للطبيب المنفّذ، وبند الطبيب ب ليس منها. */
+      expect(shown).toHaveLength(detailS.lines.length);
+      expect(shown.filter((line) => line.invoice === coordinatedInvoice.invoiceId).map((line) => line.amount).sort())
+        .toEqual([12_000, 8_000].sort());
+      const groups = await page.locator("[data-case-group]").allInnerTexts();
+      expect(groups.filter((text) => text.includes(COORDINATED_CASE))).toHaveLength(1);
+      const row = totals.rows.find((entry) => entry.doctorId === doctorS && entry.currency === "YER")!;
+      expect(shown.reduce((sum, line) => sum + line.earned, 0)).toBe(row.earnedMinor);
+      expect(shown.reduce((sum, line) => sum + line.accrued, 0)).toBe(row.accruedMinor);
+      const summary = page.locator('[data-currency-summary="YER"]');
+      expect(Number(await summary.getAttribute("data-earned"))).toBe(row.earnedMinor);
+      expect(Number(await summary.getAttribute("data-accrued"))).toBe(row.accruedMinor);
     } finally {
       await page.context().close();
+    }
+
+    /* والمنسّق (الطبيب ب) لا تنتقل إليه عمولة المنفّذ: كشفه يحمل بنده وحده من الفاتورة. */
+    const coordinatorPage = await openAs("admin", `/print/commission-statement/${doctorB}?${range}`);
+    try {
+      await coordinatorPage.locator("[data-statement-line]").first().waitFor({ timeout: 60_000 });
+      const amounts = await coordinatorPage.locator(`[data-statement-line][data-invoice="${coordinatedInvoice.invoiceId}"]`)
+        .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-amount"))));
+      expect(amounts).toEqual([5_000]);
+    } finally {
+      await coordinatorPage.context().close();
+    }
+  });
+});
+
+describe("لوحة تفصيل العمولة — ملكية الطلبات وعقد الردّ ورابط الطباعة", () => {
+  const panel = (page: Page) => page.locator("[data-commission-detail]");
+  const toggle = (page: Page) => page.getByRole("button", { name: /تفصيل العمولة/ });
+  const pick = (page: Page, label: string) => panel(page).locator("label", { hasText: label }).locator("select");
+  const isDetail = (url: string) => new URL(url).searchParams.get("detail") === "1";
+
+  async function setPeriod(page: Page, from: string, to: string) {
+    await page.locator('input[type="date"]').first().fill(from);
+    await page.locator('input[type="date"]').nth(1).fill(to);
+  }
+
+  /* الصفحة تُفتح على domcontentloaded: قد تصل الضغطة قبل أن يكتمل hydration فتضيع. نضغط حتى
+     تؤكّد اللوحة نفسها أنها فُتحت (وهذا يثبت أنّ React حيّ)، ثم نضبط الفترة. */
+  async function openPanel(width = 1280): Promise<Page> {
+    const page = await openAs("admin", "/finance/commissions", width);
+    await panel(page).waitFor({ timeout: 60_000 });
+    await expect.poll(async () => {
+      if (await panel(page).getAttribute("data-detail-state") === "closed") await toggle(page).click();
+      return panel(page).getAttribute("data-detail-state");
+    }, { timeout: 30_000, interval: 500 }).not.toBe("closed");
+    await setPeriod(page, FROM, TO);
+    await panel(page).getByText(OTHER_PATIENT).first().waitFor({ timeout: 60_000 });
+    return page;
+  }
+
+  it("ردٌّ متأخر لطبيبٍ سابق لا يظهر تحت طبيبٍ اختير بعده، ولا تبقى سطورٌ قديمة أثناء التحميل", async () => {
+    const page = await openPanel();
+    try {
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (isDetail(url.href) && url.searchParams.get("doctorId") === String(doctorS)) await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await route.continue().catch(() => {});
+      });
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await page.waitForTimeout(300);
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBe(0);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).locator("[data-print-link]").count()).toBe(0);
+      await pick(page, "الطبيب").selectOption(String(doctorB));
+      await panel(page).getByText(OTHER_PATIENT).first().waitFor({ timeout: 30_000 });
+      await page.waitForTimeout(2_500);
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBeGreaterThan(0);
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("إغلاق اللوحة أثناء طلبٍ معلّق ثم تغيير الفترة وإعادة الفتح: الردّ القديم يصل متأخرًا ولا يُعرض", async () => {
+    const page = await openPanel();
+    try {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let held = 0;
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (isDetail(url.href) && url.searchParams.get("from") === FROM && url.searchParams.get("doctorId") === String(doctorS)) {
+          held += 1;
+          await gate;
+        }
+        await route.continue().catch(() => {});
+      });
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await expect.poll(() => held, { timeout: 10_000 }).toBe(1);
+      await toggle(page).click();
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("closed");
+      await setPeriod(page, MARCH_FROM, MARCH_TO);
+      await toggle(page).click();
+      await panel(page).getByText(COORDINATED_PATIENT).first().waitFor({ timeout: 30_000 });
+      release();
+      await page.waitForTimeout(1_500);
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+      expect(await panel(page).getByText(COORDINATED_PATIENT).count()).toBeGreaterThan(0);
+      /* خيار المستخدم باقٍ، والرابط يتبع النطاق الجديد. */
+      expect(await pick(page, "الطبيب").inputValue()).toBe(String(doctorS));
+      expect(await panel(page).locator("[data-print-link]").getAttribute("href")).toContain(`from=${MARCH_FROM}`);
+
+      /* وإعادة الفتح على المرشّحات نفسها لا تعرض النتيجة السابقة قبل تحميلٍ جديد. */
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        if (isDetail(route.request().url())) await new Promise((resolve) => setTimeout(resolve, 1_500));
+        await route.continue().catch(() => {});
+      });
+      await toggle(page).click();
+      await toggle(page).click();
+      await page.waitForTimeout(200);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).getByText(COORDINATED_PATIENT).count()).toBe(0);
+      await panel(page).getByText(COORDINATED_PATIENT).first().waitFor({ timeout: 30_000 });
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("نطاق أ ← ب ← أ وردودٌ بترتيبٍ عكسي: لا يظهر إلا ردّ الطلب الأخير", async () => {
+    const page = await openPanel();
+    try {
+      let sRequests = 0;
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (isDetail(url.href)) {
+          const doctor = url.searchParams.get("doctorId");
+          if (doctor === String(doctorS)) {
+            sRequests += 1;
+            if (sRequests === 1) await new Promise((resolve) => setTimeout(resolve, 3_000));
+          } else if (doctor === String(doctorB)) {
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+          }
+        }
+        await route.continue().catch(() => {});
+      });
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await page.waitForTimeout(150);
+      await pick(page, "الطبيب").selectOption(String(doctorB));
+      await page.waitForTimeout(150);
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await panel(page).getByText(`مريض التقويم ${stamp}`).first().waitFor({ timeout: 30_000 });
+      /* ردّا أ الأول وب يصلان بعد ردّ أ الأخير — ولا يغيّران شيئًا. */
+      await page.waitForTimeout(3_500);
+      expect(sRequests).toBe(2);
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBe(0);
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBeGreaterThan(0);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("ready");
+      expect(await panel(page).locator("[data-print-link]").getAttribute("href")).toContain(`/print/commission-statement/${doctorS}?`);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("401 و403 وردّ 200 ناقص: رسالةٌ عربية آمنة، لا سطور ولا أصفار ولا طباعة — ثم التعافي بإعادة المحاولة", async () => {
+    const page = await openPanel();
+    try {
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await panel(page).locator("[data-print-link]").waitFor({ timeout: 30_000 });
+      let mode: "403" | "partial" | "401" | "pass" = "403";
+      await page.route("**/api/finance/commissions?*", (route) => {
+        if (!isDetail(route.request().url()) || mode === "pass") return route.continue();
+        if (mode === "403") return route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "stack: secret-internal-detail" }) });
+        if (mode === "401") return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "token expired at node-17" }) });
+        /* 200 بلا rows ولا unallocatedMaterials ولا serviceRateFindings. */
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ lines: [], isPersonalOnly: false }) });
+      });
+      const alert = panel(page).getByRole("alert");
+      const retry = panel(page).getByRole("button", { name: "إعادة المحاولة" });
+      const expectNothingShown = async () => {
+        expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+        expect(await panel(page).getByText("لا سطور في هذه الفترة").count()).toBe(0);
+        expect(await panel(page).locator("[data-print-link]").count()).toBe(0);
+        expect(await panel(page).innerText()).not.toMatch(/secret-internal-detail|node-17|stack:/);
+      };
+
+      await pick(page, "العملة").selectOption("YER");
+      await alert.filter({ hasText: "غير مصرّح لك بعرض تفصيل العمولات." }).waitFor({ timeout: 10_000 });
+      await expectNothingShown();
+      expect(await panel(page).locator("[data-print-disabled]").innerText()).toContain("لا صلاحية");
+      expect(await pick(page, "العملة").inputValue()).toBe("YER");
+      await panel(page).screenshot({ path: join(ARTIFACTS, "commission-panel-error-1280.png") });
+
+      mode = "partial";
+      await retry.click();
+      await alert.filter({ hasText: "ردٌّ ناقص أو غير صالح" }).waitFor({ timeout: 10_000 });
+      await expectNothingShown();
+      expect(await panel(page).locator("[data-print-disabled]").innerText()).toContain("لا طباعة قبل تحميلٍ صحيح");
+
+      mode = "401";
+      await retry.click();
+      await alert.filter({ hasText: "انتهت الجلسة" }).waitFor({ timeout: 10_000 });
+      await expectNothingShown();
+
+      mode = "pass";
+      await retry.click();
+      await panel(page).getByText(`مريض التقويم ${stamp}`).first().waitFor({ timeout: 30_000 });
+      expect(await alert.count()).toBe(0);
+      const href = await panel(page).locator("[data-print-link]").getAttribute("href");
+      expect(href).toContain(`/print/commission-statement/${doctorS}?`);
+      expect(href).toContain("currency=YER");
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("فشل المصدر (500) يُعلن ولا يصير «لا سطور» ولا يُبقي سطورًا قديمة", async () => {
+    const page = await openPanel();
+    try {
+      await page.route("**/api/finance/commissions?*", (route) => isDetail(route.request().url())
+        ? route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "تعذّر تحميل العمولات." }) })
+        : route.continue());
+      await pick(page, "العملة").selectOption("USD");
+      await panel(page).getByRole("alert").filter({ hasText: "تعذّر تحميل تفصيل العمولة." }).waitFor({ timeout: 10_000 });
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBe(0);
+      expect(await panel(page).getByText("لا سطور في هذه الفترة").count()).toBe(0);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("اللوحة بعرض 390 و1280: نتيجة معتمدة ورابط طباعة مفعّل — لقطات للمراجعة", async () => {
+    for (const width of [390, 1280]) {
+      const page = await openPanel(width);
+      try {
+        await pick(page, "الطبيب").selectOption(String(doctorS));
+        await panel(page).locator("[data-print-link]").waitFor({ timeout: 30_000 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+        await panel(page).evaluate((element) => element.scrollIntoView({ block: "start" }));
+        await page.screenshot({ path: join(ARTIFACTS, `commission-panel-${width}.png`) });
+      } finally {
+        await page.context().close();
+      }
     }
   });
 });
