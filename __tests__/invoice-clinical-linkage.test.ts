@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { INVOICE_LINKAGE_SQL } from "../lib/invoice-linkage-schema";
 import {
-  caseGroupKey, caseSiteCompatible, linkageRefusalStatus, parseLineSiteFields, siteGroupKey, siteText, toothScope, validateLineSite, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, lineLinkage, sessionsFor, shellCaseTitle,
+  caseGroupKey, caseSiteCompatible, caseSiteFits, caseSiteOverlaps, linkageRefusalStatus, parseLineSiteFields, siteGroupKey, siteText, toothScope, validateLineSite, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, lineLinkage, sessionsFor, shellCaseTitle,
 } from "../lib/invoice-clinical-linkage";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../lib/specialty-templates";
 
@@ -52,21 +52,22 @@ describe("(INV-LINK B) line classification uses the catalog category only", () =
     expect(invoiceRequestFingerprint(base)).toBe(invoiceRequestFingerprint({ ...base }));
     expect(invoiceRequestFingerprint(base)).not.toBe(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], unitPriceMinor: 11 }] }));
     expect(invoiceRequestFingerprint(base)).not.toBe(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], toothCode: 36 }] }));
+    expect(invoiceRequestFingerprint(base)).not.toBe(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], doctorId: 7 }] }));
     for (const message of Object.values(INVOICE_LINKAGE_MESSAGE)) expect(message).toMatch(/[؀-ۿ]/);
   });
 });
 
 describe("(INV-LINK) case site compatibility", () => {
-  it("tooth-bound specialties need an empty or matching site; whole-mouth specialties match by specialty", () => {
+  it("only an exact known tooth site proves tooth compatibility; blank or broad sites are not inferred", () => {
     expect(caseSiteCompatible("endodontics", "11", 36)).toBe(false);
     expect(caseSiteCompatible("endodontics", "36", 36)).toBe(true);
-    expect(caseSiteCompatible("endodontics", "36، 37", 37)).toBe(true);
+    expect(caseSiteCompatible("endodontics", "36، 37", 37)).toBe(false);
     expect(caseSiteCompatible("endodontics", "136", 36)).toBe(false);
-    expect(caseSiteCompatible("endodontics", null, 36)).toBe(true);
-    expect(caseSiteCompatible("endodontics", "11", null)).toBe(true);
-    expect(caseSiteCompatible("orthodontics", "11", 36)).toBe(true);
+    expect(caseSiteCompatible("endodontics", null, 36)).toBe(false);
+    expect(caseSiteCompatible("endodontics", "11", null)).toBe(false);
+    expect(caseSiteCompatible("orthodontics", "11", 36)).toBe(false);
     expect(caseGroupKey("prosthodontics", 36)).not.toBe(caseGroupKey("prosthodontics", 46));
-    expect(caseGroupKey("orthodontics", 36)).toBe(caseGroupKey("orthodontics", null));
+    expect(caseGroupKey("orthodontics", 36)).not.toBe(caseGroupKey("orthodontics", null));
   });
 });
 
@@ -92,8 +93,10 @@ describe("(INV-LINK TOOTH) per-service tooth scope and site validation", () => {
     expect(filling.ok && filling.site.surfaces).toBe("MO");
     expect(validateLineSite({ category: "filling", toothCode: 26, surfaces: "MQ" })).toEqual({ ok: false, reason: "bad_surfaces" });
     expect(validateLineSite({ category: "ortho", toothCode: null, scope: "both" })).toMatchObject({ ok: true, site: { scope: "both" } });
+    expect(validateLineSite({ category: "ortho", toothCode: null })).toEqual({ ok: false, reason: "bad_scope" });
     expect(validateLineSite({ category: "ortho", toothCode: 11 })).toEqual({ ok: false, reason: "bad_scope" });
     expect(validateLineSite({ category: "cleaning", toothCode: null, scope: "both" })).toEqual({ ok: false, reason: "bad_scope" });
+    expect(validateLineSite({ category: "cleaning", toothCode: null })).toEqual({ ok: false, reason: "bad_scope" });
     expect(validateLineSite({ category: "consultation", toothCode: 36, scope: "upper" })).toMatchObject({ ok: true, site: { toothCode: null, scope: null } });
   });
   it("parses request site fields strictly and maps refusals to HTTP statuses", () => {
@@ -113,5 +116,25 @@ describe("(INV-LINK TOOTH) per-service tooth scope and site validation", () => {
     expect(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], surfaces: "MO" }] })).not.toBe(fp);
     expect(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], episodeTeeth: [26, 27] }] })).not.toBe(fp);
     expect(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], scope: "upper" }] })).not.toBe(fp);
+  });
+
+  it("exact scope reuse and overlap containment are distinct, preserving legitimate disjoint arches", () => {
+    const checked = validateLineSite({ category: "ortho", toothCode: null, scope: "upper" });
+    if (!checked.ok) throw new Error(checked.reason);
+    expect(caseSiteFits("orthodontics", "الفك العلوي", checked.site)).toBe(true);
+    expect(caseSiteFits("orthodontics", "الفكّان", checked.site)).toBe(false);
+    expect(caseSiteFits("orthodontics", null, checked.site)).toBe(false);
+    expect(caseSiteOverlaps("الفكّان", checked.site)).toBe(true);
+    expect(caseSiteOverlaps("الفك السفلي", checked.site)).toBe(false);
+    expect(siteGroupKey("orthodontics", checked.site)).toBe("orthodontics:scope:upper");
+  });
+
+  it("a full-mouth obligation overlaps a tooth; a bridge episode must match its complete set", () => {
+    const tooth = validateLineSite({ category: "cleaning", toothCode: 31 });
+    const bridge = validateLineSite({ category: "bridge", toothCode: 14, episodeTeeth: [14, 15, 16] });
+    if (!tooth.ok || !bridge.ok) throw new Error("Invalid fixture sites");
+    expect(caseSiteOverlaps("كامل الفم", tooth.site)).toBe(true);
+    expect(caseSiteFits("prosthodontics", "14", bridge.site)).toBe(false);
+    expect(caseSiteFits("prosthodontics", "14، 15، 16", bridge.site)).toBe(true);
   });
 });

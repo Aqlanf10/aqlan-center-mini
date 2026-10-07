@@ -29,6 +29,7 @@ import { PatientOrtho } from "@/components/PatientOrtho";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
 import { AssessmentBanner } from "@/components/AssessmentBanner";
+import { readWorkflowCases } from "@/lib/patient-workflow-cases";
 import { PatientLabOrders } from "@/components/PatientLabOrders";
 import { PatientReferrals } from "@/components/PatientReferrals";
 import { PatientCases } from "@/components/PatientCases";
@@ -117,6 +118,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
   const [fileSnapshot, setFile] = useState<PatientFile | null>(null);
   const [summarySnapshot, setSummary] = useState<WorkflowSummary | null>(null);
+  const [workflowState, setWorkflowState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -140,8 +142,16 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [confirmedAlert, setConfirmedAlert] = useState<{ owner: typeof alertOwner; alert: ConfirmedPatientAlert }>();
   const [fileOwner, setFileOwner] = useState<typeof alertOwner | null>(null);
   const [summaryOwner, setSummaryOwner] = useState<typeof alertOwner | null>(null);
+  const summarySnapshotOwner = useRef<typeof alertOwner | null>(null);
+  const workflowAuthority = useRef<{ owner: typeof alertOwner; ready: boolean } | null>(null);
+  const acceptedFileOwner = useRef<typeof alertOwner | null>(null);
   const file = fileOwner === alertOwner ? fileSnapshot : null;
   const summary = summaryOwner === alertOwner ? summarySnapshot : null;
+  // Same-owner editor state survives ordinary refresh failure, without display/action authority.
+  const retainedSummary = summarySnapshotOwner.current === alertOwner ? summarySnapshot : null;
+  const draftVisit = retainedSummary?.openVisit ?? null;
+  const workflowIsCurrent = useCallback(() => alertOwner.active
+    && workflowAuthority.current?.owner === alertOwner && workflowAuthority.current.ready, [alertOwner]);
   const loadSequence = useRef(0);
   const retireLoads = useCallback(() => { ++loadSequence.current; }, []);
   useLayoutEffect(() => {
@@ -230,8 +240,10 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [editing, setEditing] = useState(false);
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
-  const load = useCallback(async () => {
-    if (!alertOwner.active) return;
+  const load = useCallback(async (workflowOnly = false) => {
+    if (!alertOwner.active || (workflowOnly && acceptedFileOwner.current !== alertOwner)) return;
+    workflowAuthority.current = { owner: alertOwner, ready: false };
+    setSummaryOwner(null); setWorkflowState("loading");
     const sequence = ++loadSequence.current;
     const startedRevision = alertOwner.revision;
     const current = () => alertOwner.active && sequence === loadSequence.current;
@@ -241,7 +253,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
       // A denied peer retires accepted context immediately, before either body
       // or the other response's headers settle. Later peers cannot restore it.
       if (current() && [401, 403, 404].includes(response.status)) {
-        denied = true; setFileOwner(null); setSummaryOwner(null);
+        denied = true; acceptedFileOwner.current = null; setFileOwner(null); setSummaryOwner(null);
+        workflowAuthority.current = { owner: alertOwner, ready: false }; setWorkflowState("unavailable");
         throw new Error("تعذّر التحقق من صلاحية الملف.");
       }
       return response;
@@ -249,25 +262,41 @@ function PatientFileWorkspace({ id }: { id: string }) {
     setLoading(true);
     try {
       const [patientRes, workflowRes] = await Promise.all([
-        read(`/api/patients/${id}`),
+        workflowOnly ? Promise.resolve(null) : read(`/api/patients/${id}`),
         read(`/api/patients/${id}/workflow`),
       ]);
 
       if (!current() || denied) return;
-      const payload = await patientRes.json();
-      if (!current() || denied) return;
-      if (!patientRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      if (payload?.patient?.id !== Number(id)) throw new Error("تعذّر التحقق من سياق المريض.");
-      // A read begun before a confirmed save cannot restore its editable warning.
-      if (startedRevision !== alertOwner.revision && alertOwner.confirmed) {
-        payload.patient.medicalAlert = alertOwner.confirmed.value;
+      if (patientRes) {
+        const payload = await patientRes.json();
+        if (!current() || denied) return;
+        if (!patientRes.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+        if (payload?.patient?.id !== Number(id)) throw new Error("تعذّر التحقق من سياق المريض.");
+        // A read begun before a confirmed save cannot restore its editable warning.
+        if (startedRevision !== alertOwner.revision && alertOwner.confirmed) {
+          payload.patient.medicalAlert = alertOwner.confirmed.value;
+        }
+        setFile(payload as PatientFile);
+        setFileOwner(alertOwner); acceptedFileOwner.current = alertOwner;
       }
-      setFile(payload as PatientFile);
-      setFileOwner(alertOwner);
 
-      if (workflowRes.ok) {
+      if (!workflowRes.ok) throw new Error("تعذّر التحقق من ملخص المريض. أعد التحميل قبل الاعتماد عليه.");
+      {
         const data = await workflowRes.json();
         if (!current() || denied) return;
+        const projections = readWorkflowCases(data, Number(id), false);
+        if (!projections || !Array.isArray(data.activePlans) || !Array.isArray(data.plannedVisits)
+          || !Array.isArray(data.alerts) || !data.counts || typeof data.counts !== "object"
+          || [data.counts.visits, data.counts.openLabOrders, data.counts.documents].some((value) =>
+            !Number.isSafeInteger(value) || value < 0) || typeof data.counts.orthoCase !== "boolean"
+          || typeof data.canSeeFinancial !== "boolean"
+          || (data.openVisit !== null && (typeof data.openVisit !== "object" || !data.openVisit
+            || !Number.isSafeInteger(data.openVisit.id) || data.openVisit.id <= 0
+            || typeof data.openVisit.status !== "string" || typeof data.openVisit.arrivedAt !== "string"
+            || (data.openVisit.chair !== null && (!Number.isSafeInteger(data.openVisit.chair) || data.openVisit.chair <= 0))
+            || (data.openVisit.plannedTitle !== null && typeof data.openVisit.plannedTitle !== "string")))) {
+          throw new Error("تعذّر التحقق من ملخص المريض. لا يُعدّ ذلك غيابًا للحالات أو الزيارة.");
+        }
         setSummary({
           openVisit: data.openVisit ?? null,
           lastVisit: data.lastVisit ?? null,
@@ -278,21 +307,37 @@ function PatientFileWorkspace({ id }: { id: string }) {
           financial: data.financial ?? null,
           alerts: data.alerts ?? [],
           canSeeFinancial: data.canSeeFinancial ?? false,
-          assessmentCases: data.assessmentCases ?? [],
+          assessmentCases: projections.assessmentCases,
         });
-        setSummaryOwner(alertOwner);
+        summarySnapshotOwner.current = alertOwner;
+        workflowAuthority.current = { owner: alertOwner, ready: true };
+        setSummaryOwner(alertOwner); setWorkflowState("ready");
       }
       setError(null);
     } catch (loadError) {
-      if (current()) setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      if (current()) {
+        workflowAuthority.current = { owner: alertOwner, ready: false };
+        setSummaryOwner(null); setWorkflowState("unavailable");
+        setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      }
     } finally {
       if (current()) setLoading(false);
     }
   }, [id, alertOwner]);
 
+  const refreshWorkflow = useCallback(() => {
+    if (alertOwner.active && acceptedFileOwner.current === alertOwner) void load(true);
+  }, [alertOwner, load]);
   useEffect(() => {
     void load();
-  }, [load]);
+    const visible = () => { if (document.visibilityState === "visible") refreshWorkflow(); };
+    window.addEventListener("focus", refreshWorkflow);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.removeEventListener("focus", refreshWorkflow);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [load, refreshWorkflow]);
 
   const confirmDeleteFile = async () => {
     if (!file || deleting) return;
@@ -421,7 +466,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
     .map((w) => w[0])
     .join("");
 
-  const primaryAction = (() => {
+  const workflowAction = (() => {
     if (!step) return null;
     switch (step.kind) {
       case "continue_visit":
@@ -452,6 +497,9 @@ function PatientFileWorkspace({ id }: { id: string }) {
         return null;
     }
   })();
+  const primaryAction = workflowAction ? { ...workflowAction, run: () => {
+    if (workflowIsCurrent()) workflowAction.run();
+  } } : null;
 
   // Clinical warnings remain visible independently of the optional details disclosure.
   const medicalAlertBanner = patient.medicalAlert ? (
@@ -1020,10 +1068,16 @@ function PatientFileWorkspace({ id }: { id: string }) {
         })}
       </div>
 
+      {!summary ? (
+        <p role="status" data-testid="patient-workflow-read-state" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          {workflowState === "loading" ? "جارٍ التحقق من ملخص المريض…" : "تعذّر التحقق من الملخص والحالات. البيانات غير معروفة الآن؛ تبقى المسودات للمراجعة."}
+          <button type="button" onClick={refreshWorkflow} className="mr-2 underline">إعادة التحقق من الملخص</button>
+        </p>
+      ) : null}
       {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
       {tab === "summary" ? (
-        summary ? (
-          <div className="space-y-4">
+        retainedSummary ? (
+          <div className="space-y-4" hidden={!summary} inert={!summary}>
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
           {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
@@ -1039,7 +1093,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
           ) : null}
           <SummaryTab
-            summary={summary}
+            summary={summary ?? retainedSummary}
+            workflowIsCurrent={workflowIsCurrent}
             patientId={patient.id}
             patientName={patient.fullName}
             patientNumber={patient.patientNumber}
@@ -1137,8 +1192,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
           {treatmentSubTab === "ortho" && (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
-                hint="افتح حالة التقويم أدناه بعد التقييم — تُربط بهذه الحالة وبباقتها المفوترة تلقائيًا." />
-              <PatientOrtho patientId={patient.id} />
+                hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
+              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} />
             </section>
           )}
 
@@ -1152,10 +1207,10 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <section aria-label="علاج الجذور">
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="endodontics"
                 hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
-              <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
+              <PatientEndo {...endoNavigation} patientId={patient.id} onClinicalChange={refreshWorkflow} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}
-                openVisitId={summary?.openVisit?.id ?? null} />
+                openVisitId={draftVisit?.id ?? null} workflowReady={summary !== null} workflowIsCurrent={workflowIsCurrent} />
             </section>
           )}
 
@@ -1194,6 +1249,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
           patientId={patient.id}
           patientName={patient.fullName}
           summary={summary}
+          retainedOpenVisit={draftVisit}
+          workflowIsCurrent={workflowIsCurrent}
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
@@ -1207,7 +1264,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         />
       ) : tab === "account" ? (
         <>
-          <PatientLedger patientId={patient.id} />
+          <PatientLedger patientId={patient.id} onClinicalChange={refreshWorkflow} />
           <LegacyHistory patientId={patient.id} />
         </>
       ) : (

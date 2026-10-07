@@ -59,6 +59,7 @@ const financial = {
   treatmentDoneMinor: 0, remainingTreatmentMinor: 0, byCurrency: {},
 };
 const workflow = (id: number) => ({
+  patient, assessmentCases: [], legacyCases: [],
   openVisit: {
     id, status: "in_chair", chair: 1,
     // B deliberately represents an older unsigned visit returned after A.

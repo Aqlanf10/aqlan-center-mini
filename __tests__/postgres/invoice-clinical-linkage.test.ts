@@ -70,10 +70,16 @@ const counts = async (patientId: number) => (await q<{ invoices: number; plans: 
           (SELECT COUNT(*)::int FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1) AS items,
           (SELECT COUNT(*)::int FROM clinical_cases WHERE patient_id = $1) AS cases`, [patientId]))[0];
 
+async function waitForBlocker(pid: number) {
+  await expect.poll(async () => (await q<{ blocked: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE $1 = ANY(pg_blocking_pids(a.pid))) AS blocked`, [pid]))[0].blocked,
+  { timeout: 5000, interval: 20 }).toBe(true);
+}
+
 describe("scenario 1 — orthodontics 300,000", () => {
-  it("one invoice, one consented plan item pre-billed, one intake case; nothing clinical invented", async () => {
+  it("one invoice, one financially accepted item, one intake case; clinical consent is not invented", async () => {
     const patient = await newPatient("INV-ORTHO");
-    const result = await invoice(patient, [{ service: "ortho", price: 30_000_000 }]);
+    const result = await invoice(patient, [{ service: "ortho", price: 30_000_000, scope: "both" }]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(await counts(patient)).toEqual({ invoices: 1, plans: 1, items: 1, cases: 1 });
@@ -83,8 +89,8 @@ describe("scenario 1 — orthodontics 300,000", () => {
     expect(item).toMatchObject({ billing_status: "billed", billed_invoice_id: result.invoice.id, origin: "invoice", doctor_id: doctor });
     expect(item.session_count).toBe(12); // the ortho template step's sessions (1 + 10 + 1)
     const [plan] = await q<{ consent_at: Date | null; consent_note: string; status: string }>(`SELECT consent_at, consent_note, status FROM treatment_plans WHERE patient_id = $1`, [patient]);
-    expect(plan.consent_at).not.toBeNull();
-    expect(plan.consent_note).toContain("قبول مالي بالفاتورة");
+    expect(plan.consent_at).toBeNull();
+    expect(plan.consent_note).toBeNull();
     const [kase] = await q<{ specialty: string; title: string; origin: string; problem: string | null; responsible_party_id: number | null; ortho_case_id: number | null }>(
       `SELECT specialty, title, origin, problem, responsible_party_id, ortho_case_id FROM clinical_cases WHERE patient_id = $1`, [patient]);
     expect(kase).toMatchObject({ specialty: "orthodontics", origin: "invoice", problem: null, responsible_party_id: null, ortho_case_id: null });
@@ -100,7 +106,7 @@ describe("scenario 1 — orthodontics 300,000", () => {
   it("an existing active ortho case is bridged instead of a second ortho context", async () => {
     const patient = await newPatient("INV-ORTHO-EXIST");
     const [ortho] = await q<{ id: number }>(`INSERT INTO ortho_cases (patient_id, created_by) VALUES ($1, 'dr') RETURNING id`, [patient]);
-    const result = await invoice(patient, [{ service: "ortho", price: 30_000_000 }]);
+    const result = await invoice(patient, [{ service: "ortho", price: 30_000_000, scope: "both" }]);
     expect(result.ok).toBe(true);
     const [kase] = await q<{ ortho_case_id: number; title: string }>(`SELECT ortho_case_id, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
     expect(kase.ortho_case_id).toBe(ortho.id);
@@ -128,7 +134,7 @@ describe("scenario 6 — mixed ortho + endo + crown, plus financial-only lines",
   it("one master plan, three items, cases per specialty, financial lines stay invoice-only", async () => {
     const patient = await newPatient("INV-MIXED");
     const result = await invoice(patient, [
-      { service: "ortho", price: 30_000_000 }, { service: "rct", price: 80_000, tooth: 21 }, { service: "crown", price: 120_000, tooth: 21 },
+      { service: "ortho", price: 30_000_000, scope: "both" }, { service: "rct", price: 80_000, tooth: 21 }, { service: "crown", price: 120_000, tooth: 21 },
       { service: "consult", price: 5_000 }, { service: null, price: 2_000, description: "رسوم ملف" }, { service: "filling", price: 25_000, tooth: 46 },
     ]);
     expect(result.ok).toBe(true);
@@ -153,7 +159,7 @@ describe("scenario 5 — retry, double click, two tabs, concurrency", () => {
 
   it("concurrent double submit (same key) and two tabs (different keys) never duplicate the obligation", async () => {
     const patient = await newPatient("INV-CONC");
-    const same = await Promise.all(Array.from({ length: 4 }, () => invoice(patient, [{ service: "ortho", price: 30_000_000 }], "inv:conc-same-01")));
+    const same = await Promise.all(Array.from({ length: 4 }, () => invoice(patient, [{ service: "ortho", price: 30_000_000, scope: "both" }], "inv:conc-same-01")));
     expect(same.every((r) => r.ok)).toBe(true);
     expect(new Set(same.map((r) => (r.ok ? r.invoice.id : 0))).size).toBe(1);
     const tabs = await Promise.all([
@@ -162,7 +168,7 @@ describe("scenario 5 — retry, double click, two tabs, concurrency", () => {
     ]);
     expect(tabs.filter((r) => r.ok)).toHaveLength(1);
     expect(tabs.find((r) => !r.ok)).toEqual({ ok: false, reason: "already_billed", line: 0 });
-    expect(await counts(patient)).toEqual({ invoices: 2, plans: 2, items: 2, cases: 2 });
+    expect(await counts(patient)).toEqual({ invoices: 2, plans: 1, items: 2, cases: 2 });
   });
 
   it("same service on a different tooth is a different treatment — and a different endodontic episode", async () => {
@@ -170,8 +176,7 @@ describe("scenario 5 — retry, double click, two tabs, concurrency", () => {
     expect((await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }])).ok).toBe(true);
     expect((await invoice(patient, [{ service: "rct", price: 80_000, tooth: 46 }])).ok).toBe(true);
     const c = await counts(patient);
-    expect(c).toMatchObject({ invoices: 2, items: 2, cases: 2 }); // the open case for 36 is not reused for 46
-    // the same tooth again (a new treatment after the first started) reuses its site's case
+    expect(c).toMatchObject({ invoices: 2, plans: 1, items: 2, cases: 2 }); // distinct episodes share the compatible unconsented master
     expect((await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE patient_id = $1 ORDER BY id`, [patient])).map((r) => r.site)).toEqual(["36", "46"]);
   });
 });
@@ -194,7 +199,7 @@ describe("reuse of an existing agreed plan item, and refusals", () => {
 
   it("two open cases of one specialty without a choice are refused; with a choice the line links to it", async () => {
     const patient = await newPatient("INV-AMBIG");
-    const mk = async () => (await q<{ id: number }>(`INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, 'endodontics', 'x', 'dr') RETURNING id`, [patient]))[0].id;
+    const mk = async () => (await q<{ id: number }>(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'endodontics', 'x', '14', 'dr') RETURNING id`, [patient]))[0].id;
     const a = await mk(); await mk();
     expect(await invoice(patient, [{ service: "rct", price: 80_000, tooth: 14 }])).toEqual({ ok: false, reason: "ambiguous_case", line: 0 });
     expect(await invoice(patient, [{ service: "rct", price: 80_000, tooth: 14, caseId: 999999 }])).toEqual({ ok: false, reason: "bad_case", line: 0 });
@@ -205,23 +210,24 @@ describe("reuse of an existing agreed plan item, and refusals", () => {
 });
 
 describe("scenario 4 — cancellation and correction keep the clinical record", () => {
-  it("cancel: case and item survive, financial link cleared and audited; nothing deleted", async () => {
+  it("cancel: case, item and invoice lineage survive in financial review; implicit rebilling is refused", async () => {
     const patient = await newPatient("INV-CANCEL");
     const result = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }]);
     if (!result.ok) throw new Error("create");
     await setInvoiceStatus(result.invoice.id, "cancelled", { actor: "admin", actorRole: "admin" });
     const [item] = await q<{ billing_status: string; billed_invoice_id: number | null; case_id: number }>(
       `SELECT i.billing_status, i.billed_invoice_id, i.case_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1`, [patient]);
-    expect(item).toMatchObject({ billing_status: "unbilled", billed_invoice_id: null });
+    expect(item).toMatchObject({ billing_status: "needs_financial_review", billed_invoice_id: result.invoice.id });
     expect(await counts(patient)).toEqual({ invoices: 1, plans: 1, items: 1, cases: 1 });
     const audits = await q<{ details: Record<string, unknown> }>(`SELECT details FROM audit_log WHERE action = 'plan.item_update' AND entity_id = $1`, [String(patient)]);
     expect(JSON.stringify(audits)).toContain("يحتاج مراجعة مالية");
-    // the same treatment can be invoiced again after a cancellation (no stale "already billed")
+    // Cancellation cannot manufacture a clean work identity or a new obligation.
     const again = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }]);
-    expect(again.ok).toBe(true);
+    expect(again).toEqual({ ok: false, reason: "needs_financial_review", line: 0 });
+    expect(await counts(patient)).toEqual({ invoices: 1, plans: 1, items: 1, cases: 1 });
   });
 
-  it("correction: a kept line moves the link to the replacement; a removed line releases it", async () => {
+  it("correction: changed-price and removed lines keep lineage and both require financial review", async () => {
     const patient = await newPatient("INV-CORRECT");
     const result = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }, { service: "crown", price: 120_000, tooth: 36 }]);
     if (!result.ok) throw new Error("create");
@@ -235,15 +241,15 @@ describe("scenario 4 — cancellation and correction keep the clinical record", 
     const items = await q<{ category: string; billing_status: string; billed_invoice_id: number | null }>(
       `SELECT i.category, i.billing_status, i.billed_invoice_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1 ORDER BY i.id`, [patient]);
     expect(items).toEqual([
-      { category: "rct", billing_status: "billed", billed_invoice_id: corrected.corrected.id },
-      { category: "crown", billing_status: "unbilled", billed_invoice_id: null },
+      { category: "rct", billing_status: "needs_financial_review", billed_invoice_id: result.invoice.id },
+      { category: "crown", billing_status: "needs_financial_review", billed_invoice_id: result.invoice.id },
     ]);
     expect(await counts(patient)).toMatchObject({ cases: 2, items: 2 });
   });
 });
 
 describe("Codex review hardening", () => {
-  const doctorPlan = async (patient: number, item: { service: "rct" | "crown"; tooth: number; price: number; quantity?: number; sessions?: number; surfaces?: string | null }) => {
+  const doctorPlan = async (patient: number, item: { service: "rct" | "crown"; tooth: number; price: number; quantity?: number; sessions?: number; surfaces?: string | null }, consent = true) => {
     const plan = await createPlanV2({
       patientId: patient, title: "خطة الطبيب", specialty: null, primaryDoctorId: doctor, billingMode: "per_procedure",
       baseCurrency: "YER", startDate: "2026-10-01", note: null, createdBy: "dr", installments: [],
@@ -252,7 +258,7 @@ describe("Codex review hardening", () => {
         sessionCount: item.sessions ?? 3, note: null }],
     });
     if (!plan.ok) throw new Error(plan.message);
-    await recordPlanConsent({ planId: plan.planId, actor: "dr", note: null });
+    if (consent) await recordPlanConsent({ planId: plan.planId, actor: "dr", note: null });
     const [row] = await q<{ id: number }>(`SELECT id FROM plan_items WHERE plan_id = $1`, [plan.planId]);
     return { planId: plan.planId, itemId: row.id };
   };
@@ -273,7 +279,8 @@ describe("Codex review hardening", () => {
     const patient = await newPatient("INV-SHAPE");
     await doctorPlan(patient, { service: "rct", tooth: 15, price: 40_000, quantity: 2, sessions: 1 });
     // same total (1 × 80,000 vs 2 × 40,000) but a different quantity
-    expect(await invoice(patient, [{ service: "rct", price: 80_000, tooth: 15 }])).toEqual({ ok: false, reason: "shape_mismatch", line: 0 });
+    expect(await invoice(patient, [{ service: "rct", price: 80_000, tooth: 15 }])).toEqual({ ok: false, reason: "amount_mismatch", line: 0 });
+    expect(await invoice(patient, [{ service: "rct", price: 40_000, tooth: 15, quantity: 1, sessions: 1 }])).toEqual({ ok: false, reason: "shape_mismatch", line: 0 });
     // same quantity and total, a different explicit session count
     expect(await invoice(patient, [{ service: "rct", price: 40_000, quantity: 2, tooth: 15, sessions: 3 }])).toEqual({ ok: false, reason: "shape_mismatch", line: 0 });
     const ok = await invoice(patient, [{ service: "rct", price: 40_000, quantity: 2, tooth: 15, sessions: 1 }]);
@@ -299,10 +306,11 @@ describe("Codex review hardening", () => {
     const caseIds = result.links.map((l) => l.caseId);
     expect(caseIds).not.toContain(other.id);
     expect(new Set(caseIds).size).toBe(2);
-    // ortho is whole-mouth: two ortho lines in one invoice share one case
+    // The same Ortho work twice is refused, even before either row has been committed.
     const ortho = await newPatient("INV-SITE-ORTHO");
-    const o = await invoice(ortho, [{ service: "ortho", price: 100_000 }, { service: "ortho", price: 100_000, description: "تقويم 2" }]);
-    expect(o.ok && o.links[0].caseId === o.links[1].caseId).toBe(true);
+    const o = await invoice(ortho, [{ service: "ortho", price: 100_000, scope: "both" }, { service: "ortho", price: 100_000, scope: "both", description: "تقويم 2" }]);
+    expect(o).toEqual({ ok: false, reason: "existing_work", line: 1 });
+    expect(await counts(ortho)).toEqual({ invoices: 0, plans: 0, items: 0, cases: 0 });
   });
 
   it("replay reconstructs only the invoice-created plan (null when the invoice only reused items)", async () => {
@@ -316,7 +324,7 @@ describe("Codex review hardening", () => {
       === JSON.stringify(first.links.map((l) => [l.kind, l.specialty, l.planItemId, l.caseId]))).toBe(true);
 
     const mixed = await newPatient("INV-REPLAY-MIXED");
-    await doctorPlan(mixed, { service: "rct", tooth: 25, price: 80_000 });
+    await doctorPlan(mixed, { service: "rct", tooth: 25, price: 80_000 }, false);
     const m1 = await invoice(mixed, [{ service: "rct", price: 80_000, tooth: 25 }, { service: "crown", price: 120_000, tooth: 25 }], "inv:replay-mixed1");
     const m2 = await invoice(mixed, [{ service: "rct", price: 80_000, tooth: 25 }, { service: "crown", price: 120_000, tooth: 25 }], "inv:replay-mixed1");
     expect(m1.ok && m2.ok && m1.planId !== null && m2.planId === m1.planId).toBe(true);
@@ -330,7 +338,17 @@ describe("Codex review hardening", () => {
     expect(invoiceRequestFingerprint({ ...base, items: [{ ...base.items[0], sessions: 3 }] })).not.toBe(fp);
   });
 
-  it("repeated corrections keep the plan link on the newest live invoice", async () => {
+  it("new work cannot silently append to an already consented master or manufacture a second master", async () => {
+    const patient = await newPatient("INV-CONSENTED-MASTER");
+    await doctorPlan(patient, { service: "rct", tooth: 25, price: 80_000 });
+    const result = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 25 }, { service: "crown", price: 120_000, tooth: 25 }]);
+    expect(result).toEqual({ ok: false, reason: "incompatible_plan", line: 1 });
+    expect(await counts(patient)).toMatchObject({ invoices: 0, plans: 1, items: 1 });
+    expect((await q(`SELECT billing_status, billed_invoice_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1`, [patient]))[0])
+      .toEqual({ billing_status: "unbilled", billed_invoice_id: null });
+  });
+
+  it("repeated corrections keep changed work in review while an identical line follows the newest live invoice", async () => {
     const patient = await newPatient("INV-CORRECT-TWICE");
     const result = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }, { service: "crown", price: 120_000, tooth: 36 }]);
     if (!result.ok) throw new Error("create");
@@ -347,7 +365,7 @@ describe("Codex review hardening", () => {
     const items = await q<{ billing_status: string; billed_invoice_id: number | null }>(
       `SELECT i.billing_status, i.billed_invoice_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1 ORDER BY i.id`, [patient]);
     expect(items).toEqual([
-      { billing_status: "billed", billed_invoice_id: current },
+      { billing_status: "needs_financial_review", billed_invoice_id: result.invoice.id },
       { billing_status: "billed", billed_invoice_id: current },
     ]);
     // each line of the newest invoice names its plan item; the cancelled originals keep their source untouched
@@ -365,20 +383,22 @@ describe("Codex review hardening", () => {
     const signer = await getPool().connect();
     try {
       await signer.query("BEGIN");
+      const { rows: [{ pid }] } = await signer.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`);
       await signer.query(`SELECT id FROM plan_items WHERE id = $1 FOR UPDATE`, [itemId]);
       let done = false;
       const cancel = setInvoiceStatus(result.invoice.id, "cancelled", { actor: "admin", actorRole: "admin" }).then((r) => { done = true; return r; });
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await waitForBlocker(pid);
       expect(done).toBe(false); // the cancellation queues behind the item lock, not behind a half-read invoice
       // the sign-off's next step — share-locking the covering invoice — must not collide with a cancellation holding it
       await expect(signer.query(`SELECT id FROM invoices WHERE id = $1 FOR SHARE NOWAIT`, [result.invoice.id])).resolves.toBeTruthy();
       await signer.query("COMMIT");
       await cancel;
     } finally {
+      await signer.query("ROLLBACK").catch(() => undefined);
       signer.release();
     }
     const [item] = await q<{ billing_status: string }>(`SELECT billing_status FROM plan_items WHERE id = $1`, [itemId]);
-    expect(item.billing_status).toBe("unbilled");
+    expect(item.billing_status).toBe("needs_financial_review");
   });
 
   it("an invoice waiting on an item a sign-off is starting re-checks it after the lock and does not reuse it", async () => {
@@ -387,19 +407,22 @@ describe("Codex review hardening", () => {
     const signer = await getPool().connect();
     try {
       await signer.query("BEGIN");
+      const { rows: [{ pid }] } = await signer.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`);
       await signer.query(`SELECT id FROM plan_items WHERE id = $1 FOR UPDATE`, [itemId]);
       const pending = invoice(patient, [{ service: "rct", price: 80_000, tooth: 47 }]);
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await waitForBlocker(pid);
       await signer.query(`UPDATE plan_items SET status = 'in_progress', started_at = NOW() WHERE id = $1`, [itemId]);
       await signer.query("COMMIT");
       const result = await pending;
-      expect(result.ok && result.links[0].planItemId !== itemId && result.links[0].planItemCreated).toBe(true);
+      expect(result).toEqual({ ok: false, reason: "existing_work", line: 0 });
     } finally {
+      await signer.query("ROLLBACK").catch(() => undefined);
       signer.release();
     }
     const [item] = await q<{ billing_status: string; billed_invoice_id: number | null }>(
       `SELECT billing_status, billed_invoice_id FROM plan_items WHERE id = $1`, [itemId]);
     expect(item).toEqual({ billing_status: "unbilled", billed_invoice_id: null });
+    expect(await counts(patient)).toMatchObject({ invoices: 0, plans: 1, items: 1 });
   });
 });
 
@@ -445,6 +468,19 @@ describe("INV-LINK TOOTH — tooth/site selection rules (fail closed, one source
     const [kase] = await q<{ site: string; title: string }>(`SELECT site, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
     expect(kase.site).toBe("14، 15، 16");
     expect(kase.title).toContain("14، 15، 16");
+    // Distinct units in one explicit bridge episode must remain signable together.
+    // A duplicate-work guard must not collapse teeth 14, 15 and 16 into one unit.
+    expect(await recordPlanConsent({ planId: result.planId!, actor: "reception", note: "موافقة على حلقة الجسر" })).toMatchObject({ ok: true });
+    const visit = await db.addVisit({ patientId: patient, patientName: "مريض الجسر", patientPhone: null, note: null, doctorId: doctor });
+    expect(await db.setVisitProcedures({ visitId: visit.id, procedures: result.links.map((link, index) => ({
+      serviceId: services.bridge, toothCode: [14, 15, 16][index], surfaces: null, quantity: 1, unitPriceMinor: 0,
+      priceReason: null, doctorId: doctor, note: null, planItemId: link.planItemId,
+    })) })).toBe(true);
+    expect(await db.signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr", signerDoctorPartyId: doctor }))
+      .toMatchObject({ reason: null, invoiceId: null, sessionsCompleted: 3 });
+    expect(await q(`SELECT tooth_code FROM visit_procedures WHERE visit_id = $1 ORDER BY tooth_code`, [visit.id]))
+      .toEqual([{ tooth_code: 14 }, { tooth_code: 15 }, { tooth_code: 16 }]);
+    expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toHaveLength(1);
     // an open prosthodontic case on 14 only does not cover the 14–16 episode
     const other = await newPatient("TOOTH-BRIDGE-2");
     await q(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'prosthodontics', 'تاج 14', '14', 'dr')`, [other]);
@@ -503,5 +539,14 @@ describe("INV-LINK TOOTH — tooth/site selection rules (fail closed, one source
     const [kase] = await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE id = $1`, [result.links[0].caseId]);
     expect(item.tooth_code).toBe(47);
     expect(kase.site).toBe("47");
+    expect(await recordPlanConsent({ planId: result.planId!, actor: "reception", note: "موافقة سريرية صريحة" })).toMatchObject({ ok: true });
+    const visit = await db.addVisit({ patientId: patient, patientName: "مريض انتقال السن", patientPhone: null, note: null, doctorId: doctor });
+    expect((await db.getClinicalVisit(visit.id))?.outstanding.find((row) => row.planItemId === item.id))
+      .toMatchObject({ toothCode: 47, surfaces: null, clinicalConsentRecorded: true, financialReviewRequired: false });
+    expect(await db.setVisitProcedures({ visitId: visit.id, procedures: [{ serviceId: services.rct, toothCode: 47,
+      surfaces: null, quantity: 1, unitPriceMinor: 0, priceReason: null, doctorId: doctor, note: null, planItemId: item.id }] })).toBe(true);
+    expect((await db.getClinicalVisit(visit.id))?.procedures[0]).toMatchObject({ planItemId: item.id, toothCode: 47, doctorId: doctor });
+    expect(await q(`SELECT plan_item_id, tooth_code FROM visit_procedures WHERE visit_id = $1`, [visit.id]))
+      .toEqual([{ plan_item_id: item.id, tooth_code: 47 }]);
   });
 });

@@ -4,6 +4,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { HTTP_PERMISSIONS } from "@/lib/http-permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     }
 
+    // Match the Cases route's existing role gate; the same patient guard already ran above.
+    // A workflow-only role does not gain clinical case disclosure through this projection.
+    const caseAccess = HTTP_PERMISSIONS["/api/patients/[id]/cases"].GET;
+    const canSeeCases = Array.isArray(caseAccess) && caseAccess.includes(session.role);
+    const caseProjection = { assessmentCases: canSeeCases ? summary.assessmentCases : [] };
     const settings = await getSettings();
     const doctorSeesMoney =
       session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
@@ -53,6 +59,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (session.role === "assistant") {
       return NextResponse.json({
         ...summary,
+        ...caseProjection,
         today,
         nextAppointment: null,
         plannedVisits: [],
@@ -64,6 +71,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     return NextResponse.json({
       ...summary,
+      ...caseProjection,
       today,
       financial: maySeeFinancial ? summary.financial : null,
       canSeeFinancial: maySeeFinancial,

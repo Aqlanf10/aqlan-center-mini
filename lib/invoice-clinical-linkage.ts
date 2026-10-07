@@ -67,23 +67,16 @@ export function sessionsFor(category: string | null, requested: number | null, t
   return 1;
 }
 
-/** تخصصاتٌ تُعالج سنًّا بعينه: حالتها حلقةٌ لموضعها — بند سنٍّ آخر لا يُلحق بها. التقويم واللثة والتجميل للفم كله. */
-const SITE_SPECIFIC: ReadonlySet<LinkageSpecialty> = new Set(["endodontics", "prosthodontics", "implantology", "surgery"]);
-
-/**
- * هل تصلح حالةٌ مفتوحة لبندٍ على سنٍّ ما؟ للتخصص الموضعي: موضع الحالة فارغ، أو يذكر السن نفسه رقمًا مستقلًّا.
- * بند بلا سن، أو تخصصٌ للفم كله ⇒ تصلح أي حالة مفتوحة للتخصص.
- */
+/** Blank scope is unknown. It never proves that two episodes are compatible. */
 export function caseSiteCompatible(specialty: LinkageSpecialty, caseSite: string | null, toothCode: number | null): boolean {
-  if (!SITE_SPECIFIC.has(specialty) || toothCode === null) return true;
-  const site = (caseSite ?? "").trim();
-  if (site === "") return true;
-  return site.split(/[^0-9]+/).filter(Boolean).some((token) => Number(token) === toothCode);
+  void specialty;
+  if (toothCode === null || !(caseSite ?? "").trim()) return false;
+  const tokens = (caseSite ?? "").split(/[^0-9]+/).filter(Boolean);
+  return tokens.length === 1 && Number(tokens[0]) === toothCode;
 }
 
-/** مفتاح تجميع البنود على حالةٍ واحدة داخل الفاتورة: التخصص، والسن للتخصص الموضعي. */
 export function caseGroupKey(specialty: LinkageSpecialty, toothCode: number | null): string {
-  return SITE_SPECIFIC.has(specialty) && toothCode !== null ? `${specialty}:${toothCode}` : specialty;
+  return `${specialty}:${toothCode ?? "unknown"}`;
 }
 
 /**
@@ -153,7 +146,7 @@ export function validateLineSite(input: {
   episodeTeeth?: readonly number[] | null; scope?: string | null;
 }): { ok: true; site: LineSite } | { ok: false; reason: InvoiceLinkageRefusal } {
   const mode = toothScope(input.category);
-  if (mode === "none") return { ok: true, site: { mode, toothCode: null, surfaces: null, episodeTeeth: null, scope: null } };
+  if (mode === "none") return { ok: true, site: { mode, toothCode: null, surfaces: null, episodeTeeth: null, scope: input.category === "whitening" ? "full_mouth" : null } };
   const tooth = input.toothCode;
   if (tooth !== null && !isValidTooth(tooth)) return { ok: false, reason: "bad_tooth" };
   const scopeRaw = input.scope ?? null;
@@ -182,10 +175,10 @@ export function validateLineSite(input: {
       return { ok: true, site: { mode, toothCode: tooth, surfaces: normalizeSurfaces(raw), episodeTeeth: null, scope: null } };
     }
     case "arch":
-      if (tooth !== null) return { ok: false, reason: "bad_scope" };
+      if (tooth !== null || scope === null) return { ok: false, reason: "bad_scope" };
       return { ok: true, site: { mode, toothCode: null, surfaces: null, episodeTeeth: null, scope: scope as SiteScope | null } };
     case "region":
-      if (tooth !== null && scope !== null) return { ok: false, reason: "bad_scope" };
+      if ((tooth !== null && scope !== null) || (tooth === null && scope === null)) return { ok: false, reason: "bad_scope" };
       return { ok: true, site: { mode, toothCode: tooth, surfaces: null, episodeTeeth: null, scope: scope as SiteScope | null } };
   }
 }
@@ -206,15 +199,36 @@ export function scopeNote(site: LineSite): string | null {
 /** مفتاح تجميع الحالة لموضعٍ مُتحقَّق: حلقة الأسنان المتعددة حالةٌ واحدة لأسنانها كلها. */
 export function siteGroupKey(specialty: LinkageSpecialty, site: LineSite): string {
   if (site.episodeTeeth && site.episodeTeeth.length > 1) return `${specialty}:ep:${site.episodeTeeth.join(",")}`;
-  return caseGroupKey(specialty, site.toothCode);
+  return site.scope ? `${specialty}:scope:${site.scope}` : caseGroupKey(specialty, site.toothCode);
 }
 
 /** هل تصلح حالةٌ مفتوحة لهذا الموضع؟ حلقة الأسنان المتعددة تحتاج حالةً موضعها فارغ أو يذكر أسنانها كلها. */
 export function caseSiteFits(specialty: LinkageSpecialty, caseSite: string | null, site: LineSite): boolean {
-  if (site.episodeTeeth && site.episodeTeeth.length > 1) {
-    return site.episodeTeeth.every((tooth) => caseSiteCompatible(specialty, caseSite, tooth));
+  const actual = (caseSite ?? "").trim();
+  if (!actual) return false;
+  if (site.scope !== null) return actual === SITE_SCOPE_LABEL[site.scope] || actual === site.scope;
+  if (site.episodeTeeth && site.episodeTeeth.length > 0) {
+    const actualTeeth = [...new Set(actual.split(/[^0-9]+/).filter(Boolean).map(Number))].sort((a, b) => a - b);
+    return actualTeeth.length === site.episodeTeeth.length
+      && actualTeeth.every((tooth, index) => tooth === site.episodeTeeth![index]);
   }
-  return caseSiteCompatible(specialty, caseSite, site.toothCode);
+  return caseSiteCompatible(specialty, actual, site.toothCode);
+}
+
+/** Reuse needs exact scope; duplicate prevention also rejects overlapping or unknown scopes. */
+export function caseSiteOverlaps(caseSite: string | null, site: LineSite): boolean {
+  const raw = (caseSite ?? "").trim();
+  const scope = (Object.keys(SITE_SCOPE_LABEL) as SiteScope[]).find((key) => raw === key || raw === SITE_SCOPE_LABEL[key]);
+  const existingTeeth = [...new Set(raw.split(/[^0-9]+/).filter(Boolean).map(Number))];
+  if (!scope && existingTeeth.some((tooth) => !isValidTooth(tooth))) return true;
+  const requestedTeeth = site.episodeTeeth?.length ? site.episodeTeeth : site.toothCode !== null ? [site.toothCode] : [];
+  const inArch = (tooth: number, arch: "upper" | "lower") => [1, 2, 5, 6].includes(Math.trunc(tooth / 10)) === (arch === "upper");
+  if (!scope && existingTeeth.length === 0) return true;
+  if (scope === "both" || scope === "full_mouth" || site.scope === "both" || site.scope === "full_mouth") return true;
+  if (scope && site.scope) return scope === site.scope;
+  if (scope === "upper" || scope === "lower") return requestedTeeth.length === 0 || requestedTeeth.some((tooth) => inArch(tooth, scope));
+  if (site.scope === "upper" || site.scope === "lower") return existingTeeth.some((tooth) => inArch(tooth, site.scope as "upper" | "lower"));
+  return requestedTeeth.length === 0 || existingTeeth.some((tooth) => requestedTeeth.includes(tooth));
 }
 
 /** عنوان الحالة الأولية بموضعها. */
@@ -273,9 +287,15 @@ export function invoiceRequestFingerprint(input: {
 export type InvoiceLinkageRefusal =
   | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
   | "case_mismatch" | "shape_mismatch" | "ambiguous_item"
-  | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope";
+  | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
+  | "needs_financial_review" | "existing_work" | "bad_provider" | "incompatible_plan" | "bad_site";
 
 export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
+  needs_financial_review: "هذا العلاج يحتاج مراجعة مالية لسجل فواتيره؛ لا تُنشئ التزامًا جديدًا للعمل نفسه.",
+  existing_work: "يوجد سجل للعلاج نفسه بدأ أو أُنجز أو أُلغي؛ راجع البند الأصلي قبل إصدار فاتورة أخرى.",
+  bad_provider: "حدّد طبيب البند المالي المتفق عليه. تغيير الطبيب أو توزيع قيمة العلاج بين أطباء يحتاج مراجعة الاتفاق.",
+  incompatible_plan: "للمريض خطة قائمة غير قابلة للإضافة بهذه الفاتورة؛ راجع الخطة الأصلية دون إنشاء خطة مكررة.",
+  bad_site: "موضع الحالة لا يطابق نطاق هذا العلاج. صحّح الموضع السريري أولًا؛ الموضع الفارغ لا يثبت التوافق.",
   idempotency_conflict: "هذا الطلب أُرسل سابقًا ببنودٍ مختلفة — أعد فتح نموذج الفاتورة.",
   ambiguous_case: "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة التي يرتبط بها البند.",
   bad_case: "الحالة المختارة ليست حالة مفتوحة لهذا المريض وبتخصص البند.",
@@ -288,5 +308,5 @@ export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   case_mismatch: "بند الخطة المطابق لهذا العلاج مرتبط بحالةٍ أخرى — اختر حالته أو اترك الحالة للربط التلقائي.",
   shape_mismatch: "يوجد بند خطة مفتوح لنفس الخدمة والسن بكميةٍ أو عدد جلساتٍ أو أسطحٍ مختلفة — طابِق الفاتورة مع الخطة أو اطلب من الطبيب تعديلها أولًا.",
   ambiguous_item: "يوجد أكثر من بند خطة مفتوح مطابق لهذا العلاج — راجع الخطة قبل إصدار الفاتورة.",
-  already_billed: "هذا العلاج مفوتر مسبقًا لهذا المريض بفاتورةٍ قائمة ولم يبدأ بعد — لا تُصدر فاتورةً ثانية للعمل نفسه (ألغِ الأولى أو صحّحها إن كان خطأ).",
+  already_billed: "هذا العلاج له فاتورة قائمة — استخدم البند الأصلي؛ الإلغاء والتصحيح لا يسمحان بفوترة العمل نفسه من جديد.",
 };

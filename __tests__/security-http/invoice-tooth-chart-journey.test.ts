@@ -163,8 +163,8 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await row.getByTestId("scope-upper").click();
     expect(await row.getByTestId("scope-upper").getAttribute("aria-pressed")).toBe("true");
     expect(await page.getByTestId("invoice-tooth-button-0").count()).toBe(0);
+    await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
     expect(await page.getByRole("button", { name: "احفظ الفاتورة" }).isEnabled()).toBe(true);
-    await page.getByTestId("invoice-clinical-preview-0").waitFor();
     await save(page);
     expect(await cases(patientId)).toEqual([{ specialty: "orthodontics", site: "الفك العلوي" }]);
     await context.close();

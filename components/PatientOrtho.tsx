@@ -313,17 +313,17 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId }: { patientId: number }) {
+export function PatientOrtho({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
+function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -414,6 +414,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
   const refreshAfterConfirmedChange = () => {
     if (!owner.active || owner.denied) return;
     setOnboardingRevision((value) => value + 1);
+    onClinicalChange?.();
     load();
   };
   const currentCase = (id: number) => currentView() && owner.cases.some((row) => row.id === id);
@@ -475,7 +476,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
       {signVisitId ? (
-        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={safeError} />
+        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={safeError} onSigned={refreshAfterConfirmedChange} />
       ) : null}
       {saved && !savedCaseAvailable ? (
         <p role="status" className="text-xs text-slate-600">احتُفظ بمسودة الموعد دون عرضها؛ الحالة المرتبطة بها غير متاحة في القراءة الحالية.</p>
@@ -1043,7 +1044,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
  * فيصل المريض إلى الاستقبال وزيارته موقّعة: تراها «ماذا أُنجز اليوم» وتحصّل أو تؤجّل فقط.
  * من أراد إضافة إجراءٍ أو تشخيص يفتح «زيارة اليوم» ويوقّع من هناك.
  */
-function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (message: string | null) => void }) {
+function SignTodayVisitCard({ visitId, onError, onSigned }: { visitId: number; onError: (message: string | null) => void; onSigned?: () => void }) {
   const form = useOrthoDraft(`sign:${visitId}`);
   const session = useSession();
   const canSign = session?.role === "doctor" || session?.role === "admin";
@@ -1064,6 +1065,7 @@ function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (m
       if (!form.current(operation)) return;
       if (!response.ok) { if (response.status >= 500) form.uncertain(); onError(payload?.message ?? "تعذّر توقيع الزيارة."); return; }
       form.commit("signed", true);
+      onSigned?.();
     } catch {
       if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد توقيع الزيارة. أعد قراءة السجل قبل المحاولة."); }
     } finally {

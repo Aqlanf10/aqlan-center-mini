@@ -1099,7 +1099,12 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                         {(item.sessionCount ?? 1) > 1 ? (
                           <span className="shrink-0 text-slate-400">· جلسة {item.sessionsCompleted ?? 0}/{item.sessionCount ?? 1}</span>
                         ) : null}
-                        {item.billingStatus === "billed" ? (
+                        {item.billingStatus === "needs_financial_review" ? (
+                          <span role="status" data-testid={`plan-item-financial-review-${item.id}`}
+                            className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">
+                            يحتاج مراجعة مالية — لا تُنشأ فاتورة جديدة لهذا البند
+                          </span>
+                        ) : item.billingStatus === "billed" ? (
                           <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">مفوتر</span>
                         ) : item.billingStatus === "included_in_package" ? (
                           <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">ضمن الباقة</span>

@@ -24,6 +24,7 @@ import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "
 import { ServiceSelect } from "./ServiceSelect";
 import { VisitMaterials } from "./VisitMaterials";
 import { QuickServicePicker } from "./QuickServicePicker";
+import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, plannedItemBlock, visitSignatureBlock } from "./invoice-clinical-readiness";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -114,7 +115,10 @@ interface Visit {
   }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
-    toothCode: number | null; billingRule: BillingRule;
+    toothCode: number | null; surfaces?: string | null; billingRule: BillingRule;
+    caseId?: number | null; caseSite?: string | null; origin?: string;
+    originInvoiceId?: number | null; billedInvoiceId?: number | null; billingStatus?: string;
+    clinicalConsentRecorded?: boolean; financialReviewRequired?: boolean; prebilled?: boolean;
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
     quantity: number; status: string;
     /* (المراجعة النهائية للمالك — TD-05) عملة اتفاق خطة هذا البند بعينه:
@@ -134,6 +138,7 @@ interface Visit {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
+    financialReviewRequired?: boolean; clinicalConsentRecorded?: boolean;
   }[];
   /** طلبات المختبر المرتبطة بالزيارة؛ لا تثبت نسبتها إلى إجراء بعينه. */
   labOrders: {
@@ -217,6 +222,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const lastAppliedOwner = useRef<typeof owner | null>(null);
   const command = useRef<{ owner: typeof owner } | null>(null);
   const [loadedOwner, setLoadedOwner] = useState<typeof owner | null>(null);
+  // A route/principal owner is not permission to reuse an old accepted clinical read.
+  // Clear synchronously when any refresh begins; stale event closures cannot sign during it.
+  const acceptedReadOwner = useRef<typeof owner | null>(null);
   useLayoutEffect(() => {
     liveOwner.current = owner;
     return () => {
@@ -361,20 +369,26 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false) => {
     if (!currentOwner()) return false;
+    acceptedReadOwner.current = null;
     const sequence = ++loadSequence.current;
     const stillCurrent = () => currentOwner() && sequence === loadSequence.current;
     try {
-      const [visitResponse, serviceResponse, partyResponse] = await Promise.all([
-        fetch(`/api/visits/${visitId}/clinical`, { cache: "no-store" }),
-        fetch("/api/services", { cache: "no-store" }),
+      // Check the authoritative status before reading its body or waiting for
+      // auxiliary catalogues: a stalled 403 body must not retain old clinical authority.
+      const visitResponse = await fetch(`/api/visits/${visitId}/clinical`, { cache: "no-store" });
+      if (!stillCurrent()) return false;
+      if (!visitResponse.ok) throw new Error(visitResponse.status === 401 || visitResponse.status === 403
+        ? "تعذّر تأكيد صلاحية قراءة الزيارة الحالية. أعد التحميل بعد التحقق من الوصول."
+        : "تعذّر تحميل الزيارة الحالية. أعد المحاولة.");
+      const [payload, serviceResponse, partyResponse] = await Promise.all([
+        visitResponse.json(), fetch("/api/services", { cache: "no-store" }),
         fetch("/api/parties?kind=doctor", { cache: "no-store" }),
       ]);
-      const [payload, catalog, parties] = await Promise.all([
-        visitResponse.json(), serviceResponse.ok ? serviceResponse.json() : null,
+      const [catalog, parties] = await Promise.all([
+        serviceResponse.ok ? serviceResponse.json() : null,
         partyResponse.ok ? partyResponse.json() : null,
       ]);
       if (!stillCurrent()) return false;
-      if (!visitResponse.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
       const loaded = payload as Visit;
       if (loaded.id !== visitId || (expectedPatientId !== undefined && loaded.patientId !== expectedPatientId)) {
@@ -452,6 +466,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = "";
       }
       lastAppliedOwner.current = owner;
+      acceptedReadOwner.current = owner;
       setLoadedOwner(owner); setVisit(loaded); setNotes(nextNotes); setDrafts(nextDrafts);
       setDoctorId(nextDoctorId); setAutoFilled(filled); setVisitCurrency(loadedCurrency); setDirty(false);
       if (serviceResponse.ok || newOwner) setServices(catalog ?? []);
@@ -459,7 +474,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       setError(null);
       return true;
     } catch (loadError) {
-      if (stillCurrent()) { setErrorOwner(owner); setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل."); }
+      if (stillCurrent()) {
+        acceptedReadOwner.current = null;
+        setLoadedOwner(null); setReviewOpen(false); setBillingPreview(null);
+        setErrorOwner(owner); setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+        // Keep the owner's local notes/drafts in memory, but hide the unverified
+        // persisted view until a fresh authorized read succeeds.
+      }
       return false;
     }
   }, [visitId, expectedPatientId, currentOwner, owner]);
@@ -491,7 +512,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
   };
   const send = useCallback(async (body: Record<string, unknown>) => {
-    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return false;
+    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner) return false;
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
@@ -515,7 +536,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
   const sign = useCallback(async () => {
-    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
+    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner) return;
+    const blocked = visitSignatureBlock(visit);
+    if (blocked) { setError(blocked); return; }
     if (orthoSession?.elastics === "" && visit?.ortho?.visitAdjustmentId === null) {
       setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
@@ -587,7 +610,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
-    if (id !== visitId || !ownsVisit || !currentOwner() || command.current?.owner === owner) return null;
+    if (id !== visitId || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner) return null;
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
@@ -619,10 +642,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   const hasDraft = dirty || orthoSession !== null || Boolean(addendum.trim() || overrideReason.trim() || noChargeAdjustment || noChargeReason.trim());
   useLayoutEffect(() => {
-    draftForLeave.current = { owner, dirty: ownsVisit && hasDraft };
+    draftForLeave.current = { owner, dirty: lastAppliedOwner.current === owner && hasDraft };
   }, [owner, ownsVisit, hasDraft]);
   const canLeave = useCallback(() => {
-    if (!ownsVisit || !currentOwner()) return true;
+    if (!currentOwner()) return true;
     if (command.current?.owner === owner) {
       setError("هناك طلب حفظ أو توقيع قيد التنفيذ. انتظر نتيجته قبل الانتقال.");
       return false;
@@ -638,7 +661,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     if (typeof window === "undefined") return;
     const warn = (event: BeforeUnloadEvent) => {
       const unsaved = draftForLeave.current.owner === owner && draftForLeave.current.dirty;
-      if (!ownsVisit || !currentOwner() || (!unsaved && command.current?.owner !== owner)) return;
+      if (!currentOwner() || (!unsaved && command.current?.owner !== owner)) return;
       event.preventDefault(); event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
@@ -746,13 +769,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const plannedToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
   const doneToday = drafts.filter((draft) => draft.planItemId !== null);
   const notDoneToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
+  const signatureBlock = visitSignatureBlock(visit);
 
   const addPlannedItem = (item: Visit["outstanding"][number]) => {
     if (busy || !currentOwner() || command.current?.owner === owner) return;
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
-    const suggested = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+    const suggested = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
     /* (المراجعة النهائية للمالك — TD-05) السعر المقترح يُنسَّق بعملة **بند
        الخطة هذا نفسه** لا بعملةٍ مستنتَجة على مستوى الزيارة: زيارةٌ فارغة لا
        إجراءاتٍ فيها لا تعرف عملتها، فبندٌ دولاري مخزّنٌ ١٥٠٠٠٠ وحدة صغرى
@@ -767,7 +791,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         labCategory: null,
         serviceId: item.serviceId ?? 0,
         toothCode: item.toothCode ? String(item.toothCode) : "",
-        surfaces: "",
+        surfaces: item.surfaces ?? "",
         quantity: 1,
         price: formatAmount(suggested, itemCurrency),
         doctorId,
@@ -1206,13 +1230,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             {plannedToday.map((item) => {
               const sessionIndex = item.doneSessions + 1;
               const lineTotal = item.unitPriceMinor * item.quantity;
-              const price = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+              const price = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
               return (
-                <li key={item.planItemId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <li key={item.planItemId} data-testid={`planned-item-${item.planItemId}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-navy-900">
                       {item.serviceName}
                       {item.toothCode ? <span className="rounded-lg bg-navy-50 px-1.5 py-0.5 mr-1.5 text-[10px] font-bold text-navy-800">سن {item.toothCode}</span> : null}
+                      {item.surfaces ? <span data-testid={`planned-item-surfaces-${item.planItemId}`} className="ms-1 text-[10px]">أسطح {item.surfaces}</span> : null}
                       {item.sessionCount > 1 ? (
                         <span className="text-[10px] font-normal text-slate-500">
                           {" "}· جلسة {sessionIndex} من {item.sessionCount}
@@ -1220,11 +1246,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       ) : null}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {item.includedByAgreement
-                        ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
+                      {hasUnresolvedClinicalFinance(item)
+                        ? "التغطية المالية غير محسومة؛ يمكن توثيق العمل كمسودة"
+                        : item.prebilled
+                        ? "مفوتر مسبقًا — لا تُنشأ فاتورة ثانية لهذا البند"
+                        : item.includedByAgreement
+                          ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
                         : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
                       {" · من «"}{item.planTitle}{"»"}
                     </p>
+                    {plannedItemBlock(item) ? <p role="status" data-testid={`planned-item-blocked-${item.planItemId}`}
+                      className="text-[10px] font-bold text-amber-800">{plannedItemBlock(item)}</p> : null}
                     {item.unmetRequirements && item.unmetRequirements.length > 0 ? (
                       <p className="text-[10px] font-bold text-amber-800">⚠️ يتطلب أولًا: {item.unmetRequirements.join("، ")}</p>
                     ) : null}
@@ -1495,6 +1527,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             </p>
           ) : null}
 
+        {signatureBlock ? <p role="status" data-testid="visit-signature-blocked"
+          className="mb-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-amber-900">{signatureBlock}</p> : null}
         <div id="visit-sign" className="flex scroll-mt-4 flex-wrap gap-2">
           <button onClick={() => void send(payload())} disabled={busy}
             className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-navy-800 disabled:opacity-40">
@@ -1549,6 +1583,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               <p className="text-[11px] text-slate-500">{visit.patientName}</p>
             </header>
 
+            {signatureBlock ? <p role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-900">{signatureBlock}</p> : null}
             <dl className="space-y-2 text-xs">
               {orthoSession && visit.ortho?.visitAdjustmentId === null ? (
                 <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
@@ -1634,7 +1669,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 </div>
               ) : null}
 
-              {serverZeroDue ? (
+              {signatureBlock || !billingPreview ? (
+                <div role="status" data-testid="visit-financial-review-required" className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                  <dt className="font-extrabold text-amber-900">الاستحقاق المالي غير متحقق</dt>
+                  <dd className="mt-1 font-bold text-amber-800">{signatureBlock ?? "لم تكتمل معاينة الاستحقاق من الخادم؛ مبالغ المسودة ليست مبلغًا للتحصيل."}</dd>
+                </div>
+              ) : serverZeroDue ? (
                 <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3" data-testid="no-additional-due">
                   <dt className="flex items-center justify-between font-extrabold text-emerald-900">
                     <span>الاستحقاق المالي اليوم</span>
@@ -1685,10 +1725,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
                 رجوع — أكمل العمل
               </button>
-              <button type="button" onClick={() => void sign()} disabled={busy}
+              <button type="button" onClick={() => void sign()} disabled={busy || Boolean(signatureBlock)}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                 {busy
                   ? "جارٍ الإنهاء…"
+                  : signatureBlock ? "التوقيع متوقف لحين استكمال المراجعة"
+                  : !billingPreview ? "تأكيد التوقيع — يعاد التحقق من الاستحقاق في الخادم"
                   : mixedCurrencies || billingPreview?.mixedCurrencies
                     ? "تأكيد إنهاء الزيارة — عملتان: فاصل الإجراءات أولًا"
                     : serverZeroDue

@@ -26,6 +26,8 @@ const STANDALONE_TITLE = "تخصص تقويم مستقل بلا حالة تقو�
 const ENDO_TITLE = "حالة جذور اصطناعية قابلة للإغلاق";
 const SERVICE = "علاج جذور اصطناعي";
 const DRAFT = "مسودة اصطناعية يجب الاحتفاظ بها";
+const WORKFLOW_ASSESSMENT = "حالة تقييم من ملخص المريض الحالي";
+const WORKFLOW_LEGACY = "حالة تاريخية من ملخص المريض الحالي";
 const entry = () => `${baseUrl}/patients/${h.seeded.patientAId}?tab=treatment&sub=cases&caseProbe=retained&orthoCaseId=959999&visitId=959998#record`;
 const view = (page: Page) => page.getByTestId("patient-cases");
 const shortcut = (page: Page, id = HISTORICAL) => page.getByTestId(`cases-open-ortho-${id}`);
@@ -91,6 +93,9 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
   let malformed = options.malformed ?? false;
   let caseReadFails = false, committedCase = false;
   const reads = { cases: 0, ortho: 0 };
+  // Shared summary projections never own another /cases request.
+  let destinationStarted = false;
+  let pinnedCaseReads: number | null = null;
   const casePath = `/api/patients/${h.seeded.patientAId}/cases`;
   context.on("request", request => {
     if (request.isNavigationRequest() && request.resourceType() === "document") documents.push(request.url());
@@ -112,6 +117,17 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
         await json(route, { message: status === 500 ? "خطأ اصطناعي بعد كتابة محتملة" : REJECTED }, status); return;
       }
       unexpected.push(`${method} ${url.pathname}${url.search}`); await route.abort(); return;
+    }
+    if (method === "GET" && url.pathname === `/api/patients/${h.seeded.patientAId}/workflow` && url.search === "") {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      const workflow = await response.json();
+      await json(route, { ...workflow,
+        assessmentCases: [{ id: 959205, patientId: h.seeded.patientAId, kind: "specialty", orthoCaseId: null,
+          specialty: "orthodontics", title: WORKFLOW_ASSESSMENT, needsAssessment: true }],
+        legacyCases: [{ id: 959206, patientId: h.seeded.patientAId, kind: "specialty", orthoCaseId: null,
+          specialty: "orthodontics", title: WORKFLOW_LEGACY, site: null, status: "active", legacy: true }],
+      }); return;
     }
     if (method === "GET" && url.pathname === casePath && url.search === "") {
       reads.cases++;
@@ -137,10 +153,30 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
   page.on("download", download => downloads.push(download.suggestedFilename()));
   const assertIsolated = () => {
     expect(unexpected).toEqual([]); expect(errors).toEqual([]); expect(downloads).toEqual([]); expect(armed).toBeNull();
+    if (pinnedCaseReads !== null) {
+      expect(reads.cases).toBe(pinnedCaseReads);
+      expect(destinationStarted).toBe(true);
+    }
   };
   return { page, context, writes, documents, reads, casePath,
     setMalformed: (next: boolean) => { malformed = next; },
     setCaseReadFailure: (next: boolean) => { caseReadFails = next; },
+    beginOrthoBannerReads: () => { expect(destinationStarted).toBe(false); destinationStarted = true; },
+    pinOrthoBannerReads: async (sourceReads: number) => {
+      expect(destinationStarted).toBe(true);
+      const assessment = page.getByTestId("assessment-banner-orthodontics");
+      await assessment.waitFor({ timeout: 5_000 });
+      expect(await assessment.innerText()).toContain(WORKFLOW_ASSESSMENT);
+      const history = page.getByTestId("legacy-case-banner-orthodontics");
+      expect(await history.count()).toBe(0);
+      await settle(page);
+      // Exact contract: destination banners use the workflow response, so zero
+      // additional Cases GETs are allowed before or after retired controls run.
+      expect(reads.cases).toBe(sourceReads);
+      pinnedCaseReads = sourceReads;
+      await settle(page); expect(reads.cases).toBe(sourceReads);
+      return sourceReads;
+    },
     arm: (method: string, path: string, status: 409 | 500 = 409) => { expect(armed).toBeNull(); armed = { method, path, status }; },
     release: async (index = 0) => {
       const write = writes[index]; expect(write).toBeDefined();
@@ -394,13 +430,21 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
     const f = await fixture(390, { malformed: true });
     await f.run(async () => {
       const retry = f.page.getByRole("button", { name: "إعادة تحميل الحالات", exact: true }); await retry.waitFor();
+      const retiredRetry = await retry.elementHandle(); expect(retiredRetry).not.toBeNull();
       expect(await f.page.getByRole("button", { name: OPEN, exact: true }).count()).toBe(0);
       expect(await view(f.page).count()).toBe(0);
       const original = f.page.url(), length = await f.page.evaluate(() => history.length);
       await retained(f.page, original, length); expect(f.reads.ortho).toBe(0); expect(f.writes).toEqual([]);
       f.setMalformed(false); await retry.click(); await shortcut(f.page).waitFor();
+      // The malformed response and explicit verified retry are the only Cases
+      // reads. Check this before entering a destination with its own readers.
+      expect(f.reads.cases).toBe(2);
+      f.beginOrthoBannerReads();
       await shortcut(f.page).click(); await opened(f.page, original, length);
-      expect(f.reads.cases).toBe(2); expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);
+      const settledReads = await f.pinOrthoBannerReads(2);
+      await retiredRetry!.evaluate(element => (element as HTMLButtonElement).click()); await settle(f.page);
+      expect(f.reads.cases).toBe(settledReads); expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);
+      await retiredRetry!.dispose();
     });
   });
 
@@ -420,6 +464,7 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
 
       const notice = f.page.getByTestId("cases-write-uncertain");
       const review = notice.getByRole("button", { name: REVIEW, exact: true });
+      const retiredReview = await review.elementHandle(); expect(retiredReview).not.toBeNull();
       expect(await notice.innerText()).toContain("قد يكون الطلب نُفّذ");
       expect(await notice.innerText()).toContain("لن يُعاد إرسال الطلب تلقائيًا");
       expect(await field.inputValue()).toBe(DRAFT); expect(await field.isDisabled()).toBe(true);
@@ -471,10 +516,17 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
       expect(f.reads.cases).toBe(initialReads + 3); expect(await fresh.inputValue()).toBe(`${DRAFT} — طلب جديد`);
       await withDiscard(f.page, false, () => chooseTreatment(f.page, "ortho"), UNCERTAIN_LEAVE);
       await retained(f.page, original, length); expect(f.writes).toHaveLength(1);
+      expect(f.reads.cases).toBe(initialReads + 3);
+      f.beginOrthoBannerReads();
       await withDiscard(f.page, true, () => chooseTreatment(f.page, "ortho"), UNCERTAIN_LEAVE);
       await opened(f.page, original, length);
-      expect(f.writes).toHaveLength(1); expect(f.reads.cases).toBe(initialReads + 3); expect(f.documents).toHaveLength(1);
-      await originalSave!.dispose();
+      const settledReads = await f.pinOrthoBannerReads(initialReads + 3);
+      // Retained native controls cannot revive either an old write or a read.
+      // Captured React callback retirement remains covered by the component suite.
+      await originalSave!.evaluate(element => (element as HTMLButtonElement).click());
+      await retiredReview!.evaluate(element => (element as HTMLButtonElement).click()); await settle(f.page);
+      expect(f.writes).toHaveLength(1); expect(f.reads.cases).toBe(settledReads); expect(f.documents).toHaveLength(1);
+      await originalSave!.dispose(); await retiredReview!.dispose();
     });
   });
 

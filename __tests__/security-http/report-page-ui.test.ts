@@ -3,7 +3,7 @@ import { chromium, type Browser, type Page, type Route } from "playwright";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { addDays } from "../../lib/schedule";
-import { friendlyDateLong } from "../../lib/reminders";
+import { friendlyDateNamed } from "../../lib/reminders";
 import { baseUrl, harness } from "./_server";
 
 // Real built daily-report page and isolated synthetic admin session. Every
@@ -96,7 +96,7 @@ async function fixture(width = 1280) {
         viewAtRequest: {
           date: dateInput?.value ?? null,
           hasReport: Boolean(report?.querySelector('[aria-label="الحضور"]')),
-          hasPrintAction: Boolean(report?.querySelector(".print-actions")),
+          hasPrintAction: Boolean(report?.querySelector('[data-testid="print-report"]')),
           hasShare: Boolean(report?.querySelector('a[href*="wa.me"]')),
         },
         respond: (status) => respond({ ok: status >= 200 && status < 300, status,
@@ -141,7 +141,7 @@ async function requestDate(page: Page, index: number) {
 /** No report values, print action or share link may exist in the rendered page. */
 async function noReport(page: Page) {
   await expect.poll(() => page.locator('[aria-label="الحضور"]').count()).toBe(0);
-  await expect.poll(() => page.locator(".print-actions").count()).toBe(0);
+  await expect.poll(() => page.locator('[data-testid="print-report"]').count()).toBe(0);
   await expect.poll(() => page.locator('a[href*="wa.me"]').count()).toBe(0);
 }
 async function assertReportBounds(page: Page, width: number) {
@@ -165,10 +165,14 @@ describe("built daily report page date identity and stale-response containment",
     try {
       const today = await requestDate(f.page, 0);
       await complete(f.page, 0, dayPayload(today, 17, 3));
-      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).count()).toBe(1);
-      expect(await f.page.getByTestId("daily-report").getByRole("button", { name: "اطبع", exact: true }).count()).toBe(1);
+      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).count()).toBe(1);
+      // The date field is labeled, keeps the ISO contract, and an unambiguous
+      // Arabic month-name date sits beside it regardless of input locale.
+      expect(await f.page.getByLabel("تاريخ التقرير", { exact: true }).inputValue()).toBe(today);
+      expect(await f.page.getByTestId("selected-date-text").innerText()).toBe(friendlyDateNamed(today));
+      expect(await f.page.getByTestId("daily-report").getByRole("button", { name: "طباعة التقرير", exact: true }).count()).toBe(1);
       const shared = await shareParams(f.page);
-      expect(shared).toContain(`تقرير ${friendlyDateLong(today)}`);
+      expect(shared).toContain(`تقرير ${friendlyDateNamed(today)}`);
       expect(shared).toContain("الحضور: 17");
       expect(shared).toContain("تراكيب متأخرة: 3");
       expect(await f.page.getByText("تراكيب متأخرة بالمختبر: 3", { exact: false }).count()).toBe(1);
@@ -179,12 +183,18 @@ describe("built daily report page date identity and stale-response containment",
       await f.page.getByTestId("daily-report").screenshot({ path: screenshot.replace(/\.png$/, `-${width}.png`) });
 
       // Browser print keeps the center identity and the report's own date, and
-      // hides the interactive date picker and share action.
+      // hides the interactive date picker, print action and share link.
       await f.page.emulateMedia({ media: "print" });
-      expect(await f.page.locator("main > div.print\\:block").isVisible()).toBe(true);
-      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).isVisible()).toBe(true);
+      const paperHeader = f.page.locator("main > div.print\\:block");
+      expect(await paperHeader.isVisible()).toBe(true);
+      const headerText = await paperHeader.innerText();
+      expect(headerText).toContain(friendlyDateNamed(today));
+      expect(headerText).toContain("تقرير الأداء اليومي");
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).isHidden()).toBe(true);
+      expect(await f.page.locator('input[type="date"]').isHidden()).toBe(true);
       expect(await f.page.locator('a[href*="wa.me"]').isHidden()).toBe(true);
-      expect(await f.page.getByTestId("daily-report").locator(".print-actions").isHidden()).toBe(true);
+      expect(await f.page.getByTestId("daily-report").locator('[data-testid="print-report"]').isHidden()).toBe(true);
+      expect(await f.page.getByRole("link", { name: "فتح شاشة المختبر" }).isHidden()).toBe(true);
       await assertReportBounds(f.page, width);
       if (width === 1280) {
         await f.page.getByTestId("daily-report").screenshot({ path: screenshot.replace(/\.png$/, "-print-1280.png") });
@@ -213,12 +223,12 @@ describe("built daily report page date identity and stale-response containment",
       // Browser print during the pending window carries no old report either.
       await f.page.emulateMedia({ media: "print" });
       await noReport(f.page);
-      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).count()).toBe(0);
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).count()).toBe(0);
       await f.page.emulateMedia({ media: "screen" });
 
       await complete(f.page, 1, dayPayload(a, 42, 5));
-      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(a)}`, { exact: false }).count()).toBe(1);
-      expect(await shareParams(f.page)).toContain(`تقرير ${friendlyDateLong(a)}`);
+      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(a)}`, { exact: false }).count()).toBe(1);
+      expect(await shareParams(f.page)).toContain(`تقرير ${friendlyDateNamed(a)}`);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -243,7 +253,7 @@ describe("built daily report page date identity and stale-response containment",
       await expect.poll(() => f.page.getByText("جارٍ إعداد التقرير اليومي", { exact: false }).count()).toBe(1);
       await noReport(f.page);
       await complete(f.page, 2, dayPayload(b, 42, 5));
-      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(b)}`, { exact: false }).count()).toBe(1);
+      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(b)}`, { exact: false }).count()).toBe(1);
 
       // B→A with a payload whose own date is not the requested one: a clear
       // error, never a silent day swap.
@@ -258,8 +268,8 @@ describe("built daily report page date identity and stale-response containment",
       await waitForRequest(f.page, 4);
       expect(await requestDate(f.page, 4)).toBe(a);
       await complete(f.page, 4, dayPayload(a, 23, 1));
-      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(a)}`, { exact: false }).count()).toBe(1);
-      expect(await shareParams(f.page)).toContain(`تقرير ${friendlyDateLong(a)}`);
+      await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(a)}`, { exact: false }).count()).toBe(1);
+      expect(await shareParams(f.page)).toContain(`تقرير ${friendlyDateNamed(a)}`);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -290,12 +300,12 @@ describe("built daily report page date identity and stale-response containment",
       if (outcome === "success") await body(f.page, 1, dayPayload(a, 17, 3));
       else await rejectBody(f.page, 1);
 
-      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(a)}`, { exact: false }).count()).toBe(0);
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateNamed(a)}`, { exact: false }).count()).toBe(0);
       expect(await f.page.getByText("Obsolete JSON failure", { exact: true }).count()).toBe(0);
       if (currentState === "success") {
-        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(b)}`, { exact: false }).count()).toBe(1);
+        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(b)}`, { exact: false }).count()).toBe(1);
         expect(await shareParams(f.page)).toContain("الحضور: 42");
-        expect(await f.page.locator(".print-actions").count()).toBe(1);
+        expect(await f.page.locator('[data-testid="print-report"]').count()).toBe(1);
       } else {
         await noReport(f.page);
       }
@@ -303,7 +313,7 @@ describe("built daily report page date identity and stale-response containment",
       expect(await f.page.getByText("جارٍ إعداد التقرير اليومي", { exact: false }).count()).toBe(currentState === "pending" ? 1 : 0);
       if (currentState === "pending") {
         await complete(f.page, 2, dayPayload(b, 42, 5));
-        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateLong(b)}`, { exact: false }).count()).toBe(1);
+        await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(b)}`, { exact: false }).count()).toBe(1);
         expect(await shareParams(f.page)).toContain("الحضور: 42");
       }
       f.assertIsolated();
@@ -316,19 +326,19 @@ describe("built daily report page date identity and stale-response containment",
       const today = await requestDate(f.page, 0);
       const a = addDays(today, -1);
       await complete(f.page, 0, dayPayload(today, 17, 3));
-      await expect.poll(() => f.page.locator(".print-actions").count()).toBe(1);
+      await expect.poll(() => f.page.locator('[data-testid="print-report"]').count()).toBe(1);
 
       await f.page.getByTestId("daily-report").locator('input[type="date"]').fill(a);
       await waitForRequest(f.page, 1);
       await complete(f.page, 1, { message: "Synthetic report failure" }, 500);
       await expect.poll(() => f.page.getByRole("alert").filter({ hasText: "Synthetic report failure" }).count()).toBe(1);
       await noReport(f.page);
-      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).count()).toBe(0);
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).count()).toBe(0);
 
       // Browser print: center identity survives, the old report does not.
       await f.page.emulateMedia({ media: "print" });
       await noReport(f.page);
-      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateLong(today)}`, { exact: false }).count()).toBe(0);
+      expect(await f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).count()).toBe(0);
       expect(await f.page.locator("main > div.print\\:block").isVisible()).toBe(true);
       await f.page.emulateMedia({ media: "screen" });
 
@@ -337,7 +347,7 @@ describe("built daily report page date identity and stale-response containment",
       await waitForRequest(f.page, 2);
       expect(await requestDate(f.page, 2)).toBe(today);
       await complete(f.page, 2, dayPayload(today, 17, 3));
-      await expect.poll(() => f.page.locator(".print-actions").count()).toBe(1);
+      await expect.poll(() => f.page.locator('[data-testid="print-report"]').count()).toBe(1);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -347,10 +357,12 @@ describe("built daily report page date identity and stale-response containment",
     try {
       const today = await requestDate(f.page, 0);
       await complete(f.page, 0, dayPayload(today, 17, 3));
-      await expect.poll(() => f.page.locator(".print-actions").count()).toBe(1);
+      await expect.poll(() => f.page.locator('[data-testid="print-report"]').count()).toBe(1);
 
       await f.page.getByTestId("daily-report").locator('input[type="date"]').fill("");
       await expect.poll(() => f.page.getByText("التاريخ المختار غير صالح", { exact: false }).count()).toBe(1);
+      // No unambiguous named date remains beside an empty field.
+      await expect.poll(() => f.page.getByTestId("selected-date-text").count()).toBe(0);
       // Passive effects have flushed by the double animation frame: no
       // ambiguous /api/report request ever left the page for the empty value.
       await f.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -363,7 +375,7 @@ describe("built daily report page date identity and stale-response containment",
       await waitForRequest(f.page, 1);
       expect(await requestDate(f.page, 1)).toBe(today);
       await complete(f.page, 1, dayPayload(today, 17, 3));
-      await expect.poll(() => f.page.locator(".print-actions").count()).toBe(1);
+      await expect.poll(() => f.page.locator('[data-testid="print-report"]').count()).toBe(1);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
