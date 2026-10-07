@@ -199,6 +199,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/referrals/mine": { GET: CLINICAL },
   "/api/report": { GET: CLINIC },
   "/api/reports": { GET: ["admin", "accountant"] },
+  "/api/reports/daily-clinic": { GET: ADMIN },
   "/api/reports/saved": { GET: ["admin", "reception", "doctor", "accountant"], POST: CLINIC, PATCH: CLINIC, DELETE: CLINIC },
   "/api/service-materials": { GET: CLINIC, POST: FRONT_DESK, DELETE: FRONT_DESK },
   "/api/services": { GET: ["admin", "reception", "doctor", "accountant"], POST: ADMIN },
@@ -341,3 +342,4 @@ export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): R
 
 export const API_ROUTE_UNKNOWN_MESSAGE = "هذا المسار غير موجود.";
 export const API_METHOD_NOT_ALLOWED_MESSAGE = "هذه العملية غير مدعومة على هذا المسار.";
+

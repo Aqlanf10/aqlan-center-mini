@@ -1,0 +1,109 @@
+.report {
+  width: 100%;
+  max-width: 1440px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 20px 16px 96px;
+  color: #162a3d;
+  overflow-wrap: anywhere;
+}
+
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-block: 16px 24px; }
+.controls label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; max-width: 100%; }
+.controls input { min-width: 0; max-width: 100%; border: 1px solid #8799aa; border-radius: 8px; background: white; padding: 9px 12px; direction: ltr; }
+.button, .primaryButton { border: 1px solid #8799aa; background: white; color: #162a3d; border-radius: 9px; padding: 10px 14px; font-weight: 600; font-size: 13px; }
+.primaryButton { background: #162a3d; color: white; border-color: #162a3d; }
+.button:disabled { opacity: .5; cursor: not-allowed; }
+.button:focus-visible, .primaryButton:focus-visible, .tableScroll:focus-visible { outline: 2px solid #2469aa; outline-offset: 3px; }
+.result { min-width: 0; }
+.paperHeading { border-bottom: 2px solid #162a3d; margin-bottom: 16px; padding-bottom: 12px; }
+.paperHeading h2 { font-size: 22px; font-weight: 700; margin-block: 3px; }
+.paperHeading p { margin-top: 5px; font-size: 13px; }
+.paperHeading .clinicName { font-size: 18px; font-weight: 700; }
+.basis { border: 1px solid #acc5da; background: #eef5fa; border-radius: 10px; padding: 14px; font-size: 13px; line-height: 1.85; }
+.basis p { margin-top: 5px; }
+.counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-block: 16px; }
+.counts > div { border: 1px solid #cbd5df; background: white; border-radius: 10px; padding: 12px; }
+.counts dt { font-size: 12px; color: #425870; }
+.counts dd { font-size: 24px; font-weight: 700; }
+.warning { margin-block: 16px; padding: 12px 14px; border: 1px solid #c88d27; background: #fffbeb; border-radius: 8px; color: #704408; font-size: 13px; line-height: 1.8; }
+.warning h2, .warning h3 { font-weight: 700; }
+.warning ul { list-style: disc; padding-inline-start: 20px; }
+.warning .button { margin-inline-start: 12px; }
+.status { padding: 24px 12px; text-align: center; }
+.section { margin-block: 28px; min-width: 0; }
+.section > h2 { font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+.note { font-size: 12px; color: #425870; line-height: 1.8; margin-bottom: 10px; }
+.currencyPanel { margin-block: 14px; }
+.currencyPanel h3 { font-weight: 700; margin-bottom: 6px; }
+.tableScroll { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid #becbd6; border-radius: 8px; background: white; }
+.report table { border-collapse: collapse; width: 100%; font-size: 12px; line-height: 1.7; table-layout: fixed; }
+.attendeeTable { min-width: 1120px; }
+.detailsTable { min-width: 800px; }
+.summaryTable { min-width: 600px; }
+.patientColumn { width: 18%; }
+.workColumn { width: 22%; }
+.attendeeTable:not(:has(colgroup)) th:first-child { width: 21%; }
+.attendeeTable:not(:has(colgroup)) thead tr:first-child th:nth-child(2) { width: 13%; }
+.summaryTable th:first-child { width: 52%; }
+.report th, .report td { padding: 9px 7px; border: 1px solid #becbd6; vertical-align: top; text-align: start; overflow-wrap: anywhere; white-space: normal; }
+.report thead th { background: #eaf0f5; font-weight: 700; text-align: center; vertical-align: middle; }
+.report tfoot th, .report tfoot td { background: #eef5fa; font-weight: 700; border-top: 2px solid #6b8195; }
+.report tbody th { font-weight: 600; }
+.report small { display: block; margin-top: 3px; color: #425870; font-size: 11px; line-height: 1.6; }
+.amount { font-variant-numeric: tabular-nums; max-width: 100%; overflow-wrap: anywhere; }
+.unknown { color: #8b4d09; font-weight: 600; }
+.report .unknown { color: #8b4d09; }
+.endNote { margin-block: 24px 0; padding-top: 12px; border-top: 2px solid #6b8195; font-size: 12px; line-height: 1.8; }
+.printOnly { display: none; }
+
+@media (max-width: 540px) {
+  .report { padding: 16px 10px 96px; }
+  .counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .controls { gap: 8px; }
+  .controls > .note { flex-basis: 100%; }
+}
+
+/* Named page and locally scoped rules leave /report and every other printed
+ * document unchanged, including when this CSS chunk remains in the browser. */
+@page aqlan-daily-clinic-close {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+@media print {
+  .report {
+    page: aqlan-daily-clinic-close;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    margin: 0;
+    color: black;
+    background: white;
+  }
+  .report .screenOnly { display: none !important; }
+  .report .printOnly { display: block; }
+  .report .section { margin-block: 6mm; }
+  .report .section > h2 { font-size: 12pt; break-after: avoid; }
+  .report .currencyPanel h3, .report .note { break-after: avoid; }
+  .report .tableScroll { overflow: visible; width: 100%; max-width: none; border: 0; border-radius: 0; }
+  .report table { width: 100%; min-width: 0; font-size: 8.5pt; line-height: 1.45; }
+  .report th, .report td { padding: 2mm 1.2mm; border-color: #777; color: black; }
+  .report small, .report .note { font-size: 8pt; color: #333; }
+  .report thead { display: table-header-group; }
+  /* Footer totals print once after the full result, never once per page. */
+  .report tfoot { display: table-row-group; }
+  .report tr { break-inside: avoid; page-break-inside: avoid; }
+  .report thead th, .report tfoot th, .report tfoot td { background: white; }
+  .report .paperHeading, .report .counts > div { break-inside: avoid; }
+  .report .paperHeading { margin-bottom: 4mm; padding-bottom: 3mm; }
+  .report .paperHeading h2 { font-size: 17pt; }
+  .report .paperHeading p { font-size: 9pt; }
+  .report .basis, .report .warning { background: white; border-color: #777; border-radius: 0; font-size: 9pt; padding: 3mm; }
+  .report .counts { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2mm; }
+  .report .counts > div { background: white; border-radius: 0; padding: 2mm; }
+  .report .counts dt { font-size: 8pt; color: #333; }
+  .report .counts dd { font-size: 14pt; }
+  .report .unknown { color: black; font-style: italic; }
+  .report .endNote { font-size: 9pt; }
+}
