@@ -1,7 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { insertStatement, insertionOrder, sequenceResets, sqlValue } from "../lib/backup";
+import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets, sqlValue, sqlValueForColumn } from "../lib/backup";
 
 describe("النسخة الاحتياطية", () => {
+  it("projects only scalar timestamps as PostgreSQL ISO text before driver decoding", () => {
+    expect(backupSelectColumns([
+      { column_name: "recorded_at", data_type: "timestamp with time zone" },
+      { column_name: 'local"time', data_type: "timestamp without time zone" },
+      { column_name: "id", data_type: "integer" },
+      { column_name: "depth", data_type: "numeric" },
+      { column_name: "details", data_type: "jsonb" },
+      { column_name: "tags", data_type: "ARRAY" },
+      { column_name: "day", data_type: "date" },
+    ])).toBe('(pg_catalog.to_json("recorded_at") #>> \'{}\') AS "recorded_at", '
+      + '(pg_catalog.to_json("local""time") #>> \'{}\') AS "local""time", '
+      + '"id", "depth", "details", "tags", "day"');
+  });
+
+  it("serializes exact timestamp text and SQL NULL without Date conversion", () => {
+    const value = "2001-02-03T04:05:06.123456+05:45";
+    expect(sqlValueForColumn(value, "timestamp with time zone")).toBe(`'${value}'`);
+    expect(sqlValueForColumn(null, "timestamp with time zone")).toBe("NULL");
+    expect(sqlValueForColumn("infinity", "timestamp without time zone")).toBe("'infinity'");
+  });
+
+  it("leaves the existing selection unchanged for tables without scalar timestamps", () => {
+    expect(backupSelectColumns([
+      { column_name: "id", data_type: "integer" },
+      { column_name: "details", data_type: "jsonb" },
+      { column_name: "tags", data_type: "ARRAY" },
+      { column_name: "day", data_type: "date" },
+    ])).toBe("*");
+  });
+
   it("يرتّب الجداول: المرجوع إليه قبل من يشير إليه", () => {
     const order = insertionOrder([
       { table: "payments", dependsOn: ["patients", "invoices"] },

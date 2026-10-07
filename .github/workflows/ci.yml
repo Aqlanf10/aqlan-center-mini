@@ -248,6 +248,21 @@ jobs:
       - name: HTTP security integration tests
         run: npm run test:security-http
 
+      # Exactly three intercepted synthetic report screenshots; no live clinic data,
+      # traces, browser storage, or broad artifact directory uploads.
+      - name: Upload daily report selected-date screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-selected-date-ui
+          path: |
+            .settings-ui-artifacts/daily-report-selected-day-1280.png
+            .settings-ui-artifacts/daily-report-selected-day-390.png
+            .settings-ui-artifacts/daily-report-selected-day-print-1280.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exact synthetic statement fixtures only; never upload real patient ledgers.
       - name: Upload patient statement cutoff screenshots
         if: always()
@@ -934,6 +949,42 @@ jobs:
             .settings-ui-artifacts/ortho-booking-duration-1280.png
             .settings-ui-artifacts/ortho-booking-390-bounds.json
             .settings-ui-artifacts/ortho-booking-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Only synthetic recall refusal/retry panels and their native bounds.
+      - name: Upload recall mutation refusal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recall-mutation-refusal-ui
+          path: |
+            .settings-ui-artifacts/recall-refusal-390.png
+            .settings-ui-artifacts/recall-refusal-1280.png
+            .settings-ui-artifacts/recall-retry-390.png
+            .settings-ui-artifacts/recall-retry-1280.png
+            .settings-ui-artifacts/recall-refusal-390-bounds.json
+            .settings-ui-artifacts/recall-refusal-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
+      # Only synthetic patient lab refusal/retry viewports and measured bounds.
+      # No cookies, storage, HAR, traces, real patients or broad directories.
+      - name: Upload patient lab status refusal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-lab-status-refusal-ui
+          path: |
+            .settings-ui-artifacts/lab-status-refusal-390.png
+            .settings-ui-artifacts/lab-status-refusal-1280.png
+            .settings-ui-artifacts/lab-status-retry-390.png
+            .settings-ui-artifacts/lab-status-retry-1280.png
+            .settings-ui-artifacts/lab-status-refusal-390-bounds.json
+            .settings-ui-artifacts/lab-status-refusal-1280-bounds.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
