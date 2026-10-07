@@ -116,6 +116,32 @@ case, amount/currency) — "سيتم الربط بالحالة الموجودة"
 file: the item in Plans, the case in Cases/specialty tab, the invoice in Account, next action "بدء التقييم
 السريري — <تخصص>" instead of "إنشاء خطة". Browser journeys for the scenarios below.
 
+## 7b. Tooth / site selection (owner addendum)
+
+The tooth or site is chosen **once**, at the start of the treatment, from the clinic's existing Dental Chart. There is
+no separate tooth selector and no number dropdown: the invoice dialog reuses the odontogram rows, tooth shapes, FDI
+numbering and surface selector extracted from `DentalChart` into `components/dental/*`, plus `ToothPicker`'s selection
+logic. Propagation: invoice line → plan item `tooth_code` / `surfaces` (or a scope note) → specialty case `site` →
+visit → procedure. Visits already read the plan item's tooth, so the doctor is not asked again.
+
+The scope comes from the catalog category alone: `toothScope(category)` in `lib/invoice-clinical-linkage.ts` is the one
+source for both the UI and the server.
+
+| Mode | Categories | Rule |
+|---|---|---|
+| `per_tooth_episode` | rct, post, implant, extraction, surgery | One tooth per episode. Several teeth ⇒ the UI splits them into one line, plan item and case per tooth. A line carrying more than one tooth ⇒ `episode_split_required`. |
+| `multi_tooth_episode` | crown, veneer, bridge | One line (plan item) per tooth or unit, all sharing `episodeTeeth`, so they form one episode and one case with `site` = «14، 15، 16». An existing case is reused only if its site is empty or names every tooth. Abutments are never inferred: each tooth is a unit, as in the prosthodontics template. |
+| `tooth_surfaces` | filling, sealant | One tooth per line plus optional surfaces (M D O B L), normalized and stored on the plan item. Exact reuse requires equal surfaces. |
+| `arch` | ortho | Never a single tooth; optional scope upper / lower / both. Stored as the plan item note «النطاق: …» and the new case's site. |
+| `region` | cleaning | Full mouth / upper / lower, or a single tooth (not both). |
+| `none` | consultation, x-ray, whitening, unknown | No tooth is asked for; any tooth, surfaces or scope sent is ignored. |
+
+Fail closed: a tooth-bound service without a tooth ⇒ `tooth_required` (400, Arabic). Other refusals: invalid surfaces
+⇒ `bad_surfaces`; a scope not allowed for the service ⇒ `bad_scope`; malformed site fields ⇒ 400. Nothing is written.
+Save and preview share one validator (`validateLineSite`), so the preview shows the exact refusal the save would give,
+and any change of teeth, surfaces or scope re-runs the preview. The idempotency fingerprint covers surfaces, episode
+teeth and scope.
+
 ## 8. Test scenarios (PG18 + HTTP + browser)
 
 1 Ortho 300,000: 1 invoice, 1 item, 1 case, visible; visit uses the item; sign creates no invoice #2.

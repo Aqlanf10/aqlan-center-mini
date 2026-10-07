@@ -31,6 +31,7 @@ beforeAll(async () => {
   for (const [key, name, category] of [
     ["ortho", "تقويم ثابت", "ortho"], ["rct", "علاج عصب", "rct"], ["crown", "تاج زركونيا", "crown"],
     ["consult", "كشف", "consultation"], ["filling", "حشوة ضوئية", "filling"],
+    ["bridge", "جسر زركونيا (لكل سن)", "bridge"], ["cleaning", "تنظيف جير", "cleaning"],
   ] as const) {
     services[key] = (await q<{ id: number }>(
       `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 100000, TRUE, TRUE, $2) RETURNING id`,
@@ -45,12 +46,14 @@ const newPatient = async (n: string) => (await q<{ id: number }>(
 type Line = {
   service: keyof typeof services | null; price: number; tooth?: number | null; caseId?: number | null; description?: string;
   quantity?: number; sessions?: number | null;
+  surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null;
 };
 const lineOf = (line: Line) => ({
   serviceId: line.service ? services[line.service] : null,
-  category: line.service ? ({ ortho: "ortho", rct: "rct", crown: "crown", consult: "consultation", filling: "filling" } as Record<string, string>)[line.service] : null,
+  category: line.service ? ({ ortho: "ortho", rct: "rct", crown: "crown", consult: "consultation", filling: "filling", bridge: "bridge", cleaning: "cleaning" } as Record<string, string>)[line.service] : null,
   doctorId: doctor, description: line.description ?? line.service ?? "رسوم", quantity: line.quantity ?? 1, unitPriceMinor: line.price,
   toothCode: line.tooth ?? null, caseId: line.caseId ?? null, sessions: line.sessions ?? null,
+  surfaces: line.surfaces ?? null, episodeTeeth: line.episodeTeeth ?? null, scope: line.scope ?? null,
 });
 const invoice = (patientId: number, lines: Line[], key: string | null = null) => {
   const items = lines.map(lineOf);
@@ -397,5 +400,108 @@ describe("Codex review hardening", () => {
     const [item] = await q<{ billing_status: string; billed_invoice_id: number | null }>(
       `SELECT billing_status, billed_invoice_id FROM plan_items WHERE id = $1`, [itemId]);
     expect(item).toEqual({ billing_status: "unbilled", billed_invoice_id: null });
+  });
+});
+
+describe("INV-LINK TOOTH — tooth/site selection rules (fail closed, one source for save and preview)", () => {
+  const preview = (patientId: number, lines: Line[]) => linkage.previewInvoiceLinkage({
+    patientId, baseCurrency: "YER", items: lines.map((line) => ({ ...lineOf(line) })),
+  });
+  const plain = async (patientId: number) => q<{ tooth_code: number | null; surfaces: string | null; note: string | null; case_id: number | null }>(
+    `SELECT i.tooth_code, i.surfaces, i.note, i.case_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1 ORDER BY i.id`, [patientId]);
+
+  it("a tooth-bound service without a tooth is refused and nothing is written; the preview says the same", async () => {
+    const patient = await newPatient("TOOTH-REQ");
+    for (const service of ["rct", "crown", "filling", "bridge"] as const) {
+      expect(await invoice(patient, [{ service, price: 80_000 }])).toEqual({ ok: false, reason: "tooth_required", line: 0 });
+      expect((await preview(patient, [{ service, price: 80_000 }]))[0].refusal).toBe("tooth_required");
+    }
+    expect(await counts(patient)).toEqual({ invoices: 0, plans: 0, items: 0, cases: 0 });
+  });
+
+  it("an endodontic episode covers one tooth: several teeth on one line must be split; split lines give a case per tooth", async () => {
+    const patient = await newPatient("TOOTH-ENDO");
+    expect(await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36, episodeTeeth: [36, 46] }]))
+      .toEqual({ ok: false, reason: "episode_split_required", line: 0 });
+    expect((await preview(patient, [{ service: "rct", price: 80_000, tooth: 36, episodeTeeth: [36, 46] }]))[0].refusal).toBe("episode_split_required");
+    const split = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 36 }, { service: "rct", price: 80_000, tooth: 46 }]);
+    expect(split.ok).toBe(true);
+    expect((await plain(patient)).map((row) => row.tooth_code)).toEqual([36, 46]);
+    expect((await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE patient_id = $1 ORDER BY id`, [patient])).map((r) => r.site)).toEqual(["36", "46"]);
+  });
+
+  it("a bridge 14–16 is one unit per tooth and ONE prosthodontic episode; no abutments inferred", async () => {
+    const patient = await newPatient("TOOTH-BRIDGE");
+    const lines: Line[] = [14, 15, 16].map((tooth) => ({ service: "bridge" as const, price: 120_000, tooth, episodeTeeth: [16, 14, 15] }));
+    const before = await preview(patient, lines);
+    expect(before.map((p) => p.case?.mode)).toEqual(["new", "new", "new"]);
+    expect(new Set(before.map((p) => p.case?.title)).size).toBe(1);
+    const result = await invoice(patient, lines);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(new Set(result.links.map((l) => l.caseId)).size).toBe(1);
+    const items = await plain(patient);
+    expect(items.map((row) => row.tooth_code)).toEqual([14, 15, 16]);
+    const [kase] = await q<{ site: string; title: string }>(`SELECT site, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
+    expect(kase.site).toBe("14، 15، 16");
+    expect(kase.title).toContain("14، 15، 16");
+    // an open prosthodontic case on 14 only does not cover the 14–16 episode
+    const other = await newPatient("TOOTH-BRIDGE-2");
+    await q(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'prosthodontics', 'تاج 14', '14', 'dr')`, [other]);
+    const second = await invoice(other, lines);
+    expect(second.ok && second.links.every((l) => l.caseCreated || l.caseId === second.links[0].caseId)).toBe(true);
+    expect((await q(`SELECT 1 FROM clinical_cases WHERE patient_id = $1`, [other]))).toHaveLength(2);
+    // the episode must contain the line's own tooth
+    expect(await invoice(patient, [{ service: "bridge", price: 1, tooth: 24, episodeTeeth: [25, 26] }])).toEqual({ ok: false, reason: "bad_tooth", line: 0 });
+  });
+
+  it("a filling stores its surfaces (normalized) and reuses an agreed item only with the same surfaces", async () => {
+    const patient = await newPatient("TOOTH-FILL");
+    const created = await invoice(patient, [{ service: "filling", price: 25_000, tooth: 26, surfaces: "om" }]);
+    expect(created.ok).toBe(true);
+    expect((await plain(patient))[0]).toMatchObject({ tooth_code: 26, surfaces: "MO" });
+    expect(await invoice(patient, [{ service: "filling", price: 25_000, tooth: 27, surfaces: "MX" }])).toEqual({ ok: false, reason: "bad_surfaces", line: 0 });
+    // doctor's agreed filling on 17 MOD: reused only by MOD, a different surface set is a different shape
+    const agreed = await createPlanV2({
+      patientId: patient, title: "خطة", specialty: null, primaryDoctorId: doctor, billingMode: "per_procedure",
+      baseCurrency: "YER", startDate: "2026-10-01", note: null, createdBy: "dr", installments: [],
+      items: [{ serviceId: services.filling, serviceName: "حشوة", category: "filling", toothCode: 17, surfaces: "MOD", quantity: 1, unitPriceMinor: 30_000, billingRule: "on_completion", sessionCount: 1, note: null }],
+    });
+    if (!agreed.ok) throw new Error(agreed.message);
+    await recordPlanConsent({ planId: agreed.planId, actor: "dr", note: null });
+    expect(await invoice(patient, [{ service: "filling", price: 30_000, tooth: 17, surfaces: "MO" }])).toEqual({ ok: false, reason: "shape_mismatch", line: 0 });
+    const reused = await invoice(patient, [{ service: "filling", price: 30_000, tooth: 17, surfaces: "DOM" }]);
+    expect(reused.ok && !reused.links[0].planItemCreated).toBe(true);
+  });
+
+  it("orthodontics takes an arch scope, never a single tooth; periodontics a region; the scope reaches the plan item and the case", async () => {
+    const patient = await newPatient("TOOTH-ORTHO");
+    expect(await invoice(patient, [{ service: "ortho", price: 100_000, tooth: 11 }])).toEqual({ ok: false, reason: "bad_scope", line: 0 });
+    expect(await invoice(patient, [{ service: "ortho", price: 100_000, scope: "full_mouth" }])).toEqual({ ok: false, reason: "bad_scope", line: 0 });
+    expect((await invoice(patient, [{ service: "ortho", price: 100_000, scope: "upper" }])).ok).toBe(true);
+    expect((await plain(patient))[0]).toMatchObject({ tooth_code: null, note: "النطاق: الفك العلوي" });
+    const [kase] = await q<{ site: string; title: string }>(`SELECT site, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
+    expect(kase).toMatchObject({ site: "الفك العلوي" });
+    const perio = await newPatient("TOOTH-PERIO");
+    expect((await invoice(perio, [{ service: "cleaning", price: 20_000, scope: "full_mouth" }])).ok).toBe(true);
+    expect((await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE patient_id = $1`, [perio]))[0].site).toBe("كامل الفم");
+    expect(await invoice(perio, [{ service: "cleaning", price: 20_000, tooth: 31, scope: "lower" }])).toEqual({ ok: false, reason: "bad_scope", line: 0 });
+  });
+
+  it("non-tooth services ignore any tooth/surface/scope sent", async () => {
+    const patient = await newPatient("TOOTH-NONE");
+    const result = await invoice(patient, [{ service: "consult", price: 5_000, tooth: 36, surfaces: "MO", scope: "upper" }]);
+    expect(result.ok && result.links[0].kind === "financial").toBe(true);
+    expect(await counts(patient)).toMatchObject({ plans: 0, items: 0, cases: 0 });
+  });
+
+  it("canonical propagation: the visit procedure of the plan item carries the invoice line's tooth", async () => {
+    const patient = await newPatient("TOOTH-VISIT");
+    const result = await invoice(patient, [{ service: "rct", price: 80_000, tooth: 47 }]);
+    if (!result.ok) throw new Error("create");
+    const [item] = await q<{ id: number; tooth_code: number }>(`SELECT id, tooth_code FROM plan_items WHERE id = $1`, [result.links[0].planItemId]);
+    const [kase] = await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE id = $1`, [result.links[0].caseId]);
+    expect(item.tooth_code).toBe(47);
+    expect(kase.site).toBe("47");
   });
 });

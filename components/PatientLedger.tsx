@@ -13,7 +13,13 @@ import { ReceiptCorrection } from "./ReceiptCorrection";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
-import { lineLinkage } from "@/lib/invoice-clinical-linkage";
+import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
+import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
+import {
+  PER_TOOTH_SPLIT_NOTICE, applyToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
+  selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
+  type ToothPayload, type ToothRowLike, type ToothSelection,
+} from "./dental/invoice-tooth-selection";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 
 /**
@@ -733,6 +739,11 @@ interface LinePreview {
   refusalMessage: string | null;
 }
 
+type InvoiceRow = ToothRowLike & { serviceId: string; description: string; price: string; quantity: string; priceReason: string };
+const blankInvoiceRow = (key: string): InvoiceRow => ({
+  key, serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
+});
+
 function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   patientId: number;
   base: Currency;
@@ -740,9 +751,13 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   busy: boolean;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
-  const [rows, setRows] = useState<{ serviceId: string; description: string; price: string; quantity: string; priceReason: string; toothCode: string; caseId: string }[]>(
-    [{ serviceId: "", description: "", price: "", quantity: "1", priceReason: "", toothCode: "", caseId: "" }],
-  );
+  /* مفاتيح ثابتة للأسطر: اختيار عدة أسنان يقسم السطر إلى أسطر، فلا يصلح الترتيب مفتاحًا. */
+  const rowSeq = useRef(0);
+  const nextRowKey = () => `row-${++rowSeq.current}`;
+  const [rows, setRows] = useState<InvoiceRow[]>(() => [blankInvoiceRow("row-0")]);
+  /* (INV-LINK TOOTH) نافذة «تحديد الأسنان» مفتوحة لهذا السطر (بمفتاحه). */
+  const [toothDialogFor, setToothDialogFor] = useState<string | null>(null);
+  const [splitNotice, setSplitNotice] = useState<string | null>(null);
   /* (INV-LINK B) مفتاح الإعادة لهذا النموذج: نقرةٌ مزدوجة أو ردٌّ ضائع يعيد الفاتورة نفسها لا فاتورةً ثانية. */
   const [idempotencyKey] = useState(() => newIdempotencyKey("inv"));
   const [previews, setPreviews] = useState<LinePreview[]>([]);
@@ -775,13 +790,18 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   const net = Math.max(0, total - discountMinor);
 
   /* (INV-LINK D) معاينة ما ستفعله الفاتورة بالعلاج: بند خطة قائم/جديد، حالة قائمة/أولية — قبل الحفظ. */
+  const serviceOf = (serviceId: string) => services.find((item) => String(item.id) === serviceId);
   const isClinical = (serviceId: string) => {
-    const service = services.find((item) => String(item.id) === serviceId);
+    const service = serviceOf(serviceId);
     return service ? lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical" : false;
   };
-  const previewKey = JSON.stringify([currency, rows.map((row) => [row.serviceId, row.price, row.quantity, row.toothCode, row.caseId])]);
+  /* (INV-LINK TOOTH) كيف يُحدَّد سن البند — من فئة خدمته وحدها (المصدر نفسه الذي يفرضه الخادم). */
+  const modeOf = (row: InvoiceRow): ToothScopeMode => invoiceToothMode(serviceOf(row.serviceId)?.category);
+  // أي تغيير في الأسنان/الأسطح/النطاق يعيد المعاينة: هي جزءٌ من مفتاحها وجسمها.
+  const previewKey = JSON.stringify([currency, rows.map((row) => [row.serviceId, row.price, row.quantity, row.caseId,
+    toothPayload(modeOf(row), row)])]);
   useEffect(() => {
-    const payloadRows = JSON.parse(previewKey)[1] as string[][];
+    const payloadRows = JSON.parse(previewKey)[1] as [string, string, string, string, ToothPayload][];
     const clinicalRow = (serviceId: string) => {
       const service = services.find((item) => String(item.id) === serviceId);
       return service ? lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical" : false;
@@ -793,8 +813,8 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({
           patientId, currency,
-          items: payloadRows.map(([serviceId, price, quantity, toothCode, caseId]) => ({
-            serviceId: serviceId ? Number(serviceId) : null, price, quantity, toothCode, caseId,
+          items: payloadRows.map(([serviceId, price, quantity, caseId, tooth]) => ({
+            serviceId: serviceId ? Number(serviceId) : null, price, quantity, caseId, ...tooth,
           })),
         }),
       }).then(async (response) => {
@@ -804,6 +824,78 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
     }, 350);
     return () => { controller.abort(); clearTimeout(timer); };
   }, [previewKey, patientId, currency, services]);
+
+  /* (INV-LINK TOOTH) لا يُحفظ بندٌ يحتاج سنًّا بلا سن — والخادم يرفضه أيضًا. */
+  const toothProblems = rows.map((row) => row.serviceId ? toothProblem(modeOf(row), row) : null);
+  const blockedLines = toothProblems.flatMap((problem, index) => problem ? [index + 1] : []);
+  const dialogIndex = toothDialogFor === null ? -1 : rows.findIndex((row) => row.key === toothDialogFor);
+  const dialogRow = dialogIndex >= 0 ? rows[dialogIndex] : null;
+
+  const confirmTeeth = (key: string, selection: ToothSelection) => {
+    const index = rows.findIndex((row) => row.key === key);
+    if (index < 0) { setToothDialogFor(null); return; }
+    const mode = modeOf(rows[index]);
+    setRows((current) => {
+      const at = current.findIndex((row) => row.key === key);
+      return at < 0 ? current : applyToothSelection(current, at, mode, selection, nextRowKey);
+    });
+    const teeth = [...new Set(selection.teeth)].sort((a, b) => a - b);
+    setSplitNotice(mode === "per_tooth_episode" && teeth.length > 1 ? `${PER_TOOTH_SPLIT_NOTICE}: ${teeth.join("، ")}.` : null);
+    setToothDialogFor(null);
+  };
+
+  const scopeButtons = (row: InvoiceRow, index: number, mode: ToothScopeMode) => {
+    const scopes = allowedScopes(mode);
+    if (scopes.length === 0) return null;
+    return (
+      <div role="group" aria-label="نطاق العلاج" className="flex flex-wrap rounded-xl border border-slate-200 bg-white p-0.5">
+        {scopes.map((scope) => {
+          const on = row.toothCode === null && row.scope === scope;
+          return (
+            <button key={scope} type="button" aria-pressed={on} data-testid={`scope-${scope}`}
+              onClick={() => setRows((current) => setRowScope(current, index, on && mode === "arch" ? null : scope))}
+              className={`min-h-[44px] rounded-lg px-3 text-xs font-bold transition-colors ${
+                on ? "bg-navy-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
+              {SITE_SCOPE_LABEL[scope]}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const toothControl = (row: InvoiceRow, index: number) => {
+    const mode = modeOf(row);
+    if (mode === "none") return null;
+    const label = selectionLabel(mode, row);
+    const chosenTooth = row.toothCode !== null;
+    const problem = toothProblems[index];
+    const openButton = (text: string) => (
+      <button type="button" onClick={() => setToothDialogFor(row.key)} data-testid={`invoice-tooth-button-${index}`}
+        aria-haspopup="dialog" aria-invalid={problem ? true : undefined}
+        className={`min-h-[44px] whitespace-nowrap rounded-xl border px-3 text-xs font-extrabold transition-colors ${
+          problem ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
+            : "border-navy-200 bg-white text-navy-900 hover:bg-navy-50"}`}>
+        {text}
+      </button>
+    );
+    return (
+      <div className="flex w-full flex-wrap items-center gap-1.5" data-testid={`invoice-tooth-control-${index}`}>
+        <span className="text-[11px] font-bold text-slate-500">{mode === "arch" ? "الفك:" : mode === "region" ? "النطاق:" : "الأسنان:"}</span>
+        {scopeButtons(row, index, mode)}
+        {mode !== "arch" && chosenTooth && label ? (
+          <span data-testid={`invoice-tooth-chip-${index}`}
+            className="inline-flex min-h-[32px] items-center gap-1 rounded-full border border-navy-200 bg-navy-50 px-3 text-xs font-extrabold text-navy-900">
+            🦷 <span>{label}</span>
+            {row.groupId && row.episodeTeeth && row.episodeTeeth.length > 1 ? (
+              <span className="font-semibold text-slate-500">· هذا السطر: {row.toothCode}</span>
+            ) : null}
+          </span>
+        ) : null}
+        {usesToothChart(mode) ? openButton(chosenTooth ? "تغيير" : mode === "region" ? "🦷 سن محدد" : "🦷 تحديد الأسنان") : null}
+      </div>
+    );
+  };
 
   return (
     <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
@@ -818,26 +910,27 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
           ))}
         </select>
       </label>
+      {splitNotice ? (
+        <p role="status" data-testid="invoice-split-notice"
+          className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          {splitNotice}
+        </p>
+      ) : null}
       {rows.map((row, index) => (
-        <div key={index} className="mb-3 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5 space-y-2">
+        <div key={row.key} data-testid={`invoice-row-${index}`} data-tooth={row.toothCode ?? ""}
+          className={`mb-3 rounded-xl border bg-slate-50/50 p-2.5 space-y-2 ${
+            row.groupId ? "border-sky-200 border-s-4 border-s-sky-400" : "border-slate-100"}`}>
           <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-[14rem] flex-1">
               <ServiceSelect
                 services={services}
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
-                  setRows((current) =>
-                    current.map((item, i) =>
-                      i === index
-                        ? {
-                            ...item,
-                            serviceId: id ? String(id) : "",
-                            price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
-                            description: srv ? srv.name : item.description,
-                          }
-                        : item,
-                    ),
-                  );
+                  setRows((current) => replaceRowService(current, index, {
+                    serviceId: id ? String(id) : "",
+                    price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
+                    description: srv ? srv.name : current[index].description,
+                  }, invoiceToothMode(srv?.category)));
                 }}
                 base={base}
                 allowManual={true}
@@ -865,7 +958,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                 aria-label="السعر"
                 inputMode="decimal"
                 dir="ltr"
-                className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold text-center"
+                className="w-32 min-w-0 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-semibold tabular-nums text-center"
               />
             </div>
             {row.serviceId && (() => {
@@ -896,33 +989,23 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                 className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
               />
             </div>
-            {isClinical(row.serviceId) ? (
-              <div className="flex items-center gap-1.5">
-                <label className="text-[11px] font-bold text-slate-500">السن:</label>
-                <input
-                  value={row.toothCode}
-                  onChange={(event) => setRows((current) => current.map((item, i) =>
-                    i === index ? { ...item, toothCode: event.target.value } : item))}
-                  placeholder="FDI"
-                  aria-label="السن"
-                  inputMode="numeric"
-                  dir="ltr"
-                  data-testid={`invoice-tooth-${index}`}
-                  className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
-                />
-              </div>
-            ) : null}
             {rows.length > 1 ? (
               <button
                 type="button"
-                onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
+                onClick={() => setRows((current) => removeRowAt(current, index))}
                 className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
                 title="حذف البند"
               >
                 ✕
               </button>
             ) : null}
+            {toothControl(row, index)}
           </div>
+          {toothProblems[index] ? (
+            <p data-testid={`invoice-tooth-problem-${index}`} className="text-[11px] font-bold text-amber-800">
+              {toothProblems[index]}
+            </p>
+          ) : null}
           {(() => {
             const preview = previews.find((one) => one.line === index);
             if (!preview || preview.kind !== "clinical" || !isClinical(row.serviceId)) return null;
@@ -954,7 +1037,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
       ))}
 
       <button type="button"
-        onClick={() => setRows((current) => [...current, { serviceId: "", description: "", price: "", quantity: "1", priceReason: "", toothCode: "", caseId: "" }])}
+        onClick={() => setRows((current) => [...current, blankInvoiceRow(nextRowKey())])}
         className="mb-3 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
         + بند آخر
       </button>
@@ -982,29 +1065,49 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
       {/* الرقم المعتمد يُحسب على الخادم من البنود مهما أرسلت الواجهة؛ وهذا العرض
           يستعمل نفس دالة القراءة فيتطابق معه. */}
 
+      {blockedLines.length > 0 ? (
+        <p role="alert" data-testid="invoice-save-blocked"
+          className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+          لا يمكن حفظ الفاتورة قبل تحديد السن من مخطط الأسنان — {blockedLines.length === 1 ? `البند ${blockedLines[0]}` : `البنود ${blockedLines.join("، ")}`}.
+        </p>
+      ) : null}
       <button
-        onClick={() => onSubmit({
-          currency,
-          discount,
-          discountReason,
-          items: rows
-            .filter((row) => row.serviceId || row.description.trim())
-            .map((row) => ({
-              serviceId: row.serviceId ? Number(row.serviceId) : undefined,
-              description: row.description,
-              price: row.price,
-              priceReason: row.priceReason,
-              quantity: Number(row.quantity) || 1,
-              toothCode: isClinical(row.serviceId) && row.toothCode.trim() ? Number(row.toothCode) : undefined,
-              caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
-            })),
-          idempotencyKey,
-        })}
-        disabled={busy || !rows.some((row) => row.serviceId || row.description.trim())}
+        onClick={() => {
+          if (blockedLines.length > 0) return;
+          onSubmit({
+            currency,
+            discount,
+            discountReason,
+            items: rows
+              .filter((row) => row.serviceId || row.description.trim())
+              .map((row) => ({
+                serviceId: row.serviceId ? Number(row.serviceId) : undefined,
+                description: row.description,
+                price: row.price,
+                priceReason: row.priceReason,
+                quantity: Number(row.quantity) || 1,
+                ...toothPayload(modeOf(row), row),
+                caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
+              })),
+            idempotencyKey,
+          });
+        }}
+        disabled={busy || blockedLines.length > 0 || !rows.some((row) => row.serviceId || row.description.trim())}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
       >
         احفظ الفاتورة
       </button>
+      {dialogRow ? (
+        <ToothSelectionDialog
+          key={dialogRow.key}
+          patientId={patientId}
+          mode={modeOf(dialogRow)}
+          serviceName={serviceOf(dialogRow.serviceId)?.name ?? dialogRow.description}
+          initial={selectionOfRow(dialogRow)}
+          onConfirm={(selection) => confirmTeeth(dialogRow.key, selection)}
+          onCancel={() => setToothDialogFor(null)}
+        />
+      ) : null}
     </section>
   );
 }

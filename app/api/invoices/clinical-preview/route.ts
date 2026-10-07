@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { listServices } from "@/lib/db";
 import { previewInvoiceLinkage } from "@/lib/invoice-linkage-db";
-import { INVOICE_LINKAGE_MESSAGE } from "@/lib/invoice-clinical-linkage";
+import { INVOICE_LINKAGE_MESSAGE, parseLineSiteFields } from "@/lib/invoice-clinical-linkage";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -42,6 +42,8 @@ export async function POST(request: Request) {
         unitPriceMinor: typed ?? (currency === CLINIC_BASE_CURRENCY && service ? service.priceMinor : 0),
         toothCode: tooth !== null && Number.isInteger(tooth) ? tooth : null,
         caseId: caseId !== null && Number.isInteger(caseId) && caseId > 0 ? caseId : null,
+        // شكلٌ خاطئ في المعاينة لا يُسقط الطلب: يُعامل كغير مُرسَل ويحكم الحفظ برفضه الصريح.
+        ...(parseLineSiteFields(item) ?? { surfaces: null, episodeTeeth: null, scope: null }),
       };
     });
     const lines = await previewInvoiceLinkage({ patientId, baseCurrency: currency, items });
