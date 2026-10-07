@@ -192,6 +192,12 @@ describe("daily clinic report: fail closed", () => {
     expect(() => buildDailyClinicReport(fixture({ plans: [plan(), plan(2)], invoices: [{ id: 10, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 0, status: "open", planId: 2 }], payments: [payment({ invoiceId: 10, planId: 1 })] }))).toThrow();
     expect(() => buildDailyClinicReport(fixture({ plans: [plan(1, "SAR")], payments: [payment({ planId: 1, currency: "USD" })] }))).toThrow();
   });
+  it("validates invoice status before canonical arithmetic and preserves cancelled invoice semantics", () => {
+    const invoice = { id: 4, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 100, planId: null };
+    expect(() => buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "unknown" }] }))).toThrow("Unknown invoice status");
+    expect(buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "paid" }] })).currentAccounts[0].byCurrency.YER.billedMinor).toBe(900);
+    expect(buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "cancelled" }] })).currentAccounts[0].byCurrency.YER.billedMinor).toBe(0);
+  });
   it("rejects unknown currency, source fanout and unsafe aggregate amounts", () => {
     expect(() => buildDailyClinicReport(fixture({ plans: [plan(1, "EUR")] }))).toThrow();
     expect(() => buildDailyClinicReport(fixture({ visits: [visit(), visit()] }))).toThrow();

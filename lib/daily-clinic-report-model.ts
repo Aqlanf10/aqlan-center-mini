@@ -41,6 +41,12 @@ function uniqueMap<T>(rows: readonly T[], id: (row: T) => string | number): Map<
   return result;
 }
 
+/** Runtime validation also narrows the canonical InvoiceLike status. */
+function invoiceStatus(value: string): "open" | "paid" | "cancelled" {
+  if (value === "open" || value === "paid" || value === "cancelled") return value;
+  throw new DailyClinicReportIntegrityError("Unknown invoice status");
+}
+
 function instant(value: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new DailyClinicReportIntegrityError("Invalid source timestamp");
@@ -62,9 +68,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
   for (const invoice of source.invoices) {
     money(invoice.totalMinor, "invoice total", true);
     money(invoice.discountMinor, "invoice discount", true);
-    if (!["open", "paid", "cancelled"].includes(invoice.status)) {
-      throw new DailyClinicReportIntegrityError("Unknown invoice status");
-    }
+    invoiceStatus(invoice.status);
     invoiceRefs.set(invoice.id, { patientId: invoice.patientId,
       currency: requireCurrency(invoice.currency, "فاتورة التقرير", invoice.id) });
   }
@@ -273,7 +277,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
   for (const [patientId, patientName] of patientNames) {
     const payments = resolvedPayments.filter((payment) => payment.source.patientId === patientId);
     const invoices = source.invoices.filter((invoice) => invoice.patientId === patientId).map((invoice) => ({
-        totalMinor: invoice.totalMinor, discountMinor: invoice.discountMinor, status: invoice.status,
+        totalMinor: invoice.totalMinor, discountMinor: invoice.discountMinor, status: invoiceStatus(invoice.status),
         baseCurrency: invoiceRefs.get(invoice.id)!.currency,
       }));
     // The canonical helper is number-based. Reject unsafe intermediate arithmetic
