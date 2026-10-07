@@ -14,7 +14,7 @@ type Category = "ortho" | "rct" | "crown";
 type Who = "reception" | "doctorA" | "admin";
 interface Link { planItemId: number; caseId: number; specialty: string }
 interface Invoice { id: number; totalMinor: number; discountMinor: number; clinical: { planId: number; links: Link[] } }
-interface Planned { id: number; sequence: number; status: string }
+interface Planned { id: number; sequence: number; status: string; sessionStatus: string; visitId: number | null }
 interface Clinical {
   id: number; patientId: number; doctorId: number | null; status: string; signedAt: string | null;
   invoiceId: number | null; duesMinor?: number;
@@ -172,8 +172,28 @@ async function consent(planId: number) {
   expect((await q(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [planId]))[0].consent_at).not.toBeNull();
 }
 async function planned(itemId: number): Promise<Planned[]> {
-  return q<Planned>(`SELECT pv.id, ts.sequence, pv.status FROM treatment_sessions ts
+  return q<Planned>(`SELECT pv.id, ts.sequence, pv.status, ts.status AS "sessionStatus", ts.visit_id AS "visitId" FROM treatment_sessions ts
     JOIN planned_visits pv ON pv.id = ts.planned_visit_id WHERE ts.plan_item_id = $1 ORDER BY ts.sequence`, [itemId]);
+}
+async function pendingSession(itemId: number, sequence: number): Promise<Planned> {
+  // Invoice-origin, non-template sessions initially share one planned visit.
+  // Signing closes it and reassigns the next session to a new planned visit;
+  // a cached pre-sign array is not the next appointment's current identity.
+  const sessions = await planned(itemId);
+  const matches = sessions.filter((session) => session.sequence === sequence);
+  expect(matches, `one persisted session at sequence ${sequence}`).toHaveLength(1);
+  const next = matches[0];
+  expect(next).toMatchObject({ status: "planned", sessionStatus: "planned", visitId: null });
+  for (const earlier of sessions.filter((session) => session.sequence < sequence)) {
+    expect(earlier.sessionStatus, `earlier session ${earlier.sequence} completed through signing`).toBe("done");
+  }
+  return next;
+}
+async function nextAfterSign(itemId: number, sequence: number, previousId: number, signed: Clinical): Promise<Planned> {
+  const next = await pendingSession(itemId, sequence);
+  expect(next.id, "next session cannot reuse the completed planned visit").not.toBe(previousId);
+  expect(signed.nextPlannedVisit).toMatchObject({ id: next.id });
+  return next;
 }
 async function arriveAndSeat(patientId: number, plannedVisitId: number): Promise<number> {
   const visit = await mutate<{ id: number; status: string }>("reception", "POST", "/api/visits", { plannedVisitId }, 201);
@@ -226,7 +246,7 @@ async function stageThroughUi(patientId: number, visitId: number, itemId: number
     plan_item_id: itemId, service_id: services[category], tooth_code: tooth, surfaces: null, doctor_id: doctorId, unit_price_minor: 0,
   }]);
 }
-async function signOnce(patientId: number, visitId: number, expectedInvoices: number) {
+async function signOnce(patientId: number, visitId: number, expectedInvoices: number, itemId: number, session: Planned) {
   const responses = await Promise.all([0, 1].map(() => authedMutation(`/api/visits/${visitId}/clinical`, h.sessions.doctorA,
     "POST", JSON.stringify({ action: "sign" }))));
   expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
@@ -242,6 +262,11 @@ async function signOnce(patientId: number, visitId: number, expectedInvoices: nu
     WHERE ii.source_type = 'visit_procedure' AND vp.visit_id = $1`, [visitId])).toEqual([]);
   expect(await q(`SELECT id FROM treatment_sessions WHERE visit_id = $1 AND status = 'done'`, [visitId])).toHaveLength(1);
   expect((await q(`SELECT status FROM visits WHERE id = $1`, [visitId]))[0]).toEqual({ status: "done" });
+  expect((await planned(itemId)).find((current) => current.sequence === session.sequence)).toEqual({
+    id: session.id, sequence: session.sequence, status: "completed", sessionStatus: "done", visitId,
+  });
+  expect(await q(`SELECT status, visit_id FROM planned_visits WHERE id = $1`, [session.id]))
+    .toEqual([{ status: "completed", visit_id: visitId }]);
   return signed;
 }
 
@@ -286,6 +311,8 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
   expect(checkout.summary.find((line) => line.currency === "YER")).toMatchObject({ currentBalanceMinor: 0, dueNowMinor: 0 });
   expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual(before);
   expect(before).toHaveLength(expectedInvoices);
+  expect(await q(`SELECT patient_id, status, appointment_id, visit_id FROM planned_visits WHERE id = $1`, [nextId]))
+    .toEqual([{ patient_id: patientId, status: "planned", appointment_id: null, visit_id: null }]);
   // A distinct future weekday per journey avoids a shared-harness capacity collision.
   const date = new Date(Date.now() + (28 + scheduleOffset++ * 7) * 86_400_000);
   while (date.getUTCDay() !== 0) date.setUTCDate(date.getUTCDate() + 1);
@@ -295,7 +322,8 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
   await mutate("reception", "POST", `/api/planned-visits/${nextId}/schedule`, { date: scheduledDate, time: "17:00" }, 409);
   expect(await q(`SELECT id, patient_id, status, scheduled_date::text AS scheduled_date FROM appointments WHERE id = $1`, [booking.appointmentId]))
     .toEqual([{ id: booking.appointmentId, patient_id: patientId, status: "booked", scheduled_date: scheduledDate }]);
-  expect((await q(`SELECT appointment_id FROM planned_visits WHERE id = $1`, [nextId]))[0]).toEqual({ appointment_id: booking.appointmentId });
+  expect((await q(`SELECT status, appointment_id, visit_id FROM planned_visits WHERE id = $1`, [nextId]))[0])
+    .toEqual({ status: "scheduled", appointment_id: booking.appointmentId, visit_id: null });
   const after = await read<{ nextAppointment: { date: string; time: string } }>("reception", `/api/visits/${visitId}/walkout`);
   expect(after.nextAppointment).toMatchObject({ date: scheduledDate, time: "17:00" });
 }
@@ -331,11 +359,13 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     await consent(created.clinical.planId);
     const sessions = await planned(created.clinical.links[0].planItemId);
     expect(sessions.length).toBeGreaterThan(1);
-    const visitId = await arriveAndSeat(patientId, sessions[0].id);
+    const first = await pendingSession(created.clinical.links[0].planItemId, 1);
+    const visitId = await arriveAndSeat(patientId, first.id);
     await stageThroughUi(patientId, visitId, created.clinical.links[0].planItemId, "ortho", null);
-    await signOnce(patientId, visitId, 1);
+    const signed = await signOnce(patientId, visitId, 1, created.clinical.links[0].planItemId, first);
+    const next = await nextAfterSign(created.clinical.links[0].planItemId, 2, first.id, signed);
     await collectThroughUi(patientId, created);
-    await checkoutAndNext(patientId, visitId, sessions[1].id, 1);
+    await checkoutAndNext(patientId, visitId, next.id, 1);
   }, 240_000);
 
   it("Endo tooth 36: lost invoice response, stale clinical tab and addendum preserve one treatment through collection and the next appointment", async () => {
@@ -343,11 +373,12 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     const created = await invoice(patientId, "rct", 36, "lost_response");
     const endo = await openEndo(patientId, created, 36);
     await consent(created.clinical.planId);
-    const sessions = await planned(created.clinical.links[0].planItemId);
-    const visitId = await arriveAndSeat(patientId, sessions[0].id);
+    const first = await pendingSession(created.clinical.links[0].planItemId, 1);
+    const visitId = await arriveAndSeat(patientId, first.id);
     await stageThroughUi(patientId, visitId, created.clinical.links[0].planItemId, "rct", 36);
     await recordEndo(patientId, endo.id, visitId, "assessment", true);
-    await signOnce(patientId, visitId, 1);
+    const signed = await signOnce(patientId, visitId, 1, created.clinical.links[0].planItemId, first);
+    const next = await nextAfterSign(created.clinical.links[0].planItemId, 2, first.id, signed);
     const [{ id: recordId }] = await q<{ id: number }>(`SELECT id FROM endo_visits WHERE visit_id = $1`, [visitId]);
     const path = `/api/patients/${patientId}/endo/${endo.id}/visits`;
     await mutate("doctorA", "PUT", path, { visitId, stage: "assessment", note: "كتابة فوق الموقّع", expectedVersion: 2 }, 409);
@@ -356,7 +387,7 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     await mutate("doctorA", "POST", `${path}/${recordId}/addenda`, addition, 200);
     expect((await q(`SELECT note FROM endo_visits WHERE id = $1`, [recordId]))[0]).toEqual({ note: "التعديل الأحدث" });
     await collectThroughUi(patientId, created, true);
-    await checkoutAndNext(patientId, visitId, sessions[1].id, 1);
+    await checkoutAndNext(patientId, visitId, next.id, 1);
   }, 240_000);
 
   it("Endo → Crown tooth 46: two stale invoice tabs, one patient/master, real signed RCT completion, then an exact linked crown visit", async () => {
@@ -374,23 +405,31 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     await consent(rct.clinical.planId);
     const rctSessions = await planned(rct.clinical.links[0].planItemId);
     expect(rctSessions).toHaveLength(3);
-    for (const [index, session] of rctSessions.entries()) {
+    for (let index = 0; index < rctSessions.length; index += 1) {
+      const session = await pendingSession(rct.clinical.links[0].planItemId, index + 1);
       const visitId = await arriveAndSeat(patientId, session.id);
       await stageThroughUi(patientId, visitId, rct.clinical.links[0].planItemId, "rct", 46);
       await recordEndo(patientId, endo.id, visitId, (["assessment", "shaping", "obturation"] as const)[index]);
-      await signOnce(patientId, visitId, 2);
+      const signed = await signOnce(patientId, visitId, 2, rct.clinical.links[0].planItemId, session);
+      if (index + 1 < rctSessions.length) {
+        await nextAfterSign(rct.clinical.links[0].planItemId, index + 2, session.id, signed);
+      } else {
+        await nextAfterSign(crown.clinical.links[0].planItemId, 1, session.id, signed);
+      }
     }
     expect((await q(`SELECT status FROM plan_items WHERE id = $1`, [rct.clinical.links[0].planItemId]))[0]).toEqual({ status: "done" });
     const completed = await mutate<{ status: string; crown: string }>("doctorA", "PATCH", `/api/patients/${patientId}/endo/${endo.id}`, { status: "completed" });
     expect(completed).toMatchObject({ status: "completed", crown: "ready" });
     const crownSessions = await planned(crown.clinical.links[0].planItemId);
     expect(crownSessions.length).toBeGreaterThan(1);
-    const crownVisitId = await arriveAndSeat(patientId, crownSessions[0].id);
+    const crownFirst = await pendingSession(crown.clinical.links[0].planItemId, 1);
+    const crownVisitId = await arriveAndSeat(patientId, crownFirst.id);
     await stageThroughUi(patientId, crownVisitId, crown.clinical.links[0].planItemId, "crown", 46);
-    await signOnce(patientId, crownVisitId, 2);
+    const crownSigned = await signOnce(patientId, crownVisitId, 2, crown.clinical.links[0].planItemId, crownFirst);
+    const crownNext = await nextAfterSign(crown.clinical.links[0].planItemId, 2, crownFirst.id, crownSigned);
     await collectThroughUi(patientId, rct);
     await collectThroughUi(patientId, crown);
-    await checkoutAndNext(patientId, crownVisitId, crownSessions[1].id, 2);
+    await checkoutAndNext(patientId, crownVisitId, crownNext.id, 2);
     expect(await q(`SELECT id FROM patients WHERE id = $1`, [patientId])).toHaveLength(1);
     expect(await q(`SELECT id FROM treatment_plans WHERE patient_id = $1`, [patientId])).toHaveLength(1);
     expect(await q(`SELECT specialty, site FROM clinical_cases WHERE patient_id = $1 ORDER BY specialty`, [patientId]))

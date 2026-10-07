@@ -1,5 +1,6 @@
 import { caseSiteOverlaps, SITE_SCOPE_LABEL, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
+import { normalizeClinicalProcedureId } from "./clinical-procedure-id";
 import { readRecoveryDocumentStates, publicRecoveryRead, hasInstallmentReversalSignal, type PatientInstallmentRecoveryRead } from "./reversed-installment-recovery-db";
 import {
   REVERSED_INSTALLMENT_RECOVERY_PURPOSE, parseRecoveryIntent, recoveryIntentFingerprintSource, type RecoveryIntent,
@@ -15962,7 +15963,7 @@ interface ClinicalRow {
 }
 
 interface ProcedureRow {
-  id: number; service_id: number; service_name: string; category: string | null;
+  id: number | string; service_id: number; service_name: string; category: string | null;
   doctor_id: number | null; tooth_code: number | null; surfaces: string | null;
   quantity: number; unit_price_minor: string; plan_item_id: number | null; note: string | null;
   /* (المراجعة النهائية — TD-05) عملة خطة البند المرتبط — غائبة حين لا
@@ -15971,7 +15972,7 @@ interface ProcedureRow {
 }
 
 const toProcedureLine = (row: ProcedureRow): ProcedureLine => ({
-  id: row.id,
+  id: normalizeClinicalProcedureId(row.id),
   serviceId: row.service_id,
   serviceName: row.service_name,
   category: row.category,

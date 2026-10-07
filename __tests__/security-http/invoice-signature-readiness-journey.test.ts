@@ -93,6 +93,18 @@ async function evidence(f: Fixture): Promise<Evidence> {
   expect(dto).toMatchObject({ id: f.visitId, patientId: f.patientId, signedAt: null });
   expect(dto.procedures).toHaveLength(1);
   expect(dto.sessionPricing).toHaveLength(1);
+  // Real PostgreSQL returns BIGSERIAL as text. The HTTP DTO must normalize the
+  // exact identity before the real browser's strict correlation gate can sign.
+  const { rows: raw } = await db.query<{ id: string }>(
+    "SELECT id FROM visit_procedures WHERE visit_id = $1 ORDER BY id", [f.visitId],
+  );
+  expect(raw).toHaveLength(1);
+  expect(typeof raw[0].id).toBe("string");
+  expect(typeof dto.procedures[0].id).toBe("number");
+  expect(Number.isSafeInteger(dto.procedures[0].id)).toBe(true);
+  expect(dto.procedures[0].id).toBeGreaterThan(0);
+  expect(String(dto.procedures[0].id)).toBe(raw[0].id);
+  expect(typeof dto.sessionPricing[0].procedureId).toBe("number");
   expect(dto.sessionPricing[0]).toMatchObject({ procedureId: dto.procedures[0].id, planItemId: f.itemId });
   return dto;
 }
