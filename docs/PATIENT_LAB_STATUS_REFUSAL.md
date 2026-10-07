@@ -21,7 +21,8 @@ message. This change handles those two actions in the existing component:
 - One synchronous ref complements the existing disabled/busy state. It blocks
   repeated and competing create/cancel/status calls before React re-renders,
   through refusal-body decoding and through the successful-write refresh.
-  All handlers release the lock in `finally`. Cancellation still requires its
+  Current handlers release the lock in `finally`; retired handlers cannot release
+  another patient's lock. Cancellation still requires its
   existing confirmation; creation and cancellation payloads are unchanged.
 - A successful receipt still refreshes the list, then opens delivery booking
   for the exact captured order with `received` status. Successful delivery
@@ -31,8 +32,8 @@ message. This change handles those two actions in the existing component:
 
 This is UI refusal containment. It does not change backend authorization,
 status transitions, money, writers, invoices, schemas, currency, visits or
-plans. The existing list fallback, initial-load behavior, stale read/navigation
-lifetime and post-success read-failure behavior are outside this slice.
+plans. Read truthfulness and lifetime handling are documented separately in
+[PATIENT_LAB_READ_STATES.md](PATIENT_LAB_READ_STATES.md).
 It does not establish general mutation idempotency or clinical persistence.
 
 ## Dedicated regression source
@@ -69,10 +70,10 @@ synthetic files in the shared CI upload step. No app/test gate is changed.
 Six more cases leave the lab panel with a pending receipt command and settle
 it successfully, with refusal, or with a lost response. They check no modal or
 error is attached to the Files panel, no repeated PATCH occurs, and returning
-to Lab uses its fresh scoped read. Existing lifetime behavior is explicit:
-successful completion still invokes the old scoped read after unmount; this
-test does not claim cancellation, durable pending state across navigation,
-cross-patient read fencing or mutation idempotency.
+to Lab uses its fresh scoped read. Retired command continuations now avoid
+starting an obsolete scoped read after unmount. This does not abort an already
+sent mutation, establish its server result, preserve pending state across
+navigation, or establish mutation idempotency.
 
 ## Validation gate and test plan
 
