@@ -307,14 +307,9 @@ describe("built patient lab refusal containment", () => {
         if (outcome === "network") await fail(page, 1);
         else await finish(page, 1, outcome === "received" ? 200 : 409, outcome === "received"
           ? order(81001, "received") : { message: "رفض اصطناعي بعد المغادرة" });
-        let next = 2;
-        if (outcome === "received") {
-          // Disclosed existing behavior: success still makes its old scoped
-          // read after unmount. This test does not claim request cancellation.
-          await waitForRequest(page, 2);
-          await finish(page, 2, 200, { orders: [order(81001, "received"), order(81002, "in_progress"), order(81003, "received")], labs: [] });
-          next = 3;
-        }
+        // Retired owners must not start a read or attach UI after unmount.
+        expect((await requests(page)).length).toBe(2);
+        const next = 2;
         expect(await modal(page).count()).toBe(0);
         expect(await section(page).count()).toBe(0);
         expect((await requests(page)).filter((entry) => entry.method === "PATCH")).toHaveLength(1);
