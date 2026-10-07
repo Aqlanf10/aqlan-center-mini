@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/services-catalog";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * (COMM-DETAIL-1 · F-8) تفصيل العمولة تحت شاشة العمولات — سطرٌ لكل حصة طبيب كما حسبها
@@ -15,13 +16,12 @@ interface DetailLine {
   invoiceId: number; invoiceNumber: string | null; visitId: number | null; clinicDate: string;
   patientId: number; patientName: string; patientNumber: string | null;
   doctorId: number; doctorName: string; currency: Currency;
-  serviceName: string | null; category: string | null; categoryLabel: string | null;
+  serviceName: string | null; categoryLabel: string | null;
   caseId: number | null; caseTitle: string | null; planId: number | null; planTitle: string | null;
   amountMinor: number; labCostMinor: number; materialCostMinor: number;
   labDeducted: boolean; materialDeducted: boolean; baseMinor: number;
   percent: number; ruleSourceLabel: string; accruedMinor: number; earnedMinor: number;
   invoiceNetMinor: number; invoiceCoveredMinor: number;
-  earnedParts: Array<{ percent: number; coveredMinor: number; earnedMinor: number }>;
 }
 interface Unallocated {
   movementId: number; patientName: string | null; invoiceId: number; itemName: string; costMinor: number; reasonLabel: string;
@@ -32,41 +32,149 @@ interface DetailPayload {
   rows: Array<{ doctorId: number; doctorName: string }>;
 }
 
+type Shape = Record<string, unknown>;
+const isShape = (value: unknown): value is Shape => typeof value === "object" && value !== null && !Array.isArray(value);
+const isNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+const isText = (value: unknown) => typeof value === "string";
+const isTextOrNull = (value: unknown) => value === null || typeof value === "string";
+const isNumberOrNull = (value: unknown) => value === null || isNumber(value);
+const has = (shape: Shape, keys: string[], test: (value: unknown) => boolean) => keys.every((key) => test(shape[key]));
+
+function isLine(value: unknown): value is DetailLine {
+  return isShape(value)
+    && has(value, ["invoiceId", "patientId", "doctorId", "amountMinor", "labCostMinor", "materialCostMinor", "baseMinor",
+      "percent", "accruedMinor", "earnedMinor", "invoiceNetMinor", "invoiceCoveredMinor"], isNumber)
+    && has(value, ["clinicDate", "patientName", "doctorName", "ruleSourceLabel"], isText)
+    && has(value, ["invoiceNumber", "patientNumber", "serviceName", "categoryLabel", "caseTitle", "planTitle"], isTextOrNull)
+    && has(value, ["visitId", "caseId", "planId"], isNumberOrNull)
+    && has(value, ["labDeducted", "materialDeducted"], (field) => typeof field === "boolean")
+    && (CURRENCIES as readonly unknown[]).includes(value.currency);
+}
+
+/** عقد الردّ كاملًا قبل أي عرض: ردٌّ ناقص لا يُعرض جزؤه ولا تُخترع له أصفار. */
+function parseDetailPayload(payload: unknown): DetailPayload | null {
+  if (!isShape(payload) || typeof payload.isPersonalOnly !== "boolean") return null;
+  const { lines, rows, unallocatedMaterials, serviceRateFindings } = payload;
+  if (!Array.isArray(lines) || !lines.every(isLine)) return null;
+  if (!Array.isArray(rows) || !rows.every((row) => isShape(row) && isNumber(row.doctorId) && isText(row.doctorName))) return null;
+  if (!Array.isArray(unallocatedMaterials) || !unallocatedMaterials.every((item) => isShape(item)
+    && has(item, ["movementId", "invoiceId", "costMinor"], isNumber)
+    && has(item, ["itemName", "reasonLabel"], isText) && isTextOrNull(item.patientName))) return null;
+  if (!Array.isArray(serviceRateFindings) || !serviceRateFindings.every((finding) => isShape(finding)
+    && has(finding, ["doctorName", "ruleName"], isText) && isNumber(finding.percent)
+    && (finding.status === "ambiguous" || finding.status === "unresolved")
+    && Array.isArray(finding.candidateServiceIds) && finding.candidateServiceIds.every(isNumber))) return null;
+  return payload as unknown as DetailPayload;
+}
+
+type DetailState =
+  | { key: string; status: "ready"; data: DetailPayload }
+  | { key: string; status: "error"; message: string; denied: boolean };
+
+/* الصلاحيات التي يقرأ منها الخادم نطاق العمولات (`resolveCommissionViewer`) — جزءٌ من هوية القراءة. */
+const COMMISSION_READ_PERMISSIONS = [
+  "canViewOwnCommissions", "canViewClinicRevenue", "canViewClinicFinance", "canViewOtherDoctorsAccounts",
+] as const;
+
+/* رسائلنا نحن — لا نصّ استثناء ولا رسالة خادمٍ خام قد تحمل تفاصيل داخلية. */
+const FAILURE = {
+  network: "تعذّر الاتصال بالخادم لتحميل تفصيل العمولة.",
+  session: "انتهت الجلسة. سجّل الدخول من جديد.",
+  forbidden: "غير مصرّح لك بعرض تفصيل العمولات.",
+  server: "تعذّر تحميل تفصيل العمولة.",
+  invalid: "وصل ردٌّ ناقص أو غير صالح من الخادم — لم يُعرض شيءٌ منه.",
+} as const;
+
 export function CommissionDetailPanel({ from, to, base }: { from: string; to: string; base: Currency }) {
+  const session = useSession();
   const [open, setOpen] = useState(false);
   const [doctorId, setDoctorId] = useState<string>("");
   const [specialty, setSpecialty] = useState<string>("");
   const [currency, setCurrency] = useState<string>("");
-  const [data, setData] = useState<DetailPayload | null>(null);
   const [doctors, setDoctors] = useState<Array<{ id: number; name: string }>>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [personalOnly, setPersonalOnly] = useState(false);
+  /* كل فتحٍ للوحة وكل «إعادة محاولة» نطاقٌ جديد: لا تُعرض نتيجةٌ قديمة ولو عادت المرشّحات نفسها. */
+  const [openEpoch, setOpenEpoch] = useState(0);
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<DetailState | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const query = new URLSearchParams({ detail: "1", from, to });
-      if (doctorId) query.set("doctorId", doctorId);
-      if (specialty) query.set("specialty", specialty);
-      if (currency) query.set("currency", currency);
-      const response = await fetch(`/api/finance/commissions?${query}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر تحميل التفصيل.");
-      setData(payload as DetailPayload);
-      setError(null);
-      if (!doctorId) {
-        const seen = new Map<number, string>();
-        for (const line of (payload as DetailPayload).lines) seen.set(line.doctorId, line.doctorName);
-        setDoctors([...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar")));
-      }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل التفصيل.");
-    } finally {
-      setLoading(false);
+  /* هوية القراءة: المستخدم والدور والصلاحيات التي تغيّر ما يعيده الخادم. سحبُ «حسابات الأطباء
+     الآخرين» مثلًا يجعل ما على الشاشة بياناتٍ لم يعد له حقّ رؤيتها — فتُسحب فورًا. */
+  const readIdentity = JSON.stringify([
+    session?.username ?? "",
+    session?.role ?? "",
+    COMMISSION_READ_PERMISSIONS.map((key) => Boolean((session?.permissions as Record<string, unknown> | null | undefined)?.[key])),
+  ]);
+  const scopeBase = JSON.stringify([readIdentity, from, to, doctorId, specialty, currency]);
+
+  /* لكل انتقال نطاقٍ هويةٌ جديدة (revision) تُحسب في التصيير نفسه الذي يرى التغيير، وتُسحب معه
+     النتيجة المعروضة فورًا: العودة من ب إلى أ لا تُحيي نتيجة أ القديمة كأنها جاهزة، بل تنتظر
+     طلب أ الجديد. وتغيّر هوية القراءة يمحو أيضًا قائمة الأطباء واختيار الطبيب المبنيّين عليها. */
+  const [scope, setScope] = useState({ base: scopeBase, identity: readIdentity, revision: 0 });
+  if (scope.base !== scopeBase) {
+    setScope({ base: scopeBase, identity: readIdentity, revision: scope.revision + 1 });
+    setResult(null);
+    if (scope.identity !== readIdentity) {
+      setDoctors([]);
+      setDoctorId("");
+      setPersonalOnly(false);
     }
-  }, [from, to, doctorId, specialty, currency]);
+  }
 
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  /* ملكية النتيجة: مفتاحٌ يجمع هوية النطاق وفتح اللوحة والمحاولة. كل تغييرٍ فيه — أو إغلاق اللوحة —
+     يلغي الطلب السابق فورًا (AbortController)، ويتقدّم رقم الجيل في التنظيف نفسه لا عند بدء التحميل
+     التالي، ولا تُعرض نتيجةٌ إلا إن طابق مفتاحُها المفتاحَ الحالي. */
+  const requestKey = JSON.stringify([scope.base, scope.revision, openEpoch, attempt]);
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    const generation = ++generationRef.current;
+    const controller = new AbortController();
+    const owns = () => !controller.signal.aborted && generation === generationRef.current;
+    void (async () => {
+      let next: DetailState;
+      try {
+        const query = new URLSearchParams({ detail: "1", from, to });
+        if (doctorId) query.set("doctorId", doctorId);
+        if (specialty) query.set("specialty", specialty);
+        if (currency) query.set("currency", currency);
+        const response = await fetch(`/api/finance/commissions?${query}`, { cache: "no-store", signal: controller.signal });
+        const payload: unknown = await response.json().catch(() => undefined);
+        if (!owns()) return;
+        if (response.status === 401) next = { key: requestKey, status: "error", message: FAILURE.session, denied: true };
+        else if (response.status === 403) next = { key: requestKey, status: "error", message: FAILURE.forbidden, denied: true };
+        else if (!response.ok) next = { key: requestKey, status: "error", message: FAILURE.server, denied: false };
+        else {
+          const data = parseDetailPayload(payload);
+          next = data
+            ? { key: requestKey, status: "ready", data }
+            : { key: requestKey, status: "error", message: FAILURE.invalid, denied: false };
+        }
+      } catch {
+        if (!owns()) return;
+        next = { key: requestKey, status: "error", message: FAILURE.network, denied: false };
+      }
+      setResult(next);
+      if (next.status === "ready") {
+        setPersonalOnly(next.data.isPersonalOnly);
+        if (!doctorId) {
+          const seen = new Map<number, string>();
+          for (const line of next.data.lines) seen.set(line.doctorId, line.doctorName);
+          setDoctors([...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar")));
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+      generationRef.current += 1;
+    };
+  }, [open, requestKey, from, to, doctorId, specialty, currency]);
+
+  /* ما يُعرض: نتيجةُ المفتاح الحالي وحده — وإلا فالتحميل جارٍ لهذا النطاق. */
+  const current = result !== null && result.key === requestKey ? result : null;
+  const data = current?.status === "ready" ? current.data : null;
+  const loading = open && current === null;
 
   const totals = useMemo(() => {
     const map = new Map<Currency, { accrued: number; earned: number }>();
@@ -79,14 +187,26 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
     return CURRENCIES.filter((code) => map.has(code)).map((code) => [code, map.get(code)!] as const);
   }, [data]);
 
-  const printDoctor = data?.isPersonalOnly ? data.lines[0]?.doctorId ?? null : doctorId ? Number(doctorId) : null;
+  /* رابط الطباعة يتبع نتيجةً معتمدة للنطاق الحالي فقط: معطّلٌ أثناء التحميل والفشل وفقد الصلاحية.
+     وصفحة الطباعة تتحقّق من الصلاحية مستقلّةً على الخادم على أي حال. */
+  const printDoctor = data
+    ? data.isPersonalOnly ? data.lines[0]?.doctorId ?? data.rows[0]?.doctorId ?? null : doctorId ? Number(doctorId) : null
+    : null;
   const printHref = printDoctor
     ? `/print/commission-statement/${printDoctor}?from=${from}&to=${to}${currency ? `&currency=${currency}` : ""}${specialty ? `&specialty=${specialty}` : ""}`
     : null;
+  const printBlockedReason = loading ? "يُفعَّل رابط الطباعة بعد اكتمال التحميل."
+    : current?.status === "error" ? current.denied ? "لا صلاحية لطباعة الكشف." : "لا طباعة قبل تحميلٍ صحيح لهذا النطاق."
+      : data && data.isPersonalOnly ? "لا أعمال لك في هذه الفترة لطباعتها."
+        : "اختر طبيبًا لطباعة كشفه.";
 
   return (
-    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
-      <button type="button" onClick={() => setOpen((value) => !value)}
+    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-3" data-commission-detail
+      data-detail-state={!open ? "closed" : loading ? "loading" : current?.status ?? "loading"}>
+      <button type="button" onClick={() => {
+        if (!open) setOpenEpoch((value) => value + 1);
+        setOpen(!open);
+      }}
         className="flex w-full items-center justify-between text-sm font-extrabold text-navy-800" aria-expanded={open}>
         <span>تفصيل العمولة: مريض · عمل · نسبة</span>
         <span className="text-xs text-slate-500">{open ? "إخفاء" : "عرض"}</span>
@@ -94,7 +214,7 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
       {open ? (
         <div className="mt-3">
           <div className="mb-3 flex flex-wrap gap-2">
-            {!data?.isPersonalOnly ? (
+            {!personalOnly ? (
               <label className="min-w-[8rem] flex-1">
                 <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب</span>
                 <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
@@ -123,15 +243,26 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
             </label>
           </div>
           {printHref ? (
-            <a href={printHref} target="_blank" rel="noreferrer"
+            <a href={printHref} target="_blank" rel="noreferrer" data-print-link
               className="mb-3 block rounded-xl border border-navy-800 py-2 text-center text-xs font-bold text-navy-800">
               كشف الطبيب للطباعة
             </a>
           ) : (
-            <p className="mb-3 text-center text-[11px] text-slate-500">اختر طبيبًا لطباعة كشفه.</p>
+            <p className="mb-3 rounded-xl border border-dashed border-slate-200 py-2 text-center text-[11px] text-slate-500"
+              aria-disabled="true" data-print-disabled>
+              كشف الطبيب للطباعة — {printBlockedReason}
+            </p>
           )}
-          {error ? <p role="alert" className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
-          {loading && !data ? <p className="text-center text-xs text-slate-400">جارٍ التحميل…</p> : null}
+          {current?.status === "error" ? (
+            <div role="alert" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">
+              <span>{current.message}</span>
+              <button type="button" onClick={() => setAttempt((value) => value + 1)}
+                className="rounded-lg border border-red-200 bg-white px-2 py-1 font-bold text-red-700">
+                إعادة المحاولة
+              </button>
+            </div>
+          ) : null}
+          {loading ? <p role="status" className="text-center text-xs text-slate-400">جارٍ تحميل التفصيل لهذا النطاق…</p> : null}
           {data ? (
             <>
               <div className="mb-2 flex flex-wrap gap-2">
