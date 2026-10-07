@@ -2,7 +2,7 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, clinicDateString } from "../lib/schedule";
-import { friendlyDateLong } from "../lib/reminders";
+import { friendlyDateNamed } from "../lib/reminders";
 import { reportText } from "../lib/report";
 import { CLINIC_ZONE_FALLBACK } from "../lib/clinicZone";
 
@@ -30,8 +30,7 @@ vi.mock("../components/SettingsProvider", () => ({
   useClinicName: () => "Synthetic clinic",
   useSetting: () => "Synthetic",
 }));
-vi.mock("../components/Icon", () => ({ Logo: () => null }));
-vi.mock("../components/PrintButton", () => ({ PrintButton: () => createElement("button", { "data-testid": "print-report" }, "Print") }));
+vi.mock("../components/Icon", () => ({ Logo: () => null, Icon: () => null }));
 import ReportPage from "../app/report/page";
 
 // Page useState order: date, loadedFeed, loading, failure, retry.
@@ -106,10 +105,10 @@ describe("daily report page — matching day, print and share", () => {
     start();
     const html = await settle();
     expect(fetchedDate(0)).toBe(today());
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(today())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(today())}`);
     expect(html).toContain('data-testid="print-report"');
     const shared = shareText(html);
-    expect(shared).toContain(`تقرير ${friendlyDateLong(today())}`);
+    expect(shared).toContain(`تقرير ${friendlyDateNamed(today())}`);
     expect(shared).toContain("الحضور: 17");
     // Current lab semantics stay as delivered by the route — no historical rewrite.
     expect(shared).toContain("تراكيب متأخرة: 3");
@@ -121,7 +120,7 @@ describe("daily report page — matching day, print and share", () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(emptyDay(today())));
     start();
     const html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(today())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(today())}`);
     expect(html).toContain('data-testid="print-report"');
     expect(shareText(html)).not.toBeNull();
     expect(html).not.toContain("جارٍ إعداد التقرير اليومي");
@@ -174,11 +173,11 @@ describe("daily report late-response containment", () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(b(), 42)));
     start();
     const html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(b())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(b())}`);
     older.resolve(response(dayPayload(a(), 17)));
     const afterLate = await settle();
-    expect(afterLate).toContain(`تقرير يوم: ${friendlyDateLong(b())}`);
-    expect(afterLate).not.toContain(friendlyDateLong(a()));
+    expect(afterLate).toContain(`تقرير يوم: ${friendlyDateNamed(b())}`);
+    expect(afterLate).not.toContain(friendlyDateNamed(a()));
     expect(harness.states[LOADED]).toEqual({ requestedDate: b(), feed: dayPayload(b(), 42) });
     expect(harness.states[FAILURE]).toBeNull();
     expect(harness.states[LOADING]).toBe(false);
@@ -196,7 +195,7 @@ describe("daily report late-response containment", () => {
     await settle();
     older.reject(new Error("obsolete network failure"));
     const html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(b())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(b())}`);
     expect(harness.states[FAILURE]).toBeNull();
     expect(harness.states[LOADING]).toBe(false);
   });
@@ -236,7 +235,7 @@ describe("daily report late-response containment", () => {
     expect(harness.states[LOADING]).toBe(true);
     current.resolve(response(dayPayload(b(), 42)));
     const html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(b())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(b())}`);
     expect(harness.states[LOADING]).toBe(false);
   });
 
@@ -271,8 +270,8 @@ describe("daily report late-response containment", () => {
     // Only the latest request for the selected date may paint.
     current.resolve(response(dayPayload(a(), 23)));
     html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(a())}`);
-    expect(html).not.toContain(friendlyDateLong(b()));
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(a())}`);
+    expect(html).not.toContain(friendlyDateNamed(b()));
     expect(harness.states[LOADED]).toEqual({ requestedDate: a(), feed: dayPayload(a(), 23) });
   });
 
@@ -294,13 +293,13 @@ describe("daily report late-response containment", () => {
     start();
     current.resolve(response(dayPayload(a(), 23)));
     let html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(a())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(a())}`);
     // A same-date stale success and a different-date stale success both arrive late.
     staleA.resolve(response(dayPayload(a(), 17)));
     staleB.resolve(response(dayPayload(b(), 42)));
     html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(a())}`);
-    expect(html).not.toContain(friendlyDateLong(b()));
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(a())}`);
+    expect(html).not.toContain(friendlyDateNamed(b()));
     expect(harness.states[LOADED]).toEqual({ requestedDate: a(), feed: dayPayload(a(), 23) });
     expect(harness.states[FAILURE]).toBeNull();
     expect(harness.states[LOADING]).toBe(false);
@@ -349,10 +348,10 @@ describe("daily report JSON completion after effect retirement", () => {
     if (outcome === "success") oldBody.resolve(dayPayload(a, 17));
     else oldBody.reject(new Error("Obsolete JSON failure"));
     const html = await settle();
-    expect(html).not.toContain(friendlyDateLong(a));
+    expect(html).not.toContain(friendlyDateNamed(a));
     if (currentState === "success") {
       expect(harness.states[LOADED]).toEqual({ requestedDate: b, feed: dayPayload(b, 42) });
-      expect(html).toContain(`تقرير يوم: ${friendlyDateLong(b)}`);
+      expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(b)}`);
       expect(shareText(html)).toContain("الحضور: 42");
     } else {
       noReport(html);
@@ -364,7 +363,7 @@ describe("daily report JSON completion after effect retirement", () => {
     if (currentState === "pending") {
       expect(html).toContain("جارٍ إعداد التقرير اليومي");
       current.resolve(response(dayPayload(b, 42)));
-      expect(await settle()).toContain(`تقرير يوم: ${friendlyDateLong(b)}`);
+      expect(await settle()).toContain(`تقرير يوم: ${friendlyDateNamed(b)}`);
     }
   });
 });
@@ -443,7 +442,7 @@ describe("daily report failure, retry and invalid dates", () => {
     start();
     const html = await settle();
     noReport(html);
-    expect(html).not.toContain(friendlyDateLong(a));
+    expect(html).not.toContain(friendlyDateNamed(a));
     expect(html).toContain("تعذّر تحميل التقرير.");
     expect(html).toContain("أعد المحاولة");
   });
@@ -460,7 +459,7 @@ describe("daily report failure, retry and invalid dates", () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(today(), 17)));
     start();
     const html = await settle();
-    expect(html).toContain(`تقرير يوم: ${friendlyDateLong(today())}`);
+    expect(html).toContain(`تقرير يوم: ${friendlyDateNamed(today())}`);
     expect(html).toContain('data-testid="print-report"');
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetchedDate(1)).toBe(today());
@@ -472,7 +471,7 @@ describe("daily report failure, retry and invalid dates", () => {
     start();
     const html = await settle();
     noReport(html);
-    expect(html).not.toContain(friendlyDateLong(other));
+    expect(html).not.toContain(friendlyDateNamed(other));
     expect(html).toContain("وصل تقريرٌ بتاريخٍ غير التاريخ المطلوب.");
     expect(harness.states[LOADED]).toBeNull();
   });
@@ -490,13 +489,13 @@ describe("daily report failure, retry and invalid dates", () => {
     // Pre-effect commit: the identity guard alone already hides the old report.
     const preEffect = render();
     noReport(preEffect);
-    expect(preEffect).not.toContain(friendlyDateLong(a));
+    expect(preEffect).not.toContain(friendlyDateNamed(a));
     expect(preEffect).toContain("التاريخ المختار غير صالح");
     // The effect runs: no fetch leaves the page, and nothing stale survives.
     start();
     const html = render();
     noReport(html);
-    expect(html).not.toContain(friendlyDateLong(a));
+    expect(html).not.toContain(friendlyDateNamed(a));
     expect(html).toContain("التاريخ المختار غير صالح");
     expect(html).toContain('aria-invalid="true"');
     // Both prev/next steppers are disabled; only «اليوم» recovers.
@@ -511,7 +510,7 @@ describe("daily report failure, retry and invalid dates", () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(a, 17)));
     start();
     const recovered = await settle();
-    expect(recovered).toContain(`تقرير يوم: ${friendlyDateLong(a)}`);
+    expect(recovered).toContain(`تقرير يوم: ${friendlyDateNamed(a)}`);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetchedDate(1)).toBe(a);
   });
@@ -527,10 +526,83 @@ describe("share link identity", () => {
     const html = await settle();
     expect(shareText(html)).toBe(reportText({
       clinicName: "Synthetic clinic",
-      dateText: friendlyDateLong(a),
+      dateText: friendlyDateNamed(a),
       report: payload.report as never,
       tomorrowPercent: 50,
       lateLabOrders: 3,
     }));
+  });
+});
+
+describe("daily report date clarity and state design", () => {
+  it("shows the selected date as an unambiguous Arabic month name next to a labeled field", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(today(), 17)));
+    start();
+    const html = await settle();
+    // The field is labeled, and its value stays the ISO contract the API expects.
+    expect(html).toContain('for="daily-report-date"');
+    expect(html).toContain("تاريخ التقرير");
+    expect(html).toContain('id="daily-report-date"');
+    // «الأربعاء 7 أكتوبر 2026» cannot be misread as day/month or month/day.
+    expect(html).toContain(`data-testid="selected-date-text"`);
+    expect(html).toContain(friendlyDateNamed(today()));
+    // The paper header repeats the same unambiguous date exactly once.
+    expect(html).toContain('data-testid="print-report-date"');
+    expect(html).toContain(`>${friendlyDateNamed(today())}<`);
+  });
+
+  it("names the day being prepared while loading, and puts no date on paper without a report", async () => {
+    const pending = deferred<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
+    start();
+    const html = await settle();
+    expect(html).toContain("جارٍ إعداد التقرير اليومي");
+    expect(html).toContain(`ليوم ${friendlyDateNamed(today())}`);
+    // No report yet: the paper header carries the center identity but no date.
+    expect(html).not.toContain('data-testid="print-report-date"');
+    pending.resolve(response(dayPayload(today(), 17)));
+    await settle();
+  });
+
+  it("keeps an empty-activity day a valid report and says so visibly without an alert", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(emptyDay(today())));
+    start();
+    const html = await settle();
+    expect(html).toContain("لا حضور ولا مواعيد مسجّلة في هذا اليوم");
+    expect(html).toContain('data-state="empty-day"');
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain('data-testid="print-report"');
+    expect(shareText(html)).not.toBeNull();
+  });
+
+  it("separates the next-day date, the current lab status and the report-date follow-ups", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(today(), 17, 3)));
+    start();
+    const html = await settle();
+    const next = addDays(today(), 1);
+    // Next-day load names its own date explicitly — no ambiguous «الغد».
+    expect(html).toContain(`حجوزات اليوم التالي — ${friendlyDateNamed(next)}`);
+    expect(html).not.toContain("حِمل الغد");
+    // Lab figures declare their current-state semantics, not a day balance.
+    expect(html).toContain("أعمال المختبر — الحالة الآن");
+    expect(html).toContain("ليست رصيد يوم التقرير");
+    expect(html).toContain("تراكيب متأخرة بالمختبر: 3");
+    expect(html).toContain("جاهزة للتركيب: 2");
+    // Unclosed appointments are bound to the report date.
+    expect(html).toContain("مواعيد غير مغلقة ليوم التقرير: 1");
+    // Occupancy states its units in text, not color alone.
+    expect(html).toContain("إشغال 50٪");
+    expect(html).toContain("المحجوز: 6 مواعيد — 50٪ من طاقة اليوم");
+  });
+
+  it("hides the print action from paper and keeps it a labeled local button", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(dayPayload(today(), 17)));
+    start();
+    const html = await settle();
+    // A real button with a visible label — hidden on paper via print:hidden.
+    expect(html.match(/<button[^>]*data-testid="print-report"[^>]*>/)![0]).toContain("print:hidden");
+    expect(html).toContain("طباعة التقرير");
+    // The date picker and every interactive control stay off the paper.
+    expect(html).toContain('aria-label="اختيار تاريخ التقرير"');
   });
 });

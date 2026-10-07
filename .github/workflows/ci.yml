@@ -263,6 +263,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic daily-report design evidence only: viewport captures at
+      # 1280/390 with a 320 boundary check, the four state screens, and the real
+      # paginated A4 PDF. No live clinic data, traces, or broad directory uploads.
+      - name: Upload daily report design evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-design-ui
+          path: |
+            .settings-ui-artifacts/daily-report-design-1280.png
+            .settings-ui-artifacts/daily-report-design-390.png
+            .settings-ui-artifacts/daily-report-design-320.png
+            .settings-ui-artifacts/daily-report-loading-390.png
+            .settings-ui-artifacts/daily-report-error-390.png
+            .settings-ui-artifacts/daily-report-empty-day-390.png
+            .settings-ui-artifacts/daily-report-invalid-date-390.png
+            .settings-ui-artifacts/daily-report-print-a4.pdf
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exact synthetic statement fixtures only; never upload real patient ledgers.
       - name: Upload patient statement cutoff screenshots
         if: always()
