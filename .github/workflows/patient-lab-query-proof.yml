@@ -1,0 +1,142 @@
+# Temporary proof only. No PR and no change to the real clinical ci.yml.
+name: Temporary patient lab query proof
+on:
+  push:
+    branches: [ci-proof/patient-lab-query-20261007]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patient-lab-query-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patient_lab_query_proof:
+    name: Synthetic patient query counterfactual (not release CI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      DATABASE_ENVIRONMENT: test
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      SECURITY_HTTP_PORT: "3217"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out exact temporary proof commit and its main parent
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Set up supported Node.js
+        id: node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Refuse unsafe targets or changed reviewed source before installation
+        id: preflight
+        run: node .ci-proof/patient-lab-query/run.mjs preflight
+
+      - name: Install supported npm and locked dependencies
+        id: install
+        run: |
+          npm install -g npm@11
+          npm ci
+
+      - name: Run unit, PostgreSQL and rebuilt HTTP candidate-original-restored proof
+        id: proof
+        run: node --import tsx .ci-proof/patient-lab-query/run.mjs run
+
+      - name: Preserve exact bounded synthetic proof outputs
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patient-lab-query-proof--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .patient-lab-query-proof-results/preflight.json
+            .patient-lab-query-proof-results/identity.json
+            .patient-lab-query-proof-results/target-guard.json
+            .patient-lab-query-proof-results/summary.json
+            .patient-lab-query-proof-results/unit.json
+            .patient-lab-query-proof-results/unit.stdout.txt
+            .patient-lab-query-proof-results/unit.stderr.txt
+            .patient-lab-query-proof-results/unit.process.json
+            .patient-lab-query-proof-results/postgres.json
+            .patient-lab-query-proof-results/postgres.stdout.txt
+            .patient-lab-query-proof-results/postgres.stderr.txt
+            .patient-lab-query-proof-results/postgres.process.json
+            .patient-lab-query-proof-results/build-candidate-before.stdout.txt
+            .patient-lab-query-proof-results/build-candidate-before.stderr.txt
+            .patient-lab-query-proof-results/build-candidate-before.process.json
+            .patient-lab-query-proof-results/candidate-before.build.json
+            .patient-lab-query-proof-results/http-candidate-before.json
+            .patient-lab-query-proof-results/http-candidate-before.stdout.txt
+            .patient-lab-query-proof-results/http-candidate-before.stderr.txt
+            .patient-lab-query-proof-results/http-candidate-before.process.json
+            .patient-lab-query-proof-results/build-original.stdout.txt
+            .patient-lab-query-proof-results/build-original.stderr.txt
+            .patient-lab-query-proof-results/build-original.process.json
+            .patient-lab-query-proof-results/original.build.json
+            .patient-lab-query-proof-results/http-original.json
+            .patient-lab-query-proof-results/http-original.stdout.txt
+            .patient-lab-query-proof-results/http-original.stderr.txt
+            .patient-lab-query-proof-results/http-original.process.json
+            .patient-lab-query-proof-results/build-candidate-after.stdout.txt
+            .patient-lab-query-proof-results/build-candidate-after.stderr.txt
+            .patient-lab-query-proof-results/build-candidate-after.process.json
+            .patient-lab-query-proof-results/candidate-after.build.json
+            .patient-lab-query-proof-results/http-candidate-after.json
+            .patient-lab-query-proof-results/http-candidate-after.stdout.txt
+            .patient-lab-query-proof-results/http-candidate-after.stderr.txt
+            .patient-lab-query-proof-results/http-candidate-after.process.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Require actual proof and evidence-upload success
+        if: always()
+        env:
+          CHECKOUT_RESULT: ${{ steps.checkout.outcome }}
+          NODE_RESULT: ${{ steps.node.outcome }}
+          PREFLIGHT_RESULT: ${{ steps.preflight.outcome }}
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          PROOF_RESULT: ${{ steps.proof.outcome }}
+          UPLOAD_RESULT: ${{ steps.evidence.outcome }}
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          node --input-type=module - <<'JS'
+          import { readFileSync } from "node:fs";
+          for (const key of ["CHECKOUT_RESULT", "NODE_RESULT", "PREFLIGHT_RESULT", "INSTALL_RESULT", "PROOF_RESULT", "UPLOAD_RESULT"]) {
+            if (process.env[key] !== "success") throw new Error(`Proof failed: ${key}`);
+          }
+          if (!/^[1-9][0-9]*$/.test(process.env.ARTIFACT_ID ?? "")) throw new Error("Missing exact artifact ID");
+          if (!/^[0-9a-f]{64}$/.test(process.env.ARTIFACT_DIGEST ?? "")) throw new Error("Missing exact artifact digest");
+          const proof = JSON.parse(readFileSync(".patient-lab-query-proof-results/summary.json", "utf8"));
+          if (!proof.completed || !proof.expectedRed || !proof.restoredCandidateGreen || proof.failure !== null) {
+            throw new Error("Counterfactual evidence is incomplete");
+          }
+          console.log("Synthetic query proof and evidence upload passed. Release CI and Production remain unproved.");
+          JS

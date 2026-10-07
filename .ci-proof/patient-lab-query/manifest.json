@@ -1,0 +1,115 @@
+{
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "baseCommit": "3cdfe760f2e5577ba73b1c00ad07c989143afb87",
+  "baseTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+  "proofRef": "refs/heads/ci-proof/patient-lab-query-20261007",
+  "clinicalManifestSha256": "28b49d1caa7bb28b61c0d739c39d6dbe03844d80d56be2d02c960ed583b53a36",
+  "candidateFiles": [
+    {
+      "path": "__tests__/fixtures/patient-lab-query.ts",
+      "bytes": 2557,
+      "sha256": "f7f8d38fe769d901d4b8ce82e347e335ef8c0a3c46c701245f60ca51d634432f",
+      "git_blob_sha": "8b06a6b5aff3f2d61038070257cab81d85f8835b",
+      "base_git_blob_sha": null
+    },
+    {
+      "path": "__tests__/patient-lab-query-route.test.ts",
+      "bytes": 6735,
+      "sha256": "3c4289ca42a9b31cdc599f3871c52f8697f2de99a6a6df361c25c67429fd11f7",
+      "git_blob_sha": "0660636debc9c175b21c4e066cac9feac8c0f933",
+      "base_git_blob_sha": null
+    },
+    {
+      "path": "__tests__/postgres/patient-lab-query.test.ts",
+      "bytes": 2903,
+      "sha256": "214c1b78968dcc2617c2a8f2e0024ea27d05c5f4459580038ab39cd2a9194f21",
+      "git_blob_sha": "6a5f0dcf27d267d27dc0698c12d866e282b52f0e",
+      "base_git_blob_sha": null
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-query-http.test.ts",
+      "bytes": 6216,
+      "sha256": "6a72b181544dbe7e9c388ff90d605c6de82df3ac2a1922fcb97068bdbff871a1",
+      "git_blob_sha": "9aceb7cde221032e3e2beeeeca880a152d8d38fd",
+      "base_git_blob_sha": null
+    },
+    {
+      "path": "app/api/lab/route.ts",
+      "bytes": 12839,
+      "sha256": "3bd016c6f9e3fec7d67cc5d26526c7d55cea5ded9a5c32a0c92c2d072e8e278a",
+      "git_blob_sha": "d68669c920010f16d0f5c5693b213804241693aa",
+      "base_git_blob_sha": "45c1ebdba947bded2fcfa19a492c154954bcf08d"
+    }
+  ],
+  "protectedBaseFiles": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "git_blob_sha": "8c6c05b480ccf667be716bca44d9ca6c2ba00758"
+    },
+    {
+      "path": "__tests__/postgres/_global-setup.ts",
+      "git_blob_sha": "a96b14c13a906f15bd9301f314526e207a154aac"
+    },
+    {
+      "path": "__tests__/postgres/_safe-target.ts",
+      "git_blob_sha": "015ec6dc5511b9a643a3d1700f834e1cad1f8ea1"
+    },
+    {
+      "path": "__tests__/security-http/_global-setup.ts",
+      "git_blob_sha": "260f5a15c6f440c82db1687b3429719cab75ef80"
+    },
+    {
+      "path": "__tests__/security-http/_server.ts",
+      "git_blob_sha": "695aa47c0956218149fd4c16ceddcc8370f49b9d"
+    },
+    {
+      "path": "lib/db.ts",
+      "git_blob_sha": "6ada75e986e739a215fe1cb586cd801c6fdf08a9"
+    },
+    {
+      "path": "lib/env-contract.ts",
+      "git_blob_sha": "f238e6dd3e8c8363980838acc4db3bff828aa2d5"
+    },
+    {
+      "path": "package-lock.json",
+      "git_blob_sha": "d7ae33712b15d6891e63922a1a856b58cb44fa65"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "git_blob_sha": "ea71ef1c07700df0dc38b8d1dbd10faecbd24261"
+    },
+    {
+      "path": "vitest.config.mts",
+      "git_blob_sha": "c1ca5c54992c534c627b38ad88f12e4910297d73"
+    },
+    {
+      "path": "vitest.config.postgres.mts",
+      "git_blob_sha": "9a4a59093c45c0df592f97344ef0b8a57cee00d2"
+    },
+    {
+      "path": "vitest.config.security.mts",
+      "git_blob_sha": "5f31d93528c4769aeba353fd91ef1a73719866c7"
+    }
+  ],
+  "originalRoute": {
+    "path": "app/api/lab/route.ts",
+    "gitBlob": "45c1ebdba947bded2fcfa19a492c154954bcf08d",
+    "sha256": "14b0ac7e7c23f85e4dde8a5b8991891ffc3254e07c0a1640d37e2acdfd90598f"
+  },
+  "expectedCounts": {
+    "unit": 33,
+    "postgres": 3,
+    "http": 18
+  },
+  "negativeAssertion": {
+    "fullName": "patient lab query through the built HTTP application returns older target orders beyond the global 300-row cap with unchanged projection",
+    "path": "__tests__/security-http/patient-lab-query-http.test.ts",
+    "line": 53,
+    "statement": "expect(target.orders.map((order) => order.id)).toEqual(fixture.targetOrderIds);"
+  },
+  "proofOnlyFiles": [
+    ".ci-proof/patient-lab-query/manifest.json",
+    ".ci-proof/patient-lab-query/run.mjs",
+    ".github/workflows/patient-lab-query-proof.yml"
+  ]
+}
