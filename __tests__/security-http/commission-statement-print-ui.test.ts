@@ -522,8 +522,8 @@ describe("لوحة تفصيل العمولة — ملكية الطلبات وع�
 
   /* الصفحة تُفتح على domcontentloaded: قد تصل الضغطة قبل أن يكتمل hydration فتضيع. نضغط حتى
      تؤكّد اللوحة نفسها أنها فُتحت (وهذا يثبت أنّ React حيّ)، ثم نضبط الفترة. */
-  async function openPanel(width = 1280): Promise<Page> {
-    const page = await openAs("admin", "/finance/commissions", width);
+  async function openPanel(width = 1280, who: "admin" | "doctorA" = "admin"): Promise<Page> {
+    const page = await openAs(who, "/finance/commissions", width);
     await panel(page).waitFor({ timeout: 60_000 });
     await expect.poll(async () => {
       if (await panel(page).getAttribute("data-detail-state") === "closed") await toggle(page).click();
@@ -635,6 +635,106 @@ describe("لوحة تفصيل العمولة — ملكية الطلبات وع�
       expect(await panel(page).locator("[data-print-link]").getAttribute("href")).toContain(`/print/commission-statement/${doctorS}?`);
     } finally {
       await page.context().close();
+    }
+  });
+
+  it("أ ناجحة ← ب معلّقة ← أ: لا تعود نتيجة أ القديمة جاهزة ولا رابطها حتى ينجح طلب أ الجديد", async () => {
+    const page = await openPanel();
+    try {
+      /* أ ناجحة مسبقًا: سطور الطبيب س ورابط طباعته. */
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await panel(page).locator("[data-print-link]").waitFor({ timeout: 30_000 });
+      await panel(page).getByText(`مريض التقويم ${stamp}`).first().waitFor({ timeout: 30_000 });
+
+      let releaseB: () => void = () => {};
+      let releaseA: () => void = () => {};
+      const gateB = new Promise<void>((resolve) => { releaseB = resolve; });
+      const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+      let aRequests = 0;
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        const url = new URL(route.request().url());
+        if (isDetail(url.href) && url.searchParams.get("doctorId") === String(doctorB)) await gateB;
+        if (isDetail(url.href) && url.searchParams.get("doctorId") === String(doctorS)) {
+          aRequests += 1;
+          await gateA;
+        }
+        await route.continue().catch(() => {});
+      });
+
+      await pick(page, "الطبيب").selectOption(String(doctorB));
+      await page.waitForTimeout(300);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).locator("[data-print-link]").count()).toBe(0);
+
+      /* العودة إلى أ: المفتاح يعود للقيم نفسها، لكنّ النتيجة القديمة لا تعود. */
+      await pick(page, "الطبيب").selectOption(String(doctorS));
+      await expect.poll(() => aRequests, { timeout: 10_000 }).toBe(1);
+      await page.waitForTimeout(300);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+      expect(await panel(page).locator("[data-print-link]").count()).toBe(0);
+      expect(await panel(page).locator("[data-print-disabled]").innerText()).toContain("بعد اكتمال التحميل");
+
+      /* ردّ ب المتأخر لا يغيّر شيئًا، ثم ينجح طلب أ الحالي وحده. */
+      releaseB();
+      await page.waitForTimeout(600);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBe(0);
+      releaseA();
+      await panel(page).getByText(`مريض التقويم ${stamp}`).first().waitFor({ timeout: 30_000 });
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("ready");
+      expect(await panel(page).locator("[data-print-link]").getAttribute("href")).toContain(`/print/commission-statement/${doctorS}?`);
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  it("سحب صلاحية «حسابات الأطباء الآخرين» يسحب البيانات المعروضة فورًا ويبطل الطلبات — والخادم يبقى الحَكَم", async () => {
+    const [user] = await q<{ permissions: string; party_id: number }>(`SELECT permissions, party_id FROM users WHERE username = 'secdoctora'`);
+    const original = user.permissions;
+    const base = JSON.parse(original) as Record<string, boolean>;
+    const grant = (others: boolean) => q(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [JSON.stringify({
+      ...base, canViewOwnCommissions: true, canViewClinicRevenue: false, canViewClinicFinance: false, canViewOtherDoctorsAccounts: others,
+    })]);
+    await grant(true);
+    let page: Page | null = null;
+    try {
+      /* الطبيب أ بصلاحية حسابات الآخرين: يرى سطور الجميع. */
+      page = await openPanel(1280, "doctorA");
+      await panel(page).getByText(`مريض التقويم ${stamp}`).first().waitFor({ timeout: 30_000 });
+      expect(await pick(page, "الطبيب").count()).toBe(1);
+
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      await page.route("**/api/finance/commissions?*", async (route) => {
+        if (isDetail(route.request().url())) await gate;
+        await route.continue().catch(() => {});
+      });
+
+      /* سحب الصلاحية، ثم تحديث الجلسة في المتصفح كما يفعل أي `router.refresh()` في التطبيق. */
+      await grant(false);
+      await page.evaluate(() => (window as unknown as { next: { router: { refresh(): void } } }).next.router.refresh());
+      await expect.poll(() => panel(page!).getByText(OTHER_PATIENT).count(), { timeout: 20_000 }).toBe(0);
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+      expect(await panel(page).getAttribute("data-detail-state")).toBe("loading");
+      expect(await panel(page).locator("[data-print-link]").count()).toBe(0);
+      /* قائمة الأطباء المبنية على الصلاحية القديمة سُحبت أيضًا. */
+      expect(await panel(page).locator("option", { hasText: "د. كشف اصطناعي" }).count()).toBe(0);
+
+      release();
+      await expect.poll(() => panel(page!).getAttribute("data-detail-state"), { timeout: 30_000 }).toBe("ready");
+      expect(await panel(page).getByText(OTHER_PATIENT).count()).toBe(0);
+      expect(await panel(page).getByText(`مريض التقويم ${stamp}`).count()).toBe(0);
+      expect(await pick(page, "الطبيب").count()).toBe(0);
+
+      /* والتحقّق المستقل على الخادم باقٍ: لا تفصيل لغيره ولا كشف مطبوع لغيره. */
+      const detail = await (await authedGet(`/api/finance/commissions?detail=1&from=${FROM}&to=${TO}&doctorId=${doctorS}`, h.sessions.doctorA)).json() as { lines: ApiLine[]; isPersonalOnly: boolean };
+      expect(detail.isPersonalOnly).toBe(true);
+      expect(detail.lines.every((line) => line.doctorId === user.party_id)).toBe(true);
+      expect((await authedGet(statementPath(doctorS), h.sessions.doctorA)).status).toBe(404);
+    } finally {
+      await page?.context().close();
+      await q(`UPDATE users SET permissions = $1 WHERE username = 'secdoctora'`, [original]);
     }
   });
 

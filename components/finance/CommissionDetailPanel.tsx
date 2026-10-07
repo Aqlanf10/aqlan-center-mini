@@ -71,6 +71,11 @@ type DetailState =
   | { key: string; status: "ready"; data: DetailPayload }
   | { key: string; status: "error"; message: string; denied: boolean };
 
+/* الصلاحيات التي يقرأ منها الخادم نطاق العمولات (`resolveCommissionViewer`) — جزءٌ من هوية القراءة. */
+const COMMISSION_READ_PERMISSIONS = [
+  "canViewOwnCommissions", "canViewClinicRevenue", "canViewClinicFinance", "canViewOtherDoctorsAccounts",
+] as const;
+
 /* رسائلنا نحن — لا نصّ استثناء ولا رسالة خادمٍ خام قد تحمل تفاصيل داخلية. */
 const FAILURE = {
   network: "تعذّر الاتصال بالخادم لتحميل تفصيل العمولة.",
@@ -93,10 +98,33 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<DetailState | null>(null);
 
-  /* ملكية النتيجة: مفتاحٌ يجمع المستخدم والفترة والمرشّحات وفتح اللوحة والمحاولة. كل تغييرٍ فيه —
-     أو إغلاق اللوحة — يلغي الطلب السابق فورًا (AbortController)، ويتقدّم رقم الجيل في التنظيف
-     نفسه لا عند بدء التحميل التالي، ولا تُعرض نتيجةٌ إلا إن طابق مفتاحُها المفتاحَ الحالي. */
-  const requestKey = JSON.stringify([session?.username ?? "", session?.role ?? "", from, to, doctorId, specialty, currency, openEpoch, attempt]);
+  /* هوية القراءة: المستخدم والدور والصلاحيات التي تغيّر ما يعيده الخادم. سحبُ «حسابات الأطباء
+     الآخرين» مثلًا يجعل ما على الشاشة بياناتٍ لم يعد له حقّ رؤيتها — فتُسحب فورًا. */
+  const readIdentity = JSON.stringify([
+    session?.username ?? "",
+    session?.role ?? "",
+    COMMISSION_READ_PERMISSIONS.map((key) => Boolean((session?.permissions as Record<string, unknown> | null | undefined)?.[key])),
+  ]);
+  const scopeBase = JSON.stringify([readIdentity, from, to, doctorId, specialty, currency]);
+
+  /* لكل انتقال نطاقٍ هويةٌ جديدة (revision) تُحسب في التصيير نفسه الذي يرى التغيير، وتُسحب معه
+     النتيجة المعروضة فورًا: العودة من ب إلى أ لا تُحيي نتيجة أ القديمة كأنها جاهزة، بل تنتظر
+     طلب أ الجديد. وتغيّر هوية القراءة يمحو أيضًا قائمة الأطباء واختيار الطبيب المبنيّين عليها. */
+  const [scope, setScope] = useState({ base: scopeBase, identity: readIdentity, revision: 0 });
+  if (scope.base !== scopeBase) {
+    setScope({ base: scopeBase, identity: readIdentity, revision: scope.revision + 1 });
+    setResult(null);
+    if (scope.identity !== readIdentity) {
+      setDoctors([]);
+      setDoctorId("");
+      setPersonalOnly(false);
+    }
+  }
+
+  /* ملكية النتيجة: مفتاحٌ يجمع هوية النطاق وفتح اللوحة والمحاولة. كل تغييرٍ فيه — أو إغلاق اللوحة —
+     يلغي الطلب السابق فورًا (AbortController)، ويتقدّم رقم الجيل في التنظيف نفسه لا عند بدء التحميل
+     التالي، ولا تُعرض نتيجةٌ إلا إن طابق مفتاحُها المفتاحَ الحالي. */
+  const requestKey = JSON.stringify([scope.base, scope.revision, openEpoch, attempt]);
   const generationRef = useRef(0);
 
   useEffect(() => {
