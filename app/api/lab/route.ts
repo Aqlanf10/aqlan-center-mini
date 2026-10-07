@@ -25,6 +25,12 @@ export async function GET(request: Request) {
   const summaryOnly = url.searchParams.get("summary") === "1";
   const patientIdRaw = url.searchParams.get("patientId");
   const patientId = patientIdRaw ? Number(patientIdRaw) : null;
+  // Keep the existing nonzero-integer filter contract, including invalid-ID fallback.
+  const patientFilter = patientId && Number.isInteger(patientId) ? patientId : null;
+  // patient_id is a PostgreSQL INTEGER. These IDs previously matched no rows;
+  // do not turn them into a database overflow now that filtering happens in SQL.
+  const patientOutOfRange = patientFilter !== null
+    && (patientFilter < -2_147_483_648 || patientFilter > 2_147_483_647);
   const withServices = url.searchParams.get("services") === "1";
 
   /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
@@ -40,17 +46,15 @@ export async function GET(request: Request) {
       return NextResponse.json(await labCounts());
     }
     const [rawOrders, labs, labServices] = await Promise.all([
-      listLabOrders(),
+      patientOutOfRange
+        ? Promise.resolve([])
+        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
     const orders = hideCosts
       ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
       : rawOrders;
-    if (patientId && Number.isInteger(patientId)) {
-      const filtered = orders.filter((o) => o.patientId === patientId);
-      return NextResponse.json({ orders: filtered, labs, ...(withServices ? { labServices } : {}) });
-    }
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل أعمال المختبر." }, { status: 500 });

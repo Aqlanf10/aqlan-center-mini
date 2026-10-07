@@ -63,7 +63,7 @@ export type AuditAction =
   | "commission.case_override.set" | "commission.case_override.void"
   | "backup.download" | "export.download"
   | "document.reprint"
-  | "chart.record" | "visit.sign" | "visit.addendum"
+  | "chart.record" | "perio.record" | "visit.sign" | "visit.addendum"
   /* (LIVE-3) حركات الطابور: من نادى، أعاد النداء، أجلس، أعاد للانتظار، أنهى التشغيل. */
   | "visit.call" | "visit.call_again" | "visit.seat" | "visit.return_to_waiting" | "visit.finish"
   /* (CHAIR-1) إقرار الجاهزية للكرسي، وتجاوز الطوارئ بسببٍ مكتوب، وتأجيل الدفع عند الشبّاك. */
@@ -198,6 +198,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "export.download": "تصدير بيانات",
   "document.reprint": "إعادة طباعة مستند",
   "chart.record": "تثبيت حالة سن",
+  "perio.record": "حفظ قياسات اللثة",
   "visit.sign": "توقيع زيارة",
   "visit.addendum": "ملحق على زيارة",
   "visit.call": "نداء مريض إلى كرسي",

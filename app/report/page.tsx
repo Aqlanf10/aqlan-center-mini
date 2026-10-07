@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
 import { Logo } from "@/components/Icon";
 import { friendlyDateLong } from "@/lib/reminders";
 import { addDays, clinicDateString, type DayLoad } from "@/lib/schedule";
-import { appointmentsCountText, minutesText, reportText, shortMinutes, type DayReport } from "@/lib/report";
+import { appointmentsCountText, reportText, shortMinutes, type DayReport } from "@/lib/report";
 import type { LabSummary } from "@/lib/lab";
 import { PageHeader, StatCard as Stat } from "@/components/PageHeader";
 import { PrintButton } from "@/components/PrintButton";
@@ -31,6 +31,21 @@ interface ReportFeed {
   plannedToday?: PlannedTodayRow[];
 }
 
+/* نفس عقد مسار /api/report: YYYY-MM-DD. الفحص هنا ليس تكرارًا للخادم —
+ * الخادم يُطبّع التاريخ الفاسد إلى «اليوم» بصمت، والشاشة لا ترسل أصلًا
+ * طلبًا غامضًا يُطبَّع، ولا تعرض تقرير «اليوم» بتاريخٍ مُمسوحٍ من الحقل. */
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** هل القيمة يومٌ حقيقي في التقويم — لا نصٌّ يطابق القالب فحسب (كـ 2026-13-45)؟ */
+function isSelectableDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  return calendar.getUTCFullYear() === year
+    && calendar.getUTCMonth() === month - 1
+    && calendar.getUTCDate() === day;
+}
+
 export default function ReportPage() {
   const clinicName = useClinicName();
   const doctor = useSetting("clinic.lead_doctor");
@@ -39,28 +54,65 @@ export default function ReportPage() {
   const address = useSetting("clinic.address");
   const today = useMemo(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), []);
   const [date, setDate] = useState(today);
-  const [feed, setFeed] = useState<ReportFeed | null>(null);
+  /* (هوية العرض) التقرير المحمول مقترنٌ بالتاريخ الذي طُلب له، فاختيارُ يومٍ
+   * جديدًا يُخفي القديمَ في نفس الرسمة — قبل أن يعمل تأثيرُ React ويمسحه. */
+  const [loadedFeed, setLoadedFeed] = useState<{ requestedDate: string; feed: ReportFeed } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /* الخطأ أيضًا مقترنٌ بتاريخه: خطأُ يومٍ سابقٍ لا يُعرض تحت اختيارٍ جديد. */
+  const [failure, setFailure] = useState<{ requestedDate: string; message: string } | null>(null);
+  const [retry, setRetry] = useState(0);
 
-  const load = useCallback(async (target: string) => {
-    setLoading(true);
-    try {
-      const response = await fetch(`/api/report?date=${target}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setFeed(payload as ReportFeed);
-      setError(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const dateSelectable = isSelectableDate(date);
 
   useEffect(() => {
-    void load(date);
-  }, [date, load]);
+    /* حقلٌ مُمسوح أو قيمةٌ فاسدة: لا طلبَ يُرسَل، ولا تقريرَ قديمَ يبقى، ولا
+     * «جارٍ التحميل» بلا طلبٍ فعلّي. الاستعادة بزر «اليوم» أو بإدخال تاريخٍ صحيح. */
+    if (!isSelectableDate(date)) {
+      setLoadedFeed(null);
+      setFailure(null);
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    async function load() {
+      // تقريرٌ سابق لا يجوز أن يبقى مرئيًا أو قابلًا للطباعة أثناء تحميل جديد.
+      setLoadedFeed(null);
+      setFailure(null);
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/report?date=${date}`, {
+          cache: "no-store", signal: controller.signal,
+        });
+        if (!active) return;
+        const payload = await response.json();
+        if (!active) return;
+        if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
+        /* استجابةٌ بتاريخٍ غير المطلوب خطأٌ صريح، لا تقريرٌ لليوم المختار:
+         * الإلغاء وحده لا يحمي من ردٍّ متأخرٍ يجتاز الفحصَ ويعرض يومًا آخر. */
+        if (payload?.date !== date) throw new Error("وصل تقريرٌ بتاريخٍ غير التاريخ المطلوب.");
+        setLoadedFeed({ requestedDate: date, feed: payload as ReportFeed });
+      } catch (loadError) {
+        if (!active) return;
+        setLoadedFeed(null);
+        setFailure({
+          requestedDate: date,
+          message: loadError instanceof Error ? loadError.message : "تعذّر التحميل.",
+        });
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void load();
+    return () => { active = false; controller.abort(); };
+  }, [date, retry]);
+
+  /* القيم المعروضة (والطباعة والمشاركة) مقيدة بالطلب الذي أنتجها، لا بتاريخ
+   * الاستجابة المُطبَّع. ردٌّ متأخرٌ لا يظهر، ورسمةٌ بعد تغيير التاريخ وقبل
+   * بدء التأثير لا تجد تقريرًا قديمًا متخفيًا تحت التاريخ الجديد. */
+  const feed = loadedFeed?.requestedDate === date ? loadedFeed.feed : null;
+  const error = failure?.requestedDate === date ? failure.message : null;
+  const waiting = loading || (loadedFeed !== null && feed === null);
 
   const shareLink = useMemo(() => {
     if (!feed) return null;
@@ -75,7 +127,7 @@ export default function ReportPage() {
   }, [feed, clinicName]);
 
   return (
-    <main className="mx-auto max-w-4xl p-4 pb-24">
+    <main data-testid="daily-report" className="mx-auto max-w-4xl p-4 pb-24">
       {/* ترويسة الطباعة: الشعار والهوية على الورقة — تقرير الأداء اليومي يُوقّع
           ويُؤرشف عند إقفال اليوم، فيحمل اسم المركز كاملًا لا عنوان شاشةٍ فقط. */}
       <div className="mb-3 hidden print:block" dir="rtl">
@@ -104,9 +156,14 @@ export default function ReportPage() {
         title="تقرير الأداء اليومي"
         subtitle="إحصاءات الحضور، أزمنة الانتظار، وجاهزية أعمال الغد"
       >
-        <div className="flex items-center gap-2">
-          <PrintButton />
-        </div>
+        {/* لا طباعة إلا لتقريرٍ صحيحٍ للتاريخ المختار — والطباعة من المتصفح
+            نفسها لا تجد في الصفحة تقريرًا قديمًا لأن جسم التقرير غير موجود،
+            ولا زرًّا تفاعليًّا على الورقة. */}
+        {feed ? (
+          <div className="flex items-center gap-2 print:hidden">
+            <PrintButton />
+          </div>
+        ) : null}
       </PageHeader>
 
       {/* شريط اختيار التاريخ */}
@@ -114,7 +171,8 @@ export default function ReportPage() {
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setDate((current) => addDays(current, -1))}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+            disabled={!dateSelectable}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
           >
             ‹ اليوم السابق
           </button>
@@ -130,7 +188,7 @@ export default function ReportPage() {
           </button>
           <button
             onClick={() => setDate((current) => addDays(current, 1))}
-            disabled={date >= today}
+            disabled={!dateSelectable || date >= today}
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
           >
             اليوم التالي ›
@@ -141,21 +199,38 @@ export default function ReportPage() {
           type="date"
           value={date}
           onChange={(event) => setDate(event.target.value)}
+          aria-invalid={!dateSelectable ? true : undefined}
           className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-extrabold text-navy-900 outline-none focus:border-navy-800"
         />
       </div>
 
-      {error ? (
-        <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-red-700">
-          {error}
+      {dateSelectable && error ? (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2"
+        >
+          <p className="text-xs font-bold text-red-700">{error}</p>
+          <button
+            type="button"
+            onClick={() => setRetry((current) => current + 1)}
+            className="rounded-xl border border-red-300 bg-white px-3 py-1.5 text-xs font-extrabold text-red-700 hover:bg-red-100"
+          >
+            أعد المحاولة
+          </button>
+        </div>
+      ) : null}
+
+      {!dateSelectable ? (
+        <p role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">
+          التاريخ المختار غير صالح — اختر تاريخًا صحيحًا أو اضغط «اليوم» لعرض تقرير اليوم.
         </p>
       ) : null}
 
-      {loading || !feed ? (
+      {dateSelectable && waiting && !feed ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
           جارٍ إعداد التقرير اليومي…
         </p>
-      ) : (
+      ) : feed ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between rounded-xl bg-navy-50/50 p-3 border border-navy-100">
             <span className="text-xs font-black text-navy-900">
@@ -292,6 +367,8 @@ export default function ReportPage() {
               />
             </div>
 
+            {/* أرقام المختبر تبقى بدلالتها الحالية (حالة المختبر الآن) كما
+                يرسلها المسار — لا تُحوَّل تلقائيًا إلى أرقامٍ تاريخية. */}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 text-xs">
               <a
                 href="/lab"
@@ -318,7 +395,7 @@ export default function ReportPage() {
             </div>
           </section>
 
-          {/* زر مشاركة التقرير */}
+          {/* زر مشاركة التقرير — لا يُجهَّز الرابط إلا لتقريرٍ صحيحٍ للتاريخ المختار. */}
           {shareLink ? (
             <a
               href={shareLink}
@@ -330,7 +407,7 @@ export default function ReportPage() {
             </a>
           ) : null}
         </div>
-      )}
+      ) : null}
     </main>
   );
 }

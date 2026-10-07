@@ -2968,10 +2968,10 @@ function toUser(row: UserRow): StaffUser {
  * موظفة الاستقبال ستكتب `Reception` أو `reception` حسب ما تفعله لوحة المفاتيح، ورفض
  * الدخول لهذا السبب يعني اتصالًا بك في أول صباح.
  */
-export async function findUserByUsername(username: string): Promise<StaffUser | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<UserRow>(
-    `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1`,
+export async function findUserByUsername(username: string, client?: DbClient): Promise<StaffUser | null> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<UserRow>(
+    `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1${client ? " FOR SHARE" : ""}`,
     [username],
   );
   return rows[0] ? toUser(rows[0]) : null;
@@ -14333,38 +14333,44 @@ export async function linkUserDoctor(
  * (P0-F) هل للمريض زيارةٌ اليوم (بيوم العيادة)؟ — حدّ المساعد السريري: يرى ويُنهي زيارات اليوم
  * وحدها، لا ملفات المرضى الآخرين.
  */
-export async function patientHasVisitToday(patientId: number): Promise<boolean> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ ok: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1 FROM visits
-        WHERE patient_id = $1 AND (arrived_at AT TIME ZONE $2)::date = $3::date
-     ) AS ok`,
-    [patientId, CLINIC_TIME_ZONE, clinicDateString(new Date(), CLINIC_TIME_ZONE)],
+export async function patientHasVisitToday(patientId: number, client?: DbClient): Promise<boolean> {
+  if (!client) await ensureSchema();
+  // The same clinic-day predicate serves ordinary reads and protected access decisions.
+  const predicate = "patient_id = $1 AND (arrived_at AT TIME ZONE $2)::date = $3::date";
+  const day = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const { rows } = await (client ?? getPool()).query<{ ok?: boolean; id?: number }>(
+    client ? `SELECT id FROM visits WHERE ${predicate} ORDER BY id LIMIT 1 FOR SHARE`
+      : `SELECT EXISTS (SELECT 1 FROM visits WHERE ${predicate}) AS ok`,
+    [patientId, CLINIC_TIME_ZONE, day],
   );
-  return rows[0]?.ok === true;
+  // A lock wait may cross clinic midnight. Fail closed; a later request can re-evaluate.
+  return client ? Boolean(rows[0]) && day === clinicDateString(new Date(), CLINIC_TIME_ZONE)
+    : rows[0]?.ok === true;
 }
 
-export async function doctorOwnsPatient(partyId: number, patientId: number): Promise<boolean> {
-  await ensureSchema();
+export async function doctorOwnsPatient(partyId: number, patientId: number, client?: DbClient): Promise<boolean> {
+  if (!client) await ensureSchema();
+  // One canonical definition: the legacy EXISTS and transactional witness locks use
+  // identical predicates. Any one protected positive witness is sufficient.
+  const witnesses = [
+    { table: "treatment_plans", alias: "t", predicate: "t.patient_id = $2 AND t.primary_doctor_id = $1 AND t.status = 'active'" },
+    { table: "visits", alias: "v", predicate: "v.patient_id = $2 AND v.doctor_id = $1" },
+    { table: "planned_visits", alias: "pv", predicate: "pv.patient_id = $2 AND pv.doctor_id = $1" },
+    { table: "patients", alias: "pd", predicate: "pd.id = $2 AND pd.primary_doctor_id = $1" },
+    { table: "appointments", alias: "a", predicate: "a.patient_id = $2 AND a.doctor_id = $1" },
+    { table: "patient_referrals", alias: "r", predicate: "r.patient_id = $2 AND r.kind = 'internal' AND r.to_party_id = $1 AND r.workflow_state NOT IN ('declined', 'cancelled')" },
+  ];
+  if (client) {
+    for (const { table, alias, predicate } of witnesses) {
+      const { rows } = await client.query(`SELECT ${alias}.id FROM ${table} ${alias}
+        WHERE ${predicate} ORDER BY ${alias}.id LIMIT 1 FOR SHARE`, [partyId, patientId]);
+      if (rows[0]) return true;
+    }
+    return false;
+  }
   const { rows } = await getPool().query<{ ok: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1
-         FROM treatment_plans t
-        WHERE t.patient_id = $2 AND t.primary_doctor_id = $1 AND t.status = 'active'
-       UNION ALL
-       SELECT 1 FROM visits v WHERE v.patient_id = $2 AND v.doctor_id = $1
-       UNION ALL
-       SELECT 1 FROM planned_visits pv WHERE pv.patient_id = $2 AND pv.doctor_id = $1
-       UNION ALL
-       SELECT 1 FROM patients pd WHERE pd.id = $2 AND pd.primary_doctor_id = $1
-       UNION ALL
-       SELECT 1 FROM appointments a WHERE a.patient_id = $2 AND a.doctor_id = $1
-       UNION ALL
-       SELECT 1 FROM patient_referrals r
-        WHERE r.patient_id = $2 AND r.kind = 'internal' AND r.to_party_id = $1
-          AND r.workflow_state NOT IN ('declined', 'cancelled')
-     ) AS ok`,
+    `SELECT EXISTS (${witnesses.map(({ table, alias, predicate }) =>
+      `SELECT 1 FROM ${table} ${alias} WHERE ${predicate}`).join(" UNION ALL ")}) AS ok`,
     [partyId, patientId],
   );
   return Boolean(rows[0]?.ok);
@@ -15137,7 +15143,7 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
-import { insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -15241,7 +15247,7 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       withSerialId.push(table);
     }
 
-    const { rows } = await pool.query(`SELECT * FROM "${table}"`);
+    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
       if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
