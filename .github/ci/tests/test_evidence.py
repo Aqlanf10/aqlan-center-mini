@@ -265,3 +265,95 @@ class GateEndToEndFaults(unittest.TestCase):
             downloads[target]['receipt.json'] = json.dumps(http).encode()
             with self.assertRaises(ValueError):
                 self.run_gate(all_needs, downloads)
+
+
+class NativePreludeFaults(unittest.TestCase):
+    def test_captured_service_prelude_is_retained_and_declared_steps_stay_exact(self):
+        for lane in evidence.LANES:
+            rec = receipt(lane)
+            prelude = evidence.validate_bootstrap_snapshot(rec['bootstrapSteps'], lane)
+            current = {**rec['steps'], **prelude}
+            declared, observed = evidence.reconcile_step_snapshot(current, rec['bootstrapSteps'],
+                configuration()['mandatoryStepIds'][lane], lane)
+            self.assertEqual(declared, rec['steps'])
+            self.assertEqual(observed, rec['runnerPreludeSteps'])
+            for key in rec['steps']:
+                bad = copy.deepcopy(current)
+                del bad[key]
+                with self.assertRaises(ValueError):
+                    evidence.reconcile_step_snapshot(bad, rec['bootstrapSteps'],
+                        configuration()['mandatoryStepIds'][lane], lane)
+                bad = copy.deepcopy(current)
+                bad[key]['outcome'] = 'failure'
+                with self.assertRaises(ValueError):
+                    evidence.reconcile_step_snapshot(bad, rec['bootstrapSteps'],
+                        configuration()['mandatoryStepIds'][lane], lane)
+
+    def test_no_blanket_runner_regex_exception(self):
+        lane = 'postgres_schema_journeys'
+        good = receipt(lane)['bootstrapSteps']
+        key = next(k for k in good if k not in evidence.BOOTSTRAP_IDS)
+        for value in ('failure', 'cancelled', 'skipped', '', None):
+            for field in ('outcome', 'conclusion'):
+                bad = copy.deepcopy(good)
+                bad[key][field] = value
+                with self.assertRaises(ValueError):
+                    evidence.validate_bootstrap_snapshot(bad, lane)
+        for mutation in ('missing', 'extra', 'outputs', 'name', 'wrong-version', 'wrong-variant', 'extra-field'):
+            bad = copy.deepcopy(good)
+            if mutation == 'missing':
+                del bad[key]
+            elif mutation == 'extra':
+                bad['22222222222242228222222222222222'] = copy.deepcopy(bad[key])
+            elif mutation == 'outputs':
+                bad[key]['outputs']['unexpected'] = 'value'
+            elif mutation == 'name':
+                bad['unknown-platform-step'] = bad.pop(key)
+            elif mutation == 'wrong-version':
+                bad[key[:12] + '1' + key[13:]] = bad.pop(key)
+            elif mutation == 'wrong-variant':
+                bad[key[:16] + '1' + key[17:]] = bad.pop(key)
+            else:
+                bad[key]['claimedSuccess'] = True
+            with self.assertRaises(ValueError):
+                evidence.validate_bootstrap_snapshot(bad, lane)
+        for lane in ('security_early', 'static_quality'):
+            with self.assertRaises(ValueError):
+                evidence.validate_bootstrap_snapshot(good, lane)
+
+    def test_runner_or_bootstrap_changes_after_capture_fail_seal_and_final(self):
+        lane = 'build_http'
+        rec = receipt(lane)
+        expected = configuration()['mandatoryStepIds'][lane]
+        prelude = rec['runnerPreludeSteps']
+        current = {**rec['steps'], **prelude}
+        key = next(iter(prelude))
+        variants = []
+        bad = copy.deepcopy(current)
+        bad['22222222222242228222222222222222'] = bad.pop(key)
+        variants.append(bad)
+        bad = copy.deepcopy(current)
+        bad['22222222222242228222222222222222'] = copy.deepcopy(bad[key])
+        variants.append(bad)
+        bad = copy.deepcopy(current)
+        bad['baseline_01']['outputs']['changed'] = 'after initialization'
+        variants.append(bad)
+        bad = copy.deepcopy(current)
+        bad[key]['conclusion'] = 'skipped'
+        variants.append(bad)
+        for bad in variants:
+            with self.assertRaises(ValueError):
+                evidence.reconcile_step_snapshot(bad, rec['bootstrapSteps'], expected, lane)
+        for bad in variants:
+            bad_receipt = copy.deepcopy(rec)
+            bad_receipt['sealSteps'] = bad
+            with self.assertRaises(ValueError):
+                evidence.validate_receipt(bad_receipt, lane, identity(), configuration())
+        bad_receipt = copy.deepcopy(rec)
+        bad_receipt['runnerPreludeSteps'] = {}
+        with self.assertRaises(ValueError):
+            evidence.validate_receipt(bad_receipt, lane, identity(), configuration())
+        bad_receipt = copy.deepcopy(rec)
+        bad_receipt['bootstrapSteps']['baseline_01']['outputs']['changed'] = 'forged'
+        with self.assertRaises(ValueError):
+            evidence.validate_receipt(bad_receipt, lane, identity(), configuration())

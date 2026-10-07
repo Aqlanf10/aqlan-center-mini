@@ -128,6 +128,44 @@ def validate_steps(steps, expected):
                 and step.get('conclusion') == 'success', f'mandatory step did not succeed: {step_id}')
 
 
+BOOTSTRAP_IDS = tuple(f'baseline_{number:02d}' for number in range(1, 6))
+SERVICE_LANES = ('postgres_schema_journeys', 'build_http')
+RUNNER_PRELUDE_ID = re.compile(r'^[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$')
+
+
+def validate_bootstrap_snapshot(snapshot, lane):
+    """Bounded native container prelude, observed before lane-specific audit/test/build work.
+
+    Runner v2.337.0 JobExtension creates one Initialize containers pre-job step
+    with a Guid.ToString("N") context for these exact hosted-service jobs. This
+    is not a regex-only exception to mandatory-step validation: the full early
+    snapshot is persisted and must remain byte-structurally equal at sealing.
+    """
+    require(lane in LANES and isinstance(snapshot, dict), 'invalid bootstrap context')
+    declared = {key: snapshot[key] for key in BOOTSTRAP_IDS if key in snapshot}
+    validate_steps(declared, BOOTSTRAP_IDS)
+    extra = set(snapshot) - set(BOOTSTRAP_IDS)
+    require(len(extra) == (1 if lane in SERVICE_LANES else 0), 'unexpected native pre-job context count')
+    prelude = {}
+    for key in extra:
+        require(isinstance(key, str) and RUNNER_PRELUDE_ID.fullmatch(key), 'unrecognized native pre-job identity')
+        require(snapshot[key] == {'outputs': {}, 'outcome': 'success', 'conclusion': 'success'},
+                'native container initialization must succeed without outputs or extra fields')
+        prelude[key] = snapshot[key]
+    return prelude
+
+
+def reconcile_step_snapshot(current, bootstrap, expected, lane):
+    prelude = validate_bootstrap_snapshot(bootstrap, lane)
+    require(isinstance(current, dict) and set(BOOTSTRAP_IDS) <= set(expected), 'invalid complete step context')
+    require(set(current) == set(expected) | set(prelude), 'missing or unexpected complete step context')
+    require(all(current[key] == value for key, value in bootstrap.items()),
+            'bootstrap or native pre-job context changed after initial capture')
+    declared = {key: current[key] for key in expected}
+    validate_steps(declared, expected)  # Preserve the original exact mandatory-set/outcome contract.
+    return declared, {key: current[key] for key in prelude}
+
+
 def validate_needs(needs):
     require(isinstance(needs, dict) and set(needs) == set(LANES), 'exact complete lane set required')
     for lane in LANES:
@@ -339,8 +377,8 @@ def fetch_artifact(artifact_id, expected_name, expected_digest, identity):
 def validate_receipt(receipt, lane, identity, configuration):
     require(isinstance(receipt, dict) and set(receipt) == {
         'format', 'lane', 'identity', 'startedAt', 'sealedAt', 'nodeVersion', 'npmVersion',
-        'hostname', 'postgresContainer', 'steps', 'artifacts'}, 'invalid receipt schema')
-    require(receipt['format'] == 'aqlan-ci-lane-v1' and receipt['lane'] == lane
+        'hostname', 'postgresContainer', 'bootstrapSteps', 'sealSteps', 'runnerPreludeSteps', 'steps', 'artifacts'}, 'invalid receipt schema')
+    require(receipt['format'] == 'aqlan-ci-lane-v2' and receipt['lane'] == lane
             and receipt['identity'] == identity, 'cross-commit, lane, event, attempt or workflow receipt')
     require(re.fullmatch(r'v22\.[0-9]+\.[0-9]+', receipt['nodeVersion'] or '')
             and re.fullmatch(r'11\.[0-9]+\.[0-9]+', receipt['npmVersion'] or ''), 'tool contract mismatch')
@@ -348,6 +386,10 @@ def validate_receipt(receipt, lane, identity, configuration):
     end = datetime.fromisoformat(receipt['sealedAt'])
     require(start.tzinfo and end.tzinfo and start <= end, 'invalid receipt time interval')
     validate_steps(receipt['steps'], configuration['mandatoryStepIds'][lane])
+    declared, prelude = reconcile_step_snapshot(receipt['sealSteps'], receipt['bootstrapSteps'],
+                                               configuration['mandatoryStepIds'][lane], lane)
+    require(receipt['steps'] == declared and receipt['runnerPreludeSteps'] == prelude,
+            'receipt differs from full unfiltered initial/seal snapshots')
     expected = {name for name, spec in configuration['artifacts'].items()
                 if spec['lane'] == lane and spec['releaseRequired']}
     require(isinstance(receipt['artifacts'], dict) and set(receipt['artifacts']) == expected,
@@ -367,7 +409,9 @@ def init():
                  '.sec-http-state.json', '.sec-http-storage'):
         require(not (ROOT / path).exists(), 'stale output present before mandatory work')
     identity = source_identity(os.environ)
-    receipt = {'identity': identity, 'startedAt': datetime.now(timezone.utc).isoformat(),
+    bootstrap = decode_json(os.environ.get('CI_BOOTSTRAP_STEPS_JSON', ''))
+    validate_bootstrap_snapshot(bootstrap, lane)
+    receipt = {'identity': identity, 'bootstrapSteps': bootstrap, 'startedAt': datetime.now(timezone.utc).isoformat(),
                'nodeVersion': version(['node', '--version']), 'npmVersion': version(['npm', '--version']),
                'hostname': socket.gethostname(), 'postgresContainer': os.environ.get('CI_POSTGRES_CONTAINER', '')}
     (ROOT / '.ci-evidence').mkdir()
@@ -381,8 +425,9 @@ def seal():
     initial = decode_json((ROOT / '.ci-evidence/initial.json').read_bytes())
     identity = source_identity(os.environ)
     require(initial['identity'] == identity, 'source or identity changed during lane')
-    steps = decode_json(os.environ.get('CI_STEPS_JSON', ''))
-    validate_steps(steps, configuration['mandatoryStepIds'][lane])
+    current_steps = decode_json(os.environ.get('CI_STEPS_JSON', ''))
+    steps, prelude = reconcile_step_snapshot(current_steps, initial['bootstrapSteps'],
+                                            configuration['mandatoryStepIds'][lane], lane)
     artifacts = {}
     for name, spec in configuration['artifacts'].items():
         if spec['lane'] != lane or not spec['releaseRequired']:
@@ -398,7 +443,7 @@ def seal():
         validate_family(spec, members, {mapping[path]: data for path, data in files.items()}, identity)
         artifacts[name] = {**artifact_output(steps[spec['uploadStep']]),
                            'name': physical_name(name, identity), 'members': members}
-    receipt = {'format': 'aqlan-ci-lane-v1', 'lane': lane, **initial,
+    receipt = {'format': 'aqlan-ci-lane-v2', 'lane': lane, **initial, 'runnerPreludeSteps': prelude, 'sealSteps': current_steps,
                'sealedAt': datetime.now(timezone.utc).isoformat(), 'steps': steps, 'artifacts': artifacts}
     validate_receipt(receipt, lane, identity, configuration)
     (ROOT / '.ci-evidence/receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')

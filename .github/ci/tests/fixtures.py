@@ -88,7 +88,15 @@ def receipt(lane):
         recorded[spec['uploadStep']]['outputs'] = {'artifact-id': str(index + 1000), 'artifact-digest': 'b' * 64}
         artifacts[name] = {'id': str(index + 1000), 'digest': 'b' * 64,
                            'name': evidence.physical_name(name, ident), 'members': members}
-    return {'format': 'aqlan-ci-lane-v1', 'lane': lane, 'identity': ident,
+    bootstrap = copy.deepcopy({key: recorded[key] for key in evidence.BOOTSTRAP_IDS})
+    prelude = {}
+    if lane in evidence.SERVICE_LANES:
+        key = '11111111111141118111111111111111'
+        prelude[key] = {'outputs': {}, 'outcome': 'success', 'conclusion': 'success'}
+        bootstrap.update(copy.deepcopy(prelude))
+    return {'format': 'aqlan-ci-lane-v2', 'lane': lane, 'identity': ident,
+            'bootstrapSteps': bootstrap, 'runnerPreludeSteps': prelude,
+            'sealSteps': copy.deepcopy({**recorded, **prelude}),
             'startedAt': '2026-10-06T00:00:00+00:00', 'sealedAt': '2026-10-06T00:10:00+00:00',
             'nodeVersion': 'v22.20.0', 'npmVersion': '11.6.0', 'hostname': lane,
             'postgresContainer': lane if lane in ('build_http', 'postgres_schema_journeys') else '',

@@ -116,10 +116,11 @@ def validate_graph(graph, contract):
         require(job['steps'][:5] == contract['bootstrapSteps'], 'per-lane bootstrap contract changed')
         expected_init = {
             'name': 'Bind clean checkout and evidence identity', 'id': 'evidence_init',
-            'run': 'python3 .github/ci/evidence.py init'}
+            'run': 'python3 .github/ci/evidence.py init',
+            'env': {'CI_BOOTSTRAP_STEPS_JSON': '${{ toJSON(steps) }}'}}
         if expected_service:
             # job.services is available only after the job starts, at step env scope.
-            expected_init['env'] = {'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'}
+            expected_init['env']['CI_POSTGRES_CONTAINER'] = '${{ job.services.postgres.id }}'
         require(list(steps)[5] == 'evidence_init' and steps['evidence_init'] == expected_init,
                 'clean-source or step-scoped service provenance gate changed')
         require(list(steps)[-2:] == ['seal', 'receipt_upload'], 'seal must run after every command/uploader')

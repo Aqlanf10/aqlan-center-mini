@@ -63,6 +63,8 @@ jobs:
       - name: Bind clean checkout and evidence identity
         id: evidence_init
         run: python3 .github/ci/evidence.py init
+        env:
+          CI_BOOTSTRAP_STEPS_JSON: ${{ toJSON(steps) }}
       - name: Dependency audit
         run: node --import tsx scripts/ci-audit.mjs
         id: baseline_19
@@ -160,6 +162,8 @@ jobs:
       - name: Bind clean checkout and evidence identity
         id: evidence_init
         run: python3 .github/ci/evidence.py init
+        env:
+          CI_BOOTSTRAP_STEPS_JSON: ${{ toJSON(steps) }}
       - name: Validate workflow DAG and fail-closed fault controls
         id: ci_contract_tests
         run: |
@@ -257,6 +261,7 @@ jobs:
         run: python3 .github/ci/evidence.py init
         env:
           CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          CI_BOOTSTRAP_STEPS_JSON: ${{ toJSON(steps) }}
       - name: PostgreSQL integration tests
         env:
           CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
@@ -391,6 +396,7 @@ jobs:
         run: python3 .github/ci/evidence.py init
         env:
           CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          CI_BOOTSTRAP_STEPS_JSON: ${{ toJSON(steps) }}
       - name: Audit the actual build-lane installation
         run: node --import tsx scripts/ci-audit.mjs
         id: build_install_audit

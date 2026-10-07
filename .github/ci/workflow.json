@@ -84,7 +84,10 @@
         {
           "name": "Bind clean checkout and evidence identity",
           "id": "evidence_init",
-          "run": "python3 .github/ci/evidence.py init"
+          "run": "python3 .github/ci/evidence.py init",
+          "env": {
+            "CI_BOOTSTRAP_STEPS_JSON": "${{ toJSON(steps) }}"
+          }
         },
         {
           "name": "Dependency audit",
@@ -192,7 +195,10 @@
         {
           "name": "Bind clean checkout and evidence identity",
           "id": "evidence_init",
-          "run": "python3 .github/ci/evidence.py init"
+          "run": "python3 .github/ci/evidence.py init",
+          "env": {
+            "CI_BOOTSTRAP_STEPS_JSON": "${{ toJSON(steps) }}"
+          }
         },
         {
           "name": "Validate workflow DAG and fail-closed fault controls",
@@ -328,7 +334,8 @@
           "id": "evidence_init",
           "run": "python3 .github/ci/evidence.py init",
           "env": {
-            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}",
+            "CI_BOOTSTRAP_STEPS_JSON": "${{ toJSON(steps) }}"
           }
         },
         {
@@ -512,7 +519,8 @@
           "id": "evidence_init",
           "run": "python3 .github/ci/evidence.py init",
           "env": {
-            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}",
+            "CI_BOOTSTRAP_STEPS_JSON": "${{ toJSON(steps) }}"
           }
         },
         {

@@ -103,3 +103,20 @@ run every full suite and inspect retained evidence; get independent review; and
 measure actual successful PR/main timings. The observed serial baseline was 24m19–32m52
 (median 29m01 across five successful runs). A future 12–16 minute normal case is a
 hypothesis, not a guaranteed result or permission to remove work.
+
+
+### Native container-initialization context
+
+The runner adds one GUID-named pre-job context when it initializes service containers.
+At evidence initialization, each lane captures the complete actual prior-step context:
+exactly the five successful declared bootstrap steps, plus exactly one successful
+empty-output UUIDv4 entry in each of the two service-backed lanes. Other lanes require
+no native entry. Both full, unfiltered bootstrap and seal snapshots are retained in the version-2 receipt.
+
+At sealing, every declared mandatory step is still required with exact success outcomes.
+The only additional entry must be the same native entry observed before lane-specific audit/test/build work;
+its ID, fields and outcomes and the captured bootstrap entries must remain unchanged.
+Unknown, additional, failed, cancelled, skipped, output-bearing or later-injected entries
+fail. The final gate revalidates the retained snapshot and native entry rather than
+silently discarding unknown step contexts. Actual service IDs and distinct-host/container
+checks remain mandatory.

@@ -78,7 +78,8 @@ class WorkflowDagFaults(unittest.TestCase):
             job = value['jobs'][lane]
             self.assertNotIn('CI_POSTGRES_CONTAINER', job['env'])
             init = next(step for step in job['steps'] if step['id'] == 'evidence_init')
-            self.assertEqual(init['env'], {'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'})
+            self.assertEqual(init['env'], {'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}',
+                                           'CI_BOOTSTRAP_STEPS_JSON': '${{ toJSON(steps) }}'})
             self.reject(lambda g: g['jobs'][lane]['env'].update({
                 'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'}))
             def remove_capture(g):
@@ -89,6 +90,15 @@ class WorkflowDagFaults(unittest.TestCase):
                 step = next(s for s in g['jobs'][lane]['steps'] if s['id'] == 'evidence_init')
                 step['env']['CI_POSTGRES_CONTAINER'] = 'synthetic-container-id'
             self.reject(wrong_capture)
+
+    def test_early_step_snapshot_is_mandatory_in_every_lane(self):
+        for lane in workflow.LANES:
+            init = next(s for s in graph()['jobs'][lane]['steps'] if s['id'] == 'evidence_init')
+            self.assertEqual(init['env']['CI_BOOTSTRAP_STEPS_JSON'], '${{ toJSON(steps) }}')
+            def omit_snapshot(g):
+                step = next(s for s in g['jobs'][lane]['steps'] if s['id'] == 'evidence_init')
+                step['env'].pop('CI_BOOTSTRAP_STEPS_JSON')
+            self.reject(omit_snapshot)
 
     def test_legacy_hidden_directory_remains_non_evidence(self):
         def broaden(g):
