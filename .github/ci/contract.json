@@ -1,0 +1,2685 @@
+{
+  "version": 1,
+  "baselineRef": "05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f",
+  "baselineWorkflowBlob": "cb390bbe7a88b730143c5884afcbbeda971d2825",
+  "state": "RECONCILED_TO_MAIN_FOR_INDEPENDENT_CANDIDATE_CI",
+  "expectedLanes": [
+    "security_early",
+    "static_quality",
+    "postgres_schema_journeys",
+    "build_http"
+  ],
+  "legacyCheckName": "Typecheck, Lint, Test, Postgres, Audit, Build",
+  "triggers": {
+    "pull_request": {
+      "branches": [
+        "main"
+      ]
+    },
+    "push": {
+      "branches": [
+        "main",
+        "feat/**",
+        "hardening/**"
+      ]
+    },
+    "workflow_dispatch": null
+  },
+  "concurrency": {
+    "group": "ci-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  "laneEnvironment": {
+    "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+    "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+    "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+    "CLINIC_TIME_ZONE": "Asia/Aden"
+  },
+  "postgresService": {
+    "postgres": {
+      "image": "postgres:18-alpine",
+      "env": {
+        "POSTGRES_USER": "ci",
+        "POSTGRES_PASSWORD": "ci",
+        "POSTGRES_DB": "aqlan_p1_test"
+      },
+      "ports": [
+        "5432:5432"
+      ],
+      "options": "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5"
+    }
+  },
+  "bootstrapSteps": [
+    {
+      "name": "Check out repository",
+      "uses": "actions/checkout@v7",
+      "id": "baseline_01",
+      "with": {
+        "ref": "${{ github.sha }}"
+      }
+    },
+    {
+      "name": "Set up Node.js",
+      "uses": "actions/setup-node@v7",
+      "with": {
+        "node-version": 22,
+        "cache": "npm"
+      },
+      "id": "baseline_02"
+    },
+    {
+      "name": "Upgrade npm to bulk advisory endpoint",
+      "run": "npm install -g npm@11",
+      "id": "baseline_03"
+    },
+    {
+      "name": "Install locked dependencies",
+      "run": "npm ci",
+      "id": "baseline_04"
+    },
+    {
+      "name": "Verify environment contract",
+      "run": "npm run verify:environment",
+      "id": "baseline_05"
+    }
+  ],
+  "preservedSteps": [
+    {
+      "lane": "security_early",
+      "id": "baseline_01",
+      "sourceOrdinal": 1,
+      "expected": {
+        "name": "Check out repository",
+        "uses": "actions/checkout@v7",
+        "id": "baseline_01",
+        "with": {
+          "ref": "${{ github.sha }}"
+        }
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_02",
+      "sourceOrdinal": 2,
+      "expected": {
+        "name": "Set up Node.js",
+        "uses": "actions/setup-node@v7",
+        "with": {
+          "node-version": 22,
+          "cache": "npm"
+        },
+        "id": "baseline_02"
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_03",
+      "sourceOrdinal": 3,
+      "expected": {
+        "name": "Upgrade npm to bulk advisory endpoint",
+        "run": "npm install -g npm@11",
+        "id": "baseline_03"
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_04",
+      "sourceOrdinal": 4,
+      "expected": {
+        "name": "Install locked dependencies",
+        "run": "npm ci",
+        "id": "baseline_04"
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_05",
+      "sourceOrdinal": 5,
+      "expected": {
+        "name": "Verify environment contract",
+        "run": "npm run verify:environment",
+        "id": "baseline_05"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_01",
+      "sourceOrdinal": 1,
+      "expected": {
+        "name": "Check out repository",
+        "uses": "actions/checkout@v7",
+        "id": "baseline_01",
+        "with": {
+          "ref": "${{ github.sha }}"
+        }
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_02",
+      "sourceOrdinal": 2,
+      "expected": {
+        "name": "Set up Node.js",
+        "uses": "actions/setup-node@v7",
+        "with": {
+          "node-version": 22,
+          "cache": "npm"
+        },
+        "id": "baseline_02"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_03",
+      "sourceOrdinal": 3,
+      "expected": {
+        "name": "Upgrade npm to bulk advisory endpoint",
+        "run": "npm install -g npm@11",
+        "id": "baseline_03"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_04",
+      "sourceOrdinal": 4,
+      "expected": {
+        "name": "Install locked dependencies",
+        "run": "npm ci",
+        "id": "baseline_04"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_05",
+      "sourceOrdinal": 5,
+      "expected": {
+        "name": "Verify environment contract",
+        "run": "npm run verify:environment",
+        "id": "baseline_05"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_01",
+      "sourceOrdinal": 1,
+      "expected": {
+        "name": "Check out repository",
+        "uses": "actions/checkout@v7",
+        "id": "baseline_01",
+        "with": {
+          "ref": "${{ github.sha }}"
+        }
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_02",
+      "sourceOrdinal": 2,
+      "expected": {
+        "name": "Set up Node.js",
+        "uses": "actions/setup-node@v7",
+        "with": {
+          "node-version": 22,
+          "cache": "npm"
+        },
+        "id": "baseline_02"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_03",
+      "sourceOrdinal": 3,
+      "expected": {
+        "name": "Upgrade npm to bulk advisory endpoint",
+        "run": "npm install -g npm@11",
+        "id": "baseline_03"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_04",
+      "sourceOrdinal": 4,
+      "expected": {
+        "name": "Install locked dependencies",
+        "run": "npm ci",
+        "id": "baseline_04"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_05",
+      "sourceOrdinal": 5,
+      "expected": {
+        "name": "Verify environment contract",
+        "run": "npm run verify:environment",
+        "id": "baseline_05"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_01",
+      "sourceOrdinal": 1,
+      "expected": {
+        "name": "Check out repository",
+        "uses": "actions/checkout@v7",
+        "id": "baseline_01",
+        "with": {
+          "ref": "${{ github.sha }}"
+        }
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_02",
+      "sourceOrdinal": 2,
+      "expected": {
+        "name": "Set up Node.js",
+        "uses": "actions/setup-node@v7",
+        "with": {
+          "node-version": 22,
+          "cache": "npm"
+        },
+        "id": "baseline_02"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_03",
+      "sourceOrdinal": 3,
+      "expected": {
+        "name": "Upgrade npm to bulk advisory endpoint",
+        "run": "npm install -g npm@11",
+        "id": "baseline_03"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_04",
+      "sourceOrdinal": 4,
+      "expected": {
+        "name": "Install locked dependencies",
+        "run": "npm ci",
+        "id": "baseline_04"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_05",
+      "sourceOrdinal": 5,
+      "expected": {
+        "name": "Verify environment contract",
+        "run": "npm run verify:environment",
+        "id": "baseline_05"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_06",
+      "sourceOrdinal": 6,
+      "expected": {
+        "name": "Typecheck",
+        "run": "npm run typecheck",
+        "id": "baseline_06"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_07",
+      "sourceOrdinal": 7,
+      "expected": {
+        "name": "Lint",
+        "run": "npm run lint",
+        "id": "baseline_07"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_08",
+      "sourceOrdinal": 8,
+      "expected": {
+        "name": "Money aggregation guard",
+        "run": "npm run scan:money",
+        "id": "baseline_08"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_09",
+      "sourceOrdinal": 9,
+      "expected": {
+        "name": "Unit tests",
+        "run": "npm test",
+        "id": "baseline_09"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_10",
+      "sourceOrdinal": 10,
+      "expected": {
+        "name": "PostgreSQL integration tests",
+        "env": {
+          "CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE": "1",
+          "MANUAL_CASH_CI_DISPOSABLE_FIXTURE": "1"
+        },
+        "run": "npm run test:postgres",
+        "id": "baseline_10"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_11",
+      "sourceOrdinal": 11,
+      "expected": {
+        "name": "Generate current schema contract on PostgreSQL 18",
+        "env": {
+          "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+        },
+        "run": "git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json\nnpm run schema:contract\ncp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json\nnpm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json\ngit checkout -- schema/current-schema-contract.pg18.json\n",
+        "id": "baseline_11"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_12",
+      "sourceOrdinal": 12,
+      "expected": {
+        "name": "Upload PostgreSQL 18 schema contract",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "current-schema-contract-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": "/tmp/current-schema-contract.pg18.json",
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_12"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_13",
+      "sourceOrdinal": 13,
+      "expected": {
+        "name": "Characterize schema ownership on ephemeral PostgreSQL 18",
+        "env": {
+          "SCHEMA_OWNERSHIP_SOURCE_COMMIT_SHA": "${{ github.event.pull_request.head.sha || github.sha }}"
+        },
+        "run": "npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json",
+        "id": "baseline_13"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_14",
+      "sourceOrdinal": 14,
+      "expected": {
+        "name": "Upload schema ownership characterization",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "schema-ownership-characterization-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": "/tmp/schema-ownership-characterization.json",
+          "if-no-files-found": "warn",
+          "retention-days": 7
+        },
+        "id": "baseline_14"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_15",
+      "sourceOrdinal": 15,
+      "expected": {
+        "name": "Operational verification journeys",
+        "env": {
+          "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+        },
+        "run": "npm run verify:ci",
+        "id": "baseline_15"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_16",
+      "sourceOrdinal": 16,
+      "expected": {
+        "name": "Generate PostgreSQL 18 baseline manifest candidate",
+        "run": "npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json",
+        "id": "baseline_16"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_17",
+      "sourceOrdinal": 17,
+      "expected": {
+        "name": "Verify committed baseline manifest against fresh generation",
+        "run": "npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json",
+        "id": "baseline_17"
+      }
+    },
+    {
+      "lane": "postgres_schema_journeys",
+      "id": "baseline_18",
+      "sourceOrdinal": 18,
+      "expected": {
+        "name": "Upload baseline manifest candidate",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "baseline-schema-manifest-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": "/tmp/baseline-schema-manifest.json",
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_18"
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_19",
+      "sourceOrdinal": 19,
+      "expected": {
+        "name": "Dependency audit",
+        "run": "node --import tsx scripts/ci-audit.mjs",
+        "id": "baseline_19"
+      }
+    },
+    {
+      "lane": "security_early",
+      "id": "baseline_20",
+      "sourceOrdinal": 20,
+      "expected": {
+        "name": "Upload exact dependency audit evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "scoped-dependency-audit--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".dependency-audit/full-attempt-1.json\n.dependency-audit/full-attempt-1.stderr.txt\n.dependency-audit/full-attempt-1.process.json\n.dependency-audit/full-attempt-2.json\n.dependency-audit/full-attempt-2.stderr.txt\n.dependency-audit/full-attempt-2.process.json\n.dependency-audit/full-attempt-3.json\n.dependency-audit/full-attempt-3.stderr.txt\n.dependency-audit/full-attempt-3.process.json\n.dependency-audit/production-attempt-1.json\n.dependency-audit/production-attempt-1.stderr.txt\n.dependency-audit/production-attempt-1.process.json\n.dependency-audit/production-attempt-2.json\n.dependency-audit/production-attempt-2.stderr.txt\n.dependency-audit/production-attempt-2.process.json\n.dependency-audit/production-attempt-3.json\n.dependency-audit/production-attempt-3.stderr.txt\n.dependency-audit/production-attempt-3.process.json\n.dependency-audit/exception-proof.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_20"
+      }
+    },
+    {
+      "lane": "static_quality",
+      "id": "baseline_21",
+      "sourceOrdinal": 21,
+      "expected": {
+        "name": "Raw body parser scanner",
+        "run": "npm run ci:scan:body",
+        "id": "baseline_21"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_22",
+      "sourceOrdinal": 22,
+      "expected": {
+        "name": "Production build",
+        "run": "npm run build",
+        "id": "baseline_22"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_23",
+      "sourceOrdinal": 23,
+      "expected": {
+        "name": "Build and smoke-test read-only preflight artifact",
+        "run": "npm run build:preflight",
+        "id": "baseline_23"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_24",
+      "sourceOrdinal": 24,
+      "expected": {
+        "name": "Verify braces absence in actual runtime artifacts",
+        "run": "node scripts/verify-braces-runtime.mjs",
+        "id": "baseline_24"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_25",
+      "sourceOrdinal": 25,
+      "expected": {
+        "name": "Upload exact runtime dependency proof",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "braces-runtime-absence--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".dependency-audit/runtime-proof.json",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_25"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_26",
+      "sourceOrdinal": 26,
+      "expected": {
+        "name": "Install Chromium for Settings browser journey",
+        "run": "npx playwright install --with-deps chromium",
+        "id": "baseline_26"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_27",
+      "sourceOrdinal": 27,
+      "expected": {
+        "name": "Install PDF text inspection tool",
+        "run": "sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils",
+        "id": "baseline_27"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_28",
+      "sourceOrdinal": 28,
+      "expected": {
+        "name": "HTTP security integration tests",
+        "run": "npm run test:security-http",
+        "id": "baseline_28"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_29",
+      "sourceOrdinal": 29,
+      "expected": {
+        "name": "Upload patient statement cutoff screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-statement-cutoff-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-statement-cutoff-screen.png\n.settings-ui-artifacts/patient-statement-cutoff-print.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_29"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_30",
+      "sourceOrdinal": 30,
+      "expected": {
+        "name": "Upload lab pricing UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "lab-pricing-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/lab-pricing-scope.png\n.settings-ui-artifacts/lab-pricing-scope-mobile.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_30"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_31",
+      "sourceOrdinal": 31,
+      "expected": {
+        "name": "Upload pending booking UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "quick-booking-frozen-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/quick-booking-frozen-desktop.png\n.settings-ui-artifacts/quick-booking-frozen-mobile.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_31"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_32",
+      "sourceOrdinal": 32,
+      "expected": {
+        "name": "Upload prescription patient context evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "prescription-patient-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/prescription-patient-context-warning-1280.png\n.settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-warning-390.png\n.settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-390.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_32"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_33",
+      "sourceOrdinal": 33,
+      "expected": {
+        "name": "Upload prescription diagnosis UI screenshot",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "prescription-diagnosis-ui-screenshot--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/prescription-diagnosis-pinned.png",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_33"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_34",
+      "sourceOrdinal": 34,
+      "expected": {
+        "name": "Upload finance report visibility screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "finance-report-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/finance-report-revenue-only-1280.png\n.settings-ui-artifacts/finance-report-revenue-only-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_34"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_35",
+      "sourceOrdinal": 35,
+      "expected": {
+        "name": "Upload finance shift read UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "finance-shift-read-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/finance-shift-unavailable.png\n.settings-ui-artifacts/finance-shift-draft-restored.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_35"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_36",
+      "sourceOrdinal": 36,
+      "expected": {
+        "name": "Upload expense catalogue visibility screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "expense-catalogue-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/expense-catalogue-restricted-1280.png\n.settings-ui-artifacts/expense-catalogue-restricted-390.png\n.settings-ui-artifacts/expense-catalogue-revoked-open-report.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_36"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_37",
+      "sourceOrdinal": 37,
+      "expected": {
+        "name": "Upload patient dossier ENDO print artifacts",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-dossier-endo-print-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-dossier-endo-screen.png\n.settings-ui-artifacts/patient-dossier-endo-mobile-390.png\n.settings-ui-artifacts/patient-dossier-endo-print.png\n.settings-ui-artifacts/patient-dossier-endo-a4.pdf\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_37"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_38",
+      "sourceOrdinal": 38,
+      "expected": {
+        "name": "Upload pending clinical notes UI screenshot",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "clinical-visit-pending-notes-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/clinical-visit-pending-notes.png",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_38"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_39",
+      "sourceOrdinal": 39,
+      "expected": {
+        "name": "Upload clinical visit owner UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "clinical-visit-owner-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png\n.settings-ui-artifacts/clinical-visit-owner-pending-390.png\n.settings-ui-artifacts/clinical-visit-owner-ready-1280.png\n.settings-ui-artifacts/clinical-visit-owner-ready-390.png\n.settings-ui-artifacts/clinical-visit-owner-stay-1280.png\n.settings-ui-artifacts/clinical-visit-owner-stay-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_39"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_40",
+      "sourceOrdinal": 40,
+      "expected": {
+        "name": "Upload standalone orthodontic wire screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-adjustment-wire-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-390.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json\n.settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_40"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_41",
+      "sourceOrdinal": 41,
+      "expected": {
+        "name": "Upload orthodontic regimen screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-regimen-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png\n.settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-ongoing-390.png\n.settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-1280.png\n.settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-390.png\n.settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_41"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_42",
+      "sourceOrdinal": 42,
+      "expected": {
+        "name": "Upload patient alert freshness screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-alert-freshness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-alert-freshness-1280.png\n.settings-ui-artifacts/patient-alert-freshness-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_42"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_43",
+      "sourceOrdinal": 43,
+      "expected": {
+        "name": "Upload case diagnosis reference screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "clinical-visit-diagnosis-reference-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_43"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_44",
+      "sourceOrdinal": 44,
+      "expected": {
+        "name": "Upload orthodontic chairside entry screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "clinical-visit-ortho-entry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png\n.settings-ui-artifacts/clinical-visit-ortho-entry-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_44"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_45",
+      "sourceOrdinal": 45,
+      "expected": {
+        "name": "Upload accounting carry-forward UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "accounting-carry-forward-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/accounting-carry-forward.png\n.settings-ui-artifacts/accounting-carry-forward-mobile.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_45"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_46",
+      "sourceOrdinal": 46,
+      "expected": {
+        "name": "Upload manual cash containment UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "manual-cash-containment-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/manual_cash_requires_linked_movement.png\n.settings-ui-artifacts/manual_cash_shift_busy.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_46"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_47",
+      "sourceOrdinal": 47,
+      "expected": {
+        "name": "Upload patient navigation draft screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-navigation-draft-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-navigation-draft-1280.png\n.settings-ui-artifacts/patient-navigation-draft-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_47"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_48",
+      "sourceOrdinal": 48,
+      "expected": {
+        "name": "Upload compact patient context screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-compact-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-today-ordinary-390.png\n.settings-ui-artifacts/patient-compact-today-long-1280.png\n.settings-ui-artifacts/patient-compact-today-long-390.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-390.png\n.settings-ui-artifacts/patient-compact-treatment-long-1280.png\n.settings-ui-artifacts/patient-compact-treatment-long-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_48"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_49",
+      "sourceOrdinal": 49,
+      "expected": {
+        "name": "Upload endodontics cockpit screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "endodontics-cockpit-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/endodontics-cockpit-1280.png\n.settings-ui-artifacts/endodontics-cockpit-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_49"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_50",
+      "sourceOrdinal": 50,
+      "expected": {
+        "name": "Upload endodontics reference read safety evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "endodontics-reference-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/endodontics-read-denied-1280.png\n.settings-ui-artifacts/endodontics-read-denied-390.png\n.settings-ui-artifacts/endodontics-read-denied-1280-bounds.json\n.settings-ui-artifacts/endodontics-read-denied-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_50"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_51",
+      "sourceOrdinal": 51,
+      "expected": {
+        "name": "Upload cockpit UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-cockpit-readiness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-cockpit-readiness-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-390.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_51"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_52",
+      "sourceOrdinal": 52,
+      "expected": {
+        "name": "Upload legacy UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "legacy-patient-guidance-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/legacy-patient-plan-1280.png\n.settings-ui-artifacts/legacy-patient-plan-390.png\n.settings-ui-artifacts/legacy-opening-guidance-1280.png\n.settings-ui-artifacts/legacy-opening-guidance-390.png\n.settings-ui-artifacts/legacy-current-collection-1280.png\n.settings-ui-artifacts/legacy-current-collection-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_52"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_53",
+      "sourceOrdinal": 53,
+      "expected": {
+        "name": "Upload orthodontic diagnosis case screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-diagnosis-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-diagnosis-case-1280.png\n.settings-ui-artifacts/ortho-diagnosis-case-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_53"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_54",
+      "sourceOrdinal": 54,
+      "expected": {
+        "name": "Upload legacy archive reader screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "legacy-archive-reader-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/legacy-archive-reader-1280.png\n.settings-ui-artifacts/legacy-archive-reader-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_54"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_55",
+      "sourceOrdinal": 55,
+      "expected": {
+        "name": "Upload orthodontic agreement read-state screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-package-read-state-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-package-unavailable-1280.png\n.settings-ui-artifacts/ortho-package-unavailable-390.png\n.settings-ui-artifacts/ortho-package-funded-1280.png\n.settings-ui-artifacts/ortho-package-funded-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_55"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_56",
+      "sourceOrdinal": 56,
+      "expected": {
+        "name": "Upload plan payment visibility screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "plan-payment-visibility-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/plan-payment-hidden-1280.png\n.settings-ui-artifacts/plan-payment-hidden-390.png\n.settings-ui-artifacts/plan-payment-denied-1280.png\n.settings-ui-artifacts/plan-payment-denied-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_56"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_57",
+      "sourceOrdinal": 57,
+      "expected": {
+        "name": "Upload orthodontic record case screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-records-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-records-case-1280.png\n.settings-ui-artifacts/ortho-records-references-1280.png\n.settings-ui-artifacts/ortho-records-case-390.png\n.settings-ui-artifacts/ortho-records-profile-390.png\n.settings-ui-artifacts/ortho-records-references-390.png\n.settings-ui-artifacts/ortho-records-unavailable-390.png\n.settings-ui-artifacts/ortho-records-ceph-summary-1280.png\n.settings-ui-artifacts/ortho-records-ceph-summary-390.png\n.settings-ui-artifacts/ortho-records-capture-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_57"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_58",
+      "sourceOrdinal": 58,
+      "expected": {
+        "name": "Upload legacy checklist refresh screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "legacy-checklist-refresh-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/legacy-checklist-independent-1280.png\n.settings-ui-artifacts/legacy-checklist-independent-390.png\n.settings-ui-artifacts/legacy-checklist-unavailable-1280.png\n.settings-ui-artifacts/legacy-checklist-unavailable-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_58"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_59",
+      "sourceOrdinal": 59,
+      "expected": {
+        "name": "Upload commission category editor screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "commission-category-editor-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/commission-category-editor-1280.png\n.settings-ui-artifacts/commission-category-editor-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_59"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_60",
+      "sourceOrdinal": 60,
+      "expected": {
+        "name": "Upload long doctor phone filter screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "phone-doctor-filter-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/phone-doctor-filter-home-390.png\n.settings-ui-artifacts/phone-doctor-filter-appointments-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_60"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_61",
+      "sourceOrdinal": 61,
+      "expected": {
+        "name": "Upload Settings UI screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "settings-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/",
+          "if-no-files-found": "ignore",
+          "retention-days": 7
+        },
+        "id": "baseline_61"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_62",
+      "sourceOrdinal": 62,
+      "expected": {
+        "name": "Upload reversed installment invoice label evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-invoice-recovery-labels-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/invoice-recovery-partial-1280.png\n.settings-ui-artifacts/invoice-recovery-credit-1280.png\n.settings-ui-artifacts/invoice-recovery-partial-390.png\n.settings-ui-artifacts/invoice-recovery-credit-390.png\n.settings-ui-artifacts/invoice-recovery-1280-bounds.json\n.settings-ui-artifacts/invoice-recovery-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_62"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_63",
+      "sourceOrdinal": 63,
+      "expected": {
+        "name": "Upload orthodontic parent read safety acceptance",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-ortho-parent-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_63"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_64",
+      "sourceOrdinal": 64,
+      "expected": {
+        "name": "Upload ceph pending-write uncertainty screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-ceph-post-uncertainty-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png\n.settings-ui-artifacts/patient-ceph-post-uncertain-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_64"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_65",
+      "sourceOrdinal": 65,
+      "expected": {
+        "name": "Upload orthodontic photo completeness screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-photo-completeness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-photo-completeness-1280.png\n.settings-ui-artifacts/ortho-photo-completeness-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_65"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_66",
+      "sourceOrdinal": 66,
+      "expected": {
+        "name": "Upload truthful orthodontic follow-up invitation evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-unbooked-followup-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-unbooked-followup-390.png\n.settings-ui-artifacts/ortho-unbooked-followup-1280.png\n.settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json\n.settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_66"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_67",
+      "sourceOrdinal": 67,
+      "expected": {
+        "name": "Upload Today readiness read lifetime evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "today-readiness-read-lifetime-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/today-readiness-1280.png\n.settings-ui-artifacts/today-readiness-390.png\n.settings-ui-artifacts/today-readiness-1280-bounds.json\n.settings-ui-artifacts/today-readiness-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_67"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_68",
+      "sourceOrdinal": 68,
+      "expected": {
+        "name": "Upload raw service category display screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "service-raw-category-display-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/service-raw-category-1280.png\n.settings-ui-artifacts/service-raw-category-390.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_68"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_69",
+      "sourceOrdinal": 69,
+      "expected": {
+        "name": "Upload legacy reconciliation preview evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "legacy-reconciliation-preview-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/legacy-reconciliation-preview-390.png\n.settings-ui-artifacts/legacy-reconciliation-preview-1280.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_69"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_70",
+      "sourceOrdinal": 70,
+      "expected": {
+        "name": "Upload Cases orthodontic section navigation evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-cases-navigation-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/patient-cases-navigation-1280.png\n.settings-ui-artifacts/patient-cases-navigation-390.png\n.settings-ui-artifacts/patient-cases-navigation-1280-bounds.json\n.settings-ui-artifacts/patient-cases-navigation-390-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_70"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_71",
+      "sourceOrdinal": 71,
+      "expected": {
+        "name": "Upload dental chart read and retry evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "dental-chart-read-retry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/dental-chart-ready-390.png\n.settings-ui-artifacts/dental-chart-ready-1280.png\n.settings-ui-artifacts/dental-chart-ready-390-bounds.json\n.settings-ui-artifacts/dental-chart-ready-1280-bounds.json\n.settings-ui-artifacts/dental-chart-error-390.png\n.settings-ui-artifacts/dental-chart-error-1280.png\n.settings-ui-artifacts/dental-chart-error-390-bounds.json\n.settings-ui-artifacts/dental-chart-error-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_71"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_72",
+      "sourceOrdinal": 72,
+      "expected": {
+        "name": "Upload orthodontic prescription truth evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-prescription-truth-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png\n.settings-ui-artifacts/ortho-prescription-unrecorded-1280.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-390.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-1280.png\n.settings-ui-artifacts/ortho-prescription-390-bounds.json\n.settings-ui-artifacts/ortho-prescription-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_72"
+      }
+    },
+    {
+      "lane": "build_http",
+      "id": "baseline_73",
+      "sourceOrdinal": 73,
+      "expected": {
+        "name": "Upload orthodontic booking default evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "ortho-booking-default-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+          "path": ".settings-ui-artifacts/ortho-booking-service-390.png\n.settings-ui-artifacts/ortho-booking-service-1280.png\n.settings-ui-artifacts/ortho-booking-duration-390.png\n.settings-ui-artifacts/ortho-booking-duration-1280.png\n.settings-ui-artifacts/ortho-booking-390-bounds.json\n.settings-ui-artifacts/ortho-booking-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        },
+        "id": "baseline_73"
+      }
+    }
+  ],
+  "clinicalDeltas": [
+    {
+      "source": "https://github.com/Aqlanf10/aqlan-center-mini/pull/276",
+      "headSha": "4e99a13c2358dbd9dd8d2ee094bd173067a0cb08",
+      "step": {
+        "name": "Upload recall mutation refusal evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "recall-mutation-refusal-ui",
+          "path": ".settings-ui-artifacts/recall-refusal-390.png\n.settings-ui-artifacts/recall-refusal-1280.png\n.settings-ui-artifacts/recall-retry-390.png\n.settings-ui-artifacts/recall-retry-1280.png\n.settings-ui-artifacts/recall-refusal-390-bounds.json\n.settings-ui-artifacts/recall-refusal-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        }
+      }
+    },
+    {
+      "source": "https://github.com/Aqlanf10/aqlan-center-mini/pull/281",
+      "headSha": "31085a171a8a79ad9d592fd05dbba00de40a07c6",
+      "step": {
+        "name": "Upload patient lab status refusal evidence",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "patient-lab-status-refusal-ui",
+          "path": ".settings-ui-artifacts/lab-status-refusal-390.png\n.settings-ui-artifacts/lab-status-refusal-1280.png\n.settings-ui-artifacts/lab-status-retry-390.png\n.settings-ui-artifacts/lab-status-retry-1280.png\n.settings-ui-artifacts/lab-status-refusal-390-bounds.json\n.settings-ui-artifacts/lab-status-refusal-1280-bounds.json\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        }
+      }
+    },
+    {
+      "source": "https://github.com/Aqlanf10/aqlan-center-mini/pull/279",
+      "prospectiveTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+      "reviewedParentTree": "5c62d79bbd4c645793946c8c29201487ff5af9d5",
+      "step": {
+        "name": "Upload daily report selected-date screenshots",
+        "if": "always()",
+        "uses": "actions/upload-artifact@v4",
+        "with": {
+          "name": "daily-report-selected-date-ui",
+          "path": ".settings-ui-artifacts/daily-report-selected-day-1280.png\n.settings-ui-artifacts/daily-report-selected-day-390.png\n.settings-ui-artifacts/daily-report-selected-day-print-1280.png\n",
+          "include-hidden-files": true,
+          "if-no-files-found": "error",
+          "retention-days": 7
+        }
+      }
+    }
+  ],
+  "artifacts": {
+    "current-schema-contract-pg18": {
+      "semanticName": "current-schema-contract-pg18",
+      "proposedLane": "postgres-schema-journeys",
+      "paths": [
+        "/tmp/current-schema-contract.pg18.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": false,
+      "currentIf": "success() implicit",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L129",
+      "lane": "postgres_schema_journeys",
+      "uploadStep": "baseline_12"
+    },
+    "schema-ownership-characterization-pg18": {
+      "semanticName": "schema-ownership-characterization-pg18",
+      "proposedLane": "postgres-schema-journeys",
+      "paths": [
+        "/tmp/schema-ownership-characterization.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": false,
+      "currentIf": "always()",
+      "currentMissingPolicy": "warn",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "Current warn on missing; successful release must still require the characterization file and successful producer.",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L142",
+      "lane": "postgres_schema_journeys",
+      "uploadStep": "baseline_14"
+    },
+    "baseline-schema-manifest-pg18": {
+      "semanticName": "baseline-schema-manifest-pg18",
+      "proposedLane": "postgres-schema-journeys",
+      "paths": [
+        "/tmp/baseline-schema-manifest.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": false,
+      "currentIf": "success() implicit",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L172",
+      "lane": "postgres_schema_journeys",
+      "uploadStep": "baseline_18"
+    },
+    "scoped-dependency-audit": {
+      "semanticName": "scoped-dependency-audit",
+      "proposedLane": "security-early (also repeated in build-http against that installation)",
+      "paths": [
+        ".dependency-audit/full-attempt-1.json",
+        ".dependency-audit/full-attempt-1.stderr.txt",
+        ".dependency-audit/full-attempt-1.process.json",
+        ".dependency-audit/full-attempt-2.json",
+        ".dependency-audit/full-attempt-2.stderr.txt",
+        ".dependency-audit/full-attempt-2.process.json",
+        ".dependency-audit/full-attempt-3.json",
+        ".dependency-audit/full-attempt-3.stderr.txt",
+        ".dependency-audit/full-attempt-3.process.json",
+        ".dependency-audit/production-attempt-1.json",
+        ".dependency-audit/production-attempt-1.stderr.txt",
+        ".dependency-audit/production-attempt-1.process.json",
+        ".dependency-audit/production-attempt-2.json",
+        ".dependency-audit/production-attempt-2.stderr.txt",
+        ".dependency-audit/production-attempt-2.process.json",
+        ".dependency-audit/production-attempt-3.json",
+        ".dependency-audit/production-attempt-3.stderr.txt",
+        ".dependency-audit/production-attempt-3.process.json",
+        ".dependency-audit/exception-proof.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": false,
+      "nuance": "Attempt 1 full+production triples and exception-proof required on successful audit; attempts 2/3 required only when executed, with complete stdout/stderr/process triples. Empty stderr allowed.",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L186",
+      "lane": "security_early",
+      "uploadStep": "baseline_20"
+    },
+    "braces-runtime-absence": {
+      "semanticName": "braces-runtime-absence",
+      "proposedLane": "build-http",
+      "paths": [
+        ".dependency-audit/runtime-proof.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "success() implicit",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L229",
+      "lane": "build_http",
+      "uploadStep": "baseline_25"
+    },
+    "patient-statement-cutoff-ui": {
+      "semanticName": "patient-statement-cutoff-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-statement-cutoff-screen.png",
+        ".settings-ui-artifacts/patient-statement-cutoff-print.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L252",
+      "lane": "build_http",
+      "uploadStep": "baseline_29"
+    },
+    "lab-pricing-ui-screenshots": {
+      "semanticName": "lab-pricing-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/lab-pricing-scope.png",
+        ".settings-ui-artifacts/lab-pricing-scope-mobile.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L266",
+      "lane": "build_http",
+      "uploadStep": "baseline_30"
+    },
+    "quick-booking-frozen-ui-screenshots": {
+      "semanticName": "quick-booking-frozen-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/quick-booking-frozen-desktop.png",
+        ".settings-ui-artifacts/quick-booking-frozen-mobile.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L279",
+      "lane": "build_http",
+      "uploadStep": "baseline_31"
+    },
+    "prescription-patient-context-ui": {
+      "semanticName": "prescription-patient-context-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/prescription-patient-context-warning-1280.png",
+        ".settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json",
+        ".settings-ui-artifacts/prescription-patient-context-unavailable-1280.png",
+        ".settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json",
+        ".settings-ui-artifacts/prescription-patient-context-warning-390.png",
+        ".settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json",
+        ".settings-ui-artifacts/prescription-patient-context-unavailable-390.png",
+        ".settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L293",
+      "lane": "build_http",
+      "uploadStep": "baseline_32"
+    },
+    "prescription-diagnosis-ui-screenshot": {
+      "semanticName": "prescription-diagnosis-ui-screenshot",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/prescription-diagnosis-pinned.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L312",
+      "lane": "build_http",
+      "uploadStep": "baseline_33"
+    },
+    "finance-report-visibility-ui-screenshots": {
+      "semanticName": "finance-report-visibility-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/finance-report-revenue-only-1280.png",
+        ".settings-ui-artifacts/finance-report-revenue-only-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L323",
+      "lane": "build_http",
+      "uploadStep": "baseline_34"
+    },
+    "finance-shift-read-ui-screenshots": {
+      "semanticName": "finance-shift-read-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/finance-shift-unavailable.png",
+        ".settings-ui-artifacts/finance-shift-draft-restored.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L336",
+      "lane": "build_http",
+      "uploadStep": "baseline_35"
+    },
+    "expense-catalogue-visibility-ui-screenshots": {
+      "semanticName": "expense-catalogue-visibility-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/expense-catalogue-restricted-1280.png",
+        ".settings-ui-artifacts/expense-catalogue-restricted-390.png",
+        ".settings-ui-artifacts/expense-catalogue-revoked-open-report.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L349",
+      "lane": "build_http",
+      "uploadStep": "baseline_36"
+    },
+    "patient-dossier-endo-print-ui": {
+      "semanticName": "patient-dossier-endo-print-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-dossier-endo-screen.png",
+        ".settings-ui-artifacts/patient-dossier-endo-mobile-390.png",
+        ".settings-ui-artifacts/patient-dossier-endo-print.png",
+        ".settings-ui-artifacts/patient-dossier-endo-a4.pdf"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L363",
+      "lane": "build_http",
+      "uploadStep": "baseline_37"
+    },
+    "clinical-visit-pending-notes-ui": {
+      "semanticName": "clinical-visit-pending-notes-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/clinical-visit-pending-notes.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L378",
+      "lane": "build_http",
+      "uploadStep": "baseline_38"
+    },
+    "clinical-visit-owner-ui": {
+      "semanticName": "clinical-visit-owner-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png",
+        ".settings-ui-artifacts/clinical-visit-owner-pending-390.png",
+        ".settings-ui-artifacts/clinical-visit-owner-ready-1280.png",
+        ".settings-ui-artifacts/clinical-visit-owner-ready-390.png",
+        ".settings-ui-artifacts/clinical-visit-owner-stay-1280.png",
+        ".settings-ui-artifacts/clinical-visit-owner-stay-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L390",
+      "lane": "build_http",
+      "uploadStep": "baseline_39"
+    },
+    "ortho-adjustment-wire-defaults-ui": {
+      "semanticName": "ortho-adjustment-wire-defaults-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png",
+        ".settings-ui-artifacts/ortho-adjustment-current-wires-390.png",
+        ".settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json",
+        ".settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L408",
+      "lane": "build_http",
+      "uploadStep": "baseline_40"
+    },
+    "ortho-regimen-defaults-ui": {
+      "semanticName": "ortho-regimen-defaults-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png",
+        ".settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json",
+        ".settings-ui-artifacts/ortho-regimen-ongoing-390.png",
+        ".settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json",
+        ".settings-ui-artifacts/ortho-regimen-baseline-1280.png",
+        ".settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json",
+        ".settings-ui-artifacts/ortho-regimen-baseline-390.png",
+        ".settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png",
+        ".settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png",
+        ".settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png",
+        ".settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-regimen-baseline-390.png",
+        ".settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L424",
+      "lane": "build_http",
+      "uploadStep": "baseline_41"
+    },
+    "patient-alert-freshness-ui": {
+      "semanticName": "patient-alert-freshness-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-alert-freshness-1280.png",
+        ".settings-ui-artifacts/patient-alert-freshness-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L451",
+      "lane": "build_http",
+      "uploadStep": "baseline_42"
+    },
+    "clinical-visit-diagnosis-reference-ui": {
+      "semanticName": "clinical-visit-diagnosis-reference-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png",
+        ".settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L465",
+      "lane": "build_http",
+      "uploadStep": "baseline_43"
+    },
+    "clinical-visit-ortho-entry-ui": {
+      "semanticName": "clinical-visit-ortho-entry-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png",
+        ".settings-ui-artifacts/clinical-visit-ortho-entry-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L488",
+      "lane": "build_http",
+      "uploadStep": "baseline_44"
+    },
+    "accounting-carry-forward-ui": {
+      "semanticName": "accounting-carry-forward-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/accounting-carry-forward.png",
+        ".settings-ui-artifacts/accounting-carry-forward-mobile.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L501",
+      "lane": "build_http",
+      "uploadStep": "baseline_45"
+    },
+    "manual-cash-containment-ui": {
+      "semanticName": "manual-cash-containment-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/manual_cash_requires_linked_movement.png",
+        ".settings-ui-artifacts/manual_cash_shift_busy.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L514",
+      "lane": "build_http",
+      "uploadStep": "baseline_46"
+    },
+    "patient-navigation-draft-ui": {
+      "semanticName": "patient-navigation-draft-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-navigation-draft-1280.png",
+        ".settings-ui-artifacts/patient-navigation-draft-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L527",
+      "lane": "build_http",
+      "uploadStep": "baseline_47"
+    },
+    "patient-compact-context-ui": {
+      "semanticName": "patient-compact-context-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png",
+        ".settings-ui-artifacts/patient-compact-today-ordinary-390.png",
+        ".settings-ui-artifacts/patient-compact-today-long-1280.png",
+        ".settings-ui-artifacts/patient-compact-today-long-390.png",
+        ".settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png",
+        ".settings-ui-artifacts/patient-compact-treatment-ordinary-390.png",
+        ".settings-ui-artifacts/patient-compact-treatment-long-1280.png",
+        ".settings-ui-artifacts/patient-compact-treatment-long-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L540",
+      "lane": "build_http",
+      "uploadStep": "baseline_48"
+    },
+    "endodontics-cockpit-ui": {
+      "semanticName": "endodontics-cockpit-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/endodontics-cockpit-1280.png",
+        ".settings-ui-artifacts/endodontics-cockpit-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L559",
+      "lane": "build_http",
+      "uploadStep": "baseline_49"
+    },
+    "endodontics-reference-read-safety-ui": {
+      "semanticName": "endodontics-reference-read-safety-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/endodontics-read-denied-1280.png",
+        ".settings-ui-artifacts/endodontics-read-denied-390.png",
+        ".settings-ui-artifacts/endodontics-read-denied-1280-bounds.json",
+        ".settings-ui-artifacts/endodontics-read-denied-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L572",
+      "lane": "build_http",
+      "uploadStep": "baseline_50"
+    },
+    "patient-cockpit-readiness-ui": {
+      "semanticName": "patient-cockpit-readiness-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-cockpit-readiness-1280.png",
+        ".settings-ui-artifacts/patient-cockpit-readiness-390.png",
+        ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png",
+        ".settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L587",
+      "lane": "build_http",
+      "uploadStep": "baseline_51"
+    },
+    "legacy-patient-guidance-ui": {
+      "semanticName": "legacy-patient-guidance-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/legacy-patient-plan-1280.png",
+        ".settings-ui-artifacts/legacy-patient-plan-390.png",
+        ".settings-ui-artifacts/legacy-opening-guidance-1280.png",
+        ".settings-ui-artifacts/legacy-opening-guidance-390.png",
+        ".settings-ui-artifacts/legacy-current-collection-1280.png",
+        ".settings-ui-artifacts/legacy-current-collection-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L602",
+      "lane": "build_http",
+      "uploadStep": "baseline_52"
+    },
+    "ortho-diagnosis-case-ui": {
+      "semanticName": "ortho-diagnosis-case-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-diagnosis-case-1280.png",
+        ".settings-ui-artifacts/ortho-diagnosis-case-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L619",
+      "lane": "build_http",
+      "uploadStep": "baseline_53"
+    },
+    "legacy-archive-reader-screenshots": {
+      "semanticName": "legacy-archive-reader-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/legacy-archive-reader-1280.png",
+        ".settings-ui-artifacts/legacy-archive-reader-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L632",
+      "lane": "build_http",
+      "uploadStep": "baseline_54"
+    },
+    "ortho-package-read-state-ui": {
+      "semanticName": "ortho-package-read-state-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-package-unavailable-1280.png",
+        ".settings-ui-artifacts/ortho-package-unavailable-390.png",
+        ".settings-ui-artifacts/ortho-package-funded-1280.png",
+        ".settings-ui-artifacts/ortho-package-funded-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L646",
+      "lane": "build_http",
+      "uploadStep": "baseline_55"
+    },
+    "plan-payment-visibility-ui": {
+      "semanticName": "plan-payment-visibility-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/plan-payment-hidden-1280.png",
+        ".settings-ui-artifacts/plan-payment-hidden-390.png",
+        ".settings-ui-artifacts/plan-payment-denied-1280.png",
+        ".settings-ui-artifacts/plan-payment-denied-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L661",
+      "lane": "build_http",
+      "uploadStep": "baseline_56"
+    },
+    "ortho-records-case-ui": {
+      "semanticName": "ortho-records-case-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-records-case-1280.png",
+        ".settings-ui-artifacts/ortho-records-references-1280.png",
+        ".settings-ui-artifacts/ortho-records-case-390.png",
+        ".settings-ui-artifacts/ortho-records-profile-390.png",
+        ".settings-ui-artifacts/ortho-records-references-390.png",
+        ".settings-ui-artifacts/ortho-records-unavailable-390.png",
+        ".settings-ui-artifacts/ortho-records-ceph-summary-1280.png",
+        ".settings-ui-artifacts/ortho-records-ceph-summary-390.png",
+        ".settings-ui-artifacts/ortho-records-capture-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L676",
+      "lane": "build_http",
+      "uploadStep": "baseline_57"
+    },
+    "legacy-checklist-refresh-ui": {
+      "semanticName": "legacy-checklist-refresh-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/legacy-checklist-independent-1280.png",
+        ".settings-ui-artifacts/legacy-checklist-independent-390.png",
+        ".settings-ui-artifacts/legacy-checklist-unavailable-1280.png",
+        ".settings-ui-artifacts/legacy-checklist-unavailable-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L696",
+      "lane": "build_http",
+      "uploadStep": "baseline_58"
+    },
+    "commission-category-editor-ui": {
+      "semanticName": "commission-category-editor-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/commission-category-editor-1280.png",
+        ".settings-ui-artifacts/commission-category-editor-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L711",
+      "lane": "build_http",
+      "uploadStep": "baseline_59"
+    },
+    "phone-doctor-filter-ui": {
+      "semanticName": "phone-doctor-filter-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/phone-doctor-filter-home-390.png",
+        ".settings-ui-artifacts/phone-doctor-filter-appointments-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L725",
+      "lane": "build_http",
+      "uploadStep": "baseline_60"
+    },
+    "settings-ui-screenshots": {
+      "semanticName": "settings-ui-screenshots",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": false,
+      "currentIf": "always()",
+      "currentMissingPolicy": "ignore",
+      "releaseRequired": false,
+      "requireEveryPath": false,
+      "nuance": "Legacy hidden-directory upload is a documented non-evidence no-op in all five successful samples; do not enable broad hidden uploads.",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L737",
+      "lane": "build_http",
+      "uploadStep": "baseline_61"
+    },
+    "patient-invoice-recovery-labels-ui": {
+      "semanticName": "patient-invoice-recovery-labels-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/invoice-recovery-partial-1280.png",
+        ".settings-ui-artifacts/invoice-recovery-credit-1280.png",
+        ".settings-ui-artifacts/invoice-recovery-partial-390.png",
+        ".settings-ui-artifacts/invoice-recovery-credit-390.png",
+        ".settings-ui-artifacts/invoice-recovery-1280-bounds.json",
+        ".settings-ui-artifacts/invoice-recovery-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L748",
+      "lane": "build_http",
+      "uploadStep": "baseline_62"
+    },
+    "patient-ortho-parent-read-safety-ui": {
+      "semanticName": "patient-ortho-parent-read-safety-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png",
+        ".settings-ui-artifacts/patient-ortho-parent-read-safety-390.png",
+        ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json",
+        ".settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L765",
+      "lane": "build_http",
+      "uploadStep": "baseline_63"
+    },
+    "patient-ceph-post-uncertainty-ui": {
+      "semanticName": "patient-ceph-post-uncertainty-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png",
+        ".settings-ui-artifacts/patient-ceph-post-uncertain-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L781",
+      "lane": "build_http",
+      "uploadStep": "baseline_64"
+    },
+    "ortho-photo-completeness-ui": {
+      "semanticName": "ortho-photo-completeness-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-photo-completeness-1280.png",
+        ".settings-ui-artifacts/ortho-photo-completeness-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L796",
+      "lane": "build_http",
+      "uploadStep": "baseline_65"
+    },
+    "ortho-unbooked-followup-ui": {
+      "semanticName": "ortho-unbooked-followup-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-unbooked-followup-390.png",
+        ".settings-ui-artifacts/ortho-unbooked-followup-1280.png",
+        ".settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json",
+        ".settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L810",
+      "lane": "build_http",
+      "uploadStep": "baseline_66"
+    },
+    "today-readiness-read-lifetime-ui": {
+      "semanticName": "today-readiness-read-lifetime-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/today-readiness-1280.png",
+        ".settings-ui-artifacts/today-readiness-390.png",
+        ".settings-ui-artifacts/today-readiness-1280-bounds.json",
+        ".settings-ui-artifacts/today-readiness-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L826",
+      "lane": "build_http",
+      "uploadStep": "baseline_67"
+    },
+    "service-raw-category-display-ui": {
+      "semanticName": "service-raw-category-display-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/service-raw-category-1280.png",
+        ".settings-ui-artifacts/service-raw-category-390.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L840",
+      "lane": "build_http",
+      "uploadStep": "baseline_68"
+    },
+    "legacy-reconciliation-preview-ui": {
+      "semanticName": "legacy-reconciliation-preview-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/legacy-reconciliation-preview-390.png",
+        ".settings-ui-artifacts/legacy-reconciliation-preview-1280.png",
+        ".settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json",
+        ".settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json",
+        ".settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png",
+        ".settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L854",
+      "lane": "build_http",
+      "uploadStep": "baseline_69"
+    },
+    "patient-cases-navigation-ui": {
+      "semanticName": "patient-cases-navigation-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/patient-cases-navigation-1280.png",
+        ".settings-ui-artifacts/patient-cases-navigation-390.png",
+        ".settings-ui-artifacts/patient-cases-navigation-1280-bounds.json",
+        ".settings-ui-artifacts/patient-cases-navigation-390-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L872",
+      "lane": "build_http",
+      "uploadStep": "baseline_70"
+    },
+    "dental-chart-read-retry-ui": {
+      "semanticName": "dental-chart-read-retry-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/dental-chart-ready-390.png",
+        ".settings-ui-artifacts/dental-chart-ready-1280.png",
+        ".settings-ui-artifacts/dental-chart-ready-390-bounds.json",
+        ".settings-ui-artifacts/dental-chart-ready-1280-bounds.json",
+        ".settings-ui-artifacts/dental-chart-error-390.png",
+        ".settings-ui-artifacts/dental-chart-error-1280.png",
+        ".settings-ui-artifacts/dental-chart-error-390-bounds.json",
+        ".settings-ui-artifacts/dental-chart-error-1280-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L888",
+      "lane": "build_http",
+      "uploadStep": "baseline_71"
+    },
+    "ortho-prescription-truth-ui": {
+      "semanticName": "ortho-prescription-truth-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png",
+        ".settings-ui-artifacts/ortho-prescription-unrecorded-1280.png",
+        ".settings-ui-artifacts/ortho-prescription-closed-custom-390.png",
+        ".settings-ui-artifacts/ortho-prescription-closed-custom-1280.png",
+        ".settings-ui-artifacts/ortho-prescription-390-bounds.json",
+        ".settings-ui-artifacts/ortho-prescription-1280-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L908",
+      "lane": "build_http",
+      "uploadStep": "baseline_72"
+    },
+    "ortho-booking-default-ui": {
+      "semanticName": "ortho-booking-default-ui",
+      "proposedLane": "build-http",
+      "paths": [
+        ".settings-ui-artifacts/ortho-booking-service-390.png",
+        ".settings-ui-artifacts/ortho-booking-service-1280.png",
+        ".settings-ui-artifacts/ortho-booking-duration-390.png",
+        ".settings-ui-artifacts/ortho-booking-duration-1280.png",
+        ".settings-ui-artifacts/ortho-booking-390-bounds.json",
+        ".settings-ui-artifacts/ortho-booking-1280-bounds.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "nuance": "",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L925",
+      "lane": "build_http",
+      "uploadStep": "baseline_73"
+    },
+    "recall-mutation-refusal-ui": {
+      "semanticName": "recall-mutation-refusal-ui",
+      "lane": "build_http",
+      "paths": [
+        ".settings-ui-artifacts/recall-refusal-390.png",
+        ".settings-ui-artifacts/recall-refusal-1280.png",
+        ".settings-ui-artifacts/recall-retry-390.png",
+        ".settings-ui-artifacts/recall-retry-1280.png",
+        ".settings-ui-artifacts/recall-refusal-390-bounds.json",
+        ".settings-ui-artifacts/recall-refusal-1280-bounds.json"
+      ],
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/pull/276",
+      "nuance": "Present unchanged in reconciled main 3cdfe760f2e5577ba73b1c00ad07c989143afb87; every listed member remains required.",
+      "uploadStep": "clinical_delta_01"
+    },
+    "patient-lab-status-refusal-ui": {
+      "semanticName": "patient-lab-status-refusal-ui",
+      "lane": "build_http",
+      "paths": [
+        ".settings-ui-artifacts/lab-status-refusal-390.png",
+        ".settings-ui-artifacts/lab-status-refusal-1280.png",
+        ".settings-ui-artifacts/lab-status-retry-390.png",
+        ".settings-ui-artifacts/lab-status-retry-1280.png",
+        ".settings-ui-artifacts/lab-status-refusal-390-bounds.json",
+        ".settings-ui-artifacts/lab-status-refusal-1280-bounds.json"
+      ],
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/pull/281",
+      "nuance": "Present unchanged in reconciled main 3cdfe760f2e5577ba73b1c00ad07c989143afb87; every listed member remains required.",
+      "uploadStep": "clinical_delta_02"
+    },
+    "daily-report-selected-date-ui": {
+      "semanticName": "daily-report-selected-date-ui",
+      "lane": "build_http",
+      "paths": [
+        ".settings-ui-artifacts/daily-report-selected-day-1280.png",
+        ".settings-ui-artifacts/daily-report-selected-day-390.png",
+        ".settings-ui-artifacts/daily-report-selected-day-print-1280.png"
+      ],
+      "releaseRequired": true,
+      "requireEveryPath": true,
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "nuance": "Present unchanged in reconciled main 3cdfe760f2e5577ba73b1c00ad07c989143afb87; every listed member remains required.",
+      "uploadStep": "clinical_delta_03"
+    },
+    "scoped-build-install-audit": {
+      "semanticName": "scoped-build-install-audit",
+      "proposedLane": "security-early (also repeated in build-http against that installation)",
+      "paths": [
+        ".dependency-audit/full-attempt-1.json",
+        ".dependency-audit/full-attempt-1.stderr.txt",
+        ".dependency-audit/full-attempt-1.process.json",
+        ".dependency-audit/full-attempt-2.json",
+        ".dependency-audit/full-attempt-2.stderr.txt",
+        ".dependency-audit/full-attempt-2.process.json",
+        ".dependency-audit/full-attempt-3.json",
+        ".dependency-audit/full-attempt-3.stderr.txt",
+        ".dependency-audit/full-attempt-3.process.json",
+        ".dependency-audit/production-attempt-1.json",
+        ".dependency-audit/production-attempt-1.stderr.txt",
+        ".dependency-audit/production-attempt-1.process.json",
+        ".dependency-audit/production-attempt-2.json",
+        ".dependency-audit/production-attempt-2.stderr.txt",
+        ".dependency-audit/production-attempt-2.process.json",
+        ".dependency-audit/production-attempt-3.json",
+        ".dependency-audit/production-attempt-3.stderr.txt",
+        ".dependency-audit/production-attempt-3.process.json",
+        ".dependency-audit/exception-proof.json"
+      ],
+      "retentionDays": 7,
+      "includeHiddenFiles": true,
+      "currentIf": "always()",
+      "currentMissingPolicy": "error",
+      "releaseRequired": true,
+      "requireEveryPath": false,
+      "nuance": "Same unchanged audit repeated against build lane installation; independent raw evidence.",
+      "sourceUrl": "https://github.com/Aqlanf10/aqlan-center-mini/blob/05bde7c66c0f7fc2c5a4066e5dc873c2ade60f5f/.github/workflows/ci.yml#L186",
+      "lane": "build_http",
+      "uploadStep": "build_install_audit_upload"
+    }
+  },
+  "mandatoryStepIds": {
+    "security_early": [
+      "baseline_01",
+      "baseline_02",
+      "baseline_03",
+      "baseline_04",
+      "baseline_05",
+      "evidence_init",
+      "baseline_19",
+      "baseline_20"
+    ],
+    "static_quality": [
+      "baseline_01",
+      "baseline_02",
+      "baseline_03",
+      "baseline_04",
+      "baseline_05",
+      "evidence_init",
+      "ci_contract_tests",
+      "baseline_06",
+      "baseline_07",
+      "baseline_08",
+      "baseline_09",
+      "baseline_21"
+    ],
+    "postgres_schema_journeys": [
+      "baseline_01",
+      "baseline_02",
+      "baseline_03",
+      "baseline_04",
+      "baseline_05",
+      "evidence_init",
+      "baseline_10",
+      "baseline_11",
+      "baseline_12",
+      "baseline_13",
+      "baseline_14",
+      "baseline_15",
+      "baseline_16",
+      "baseline_17",
+      "baseline_18"
+    ],
+    "build_http": [
+      "baseline_01",
+      "baseline_02",
+      "baseline_03",
+      "baseline_04",
+      "baseline_05",
+      "evidence_init",
+      "build_install_audit",
+      "build_install_audit_upload",
+      "baseline_22",
+      "baseline_23",
+      "baseline_24",
+      "baseline_25",
+      "baseline_26",
+      "baseline_27",
+      "baseline_28",
+      "baseline_29",
+      "baseline_30",
+      "baseline_31",
+      "baseline_32",
+      "baseline_33",
+      "baseline_34",
+      "baseline_35",
+      "baseline_36",
+      "baseline_37",
+      "baseline_38",
+      "baseline_39",
+      "baseline_40",
+      "baseline_41",
+      "baseline_42",
+      "baseline_43",
+      "baseline_44",
+      "baseline_45",
+      "baseline_46",
+      "baseline_47",
+      "baseline_48",
+      "baseline_49",
+      "baseline_50",
+      "baseline_51",
+      "baseline_52",
+      "baseline_53",
+      "baseline_54",
+      "baseline_55",
+      "baseline_56",
+      "baseline_57",
+      "baseline_58",
+      "baseline_59",
+      "baseline_60",
+      "baseline_61",
+      "baseline_62",
+      "baseline_63",
+      "baseline_64",
+      "baseline_65",
+      "baseline_66",
+      "baseline_67",
+      "baseline_68",
+      "baseline_69",
+      "baseline_70",
+      "baseline_71",
+      "baseline_72",
+      "baseline_73",
+      "clinical_delta_01",
+      "clinical_delta_02",
+      "clinical_delta_03"
+    ]
+  },
+  "protectedSourceSha256": {
+    "vitest.config.security.mts": "eece8de865fdbb714821b23825dfc63188cd1392f6d888dcd3829f042e76d545",
+    "vitest.config.mts": "480a2a4a97b0a898567f90cff864da1322a4bbc6e6bc6bf16c5d68a0db9bad28",
+    "vitest.config.postgres.mts": "239813784cb203f2d2c4e228a684b178f192f8d32101f512b3260bede382b6fa",
+    "lib/braces-exception-pins.mjs": "cb8270a104d9704866046688e40e7c41154d1abd1521605008e3ed3f6f9267da",
+    "lib/scoped-braces-exception.mjs": "a4a052d0a56a65056c3e686e2d856d837b98d41af3bbe767e97c651d021742bc",
+    "scripts/verify-braces-runtime.mjs": "41637368b977be7b039866c16fd0b07205998d159c4b95334a19ab1284dc1ea3",
+    "scripts/verify-braces-exception.mjs": "dc37a5241899ae1dab79b9b92953fe7d630cef81b85902f156672d777b2d8db7",
+    "scripts/ci-audit.mjs": "9c38c4934e61c6f3a2a465f169680a20f2bc2e4bdfc953f09e4798e04b60c50d",
+    "scripts/dependency-security/installed-braces.mjs": "a01708fa724b345b38921e706ece274b5f267ed79f11e8667e7cec8758b485d8",
+    "scripts/dependency-security/reviewed-overrides.mjs": "48fa38d9e1912547f1fb2fc6eb927892209c1517d3240a89d624f88e4c762a28",
+    "scripts/dependency-security/audit-process.mjs": "5458212ed52a84e6b63815b36a2dc502dc3150ab010ac08ea7117d29f92d4f66"
+  },
+  "reconciliation": {
+    "mainCommit": "3cdfe760f2e5577ba73b1c00ad07c989143afb87",
+    "mainTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+    "mainWorkflowBlob": "8c6c05b480ccf667be716bca44d9ca6c2ba00758",
+    "reviewedPreparationManifestSha256": "194a3cfee6e03267dedd9c15565ad07605fffa14047a1a96d38278498500ce4e",
+    "acceptedSourceProofRun": 37548405894,
+    "acceptedSourceProofHead": "0f39d82fb002aa752c4c42a17271b591311aa96d",
+    "note": "Exact main tree equals accepted source-proof clinical base; full parallel clinical/platform acceptance remains required."
+  }
+}

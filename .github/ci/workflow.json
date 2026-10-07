@@ -1,0 +1,1271 @@
+{
+  "name": "CI",
+  "on": {
+    "pull_request": {
+      "branches": [
+        "main"
+      ]
+    },
+    "push": {
+      "branches": [
+        "main",
+        "feat/**",
+        "hardening/**"
+      ]
+    },
+    "workflow_dispatch": null
+  },
+  "concurrency": {
+    "group": "ci-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  "jobs": {
+    "security_early": {
+      "name": "Security and live dependency evidence",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 55,
+      "permissions": {
+        "contents": "read"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+        "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+        "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+        "CLINIC_TIME_ZONE": "Asia/Aden",
+        "CI_EVENT_NAME": "${{ github.event_name }}",
+        "CI_EVENT_SHA": "${{ github.sha }}",
+        "CI_SOURCE_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "CI_SOURCE_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+        "CI_WORKFLOW_REF": "${{ github.workflow_ref }}",
+        "CI_WORKFLOW_SHA": "${{ github.workflow_sha }}",
+        "CI_RUN_ID": "${{ github.run_id }}",
+        "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
+        "CI_REPOSITORY": "${{ github.repository }}",
+        "CI_REF": "${{ github.ref }}",
+        "CI_LANE": "security_early"
+      },
+      "outputs": {
+        "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
+        "receipt_digest": "${{ steps.receipt_upload.outputs.artifact-digest }}"
+      },
+      "steps": [
+        {
+          "name": "Check out repository",
+          "uses": "actions/checkout@v7",
+          "id": "baseline_01",
+          "with": {
+            "ref": "${{ github.sha }}"
+          }
+        },
+        {
+          "name": "Set up Node.js",
+          "uses": "actions/setup-node@v7",
+          "with": {
+            "node-version": 22,
+            "cache": "npm"
+          },
+          "id": "baseline_02"
+        },
+        {
+          "name": "Upgrade npm to bulk advisory endpoint",
+          "run": "npm install -g npm@11",
+          "id": "baseline_03"
+        },
+        {
+          "name": "Install locked dependencies",
+          "run": "npm ci",
+          "id": "baseline_04"
+        },
+        {
+          "name": "Verify environment contract",
+          "run": "npm run verify:environment",
+          "id": "baseline_05"
+        },
+        {
+          "name": "Bind clean checkout and evidence identity",
+          "id": "evidence_init",
+          "run": "python3 .github/ci/evidence.py init"
+        },
+        {
+          "name": "Dependency audit",
+          "run": "node --import tsx scripts/ci-audit.mjs",
+          "id": "baseline_19"
+        },
+        {
+          "name": "Upload exact dependency audit evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "scoped-dependency-audit--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".dependency-audit/full-attempt-1.json\n.dependency-audit/full-attempt-1.stderr.txt\n.dependency-audit/full-attempt-1.process.json\n.dependency-audit/full-attempt-2.json\n.dependency-audit/full-attempt-2.stderr.txt\n.dependency-audit/full-attempt-2.process.json\n.dependency-audit/full-attempt-3.json\n.dependency-audit/full-attempt-3.stderr.txt\n.dependency-audit/full-attempt-3.process.json\n.dependency-audit/production-attempt-1.json\n.dependency-audit/production-attempt-1.stderr.txt\n.dependency-audit/production-attempt-1.process.json\n.dependency-audit/production-attempt-2.json\n.dependency-audit/production-attempt-2.stderr.txt\n.dependency-audit/production-attempt-2.process.json\n.dependency-audit/production-attempt-3.json\n.dependency-audit/production-attempt-3.stderr.txt\n.dependency-audit/production-attempt-3.process.json\n.dependency-audit/exception-proof.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_20"
+        },
+        {
+          "name": "Seal exact mandatory outcomes and artifact members",
+          "id": "seal",
+          "if": "always()",
+          "env": {
+            "CI_STEPS_JSON": "${{ toJSON(steps) }}"
+          },
+          "run": "python3 .github/ci/evidence.py seal"
+        },
+        {
+          "name": "Upload immutable lane receipt",
+          "id": "receipt_upload",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ci-receipt-security_early--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".ci-evidence/receipt.json",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "static_quality": {
+      "name": "Typecheck, lint and unit tests",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 55,
+      "permissions": {
+        "contents": "read"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+        "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+        "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+        "CLINIC_TIME_ZONE": "Asia/Aden",
+        "CI_EVENT_NAME": "${{ github.event_name }}",
+        "CI_EVENT_SHA": "${{ github.sha }}",
+        "CI_SOURCE_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "CI_SOURCE_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+        "CI_WORKFLOW_REF": "${{ github.workflow_ref }}",
+        "CI_WORKFLOW_SHA": "${{ github.workflow_sha }}",
+        "CI_RUN_ID": "${{ github.run_id }}",
+        "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
+        "CI_REPOSITORY": "${{ github.repository }}",
+        "CI_REF": "${{ github.ref }}",
+        "CI_LANE": "static_quality"
+      },
+      "outputs": {
+        "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
+        "receipt_digest": "${{ steps.receipt_upload.outputs.artifact-digest }}"
+      },
+      "steps": [
+        {
+          "name": "Check out repository",
+          "uses": "actions/checkout@v7",
+          "id": "baseline_01",
+          "with": {
+            "ref": "${{ github.sha }}"
+          }
+        },
+        {
+          "name": "Set up Node.js",
+          "uses": "actions/setup-node@v7",
+          "with": {
+            "node-version": 22,
+            "cache": "npm"
+          },
+          "id": "baseline_02"
+        },
+        {
+          "name": "Upgrade npm to bulk advisory endpoint",
+          "run": "npm install -g npm@11",
+          "id": "baseline_03"
+        },
+        {
+          "name": "Install locked dependencies",
+          "run": "npm ci",
+          "id": "baseline_04"
+        },
+        {
+          "name": "Verify environment contract",
+          "run": "npm run verify:environment",
+          "id": "baseline_05"
+        },
+        {
+          "name": "Bind clean checkout and evidence identity",
+          "id": "evidence_init",
+          "run": "python3 .github/ci/evidence.py init"
+        },
+        {
+          "name": "Validate workflow DAG and fail-closed fault controls",
+          "id": "ci_contract_tests",
+          "run": "python3 .github/ci/workflow.py --check\npython3 -m unittest discover -s .github/ci/tests -p \"test_*.py\"\n"
+        },
+        {
+          "name": "Typecheck",
+          "run": "npm run typecheck",
+          "id": "baseline_06"
+        },
+        {
+          "name": "Lint",
+          "run": "npm run lint",
+          "id": "baseline_07"
+        },
+        {
+          "name": "Money aggregation guard",
+          "run": "npm run scan:money",
+          "id": "baseline_08"
+        },
+        {
+          "name": "Unit tests",
+          "run": "npm test",
+          "id": "baseline_09"
+        },
+        {
+          "name": "Raw body parser scanner",
+          "run": "npm run ci:scan:body",
+          "id": "baseline_21"
+        },
+        {
+          "name": "Seal exact mandatory outcomes and artifact members",
+          "id": "seal",
+          "if": "always()",
+          "env": {
+            "CI_STEPS_JSON": "${{ toJSON(steps) }}"
+          },
+          "run": "python3 .github/ci/evidence.py seal"
+        },
+        {
+          "name": "Upload immutable lane receipt",
+          "id": "receipt_upload",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ci-receipt-static_quality--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".ci-evidence/receipt.json",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "postgres_schema_journeys": {
+      "name": "PostgreSQL, schemas and operational journeys",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 55,
+      "services": {
+        "postgres": {
+          "image": "postgres:18-alpine",
+          "env": {
+            "POSTGRES_USER": "ci",
+            "POSTGRES_PASSWORD": "ci",
+            "POSTGRES_DB": "aqlan_p1_test"
+          },
+          "ports": [
+            "5432:5432"
+          ],
+          "options": "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5"
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+        "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+        "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+        "CLINIC_TIME_ZONE": "Asia/Aden",
+        "CI_EVENT_NAME": "${{ github.event_name }}",
+        "CI_EVENT_SHA": "${{ github.sha }}",
+        "CI_SOURCE_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "CI_SOURCE_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+        "CI_WORKFLOW_REF": "${{ github.workflow_ref }}",
+        "CI_WORKFLOW_SHA": "${{ github.workflow_sha }}",
+        "CI_RUN_ID": "${{ github.run_id }}",
+        "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
+        "CI_REPOSITORY": "${{ github.repository }}",
+        "CI_REF": "${{ github.ref }}",
+        "CI_LANE": "postgres_schema_journeys",
+        "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+      },
+      "outputs": {
+        "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
+        "receipt_digest": "${{ steps.receipt_upload.outputs.artifact-digest }}"
+      },
+      "steps": [
+        {
+          "name": "Check out repository",
+          "uses": "actions/checkout@v7",
+          "id": "baseline_01",
+          "with": {
+            "ref": "${{ github.sha }}"
+          }
+        },
+        {
+          "name": "Set up Node.js",
+          "uses": "actions/setup-node@v7",
+          "with": {
+            "node-version": 22,
+            "cache": "npm"
+          },
+          "id": "baseline_02"
+        },
+        {
+          "name": "Upgrade npm to bulk advisory endpoint",
+          "run": "npm install -g npm@11",
+          "id": "baseline_03"
+        },
+        {
+          "name": "Install locked dependencies",
+          "run": "npm ci",
+          "id": "baseline_04"
+        },
+        {
+          "name": "Verify environment contract",
+          "run": "npm run verify:environment",
+          "id": "baseline_05"
+        },
+        {
+          "name": "Bind clean checkout and evidence identity",
+          "id": "evidence_init",
+          "run": "python3 .github/ci/evidence.py init"
+        },
+        {
+          "name": "PostgreSQL integration tests",
+          "env": {
+            "CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE": "1",
+            "MANUAL_CASH_CI_DISPOSABLE_FIXTURE": "1"
+          },
+          "run": "npm run test:postgres",
+          "id": "baseline_10"
+        },
+        {
+          "name": "Generate current schema contract on PostgreSQL 18",
+          "env": {
+            "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+          },
+          "run": "git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json\nnpm run schema:contract\ncp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json\nnpm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json\ngit checkout -- schema/current-schema-contract.pg18.json\n",
+          "id": "baseline_11"
+        },
+        {
+          "name": "Upload PostgreSQL 18 schema contract",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "current-schema-contract-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": "/tmp/current-schema-contract.pg18.json",
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_12"
+        },
+        {
+          "name": "Characterize schema ownership on ephemeral PostgreSQL 18",
+          "env": {
+            "SCHEMA_OWNERSHIP_SOURCE_COMMIT_SHA": "${{ github.event.pull_request.head.sha || github.sha }}"
+          },
+          "run": "npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json",
+          "id": "baseline_13"
+        },
+        {
+          "name": "Upload schema ownership characterization",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "schema-ownership-characterization-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": "/tmp/schema-ownership-characterization.json",
+            "if-no-files-found": "warn",
+            "retention-days": 7
+          },
+          "id": "baseline_14"
+        },
+        {
+          "name": "Operational verification journeys",
+          "env": {
+            "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable"
+          },
+          "run": "npm run verify:ci",
+          "id": "baseline_15"
+        },
+        {
+          "name": "Generate PostgreSQL 18 baseline manifest candidate",
+          "run": "npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json",
+          "id": "baseline_16"
+        },
+        {
+          "name": "Verify committed baseline manifest against fresh generation",
+          "run": "npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json",
+          "id": "baseline_17"
+        },
+        {
+          "name": "Upload baseline manifest candidate",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "baseline-schema-manifest-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": "/tmp/baseline-schema-manifest.json",
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_18"
+        },
+        {
+          "name": "Seal exact mandatory outcomes and artifact members",
+          "id": "seal",
+          "if": "always()",
+          "env": {
+            "CI_STEPS_JSON": "${{ toJSON(steps) }}"
+          },
+          "run": "python3 .github/ci/evidence.py seal"
+        },
+        {
+          "name": "Upload immutable lane receipt",
+          "id": "receipt_upload",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ci-receipt-postgres_schema_journeys--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".ci-evidence/receipt.json",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "build_http": {
+      "name": "Production build, preflight, runtime and HTTP",
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 55,
+      "services": {
+        "postgres": {
+          "image": "postgres:18-alpine",
+          "env": {
+            "POSTGRES_USER": "ci",
+            "POSTGRES_PASSWORD": "ci",
+            "POSTGRES_DB": "aqlan_p1_test"
+          },
+          "ports": [
+            "5432:5432"
+          ],
+          "options": "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5"
+        }
+      },
+      "permissions": {
+        "contents": "read"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable",
+        "TEST_DATABASE_URL": "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable",
+        "SESSION_SECRET": "ci-placeholder-secret-0123456789abcdef",
+        "CLINIC_TIME_ZONE": "Asia/Aden",
+        "CI_EVENT_NAME": "${{ github.event_name }}",
+        "CI_EVENT_SHA": "${{ github.sha }}",
+        "CI_SOURCE_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "CI_SOURCE_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+        "CI_WORKFLOW_REF": "${{ github.workflow_ref }}",
+        "CI_WORKFLOW_SHA": "${{ github.workflow_sha }}",
+        "CI_RUN_ID": "${{ github.run_id }}",
+        "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
+        "CI_REPOSITORY": "${{ github.repository }}",
+        "CI_REF": "${{ github.ref }}",
+        "CI_LANE": "build_http",
+        "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+      },
+      "outputs": {
+        "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
+        "receipt_digest": "${{ steps.receipt_upload.outputs.artifact-digest }}"
+      },
+      "steps": [
+        {
+          "name": "Check out repository",
+          "uses": "actions/checkout@v7",
+          "id": "baseline_01",
+          "with": {
+            "ref": "${{ github.sha }}"
+          }
+        },
+        {
+          "name": "Set up Node.js",
+          "uses": "actions/setup-node@v7",
+          "with": {
+            "node-version": 22,
+            "cache": "npm"
+          },
+          "id": "baseline_02"
+        },
+        {
+          "name": "Upgrade npm to bulk advisory endpoint",
+          "run": "npm install -g npm@11",
+          "id": "baseline_03"
+        },
+        {
+          "name": "Install locked dependencies",
+          "run": "npm ci",
+          "id": "baseline_04"
+        },
+        {
+          "name": "Verify environment contract",
+          "run": "npm run verify:environment",
+          "id": "baseline_05"
+        },
+        {
+          "name": "Bind clean checkout and evidence identity",
+          "id": "evidence_init",
+          "run": "python3 .github/ci/evidence.py init"
+        },
+        {
+          "name": "Audit the actual build-lane installation",
+          "run": "node --import tsx scripts/ci-audit.mjs",
+          "id": "build_install_audit"
+        },
+        {
+          "name": "Upload exact dependency audit evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "scoped-build-install-audit--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".dependency-audit/full-attempt-1.json\n.dependency-audit/full-attempt-1.stderr.txt\n.dependency-audit/full-attempt-1.process.json\n.dependency-audit/full-attempt-2.json\n.dependency-audit/full-attempt-2.stderr.txt\n.dependency-audit/full-attempt-2.process.json\n.dependency-audit/full-attempt-3.json\n.dependency-audit/full-attempt-3.stderr.txt\n.dependency-audit/full-attempt-3.process.json\n.dependency-audit/production-attempt-1.json\n.dependency-audit/production-attempt-1.stderr.txt\n.dependency-audit/production-attempt-1.process.json\n.dependency-audit/production-attempt-2.json\n.dependency-audit/production-attempt-2.stderr.txt\n.dependency-audit/production-attempt-2.process.json\n.dependency-audit/production-attempt-3.json\n.dependency-audit/production-attempt-3.stderr.txt\n.dependency-audit/production-attempt-3.process.json\n.dependency-audit/exception-proof.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "build_install_audit_upload"
+        },
+        {
+          "name": "Production build",
+          "run": "npm run build",
+          "id": "baseline_22"
+        },
+        {
+          "name": "Build and smoke-test read-only preflight artifact",
+          "run": "npm run build:preflight",
+          "id": "baseline_23"
+        },
+        {
+          "name": "Verify braces absence in actual runtime artifacts",
+          "run": "node scripts/verify-braces-runtime.mjs",
+          "id": "baseline_24"
+        },
+        {
+          "name": "Upload exact runtime dependency proof",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "braces-runtime-absence--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".dependency-audit/runtime-proof.json",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_25"
+        },
+        {
+          "name": "Install Chromium for Settings browser journey",
+          "run": "npx playwright install --with-deps chromium",
+          "id": "baseline_26"
+        },
+        {
+          "name": "Install PDF text inspection tool",
+          "run": "sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils",
+          "id": "baseline_27"
+        },
+        {
+          "name": "HTTP security integration tests",
+          "run": "npm run test:security-http",
+          "id": "baseline_28"
+        },
+        {
+          "name": "Upload patient statement cutoff screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-statement-cutoff-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-statement-cutoff-screen.png\n.settings-ui-artifacts/patient-statement-cutoff-print.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_29"
+        },
+        {
+          "name": "Upload lab pricing UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "lab-pricing-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/lab-pricing-scope.png\n.settings-ui-artifacts/lab-pricing-scope-mobile.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_30"
+        },
+        {
+          "name": "Upload pending booking UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "quick-booking-frozen-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/quick-booking-frozen-desktop.png\n.settings-ui-artifacts/quick-booking-frozen-mobile.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_31"
+        },
+        {
+          "name": "Upload prescription patient context evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "prescription-patient-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/prescription-patient-context-warning-1280.png\n.settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-1280-bounds.json\n.settings-ui-artifacts/prescription-patient-context-warning-390.png\n.settings-ui-artifacts/prescription-patient-context-warning-390-bounds.json\n.settings-ui-artifacts/prescription-patient-context-unavailable-390.png\n.settings-ui-artifacts/prescription-patient-context-unavailable-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_32"
+        },
+        {
+          "name": "Upload prescription diagnosis UI screenshot",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "prescription-diagnosis-ui-screenshot--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/prescription-diagnosis-pinned.png",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_33"
+        },
+        {
+          "name": "Upload finance report visibility screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "finance-report-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/finance-report-revenue-only-1280.png\n.settings-ui-artifacts/finance-report-revenue-only-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_34"
+        },
+        {
+          "name": "Upload finance shift read UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "finance-shift-read-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/finance-shift-unavailable.png\n.settings-ui-artifacts/finance-shift-draft-restored.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_35"
+        },
+        {
+          "name": "Upload expense catalogue visibility screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "expense-catalogue-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/expense-catalogue-restricted-1280.png\n.settings-ui-artifacts/expense-catalogue-restricted-390.png\n.settings-ui-artifacts/expense-catalogue-revoked-open-report.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_36"
+        },
+        {
+          "name": "Upload patient dossier ENDO print artifacts",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-dossier-endo-print-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-dossier-endo-screen.png\n.settings-ui-artifacts/patient-dossier-endo-mobile-390.png\n.settings-ui-artifacts/patient-dossier-endo-print.png\n.settings-ui-artifacts/patient-dossier-endo-a4.pdf\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_37"
+        },
+        {
+          "name": "Upload pending clinical notes UI screenshot",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "clinical-visit-pending-notes-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/clinical-visit-pending-notes.png",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_38"
+        },
+        {
+          "name": "Upload clinical visit owner UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "clinical-visit-owner-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/clinical-visit-owner-pending-1280.png\n.settings-ui-artifacts/clinical-visit-owner-pending-390.png\n.settings-ui-artifacts/clinical-visit-owner-ready-1280.png\n.settings-ui-artifacts/clinical-visit-owner-ready-390.png\n.settings-ui-artifacts/clinical-visit-owner-stay-1280.png\n.settings-ui-artifacts/clinical-visit-owner-stay-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_39"
+        },
+        {
+          "name": "Upload standalone orthodontic wire screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-adjustment-wire-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-adjustment-current-wires-1280.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-390.png\n.settings-ui-artifacts/ortho-adjustment-current-wires-1280-bounds.json\n.settings-ui-artifacts/ortho-adjustment-current-wires-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_40"
+        },
+        {
+          "name": "Upload orthodontic regimen screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-regimen-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-regimen-ongoing-1280.png\n.settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-ongoing-390.png\n.settings-ui-artifacts/ortho-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-1280.png\n.settings-ui-artifacts/ortho-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/ortho-regimen-baseline-390.png\n.settings-ui-artifacts/ortho-regimen-baseline-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390.png\n.settings-ui-artifacts/clinical-visit-regimen-ongoing-390-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390.png\n.settings-ui-artifacts/clinical-visit-regimen-baseline-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_41"
+        },
+        {
+          "name": "Upload patient alert freshness screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-alert-freshness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-alert-freshness-1280.png\n.settings-ui-artifacts/patient-alert-freshness-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_42"
+        },
+        {
+          "name": "Upload case diagnosis reference screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "clinical-visit-diagnosis-reference-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-history-390-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-1280-bounds.json\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390.png\n.settings-ui-artifacts/clinical-visit-diagnosis-reference-unavailable-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_43"
+        },
+        {
+          "name": "Upload orthodontic chairside entry screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "clinical-visit-ortho-entry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/clinical-visit-ortho-entry-1280.png\n.settings-ui-artifacts/clinical-visit-ortho-entry-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_44"
+        },
+        {
+          "name": "Upload accounting carry-forward UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "accounting-carry-forward-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/accounting-carry-forward.png\n.settings-ui-artifacts/accounting-carry-forward-mobile.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_45"
+        },
+        {
+          "name": "Upload manual cash containment UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "manual-cash-containment-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/manual_cash_requires_linked_movement.png\n.settings-ui-artifacts/manual_cash_shift_busy.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_46"
+        },
+        {
+          "name": "Upload patient navigation draft screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-navigation-draft-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-navigation-draft-1280.png\n.settings-ui-artifacts/patient-navigation-draft-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_47"
+        },
+        {
+          "name": "Upload compact patient context screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-compact-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-compact-today-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-today-ordinary-390.png\n.settings-ui-artifacts/patient-compact-today-long-1280.png\n.settings-ui-artifacts/patient-compact-today-long-390.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-1280.png\n.settings-ui-artifacts/patient-compact-treatment-ordinary-390.png\n.settings-ui-artifacts/patient-compact-treatment-long-1280.png\n.settings-ui-artifacts/patient-compact-treatment-long-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_48"
+        },
+        {
+          "name": "Upload endodontics cockpit screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "endodontics-cockpit-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/endodontics-cockpit-1280.png\n.settings-ui-artifacts/endodontics-cockpit-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_49"
+        },
+        {
+          "name": "Upload endodontics reference read safety evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "endodontics-reference-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/endodontics-read-denied-1280.png\n.settings-ui-artifacts/endodontics-read-denied-390.png\n.settings-ui-artifacts/endodontics-read-denied-1280-bounds.json\n.settings-ui-artifacts/endodontics-read-denied-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_50"
+        },
+        {
+          "name": "Upload cockpit UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-cockpit-readiness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-cockpit-readiness-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-390.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-1280.png\n.settings-ui-artifacts/patient-cockpit-readiness-unavailable-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_51"
+        },
+        {
+          "name": "Upload legacy UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "legacy-patient-guidance-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/legacy-patient-plan-1280.png\n.settings-ui-artifacts/legacy-patient-plan-390.png\n.settings-ui-artifacts/legacy-opening-guidance-1280.png\n.settings-ui-artifacts/legacy-opening-guidance-390.png\n.settings-ui-artifacts/legacy-current-collection-1280.png\n.settings-ui-artifacts/legacy-current-collection-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_52"
+        },
+        {
+          "name": "Upload orthodontic diagnosis case screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-diagnosis-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-diagnosis-case-1280.png\n.settings-ui-artifacts/ortho-diagnosis-case-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_53"
+        },
+        {
+          "name": "Upload legacy archive reader screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "legacy-archive-reader-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/legacy-archive-reader-1280.png\n.settings-ui-artifacts/legacy-archive-reader-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_54"
+        },
+        {
+          "name": "Upload orthodontic agreement read-state screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-package-read-state-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-package-unavailable-1280.png\n.settings-ui-artifacts/ortho-package-unavailable-390.png\n.settings-ui-artifacts/ortho-package-funded-1280.png\n.settings-ui-artifacts/ortho-package-funded-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_55"
+        },
+        {
+          "name": "Upload plan payment visibility screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "plan-payment-visibility-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/plan-payment-hidden-1280.png\n.settings-ui-artifacts/plan-payment-hidden-390.png\n.settings-ui-artifacts/plan-payment-denied-1280.png\n.settings-ui-artifacts/plan-payment-denied-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_56"
+        },
+        {
+          "name": "Upload orthodontic record case screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-records-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-records-case-1280.png\n.settings-ui-artifacts/ortho-records-references-1280.png\n.settings-ui-artifacts/ortho-records-case-390.png\n.settings-ui-artifacts/ortho-records-profile-390.png\n.settings-ui-artifacts/ortho-records-references-390.png\n.settings-ui-artifacts/ortho-records-unavailable-390.png\n.settings-ui-artifacts/ortho-records-ceph-summary-1280.png\n.settings-ui-artifacts/ortho-records-ceph-summary-390.png\n.settings-ui-artifacts/ortho-records-capture-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_57"
+        },
+        {
+          "name": "Upload legacy checklist refresh screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "legacy-checklist-refresh-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/legacy-checklist-independent-1280.png\n.settings-ui-artifacts/legacy-checklist-independent-390.png\n.settings-ui-artifacts/legacy-checklist-unavailable-1280.png\n.settings-ui-artifacts/legacy-checklist-unavailable-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_58"
+        },
+        {
+          "name": "Upload commission category editor screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "commission-category-editor-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/commission-category-editor-1280.png\n.settings-ui-artifacts/commission-category-editor-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_59"
+        },
+        {
+          "name": "Upload long doctor phone filter screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "phone-doctor-filter-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/phone-doctor-filter-home-390.png\n.settings-ui-artifacts/phone-doctor-filter-appointments-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_60"
+        },
+        {
+          "name": "Upload Settings UI screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "settings-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/",
+            "if-no-files-found": "ignore",
+            "retention-days": 7
+          },
+          "id": "baseline_61"
+        },
+        {
+          "name": "Upload reversed installment invoice label evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-invoice-recovery-labels-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/invoice-recovery-partial-1280.png\n.settings-ui-artifacts/invoice-recovery-credit-1280.png\n.settings-ui-artifacts/invoice-recovery-partial-390.png\n.settings-ui-artifacts/invoice-recovery-credit-390.png\n.settings-ui-artifacts/invoice-recovery-1280-bounds.json\n.settings-ui-artifacts/invoice-recovery-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_62"
+        },
+        {
+          "name": "Upload orthodontic parent read safety acceptance",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-ortho-parent-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390.png\n.settings-ui-artifacts/patient-ortho-parent-read-safety-1280-bounds.json\n.settings-ui-artifacts/patient-ortho-parent-read-safety-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_63"
+        },
+        {
+          "name": "Upload ceph pending-write uncertainty screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-ceph-post-uncertainty-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-ceph-post-uncertain-1280.png\n.settings-ui-artifacts/patient-ceph-post-uncertain-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_64"
+        },
+        {
+          "name": "Upload orthodontic photo completeness screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-photo-completeness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-photo-completeness-1280.png\n.settings-ui-artifacts/ortho-photo-completeness-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_65"
+        },
+        {
+          "name": "Upload truthful orthodontic follow-up invitation evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-unbooked-followup-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-unbooked-followup-390.png\n.settings-ui-artifacts/ortho-unbooked-followup-1280.png\n.settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json\n.settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_66"
+        },
+        {
+          "name": "Upload Today readiness read lifetime evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "today-readiness-read-lifetime-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/today-readiness-1280.png\n.settings-ui-artifacts/today-readiness-390.png\n.settings-ui-artifacts/today-readiness-1280-bounds.json\n.settings-ui-artifacts/today-readiness-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_67"
+        },
+        {
+          "name": "Upload raw service category display screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "service-raw-category-display-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/service-raw-category-1280.png\n.settings-ui-artifacts/service-raw-category-390.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_68"
+        },
+        {
+          "name": "Upload legacy reconciliation preview evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "legacy-reconciliation-preview-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/legacy-reconciliation-preview-390.png\n.settings-ui-artifacts/legacy-reconciliation-preview-1280.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-1280-bounds.json\n.settings-ui-artifacts/legacy-reconciliation-preview-390-upper-viewport.png\n.settings-ui-artifacts/legacy-reconciliation-preview-390-lower-viewport.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_69"
+        },
+        {
+          "name": "Upload Cases orthodontic section navigation evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-cases-navigation-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/patient-cases-navigation-1280.png\n.settings-ui-artifacts/patient-cases-navigation-390.png\n.settings-ui-artifacts/patient-cases-navigation-1280-bounds.json\n.settings-ui-artifacts/patient-cases-navigation-390-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_70"
+        },
+        {
+          "name": "Upload dental chart read and retry evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "dental-chart-read-retry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/dental-chart-ready-390.png\n.settings-ui-artifacts/dental-chart-ready-1280.png\n.settings-ui-artifacts/dental-chart-ready-390-bounds.json\n.settings-ui-artifacts/dental-chart-ready-1280-bounds.json\n.settings-ui-artifacts/dental-chart-error-390.png\n.settings-ui-artifacts/dental-chart-error-1280.png\n.settings-ui-artifacts/dental-chart-error-390-bounds.json\n.settings-ui-artifacts/dental-chart-error-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_71"
+        },
+        {
+          "name": "Upload orthodontic prescription truth evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-prescription-truth-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-prescription-unrecorded-390.png\n.settings-ui-artifacts/ortho-prescription-unrecorded-1280.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-390.png\n.settings-ui-artifacts/ortho-prescription-closed-custom-1280.png\n.settings-ui-artifacts/ortho-prescription-390-bounds.json\n.settings-ui-artifacts/ortho-prescription-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_72"
+        },
+        {
+          "name": "Upload orthodontic booking default evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ortho-booking-default-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/ortho-booking-service-390.png\n.settings-ui-artifacts/ortho-booking-service-1280.png\n.settings-ui-artifacts/ortho-booking-duration-390.png\n.settings-ui-artifacts/ortho-booking-duration-1280.png\n.settings-ui-artifacts/ortho-booking-390-bounds.json\n.settings-ui-artifacts/ortho-booking-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "baseline_73"
+        },
+        {
+          "name": "Upload recall mutation refusal evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "recall-mutation-refusal-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/recall-refusal-390.png\n.settings-ui-artifacts/recall-refusal-1280.png\n.settings-ui-artifacts/recall-retry-390.png\n.settings-ui-artifacts/recall-retry-1280.png\n.settings-ui-artifacts/recall-refusal-390-bounds.json\n.settings-ui-artifacts/recall-refusal-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "clinical_delta_01"
+        },
+        {
+          "name": "Upload patient lab status refusal evidence",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "patient-lab-status-refusal-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/lab-status-refusal-390.png\n.settings-ui-artifacts/lab-status-refusal-1280.png\n.settings-ui-artifacts/lab-status-retry-390.png\n.settings-ui-artifacts/lab-status-retry-1280.png\n.settings-ui-artifacts/lab-status-refusal-390-bounds.json\n.settings-ui-artifacts/lab-status-refusal-1280-bounds.json\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "clinical_delta_02"
+        },
+        {
+          "name": "Upload daily report selected-date screenshots",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "daily-report-selected-date-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".settings-ui-artifacts/daily-report-selected-day-1280.png\n.settings-ui-artifacts/daily-report-selected-day-390.png\n.settings-ui-artifacts/daily-report-selected-day-print-1280.png\n",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          },
+          "id": "clinical_delta_03"
+        },
+        {
+          "name": "Seal exact mandatory outcomes and artifact members",
+          "id": "seal",
+          "if": "always()",
+          "env": {
+            "CI_STEPS_JSON": "${{ toJSON(steps) }}"
+          },
+          "run": "python3 .github/ci/evidence.py seal"
+        },
+        {
+          "name": "Upload immutable lane receipt",
+          "id": "receipt_upload",
+          "if": "always()",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "ci-receipt-build_http--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}",
+            "path": ".ci-evidence/receipt.json",
+            "include-hidden-files": true,
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "quality": {
+      "name": "Typecheck, Lint, Test, Postgres, Audit, Build",
+      "if": "always()",
+      "needs": [
+        "security_early",
+        "static_quality",
+        "postgres_schema_journeys",
+        "build_http"
+      ],
+      "runs-on": "ubuntu-latest",
+      "timeout-minutes": 55,
+      "permissions": {
+        "contents": "read",
+        "actions": "read"
+      },
+      "env": {
+        "CI_EVENT_NAME": "${{ github.event_name }}",
+        "CI_EVENT_SHA": "${{ github.sha }}",
+        "CI_SOURCE_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}",
+        "CI_SOURCE_BASE_SHA": "${{ github.event.pull_request.base.sha || github.event.before || github.sha }}",
+        "CI_WORKFLOW_REF": "${{ github.workflow_ref }}",
+        "CI_WORKFLOW_SHA": "${{ github.workflow_sha }}",
+        "CI_RUN_ID": "${{ github.run_id }}",
+        "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
+        "CI_REPOSITORY": "${{ github.repository }}",
+        "CI_REF": "${{ github.ref }}"
+      },
+      "steps": [
+        {
+          "name": "Check out exact event commit",
+          "id": "checkout",
+          "uses": "actions/checkout@v7",
+          "with": {
+            "ref": "${{ github.sha }}"
+          }
+        },
+        {
+          "name": "Verify complete fail-closed release evidence",
+          "id": "final_gate",
+          "if": "always()",
+          "env": {
+            "CI_NEEDS_JSON": "${{ toJSON(needs) }}",
+            "CI_GATE_STEPS_JSON": "${{ toJSON(steps) }}",
+            "GH_TOKEN": "${{ github.token }}"
+          },
+          "run": "python3 .github/ci/evidence.py gate"
+        }
+      ]
+    }
+  }
+}

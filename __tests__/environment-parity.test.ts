@@ -47,13 +47,15 @@ function stepCommandsInclude(commands: readonly string[], gate: string): boolean
   return commands.some((command) => command === gate || command.startsWith(`${gate} `));
 }
 
-/** موضع بوابة في ci.yml — بالأمر الحرفي أو بأمرها التحتّي (كما في فحص الوجود أعلاه). */
-function ciYamlPosition(ciYaml: string, gate: string): number {
-  const literal = ciYaml.indexOf(gate);
-  if (literal >= 0) return literal;
-  const scriptName = gate === "npm test" ? "test" : gate.replace("npm run ", "");
-  const underlying = packageJson.scripts?.[scriptName] ?? "";
-  return ciYaml.indexOf(underlying);
+/** Parse the canonical CI DAG only after verifying its exact executable YAML equivalence. */
+function ciWorkflowGraph(): { jobs: Record<string, { steps: Array<{ run?: string }> }> } {
+  const result = spawnSync("python3", [".github/ci/workflow.py", "--export"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  expect(result.error, result.stderr).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  return JSON.parse(result.stdout);
 }
 
 describe("عقد Node — صريحٌ ومُفحَص (TD-REG-019)", () => {
@@ -599,22 +601,27 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     ]));
   });
 
-  it("خطوات البوابة الكاملة بترتيب ci.yml نفسه — للبوابات الإلزامية كلها", async () => {
+  it("البوابة المحلية ترتيب تسلسلي صالح وكل بواباتها محفوظة في رسم CI المتوازي", async () => {
     const { FULL_GATE_STEPS } = await import("../scripts/verify-full.mjs");
     const commands = FULL_GATE_STEPS.map((step) => step.command.join(" "));
-    const ciYaml = readRepoFile(".github/workflows/ci.yml");
-    let previousStepIndex = -1;
-    let previousCiPosition = -1;
+    const graph = ciWorkflowGraph();
+    const workLanes = ["security_early", "static_quality", "postgres_schema_journeys", "build_http"];
+    const ciCommands = workLanes.flatMap((lane) => graph.jobs[lane].steps
+      .flatMap((step) => step.run?.split("\n") ?? []));
+    let previousLocalIndex = -1;
     for (const gate of REQUIRED_CI_GATES) {
-      const stepIndex = commands.findIndex((command) => command === gate || command.startsWith(`${gate} `));
-      expect(stepIndex, `${gate} ليست في البوابة الكاملة`).toBeGreaterThanOrEqual(0);
-      expect(stepIndex, `${gate} خارج ترتيب البوابة`).toBeGreaterThan(previousStepIndex);
-      previousStepIndex = stepIndex;
-      const ciPosition = ciYamlPosition(ciYaml, gate);
-      expect(ciPosition, `${gate} ليست في ci.yml`).toBeGreaterThanOrEqual(0);
-      expect(ciPosition, `${gate} خارج ترتيب ci.yml`).toBeGreaterThan(previousCiPosition);
-      previousCiPosition = ciPosition;
+      const localIndex = commands.findIndex((command) => command === gate || command.startsWith(`${gate} `));
+      expect(localIndex, `${gate} ليست في البوابة المحلية المتسلسلة`).toBeGreaterThan(previousLocalIndex);
+      previousLocalIndex = localIndex;
+      const scriptName = gate === "npm test" ? "test" : gate.replace("npm run ", "");
+      const underlying = packageJson.scripts?.[scriptName] ?? "";
+      expect(stepCommandsInclude(ciCommands, gate) || (underlying !== "" && ciCommands.includes(underlying)), gate).toBe(true);
     }
+    // The executable DAG verifier additionally checks bootstrap/environment in
+    // every lane, schema compare-before-restore, build/preflight/runtime/HTTP
+    // edges, same-install live audits, all artifacts and the always/needs gate.
+    expect(ciCommands).toContain("node scripts/verify-braces-runtime.mjs");
+    expect(ciCommands.filter((command) => command === "node --import tsx scripts/ci-audit.mjs")).toHaveLength(2);
   });
 
   it("خطوة عقد المخطط وحدها هي التي تولّد الملتزم — وتستعيده بعدها (عين git checkout في CI)", async () => {

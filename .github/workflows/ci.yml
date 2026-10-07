@@ -1,193 +1,76 @@
+# Generated from .github/ci/workflow.json; edit the graph, then render it.
 name: CI
-
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
   push:
-    branches: [main, "feat/**", "hardening/**"]
-  workflow_dispatch:
-
+    branches:
+      - main
+      - feat/**
+      - hardening/**
+  workflow_dispatch: 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  quality:
-    name: Typecheck, Lint, Test, Postgres, Audit, Build
+  security_early:
+    name: Security and live dependency evidence
     runs-on: ubuntu-latest
     timeout-minutes: 55
-
-    services:
-      # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
-      # ليست اختيارية: التزامن المالي لا يُثبت على PGlite أحادي الاتصال.
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: aqlan_p1_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+    permissions:
+      contents: read
     env:
-      # Build and unit tests do not open a database connection. The placeholder
-      # prevents accidental use of a real Railway URL in CI.
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
-      # اختبارات تكامل PostgreSQL الحقيقية (test:postgres) — قاعدة الخدمة المعزولة.
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
-
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_EVENT_SHA: ${{ github.sha }}
+      CI_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CI_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_REF: ${{ github.ref }}
+      CI_LANE: security_early
+    outputs:
+      receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
+      receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
+        id: baseline_01
+        with:
+          ref: ${{ github.sha }}
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-
-      # npm bundled with Node 22 still calls the retired quick-audit endpoint
-      # (POST /-/npm/v1/security/audits/quick), which the npm registry now
-      # answers with 400 Bad Request — the audit step then fails with no
-      # vulnerability at all. npm v11 uses the replacement bulk advisory
-      # endpoint, so the audit keeps guarding dependencies as before.
+        id: baseline_02
       - name: Upgrade npm to bulk advisory endpoint
         run: npm install -g npm@11
-
+        id: baseline_03
       - name: Install locked dependencies
         run: npm ci
-
-      # (TD-02) عقد البيئة قبل أي بوابة: إصدار Node داخل العقد، npm داخل النطاق،
-      # التوقيت التعاقدي Asia/Aden، وروابط القواعد محلية آمنة — يفشل مغلقًا عند
-      # أول انجراف بين ملفات العقد (engines/.nvmrc/CI) نفسها. ساكن بالكامل:
-      # لا يفتح قاعدة ولا ينزّل شيئًا.
+        id: baseline_04
       - name: Verify environment contract
         run: npm run verify:environment
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      # Phase 1A introduced ESLint primarily as a correctness guardrail
-      # (not a formatting campaign). Keep it mandatory in CI so hook-rule
-      # regressions cannot pass typecheck/build unnoticed.
-      - name: Lint
-        run: npm run lint
-
-      # (P-01) حارس تجميع المال — لا جمع عبر العملات في كود المنتج: أي SUM
-      # على أعمدة المال بلا بعد العملة يفشل البناء (انحدار P0-1).
-      - name: Money aggregation guard
-        run: npm run scan:money
-
-      - name: Unit tests
-        run: npm test
-
-      - name: PostgreSQL integration tests
-        env:
-          # Explicit fixture reset opt-in for this disposable service database only.
-          # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
-          CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
-          MANUAL_CASH_CI_DISPOSABLE_FIXTURE: "1"
-        # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
-        # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
-        run: npm run test:postgres
-
-      # (P0) رحلات التحقق التشغيلية — إلزامية لا اختيارية.
-      #
-      # الأنواعُ والاختباراتُ والبناءُ تُثبت أن البرنامج **يُترجم**، لا أنه يعمل. وقد
-      # كان هذا الفحص يخضرّ بينما خمسٌ من ثماني عشرة رحلةً تشغيلية ساقطة — لأنه لم
-      # يكن يشغّل أيًّا منها. `verify:ci` يشغّلها كلها بترتيب مراحلها ويفشل البناء
-      # إن سقطت واحدة أو تُخطّيت لنقص بيئة.
-      #
-      # DATABASE_URL هنا قاعدةُ الصيانة `postgres` لا قاعدةُ بيانات: كل رحلةٍ تنشئ
-      # قاعدتها المؤقتة باسمٍ فريد وتهدمها في finally، فلا تلمس شيئًا مشتركًا ولا
-      # تتنازع رحلتان صفًّا واحدًا.
-      # عقد المخطط الحالي يُولَّد هنا على PostgreSQL 18 — عقد الاختبار/التطوير/
-      # التدرّج المدعوم (major الإنتاج على Railway غير مثبتٍ من المستودع ولا
-      # يُدَّعى) — ويُرفع أثرًا. والبوّابة نفسها في verify:schema أدناه.
-      # (التصحيح النهائي) المقارنة البنيوية الحتمية قبل الاستعادة: النسخة
-      # الطازجة تقابل الملتزم من HEAD — أي فرقٍ بنيوي (جدول/عمود/نوع/قيد/
-      # فهرس/مُشغِّل/عدّاد) يُفشل البناء بـ SCHEMA_CONTRACT_DRIFT قبل أن
-      # يستعاد الملف الملتزم بشجرة العمل. مصدر minor للخادم (18.4 مقابل 18.6)
-      # لا يُفشل وحده — البنية هي المقيس.
-      - name: Generate current schema contract on PostgreSQL 18
-        env:
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json
-          npm run schema:contract
-          cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json
-          npm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json
-          git checkout -- schema/current-schema-contract.pg18.json
-
-      - name: Upload PostgreSQL 18 schema contract
-        uses: actions/upload-artifact@v4
-        with:
-          name: current-schema-contract-pg18
-          path: /tmp/current-schema-contract.pg18.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Characterize schema ownership on ephemeral PostgreSQL 18
-        env:
-          SCHEMA_OWNERSHIP_SOURCE_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json
-
-      - name: Upload schema ownership characterization
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: schema-ownership-characterization-pg18
-          path: /tmp/schema-ownership-characterization.json
-          # Earlier mandatory gates can stop before characterization creates the file.
-          # The characterization step itself remains fail-closed when it runs.
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Operational verification journeys
-        env:
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: npm run verify:ci
-
-      # Final Production Gate: bootstrap a deterministic baseline manifest on
-      # the supported CI/test/staging contract major (PostgreSQL 18). This step
-      # uses only the CI DB; the generated file is an artifact for provenance,
-      # not deployed. The production PostgreSQL major on Railway is NOT
-      # verified from this repository and is deliberately not claimed here.
-      - name: Generate PostgreSQL 18 baseline manifest candidate
-        run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
-
-      # المرجع الثابت هو الملف الملتزم schema/baseline-schema-manifest.pg18.json:
-      # أي اختلاف بين توليد 0001 الطازج والملف الملتزم يفشل CI — تعديل 0001
-      # يتطلب إعادة توليد الملف واعتمادها بمراجعة صريحة.
-      - name: Verify committed baseline manifest against fresh generation
-        run: npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json
-
-      - name: Upload baseline manifest candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-schema-manifest-pg18
-          path: /tmp/baseline-schema-manifest.json
-          if-no-files-found: error
-          retention-days: 7
-
+        id: baseline_05
+      - name: Bind clean checkout and evidence identity
+        id: evidence_init
+        run: python3 .github/ci/evidence.py init
       - name: Dependency audit
-        # Preserve complete raw reports. Only the exact reviewed braces advisory
-        # may receive a disposition after independent fail-closed verification;
-        # every other advisory, malformed report or failed lookup blocks.
         run: node --import tsx scripts/ci-audit.mjs
-
+        id: baseline_19
       - name: Upload exact dependency audit evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scoped-dependency-audit
+          name: scoped-dependency-audit--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .dependency-audit/full-attempt-1.json
             .dependency-audit/full-attempt-1.stderr.txt
@@ -211,105 +94,401 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # (P2-FIX-2) عدّاء انحدار قارئات الأجسام — إلزامي: أي request.json()
-      # خام في app/api يفشل البناء؛ كل القراءة عبر readJsonBody المحدود (S8).
+        id: baseline_20
+      - name: Seal exact mandatory outcomes and artifact members
+        id: seal
+        if: always()
+        env:
+          CI_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 .github/ci/evidence.py seal
+      - name: Upload immutable lane receipt
+        id: receipt_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-receipt-security_early--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .ci-evidence/receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  static_quality:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_EVENT_SHA: ${{ github.sha }}
+      CI_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CI_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_REF: ${{ github.ref }}
+      CI_LANE: static_quality
+    outputs:
+      receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
+      receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        id: baseline_01
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+        id: baseline_02
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+        id: baseline_03
+      - name: Install locked dependencies
+        run: npm ci
+        id: baseline_04
+      - name: Verify environment contract
+        run: npm run verify:environment
+        id: baseline_05
+      - name: Bind clean checkout and evidence identity
+        id: evidence_init
+        run: python3 .github/ci/evidence.py init
+      - name: Validate workflow DAG and fail-closed fault controls
+        id: ci_contract_tests
+        run: |
+          python3 .github/ci/workflow.py --check
+          python3 -m unittest discover -s .github/ci/tests -p "test_*.py"
+      - name: Typecheck
+        run: npm run typecheck
+        id: baseline_06
+      - name: Lint
+        run: npm run lint
+        id: baseline_07
+      - name: Money aggregation guard
+        run: npm run scan:money
+        id: baseline_08
+      - name: Unit tests
+        run: npm test
+        id: baseline_09
       - name: Raw body parser scanner
         run: npm run ci:scan:body
-
+        id: baseline_21
+      - name: Seal exact mandatory outcomes and artifact members
+        id: seal
+        if: always()
+        env:
+          CI_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 .github/ci/evidence.py seal
+      - name: Upload immutable lane receipt
+        id: receipt_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-receipt-static_quality--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .ci-evidence/receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  postgres_schema_journeys:
+    name: PostgreSQL, schemas and operational journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_EVENT_SHA: ${{ github.sha }}
+      CI_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CI_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_REF: ${{ github.ref }}
+      CI_LANE: postgres_schema_journeys
+      CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+    outputs:
+      receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
+      receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        id: baseline_01
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+        id: baseline_02
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+        id: baseline_03
+      - name: Install locked dependencies
+        run: npm ci
+        id: baseline_04
+      - name: Verify environment contract
+        run: npm run verify:environment
+        id: baseline_05
+      - name: Bind clean checkout and evidence identity
+        id: evidence_init
+        run: python3 .github/ci/evidence.py init
+      - name: PostgreSQL integration tests
+        env:
+          CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
+          MANUAL_CASH_CI_DISPOSABLE_FIXTURE: "1"
+        run: npm run test:postgres
+        id: baseline_10
+      - name: Generate current schema contract on PostgreSQL 18
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          git show HEAD:schema/current-schema-contract.pg18.json > /tmp/committed-schema-contract.pg18.json
+          npm run schema:contract
+          cp schema/current-schema-contract.pg18.json /tmp/current-schema-contract.pg18.json
+          npm run schema:contract:verify -- --fresh /tmp/current-schema-contract.pg18.json --committed /tmp/committed-schema-contract.pg18.json
+          git checkout -- schema/current-schema-contract.pg18.json
+        id: baseline_11
+      - name: Upload PostgreSQL 18 schema contract
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-schema-contract-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: /tmp/current-schema-contract.pg18.json
+          if-no-files-found: error
+          retention-days: 7
+        id: baseline_12
+      - name: Characterize schema ownership on ephemeral PostgreSQL 18
+        env:
+          SCHEMA_OWNERSHIP_SOURCE_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: npm run schema:ownership:verify -- --output /tmp/schema-ownership-characterization.json
+        id: baseline_13
+      - name: Upload schema ownership characterization
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-ownership-characterization-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: /tmp/schema-ownership-characterization.json
+          if-no-files-found: warn
+          retention-days: 7
+        id: baseline_14
+      - name: Operational verification journeys
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: npm run verify:ci
+        id: baseline_15
+      - name: Generate PostgreSQL 18 baseline manifest candidate
+        run: npm run db:baseline:manifest -- --output /tmp/baseline-schema-manifest.json
+        id: baseline_16
+      - name: Verify committed baseline manifest against fresh generation
+        run: npm run db:baseline:manifest:verify -- --fresh /tmp/baseline-schema-manifest.json
+        id: baseline_17
+      - name: Upload baseline manifest candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-schema-manifest-pg18--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: /tmp/baseline-schema-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+        id: baseline_18
+      - name: Seal exact mandatory outcomes and artifact members
+        id: seal
+        if: always()
+        env:
+          CI_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 .github/ci/evidence.py seal
+      - name: Upload immutable lane receipt
+        id: receipt_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-receipt-postgres_schema_journeys--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .ci-evidence/receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  build_http:
+    name: Production build, preflight, runtime and HTTP
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_EVENT_SHA: ${{ github.sha }}
+      CI_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CI_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_REF: ${{ github.ref }}
+      CI_LANE: build_http
+      CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+    outputs:
+      receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
+      receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        id: baseline_01
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+        id: baseline_02
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11
+        id: baseline_03
+      - name: Install locked dependencies
+        run: npm ci
+        id: baseline_04
+      - name: Verify environment contract
+        run: npm run verify:environment
+        id: baseline_05
+      - name: Bind clean checkout and evidence identity
+        id: evidence_init
+        run: python3 .github/ci/evidence.py init
+      - name: Audit the actual build-lane installation
+        run: node --import tsx scripts/ci-audit.mjs
+        id: build_install_audit
+      - name: Upload exact dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoped-build-install-audit--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .dependency-audit/full-attempt-1.json
+            .dependency-audit/full-attempt-1.stderr.txt
+            .dependency-audit/full-attempt-1.process.json
+            .dependency-audit/full-attempt-2.json
+            .dependency-audit/full-attempt-2.stderr.txt
+            .dependency-audit/full-attempt-2.process.json
+            .dependency-audit/full-attempt-3.json
+            .dependency-audit/full-attempt-3.stderr.txt
+            .dependency-audit/full-attempt-3.process.json
+            .dependency-audit/production-attempt-1.json
+            .dependency-audit/production-attempt-1.stderr.txt
+            .dependency-audit/production-attempt-1.process.json
+            .dependency-audit/production-attempt-2.json
+            .dependency-audit/production-attempt-2.stderr.txt
+            .dependency-audit/production-attempt-2.process.json
+            .dependency-audit/production-attempt-3.json
+            .dependency-audit/production-attempt-3.stderr.txt
+            .dependency-audit/production-attempt-3.process.json
+            .dependency-audit/exception-proof.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+        id: build_install_audit_upload
       - name: Production build
         run: npm run build
-
+        id: baseline_22
       - name: Build and smoke-test read-only preflight artifact
         run: npm run build:preflight
-
+        id: baseline_23
       - name: Verify braces absence in actual runtime artifacts
         run: node scripts/verify-braces-runtime.mjs
-
+        id: baseline_24
       - name: Upload exact runtime dependency proof
         uses: actions/upload-artifact@v4
         with:
-          name: braces-runtime-absence
+          name: braces-runtime-absence--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: .dependency-audit/runtime-proof.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
-      # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
-      # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
-      # القاعدة المعزولة نفسها (قاعدة خدمة CI) — لا في وحدات محاكاة.
+        id: baseline_25
       - name: Install Chromium for Settings browser journey
         run: npx playwright install --with-deps chromium
-
+        id: baseline_26
       - name: Install PDF text inspection tool
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
-
+        id: baseline_27
       - name: HTTP security integration tests
         run: npm run test:security-http
-
-      # Exactly three intercepted synthetic report screenshots; no live clinic data,
-      # traces, browser storage, or broad artifact directory uploads.
-      - name: Upload daily report selected-date screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-report-selected-date-ui
-          path: |
-            .settings-ui-artifacts/daily-report-selected-day-1280.png
-            .settings-ui-artifacts/daily-report-selected-day-390.png
-            .settings-ui-artifacts/daily-report-selected-day-print-1280.png
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-      # Exact synthetic statement fixtures only; never upload real patient ledgers.
+        id: baseline_28
       - name: Upload patient statement cutoff screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-statement-cutoff-ui
+          name: patient-statement-cutoff-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-statement-cutoff-screen.png
             .settings-ui-artifacts/patient-statement-cutoff-print.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only these two synthetic fixture screenshots are allowed from the hidden
-      # directory; never upload the directory broadly or include environment files.
+        id: baseline_29
       - name: Upload lab pricing UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lab-pricing-ui-screenshots
+          name: lab-pricing-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/lab-pricing-scope.png
             .settings-ui-artifacts/lab-pricing-scope-mobile.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Allowlist only the synthetic pending-booking panels; no real patient data.
+        id: baseline_30
       - name: Upload pending booking UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: quick-booking-frozen-ui-screenshots
+          name: quick-booking-frozen-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/quick-booking-frozen-desktop.png
             .settings-ui-artifacts/quick-booking-frozen-mobile.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic prescription-context viewport captures and native bounds only.
-      # No real patients, traces, HAR, cookies, browser state, or broad uploads.
+        id: baseline_31
       - name: Upload prescription patient context evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-patient-context-ui
+          name: prescription-patient-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/prescription-patient-context-warning-1280.png
             .settings-ui-artifacts/prescription-patient-context-warning-1280-bounds.json
@@ -322,50 +501,46 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only the synthetic prescription draft, never real clinical data.
+        id: baseline_32
       - name: Upload prescription diagnosis UI screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: prescription-diagnosis-ui-screenshot
+          name: prescription-diagnosis-ui-screenshot--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: .settings-ui-artifacts/prescription-diagnosis-pinned.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Allowlist only the synthetic projected financial report, never live data.
+        id: baseline_33
       - name: Upload finance report visibility screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: finance-report-visibility-ui-screenshots
+          name: finance-report-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/finance-report-revenue-only-1280.png
             .settings-ui-artifacts/finance-report-revenue-only-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic shift read/draft screenshots; no real financial data.
+        id: baseline_34
       - name: Upload finance shift read UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: finance-shift-read-ui-screenshots
+          name: finance-shift-read-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/finance-shift-unavailable.png
             .settings-ui-artifacts/finance-shift-draft-restored.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only these three synthetic catalogue/report-containment panels are allowed.
+        id: baseline_35
       - name: Upload expense catalogue visibility screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: expense-catalogue-visibility-ui-screenshots
+          name: expense-catalogue-visibility-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/expense-catalogue-restricted-1280.png
             .settings-ui-artifacts/expense-catalogue-restricted-390.png
@@ -373,13 +548,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic dossier fixtures only; no real clinical records or broad uploads.
+        id: baseline_36
       - name: Upload patient dossier ENDO print artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-dossier-endo-print-ui
+          name: patient-dossier-endo-print-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-dossier-endo-screen.png
             .settings-ui-artifacts/patient-dossier-endo-mobile-390.png
@@ -388,25 +562,22 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only the synthetic clinical-note containment fixture is allowlisted.
+        id: baseline_37
       - name: Upload pending clinical notes UI screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-pending-notes-ui
+          name: clinical-visit-pending-notes-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: .settings-ui-artifacts/clinical-visit-pending-notes.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic patient/Today owner fixtures only. Never upload the
-      # directory, real patient records, traces, HAR, cookies or browser state.
+        id: baseline_38
       - name: Upload clinical visit owner UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-owner-ui
+          name: clinical-visit-owner-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/clinical-visit-owner-pending-1280.png
             .settings-ui-artifacts/clinical-visit-owner-pending-390.png
@@ -417,14 +588,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only standalone orthodontic wire fixtures and geometry; no real records,
-      # traces, HAR, cookies, browser state, or artifact-directory uploads.
+        id: baseline_39
       - name: Upload standalone orthodontic wire screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-adjustment-wire-defaults-ui
+          name: ortho-adjustment-wire-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-adjustment-current-wires-1280.png
             .settings-ui-artifacts/ortho-adjustment-current-wires-390.png
@@ -433,14 +602,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic orthodontic regimen fixtures and control geometry; never
-      # real records, traces, HAR, cookies, browser state, or whole directories.
+        id: baseline_40
       - name: Upload orthodontic regimen screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-regimen-defaults-ui
+          name: ortho-regimen-defaults-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-regimen-ongoing-1280.png
             .settings-ui-artifacts/ortho-regimen-ongoing-1280-bounds.json
@@ -461,27 +628,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exactly two synthetic saved-alert scenes; no clinical logs or browser state.
+        id: baseline_41
       - name: Upload patient alert freshness screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-alert-freshness-ui
+          name: patient-alert-freshness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-alert-freshness-1280.png
             .settings-ui-artifacts/patient-alert-freshness-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Synthetic case diagnosis reference only; no real patient data, traces,
-      # HAR, authentication state, browser storage, or whole-directory uploads.
+        id: baseline_42
       - name: Upload case diagnosis reference screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-diagnosis-reference-ui
+          name: clinical-visit-diagnosis-reference-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280.png
             .settings-ui-artifacts/clinical-visit-diagnosis-reference-latest-1280-bounds.json
@@ -498,65 +662,60 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic orthodontic visit entry fixtures, never live patient data.
+        id: baseline_43
       - name: Upload orthodontic chairside entry screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: clinical-visit-ortho-entry-ui
+          name: clinical-visit-ortho-entry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/clinical-visit-ortho-entry-1280.png
             .settings-ui-artifacts/clinical-visit-ortho-entry-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only the synthetic read-only carry-forward screens, never real ledger data.
+        id: baseline_44
       - name: Upload accounting carry-forward UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: accounting-carry-forward-ui
+          name: accounting-carry-forward-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/accounting-carry-forward.png
             .settings-ui-artifacts/accounting-carry-forward-mobile.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only these two synthetic manual-journal drafts, never real ledger data.
+        id: baseline_45
       - name: Upload manual cash containment UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: manual-cash-containment-ui
+          name: manual-cash-containment-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/manual_cash_requires_linked_movement.png
             .settings-ui-artifacts/manual_cash_shift_busy.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only the two synthetic patient-navigation draft fixtures are allowlisted.
+        id: baseline_46
       - name: Upload patient navigation draft screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-navigation-draft-ui
+          name: patient-navigation-draft-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-navigation-draft-1280.png
             .settings-ui-artifacts/patient-navigation-draft-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic compact patient context fixtures; never real patient data.
+        id: baseline_47
       - name: Upload compact patient context screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-compact-context-ui
+          name: patient-compact-context-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-compact-today-ordinary-1280.png
             .settings-ui-artifacts/patient-compact-today-ordinary-390.png
@@ -569,26 +728,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic endodontic fixtures; never upload real patient records.
+        id: baseline_48
       - name: Upload endodontics cockpit screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-cockpit-ui
+          name: endodontics-cockpit-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/endodontics-cockpit-1280.png
             .settings-ui-artifacts/endodontics-cockpit-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Bounded synthetic denial panel and retry-control geometry only.
+        id: baseline_49
       - name: Upload endodontics reference read safety evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: endodontics-reference-read-safety-ui
+          name: endodontics-reference-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/endodontics-read-denied-1280.png
             .settings-ui-artifacts/endodontics-read-denied-390.png
@@ -597,13 +754,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic UI fixtures only; never upload real patient information.
+        id: baseline_50
       - name: Upload cockpit UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cockpit-readiness-ui
+          name: patient-cockpit-readiness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-cockpit-readiness-1280.png
             .settings-ui-artifacts/patient-cockpit-readiness-390.png
@@ -612,13 +768,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic UI fixtures only; never upload real patient information.
+        id: baseline_51
       - name: Upload legacy UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-patient-guidance-ui
+          name: legacy-patient-guidance-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/legacy-patient-plan-1280.png
             .settings-ui-artifacts/legacy-patient-plan-390.png
@@ -629,40 +784,36 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic diagnosis-case panels only; no broad directory upload.
+        id: baseline_52
       - name: Upload orthodontic diagnosis case screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-diagnosis-case-ui
+          name: ortho-diagnosis-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-diagnosis-case-1280.png
             .settings-ui-artifacts/ortho-diagnosis-case-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only the two synthetic archive reader panels; never upload the directory.
+        id: baseline_53
       - name: Upload legacy archive reader screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-archive-reader-screenshots
+          name: legacy-archive-reader-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/legacy-archive-reader-1280.png
             .settings-ui-artifacts/legacy-archive-reader-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic agreement read-state fixtures only. Append to the
-      # existing job after real HTTP UI tests; preserve concurrent upload steps.
+        id: baseline_54
       - name: Upload orthodontic agreement read-state screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-package-read-state-ui
+          name: ortho-package-read-state-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-package-unavailable-1280.png
             .settings-ui-artifacts/ortho-package-unavailable-390.png
@@ -671,13 +822,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic plan projections only; no real patient or receipt data.
+        id: baseline_55
       - name: Upload plan payment visibility screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: plan-payment-visibility-ui
+          name: plan-payment-visibility-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/plan-payment-hidden-1280.png
             .settings-ui-artifacts/plan-payment-hidden-390.png
@@ -686,13 +836,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Allowlist only synthetic unchanged-UI records viewport captures and bounds.
+        id: baseline_56
       - name: Upload orthodontic record case screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-records-case-ui
+          name: ortho-records-case-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-records-case-1280.png
             .settings-ui-artifacts/ortho-records-references-1280.png
@@ -706,13 +855,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic checklist panels; canonical classifier success and unavailable reads.
+        id: baseline_57
       - name: Upload legacy checklist refresh screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-checklist-refresh-ui
+          name: legacy-checklist-refresh-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/legacy-checklist-independent-1280.png
             .settings-ui-artifacts/legacy-checklist-independent-390.png
@@ -721,50 +869,45 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic category editor panels; no real account or financial data.
+        id: baseline_58
       - name: Upload commission category editor screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: commission-category-editor-ui
+          name: commission-category-editor-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/commission-category-editor-1280.png
             .settings-ui-artifacts/commission-category-editor-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exactly two synthetic long-doctor phone captures. Native bounds are
-      # logged by the test; no broad directory, trace, HAR, or state uploads.
+        id: baseline_59
       - name: Upload long doctor phone filter screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phone-doctor-filter-ui
+          name: phone-doctor-filter-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/phone-doctor-filter-home-390.png
             .settings-ui-artifacts/phone-doctor-filter-appointments-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
+        id: baseline_60
       - name: Upload Settings UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: settings-ui-screenshots
+          name: settings-ui-screenshots--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: .settings-ui-artifacts/
           if-no-files-found: ignore
           retention-days: 7
-
-      # Exact synthetic invoice-status rows and geometry only. No real records,
-      # traces, HAR, cookies, browser state or artifact-directory uploads.
+        id: baseline_61
       - name: Upload reversed installment invoice label evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-invoice-recovery-labels-ui
+          name: patient-invoice-recovery-labels-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/invoice-recovery-partial-1280.png
             .settings-ui-artifacts/invoice-recovery-credit-1280.png
@@ -775,13 +918,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-
+        id: baseline_62
       - name: Upload orthodontic parent read safety acceptance
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ortho-parent-read-safety-ui
+          name: patient-ortho-parent-read-safety-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-ortho-parent-read-safety-1280.png
             .settings-ui-artifacts/patient-ortho-parent-read-safety-390.png
@@ -790,43 +932,36 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exactly two synthetic built-page Ceph warnings; no real patients,
-      # traces, HAR, authentication state, or broad artifact uploads.
+        id: baseline_63
       - name: Upload ceph pending-write uncertainty screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-ceph-post-uncertainty-ui
+          name: patient-ceph-post-uncertainty-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-ceph-post-uncertain-1280.png
             .settings-ui-artifacts/patient-ceph-post-uncertain-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-
-      # Exactly two synthetic built-page scenes with unknown saved history and
-      # queued preview text. No real records, traces, HAR or authentication state.
+        id: baseline_64
       - name: Upload orthodontic photo completeness screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-photo-completeness-ui
+          name: ortho-photo-completeness-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-photo-completeness-1280.png
             .settings-ui-artifacts/ortho-photo-completeness-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic /ortho board captures and decoded-link/geometry evidence.
-      # Never upload cookies, browser state, traces, HAR or a whole directory.
+        id: baseline_65
       - name: Upload truthful orthodontic follow-up invitation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-unbooked-followup-ui
+          name: ortho-unbooked-followup-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-unbooked-followup-390.png
             .settings-ui-artifacts/ortho-unbooked-followup-1280.png
@@ -835,14 +970,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exactly two synthetic built Today screenshots and target/occlusion bounds.
-      # No traces, HAR, cookies, browser state, real records or broad uploads.
+        id: baseline_66
       - name: Upload Today readiness read lifetime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: today-readiness-read-lifetime-ui
+          name: today-readiness-read-lifetime-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/today-readiness-1280.png
             .settings-ui-artifacts/today-readiness-390.png
@@ -851,26 +984,24 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
+        id: baseline_67
       - name: Upload raw service category display screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: service-raw-category-display-ui
+          name: service-raw-category-display-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/service-raw-category-1280.png
             .settings-ui-artifacts/service-raw-category-390.png
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic read-only Account comparison: no cookies, storage values,
-      # traces, HAR, broad directories or historical financial writes.
+        id: baseline_68
       - name: Upload legacy reconciliation preview evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-reconciliation-preview-ui
+          name: legacy-reconciliation-preview-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/legacy-reconciliation-preview-390.png
             .settings-ui-artifacts/legacy-reconciliation-preview-1280.png
@@ -881,14 +1012,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exactly two synthetic Cases navigation screenshots and target/occlusion bounds.
-      # No traces, HAR, cookies, browser state, real records or broad uploads.
+        id: baseline_69
       - name: Upload Cases orthodontic section navigation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-cases-navigation-ui
+          name: patient-cases-navigation-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/patient-cases-navigation-1280.png
             .settings-ui-artifacts/patient-cases-navigation-390.png
@@ -897,14 +1026,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic chart-ready/error regions and Retry bounds only.
-      # No traces, HAR, cookies, storage, broad directories or clinical writes.
+        id: baseline_70
       - name: Upload dental chart read and retry evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dental-chart-read-retry-ui
+          name: dental-chart-read-retry-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/dental-chart-ready-390.png
             .settings-ui-artifacts/dental-chart-ready-1280.png
@@ -917,14 +1044,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Exact synthetic prescription cards and text bounds only. No traces, HAR,
-      # cookies, browser state, real records, or broad artifact directories.
+        id: baseline_71
       - name: Upload orthodontic prescription truth evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-prescription-truth-ui
+          name: ortho-prescription-truth-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-prescription-unrecorded-390.png
             .settings-ui-artifacts/ortho-prescription-unrecorded-1280.png
@@ -935,13 +1060,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic default-service/duration controls and their geometry.
+        id: baseline_72
       - name: Upload orthodontic booking default evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ortho-booking-default-ui
+          name: ortho-booking-default-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/ortho-booking-service-390.png
             .settings-ui-artifacts/ortho-booking-service-1280.png
@@ -952,13 +1076,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      # Only synthetic recall refusal/retry panels and their native bounds.
+        id: baseline_73
       - name: Upload recall mutation refusal evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recall-mutation-refusal-ui
+          name: recall-mutation-refusal-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/recall-refusal-390.png
             .settings-ui-artifacts/recall-refusal-1280.png
@@ -969,15 +1092,12 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-
-      # Only synthetic patient lab refusal/retry viewports and measured bounds.
-      # No cookies, storage, HAR, traces, real patients or broad directories.
+        id: clinical_delta_01
       - name: Upload patient lab status refusal evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patient-lab-status-refusal-ui
+          name: patient-lab-status-refusal-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .settings-ui-artifacts/lab-status-refusal-390.png
             .settings-ui-artifacts/lab-status-refusal-1280.png
@@ -988,3 +1108,71 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+        id: clinical_delta_02
+      - name: Upload daily report selected-date screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-selected-date-ui--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .settings-ui-artifacts/daily-report-selected-day-1280.png
+            .settings-ui-artifacts/daily-report-selected-day-390.png
+            .settings-ui-artifacts/daily-report-selected-day-print-1280.png
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+        id: clinical_delta_03
+      - name: Seal exact mandatory outcomes and artifact members
+        id: seal
+        if: always()
+        env:
+          CI_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 .github/ci/evidence.py seal
+      - name: Upload immutable lane receipt
+        id: receipt_upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-receipt-build_http--${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: .ci-evidence/receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  quality:
+    name: Typecheck, Lint, Test, Postgres, Audit, Build
+    if: always()
+    needs:
+      - security_early
+      - static_quality
+      - postgres_schema_journeys
+      - build_http
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_EVENT_SHA: ${{ github.sha }}
+      CI_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CI_SOURCE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+      CI_WORKFLOW_REF: ${{ github.workflow_ref }}
+      CI_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_RUN_ATTEMPT: ${{ github.run_attempt }}
+      CI_REPOSITORY: ${{ github.repository }}
+      CI_REF: ${{ github.ref }}
+    steps:
+      - name: Check out exact event commit
+        id: checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify complete fail-closed release evidence
+        id: final_gate
+        if: always()
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_GATE_STEPS_JSON: ${{ toJSON(steps) }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/evidence.py gate
