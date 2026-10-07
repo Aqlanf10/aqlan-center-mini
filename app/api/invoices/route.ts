@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getSettings, listParties, listPatientInvoices, listServices } from "@/lib/db";
 import { createLinkedInvoice, type LinkedInvoiceLineInput } from "@/lib/invoice-linkage-db";
 import {
-  INVOICE_IDEMPOTENCY_PATTERN, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint,
+  INVOICE_IDEMPOTENCY_PATTERN, INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, linkageRefusalStatus, parseLineSiteFields,
 } from "@/lib/invoice-clinical-linkage";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
@@ -142,10 +142,13 @@ export async function POST(request: Request) {
     if (toothCode === undefined) return NextResponse.json({ message: "رقم السن غير صحيح بالترقيم الدولي." }, { status: 400 });
     if (caseId === undefined) return NextResponse.json({ message: "الحالة المختارة غير صالحة." }, { status: 400 });
     if (sessions === undefined) return NextResponse.json({ message: "عدد جلسات البند بين ١ و٦٠." }, { status: 400 });
+    /* (INV-LINK TOOTH) أسطح الحشوة، أسنان حلقة التاج/الجسر، ونطاق التقويم/اللثة — كما اختيرت من مخطط الأسنان. */
+    const siteFields = parseLineSiteFields(raw);
+    if (!siteFields) return NextResponse.json({ message: "بيانات موضع البند (الأسنان/الأسطح/النطاق) غير صالحة." }, { status: 400 });
 
     items.push({
       serviceId: service ? service.id : null, category: service?.category ?? null, doctorId, description, quantity,
-      unitPriceMinor, toothCode, caseId, sessions,
+      unitPriceMinor, toothCode, caseId, sessions, ...siteFields,
     });
     authorityLines.push({
       description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
@@ -194,7 +197,7 @@ export async function POST(request: Request) {
     if (!result.ok) {
       if (result.reason === "no_patient") return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
       const prefix = result.line !== null ? `البند ${result.line + 1}: ` : "";
-      const status = result.reason === "bad_tooth" || result.reason === "bad_case" ? 400 : 409;
+      const status = linkageRefusalStatus(result.reason);
       return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
     }
     return NextResponse.json(

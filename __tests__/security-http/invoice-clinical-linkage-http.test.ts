@@ -79,4 +79,30 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       `SELECT action FROM audit_log WHERE action = 'invoice.create' AND details::text LIKE '%الربط_بالعلاج%' ORDER BY id DESC LIMIT 1`);
     expect(rows).toHaveLength(1);
   });
+
+  it("(INV-LINK TOOTH) fail closed: a tooth-bound line without a tooth, a multi-tooth endo line and a bad scope are Arabic 400s; preview agrees", async () => {
+    const invoicesBefore = Number((await db.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM invoices WHERE patient_id = $1`, [patientId])).rows[0].n);
+    const noTooth = await post("reception", { items: [{ serviceId: rctService }] });
+    expect(noTooth.status).toBe(400);
+    expect((await json(noTooth)).message).toContain("البند 1: ");
+    expect((await json(await post("reception", { items: [{ serviceId: rctService }] }))).message).toContain("حدّد السن");
+    const split = await post("reception", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: [36, 46] }] });
+    expect(split.status).toBe(400);
+    expect((await json(split)).message).toContain("قسّم البند");
+    const scope = await post("reception", { items: [{ serviceId: orthoService, toothCode: 11 }] });
+    expect(scope.status).toBe(400);
+    const shape = await post("reception", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: "36" }] });
+    expect(shape.status).toBe(400);
+    expect(Number((await db.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM invoices WHERE patient_id = $1`, [patientId])).rows[0].n)).toBe(invoicesBefore);
+    // a fresh patient: the ortho of the main patient is already pre-billed by an earlier test (would preview already_billed)
+    const { rows: [{ id: fresh }] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'معاينة الأسنان') RETURNING id`, [`ILT-${stamp}`]);
+    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST",
+      JSON.stringify({ patientId: fresh, currency: "YER", items: [{ serviceId: rctService }, { serviceId: orthoService, scope: "upper" }] }));
+    expect(preview.status).toBe(200);
+    const lines = (await preview.json() as { lines: { refusal: string | null; refusalMessage: string | null }[] }).lines;
+    expect(lines[0].refusal).toBe("tooth_required");
+    expect(lines[0].refusalMessage).toContain("حدّد السن");
+    expect(lines[1].refusal).toBeNull();
+  });
 });

@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER, PRIMARY_LOWER, PRIMARY_UPPER,
-  STAGE_LABEL, SURFACES, buildChart, chartSummary, isPrimary, toothName, toUniversal,
+  CONDITION_LABEL, PERMANENT_LOWER, PERMANENT_UPPER,
+  STAGE_LABEL, buildChart, chartSummary, isPrimary, toothName, toUniversal,
   calculatePerioAssessment, type ConditionStage, type ToothCondition, type ToothRecord, type ToothState,
   type ToothPerioRecord, type PerioAssessmentSummary, type PerioSite,
 } from "@/lib/dental";
 import { useSession, type SessionInfo } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
+import { Odontogram } from "./dental/Odontogram";
+import { SurfaceSelector } from "./dental/SurfaceSelector";
 
 /**
  * مخطط الأسنان التفاعلي العالمي.
@@ -17,25 +19,10 @@ import { Icon } from "./Icon";
  * يدعم نظامي الترقيم:
  * 1) ترقيم FDI الدولي (11–48 / 51–85)
  * 2) الترقيم العالمي Universal Numbering System (1–32 / A–T) المعتمد في الأنظمة الدولية (Dentrix / Open Dental)
+ *
+ * شكل السن ولونه وصفوف الفكّين من `components/dental/Odontogram`، وأسطح السن من
+ * `components/dental/SurfaceSelector` — المصدر نفسه الذي يستعمله «تحديد الأسنان» في الفاتورة.
  */
-
-const CONDITION_COLOR: Record<ToothCondition, string> = {
-  healthy: "fill-white stroke-slate-300",
-  caries: "fill-red-500 stroke-red-700",
-  filling: "fill-sky-700 stroke-sky-900",
-  rct: "fill-purple-500 stroke-purple-700",
-  crown: "fill-amber-400 stroke-amber-600",
-  bridge: "fill-amber-300 stroke-amber-600",
-  implant: "fill-emerald-500 stroke-emerald-700",
-  missing: "fill-slate-200 stroke-slate-400",
-  extracted: "fill-slate-200 stroke-slate-400 opacity-40",
-  impacted: "fill-indigo-300 stroke-indigo-600",
-  fracture: "fill-rose-400 stroke-rose-700",
-  mobility: "fill-amber-100 stroke-amber-500",
-  veneer: "fill-teal-300 stroke-teal-600",
-  sealant: "fill-cyan-100 stroke-cyan-500",
-  bracket: "fill-orange-400 stroke-orange-600",
-};
 
 const ORDERED_CONDITIONS: ToothCondition[] = [
   "caries", "filling", "rct", "crown", "bridge", "implant", "veneer", "sealant",
@@ -276,19 +263,8 @@ function DentalChartWorkspace({ patientId, session }: { patientId: number; sessi
           </div>
 
           {readReady ? <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-            <div className="mx-auto w-fit">
-              <Row teeth={PERMANENT_UPPER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} />
-              {showPrimary ? (
-                <>
-                  <Row teeth={PRIMARY_UPPER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} small />
-                  <div className="my-1 h-px bg-slate-200" />
-                  <Row teeth={PRIMARY_LOWER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} small />
-                </>
-              ) : (
-                <div className="my-2 h-px bg-slate-200" />
-              )}
-              <Row teeth={PERMANENT_LOWER} chart={chart} selected={selected} onPick={pickTooth} disabled={busy} system={numberingSystem} />
-            </div>
+            <Odontogram chart={chart} selected={selected === null ? [] : [selected]} onPick={pickTooth}
+              disabled={busy} system={numberingSystem} showPrimary={showPrimary} />
           </div> : null}
 
           {loading ? (
@@ -331,64 +307,6 @@ function DentalChartWorkspace({ patientId, session }: { patientId: number; sessi
   );
 }
 
-function Row({ teeth, chart, selected, onPick, disabled = false, system = "fdi", small = false }: {
-  teeth: number[];
-  chart: Map<number, ToothState>;
-  selected: number | null;
-  onPick: (code: number) => void;
-  disabled?: boolean;
-  system?: "fdi" | "universal";
-  small?: boolean;
-}) {
-  return (
-    <div className="flex gap-0.5" dir="ltr">
-      {teeth.map((code) => {
-        const state = chart.get(code);
-        const condition = state?.current?.condition ?? "healthy";
-        const planned = (state?.planned.length ?? 0) > 0;
-        const active = selected === code;
-        const displayLabel = system === "universal" ? toUniversal(code) : String(code);
-        const isAbsent = state?.absent || condition === "missing" || condition === "extracted";
-
-        return (
-          <button
-            key={code}
-            onClick={() => onPick(code)}
-            disabled={disabled}
-            title={`${toothName(code)} (FDI: ${code}, Univ: ${toUniversal(code)})`}
-            aria-label={toothName(code)}
-            className={`flex flex-col items-center rounded-md px-0.5 py-1 transition-colors ${
-              active ? "bg-navy-900" : "hover:bg-navy-50"
-            }`}
-          >
-            <span className={`text-[9px] font-bold ${active ? "text-white" : "text-slate-400"}`}>
-              {displayLabel}
-            </span>
-            <div className="relative">
-              <svg viewBox="0 0 24 30" className={small ? "h-6 w-5" : "h-8 w-6"}>
-                {/* شكل السن: تاجٌ وجذران مع تفاصيل بصرية واضحة */}
-                <path
-                  d="M12 2c-3 0-4.3 1.4-6.8 1.4C2.7 3.4 1 5.4 1 8.9c0 3 .9 5 1.7 7.7.6 2 .9 4.2 1.2 6.4.3 2.2.8 3.6 2.2 3.6 1.3 0 1.7-1.4 2.1-3.6.5-2.4.8-5 2.8-5s2.3 2.6 2.8 5c.4 2.2.8 3.6 2.1 3.6 1.4 0 1.9-1.4 2.2-3.6.3-2.2.6-4.4 1.2-6.4.8-2.7 1.7-4.7 1.7-7.7 0-3.5-1.7-5.5-4.2-5.5C16.3 3.4 15 2 12 2Z"
-                  className={`${CONDITION_COLOR[condition]}`}
-                  strokeWidth="1.2"
-                />
-                {isAbsent ? (
-                  // علامة X للسن المفقود أو المخلوع
-                  <path d="M4 5 L20 25 M20 5 L4 25" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
-                ) : null}
-                {planned ? (
-                  // الدائرة البرتقالية = خطة لم تُنفَّذ. تُرسم فوق الحالة لا بدلًا منها.
-                  <circle cx="19" cy="5" r="4" className="fill-amber-500 stroke-white" strokeWidth="1.5" />
-                ) : null}
-              </svg>
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function ToothPanel({
   toothCode,
   state,
@@ -423,14 +341,6 @@ function ToothPanel({
   };
 
   const needsSurfaces = condition === "caries" || condition === "filling" || condition === "sealant";
-
-  const SURFACE_DESCRIPTIONS: Record<string, { label: string; desc: string }> = {
-    M: { label: "M", desc: "إنسي (Mesial)" },
-    O: { label: "O", desc: "إطباقي (Occlusal)" },
-    D: { label: "D", desc: "وحشي (Distal)" },
-    B: { label: "B", desc: "دهليزي (Buccal)" },
-    L: { label: "L", desc: "لساني (Lingual)" },
-  };
 
   return (
     <section
@@ -603,33 +513,7 @@ function ToothPanel({
               <label className="block text-xs font-bold text-slate-700 mb-2">
                 أسطح السن المعنية (Tooth Surfaces - M D O B L):
               </label>
-              <div className="grid grid-cols-5 gap-2">
-                {SURFACES.map((surface) => {
-                  const active = surfaces.includes(surface);
-                  const meta = SURFACE_DESCRIPTIONS[surface];
-                  return (
-                    <button
-                      key={surface}
-                      type="button"
-                      onClick={() =>
-                        setSurfaces((current) =>
-                          current.includes(surface)
-                            ? current.filter((item) => item !== surface)
-                            : [...current, surface],
-                        )
-                      }
-                      className={`flex flex-col items-center justify-center rounded-xl p-2 text-center transition-all border ${
-                        active
-                          ? "border-navy-900 bg-navy-900 text-white shadow-sm"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
-                      }`}
-                    >
-                      <span className="text-sm font-black">{meta?.label || surface}</span>
-                      <span className="text-[9px] font-semibold mt-0.5 opacity-80">{meta?.desc || ""}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <SurfaceSelector value={surfaces} onChange={setSurfaces} />
             </div>
           ) : null}
 

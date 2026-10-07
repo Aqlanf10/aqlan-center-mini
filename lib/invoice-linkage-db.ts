@@ -16,13 +16,13 @@ import {
   type AuditInput, type DbClient, type Invoice,
 } from "./db";
 import { documentNumberSql } from "./document-numbers";
-import { isValidTooth } from "./dental";
+import { normalizeSurfaces } from "./dental";
 import type { Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import type { SpecialtyTemplate } from "./specialty-templates";
 import {
-  LINKAGE_SPECIALTY_LABEL, caseGroupKey, caseSiteCompatible, lineLinkage, sessionsFor, shellCaseTitle,
-  type InvoiceLinkageRefusal, type LinkageSpecialty,
+  LINKAGE_SPECIALTY_LABEL, caseSiteFits, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
+  validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
@@ -37,6 +37,12 @@ export interface LinkedInvoiceLineInput {
   caseId: number | null;
   /** عدد جلسات البند إن أُعطي؛ وإلا من قالب التخصص. */
   sessions: number | null;
+  /** (INV-LINK TOOTH) أسطح الحشوة كما اختيرت من المخطط (تُطبَّع). */
+  surfaces?: string | null;
+  /** (INV-LINK TOOTH) أسنان حلقة التاج/القشرة/الجسر كلها — سطرٌ لكل سن، وحالةٌ واحدة للحلقة. */
+  episodeTeeth?: number[] | null;
+  /** (INV-LINK TOOTH) نطاقٌ بلا سن: علوي/سفلي/الفكّان/كامل الفم. */
+  scope?: string | null;
 }
 
 export interface LineLink {
@@ -147,10 +153,12 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     }
 
     const linkages = input.items.map((item) => lineLinkage({ serviceId: item.serviceId, category: item.category }));
-    input.items.forEach((item, line) => {
-      if (linkages[line].kind === "clinical" && item.toothCode !== null && !isValidTooth(item.toothCode)) {
-        throw new Refusal("bad_tooth", line);
-      }
+    /* (INV-LINK TOOTH) موضع كل بندٍ علاجي يُتحقق قبل أي كتابة: خدمةٌ تخص سنًّا بلا سن لا تُحفظ مرتبطةً (fail closed). */
+    const sites: (LineSite | null)[] = input.items.map((item, line) => {
+      if (linkages[line].kind !== "clinical") return null;
+      const checked = validateLineSite(item);
+      if (!checked.ok) throw new Refusal(checked.reason, line);
+      return checked.site;
     });
 
     const total = input.items.reduce((sum, item) => sum + Math.max(0, item.quantity) * Math.max(0, item.unitPriceMinor), 0);
@@ -178,14 +186,14 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id JOIN invoices v ON v.id = i.billed_invoice_id
           WHERE t.patient_id = $1 AND i.service_id = $2 AND i.tooth_code IS NOT DISTINCT FROM $3::smallint
             AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
-          LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
+          LIMIT 1`, [input.patientId, item.serviceId, sites[line]!.toothCode]);
       if (billed) throw new Refusal("already_billed", line);
       /* (INV-LEGACY) العمل نفسه يغطّيه اتفاقٌ تاريخي حيّ لم يكتمل بنده: فاتورةٌ له تحسب المال مرةً ثانية. */
       const { rows: [legacy] } = await client.query(LEGACY_COVERED_SQL, [input.patientId, item.serviceId, item.toothCode]);
       if (legacy) throw new Refusal("legacy_covered", line);
       /* بند الخطة يُقفل أولًا ثم تُعاد قراءة أهليته في جملةٍ جديدة بعد انتظار القفل — بالترتيب نفسه الذي يقفل به
          التوقيعُ البنود (loadPlanItemsForPricing): زيارةٌ وقّعت جلسته أثناء الانتظار تُرى، فلا يفوتره البابان معًا. */
-      const params = [input.patientId, input.baseCurrency, item.serviceId, item.toothCode];
+      const params = [input.patientId, input.baseCurrency, item.serviceId, sites[line]!.toothCode];
       const { rows: candidates } = await client.query<{ id: number }>(
         `${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`, [...params, claimed]);
       const candidateIds = candidates.map((row) => row.id);
@@ -202,7 +210,8 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       const totalMinor = quantity * Math.round(item.unitPriceMinor);
       const sameTotal = open.filter((row) => row.quantity * Number(row.unit_price_minor) === totalMinor);
       if (sameTotal.length === 0) throw new Refusal("amount_mismatch", line);
-      const exact = sameTotal.filter((row) => row.quantity === quantity && (row.surfaces ?? "").trim() === ""
+      const surfaces = sites[line]?.surfaces ?? null;
+      const exact = sameTotal.filter((row) => row.quantity === quantity && normalizeSurfaces(row.surfaces) === surfaces
         && (item.sessions === null || row.session_count === item.sessions));
       if (exact.length === 0) throw new Refusal("shape_mismatch", line);
       if (exact.length > 1) throw new Refusal("ambiguous_item", line);
@@ -239,10 +248,10 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           const item = input.items[line];
           return {
             serviceId: item.serviceId, serviceName: item.description, category: item.category,
-            toothCode: item.toothCode, surfaces: null,
+            toothCode: sites[line]!.toothCode, surfaces: sites[line]!.surfaces,
             quantity: Math.max(1, Math.round(item.quantity)), unitPriceMinor: Math.round(item.unitPriceMinor),
             billingRule: "on_completion" as const,
-            sessionCount: sessionsFor(item.category, item.sessions, input.templates), note: null,
+            sessionCount: sessionsFor(item.category, item.sessions, input.templates), note: scopeNote(sites[line]!),
           };
         }),
         installments: [],
@@ -287,7 +296,8 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         if (!chosen) throw new Refusal("bad_case", line);
         caseId = chosen.id;
       } else if (caseId === null) {
-        const groupKey = caseGroupKey(specialty, item.toothCode);
+        const site = sites[line]!;
+        const groupKey = siteGroupKey(specialty, site);
         const known = caseBySpecialty.get(groupKey);
         if (known) {
           caseId = known.id;
@@ -296,7 +306,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
             `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE} ORDER BY id FOR UPDATE`,
             [input.patientId, specialty]);
-          const open = sameSpecialty.filter((row) => caseSiteCompatible(specialty, row.site, item.toothCode));
+          const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
           if (open.length > 1) throw new Refusal("ambiguous_case", line);
           if (open.length === 1) {
             caseId = open[0].id;
@@ -311,11 +321,11 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
                   ORDER BY o.id DESC LIMIT 1`, [input.patientId]);
               orthoCaseId = ortho?.id ?? null;
             }
-            const title = orthoCaseId !== null ? "تقويم الأسنان" : shellCaseTitle(specialty, item.toothCode);
+            const title = orthoCaseId !== null ? "تقويم الأسنان" : shellCaseTitleFor(specialty, site);
             const { rows: [shell] } = await client.query<{ id: number }>(
               `INSERT INTO clinical_cases (patient_id, specialty, title, site, ortho_case_id, created_by, origin, origin_invoice_id)
                VALUES ($1, $2, $3, $4::text, $5::int, $6, 'invoice', $7) RETURNING id`,
-              [input.patientId, specialty, title, item.toothCode !== null ? String(item.toothCode) : null, orthoCaseId,
+              [input.patientId, specialty, title, siteText(site), orthoCaseId,
                 input.createdBy, invoiceId]);
             caseId = shell.id;
             caseCreated = true;
@@ -409,7 +419,8 @@ export interface LinePreview {
 export async function previewInvoiceLinkage(input: {
   patientId: number; baseCurrency: Currency;
   items: { serviceId: number | null; category: string | null; quantity: number; unitPriceMinor: number;
-    toothCode: number | null; caseId: number | null; sessions?: number | null }[];
+    toothCode: number | null; caseId: number | null; sessions?: number | null;
+    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null }[];
 }): Promise<LinePreview[]> {
   await ensureSchema();
   const pool = getPool();
@@ -427,19 +438,21 @@ export async function previewInvoiceLinkage(input: {
       item: { mode: "new", id: null }, case: linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
       refusal: null,
     };
-    if (item.toothCode !== null && !isValidTooth(item.toothCode)) { preview.refusal = "bad_tooth"; previews.push(preview); continue; }
+    const checked = validateLineSite(item);
+    if (!checked.ok) { preview.refusal = checked.reason; previews.push(preview); continue; }
+    const site = checked.site;
     const { rows: [billed] } = await pool.query(
       `SELECT 1 FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id JOIN invoices v ON v.id = i.billed_invoice_id
         WHERE t.patient_id = $1 AND i.service_id = $2 AND i.tooth_code IS NOT DISTINCT FROM $3::smallint
           AND i.billing_status = 'billed' AND v.status <> 'cancelled' AND i.status = 'planned' AND i.started_at IS NULL
-        LIMIT 1`, [input.patientId, item.serviceId, item.toothCode]);
+        LIMIT 1`, [input.patientId, item.serviceId, site.toothCode]);
     if (billed) { preview.refusal = "already_billed"; previews.push(preview); continue; }
     const { rows: [legacy] } = await pool.query(LEGACY_COVERED_SQL, [input.patientId, item.serviceId, item.toothCode]);
     if (legacy) { preview.refusal = "legacy_covered"; previews.push(preview); continue; }
     const { rows: open } = await pool.query<{
       id: number; quantity: number; unit_price_minor: string; case_id: number | null; session_count: number; surfaces: string | null;
     }>(`${OPEN_ITEM_SQL} AND i.id <> ALL($5::int[]) ORDER BY i.id`,
-      [input.patientId, input.baseCurrency, item.serviceId, item.toothCode, claimed]);
+      [input.patientId, input.baseCurrency, item.serviceId, site.toothCode, claimed]);
     let linkedCase: number | null = null;
     if (open.length > 0) {
       // نفس قاعدة الحفظ: المبلغ، ثم شكل العمل (الكمية/الأسطح/الجلسات)، ثم التفرّد.
@@ -447,7 +460,7 @@ export async function previewInvoiceLinkage(input: {
       const totalMinor = quantity * Math.round(item.unitPriceMinor);
       const sessions = item.sessions ?? null;
       const sameTotal = open.filter((row) => row.quantity * Number(row.unit_price_minor) === totalMinor);
-      const exact = sameTotal.filter((row) => row.quantity === quantity && (row.surfaces ?? "").trim() === ""
+      const exact = sameTotal.filter((row) => row.quantity === quantity && normalizeSurfaces(row.surfaces) === site.surfaces
         && (sessions === null || row.session_count === sessions));
       if (sameTotal.length === 0) preview.refusal = "amount_mismatch";
       else if (exact.length === 0) preview.refusal = "shape_mismatch";
@@ -468,9 +481,9 @@ export async function previewInvoiceLinkage(input: {
         [input.patientId, linkage.specialty]);
       // الحالة المختارة صراحةً تُقبل من أي حالة مفتوحة للتخصص (كالحفظ)؛ والتلقائية من الحالات الموافقة للسن فقط.
       const all = sameSpecialty.map(({ id, title }) => ({ id, title }));
-      const open = sameSpecialty.filter((row) => caseSiteCompatible(linkage.specialty, row.site, item.toothCode))
+      const open = sameSpecialty.filter((row) => caseSiteFits(linkage.specialty, row.site, site))
         .map(({ id, title }) => ({ id, title }));
-      const groupKey = caseGroupKey(linkage.specialty, item.toothCode);
+      const groupKey = siteGroupKey(linkage.specialty, site);
       if (item.caseId !== null) {
         const chosen = all.find((one) => one.id === item.caseId);
         preview.case = chosen ? { mode: "existing", id: chosen.id, title: chosen.title, options: open.length > 1 ? open : all }
@@ -480,7 +493,7 @@ export async function previewInvoiceLinkage(input: {
         const found = all.find((one) => one.id === linkedCase);
         preview.case = { mode: "existing", id: linkedCase, title: found?.title ?? null, options: [] };
       } else if (newCaseForGroup.has(groupKey)) {
-        preview.case = { mode: "new", id: null, title: shellCaseTitle(linkage.specialty, item.toothCode), options: [] };
+        preview.case = { mode: "new", id: null, title: shellCaseTitleFor(linkage.specialty, site), options: [] };
       } else if (open.length > 1) {
         preview.case = { mode: "choose", id: null, title: null, options: open };
         preview.refusal = preview.refusal ?? "ambiguous_case";
@@ -497,7 +510,7 @@ export async function previewInvoiceLinkage(input: {
         newCaseForGroup.add(groupKey);
         preview.case = bridge
           ? { mode: "bridge", id: null, title: "تقويم الأسنان", options: [] }
-          : { mode: "new", id: null, title: shellCaseTitle(linkage.specialty, item.toothCode), options: [] };
+          : { mode: "new", id: null, title: shellCaseTitleFor(linkage.specialty, site), options: [] };
       }
     }
     previews.push(preview);
