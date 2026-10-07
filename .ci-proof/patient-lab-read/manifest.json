@@ -209,7 +209,9 @@
     "line": 144,
     "statement": "await expect.poll(() => listTitle(page).textContent()).toBe(title);",
     "count": 8,
-    "limitation": "These unchanged tests fail initially on original count (0); they are not baseline lifetime evidence."
+    "limitation": "These unchanged tests fail initially on original count (0); they are not baseline lifetime evidence.",
+    "failureFirstLine": "Error: expected 'أعمال وتركيبات المعمل (0)' to be 'أعمال وتركيبات المعمل' // Object.is equality",
+    "pollStackMarker": "\n    at Proxy.__VITEST_POLL_CHAIN__ ("
   },
   "browserNegativeAssertions": [
     {
@@ -246,7 +248,7 @@
     },
     {
       "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
-      "fullName": "built patient lab refusal containment contains a late received completion after leaving the lab panel at 390",
+      "fullName": "built patient lab refusal containment contains a late 'received' completion after leaving the lab panel at 390",
       "line": 311,
       "statement": "expect((await requests(page)).length).toBe(2);",
       "expected": 2,
@@ -286,7 +288,7 @@
     },
     {
       "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
-      "fullName": "built patient lab refusal containment contains a late received completion after leaving the lab panel at 1280",
+      "fullName": "built patient lab refusal containment contains a late 'received' completion after leaving the lab panel at 1280",
       "line": 311,
       "statement": "expect((await requests(page)).length).toBe(2);",
       "expected": 2,
@@ -324,5 +326,7 @@
     "proofRoute": "Actual compiled component/providers with test-only principal controls; not server-authorization proof",
     "originalCounterfactual": "Exact baseline component only; all assertion source frozen",
     "originalCi": "Unmodified and not replaced by this targeted proof"
-  }
+  },
+  "proofParentCommit": "02956a18781ce89cd275cbef0cbad5638d42cb62",
+  "proofParentTree": "ef0e8e3d7171762e2e9bc2a5bbf550990c4da938"
 }

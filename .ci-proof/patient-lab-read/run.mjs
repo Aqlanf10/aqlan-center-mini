@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const output = join(root, ".patient-lab-read-proof-results");
 const manifestPath = ".ci-proof/patient-lab-read/manifest.json";
-const manifestSha = "df167d575bf3f7e9d8663e4786d5e0c0b9f4602e6d7ecd050945b45a29f2bdb6";
+const manifestSha = "dc4386f194775a0cd70175361df133690a349fc9a855ddcf7844763d1379283b";
 const exactUrl = "postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable";
 const testSecret = "ci-placeholder-secret-0123456789abcdef";
 const require = (ok, message) => { if (!ok) throw new Error(message); };
@@ -52,7 +52,7 @@ function environment() {
 function snapshot(version = "candidate") {
   environment();
   require(git("rev-parse", "HEAD") === process.env.GITHUB_SHA, "Checkout differs from immutable event commit");
-  require(git("rev-list", "--parents", "-n", "1", "HEAD") === `${process.env.GITHUB_SHA} ${pinned.baseCommit}`, "Exactly pinned main must be the sole proof parent");
+  require(git("rev-list", "--parents", "-n", "1", "HEAD") === `${process.env.GITHUB_SHA} ${pinned.proofParentCommit}`, "Exactly reviewed previous proof must be the sole successor parent");
   require(git("rev-parse", `${pinned.baseCommit}^{tree}`) === pinned.baseTree, "Base tree differs");
   const clinicalPaths = pinned.candidateFiles.map((item) => item.path);
   require(clinicalPaths.length === 7 && new Set(clinicalPaths).size === 7, "Exactly seven clinical source files required");
@@ -80,16 +80,50 @@ function snapshot(version = "candidate") {
   }
   return { version, checkedAt: now(), files, protectedBaseFiles: pinned.protectedBaseFiles };
 }
+// The unchanged checkout depth contains this successor and its reviewed parent.
+// Fetch only the pinned original base object if it is outside that shallow window.
+// This read happens only inside the exact owned-CI context, before source execution.
+function ensureReviewedBase() {
+  environment();
+  require(git("rev-parse", "HEAD") === process.env.GITHUB_SHA, "Checkout differs from immutable event commit");
+  require(git("rev-list", "--parents", "-n", "1", "HEAD") === `${process.env.GITHUB_SHA} ${pinned.proofParentCommit}`,
+    "Only the reviewed non-force proof successor is allowed");
+  require(git("rev-parse", `${pinned.proofParentCommit}^{tree}`) === pinned.proofParentTree, "Reviewed predecessor tree differs");
+  const predecessorParents = git("cat-file", "-p", pinned.proofParentCommit).split("\n\n", 1)[0].split("\n")
+    .filter((line) => line.startsWith("parent ")).map((line) => line.slice(7));
+  require(JSON.stringify(predecessorParents) === JSON.stringify([pinned.baseCommit]), "Raw reviewed predecessor ancestry differs");
+  const successorPaths = git("diff", "--name-only", pinned.proofParentCommit, "HEAD", "--").split("\n").filter(Boolean).sort();
+  require(JSON.stringify(successorPaths) === JSON.stringify([manifestPath, ".ci-proof/patient-lab-read/run.mjs"].sort()),
+    "Successor changed files outside the exact two-file classifier correction");
+  const origin = git("remote", "get-url", "origin");
+  require([`https://github.com/${pinned.repository}`, `https://github.com/${pinned.repository}.git`].includes(origin), "Unexpected source origin");
+  const probe = spawnSync("git", ["cat-file", "-e", `${pinned.baseCommit}^{commit}`], { cwd: root, encoding: "utf8", timeout: 30_000 });
+  require(!probe.signal && !probe.error && [0, 128].includes(probe.status), "Base-object lookup failed unexpectedly");
+  let fetchRecord = null;
+  if (probe.status !== 0) {
+    const command = ["git", "fetch", "--no-tags", "--depth=1", "origin", pinned.baseCommit];
+    const result = spawnSync(command[0], command.slice(1), { cwd: root, encoding: "utf8", timeout: 30_000 });
+    fetchRecord = { command, status: result.status, signal: result.signal, error: result.error ? String(result.error) : null,
+      stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+    require(result.status === 0 && !result.signal && !result.error, "Exact reviewed base-object fetch failed");
+  }
+  require(git("rev-parse", `${pinned.baseCommit}^{tree}`) === pinned.baseTree, "Fetched reviewed base tree differs");
+  return { origin, commit: pinned.baseCommit, predecessorParents, fetchedExactObject: probe.status !== 0,
+    probeStatus: probe.status, fetch: fetchRecord };
+}
+const reviewedBaseRead = ensureReviewedBase();
 const first = snapshot();
 mkdirSync(output, { recursive: true });
 const write = (name, value) => writeFileSync(join(output, name), `${JSON.stringify(value, null, 2)}\n`);
 const identity = {
   repository: pinned.repository, proofRef: pinned.proofRef, proofCommit: process.env.GITHUB_SHA, proofTree: git("rev-parse", "HEAD^{tree}"),
   baseCommit: pinned.baseCommit, baseTree: pinned.baseTree, runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT,
+  predecessorCommit: pinned.proofParentCommit, predecessorTree: pinned.proofParentTree,
   job: process.env.GITHUB_JOB, nodeVersion: process.version, manifestSha256: manifestSha, clinicalManifestSha256: pinned.clinicalManifestSha256,
   source: first, proofFiles: pinned.proofOnlyFiles.map((path) => ({ path, sha256: sha(bytes(path)), gitBlob: blob(bytes(path)) })),
   safeTargets: { hostname: "127.0.0.1", port: 5432, databases: ["aqlan_p1_test", "aqlan_sec_http"], postgresMajor: 18 },
   claims: pinned.claims, startedAt: now(),
+  reviewedBaseRead,
 };
 if (process.argv[2] === "preflight") {
   write("preflight.json", identity);
@@ -197,8 +231,9 @@ function browserRed(stage) {
   require(initialFailures.length === initial.count, "Initial-count browser inventory changed");
   for (const item of initialFailures) {
     const messages = item.failureMessages?.join("\n") ?? "";
-    require(item.status === "failed" && /AssertionError/.test(messages) && messages.includes(`${initial.path}:${initial.line}:`)
-      && messages.includes("(0)"), "Original read browser failure was not the initial zero-count assertion");
+    require(item.status === "failed" && messages.startsWith(`${initial.failureFirstLine}\n`)
+      && messages.includes(initial.pollStackMarker) && messages.includes(`${initial.path}:${initial.line}:`),
+    "Original read browser failure was not the exact known Vitest poll zero-count assertion");
     negatives.add(`${item.path}:${item.fullName}`);
   }
   require(stage.report.numFailedTests === pinned.limits.originalBrowserExpectedFailed
