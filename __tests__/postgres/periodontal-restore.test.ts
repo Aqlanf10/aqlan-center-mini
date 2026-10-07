@@ -40,6 +40,7 @@ let fixture: Awaited<ReturnType<typeof openPeriodontalFixture>> | undefined;
 let directory: string | undefined;
 let archivePath: string, stagingDir: string;
 let candidateFiles: Awaited<ReturnType<typeof readMigrationFiles>>;
+let shippedCount = 0;
 let sourceState: Awaited<ReturnType<typeof state>>;
 let restored: StagedRestoreResult;
 let patientA: number, patientB: number;
@@ -127,14 +128,17 @@ beforeAll(async () => {
   selection.directory = path.join(directory, "candidate-migrations");
   await mkdir(selection.directory);
   const shipped = await readMigrationFiles();
-  expect(shipped.map((file) => file.version)).toEqual(Array.from({ length: 40 }, (_, index) => String(index + 1).padStart(4, "0")));
+  // Shipped migrations are contiguous from 0001; the candidate takes the next free number (not a fixed 0041,
+  // which later shipped migrations may own).
+  shippedCount = shipped.length;
+  expect(shipped.map((file) => file.version)).toEqual(Array.from({ length: shippedCount }, (_, index) => String(index + 1).padStart(4, "0")));
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
-  await copyFile(candidatePath, path.join(selection.directory, "0041_periodontal_candidate.sql"));
+  await copyFile(candidatePath, path.join(selection.directory, `${String(shippedCount + 1).padStart(4, "0")}_periodontal_candidate.sql`));
   candidateFiles = await readMigrationFiles(selection.directory);
-  expect(candidateFiles.slice(0, 40)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
-  expect(candidateFiles[40].sql).toBe(PERIODONTAL_SQL);
+  expect(candidateFiles.slice(0, shippedCount)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
+  expect(candidateFiles[shippedCount].sql).toBe(PERIODONTAL_SQL);
 
   fixture = await openPeriodontalFixture(originalEnvironment);
   const { rows: patients } = await pool().query<{ id: number }>(`INSERT INTO patients (patient_number,full_name)
@@ -218,7 +222,7 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect(await migrate(pool(), { apply: true, files: candidateFiles })).toMatchObject({ appliedVersions: [], alreadyUpToDate: true });
     expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     expect((await migrationStatus(pool(), candidateFiles)).consistent).toBe(true);
-    expect((await readMigrationFiles()).map((file) => file.version)).toHaveLength(40);
+    expect((await readMigrationFiles()).map((file) => file.version)).toHaveLength(shippedCount);
   });
   it("preserves exact IDs, patients, teeth, predecessors, authors, request fingerprints, values and audits", async () => {
     const actual = await state();
