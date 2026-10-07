@@ -168,7 +168,7 @@ describe("built daily report page date identity and stale-response containment",
       await expect.poll(() => f.page.getByText(`تقرير يوم: ${friendlyDateNamed(today)}`, { exact: false }).count()).toBe(1);
       // The date field is labeled, keeps the ISO contract, and an unambiguous
       // Arabic month-name date sits beside it regardless of input locale.
-      expect(await f.page.getByLabel("تاريخ التقرير").inputValue()).toBe(today);
+      expect(await f.page.getByLabel("تاريخ التقرير", { exact: true }).inputValue()).toBe(today);
       expect(await f.page.getByTestId("selected-date-text").innerText()).toBe(friendlyDateNamed(today));
       expect(await f.page.getByTestId("daily-report").getByRole("button", { name: "طباعة التقرير", exact: true }).count()).toBe(1);
       const shared = await shareParams(f.page);

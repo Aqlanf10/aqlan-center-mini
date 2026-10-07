@@ -9,6 +9,7 @@ import { appointmentsCountText, reportText, shortMinutes, type DayReport } from 
 import type { LabSummary } from "@/lib/lab";
 import { PageHeader } from "@/components/PageHeader";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import styles from "./report.module.css";
 
 /**
  * تقرير اليوم — أرقام الحضور، أزمنة الانتظار، إشغال الكراسي، وحمل الغد.
@@ -72,12 +73,12 @@ function ReportStat({ label, value, unit, tone = "calm" }: {
     bad: "border-danger-300 bg-danger-50 text-danger-900",
   }[tone];
   return (
-    <div data-print-card className={`rounded-2xl border p-4 text-center shadow-xs ${PAPER_CARD} ${tones}`}>
-      <p className="text-2xl font-bold leading-none">
+    <div data-report-stat data-print-card className={`rounded-2xl border p-4 text-center shadow-xs ${PAPER_CARD} ${tones}`}>
+      <p data-stat-value className="text-2xl font-bold leading-none">
         {value}
-        {unit ? <span className="ms-1.5 inline-block align-middle text-sm font-extrabold opacity-75">{unit}</span> : null}
+        {unit ? <span data-stat-unit className="ms-1.5 inline-block align-middle text-sm font-extrabold opacity-75">{unit}</span> : null}
       </p>
-      <p className="mt-1.5 text-[11px] font-semibold leading-snug opacity-80">{label}</p>
+      <p data-stat-label className="mt-1.5 text-xs font-semibold leading-snug opacity-80">{label}</p>
     </div>
   );
 }
@@ -180,11 +181,11 @@ export default function ReportPage() {
   }, [feed, clinicName]);
 
   return (
-    <main data-testid="daily-report" className="mx-auto max-w-4xl p-4 pb-24">
+    <main data-testid="daily-report" className={`${styles.report} mx-auto max-w-4xl p-4 pb-24`}>
       {/* ترويسة الورقة الوحيدة: هوية المركز والعنوان وتاريخ التقرير — مرةً
           واحدة لا مرتين. التاريخ لا يظهر عليها إلا لتقريرٍ صحيحٍ وصل فعلًا،
           فلا ورقةً تحمل تاريخًا قديمًا تحت يومٍ جديد. */}
-      <div className="mb-3 hidden print:block" dir="rtl">
+      <div data-testid="report-paper-header" className="mb-3 hidden print:block" dir="rtl">
         <div className="flex items-center gap-3 border-b-2 border-navy-900 pb-2">
           <Logo className="h-14 w-14 shrink-0" />
           <div className="min-w-0">
@@ -377,6 +378,7 @@ export default function ReportPage() {
                 {feed.plannedToday.slice(0, 8).map((row) => (
                   <li
                     key={row.id}
+                    data-planned-row
                     className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2 break-inside-avoid print:break-inside-avoid print:border-slate-300 print:bg-white"
                   >
                     <div className="min-w-0">
@@ -487,9 +489,10 @@ export default function ReportPage() {
                 </p>
               </div>
               <span
-                className={`rounded-xl px-3 py-1 text-xs font-extrabold print:border print:border-slate-400 print:bg-white ${
+                data-testid="report-occupancy-badge"
+                className={`rounded-xl px-3 py-1 text-xs font-extrabold print:border print:border-slate-400 print:bg-white print:text-black ${
                   feed.tomorrow.percent >= 90
-                    ? "bg-red-500 text-white"
+                    ? "bg-red-700 text-white"
                     : feed.tomorrow.percent >= 70
                     ? "bg-amber-200 text-amber-900"
                     : "bg-emerald-100 text-emerald-800"
@@ -505,11 +508,13 @@ export default function ReportPage() {
               المحجوز: {appointmentsCountText(feed.tomorrow.booked)} — {feed.tomorrow.percent}٪ من طاقة اليوم
             </p>
             <div
-              className="mt-2 h-3 w-full overflow-hidden rounded-full border border-slate-200 bg-slate-100 print:border-slate-400"
+              data-testid="report-occupancy-track"
+              className="mt-2 h-3 w-full overflow-hidden rounded-full border border-slate-200 bg-slate-100 print:border-slate-400 print:bg-white"
               aria-hidden="true"
             >
               <div
-                className={`h-full transition-all duration-300 ${
+                data-testid="report-occupancy-fill"
+                className={`h-full transition-all duration-300 print:bg-slate-400 ${
                   feed.tomorrow.percent >= 90
                     ? "bg-red-500"
                     : feed.tomorrow.percent >= 70
