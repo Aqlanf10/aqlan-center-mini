@@ -20017,6 +20017,8 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   alerts: { kind: string; severity: "info" | "warning" | "danger"; text: string }[];
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
   assessmentCases: { id: number; specialty: string; title: string }[];
+  /** (INV-LEGACY) حالاتٌ مفتوحة بدأت قبل النظام — تُعرض موسومةً في تبويب تخصصها (من قائمة الحالات نفسها). */
+  legacyCases: { id: number | null; specialty: string; title: string; site: string | null }[];
 }> {
   await ensureSchema();
   const pool = getPool();
@@ -20294,9 +20296,13 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     });
   }
 
-  const assessmentCases = (await listPatientCases(patientId))
+  const patientCases = await listPatientCases(patientId);
+  const assessmentCases = patientCases
     .filter((one) => one.needsAssessment && one.id !== null)
     .map((one) => ({ id: one.id as number, specialty: one.specialty, title: one.title }));
+  const legacyCases = patientCases
+    .filter((one) => one.legacy === true && (one.status === "active" || one.status === "waiting"))
+    .map((one) => ({ id: one.id, specialty: one.specialty, title: one.title, site: one.site ?? null }));
 
   return {
     patient,
@@ -20307,6 +20313,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     financial: financialView,
     alerts,
     assessmentCases,
+    legacyCases,
   };
 }
 

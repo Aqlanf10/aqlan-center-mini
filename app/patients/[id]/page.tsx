@@ -280,6 +280,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           alerts: data.alerts ?? [],
           canSeeFinancial: data.canSeeFinancial ?? false,
           assessmentCases: data.assessmentCases ?? [],
+          legacyCases: data.legacyCases ?? [],
         });
         setSummaryOwner(alertOwner);
       }
@@ -1139,14 +1140,14 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner patientId={patient.id} specialty="orthodontics"
                 hint="افتح حالة التقويم أدناه بعد التقييم — تُربط بهذه الحالة وبباقتها المفوترة تلقائيًا." />
-              <LegacyCaseBanner patientId={patient.id} specialty="orthodontics" />
+              <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
               <PatientOrtho patientId={patient.id} />
             </section>
           )}
 
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">
-              <LegacyCaseBanner patientId={patient.id} specialty="prosthodontics" />
+              <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="prosthodontics" />
               <PatientLabOrders patientId={patient.id} patientName={patient.fullName} base={base} />
             </section>
           )}
@@ -1155,7 +1156,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <section aria-label="علاج الجذور">
               <AssessmentBanner patientId={patient.id} specialty="endodontics"
                 hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
-              <LegacyCaseBanner patientId={patient.id} specialty="endodontics" />
+              <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="endodontics" />
               <PatientEndo {...endoNavigation} patientId={patient.id} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}

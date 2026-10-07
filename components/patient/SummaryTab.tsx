@@ -42,6 +42,7 @@ export interface WorkflowSummary {
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
   assessmentCases?: { id: number; specialty: string; title: string }[];
+  legacyCases?: { id: number | null; specialty: string; title: string; site: string | null }[];
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
