@@ -1,0 +1,328 @@
+{
+  "repository": "Aqlanf10/aqlan-center-mini",
+  "baseCommit": "3cdfe760f2e5577ba73b1c00ad07c989143afb87",
+  "baseTree": "33dbc08d94158a8e87a5356b1881777e370e6d89",
+  "proofRef": "refs/heads/ci-proof/patient-lab-read-20261007-v2",
+  "proofJob": "patient_lab_read_proof",
+  "clinicalManifestSha256": "e20c155a874726f4d2cdb755c78e7e179afb36efea64cf199f5d23feab4aaafd",
+  "candidateFiles": [
+    {
+      "path": "__tests__/patient-lab-read-state.test.tsx",
+      "bytes": 26826,
+      "lines": 502,
+      "gitBlob": "2c20c88919d87eeaadfd33db7ceee3039cccf4b6",
+      "sha256": "478e7a82bf1d345a1f1ef9e82dc109dafa85a2ca9f380939ec7d7f521610ede8",
+      "baseGitBlob": null
+    },
+    {
+      "path": "__tests__/patient-lab-status-refusal.test.tsx",
+      "bytes": 20867,
+      "lines": 457,
+      "gitBlob": "76c97191ea77306963abe45a93e0fa461724bb80",
+      "sha256": "af4228cad2b4653bcc9158cba66ca38f6225c452f6bdaa0a389f8bdaa2dd1b7d",
+      "baseGitBlob": "af4e14de0cc430e77b6f990fa7011ecc3a4c81b0"
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-state-ui.test.ts",
+      "bytes": 13277,
+      "lines": 231,
+      "gitBlob": "8b26d9089d0c824e585d10c6e74eff42b2673f4b",
+      "sha256": "6fc8daf4a55bbe4e5cae02aa855156e43b7a7d65f2092c7a3a22bec10281d869",
+      "baseGitBlob": null
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
+      "bytes": 20171,
+      "lines": 330,
+      "gitBlob": "904cc0b8668053e53ef1c2d0f6fb9573a095e784",
+      "sha256": "fe60e82e49b2383281f9c5f92a0cc2b2e0004e31cc8af26a7925d79f0ae31fb2",
+      "baseGitBlob": "cbb871a799391df14aecb33fabdfe7e12fa63d93"
+    },
+    {
+      "path": "components/PatientLabOrders.tsx",
+      "bytes": 34947,
+      "lines": 755,
+      "gitBlob": "11fe9e35086e27f31759c932dedb0843e3407572",
+      "sha256": "4724335ae475e045028409457546b2894bd29456e403bdfe10b96cc5182df421",
+      "baseGitBlob": "d33865c66401c1c2a2c05e32a83b331a1a28ac84"
+    },
+    {
+      "path": "docs/PATIENT_LAB_READ_STATES.md",
+      "bytes": 8414,
+      "lines": 145,
+      "gitBlob": "de82d95b1d3eb608390bc42f3027b029524baeae",
+      "sha256": "928acf771c0541a585cc99dbc75ab6e66b4eb31e932efda8ca8bf9619d5fa4bb",
+      "baseGitBlob": null
+    },
+    {
+      "path": "docs/PATIENT_LAB_STATUS_REFUSAL.md",
+      "bytes": 6024,
+      "lines": 98,
+      "gitBlob": "3dd333fcc8cfa3a9abc773ed1814b8d3639d16df",
+      "sha256": "06b3048ee7f039ba3c9d9aeeb05ed6aa146bcba88e0ab15993351c9faef9cde0",
+      "baseGitBlob": "0b2a694c9d5c3a10737feaa7cfa5fa4f5f163d2f"
+    }
+  ],
+  "protectedBaseFiles": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "gitBlob": "8c6c05b480ccf667be716bca44d9ca6c2ba00758"
+    },
+    {
+      "path": "__tests__/helpers/guarded-browser-routes.ts",
+      "gitBlob": "6e8bccb8fefeecf6c7f333150760c673b683496b"
+    },
+    {
+      "path": "__tests__/postgres/_safe-target.ts",
+      "gitBlob": "015ec6dc5511b9a643a3d1700f834e1cad1f8ea1"
+    },
+    {
+      "path": "__tests__/security-http/_global-setup.ts",
+      "gitBlob": "260f5a15c6f440c82db1687b3429719cab75ef80"
+    },
+    {
+      "path": "__tests__/security-http/_server.ts",
+      "gitBlob": "695aa47c0956218149fd4c16ceddcc8370f49b9d"
+    },
+    {
+      "path": "app/api/lab/route.ts",
+      "gitBlob": "45c1ebdba947bded2fcfa19a492c154954bcf08d"
+    },
+    {
+      "path": "app/layout.tsx",
+      "gitBlob": "462e9808828e7ce98ba0c25f6ca1db9c54353141"
+    },
+    {
+      "path": "components/LabDeliveryAppointmentModal.tsx",
+      "gitBlob": "04bc3302875f029461661a60456a2bb36deaefd2"
+    },
+    {
+      "path": "components/LabPrescriptionModal.tsx",
+      "gitBlob": "159768f05debf6c1ead7d25133cfd44f56bb2bd4"
+    },
+    {
+      "path": "components/SessionProvider.tsx",
+      "gitBlob": "7c8cafb5c316d730de8ade3be9d929ed89d98d7b"
+    },
+    {
+      "path": "components/SettingsProvider.tsx",
+      "gitBlob": "1b7fc0ad0b18a6b741e6daa7b5585965d27e3b87"
+    },
+    {
+      "path": "lib/db.ts",
+      "gitBlob": "6ada75e986e739a215fe1cb586cd801c6fdf08a9"
+    },
+    {
+      "path": "next.config.ts",
+      "gitBlob": "1e7d18e6b1c1e1c4abc6e78c3ae7a3c7e6d94bc0"
+    },
+    {
+      "path": "package-lock.json",
+      "gitBlob": "d7ae33712b15d6891e63922a1a856b58cb44fa65"
+    },
+    {
+      "path": "package.json",
+      "gitBlob": "761040ff9335d8df440548979523cce78b5b1768"
+    },
+    {
+      "path": "vitest.config.mts",
+      "gitBlob": "c1ca5c54992c534c627b38ad88f12e4910297d73"
+    },
+    {
+      "path": "vitest.config.security.mts",
+      "gitBlob": "5f31d93528c4769aeba353fd91ef1a73719866c7"
+    },
+    {
+      "path": "lib/doctor-permissions.ts",
+      "gitBlob": "c24970671a2ae68eeabfc0f44cfe23a51f74d8f0"
+    }
+  ],
+  "originalComponent": {
+    "path": "components/PatientLabOrders.tsx",
+    "bytes": 28688,
+    "gitBlob": "d33865c66401c1c2a2c05e32a83b331a1a28ac84",
+    "sha256": "05bcaf80b3ff54fa37b2ad8218b012c96e3d54943511fe7194f1327fa704266e"
+  },
+  "proofOnlyFiles": [
+    ".ci-proof/patient-lab-read/manifest.json",
+    ".ci-proof/patient-lab-read/run.mjs",
+    ".github/workflows/patient-lab-read-proof.yml",
+    "app/proof-patient-lab-read/page.tsx",
+    "app/proof-patient-lab-read/ProofClient.tsx",
+    "__tests__/security-http/patient-lab-read-proof-ui.test.ts",
+    "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts"
+  ],
+  "unitFiles": [
+    {
+      "path": "__tests__/patient-lab-read-state.test.tsx",
+      "count": 65
+    },
+    {
+      "path": "__tests__/patient-lab-status-refusal.test.tsx",
+      "count": 67
+    }
+  ],
+  "browserFiles": [
+    {
+      "path": "__tests__/security-http/patient-lab-read-state-ui.test.ts",
+      "count": 8
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
+      "count": 12
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "count": 10
+    }
+  ],
+  "extraBrowserFiles": [
+    {
+      "path": "__tests__/security-http/patient-lab-read-proof-ui.test.ts",
+      "count": 20
+    }
+  ],
+  "unitNegativeSuffixes": [
+    {
+      "suffix": "withholds the count and empty claim until both accepted headers and body are complete",
+      "count": 1
+    },
+    {
+      "suffix": "retires A1 through A→B→A rather than treating the repeated patient id as the same owner",
+      "count": 2
+    },
+    {
+      "suffix": "does not read or mutate without a principal, and rejects the retired principal's late result",
+      "count": 2
+    },
+    {
+      "suffix": "does not commit state or parse late headers after unmount",
+      "count": 2
+    }
+  ],
+  "unitControlSuffixes": [
+    "preserves every current API status and optional/null financial fields",
+    "does not refetch for a display-name-only or same-principal object replacement"
+  ],
+  "browserReadInitialCountAssertion": {
+    "path": "__tests__/security-http/patient-lab-read-state-ui.test.ts",
+    "line": 144,
+    "statement": "await expect.poll(() => listTitle(page).textContent()).toBe(title);",
+    "count": 8,
+    "limitation": "These unchanged tests fail initially on original count (0); they are not baseline lifetime evidence."
+  },
+  "browserNegativeAssertions": [
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores stale A body after confirmed B at 390px",
+      "line": 169,
+      "statement": "expect(await current(page, \"قديم أ\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores stale A1 headers after confirmed A2 at 390px",
+      "line": 186,
+      "statement": "expect(await current(page, \"قديم أ١\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores accepted body after principal removal at 390px",
+      "line": 198,
+      "statement": "expect(await current(page, \"هوية متقاعدة\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual does not refresh an accepted command after unmount at 390px",
+      "line": 213,
+      "statement": "expect((await requests(page)).length).toBe(2);",
+      "expected": 2,
+      "received": 3
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
+      "fullName": "built patient lab refusal containment contains a late received completion after leaving the lab panel at 390",
+      "line": 311,
+      "statement": "expect((await requests(page)).length).toBe(2);",
+      "expected": 2,
+      "received": 3
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores stale A body after confirmed B at 1280px",
+      "line": 169,
+      "statement": "expect(await current(page, \"قديم أ\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores stale A1 headers after confirmed A2 at 1280px",
+      "line": 186,
+      "statement": "expect(await current(page, \"قديم أ١\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual ignores accepted body after principal removal at 1280px",
+      "line": 198,
+      "statement": "expect(await current(page, \"هوية متقاعدة\").count()).toBe(0);",
+      "expected": 0,
+      "received": 1
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-read-counterfactual-ui.test.ts",
+      "fullName": "real React lab ownership counterfactual does not refresh an accepted command after unmount at 1280px",
+      "line": 213,
+      "statement": "expect((await requests(page)).length).toBe(2);",
+      "expected": 2,
+      "received": 3
+    },
+    {
+      "path": "__tests__/security-http/patient-lab-status-refusal-ui.test.ts",
+      "fullName": "built patient lab refusal containment contains a late received completion after leaving the lab panel at 1280",
+      "line": 311,
+      "statement": "expect((await requests(page)).length).toBe(2);",
+      "expected": 2,
+      "received": 3
+    }
+  ],
+  "candidateEvidenceScenes": [
+    "unavailable",
+    "confirmed-empty",
+    "accepted-receipt-booking",
+    "accepted-receipt-unavailable"
+  ],
+  "candidateEvidenceWidths": [
+    390,
+    1280
+  ],
+  "statusEvidenceFiles": [
+    "lab-status-refusal-390.png",
+    "lab-status-refusal-1280.png",
+    "lab-status-retry-390.png",
+    "lab-status-retry-1280.png",
+    "lab-status-refusal-390-bounds.json",
+    "lab-status-refusal-1280-bounds.json"
+  ],
+  "limits": {
+    "unitTotal": 132,
+    "browserTotal": 30,
+    "extraBrowserTotal": 20,
+    "originalBrowserExpectedFailed": 18,
+    "originalBrowserExpectedPassed": 12
+  },
+  "claims": {
+    "hookTests": "Synthetic component/effect regression only; not real React rendering",
+    "normalBrowser": "Existing actual built application pages",
+    "proofRoute": "Actual compiled component/providers with test-only principal controls; not server-authorization proof",
+    "originalCounterfactual": "Exact baseline component only; all assertion source frozen",
+    "originalCi": "Unmodified and not replaced by this targeted proof"
+  }
+}
