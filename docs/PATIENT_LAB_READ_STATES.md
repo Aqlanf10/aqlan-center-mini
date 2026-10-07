@@ -82,13 +82,17 @@ booking. Retired create/cancel/status continuations cannot initiate a stale
 refresh, attach messages or booking, or release another owner's mutation lock.
 Already-sent mutations are not aborted, reversed, repeated or made idempotent.
 
-## Known boundary left unchanged
+## Remaining list-size boundary
 
-The API currently calls `listLabOrders()` without passing its patient filter,
-then filters the default globally limited result in memory. Its default
-`LIMIT 300` means a successful empty response is the endpoint's returned
-result, not proof of full historical absence. This source-only UI slice does
-not fix or endorse that independent backend completeness limitation.
+The integrated backend repair in #284 passes the patient filter to
+`listLabOrders`, which applies `l.patient_id` in SQL before the default
+`LIMIT 300`. A scoped empty response is therefore not caused by other
+patients filling a global 300-row window.
+
+The default limit still returns at most 300 orders for the requested patient.
+A populated response and its displayed count are the returned page, not a
+complete historical total when that patient has more than 300 orders. This
+UI slice does not add pagination or change that remaining per-patient limit.
 
 No API, database query, permission, schema, currency, accounting rule, writer,
 workflow, package, or future AI/Dot feature changes are included.
