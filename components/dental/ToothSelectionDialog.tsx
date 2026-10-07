@@ -1,23 +1,37 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { buildChart, toothName, type ToothRecord } from "@/lib/dental";
+import { buildChart, CONDITION_LABEL, isValidTooth, toothName, type ToothRecord } from "@/lib/dental";
 import type { ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { toggleTooth } from "../ToothPicker";
 import { Odontogram } from "./Odontogram";
 import { SurfaceSelector } from "./SurfaceSelector";
 import { MODE_HINT, PER_TOOTH_SPLIT_NOTICE, multiSelect, type ToothSelection } from "./invoice-tooth-selection";
 
+function isChartRecord(value: unknown): value is ToothRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.id === "number" && Number.isSafeInteger(row.id)
+    && typeof row.toothCode === "number" && isValidTooth(row.toothCode)
+    && typeof row.condition === "string" && Object.hasOwn(CONDITION_LABEL, row.condition)
+    && ["existing", "planned", "completed"].includes(String(row.stage))
+    && typeof row.recordedAt === "string" && row.recordedAt.length > 0
+    && typeof row.recordedBy === "string" && (row.surfaces === null || typeof row.surfaces === "string")
+    && (row.note === null || typeof row.note === "string")
+    && (row.visitId === null || (typeof row.visitId === "number" && Number.isSafeInteger(row.visitId)));
+}
+
 /**
  * (INV-LINK TOOTH) «تحديد الأسنان» لبند الفاتورة — المخطط السريري نفسه (`Odontogram`) لا محدِّدٌ جديد.
  *
  * يعرض حالة أسنان المريض الحقيقية حين تُقرأ (`GET /api/patients/{id}/chart` ثم `buildChart` كما في `DentalChart`)؛
- * وإن تعذّرت القراءة تُعرض الأسنان سليمةً وتبقى قابلةً للاختيار. الاختيار المتعدد بـ`toggleTooth` من `ToothPicker`.
+ * وإن تعذّرت القراءة تُعرض هيئة الأسنان بحالة غير معروفة وتبقى قابلةً للاختيار. الاختيار المتعدد بـ`toggleTooth` من `ToothPicker`.
  * نافذةٌ عربية (RTL) وصفوف الأسنان بوضع المواجهة (`dir="ltr"`)؛ على الجوال لوحةٌ سفلية بعرض الشاشة والمخطط
  * يُمرَّر أفقيًا داخلها فقط. Escape أو «إلغاء» يغلق بلا تغيير.
  */
-export function ToothSelectionDialog({ patientId, mode, serviceName, initial, onConfirm, onCancel }: {
+export function ToothSelectionDialog({ patientId, mode, serviceName, initial, onConfirm, onCancel, purpose = "invoice" }: {
   patientId: number;
+  purpose?: "invoice" | "legacy_agreement";
   mode: ToothScopeMode;
   serviceName: string;
   initial: ToothSelection;
@@ -30,8 +44,9 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
   const [teeth, setTeeth] = useState<number[]>(() => [...initial.teeth].sort((a, b) => a - b));
   const [surfaces, setSurfaces] = useState<string[]>(() => initial.surfaces.split("").filter(Boolean));
   const [showPrimary, setShowPrimary] = useState(() => initial.teeth.some((tooth) => tooth >= 51));
-  const [records, setRecords] = useState<ToothRecord[]>([]);
-  const [chartState, setChartState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [chartRead, setChartRead] = useState<{ patientId: number; records: ToothRecord[]; status: "ready" | "unavailable" } | null>(null);
+  if (chartRead && chartRead.patientId !== patientId) setChartRead(null);
+  const chartState = chartRead?.patientId === patientId ? chartRead.status : "loading";
   const panel = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(onCancel);
   useEffect(() => { cancelRef.current = onCancel; }, [onCancel]);
@@ -43,16 +58,15 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
       .then(async (response) => {
         const payload = await response.json().catch(() => null) as { records?: unknown } | null;
         if (controller.signal.aborted) return;
-        if (response.ok && Array.isArray(payload?.records)) {
-          setRecords(payload.records as ToothRecord[]);
-          setChartState("ready");
-        } else setChartState("unavailable");
+        if (response.ok && Array.isArray(payload?.records) && payload.records.every(isChartRecord)) {
+          setChartRead({ patientId, records: payload.records, status: "ready" });
+        } else setChartRead({ patientId, records: [], status: "unavailable" });
       })
-      .catch(() => { if (!controller.signal.aborted) setChartState("unavailable"); });
+      .catch(() => { if (!controller.signal.aborted) setChartRead({ patientId, records: [], status: "unavailable" }); });
     return () => controller.abort();
   }, [patientId]);
 
-  const chart = useMemo(() => buildChart(records), [records]);
+  const chart = useMemo(() => buildChart(chartRead?.patientId === patientId ? chartRead.records : []), [chartRead, patientId]);
 
   // Escape يغلق، والتركيز يدخل النافذة ويعود لزرّ الفتح بعد الإغلاق، والصفحة خلفها لا تتمرّر.
   useEffect(() => {
@@ -61,17 +75,38 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
     document.body.style.overflow = "hidden";
     panel.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); cancelRef.current(); }
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); cancelRef.current(); return; }
+      if (event.key !== "Tab" || !panel.current) return;
+      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+      )].filter((element) => element.getClientRects().length > 0 && !element.closest('[inert]'));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) { event.preventDefault(); panel.current.focus(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    const containFocus = (event: FocusEvent) => {
+      if (panel.current && event.target instanceof Node && !panel.current.contains(event.target)) panel.current.focus();
     };
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", containFocus);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", containFocus);
       document.body.style.overflow = overflow;
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
     };
   }, []);
 
-  const pick = (code: number) => setTeeth((current) => multi ? toggleTooth(current, code) : current.includes(code) ? [] : [code]);
+  const pick = (code: number) => {
+    // A surface selection describes one specific tooth and must never migrate to its replacement.
+    if (!multi) setSurfaces([]);
+    setTeeth((current) => multi ? toggleTooth(current, code) : current.includes(code) ? [] : [code]);
+  };
   const needsTooth = mode !== "region";
   const canConfirm = !needsTooth || teeth.length > 0;
   const confirm = () => {
@@ -93,7 +128,8 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
           <div className="min-w-0">
             <h3 id={titleId} className="text-sm font-extrabold text-navy-900">تحديد الأسنان — {serviceName}</h3>
-            <p id={hintId} className="mt-0.5 text-[11px] font-semibold text-slate-500">{MODE_HINT[mode]}</p>
+            <p id={hintId} className="mt-0.5 text-[11px] font-semibold text-slate-500">{purpose === "legacy_agreement" && mode === "multi_tooth_episode" ? "اختر كل أسنان الحلقة التي يغطيها اتفاق تاريخي واحد."
+              : purpose === "legacy_agreement" && mode === "per_tooth_episode" ? "اختر سنًّا واحدًا لكل اتفاق تاريخي مستقل." : MODE_HINT[mode]}</p>
           </div>
           <button type="button" onClick={onCancel} aria-label="إغلاق"
             className="min-h-[44px] min-w-[44px] shrink-0 rounded-xl bg-slate-100 text-xs font-black text-slate-600 hover:bg-slate-200">✕</button>
@@ -119,7 +155,7 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
               <div className="mb-1 flex justify-between text-[10px] font-bold text-slate-400">
                 <span>يمين المريض</span><span>يسار المريض</span>
               </div>
-              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} touch />
+              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} chartKnown={chartState === "ready"} touch />
             </div>
           </div>
 
@@ -133,12 +169,12 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
           {mode === "per_tooth_episode" && teeth.length > 1 ? (
             <p role="status" data-testid="tooth-dialog-split-notice"
               className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
-              {PER_TOOTH_SPLIT_NOTICE}: {teeth.join("، ")} — لا تُجمع عدة أسنان في حالة واحدة.
+              {purpose === "legacy_agreement" ? "الاتفاق التاريخي لهذا العلاج مستقل لكل سن؛ لا يمكن حفظ الاختيار المتعدد" : PER_TOOTH_SPLIT_NOTICE}: {teeth.join("، ")} — لا تُجمع عدة أسنان في حالة واحدة.
             </p>
           ) : null}
           {mode === "multi_tooth_episode" && teeth.length > 1 ? (
             <p role="status" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-900">
-              حلقةٌ واحدة: {teeth.join("، ")} — سطرٌ لكل سن في الفاتورة.
+              حلقةٌ واحدة: {teeth.join("، ")} — {purpose === "legacy_agreement" ? "اتفاق واحد وبند واحد بالمبلغ الكامل للحلقة، دون ضربه بعدد الأسنان." : "سطرٌ لكل سن في الفاتورة."}
             </p>
           ) : null}
         </div>

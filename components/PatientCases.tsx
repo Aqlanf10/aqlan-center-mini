@@ -313,8 +313,11 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
                 </div>
                 <p className="mt-1 text-xs text-slate-600">
                   {specialtyLabel(item.specialty)} · المسؤول: {item.responsibleName ?? "—"}
-                  {item.itemsTotal > 0 ? ` · البنود ${item.itemsDone}/${item.itemsTotal}` : ""}
+                  {item.itemsTotal > 0 ? ` · ${item.legacy ? "البنود المسجّلة داخل النظام" : "البنود"} ${item.itemsDone}/${item.itemsTotal}` : ""}
                 </p>
+                {item.legacy ? <p className="mt-1 text-xs text-indigo-900">
+                  التقدّم السابق غير معلوم من التسجيل المالي. يلزم التقييم والموافقة الفعلية والتحقق من التغطية قبل التوقيع؛ حفظ المسودة متاح.
+                </p> : null}
                 {item.waitingOn?.length ? (
                   <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
                     بانتظار: {item.waitingOn.join("، ")}

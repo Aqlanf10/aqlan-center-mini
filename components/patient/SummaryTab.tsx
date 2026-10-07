@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { AssessmentCase, LegacyCase } from "@/lib/patient-workflow-cases";
 import { ReceiptCorrectionLauncher } from "@/components/ReceiptCorrectionLauncher";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDate, friendlyDateLong, friendlyTime } from "@/lib/reminders";
@@ -41,8 +42,8 @@ export interface WorkflowSummary {
   }[];
   counts: { visits: number; openLabOrders: number; documents: number; orthoCase: boolean };
   /** (INV-LINK D) حالاتٌ فتحتها فاتورة علاجية وتنتظر تقييم الطبيب. */
-  assessmentCases?: { id: number; specialty: string; title: string }[];
-  legacyCases?: { id: number | null; specialty: string; title: string; site: string | null }[];
+  assessmentCases?: AssessmentCase[];
+  legacyCases?: LegacyCase[];
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
@@ -74,8 +75,10 @@ export function SummaryTab({
   onVisitStarted,
   onChanged,
   onGoToTab,
+  workflowIsCurrent,
 }: {
   summary: WorkflowSummary;
+  workflowIsCurrent?: () => boolean;
   patientId: number;
   patientName: string;
   /** رقم الملف — مفتاح بوّابة المريض نصفه، وبطاقته المطبوعة تحمله كاملًا. */
@@ -104,7 +107,7 @@ export function SummaryTab({
   const scheduledNext = summary.plannedVisits.find((visit) => visit.appointmentDate) ?? null;
 
   const schedule = async (plannedVisitId: number) => {
-    if (scheduleBusy) return;
+    if (scheduleBusy || workflowIsCurrent?.() === false) return;
     setScheduleBusy(true);
     setMessage(null);
     try {
@@ -129,6 +132,7 @@ export function SummaryTab({
   };
 
   const startPlannedVisit = async (plannedVisitId: number) => {
+    if (scheduleBusy || workflowIsCurrent?.() === false) return;
     setScheduleBusy(true);
     setMessage(null);
     try {

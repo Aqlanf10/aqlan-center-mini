@@ -1,0 +1,35 @@
+/* These paper rules apply only while this report is mounted. Shared app
+   styling and other documents keep their existing print behavior. */
+@page aqlan-daily-report {
+  size: A4;
+  margin: 10mm;
+}
+
+@media print {
+  :global(body):has(.report) {
+    background: white !important;
+  }
+
+  .report {
+    page: aqlan-daily-report;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    background: white;
+    color: black;
+  }
+
+  .report [data-print-card] {
+    background: white !important;
+    box-shadow: none !important;
+  }
+
+  .report [data-testid="report-occupancy-fill"] {
+    background: #888 !important;
+  }
+
+  .report [data-testid="report-paper-header"] img,
+  .report [data-testid="report-paper-header"] svg {
+    filter: grayscale(1);
+  }
+}

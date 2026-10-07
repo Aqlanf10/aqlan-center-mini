@@ -44,19 +44,21 @@ const BUTTON_SIZE: Record<OdontogramSize, string> = {
 const SVG_SIZE: Record<OdontogramSize, string> = { sm: "h-6 w-5", md: "h-8 w-6", touch: "h-9 w-7" };
 const LABEL_SIZE: Record<OdontogramSize, string> = { sm: "text-[9px]", md: "text-[9px]", touch: "text-[11px]" };
 
-export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false, system = "fdi", size = "md" }: {
+export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", size = "md" }: {
   teeth: readonly number[];
   chart: ReadonlyMap<number, ToothState>;
   selected: readonly number[];
   onPick: (code: number) => void;
   disabled?: boolean;
+  /** False means anatomy only: no healthy/absent/planned clinical inference. */
+  chartKnown?: boolean;
   system?: NumberingSystem;
   size?: OdontogramSize;
 }) {
   return (
     <div className="flex gap-0.5" dir="ltr">
       {teeth.map((code) => {
-        const state = chart.get(code);
+        const state = chartKnown ? chart.get(code) : undefined;
         const condition = state?.current?.condition ?? "healthy";
         const planned = (state?.planned.length ?? 0) > 0;
         const active = selected.includes(code);
@@ -70,7 +72,8 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
             onClick={() => onPick(code)}
             disabled={disabled}
             title={`${toothName(code)} (FDI: ${code}, Univ: ${toUniversal(code)})`}
-            aria-label={toothName(code)}
+            aria-label={`${toothName(code)}${chartKnown ? "" : " — الحالة غير متاحة"}`}
+            data-chart-known={chartKnown}
             aria-pressed={active}
             data-testid={`odontogram-tooth-${code}`}
             className={`flex flex-col items-center rounded-md ${BUTTON_SIZE[size]} transition-colors ${
@@ -82,7 +85,9 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
             </span>
             <div className="relative">
               <svg viewBox="0 0 24 30" className={SVG_SIZE[size]} aria-hidden="true">
-                <path d={TOOTH_PATH} className={`${CONDITION_COLOR[condition]}`} strokeWidth="1.2" />
+                <path d={TOOTH_PATH} className={chartKnown ? CONDITION_COLOR[condition] : "fill-slate-100 stroke-slate-400"}
+                  strokeWidth="1.2" strokeDasharray={chartKnown ? undefined : "2 2"} />
+                {!chartKnown ? <text x="12" y="14" textAnchor="middle" fontSize="10" className="fill-slate-500">?</text> : null}
                 {isAbsent ? (
                   // علامة X للسن المفقود أو المخلوع
                   <path d="M4 5 L20 25 M20 5 L4 25" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
@@ -104,11 +109,13 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
  * الفكّان بترتيب المخطط السريري: الدائم العلوي، (اللبني العلوي والسفلي)، الدائم السفلي — بالفواصل نفسها.
  * `touch` يكبّر الأسنان كلها لهدف لمسٍ مريح؛ وإلا فاللبنية أصغر كما في المخطط السريري.
  */
-export function Odontogram({ chart, selected, onPick, disabled = false, system = "fdi", showPrimary = false, touch = false }: {
+export function Odontogram({ chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", showPrimary = false, touch = false }: {
   chart: ReadonlyMap<number, ToothState>;
   selected: readonly number[];
   onPick: (code: number) => void;
   disabled?: boolean;
+  /** False means anatomy only: no healthy/absent/planned clinical inference. */
+  chartKnown?: boolean;
   system?: NumberingSystem;
   showPrimary?: boolean;
   touch?: boolean;
@@ -116,7 +123,7 @@ export function Odontogram({ chart, selected, onPick, disabled = false, system =
   const permanent: OdontogramSize = touch ? "touch" : "md";
   const primary: OdontogramSize = touch ? "touch" : "sm";
   const row = (teeth: readonly number[], size: OdontogramSize) => (
-    <OdontogramRow teeth={teeth} chart={chart} selected={selected} onPick={onPick} disabled={disabled} system={system} size={size} />
+    <OdontogramRow teeth={teeth} chart={chart} selected={selected} onPick={onPick} disabled={disabled} chartKnown={chartKnown} system={system} size={size} />
   );
   return (
     <div className="mx-auto w-fit">

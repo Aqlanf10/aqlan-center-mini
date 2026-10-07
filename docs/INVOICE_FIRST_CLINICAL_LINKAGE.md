@@ -1,193 +1,155 @@
-# INV-LINK — Invoice-first clinical linkage (audit, design, lineage contract)
+# Invoice-first clinical linkage: prospective safety contract
 
-Status: design for PRs B–D. Measured on `main` @ `ea312ad` (2026-10-06). Older docs were not trusted as a
-description of `main`; every statement below was re-read from code.
+Status: **source-reviewed TARGET contract for PR 273**. This is a documentation-only
+successor to `c669a82e8dbd18d7510b5ca07caa23410cd7bdec`, based on `main`
+`4fa7c406455b666e163ff1f9f10861d004eb04a4`.
 
-## 1. Audit — how the two entry points behave today
+The rules below describe the reviewed target behavior. They do not assert current
+Production behavior, completed implementation, migration activation, or release acceptance.
+Implementation remains separately gated through PR 274 and PR 278, with exact-head CI
+and end-to-end evidence required. Legacy PR 285 remains separate.
+This document supersedes the earlier B–D proposal's consent, cancellation, correction,
+provider, scope, and blanket orthodontic-funding rules. It is not a deployment claim.
+The complete reviewed core, UI, and regression tests must pass CI before activation.
 
-| Path | What it writes | Clinical effect |
-|---|---|---|
-| `POST /api/invoices` → `createInvoice` (`lib/db.ts`) | `invoices` + `invoice_items` (service_id, doctor_id, description, qty, price). No `source_type/source_id`, no plan/case, no idempotency key. Price authority via `checkInvoiceAuthority` (FIN-4); description forced from the catalog when a `serviceId` is chosen. | **None.** An ortho or RCT invoice leaves no plan item, no case, nothing in the specialty tab. |
-| Visit → `visit_procedures` → `signClinicalVisit` | One transaction: procedures, invoice lines with `source_type='visit_procedure'`, chart, plan-item sessions, lab, materials, ortho session. Linked lines (`plan_item_id`) are priced from the plan via `classifyLinkedProcedureLines` → `loadPlanItemsForPricing`, which requires the plan `active`, **consented**, and the item `planned/in_progress`. BILL-1: a plan funded by an installment agreement classifies sessions `INCLUDED` (not invoiced). | Bills clinical work; double billing of a procedure is stopped by the unique partial index `invoice_items_source_uniq (source_type, source_id)`. |
-| Plans (`createPlanV2`, `addPlanItem`, `recordPlanConsent`) | `treatment_plans` + `plan_items` (`billing_rule`, `billing_status ∈ unbilled/billed/included_in_package/waived`, `session_count`, `case_id`). `canEditItems` refuses edits once consented: "وثّق المستجدّ بخطة جديدة". | The agreed treatment. `billing_status = 'billed'` exists in the type but **no code path sets it today**. |
-| Cases (`clinical_cases`, CASE-MODEL-1) | Generic specialty case (`specialty`, `site`, `responsible_party_id`, status machine). `plan_items.case_id`, `visits.case_id`. Ortho bridges to `ortho_cases` via `ortho_case_id`. | Specialty context. |
-| `invoices.plan_id` | Used by payments/installments (BILL-1 targeting). | **Must not** be set by invoice-first: it would change payment semantics. |
-| Cancel / correct (`setInvoiceStatus`, `correctInvoice`) | Cancel flips status; correction cancels + reissues lines **without** `source_*` (the cancelled original keeps the source so the source is never billed a third time). | Clinical records are untouched today. |
+## Canonical identities
 
-Conclusion: the gap is real — a treatment invoice has no clinical identity, and nothing prevents the visit
-from billing the same work again.
+- The patient owns a treatment plan; a plan item identifies a particular service and
+  clinical scope. Visits record actual care against that item. Invoices record money.
+- Original therapeutic invoice lines use `source_type='plan_item'`, `source_id=item.id`,
+  and `plan_item_id=item.id`. The existing unique source index prevents a second source.
+- Corrections retain `invoice_items.plan_item_id`. The original source stays on the
+  original invoice; corrected lines have no new source identity.
+- `origin` and `origin_invoice_id` retain provenance. `billed_invoice_id` retains the
+  financial reference after cancellation or a shape-changing correction; it is not
+  an assertion of valid coverage by itself.
+- `invoices.plan_id` keeps its existing installment/payment meaning. Invoice-first
+  linkage never changes that field into a clinical association.
+- No new schema or status constraint migration is required by this correction:
+  `plan_items.billing_status` is existing unconstrained TEXT. The existing invoice
+  linkage migration and its runtime mirror are not renumbered or rewritten here.
 
-## 2. Source of truth
+## Create, reuse, amend, or refuse
 
-**The plan item is the canonical work identity** (agreed treatment, priced, consented). The invoice line
-points at it; the case gives it specialty context; the visit consumes it. `invoice_items` is never the clinical
-origin.
+`createLinkedInvoice` classifies lines only from catalog category. No service or an
+unrecognized/financial category remains financial-only. No clinical finding is inferred.
 
-```
-Patient → Treatment plan → Plan item ──case_id──→ Specialty case
-                               ▲    └─billed_invoice_id──→ Invoice (financial link)
-invoice_items(source_type='plan_item', source_id=item)     (lineage; unique ⇒ never sourced twice)
-Visit(case_id) → visit_procedures(plan_item_id=item) → sign → progress; no second invoice if pre-billed
-```
+The transaction locks the patient, plans and sorted items before existing financial
+locks. It checks idempotency before writing. Equal keys and equal requests replay the
+original invoice; conflicting requests do not create another obligation.
 
-## 3. Lineage contract (additive migration 0041)
+Existing work is inspected before creating identity. Reuse requires exact patient,
+service, currency, quantity, unit price, normalized surfaces, requested sessions, and
+compatible case/site. Started, cancelled, billed, or review-required work is not silently
+recreated. A different total or shape is a refusal, not partial coverage.
 
-| Column | Meaning |
-|---|---|
-| `invoice_items.source_type='plan_item'`, `source_id` | The invoice line bills that plan item. Existing unique index guarantees one sourcing line per item, ever. |
-| `plan_items.billing_status='billed'` + `plan_items.billed_invoice_id` | The item is financially accepted ("pre-billed") by that live invoice. Cleared on cancellation; moved to the replacement on correction. |
-| `plan_items.origin`, `plan_items.origin_invoice_id` | Who created the work identity: `plan` / `visit` / `invoice` (+ which invoice). NULL = pre-existing rows (unknown). |
-| `clinical_cases.origin`, `origin_invoice_id` | Same for cases (`clinical` / `invoice`). |
-| `invoices.idempotency_key`, `idempotency_request_hash` (unique key) | Same pattern as `payments`: a retry replays, a different body with the same key is a 409. |
+Fresh work can amend the unique active, unconsented, item-priced, per-procedure master
+in the same currency without installments. The shared `insertPlanV2InTx` engine creates
+its items/sessions/planned visits and updates its total. If there is no active master,
+one plan can be created for the invoice. An incompatible, consented, or ambiguous master
+requires an explicit clinical/financial decision rather than a duplicate plan.
 
-Questions answered by the contract: who created the treatment (`origin` + audit actor), who created the invoice
-(`invoices.created_by`), which plan item / case (`source_id`, `case_id`), is it pre-billed and by how much
-(`billed_invoice_id` + the line naming it through `invoice_items.plan_item_id`), and does the current visit
-execute it (`visit_procedures.plan_item_id`).
+A genuinely new episode can be distinguished by an explicitly different case after
+completed prior work and a terminal prior case, only when prior financial coverage is
+not in review. Ambiguous repeat work, including case-less repeats with no independent
+episode identity, is refused rather than guessed.
 
-## 4. Rules (PR B — transactional linkage inside `createInvoice`)
+## Financial coverage and review
 
-1. **Classification per line** (pure, `lib/invoice-clinical-linkage.ts`): no `serviceId` ⇒ financial-only (text is
-   never parsed). Catalog category ⇒ clinical or financial-only:
-   `ortho→orthodontics`, `rct→endodontics`, `post/crown/bridge→prosthodontics`, `implant→implantology`,
-   `cleaning→periodontics`, `extraction/surgery→surgery`, `veneer/whitening→cosmetic`,
-   `filling/sealant→restorative (plan item, no case)`; `consultation`, `xray`, unknown ⇒ financial-only.
-   Pediatric is not inferred (no category carries it).
-2. One transaction, patient row locked (serialises two tabs / concurrent posts), idempotency key checked first.
-   The fingerprint covers everything persisted from the request (patient, currency, discount, note, and per line
-   service/description/quantity/price/doctor/tooth/case/sessions); the same key with any other body ⇒ 409.
-   **Cross-entry serialisation:** candidate plan items are locked `FOR UPDATE` and their eligibility is re-read in a
-   new statement after the lock wait — the same item lock `signClinicalVisit` takes — so an invoice and a visit
-   sign-off cannot both treat one unbilled item as billable. Lock order everywhere is *plan item → invoice*:
-   sign-off locks the item then share-locks its covering invoice; cancellation and correction lock the invoice's
-   billed items before the invoice itself.
-3. **Find, then create.** Reuse an existing item only if it is an *exact compatible open item*: same patient,
-   service, tooth, currency; plan active + consented + not funded by an installment agreement; item `planned`,
-   `unbilled`, no sessions done, not already sourced by an invoice line; **and the same work shape**: same total,
-   same quantity, no surfaces (the invoice carries none) and, when the line states a session count, the same
-   session count. Different total ⇒ `amount_mismatch`; same total but a different shape ⇒ `shape_mismatch`; more
-   than one exact match ⇒ `ambiguous_item` (all refused, fail-closed, Arabic message) — the price or shape of
-   agreed work is not silently changed, partial coverage is not assumed, and no item is picked arbitrarily.
-   A `caseId` that differs from the reused item's case ⇒ `case_mismatch` (the invoice never moves an item between
-   cases).
-4. Otherwise all new clinical lines of the invoice go to **one new plan** (one master plan per invoice, never one
-   per specialty), consented at creation with an explicit note "قبول مالي بالفاتورة … — التقييم السريري لدى
-   الطبيب" — consistent with `canEditItems` ("المستجدّ بخطة جديدة"). Session count comes from the request, else
-   the specialty template step for that category, else 1.
-5. **Cases.** Specialties that need a case reuse the patient's single open *compatible* case of that specialty
-   (or the `caseId` supplied per line). For tooth-bound specialties (endodontics, prosthodontics, implantology,
-   surgery) a case is compatible only if its `site` is empty or names the line's tooth — an RCT on 36 never joins
-   the open endodontic case of 11; whole-mouth specialties (orthodontics, periodontics, cosmetic) match by
-   specialty. None ⇒ a minimal shell `«<تخصص> — تحتاج تقييم سريري»` with `site = tooth`, `origin='invoice'`, no
-   responsible doctor, no problem text; more than one compatible open case and no `caseId` ⇒ refused (never
-   guessed). Lines of one invoice share a case per specialty, and per tooth for tooth-bound specialties.
-6. **Nothing clinical is invented.** Ortho: no `ortho_cases` row, no wires/appliance/diagnosis/ceph — the
-   clinical case says "needs clinical assessment" and the doctor's intake bridges it later. Endo: no
-   `endo_treatments`, no diagnosis, canals or working length. Prostho: no lab order (labs stay at the clinical point).
-7. Audit in the same transaction: `plan.create`, `plan.item_add`, `case.create`, `plan.item_case`, plus the route's
-   `invoice.create` with the linkage summary.
+`PLAN_ITEM_PREBILLED_SQL` requires all of the following:
 
-## 5. Sign-off containment (PR C)
+- A live invoice for the same patient and currency
+- Exactly one current invoice line for that item
+- Exact service, quantity, unit price, total, and known doctor attribution
+- The canonical original plan-item source, including matching patient/currency/work
+- A consistent current source, or a null source on a retained correction line
 
-`loadPlanItemsForPricing` adds "pre-billed by a live invoice". A linked session of such an item classifies as
-included (no invoice line), progress/session/provider still advance; procedures stay clinically recorded. Ortho
-adjustments on a case whose plan item is pre-billed classify as included (same as an installment-funded package).
-Anything not clearly covered stays on the existing path (fail-closed: `NEW_BILLABLE`/`OUTSIDE_CONTRACT` decision),
-never a guessed zero.
+`PLAN_ITEM_INVOICE_LINEAGE_SQL` recognizes both item invoice IDs and retained invoice
+line/source identity. It therefore detects older cleared-ID cancellation records without
+rewriting them. Missing/invalid coverage with any lineage, an unknown billing status, or
+an explicit `needs_financial_review` status fails closed. Ordinary financial-only lines
+with no plan item are not labeled as review merely because a LEFT JOIN returns NULL.
 
-## 6. Corrections
+Cancellation changes the item to `needs_financial_review` while retaining provenance.
+Correction always retains line lineage. Only unchanged quantity AND unchanged unit price
+can move accepted coverage to the replacement. Removed or shape-changing lines require
+review. Neither action authorizes billing the same work again.
 
-Cancel ⇒ clinical records untouched; the item's financial link is cleared (`billing_status='unbilled'`,
-`billed_invoice_id=NULL`) and audited — the UI shows "الفاتورة أُلغيت — يحتاج مراجعة مالية". Correction
-(cancel + reissue) ⇒ items whose line survives move `billed_invoice_id` to the replacement; items whose line was
-removed are cleared as on cancel. No delete, no re-pricing of history, no linking of old invoices to new plans.
+A separate new plan item is not an escape hatch: linked signing compares its work against
+other protected invoice identities of the same service and overlapping scope. Unlinked
+single-session prepaid work is also refused. Installments cannot be added over a plan's
+existing invoice-lineage obligations.
 
-**Line lineage across corrections.** The unique source (`source_type='plan_item'`, `source_id`) stays on the
-original line, which keeps its history after cancellation. Every invoice line also carries
-`invoice_items.plan_item_id` (migration 0041): written with the original line and **copied to its replacement**
-on each correction. Kept items, duplicate service lines and changed quantity/price are resolved line by line from
-it, and a second or third correction keeps the link on the newest live invoice. A corrected line with a lower
-price still covers its item (the admin's correction reason and the `invoice.correct` audit record the change).
+## Clinical consent, truthful drafts, and providers
 
-## 7. UI (PR D)
+Only `recordPlanConsent` records clinical plan consent. An invoice does not write
+`consent_at`, `consent_by`, or `consent_note`. Its provenance records financial acceptance.
 
-Invoice form: a read-only preview per clinical line (service, specialty, existing/new plan item, existing/new
-case, amount/currency) — "سيتم الربط بالحالة الموجودة" / "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب". Patient
-file: the item in Plans, the case in Cases/specialty tab, the invoice in Account, next action "بدء التقييم
-السريري — <تخصص>" instead of "إنشاء خطة". Browser journeys for the scenarios below.
+Clinical drafts retain actual observations and the actual entered performer even when
+consent or financial review is unresolved. Draft estimates create no receivable. The
+atomic sign path rechecks consent, exact coverage, dependencies and financial identity;
+it refuses unsupported monetary/sign-off activation while preserving the saved draft.
+The same warning is exposed in session pricing, outstanding work, plans, invoice details,
+and walkout results. Review takes precedence over a zero-price or included label.
 
-## 7b. Tooth / site selection (owner addendum)
+An explicitly selected real invoice doctor is retained. A known existing plan-item
+assignment can be reused after the same doctor-identity validation. No doctor is inferred
+from the first signer. Null financial attribution is allowed to remain explicitly
+`needs_financial_review`; it is never silently assigned to a later clinician.
+Actual performer defaults retain the existing visit/signer semantics. Conflicting
+prepaid performer/financial attribution requires review; drafts still retain the care facts.
 
-The tooth or site is chosen **once**, at the start of the treatment, from the clinic's existing Dental Chart. There is
-no separate tooth selector and no number dropdown: the invoice dialog reuses the odontogram rows, tooth shapes, FDI
-numbering and surface selector extracted from `DentalChart` into `components/dental/*`, plus `ToothPicker`'s selection
-logic. Propagation: invoice line → plan item `tooth_code` / `surfaces` (or a scope note) → specialty case `site` →
-visit → procedure. Visits already read the plan item's tooth, so the doctor is not asked again.
+Existing `attributeInstallment` proportionally groups item value by doctor/service and
+uses its established primary-doctor fallback. It is not a rule for splitting one prepaid
+multi-session item between future clinicians. That allocation and the null-provider
+resolution workflow remain explicit policy gaps; this patch invents neither.
 
-The scope comes from the catalog category alone: `toothScope(category)` in `lib/invoice-clinical-linkage.ts` is the one
-source for both the UI and the server.
+## Clinical scope and case lifecycle
 
-| Mode | Categories | Rule |
-|---|---|---|
-| `per_tooth_episode` | rct, post, implant, extraction, surgery | One tooth per episode. Several teeth ⇒ the UI splits them into one line, plan item and case per tooth. A line carrying more than one tooth ⇒ `episode_split_required`. |
-| `multi_tooth_episode` | crown, veneer, bridge | One line (plan item) per tooth or unit, all sharing `episodeTeeth`, so they form one episode and one case with `site` = «14، 15، 16». An existing case is reused only if its site is empty or names every tooth. Abutments are never inferred: each tooth is a unit, as in the prosthodontics template. |
-| `tooth_surfaces` | filling, sealant | One tooth per line plus optional surfaces (M D O B L), normalized and stored on the plan item. Exact reuse requires equal surfaces. |
-| `arch` | ortho | Never a single tooth; optional scope upper / lower / both. Stored as the plan item note «النطاق: …» and the new case's site. |
-| `region` | cleaning | Full mouth / upper / lower, or a single tooth (not both). |
-| `none` | consultation, x-ray, whitening, unknown | No tooth is asked for; any tooth, surfaces or scope sent is ignored. |
+The shared `validateLineSite` and Dental Chart wire format remain `toothCode`, `surfaces`,
+`episodeTeeth`, and `scope`. Tooth-bound care requires a valid FDI tooth. Orthodontics
+requires upper/lower/both; periodontal care requires an explicit region or a tooth.
+Crown/veneer/bridge episodes retain their exact tooth set. Whitening has its catalog-defined
+whole-mouth scope, without a fabricated tooth.
 
-Fail closed: a tooth-bound service without a tooth ⇒ `tooth_required` (400, Arabic). Other refusals: invalid surfaces
-⇒ `bad_surfaces`; a scope not allowed for the service ⇒ `bad_scope`; malformed site fields ⇒ 400. Nothing is written.
-Save and preview share one validator (`validateLineSite`), so the preview shows the exact refusal the save would give,
-and any change of teeth, surfaces or scope re-runs the preview. The idempotency fingerprint covers surfaces, episode
-teeth and scope.
+Explicit, inherited and automatic case choices all require same patient, specialty,
+site and active lifecycle. Blank or unparseable legacy site is unknown, not compatibility.
+Reuse needs exact scope; duplicate prevention also checks overlap: both arches overlaps
+upper/lower, and full mouth overlaps a region/tooth. Disjoint upper/lower is not a duplicate.
+These checks cover existing work and sibling lines within one request.
 
-## 8. Test scenarios (PG18 + HTTP + browser)
+A bridged orthodontic case uses its actual orthodontic lifecycle. Closing it shares
+patient-first serialization with financial linkage. Intake bridges only one compatible
+shell; ambiguous or mismatched scope is refused. No invoice creates wires, diagnosis,
+endodontic findings, laboratory orders, or an `ortho_cases` clinical record.
 
-1 Ortho 300,000: 1 invoice, 1 item, 1 case, visible; visit uses the item; sign creates no invoice #2.
-2 Endo RCT #36: case appears; no diagnosis/canals; visit completes the same item.
-3 Crown #36: plan/case created; **no lab order** from the invoice.
-4 Cancellation after case creation: case preserved, financial link cleared, nothing deleted.
-5 Retry / double click / two tabs / concurrent: one invoice, one item, one case.
-6 Mixed Ortho + Endo + Crown: one plan, three items, cases per specialty, one patient ledger.
-Plus: same service different tooth ⇒ two items; two open cases of one specialty ⇒ refused without `caseId`;
-amount mismatch with an exact open item ⇒ refused; line without `serviceId` ⇒ financial-only.
+An ordinary billed orthodontic item is NOT an unlimited adjustment package. Its exact
+linked sessions can be covered. The existing installment agreement rule for a case's
+adjustments remains; unrelated adjustments are not implicitly funded by one billed item.
 
-## 9. PR split (as delivered)
+## Input, UI, and release checks
 
-B and C ship in **one PR**: linkage without sign-off containment would leave a double-billing window (a visit on a
-pre-billed item would invoice it again), so they are not separable safely. Implemented: `lib/invoice-clinical-linkage.ts`
-(pure), `lib/invoice-linkage-db.ts` (`createLinkedInvoice`), `insertPlanV2InTx` (plan creation core shared with
-`createPlanV2`, behaviour unchanged), `PLAN_ITEM_PREBILLED_SQL` in the sign/preview pricing, walkout and
-`ORTHO_CASE_FUNDED_SQL`, cancel/correct link maintenance. Additional refusal found while testing: the same
-service+tooth already pre-billed by a live invoice and not started ⇒ `already_billed` (two tabs with different keys).
-Audit-detail keys avoid the sanitizer's secret pattern (`سر`).
+Preview and save share `parseInvoiceInput`, including existing valid quantity normalization,
+price/currency requirements, doctors, tooth/case/session bounds, site fields, discount and
+idempotency validation. Both use the existing price-authority engine. Read-only preview
+never replaces an invalid price with a catalog price or zero, or drops malformed fields.
+Only fields actually included in the preview request can be previewed.
 
-**PR D (UI) as delivered:**
+UI integration must send the same current form inputs, preserve explicit doctor selection,
+show review/consent warnings without preventing truthful draft documentation, and prevent
+stale affirmative previews. Walkout/print consumers must prioritize financial review over
+`NO_CHARGE` fallback presentation. No claim of paid, free, consented, or covered care is
+inferred from origin alone.
 
-- `POST /api/invoices/clinical-preview` (front desk, read-only, audit-exempt) runs `previewInvoiceLinkage`. It uses
-  the same rules as the save, without writing: existing/new plan item, existing/new/bridge/choose/none case, and
-  the refusal the save would return.
-- Invoice form (`PatientLedger`):
-  - tooth field per row;
-  - debounced preview per clinical line, with a case picker when the specialty has more than one open case;
-  - an idempotency key per form, so a double click or retry gives one invoice.
-- `listPatientCases` exposes `origin` and `needsAssessment`. An invoice-origin case needs assessment while it is
-  open, is not bridged to an ortho case, has no signed visit, and has no completed session.
-- `patientWorkflow.assessmentCases` feeds the next step `clinical_assessment` («بدء التقييم السريري — <تخصص>»).
-  It comes after debt and before scheduling, and opens the specialty tab, which shows an `AssessmentBanner`.
-- `createOrthoCase` bridges the single open invoice-origin orthodontics shell to the new ortho case (audited
-  `ortho.plan_link`). The doctor's clinical record then picks up the pre-billed item, so the ortho case is funded
-  without a second invoice. Ortho clinical details are still entered only by the doctor.
+Required CI evidence includes exact reuse/append, real consent, known-provider execution,
+null/different-provider draft preservation, cancellation/shape correction with retained
+lineage, old cleared-ID history, wrong/duplicate sources, alternate-item bypass, scope
+overlap and disjoint controls, lifecycle races, and unchanged financial-only behavior.
+Existing tests that asserted synthetic consent, cancellation rebilling, or blanket Ortho
+funding must be corrected without dropping their regression coverage.
 
-## 10. Original split
-
-A (this doc) · B migration 0041 + pure classification + transactional linkage + idempotency + cancel/correct
-link maintenance, PG18 + HTTP · C sign-off containment · D invoice preview + patient-file surfacing + browser
-journeys. Each PR ends `READY_FOR_DOT_REVIEW`; merge, deploy and production verification are Dot's.
-
-## 11. Pre-system (legacy) treatment
-
-A treatment that started before the system uses the same work identity (plan item + case) with a historical agreement
-instead of an invoice: the remaining amount alone becomes an opening balance through the existing opening engine, and a live
-agreement covers the item like a live invoice does. See `docs/INVOICE_FIRST_LEGACY_TREATMENT.md`.
+No partial B+C activation is safe. Keep the stack held until the full source/UI/test
+composition is reviewed, CI is green for that exact head, migration-candidate test fixtures
+are collision-free, and the nonportable tracked `node_modules` symlink is removed from
+Git. This correction does not activate legacy intake or periodontal schema, change real
+Production data, rewrite history, alter credentials, or delete backups.

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
 import {
@@ -148,6 +149,7 @@ type OrthoOwner = {
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
   bindDenial: (deny: () => void) => void; denyRead: () => void;
   beginRead: (controller: AbortController) => number;
+  retireRead: () => void;
   setTimer: (timer: ReturnType<typeof setTimeout>) => void; clearTimer: () => void; releaseTimer: () => void;
   grantClinical: (cases: OrthoCase[]) => void; withdrawClinical: () => void; setContact: (granted: boolean) => void;
 };
@@ -179,6 +181,10 @@ function makeOwner(standalone = false): OrthoOwner {
       const sequence = ++owner.readSequence;
       owner.denied = false; owner.clinical = false; owner.contact = false; owner.cases = [];
       return sequence;
+    },
+    retireRead: () => {
+      owner.controller?.abort(); owner.readSequence++; owner.clearTimer();
+      owner.clinical = false; owner.contact = false; owner.cases = [];
     },
     setTimer: (timer) => { owner.timer = timer; },
     clearTimer: () => { if (owner.timer !== null) { clearTimeout(owner.timer); owner.timer = null; } },
@@ -313,17 +319,17 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId }: { patientId: number }) {
+export function PatientOrtho({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
+function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -336,6 +342,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
   const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
+  const [confirmedSignVisitId, setConfirmedSignVisitId] = useState<number | null>(null);
   const [onboardingRevision, setOnboardingRevision] = useState(0);
   const [, redrawMutation] = useState(0);
 
@@ -353,6 +360,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
   const deny = useCallback(() => {
     if (!owner.active) return;
     owner.denyRead();
+    setConfirmedSignVisitId(null);
     setCases([]); setPatient(null); setReadState("denied");
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
@@ -384,7 +392,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
           { cache: "no-store", signal: controller.signal });
         if (!current()) return;
         // Both endpoints guard this patient/session; denial is authoritative at headers.
-        if (response.status === 401 || response.status === 403) { deny(); return; }
+        if (response.status === 401 || response.status === 403 || response.status === 404) { deny(); return; }
         if (!response.ok) throw new Error("Read unavailable");
         const payload: unknown = await response.json();
         if (!current()) return;
@@ -414,6 +422,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
   const refreshAfterConfirmedChange = () => {
     if (!owner.active || owner.denied) return;
     setOnboardingRevision((value) => value + 1);
+    onClinicalChange?.();
     load();
   };
   const currentCase = (id: number) => currentView() && owner.cases.some((row) => row.id === id);
@@ -446,9 +455,14 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
     } finally { endMutation(owner, operation); if (owner.active) redrawMutation((value) => value + 1); }
   };
 
+  const signReceipt = confirmedSignVisitId !== null && !owner.denied ? (
+    <p role="status" data-testid="ortho-sign-confirmed" className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-xs font-black text-sky-950">✓ وُقّعت زيارة اليوم وأُرسل المريض إلى الاستقبال.</p>
+  ) : null;
+
   if (readState !== "ready" || !owner.clinical) {
     return <div data-testid="patient-ortho-workspace" data-read-state={readState}
       className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+      {signReceipt}
       <p role={error ? "alert" : "status"}>{error ?? "جارٍ التحقق من كابينة التقويم…"}</p>
       {owner.drafts.size > 0 ? <p className="text-xs text-slate-600">احتُفظ بالنماذج لهذه الجلسة دون عرضها؛ الحفظ متوقف حتى نجاح إعادة التحميل.</p> : null}
       {[...owner.drafts.values()].some((draft) => draft.uncertain) ? <UncertainWrite draft={[...owner.drafts.values()].find((draft) => draft.uncertain)!} /> : null}
@@ -474,8 +488,16 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
       ) : null}
 
       {/* بطاقة الجلسة القادمة المقترحة — إغلاق الحلقة السريرية فورياً */}
-      {signVisitId ? (
-        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} onError={safeError} />
+      {signReceipt}
+      {signVisitId && signVisitId !== confirmedSignVisitId ? (
+        <SignTodayVisitCard key={signVisitId} visitId={signVisitId} patientId={patientId} onError={safeError} onUncertain={() => {
+          if (!owner.active || owner.denied) return;
+          owner.retireRead(); setConfirmedSignVisitId(null);
+          setCases([]); setPatient(null); setReadState("error");
+        }} onSigned={() => {
+          if (!owner.active || owner.denied) return;
+          setConfirmedSignVisitId(signVisitId); refreshAfterConfirmedChange();
+        }} />
       ) : null}
       {saved && !savedCaseAvailable ? (
         <p role="status" className="text-xs text-slate-600">احتُفظ بمسودة الموعد دون عرضها؛ الحالة المرتبطة بها غير متاحة في القراءة الحالية.</p>
@@ -1043,7 +1065,7 @@ function PatientOrthoWorkspace({ patientId }: { patientId: number }) {
  * فيصل المريض إلى الاستقبال وزيارته موقّعة: تراها «ماذا أُنجز اليوم» وتحصّل أو تؤجّل فقط.
  * من أراد إضافة إجراءٍ أو تشخيص يفتح «زيارة اليوم» ويوقّع من هناك.
  */
-function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (message: string | null) => void }) {
+function SignTodayVisitCard({ visitId, patientId, onError, onUncertain, onSigned }: { visitId: number; patientId: number; onError: (message: string | null) => void; onUncertain: () => void; onSigned?: () => void }) {
   const form = useOrthoDraft(`sign:${visitId}`);
   const session = useSession();
   const canSign = session?.role === "doctor" || session?.role === "admin";
@@ -1063,7 +1085,13 @@ function SignTodayVisitCard({ visitId, onError }: { visitId: number; onError: (m
       const payload = await response.json().catch(() => null);
       if (!form.current(operation)) return;
       if (!response.ok) { if (response.status >= 500) form.uncertain(); onError(payload?.message ?? "تعذّر توقيع الزيارة."); return; }
+      if (!isClinicalSignResult(payload, visitId, patientId)) {
+        form.uncertain(); onUncertain();
+        onError("تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.");
+        return;
+      }
       form.commit("signed", true);
+      onSigned?.();
     } catch {
       if (form.current(operation)) { form.uncertain(); onError("تعذّر تأكيد توقيع الزيارة. أعد قراءة السجل قبل المحاولة."); }
     } finally {

@@ -201,10 +201,27 @@ describe("مراجعة المالك ٢: بند على خطة قائمة بعمل
 /* ══════════════════ Finding 3: الفاتورة اليدوية ══════════════════ */
 
 describe("مراجعة المالك ٣: فاتورة يدوية بعملة اتفاق", () => {
+  // Currency-only invoices must not share therapeutic work from the plan tests above.
+  // Catalogue reclassification remains covered by invoice-clinical-linkage-http.test.ts.
+  let currencyPatientId: number;
+  let currencyServiceId: number;
+  beforeAll(async () => {
+    const { rows: [patient] } = await getPool().query(
+      `INSERT INTO patients (patient_number, full_name)
+       VALUES ('OWNREV-CURRENCY', 'مريض اختبار عملات الفاتورة') RETURNING id`,
+    );
+    currencyPatientId = patient.id;
+    const { rows: [service] } = await getPool().query(
+      `INSERT INTO services (name, category, price_minor, is_active)
+       VALUES ('رسم مالي لاختبار العملات', NULL, 15000, TRUE) RETURNING id`,
+    );
+    currencyServiceId = service.id;
+  });
+
   it("فاتورة USD ببند خدمةٍ بلا سعر ⇒ 400 — سعر الدليل لا يدخلها", async () => {
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
-      patientId, currency: "USD",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: currencyPatientId, currency: "USD",
+      items: [{ serviceId: currencyServiceId, quantity: 1, price: "" }],
     }));
     expect(response.status).toBe(400);
     const payload = await response.json();
@@ -213,16 +230,16 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
 
   it("فاتورة SAR بلا سعر ⇒ 400 كذلك", async () => {
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
-      patientId, currency: "SAR",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: currencyPatientId, currency: "SAR",
+      items: [{ serviceId: currencyServiceId, quantity: 1, price: "" }],
     }));
     expect(response.status).toBe(400);
   });
 
   it("فاتورة USD بسعرٍ صريح تُخزَّن بالمبلغ الدقيق بعملتها", async () => {
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
-      patientId, currency: "USD",
-      items: [{ serviceId, quantity: 2, price: "12.34" }],
+      patientId: currencyPatientId, currency: "USD",
+      items: [{ serviceId: currencyServiceId, quantity: 2, price: "12.34" }],
     }));
     expect(response.status).toBe(201);
     const invoice = await response.json();
@@ -232,8 +249,8 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
 
   it("فاتورة SAR بسعرٍ صريح تُخزَّن صحيحة", async () => {
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
-      patientId, currency: "SAR",
-      items: [{ serviceId, quantity: 1, price: "250" }],
+      patientId: currencyPatientId, currency: "SAR",
+      items: [{ serviceId: currencyServiceId, quantity: 1, price: "250" }],
     }));
     expect(response.status).toBe(201);
     const invoice = await response.json();
@@ -243,8 +260,8 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
 
   it("فاتورة YER بلا سعر تسقط لسعر الدليل — السلوك القائم لا يمس", async () => {
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
-      patientId, currency: "YER",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: currencyPatientId, currency: "YER",
+      items: [{ serviceId: currencyServiceId, quantity: 1, price: "" }],
     }));
     expect(response.status).toBe(201);
     const invoice = await response.json();

@@ -302,7 +302,7 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     expect((await signClinicalVisit({ visitId: orthoVisit, baseCurrency: "YER", signedBy: "dr.aqlan" })).invoiceId).toBeNull();
     const orthoWalkout = await visitWalkout(orthoVisit);
     expect(orthoWalkout?.lines).toEqual([
-      { description: "تقويم ثابت", toothCode: null, quantity: 1, unitPriceMinor: 0, currency: "YER", included: true, billingClass: "INCLUDED" },
+      { description: "تقويم ثابت", toothCode: null, quantity: 1, unitPriceMinor: 0, currency: "YER", included: true, financialReviewRequired: false, billingClass: "INCLUDED" },
     ]);
     expect(orthoWalkout?.invoice).toBeNull();
     expect(orthoWalkout?.payments).toEqual([expect.objectContaining({ kind: "payment", amountMinor: 300000, currency: "YER" })]);

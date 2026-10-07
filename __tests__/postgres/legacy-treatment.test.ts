@@ -7,19 +7,19 @@ import { parseLegacyTreatmentRequest, type LegacyTreatmentRequest } from "../../
  * (INV-LEGACY) علاجٌ بدأ قبل النظام — على PostgreSQL 18.
  * اتفاق 300,000 دُفع منه 120,000 قبل النظام ⇒ رصيدٌ سابق 180,000 وحده بمحرّك الرصيد الافتتاحي؛ لا سند ولا فاتورة ولا
  * حركة وردية؛ بند خطة مغطّى (الزيارة لا تفوتره، وشدّات التقويم مشمولة)؛ حالة موسومة لا تحتاج تقييمًا أوليًّا؛ إعادة
- * الطلب وتزامنه وتكراره؛ والإبطال يحرّر التغطية ويصحّح الرصيد بمسار المحرّك نفسه دون حذف.
+ * الطلب وتزامنه وتكراره؛ والإبطال يحفظ التاريخ في مراجعة مالية ويصحّح الرصيد بمسار المحرّك نفسه دون حذف.
  */
 
 assertRealPostgresUrl();
 stubPostgresEnv();
 
 const db = await import("../../lib/db");
-const { createLegacyTreatment, voidLegacyTreatment, listLegacyTreatments } = await import("../../lib/legacy-treatment-db");
+const { createLegacyTreatment, voidLegacyTreatment, getLegacyVoidPreview, listLegacyTreatments } = await import("../../lib/legacy-treatment-db");
 const { createLinkedInvoice } = await import("../../lib/invoice-linkage-db");
 const {
   ensureSchema, getPool, resetPoolForTesting, listPatientCases, addVisit, setVisitProcedures, signClinicalVisit,
   createOrthoCase, previewVisitBilling, openShift, recordPayment, setPatientOpeningBalance, patientWorkflow,
-  listPatientPlans,
+  listPatientPlans, recordPlanConsent,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -76,7 +76,7 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
   it("records only the 180,000 remaining through the opening engine; no receipt, invoice or shift movement", async () => {
     const patient = await newPatient("LEG-ORTHO");
     const shiftsBefore = await q(`SELECT id FROM cashier_shifts`);
-    const result = await create(patient, { serviceId: services.ortho, idempotencyKey: "legacy:ortho-300k" });
+    const result = await create(patient, { serviceId: services.ortho, scope: "both", idempotencyKey: "legacy:ortho-300k" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.replayed).toBe(false);
@@ -97,12 +97,14 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
     const balances = db.ledgerBalancesByCurrency(patient, ledger, new Map());
     expect(balances.YER.dueMinor).toBe(180_000);
 
-    // work identity: one consented plan, one covered item, one legacy-labelled ortho case (not needing assessment)
+    // work identity: one unconsented plan, one covered item, one legacy-labelled ortho case (not needing assessment)
     const [item] = await q<{ id: number; billing_status: string; case_id: number; unit_price_minor: string; consent_at: Date | null; origin: string | null }>(
       `SELECT i.id, i.billing_status, i.case_id, i.unit_price_minor::text, t.consent_at, i.origin
          FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1`, [patient]);
     expect(item).toMatchObject({ id: result.agreement.planItemId, billing_status: "included_in_package", unit_price_minor: "300000" });
-    expect(item.consent_at).not.toBeNull();
+    expect(item.consent_at).toBeNull();
+    expect(await q(`SELECT consent_by, consent_note FROM treatment_plans WHERE id = $1`, [result.agreement.planId]))
+      .toEqual([{ consent_by: null, consent_note: null }]);
     const cases = await listPatientCases(patient);
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({ id: item.case_id, specialty: "orthodontics", origin: "clinical", legacy: true, needsAssessment: false });
@@ -119,19 +121,19 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
     }
 
     // the same key + body replays; a different body with the same key conflicts
-    const replay = await create(patient, { serviceId: services.ortho, idempotencyKey: "legacy:ortho-300k" });
+    const replay = await create(patient, { serviceId: services.ortho, scope: "both", idempotencyKey: "legacy:ortho-300k" });
     expect(replay).toMatchObject({ ok: true, replayed: true, agreement: { id: result.agreement.id } });
     expect(await q(`SELECT 1 FROM patient_opening_balance_history WHERE patient_id = $1`, [patient])).toHaveLength(1);
-    expect(await create(patient, { serviceId: services.ortho, previouslyPaidAmount: "100000", idempotencyKey: "legacy:ortho-300k" }))
+    expect(await create(patient, { serviceId: services.ortho, scope: "both", previouslyPaidAmount: "100000", idempotencyKey: "legacy:ortho-300k" }))
       .toEqual({ ok: false, reason: "idempotency_conflict" });
     // a second live agreement for the same service/scope is refused
-    expect(await create(patient, { serviceId: services.ortho })).toEqual({ ok: false, reason: "duplicate_live" });
+    expect(await create(patient, { serviceId: services.ortho, scope: "both" })).toEqual({ ok: false, reason: "duplicate_live" });
     expect(await q(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1`, [patient])).toHaveLength(1);
   });
 
   it("ortho adjustments on the legacy case are included (not pending); the doctor's ortho case bridges the legacy case", async () => {
     const patient = await newPatient("LEG-ORTHO-ADJ");
-    const result = await create(patient, { serviceId: services.ortho });
+    const result = await create(patient, { serviceId: services.ortho, scope: "both" });
     if (!result.ok) throw new Error(result.reason);
     const opened = await createOrthoCase({
       patientId: patient, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null,
@@ -151,6 +153,7 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
       procedures: [{ serviceId: services.ortho, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 0, priceReason: null,
         doctorId: null, note: null, planItemId: result.agreement.planItemId }],
     });
+    expect(await recordPlanConsent({ planId: result.agreement.planId, actor: "dr", note: "موافقة فعلية بعد تسجيل التاريخ" })).toMatchObject({ ok: true });
     const signed = await sign(visit.id);
     expect(signed.reason).toBeNull();
     expect(signed.invoiceId).toBeNull();
@@ -161,7 +164,7 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
   it("an existing active ortho_cases row is bridged, never duplicated", async () => {
     const patient = await newPatient("LEG-ORTHO-BRIDGE");
     const [{ id: orthoId }] = await q<{ id: number }>(`INSERT INTO ortho_cases (patient_id, created_by) VALUES ($1, 'dr') RETURNING id`, [patient]);
-    const result = await create(patient, { serviceId: services.ortho });
+    const result = await create(patient, { serviceId: services.ortho, scope: "both" });
     if (!result.ok) throw new Error(result.reason);
     const cases = await q<{ ortho_case_id: number; title: string }>(`SELECT ortho_case_id, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
     expect(cases).toEqual([{ ortho_case_id: orthoId, title: "تقويم الأسنان" }]);
@@ -190,6 +193,7 @@ describe("validation, duplicates and concurrency", () => {
     expect(await opening(patient)).toBeNull();
     expect(await q(`SELECT 1 FROM patient_opening_balance_history WHERE patient_id = $1`, [patient])).toHaveLength(0);
     const session = await visitOn(patient, services.rct, result.agreement.planItemId, 36, result.agreement.caseId);
+    expect(await recordPlanConsent({ planId: result.agreement.planId, actor: "dr", note: "موافقة فعلية بعد تسجيل التاريخ" })).toMatchObject({ ok: true });
     const signed = await sign(session);
     expect(signed.reason).toBeNull();
     expect(signed.invoiceId).toBeNull();
@@ -230,7 +234,7 @@ describe("validation, duplicates and concurrency", () => {
       templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null, auditDetails: {},
     });
     expect(invoice.ok).toBe(true);
-    expect(await create(invoiced, { serviceId: services.rct, toothCode: 36 })).toEqual({ ok: false, reason: "open_item_exists" });
+    expect(await create(invoiced, { serviceId: services.rct, toothCode: 36 })).toEqual({ ok: false, reason: "needs_financial_review" });
     expect(await opening(invoiced)).toBeNull();
   });
 
@@ -250,27 +254,29 @@ describe("opening composition and authority", () => {
   it("a manual opening in the currency is never double counted; reception cannot add onto an existing opening; admin composes agreement-owned openings", async () => {
     const manual = await newPatient("LEG-MANUAL-OPENING");
     await setPatientOpeningBalance({ patientId: manual, currency: "YER", amountMinor: 180_000, asOfDate: "2026-09-01", note: null, createdBy: "admin", reason: null });
-    expect(await create(manual, { serviceId: services.ortho }, true)).toEqual({ ok: false, reason: "opening_not_owned" });
-    expect(await create(manual, { serviceId: services.ortho })).toEqual({ ok: false, reason: "opening_not_owned" });
+    expect(await create(manual, { serviceId: services.ortho, scope: "both" }, true)).toEqual({ ok: false, reason: "opening_not_owned" });
+    expect(await create(manual, { serviceId: services.ortho, scope: "both" })).toEqual({ ok: false, reason: "opening_not_owned" });
     expect(await opening(manual)).toEqual({ amount_minor: "180000", as_of_date: "2026-09-01" });
 
     const composed = await newPatient("LEG-COMPOSE");
-    expect((await create(composed, { serviceId: services.ortho })).ok).toBe(true);
+    expect((await create(composed, { serviceId: services.ortho, scope: "both" })).ok).toBe(true);
     expect(await create(composed, { serviceId: services.crown, toothCode: 16, agreedAmount: "50000", previouslyPaidAmount: "10000" }))
       .toEqual({ ok: false, reason: "opening_edit_forbidden" });
     const second = await create(composed, { serviceId: services.crown, toothCode: 16, agreedAmount: "50000", previouslyPaidAmount: "10000", historicalAsOf: "2026-08-15" }, true);
     expect(second).toMatchObject({ ok: true, agreement: { openingEffect: "increased", remainingMinor: 40_000 } });
     expect(await opening(composed)).toEqual({ amount_minor: "220000", as_of_date: "2026-08-15" });
-    // another currency is its own opening
-    expect((await create(composed, { serviceId: services.rct, toothCode: 21, currency: "SAR", agreedAmount: "900", previouslyPaidAmount: "400" })).ok).toBe(true);
-    expect(await opening(composed, "SAR")).toEqual({ amount_minor: "50000", as_of_date: "2026-09-30" });
+    // A single YER master cannot silently become a second, foreign-currency master.
+    expect(await create(composed, { serviceId: services.rct, toothCode: 21, currency: "SAR", agreedAmount: "900", previouslyPaidAmount: "400" }))
+      .toEqual({ ok: false, reason: "incompatible_plan" });
+    expect(await opening(composed, "SAR")).toBeNull();
+    expect(await opening(composed)).toEqual({ amount_minor: "220000", as_of_date: "2026-08-15" });
   });
 });
 
-describe("void: coverage released, opening corrected by the engine, nothing deleted", () => {
-  it("void of an untouched agreement clears its opening through the engine history and cancels the agreement's plan", async () => {
+describe("void: historical work kept in financial review, opening corrected by the engine", () => {
+  it("void of an untouched agreement clears its opening through the engine and preserves its plan for review", async () => {
     const patient = await newPatient("LEG-VOID");
-    const result = await create(patient, { serviceId: services.ortho });
+    const result = await create(patient, { serviceId: services.ortho, scope: "both" });
     if (!result.ok) throw new Error(result.reason);
     expect(await voidLegacyTreatment({ patientId: patient, agreementId: result.agreement.id, reason: "x", actor: "admin", actorRole: "admin" }))
       .toEqual({ ok: false, reason: "bad_reason" });
@@ -283,36 +289,41 @@ describe("void: coverage released, opening corrected by the engine, nothing dele
     const [item] = await q<{ billing_status: string; plan_status: string }>(
       `SELECT i.billing_status, t.status AS plan_status FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`,
       [result.agreement.planItemId]);
-    expect(item).toEqual({ billing_status: "unbilled", plan_status: "cancelled" });
+    expect(item).toEqual({ billing_status: "needs_financial_review", plan_status: "active" });
     expect(await q(`SELECT 1 FROM clinical_cases WHERE patient_id = $1`, [patient])).toHaveLength(1); // the case is kept
-    expect((await listPatientCases(patient))[0].legacy).toBe(false);
+    expect((await listPatientCases(patient))[0].legacy).toBe(true); // historical origin survives void
     expect(await q(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1`, [patient])).toHaveLength(1); // row kept, void
     expect(await voidLegacyTreatment({ patientId: patient, agreementId: result.agreement.id, reason: "مرة ثانية", actor: "admin", actorRole: "admin" }))
       .toEqual({ ok: false, reason: "already_void" });
-    // a correct re-entry is possible after the mistaken one was voided
-    expect((await create(patient, { serviceId: services.ortho, previouslyPaidAmount: "150000" })).ok).toBe(true);
-    expect(await opening(patient)).toMatchObject({ amount_minor: "150000" });
-    expect(await listLegacyTreatments(patient)).toHaveLength(2);
+    // A replacement identity must not bypass unresolved historical review.
+    expect(await create(patient, { serviceId: services.ortho, scope: "both", previouslyPaidAmount: "150000" }))
+      .toEqual({ ok: false, reason: "needs_financial_review" });
+    expect(await opening(patient)).toBeNull();
+    expect(await listLegacyTreatments(patient)).toHaveLength(1);
   });
 
-  it("void after work started keeps the plan, releases coverage: the next session is billed by its rule", async () => {
+  it("void after work started keeps the plan and sessions but refuses the next signature until financial review", async () => {
     const patient = await newPatient("LEG-VOID-STARTED");
     const result = await create(patient, { serviceId: services.rct, toothCode: 36, agreedAmount: "90000", previouslyPaidAmount: "30000", sessions: 2 });
     if (!result.ok) throw new Error(result.reason);
+    expect(await recordPlanConsent({ planId: result.agreement.planId, actor: "dr", note: "موافقة فعلية بعد تسجيل التاريخ" })).toMatchObject({ ok: true });
     const first = await sign(await visitOn(patient, services.rct, result.agreement.planItemId, 36, result.agreement.caseId));
+    expect(first.reason).toBeNull();
     expect(first.invoiceId).toBeNull();
     expect((await voidLegacyTreatment({ patientId: patient, agreementId: result.agreement.id, reason: "اتفاق خاطئ", actor: "admin", actorRole: "admin" })).ok).toBe(true);
     const [plan] = await q<{ status: string }>(`SELECT t.status FROM treatment_plans t JOIN plan_items i ON i.plan_id = t.id WHERE i.id = $1`, [result.agreement.planItemId]);
     expect(plan.status).toBe("active");
-    const second = await sign(await visitOn(patient, services.rct, result.agreement.planItemId, 36, result.agreement.caseId));
-    expect(second.reason).toBeNull();
-    expect(second.invoiceId).not.toBeNull();
+    const next = await visitOn(patient, services.rct, result.agreement.planItemId, 36, result.agreement.caseId);
+    await expect(sign(next)).rejects.toBeInstanceOf(db.ClinicalPlanConflict);
+    expect(await q(`SELECT 1 FROM visits WHERE id = $1 AND signed_at IS NOT NULL`, [next])).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM invoices WHERE patient_id = $1`, [patient])).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM treatment_sessions WHERE plan_item_id = $1 AND status = 'done'`, [result.agreement.planItemId])).toHaveLength(1);
     expect(await q(`SELECT 1 FROM visit_procedures pr JOIN visits v ON v.id = pr.visit_id WHERE v.patient_id = $1`, [patient])).toHaveLength(2);
   });
 
-  it("void is refused when the opening has been collected beyond what stays covered; composed openings are reduced, not cleared", async () => {
+  it("ordinary always refuses collections; explicit manager void requires a preview and sufficient remaining principal", async () => {
     const patient = await newPatient("LEG-VOID-PAID");
-    const ortho = await create(patient, { serviceId: services.ortho }, true);
+    const ortho = await create(patient, { serviceId: services.ortho, scope: "both" }, true);
     const crown = await create(patient, { serviceId: services.crown, toothCode: 16, agreedAmount: "50000", previouslyPaidAmount: "10000" }, true);
     if (!ortho.ok || !crown.ok) throw new Error("create");
     expect(await opening(patient)).toMatchObject({ amount_minor: "220000" });
@@ -322,11 +333,21 @@ describe("void: coverage released, opening corrected by the engine, nothing dele
       amountMinor: 50_000, currency: "YER", baseCurrency: "YER", exchangeRate: 1, method: "cash", note: null, createdBy: "cashier",
     });
     expect(paid.reason).toBeNull();
-    // voiding the ortho agreement would leave 40,000 principal against 50,000 collected ⇒ refused
+    // Ordinary refuses both agreements, even though one would leave enough principal.
     expect(await voidLegacyTreatment({ patientId: patient, agreementId: ortho.agreement.id, reason: "تجربة", actor: "admin", actorRole: "admin" }))
+      .toEqual({ ok: false, reason: "opening_collected" });
+    expect(await voidLegacyTreatment({ patientId: patient, agreementId: crown.agreement.id, reason: "تاج مكرر", actor: "admin", actorRole: "admin" }))
+      .toEqual({ ok: false, reason: "opening_collected" });
+    const manager = { patientId: patient, actor: "admin", actorRole: "admin", mode: "manager_authorized" as const };
+    const denied = await getLegacyVoidPreview({ ...manager, agreementId: ortho.agreement.id });
+    if (!denied.ok) throw new Error(denied.reason);
+    expect(denied.preview).toMatchObject({ canVoid: false, refusal: "opening_settled" });
+    expect(await voidLegacyTreatment({ ...manager, agreementId: ortho.agreement.id, reason: "تجربة", previewToken: denied.preview.previewToken }))
       .toEqual({ ok: false, reason: "opening_settled" });
-    // voiding the crown leaves 180,000 ≥ 50,000 collected ⇒ reduced through the engine (set, with reason)
-    expect((await voidLegacyTreatment({ patientId: patient, agreementId: crown.agreement.id, reason: "تاج مكرر", actor: "admin", actorRole: "admin" })).ok).toBe(true);
+    const accepted = await getLegacyVoidPreview({ ...manager, agreementId: crown.agreement.id });
+    if (!accepted.ok) throw new Error(accepted.reason);
+    expect(accepted.preview).toMatchObject({ canVoid: true, openingPrincipalAfterMinor: 180000, netCollectionsMinor: 50000 });
+    expect((await voidLegacyTreatment({ ...manager, agreementId: crown.agreement.id, reason: "تاج مكرر", previewToken: accepted.preview.previewToken })).ok).toBe(true);
     expect(await opening(patient)).toMatchObject({ amount_minor: "180000" });
     const [last] = await q<{ action: string; reason: string }>(
       `SELECT action, reason FROM patient_opening_balance_history WHERE patient_id = $1 ORDER BY id DESC LIMIT 1`, [patient]);
@@ -356,21 +377,28 @@ describe("(INV-LINK TOOTH) the legacy agreement follows the same tooth/site rule
     expect(await q(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1`, [patient])).toHaveLength(0);
   });
 
-  it("a legacy crown/bridge episode keeps all its teeth on the case site; ortho keeps its arch scope", async () => {
+  it("a multi-tooth legacy episode keeps one agreement/item/opening and an immutable full site; ortho retains its arch scope", async () => {
     const patient = await newPatient("LEGACY-BRIDGE");
     const bridge = await create(patient, { serviceId: services.crown, toothCode: 14, episodeTeeth: [16, 14, 15] });
     expect(bridge.ok).toBe(true);
-    const [kase] = await q<{ site: string; title: string }>(`SELECT site, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
-    expect(kase.site).toBe("14، 15، 16");
-    expect(kase.title).toContain("حالة بدأت قبل النظام");
-    const [item] = await q<{ tooth_code: number; note: string }>(
-      `SELECT i.tooth_code, i.note FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1`, [patient]);
-    expect(item).toMatchObject({ tooth_code: 14, note: "الأسنان: 14، 15، 16" });
+    if (!bridge.ok) throw new Error(bridge.reason);
+    expect(bridge.agreement).toMatchObject({ agreedMinor: 300000, remainingMinor: 180000,
+      coverageState: "verified", coverageSite: { toothCode: 14, episodeTeeth: [14, 15, 16] } });
+    expect(await opening(patient)).toMatchObject({ amount_minor: "180000" });
+    expect(await q(`SELECT 1 FROM patient_opening_balance_history WHERE patient_id = $1`, [patient])).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM clinical_cases WHERE patient_id = $1`, [patient])).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM treatment_plans WHERE patient_id = $1`, [patient])).toHaveLength(1);
+    expect(await q(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1`, [patient])).toHaveLength(1);
+    expect(await q(`SELECT quantity,unit_price_minor::text FROM plan_items WHERE id=$1`, [bridge.agreement.planItemId]))
+      .toEqual([{ quantity: 1, unit_price_minor: "300000" }]);
+    expect(await q(`SELECT snapshot_tooth_codes FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1`, [bridge.agreement.id]))
+      .toEqual([{ snapshot_tooth_codes: [14, 15, 16] }]);
 
     const ortho = await newPatient("LEGACY-ORTHO-SCOPE");
-    expect(await create(ortho, { serviceId: services.ortho, toothCode: 11 })).toMatchObject({ ok: false, reason: "bad_scope" });
+    expect(await create(ortho, { serviceId: services.ortho, scope: "both", toothCode: 11 })).toMatchObject({ ok: false, reason: "bad_scope" });
     expect((await create(ortho, { serviceId: services.ortho, scope: "both" })).ok).toBe(true);
     expect((await q<{ site: string }>(`SELECT site FROM clinical_cases WHERE patient_id = $1`, [ortho]))[0].site).toBe("الفكّان");
     expect((await opening(ortho))?.amount_minor).toBe("180000");
   });
 });
+

@@ -21,9 +21,11 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
 
 let ortho = 0;
 let rct = 0;
+let doctor = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  doctor = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'طبيب المعاينة') RETURNING id`))[0].id;
   const service = async (name: string, category: string) => (await q<{ id: number }>(
     `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 100000, TRUE, TRUE, $2) RETURNING id`, [name, category]))[0].id;
   ortho = await service("تقويم ثابت", "ortho");
@@ -32,8 +34,8 @@ beforeAll(async () => {
 afterAll(async () => { await resetPoolForTesting(); });
 
 const newPatient = async (n: string) => (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ($1, $1) RETURNING id`, [n]))[0].id;
-const line = (serviceId: number, category: string, price: number, toothCode: number | null = null, caseId: number | null = null) =>
-  ({ serviceId, category, doctorId: null, description: category, quantity: 1, unitPriceMinor: price, toothCode, caseId, sessions: null });
+const line = (serviceId: number, category: string, price: number, toothCode: number | null = null, caseId: number | null = null, scope: string | null = null) =>
+  ({ serviceId, category, doctorId: doctor, description: category, quantity: 1, unitPriceMinor: price, toothCode, caseId, scope, sessions: null });
 const create = (patientId: number, items: ReturnType<typeof line>[]) => createLinkedInvoice({
   patientId, baseCurrency: "YER", discountMinor: 0, note: null, createdBy: "reception", actorRole: "reception",
   items, templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null, auditDetails: {},
@@ -55,7 +57,7 @@ describe("preview mirrors the save", () => {
   });
   it("two open cases ask for a choice", async () => {
     const patient = await newPatient("PRE-2");
-    for (const title of ["أ", "ب"]) await q(`INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, 'endodontics', $2, 'dr')`, [patient, title]);
+    for (const title of ["أ", "ب"]) await q(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'endodontics', $2, '11', 'dr')`, [patient, title]);
     const [preview] = await previewInvoiceLinkage({ patientId: patient, baseCurrency: "YER", items: [line(rct, "rct", 80_000, 11)] });
     expect(preview.case?.mode).toBe("choose");
     expect(preview.case?.options).toHaveLength(2);
@@ -64,7 +66,7 @@ describe("preview mirrors the save", () => {
 });
 
 describe("preview refusals equal the save's refusals", () => {
-  it("shape mismatch and a conflicting case choice are announced before saving", async () => {
+  it("amount/shape mismatch and a conflicting case choice are announced before saving", async () => {
     const patient = await newPatient("PRE-3");
     const [kase] = await q<{ id: number }>(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'endodontics', 'أ', '26', 'dr') RETURNING id`, [patient]);
     const [other] = await q<{ id: number }>(`INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'endodontics', 'ب', '26', 'dr') RETURNING id`, [patient]);
@@ -73,7 +75,8 @@ describe("preview refusals equal the save's refusals", () => {
     await q(`INSERT INTO plan_items (plan_id, service_id, service_name, category, tooth_code, quantity, unit_price_minor, session_count, case_id)
              VALUES ($1, $2, 'علاج عصب', 'rct', 26, 2, 40000, 3, $3)`, [plan.id, rct, kase.id]);
     for (const [items, refusal] of [
-      [[line(rct, "rct", 80_000, 26)], "shape_mismatch"],
+      [[line(rct, "rct", 80_000, 26)], "amount_mismatch"],
+      [[line(rct, "rct", 40_000, 26)], "shape_mismatch"],
       [[{ ...line(rct, "rct", 40_000, 26, other.id), quantity: 2 }], "case_mismatch"],
     ] as const) {
       const [preview] = await previewInvoiceLinkage({ patientId: patient, baseCurrency: "YER", items: [...items] });
@@ -86,7 +89,7 @@ describe("preview refusals equal the save's refusals", () => {
 describe("needs-assessment, next action and ortho bridging", () => {
   it("the invoice's ortho case needs assessment until the doctor opens the ortho case, which bridges it", async () => {
     const patient = await newPatient("UI-ORTHO");
-    const created = await create(patient, [line(ortho, "ortho", 30_000_000)]);
+    const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
     if (!created.ok) throw new Error("create");
     const cases = await listPatientCases(patient);
     expect(cases.filter((c) => c.needsAssessment).map((c) => c.specialty)).toEqual(["orthodontics"]);
@@ -104,7 +107,8 @@ describe("needs-assessment, next action and ortho bridging", () => {
     expect((await listPatientCases(patient)).some((c) => c.needsAssessment)).toBe(false);
     expect((await patientWorkflow(patient, "2026-10-06")).assessmentCases).toEqual([]);
     const funded = await q<{ funded: boolean }>(`SELECT ${db.ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [opened.id]);
-    expect(funded[0].funded).toBe(true);
+    expect(funded[0].funded).toBe(false); // bridging identity does not create an unlimited financial package
+    expect((await q(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [created.planId]))[0]).toEqual({ consent_at: null });
     expect(await q(`SELECT 1 FROM audit_log WHERE action = 'ortho.plan_link'`)).toHaveLength(1);
   });
 
@@ -113,7 +117,96 @@ describe("needs-assessment, next action and ortho bridging", () => {
     const created = await create(patient, [line(rct, "rct", 80_000, 36)]);
     if (!created.ok) throw new Error("create");
     expect((await listPatientCases(patient)).find((c) => c.id === created.links[0].caseId)?.needsAssessment).toBe(true);
-    await q(`INSERT INTO visits (patient_name, patient_id, case_id, signed_at, signed_by) VALUES ('م', $1, $2, NOW(), 'dr')`, [patient, created.links[0].caseId]);
+    expect(await db.recordPlanConsent({ planId: created.planId!, actor: "reception", note: "موافقة سريرية صريحة" })).toMatchObject({ ok: true });
+    const visit = await db.addVisit({ patientId: patient, patientName: "م", patientPhone: null, note: null, doctorId: doctor });
+    expect(await db.setVisitProcedures({ visitId: visit.id, procedures: [{ serviceId: rct, toothCode: 36,
+      surfaces: null, quantity: 1, unitPriceMinor: 0, priceReason: null, doctorId: doctor, note: null,
+      planItemId: created.links[0].planItemId }] })).toBe(true);
+    expect(await db.signClinicalVisit({ visitId: visit.id, baseCurrency: "YER", signedBy: "dr", signerDoctorPartyId: doctor }))
+      .toMatchObject({ reason: null, invoiceId: null });
     expect((await listPatientCases(patient)).find((c) => c.id === created.links[0].caseId)?.needsAssessment).toBe(false);
+  });
+
+  it("cancellation before ortho intake preserves clinical assessment without restoring financial coverage", async () => {
+    const patient = await newPatient("UI-ORTHO-CANCEL");
+    const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
+    if (!created.ok) throw new Error("create");
+    const caseId = created.links[0].caseId;
+    const itemId = created.links[0].planItemId;
+    const pending = [expect.objectContaining({ id: caseId, specialty: "orthodontics" })];
+    expect((await patientWorkflow(patient, "2026-10-07")).assessmentCases).toEqual(pending);
+
+    await db.setInvoiceStatus(created.invoice.id, "cancelled", { actor: "admin", actorRole: "admin" });
+    const financialState = async () => ({
+      invoices: await q(`SELECT id, status FROM invoices WHERE patient_id = $1 ORDER BY id`, [patient]),
+      plans: await q(`SELECT id, consent_at FROM treatment_plans WHERE patient_id = $1 ORDER BY id`, [patient]),
+      items: await q(`SELECT i.id, i.plan_id, i.case_id, i.billing_status, i.billed_invoice_id, i.origin_invoice_id
+        FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE t.patient_id = $1 ORDER BY i.id`, [patient]),
+      invoiceItems: await q(`SELECT i.id FROM invoice_items i JOIN invoices v ON v.id = i.invoice_id
+        WHERE v.patient_id = $1 ORDER BY i.id`, [patient]),
+      installments: await q(`SELECT i.id FROM plan_installments i JOIN treatment_plans t ON t.id = i.plan_id
+        WHERE t.patient_id = $1 ORDER BY i.id`, [patient]),
+    });
+    const cancelled = await financialState();
+    expect(cancelled).toMatchObject({
+      invoices: [{ id: created.invoice.id, status: "cancelled" }],
+      plans: [{ id: created.planId, consent_at: null }],
+      items: [{ id: itemId, plan_id: created.planId, case_id: caseId,
+        billing_status: "needs_financial_review", billed_invoice_id: created.invoice.id, origin_invoice_id: created.invoice.id }],
+      installments: [],
+    });
+    expect(cancelled.invoiceItems).toHaveLength(1);
+    expect((await patientWorkflow(patient, "2026-10-07")).assessmentCases).toEqual(pending);
+    expect((await listPatientCases(patient)).map((c) => ({ id: c.id, needsAssessment: c.needsAssessment })))
+      .toEqual([{ id: caseId, needsAssessment: true }]);
+    expect(await q(`SELECT id FROM ortho_cases WHERE patient_id = $1`, [patient])).toEqual([]);
+
+    const opened = await createOrthoCase({
+      patientId: patient, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null,
+      startDate: "2026-10-07", plannedMonths: 18, planId: null, note: null, createdBy: "dr",
+    });
+    if (!opened.ok) throw new Error(opened.message);
+    expect(await q(`SELECT id, origin, ortho_case_id FROM clinical_cases WHERE patient_id = $1`, [patient]))
+      .toEqual([{ id: caseId, origin: "invoice", ortho_case_id: opened.id }]);
+    expect(await q(`SELECT id, plan_id, ${db.ORTHO_CASE_FUNDED_SQL} AS funded
+      FROM ortho_cases c WHERE c.patient_id = $1`, [patient]))
+      .toEqual([{ id: opened.id, plan_id: null, funded: false }]);
+    expect((await listPatientCases(patient)).map((c) => ({ id: c.id, needsAssessment: c.needsAssessment })))
+      .toEqual([{ id: caseId, needsAssessment: false }]);
+    expect((await patientWorkflow(patient, "2026-10-07")).assessmentCases).toEqual([]);
+    expect(await financialState()).toEqual(cancelled);
+    // Bridging a surviving clinical record cannot make the cancelled item billable again.
+    expect(await create(patient, [line(ortho, "ortho", 30_000_000, null, caseId, "both")]))
+      .toEqual({ ok: false, reason: "needs_financial_review", line: 0 });
+    expect(await financialState()).toEqual(cancelled);
+  });
+});
+
+describe("unknown site and provider are never treated as clinical/financial approval", () => {
+  it("a blank case site is refused equally by preview and save rather than guessed to match a tooth", async () => {
+    const patient = await newPatient("PRE-UNKNOWN-SITE");
+    const [{ id: caseId }] = await q<{ id: number }>(`INSERT INTO clinical_cases (patient_id, specialty, title, created_by)
+      VALUES ($1, 'endodontics', 'موضع غير محسوم', 'dr') RETURNING id`, [patient]);
+    for (const chosen of [null, caseId]) {
+      const items = [line(rct, "rct", 80000, 36, chosen)];
+      expect((await previewInvoiceLinkage({ patientId: patient, baseCurrency: "YER", items }))[0].refusal).toBe("bad_site");
+      expect(await create(patient, items)).toEqual({ ok: false, reason: "bad_site", line: 0 });
+    }
+    expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toEqual([]);
+  });
+
+  it("missing provider remains explicit financial review; preview stays read-only and the invoice invents no clinical consent", async () => {
+    const patient = await newPatient("PRE-UNKNOWN-PROVIDER");
+    const items = [{ ...line(rct, "rct", 80000, 36), doctorId: null }];
+    const [preview] = await previewInvoiceLinkage({ patientId: patient, baseCurrency: "YER", items });
+    expect(preview).toMatchObject({ financialReviewRequired: true, refusal: null });
+    expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toEqual([]);
+    const created = await createLinkedInvoice({ patientId: patient, baseCurrency: "YER", discountMinor: 0, note: null,
+      createdBy: "reception", actorRole: "reception", items, templates: DEFAULT_SPECIALTY_TEMPLATES,
+      idempotencyKey: null, requestHash: null, auditDetails: {} });
+    if (!created.ok) throw new Error(created.reason);
+    expect((await q(`SELECT doctor_id, billing_status FROM plan_items WHERE id = $1`, [created.links[0].planItemId]))[0])
+      .toEqual({ doctor_id: null, billing_status: "needs_financial_review" });
+    expect((await q(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [created.planId]))[0]).toEqual({ consent_at: null });
   });
 });

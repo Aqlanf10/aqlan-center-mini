@@ -6,7 +6,7 @@ import {
   LEGACY_TREATMENT_MESSAGE, LEGACY_TREATMENT_STATUS, legacyCaseTitle, legacyTreatmentFingerprint, parseLegacyTreatmentRequest,
 } from "../lib/legacy-treatment";
 import { classifyOrthoAdjustment } from "../lib/billing-classification";
-import { planLedgerSummary } from "../lib/plans";
+import { planLedgerSummary, unlinkedSessionConflicts } from "../lib/plans";
 
 const TODAY = "2026-10-06";
 const base = { serviceId: 7, currency: "YER", agreedAmount: "300000", previouslyPaidAmount: "120000", historicalAsOf: "2026-09-30" };
@@ -90,6 +90,13 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
     }
   });
 
+  it("publishes bounded multi-tooth and incompatible-master refusal contracts", () => {
+    expect(LEGACY_TREATMENT_STATUS.legacy_episode_unsupported).toBe(400);
+    expect(LEGACY_TREATMENT_STATUS.incompatible_plan).toBe(409);
+    expect(LEGACY_TREATMENT_STATUS.needs_financial_review).toBe(409);
+    expect(LEGACY_TREATMENT_STATUS.bad_case).toBe(400);
+  });
+
   it("the legacy case title states its origin without inventing a diagnosis", () => {
     const none = { toothCode: null, episodeTeeth: null, scope: null };
     expect(legacyCaseTitle("orthodontics", none)).toBe("تقويم — حالة بدأت قبل النظام");
@@ -106,14 +113,42 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
     expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common })).toBe("OUTSIDE_CONTRACT");
   });
 
-  it("the ledger summary flags a historical-agreement plan only when one of its items is covered", () => {
+  it("the ledger summary flags a historical-agreement plan whenever an item retains historical agreement identity, including void", () => {
     const plan = {
-      id: 1, title: "علاج بدأ قبل النظام", status: "active" as const, totalMinor: 300_000, consentAt: "2026-10-06T00:00:00Z",
+      id: 1, title: "علاج بدأ قبل النظام", status: "active" as const, totalMinor: 300_000, consentAt: null,
       installments: [],
       progress: { paidMinor: 0, remainingMinor: 0, overdueMinor: 0, nextDueDate: null, nextDueAmountMinor: 0, paidCount: 0, count: 0 },
       itemsProgress: { count: 1, doneCount: 0, doneMinor: 0, remainingMinor: 300_000 },
     } as unknown as Parameters<typeof planLedgerSummary>[0];
     expect(planLedgerSummary({ ...plan, items: [{ legacyAgreementId: 5 }] }).legacy).toBe(true);
+    // The identifier represents durable origin, not a claim that financial coverage is still live.
+    const reviewItem = { legacyAgreementId: 5, billingStatus: "needs_financial_review" };
+    expect(planLedgerSummary({ ...plan, items: [reviewItem] }).legacy).toBe(true);
     expect(planLedgerSummary({ ...plan, items: [{}] })).not.toHaveProperty("legacy");
+  });
+});
+
+
+
+describe("durable legacy history in free-procedure protection", () => {
+  const historicalItem = {
+    id: 41, serviceId: 7, toothCode: 36, serviceName: "Historical root canal", status: "done",
+    sessionCount: 1, doneSessions: 1, hasInvoiceLineage: false, hasLegacyLineage: true,
+    billingStatus: "included_in_package" as const, caseSite: "36",
+  };
+
+  it("does not let a done or single-session legacy item become a fresh free procedure", () => {
+    expect(unlinkedSessionConflicts([historicalItem], [{ serviceId: 7, toothCode: 36 }])).toHaveLength(1);
+    expect(unlinkedSessionConflicts([{ ...historicalItem, status: "planned", doneSessions: 0 }], [{ serviceId: 7, toothCode: 36 }]))
+      .toHaveLength(1);
+  });
+
+  it("keeps other teeth independent from the historical work identity", () => {
+    expect(unlinkedSessionConflicts([historicalItem], [{ serviceId: 7, toothCode: 46 }])).toEqual([]);
+  });
+
+  it("retains legacy region overlap protection without pretending it has invoice provenance", () => {
+    expect(unlinkedSessionConflicts([{ ...historicalItem, toothCode: null, caseSite: "الفك السفلي" }], [{ serviceId: 7, toothCode: 36 }]))
+      .toHaveLength(1);
   });
 });

@@ -118,20 +118,25 @@ export const LEGACY_CASE_LABEL = "حالة بدأت قبل النظام";
 export type LegacyTreatmentRefusal =
   | "no_patient" | "bad_service" | "bad_tooth" | "bad_case" | "ambiguous_case" | "idempotency_conflict"
   | "duplicate_live" | "open_item_exists" | "opening_not_owned" | "opening_edit_forbidden" | "period_locked"
-  | "opening_changed" | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope";
+  | "opening_changed" | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
+  | "incompatible_plan" | "needs_financial_review" | "legacy_episode_unsupported";
 
 export type LegacyVoidRefusal =
-  | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason";
+  | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason"
+  | "opening_collected" | "void_forbidden" | "bad_void_request" | "preview_required" | "preview_stale";
 
 export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, string> = {
   no_patient: "المريض غير موجود.",
+  incompatible_plan: "الخطة الرئيسية القائمة غير قابلة لإضافة العلاج السابق؛ راجع خطط المريض وموافقاتها وعملتها قبل المتابعة.",
+  needs_financial_review: "هذا العمل له سجل مالي أو اتفاق تاريخي يحتاج مراجعة؛ لا يُعاد تسجيله أو فوترته بهوية جديدة.",
+  legacy_episode_unsupported: "تسجيل اتفاق تاريخي لعدة أسنان متوقف مؤقتًا حتى يدعم النظام تغطية الحلقة كاملةً بأمان؛ لا تقسّم مبلغ الاتفاق أو المدفوع على الأسنان تخمينًا.",
   bad_service: "اختر خدمةً علاجية من الدليل (تقويم، علاج جذور، تركيبات، زراعة…) — الكشف والأشعة ليست علاجًا سابقًا.",
   bad_tooth: "رقم السن غير صحيح بالترقيم الدولي.",
-  bad_case: "الحالة المختارة ليست حالة مفتوحة لهذا المريض وبتخصص العلاج.",
+  bad_case: "الحالة المختارة لا تطابق مريض العلاج وتخصصه وموضعه أو لم تعد مفتوحة.",
   ambiguous_case: "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة التي يرتبط بها العلاج السابق.",
   idempotency_conflict: "هذا الطلب أُرسل سابقًا ببياناتٍ مختلفة — أعد فتح النموذج.",
   duplicate_live: "للمريض اتفاقٌ تاريخي قائم لنفس العلاج والسن — لا يُسجَّل مرتين.",
-  open_item_exists: "للمريض بند خطة مفتوح لنفس العلاج والسن في النظام — لا يُسجَّل علاجٌ سابق فوقه. راجع الخطة أو ألغِ البند أولًا.",
+  open_item_exists: "للمريض بند خطة مفتوح لنفس العلاج والسن في النظام — لا يُسجَّل علاجٌ سابق فوقه. استخدم هوية العمل القائمة أو راجع سجلها المالي أولًا.",
   opening_not_owned: "للمريض رصيدٌ سابق بهذه العملة لم يُسجَّل من اتفاق علاجٍ سابق — قد يشمل هذا العلاج فيُحسب مرتين. يراجعه المدير ويصحّحه أولًا ثم يُسجَّل الاتفاق.",
   opening_edit_forbidden: "للمريض رصيدٌ سابق بهذه العملة — إضافة متبقي اتفاقٍ آخر إليه للمدير.",
   period_locked: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال أو راجع المدير.",
@@ -142,12 +147,20 @@ export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoi
   bad_scope: INVOICE_LINKAGE_MESSAGE.bad_scope,
   not_found: "الاتفاق التاريخي غير موجود لهذا المريض.",
   already_void: "هذا الاتفاق التاريخي مُبطَل مسبقًا.",
-  opening_settled: "سُدِّد من الرصيد السابق ما لا يبقى مغطًّى بعد إبطال الاتفاق — لا يُبطَل حتى تُراجع الدفعات (ردّ أو تصحيح سند).",
-  bad_reason: "اكتب سبب إبطال الاتفاق (ثلاثة أحرف على الأقل).",
+  opening_settled: "سُدِّد من الرصيد السابق ما لا يبقى مغطًّى بعد إبطال الاتفاق — الإبطال المصرّح به غير مسموح. يلزم مسار مراجعة مالية مستقل؛ لا يُنشأ ردّ أو تصحيح سند تلقائيًا.",
+  opening_collected: "توجد تحصيلات صافية على الرصيد السابق للمريض بهذه العملة؛ الإبطال العادي متوقف. راجع الأثر المالي واستخدم الإبطال المصرّح به للمدير إن بقي أصلٌ يغطي التحصيلات.",
+  void_forbidden: "إبطال العلاج السابق للنظام ورصيده للمدير وحده.",
+  bad_void_request: "طلب الإبطال أو نوعه غير صالح.",
+  preview_required: "اعرض الأثر المالي الحالي قبل تأكيد الإبطال المصرّح به للمدير.",
+  preview_stale: "تغيّرت بيانات المعاينة المالية؛ أعد تحميل الأثر المالي وراجعه قبل التأكيد.",
+  bad_reason: "اكتب سبب إبطال الاتفاق (من ثلاثة إلى ٣٠٠ حرف).",
 };
 
 export const LEGACY_TREATMENT_STATUS: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, number> = {
+  opening_collected: 409, void_forbidden: 403, bad_void_request: 400, preview_required: 400, preview_stale: 409,
+  incompatible_plan: 409, needs_financial_review: 409, legacy_episode_unsupported: 400,
   no_patient: 404, bad_service: 400, bad_tooth: 400, bad_case: 400, ambiguous_case: 409, idempotency_conflict: 409,
   duplicate_live: 409, open_item_exists: 409, opening_not_owned: 409, opening_edit_forbidden: 403, period_locked: 409,
   opening_changed: 409, tooth_required: 400, episode_split_required: 400, bad_surfaces: 400, bad_scope: 400, not_found: 404, already_void: 409, opening_settled: 409, bad_reason: 400,
 };
+

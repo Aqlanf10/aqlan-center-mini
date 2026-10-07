@@ -17,10 +17,11 @@ import { LegacyTreatmentForm } from "./LegacyTreatmentForm";
 import { LegacyTreatmentAgreements } from "./LegacyTreatmentAgreements";
 import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
+import { invoiceLineInputProblem, previewForRow, readPreviewLines, type PreviewState } from "./dental/invoice-preview-state";
 import {
   PER_TOOTH_SPLIT_NOTICE, applyToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
-  type ToothPayload, type ToothRowLike, type ToothSelection,
+  type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 
@@ -55,6 +56,8 @@ interface PlanSummary {
   totalMinor: number; consented: boolean; baseCurrency?: Currency;
   /** (INV-LEGACY) خطة اتفاقٍ تاريخي — مالها في الرصيد السابق لا في الخطة. */
   legacy?: boolean;
+  legacyItemCount?: number;
+  ordinaryItemsProgress?: { count: number; doneCount: number; doneMinor: number; remainingMinor: number } | null;
   installments: {
     paidMinor: number; remainingMinor: number; overdueMinor: number;
     nextDueDate: string | null; nextDueAmountMinor: number; paidCount: number; count: number;
@@ -135,7 +138,14 @@ function isPlanSummary(value: unknown): value is PlanSummary {
   if (!record(value) || !signedMinor(value.id) || typeof value.title !== "string"
     || (value.status !== "active" && value.status !== "completed" && value.status !== "cancelled")
     || !signedMinor(value.totalMinor) || typeof value.consented !== "boolean"
-    || (value.baseCurrency !== undefined && !isCurrency(value.baseCurrency))) return false;
+    || (value.baseCurrency !== undefined && !isCurrency(value.baseCurrency))
+    || (value.legacy !== undefined && typeof value.legacy !== "boolean")) return false;
+  if (value.legacy === true) {
+    if (!positiveId(value.legacyItemCount)) return false;
+    const ordinary = value.ordinaryItemsProgress;
+    if (ordinary !== null && (!record(ordinary) || !nonnegativeMinor(ordinary.count) || !nonnegativeMinor(ordinary.doneCount)
+      || !nonnegativeMinor(ordinary.doneMinor) || !nonnegativeMinor(ordinary.remainingMinor))) return false;
+  }
   const installments = value.installments;
   if (installments !== null && (!record(installments)
     || !moneyFields(installments, ["paidMinor", "remainingMinor", "overdueMinor", "nextDueAmountMinor"])
@@ -254,15 +264,15 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
       || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
 }
 
-export function PatientLedger({ patientId }: { patientId: number }) {
+export function PatientLedger({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
   const scope = JSON.stringify([patientId, session]);
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
-  return <PatientLedgerContent key={scope} patientId={patientId} />;
+  return <PatientLedgerContent key={scope} patientId={patientId} onClinicalChange={onClinicalChange} />;
 }
 
-function PatientLedgerContent({ patientId }: { patientId: number }) {
+function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -290,6 +300,7 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
   /* (DAY1 — قرار المالك) الاستقبال يضيف الرصيد السابق، والتعديل والحذف للمدير. */
   const canAddOpening = ledger?.openingAccess?.add ?? admin;
   const canEditOpening = ledger?.openingAccess?.edit ?? admin;
+  const canAddLegacy = !loading && !error && ledger?.openingAccess?.add === true;
 
   const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
   const load = useCallback(async () => {
@@ -414,7 +425,7 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
           className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white">
           {mode === "invoice" ? "إغلاق" : "فاتورة يدوية"}
         </button>
-        {canAddOpening ? (
+        {canAddLegacy ? (
           <button type="button" onClick={() => setMode(mode === "legacy" ? "none" : "legacy")}
             aria-pressed={mode === "legacy"}
             className="rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-bold text-indigo-800">
@@ -456,14 +467,15 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
       ) : null}
 
       {mode === "invoice" ? (
-        <InvoiceForm
+        <InvoiceForm key={patientId}
           patientId={patientId} base={base} services={services} busy={busy}
           onSubmit={async (body) => {
             const created = await send(() => fetch("/api/invoices", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ patientId, ...body }),
             })) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] } } | null;
-            if (created) {
+            if (readRef.current.active && created) {
+              onClinicalChange?.();
               setMode("none");
               /* (INV-LINK D) ما فعلته الفاتورة بالعلاج — يُقال صراحةً بعد الحفظ. */
               const clinical = created.clinical?.links.filter((link) => link.kind === "clinical") ?? [];
@@ -475,16 +487,18 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         />
       ) : null}
 
-      {mode === "legacy" && canAddOpening ? (
+      {mode === "legacy" && canAddLegacy ? (
         <LegacyTreatmentForm
           patientId={patientId} base={base} services={services} busy={busy}
           positions={ledger?.legacyOpeningPositions}
           onCancel={() => setMode("none")}
           onSubmit={async (body) => {
+            if (!canAddLegacy || !readRef.current.active) return;
             const saved = await send(() => fetch(`/api/patients/${patientId}/legacy-treatments`, {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
             })) as { agreement?: { remainingMinor: number; caseId: number | null } } | null;
-            if (saved?.agreement) {
+            if (readRef.current.active && saved?.agreement) {
+              onClinicalChange?.();
               setMode("none");
               setLegacyRefresh((value) => value + 1);
               setLinkNotice(`سُجّل العلاج السابق للنظام: ${saved.agreement.remainingMinor > 0
@@ -495,8 +509,10 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         />
       ) : null}
 
-      {ledger ? (
-        <LegacyTreatmentAgreements patientId={patientId} refreshKey={legacyRefresh} onChanged={() => { void load(); }} />
+      {ledger && !loading && !error ? (
+        <LegacyTreatmentAgreements patientId={patientId} refreshKey={legacyRefresh} onChanged={() => {
+          if (!readRef.current.active) return; onClinicalChange?.(); void load();
+        }} />
       ) : null}
 
       {/* التحصيل الموحّد — نفس مكون التحصيل من كل الأبواب (المواصفة §٢٦) */}
@@ -567,7 +583,9 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
         <section className="mb-4" aria-label="خطط العلاج">
           <h3 className="mb-2 text-sm font-bold">خطط العلاج ({ledger.plans.length})</h3>
           <ul className="space-y-2">
-            {ledger.plans.map((plan) => (
+            {ledger.plans.map((plan) => {
+              const ordinary = plan.legacy ? plan.ordinaryItemsProgress : plan.items;
+              return (
               <li key={plan.id} className={`rounded-2xl border p-3 ${
                 plan.status === "active" ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
               }`}>
@@ -588,7 +606,7 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
                 <div className="grid grid-cols-3 gap-1.5 text-center text-xs">
                   <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
                     <p className="font-extrabold">{formatMoney(plan.totalMinor, plan.baseCurrency ?? base)}</p>
-                    <p className="text-[10px] text-slate-500">المتفق عليه</p>
+                    <p className="text-[10px] text-slate-500">{plan.legacy ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : "المتفق عليه"}</p>
                   </div>
                   {plan.installments ? (
                     <>
@@ -604,16 +622,20 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
                   ) : (
                     <>
                       <div className="rounded-lg bg-emerald-50 px-1.5 py-1.5">
-                        <p className="font-extrabold text-emerald-800">{formatMoney(plan.items?.doneMinor ?? 0, plan.baseCurrency ?? base)}</p>
-                        <p className="text-[10px] text-emerald-700">أُنجز</p>
+                        <p className="font-extrabold text-emerald-800">{ordinary ? formatMoney(ordinary.doneMinor, plan.baseCurrency ?? base) : "غير متاح"}</p>
+                        <p className="text-[10px] text-emerald-700">{plan.legacy ? "أُنجز من البنود الأخرى" : "أُنجز"}</p>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-1.5 py-1.5">
-                        <p className="font-extrabold">{formatMoney(plan.items?.remainingMinor ?? 0, plan.baseCurrency ?? base)}</p>
-                        <p className="text-[10px] text-slate-500">بقي العلاج</p>
+                        <p className="font-extrabold">{ordinary ? formatMoney(ordinary.remainingMinor, plan.baseCurrency ?? base) : "غير متاح"}</p>
+                        <p className="text-[10px] text-slate-500">{plan.legacy ? "باقي البنود الأخرى" : "بقي العلاج"}</p>
                       </div>
                     </>
                   )}
                 </div>
+                {plan.legacy ? <p role="status" data-testid="ledger-legacy-progress-unknown" className="mt-2 text-xs text-indigo-900">
+                  {plan.legacyItemCount} بنود ذات تاريخ سابق: المنجَز قبل النظام والباقي سريريًّا غير معلومين من الاتفاق. الأرقام السابقة ليست دَينًا جديدًا؛ المستحق هو رصيد الحساب فقط.
+                  {!plan.consented ? " موافقة العلاج الفعلية لم تُسجّل؛ حفظ المسودة متاح والتوقيع ينتظرها." : ""}
+                </p> : null}
                 {plan.installments?.overdueMinor ? (
                   <p className="mt-1.5 text-[11px] font-bold text-red-700">
                     متأخر: {formatMoney(plan.installments.overdueMinor, plan.baseCurrency ?? base)}
@@ -626,12 +648,15 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
                   </p>
                 ) : null}
                 <p className="mt-1.5 text-[10px] leading-4 text-slate-400">
-                  {plan.installments
+                  {plan.legacy
+                    ? "متبقي الاتفاق التاريخي يُحصَّل من الرصيد السابق. البنود الأخرى تتبع فواتيرها المثبتة؛ لا تُحصَّل قيمة الخطة التاريخية كدفعة جديدة."
+                    : plan.installments
                     ? "قبضُ القسط يُصدر فاتورة ودفعة تظهران في القائمتين أدناه."
                     : "تُفوتر بزياراتها: كلّ زيارة موقَّعة تُصدر فاتورةً في القائمة أدناه."}
                 </p>
               </li>
-            ))}
+              );
+            })}
           </ul>
           <p className="mt-2 text-[11px] leading-4 text-slate-400">
             الخطة اتفاق لا دَين: تُدخل الحساب عند الفوترة فقط، ورصيد الحساب أعلاه هو الرقم
@@ -773,16 +798,9 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
   );
 }
 
-interface LinePreview {
-  line: number; kind: "financial" | "clinical"; specialtyLabel: string | null;
-  item: { mode: "existing" | "new"; id: number | null } | null;
-  case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null; options: { id: number; title: string }[] } | null;
-  refusalMessage: string | null;
-}
-
-type InvoiceRow = ToothRowLike & { serviceId: string; description: string; price: string; quantity: string; priceReason: string };
+type InvoiceRow = ToothRowLike & { doctorId: string; serviceId: string; description: string; price: string; quantity: string; priceReason: string };
 const blankInvoiceRow = (key: string): InvoiceRow => ({
-  key, serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
+  key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
 function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
@@ -801,7 +819,24 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
   /* (INV-LINK B) مفتاح الإعادة لهذا النموذج: نقرةٌ مزدوجة أو ردٌّ ضائع يعيد الفاتورة نفسها لا فاتورةً ثانية. */
   const [idempotencyKey] = useState(() => newIdempotencyKey("inv"));
-  const [previews, setPreviews] = useState<LinePreview[]>([]);
+  const [previewState, setPreviewState] = useState<PreviewState | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const [doctorCatalog, setDoctorCatalog] = useState<{ patientId: number; rows: { id: number; name: string }[] } | null>(null);
+  const doctors = doctorCatalog?.patientId === patientId ? doctorCatalog.rows : [];
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/parties?kind=doctor", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload: unknown = await response.json().catch(() => null);
+        if (controller.signal.aborted) return;
+        // Read only the already-authorized catalogue. Denied/malformed reads expose no fallback list.
+        if (response.ok && Array.isArray(payload) && payload.every((entry) => record(entry)
+          && positiveId(entry.id) && typeof entry.name === "string" && entry.kind === "doctor")) {
+          setDoctorCatalog({ patientId, rows: payload.map((entry) => ({ id: entry.id as number, name: entry.name as string })) });
+        } else setDoctorCatalog(null);
+      }).catch(() => { if (!controller.signal.aborted) setDoctorCatalog(null); });
+    return () => controller.abort();
+  }, [patientId]);
   const [discount, setDiscount] = useState("");
   /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
   const [discountReason, setDiscountReason] = useState("");
@@ -838,33 +873,61 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   };
   /* (INV-LINK TOOTH) كيف يُحدَّد سن البند — من فئة خدمته وحدها (المصدر نفسه الذي يفرضه الخادم). */
   const modeOf = (row: InvoiceRow): ToothScopeMode => invoiceToothMode(serviceOf(row.serviceId)?.category);
-  // أي تغيير في الأسنان/الأسطح/النطاق يعيد المعاينة: هي جزءٌ من مفتاحها وجسمها.
-  const previewKey = JSON.stringify([currency, rows.map((row) => [row.serviceId, row.price, row.quantity, row.caseId,
-    toothPayload(modeOf(row), row)])]);
+  const inputProblems = rows.map((row) => row.serviceId || row.description.trim()
+    ? invoiceLineInputProblem({ price: row.price, quantity: row.quantity, currency,
+      servicePriceMinor: serviceOf(row.serviceId)?.priceMinor ?? null }) : null);
+  // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
+  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, idempotencyKey, base, retry: previewRetry,
+    catalog: services.map((service) => [service.id, service.category, service.priceMinor]),
+    rows: rows.map((row, index) => ({ row, index })).filter(({ row }) => row.serviceId || row.description.trim())
+      .map(({ row, index }) => ({ key: row.key, clinical: isClinical(row.serviceId), inputProblem: inputProblems[index],
+        serviceId: row.serviceId ? Number(row.serviceId) : undefined, description: row.description,
+        price: row.price, priceReason: row.priceReason, quantity: Number(row.quantity) || 1,
+        caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
+        doctorId: row.doctorId ? Number(row.doctorId) : undefined, ...toothPayload(modeOf(row), row) })),
+  });
+  // Forget old evidence rather than reviving it if inputs later return to an earlier value.
+  if (previewState && previewState.requestKey !== previewKey) setPreviewState(null);
   useEffect(() => {
-    const payloadRows = JSON.parse(previewKey)[1] as [string, string, string, string, ToothPayload][];
-    const clinicalRow = (serviceId: string) => {
-      const service = services.find((item) => String(item.id) === serviceId);
-      return service ? lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical" : false;
+    const request = JSON.parse(previewKey) as {
+      patientId: number; currency: Currency; discount: string; discountReason: string; idempotencyKey: string;
+      rows: { key: string; clinical: boolean; [field: string]: unknown }[];
     };
-    if (!payloadRows.some((row) => clinicalRow(row[0]))) return;
+    if (!request.rows.some((row) => row.clinical) || request.rows.some((row) => row.inputProblem)) return;
     const controller = new AbortController();
+    const unavailable = () => {
+      if (!controller.signal.aborted) setPreviewState({ requestKey: previewKey, status: "unavailable", byRow: new Map() });
+    };
+    let deadline: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
+      deadline = setTimeout(() => { unavailable(); controller.abort(); }, 15_000);
       void fetch("/api/invoices/clinical-preview", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({
-          patientId, currency,
-          items: payloadRows.map(([serviceId, price, quantity, caseId, tooth]) => ({
-            serviceId: serviceId ? Number(serviceId) : null, price, quantity, caseId, ...tooth,
-          })),
+        body: JSON.stringify({ patientId: request.patientId, currency: request.currency,
+          discount: request.discount, discountReason: request.discountReason, idempotencyKey: request.idempotencyKey,
+          items: request.rows.map((row) => {
+            const { key, clinical, inputProblem, ...item } = row;
+            void key; void clinical; void inputProblem;
+            return item;
+          }),
         }),
       }).then(async (response) => {
-        const payload = await response.json().catch(() => null) as { lines?: LinePreview[] } | null;
-        setPreviews(response.ok && payload?.lines ? payload.lines : []);
-      }).catch(() => undefined);
+        const payload: unknown = await response.json().catch(() => null);
+        if (controller.signal.aborted) return;
+        if (!response.ok && [400, 401, 403, 409, 422].includes(response.status)
+          && record(payload) && typeof payload.message === "string" && payload.message.trim()) {
+          setPreviewState({ requestKey: previewKey, status: "refused", message: payload.message.slice(0, 1500), byRow: new Map() });
+          return;
+        }
+        const byRow = response.ok ? readPreviewLines(payload, request.rows) : null;
+        if (!byRow) { unavailable(); return; }
+        setPreviewState({ requestKey: previewKey, status: "ready", byRow });
+      }).catch(unavailable).finally(() => clearTimeout(deadline));
     }, 350);
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [previewKey, patientId, currency, services]);
+    return () => { controller.abort(); clearTimeout(timer); clearTimeout(deadline); };
+  }, [previewKey]);
+  const clinicalPreviewBlocked = rows.some((row) => isClinical(row.serviceId)
+    && previewForRow(previewState, previewKey, row.key).status !== "ready");
 
   /* (INV-LINK TOOTH) لا يُحفظ بندٌ يحتاج سنًّا بلا سن — والخادم يرفضه أيضًا. */
   const toothProblems = rows.map((row) => row.serviceId ? toothProblem(modeOf(row), row) : null);
@@ -872,13 +935,14 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   const dialogIndex = toothDialogFor === null ? -1 : rows.findIndex((row) => row.key === toothDialogFor);
   const dialogRow = dialogIndex >= 0 ? rows[dialogIndex] : null;
 
-  const confirmTeeth = (key: string, selection: ToothSelection) => {
+  const confirmTeeth = (key: string, serviceId: string, expectedMode: ToothScopeMode, selection: ToothSelection) => {
     const index = rows.findIndex((row) => row.key === key);
-    if (index < 0) { setToothDialogFor(null); return; }
+    if (index < 0 || rows[index].serviceId !== serviceId || modeOf(rows[index]) !== expectedMode) { setToothDialogFor(null); return; }
     const mode = modeOf(rows[index]);
     setRows((current) => {
       const at = current.findIndex((row) => row.key === key);
-      return at < 0 ? current : applyToothSelection(current, at, mode, selection, nextRowKey);
+      return at < 0 || current[at].serviceId !== serviceId || modeOf(current[at]) !== expectedMode
+        ? current : applyToothSelection(current, at, mode, selection, nextRowKey);
     });
     const teeth = [...new Set(selection.teeth)].sort((a, b) => a - b);
     setSplitNotice(mode === "per_tooth_episode" && teeth.length > 1 ? `${PER_TOOTH_SPLIT_NOTICE}: ${teeth.join("، ")}.` : null);
@@ -958,7 +1022,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
         </p>
       ) : null}
       {rows.map((row, index) => (
-        <div key={row.key} data-testid={`invoice-row-${index}`} data-tooth={row.toothCode ?? ""}
+        <div key={row.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
           className={`mb-3 rounded-xl border bg-slate-50/50 p-2.5 space-y-2 ${
             row.groupId ? "border-sky-200 border-s-4 border-s-sky-400" : "border-slate-100"}`}>
           <div className="flex flex-wrap items-center gap-2">
@@ -968,7 +1032,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
-                    serviceId: id ? String(id) : "",
+                    serviceId: id ? String(id) : "", doctorId: "",
                     price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
                     description: srv ? srv.name : current[index].description,
                   }, invoiceToothMode(srv?.category)));
@@ -1040,16 +1104,44 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                 ✕
               </button>
             ) : null}
+            {isClinical(row.serviceId) ? (
+              <label className="min-w-[12rem] flex-1">
+                <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المكلّف بهذا العمل</span>
+                <select aria-label="الطبيب المكلّف بالبند" data-testid={`invoice-provider-${index}`} value={row.doctorId}
+                  onChange={(event) => setRows((current) => current.map((item) => item.key === row.key
+                    ? { ...item, doctorId: event.target.value } : item))}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs">
+                  <option value="">غير محدد — يحتاج مراجعة مالية</option>
+                  {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+                </select>
+                {!doctorCatalog ? <span className="mt-1 block text-[10px] text-slate-500">قائمة الأطباء لم تُتحقق بعد؛ لا يُعيّن طبيب تلقائيًا.</span> : null}
+              </label>
+            ) : null}
             {toothControl(row, index)}
           </div>
+          {inputProblems[index] ? <p role="alert" data-testid={`invoice-input-problem-${index}`}
+            className="text-[11px] font-bold text-rose-800">{inputProblems[index]}</p> : null}
           {toothProblems[index] ? (
             <p data-testid={`invoice-tooth-problem-${index}`} className="text-[11px] font-bold text-amber-800">
               {toothProblems[index]}
             </p>
           ) : null}
           {(() => {
-            const preview = previews.find((one) => one.line === index);
-            if (!preview || preview.kind !== "clinical" || !isClinical(row.serviceId)) return null;
+            if (!isClinical(row.serviceId)) return null;
+            if (inputProblems[index]) return <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state="invalid"
+              className="text-[11px] font-bold text-rose-800">صحّح بيانات البند قبل معاينة الربط السريري.</div>;
+            const evidence = previewForRow(previewState, previewKey, row.key);
+            const preview = evidence.line;
+            if (!preview) return (
+              <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status}
+                className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-900">
+                {evidence.status === "refused" ? evidence.message ?? "راجع بيانات الفاتورة قبل الحفظ."
+                  : evidence.status === "pending" ? "جارٍ التحقق من الربط السريري لهذا البند…"
+                  : "تعذّر التحقق من الربط السريري. أعد المحاولة قبل حفظ الفاتورة."}
+                {evidence.status === "unavailable" ? <button type="button" onClick={() => setPreviewRetry((value) => value + 1)}
+                  className="ms-2 underline">إعادة المعاينة</button> : null}
+              </div>
+            );
             const caseText = !preview.case ? null
               : preview.case.mode === "existing" ? `سيتم الربط بالحالة الموجودة: ${preview.case.title ?? `#${preview.case.id}`}`
               : preview.case.mode === "new" ? "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب"
@@ -1057,11 +1149,11 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
               : preview.case.mode === "choose" ? "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة"
               : null;
             return (
-              <div data-testid={`invoice-clinical-preview-${index}`}
-                className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${preview.refusalMessage ? "border-rose-200 bg-rose-50 text-rose-800" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
-                <p>هذه الفاتورة ستنشئ/تربط علاجًا سريريًّا للمريض — {preview.specialtyLabel}: {preview.item?.mode === "existing" ? (preview.item.id !== null ? `بند الخطة القائم #${preview.item.id}` : "بند خطة قائم لا يطابق هذا السطر") : "بند خطة جديد"}
-                  {` · ${formatMoney(previewAmount(index), currency)}`}</p>
-                {caseText ? <p>{caseText}</p> : null}
+              <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status}
+                className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${evidence.status === "refused" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
+                {evidence.status === "ready" ? <p>هذه الفاتورة ستنشئ/تربط علاجًا سريريًّا للمريض — {preview.specialtyLabel}: {preview.item?.mode === "existing" ? (preview.item.id !== null ? `بند الخطة القائم #${preview.item.id}` : "بند خطة قائم لا يطابق هذا السطر") : "بند خطة جديد"}
+                  {` · ${formatMoney(previewAmount(index), currency)}`}</p> : <p>لا يمكن حفظ هذا البند قبل معالجة سبب الرفض.</p>}
+                {caseText && (evidence.status === "ready" || preview.case?.mode === "choose") ? <p>{caseText}</p> : null}
                 {preview.case?.mode === "choose" || (preview.case?.options.length ?? 0) > 1 ? (
                   <select value={row.caseId} aria-label="الحالة"
                     onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, caseId: event.target.value } : item))}
@@ -1071,6 +1163,8 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                   </select>
                 ) : null}
                 {preview.refusalMessage ? <p>{preview.refusalMessage}</p> : null}
+                {evidence.status === "ready" && (preview.financialReviewRequired || !row.doctorId) ? <p data-testid={`invoice-provider-review-${index}`}
+                  className="mt-1 text-amber-900">نسبة هذا الالتزام للطبيب غير محسومة؛ تُحفظ الفاتورة، وتبقى المراجعة المالية مطلوبة قبل التوقيع.</p> : null}
               </div>
             );
           })()}
@@ -1114,7 +1208,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
       ) : null}
       <button
         onClick={() => {
-          if (blockedLines.length > 0) return;
+          if (busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked) return;
           onSubmit({
             currency,
             discount,
@@ -1123,6 +1217,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
               .filter((row) => row.serviceId || row.description.trim())
               .map((row) => ({
                 serviceId: row.serviceId ? Number(row.serviceId) : undefined,
+                doctorId: row.doctorId ? Number(row.doctorId) : undefined,
                 description: row.description,
                 price: row.price,
                 priceReason: row.priceReason,
@@ -1133,19 +1228,19 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
             idempotencyKey,
           });
         }}
-        disabled={busy || blockedLines.length > 0 || !rows.some((row) => row.serviceId || row.description.trim())}
+        disabled={busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || !rows.some((row) => row.serviceId || row.description.trim())}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
       >
         احفظ الفاتورة
       </button>
       {dialogRow ? (
         <ToothSelectionDialog
-          key={dialogRow.key}
+          key={`${patientId}:${dialogRow.key}:${dialogRow.serviceId}:${modeOf(dialogRow)}`}
           patientId={patientId}
           mode={modeOf(dialogRow)}
           serviceName={serviceOf(dialogRow.serviceId)?.name ?? dialogRow.description}
           initial={selectionOfRow(dialogRow)}
-          onConfirm={(selection) => confirmTeeth(dialogRow.key, selection)}
+          onConfirm={(selection) => confirmTeeth(dialogRow.key, dialogRow.serviceId, modeOf(dialogRow), selection)}
           onCancel={() => setToothDialogFor(null)}
         />
       ) : null}

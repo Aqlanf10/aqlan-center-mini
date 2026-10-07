@@ -81,7 +81,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
           if (rejectSign) { await json(route, { message: "منع تجريبي من قواعد التوقيع" }, 409); return; }
           stored = { ...stored, status: "signed", signedAt: "2026-10-04T10:00:00Z", signedBy: "طبيب تجريبي",
             ortho: stored.ortho ? { ...(stored.ortho as object), visitAdjustmentId: 98317 } : null };
-          await json(route, { invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); return;
+          await json(route, { patientId, invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); return;
         }
       }
       unexpected.push(`${method} ${path}`); await json(route, { message: "Unexpected synthetic write blocked" }, 409); return;
@@ -506,3 +506,4 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
     } finally { await f.context.close(); }
   });
 });
+

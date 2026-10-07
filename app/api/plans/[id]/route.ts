@@ -93,6 +93,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         ...("recoveryInvoiceIds" in result ? { recoveryInvoiceIds: result.recoveryInvoiceIds } : {}),
       }, { status: 409 });
     }
+    if ("reason" in result && result.reason === "plan_financial_history_requires_review") {
+      return NextResponse.json({ reason: result.reason, message: "الخطة تحتوي علاجًا ذا سجل مالي أو اتفاق تاريخي؛ لا تُصدر قسطًا جديدًا له. اختر الفاتورة القائمة أو الرصيد السابق وراجع الربط المالي." }, { status: 409 });
+    }
     if ("reason" in result && result.reason === "inactive_plan") {
       return NextResponse.json({ message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." }, { status: 409 });
     }
@@ -164,3 +167,4 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "تعذّر تنفيذ الإجراء." }, { status: 500 });
   }
 }
+
