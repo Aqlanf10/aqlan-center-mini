@@ -104,21 +104,24 @@ def validate_graph(graph, contract):
         expected_service = contract['postgresService'] if lane in ('postgres_schema_journeys', 'build_http') else None
         require(job.get('services') == expected_service, 'isolated PostgreSQL service changed')
         expected_env = {**contract['laneEnvironment'], **identity_env, 'CI_LANE': lane}
-        if expected_service:
-            expected_env['CI_POSTGRES_CONTAINER'] = '${{ job.services.postgres.id }}'
         require(job.get('env') == expected_env, 'identity or environment mapping changed')
         for key, value in contract['laneEnvironment'].items():
             require(job.get('env', {}).get(key) == value, f'lane environment changed: {lane}/{key}')
         require('NODE_ENV' not in job['env'] and 'CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE' not in job['env']
                 and 'MANUAL_CASH_CI_DISPOSABLE_FIXTURE' not in job['env'], 'unsafe global runtime/reset setting')
-        if expected_service:
-            require(job['env'].get('CI_POSTGRES_CONTAINER') == '${{ job.services.postgres.id }}',
-                    'service identity missing')
+        require(not any(isinstance(value, str) and re.search(r'\b(?:job|steps|runner)\.', value)
+                        for value in job['env'].values()),
+                'runner-only context is unavailable in job-level env')
         steps = steps_by_id(job)
         require(job['steps'][:5] == contract['bootstrapSteps'], 'per-lane bootstrap contract changed')
-        require(list(steps)[5] == 'evidence_init' and steps['evidence_init'] == {
+        expected_init = {
             'name': 'Bind clean checkout and evidence identity', 'id': 'evidence_init',
-            'run': 'python3 .github/ci/evidence.py init'}, 'clean-source provenance gate changed')
+            'run': 'python3 .github/ci/evidence.py init'}
+        if expected_service:
+            # job.services is available only after the job starts, at step env scope.
+            expected_init['env'] = {'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'}
+        require(list(steps)[5] == 'evidence_init' and steps['evidence_init'] == expected_init,
+                'clean-source or step-scoped service provenance gate changed')
         require(list(steps)[-2:] == ['seal', 'receipt_upload'], 'seal must run after every command/uploader')
         require(steps['seal'].get('if') == 'always()'
                 and steps['seal'].get('run') == 'python3 .github/ci/evidence.py seal'

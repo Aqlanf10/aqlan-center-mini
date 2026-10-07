@@ -284,8 +284,7 @@
         "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
         "CI_REPOSITORY": "${{ github.repository }}",
         "CI_REF": "${{ github.ref }}",
-        "CI_LANE": "postgres_schema_journeys",
-        "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+        "CI_LANE": "postgres_schema_journeys"
       },
       "outputs": {
         "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
@@ -327,7 +326,10 @@
         {
           "name": "Bind clean checkout and evidence identity",
           "id": "evidence_init",
-          "run": "python3 .github/ci/evidence.py init"
+          "run": "python3 .github/ci/evidence.py init",
+          "env": {
+            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+          }
         },
         {
           "name": "PostgreSQL integration tests",
@@ -466,8 +468,7 @@
         "CI_RUN_ATTEMPT": "${{ github.run_attempt }}",
         "CI_REPOSITORY": "${{ github.repository }}",
         "CI_REF": "${{ github.ref }}",
-        "CI_LANE": "build_http",
-        "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+        "CI_LANE": "build_http"
       },
       "outputs": {
         "receipt_id": "${{ steps.receipt_upload.outputs.artifact-id }}",
@@ -509,7 +510,10 @@
         {
           "name": "Bind clean checkout and evidence identity",
           "id": "evidence_init",
-          "run": "python3 .github/ci/evidence.py init"
+          "run": "python3 .github/ci/evidence.py init",
+          "env": {
+            "CI_POSTGRES_CONTAINER": "${{ job.services.postgres.id }}"
+          }
         },
         {
           "name": "Audit the actual build-lane installation",

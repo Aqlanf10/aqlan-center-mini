@@ -228,7 +228,6 @@ jobs:
       CI_REPOSITORY: ${{ github.repository }}
       CI_REF: ${{ github.ref }}
       CI_LANE: postgres_schema_journeys
-      CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
     outputs:
       receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
       receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
@@ -256,6 +255,8 @@ jobs:
       - name: Bind clean checkout and evidence identity
         id: evidence_init
         run: python3 .github/ci/evidence.py init
+        env:
+          CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: PostgreSQL integration tests
         env:
           CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
@@ -361,7 +362,6 @@ jobs:
       CI_REPOSITORY: ${{ github.repository }}
       CI_REF: ${{ github.ref }}
       CI_LANE: build_http
-      CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
     outputs:
       receipt_id: ${{ steps.receipt_upload.outputs.artifact-id }}
       receipt_digest: ${{ steps.receipt_upload.outputs.artifact-digest }}
@@ -389,6 +389,8 @@ jobs:
       - name: Bind clean checkout and evidence identity
         id: evidence_init
         run: python3 .github/ci/evidence.py init
+        env:
+          CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: Audit the actual build-lane installation
         run: node --import tsx scripts/ci-audit.mjs
         id: build_install_audit

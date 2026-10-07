@@ -72,6 +72,24 @@ class WorkflowDagFaults(unittest.TestCase):
         self.reject(lambda g: g['on'].update({'pull_request_target': {'branches': ['main']}}))
         self.reject(lambda g: g['concurrency'].update({'group': 'ci-${{ github.head_ref || github.ref }}'}))
 
+    def test_service_identity_uses_step_scope_not_job_scope(self):
+        value = graph()
+        for lane in ('postgres_schema_journeys', 'build_http'):
+            job = value['jobs'][lane]
+            self.assertNotIn('CI_POSTGRES_CONTAINER', job['env'])
+            init = next(step for step in job['steps'] if step['id'] == 'evidence_init')
+            self.assertEqual(init['env'], {'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'})
+            self.reject(lambda g: g['jobs'][lane]['env'].update({
+                'CI_POSTGRES_CONTAINER': '${{ job.services.postgres.id }}'}))
+            def remove_capture(g):
+                step = next(s for s in g['jobs'][lane]['steps'] if s['id'] == 'evidence_init')
+                step.pop('env')
+            self.reject(remove_capture)
+            def wrong_capture(g):
+                step = next(s for s in g['jobs'][lane]['steps'] if s['id'] == 'evidence_init')
+                step['env']['CI_POSTGRES_CONTAINER'] = 'synthetic-container-id'
+            self.reject(wrong_capture)
+
     def test_legacy_hidden_directory_remains_non_evidence(self):
         def broaden(g):
             step = next(s for s in g['jobs']['build_http']['steps'] if s.get('with', {}).get('name', '').startswith('settings-ui-screenshots--'))
