@@ -145,12 +145,16 @@ async function main() {
   const accruedMinor = accrued.kpis.find((k) => k.key === "accrued")?.minor ?? -1;
   check("الناشئة اليوم = 125,000", accruedMinor, 125000);
 
-  // التحصيل: جديد 50k (فوق الافتتاحي) + قديم 50k
+  // التحصيل يعرض السند بعملته، ولا يعرض تخصيص FIFO كأنه هدف صريح للسند.
   const collections = await buildReport("collections", params());
-  const newMinor = collections.kpis.find((k) => k.key === "new")?.minor ?? -1;
-  const oldMinor = collections.kpis.find((k) => k.key === "old")?.minor ?? -1;
-  check("التحصيل: قديم = 50,000 (FIFO على الافتتاحي)", oldMinor, 50000);
-  check("التحصيل: جديد = 50,000", newMinor, 50000);
+  check("التحصيل: صافي السندات اليمنية = 100,000",
+    collections.kpis.find((k) => k.key === "cur-YER")?.minor, 100000);
+  check("التحصيل: قيمة الصف الأصلية = 100,000 YER",
+    collections.rows?.[0]?.nativeMinor, 100000);
+  check("التحصيل: لا بطاقة مكافئ/تخصيص مشتق",
+    collections.kpis.some((k) => /^(total|new|old|refunds)$/.test(k.key)), false);
+  // Keep the existing classifier check on its account-based daily-report surface.
+  check("يومي: باقي التحصيل بعد الرصيد السابق = 50,000", dailyCollected - dailyOld, 50000);
 
   // حركة المديونية لهذه السنة
   const movement = await buildReport("debt", params({ debtMode: "movement", preset: "this_year" }));
@@ -223,7 +227,7 @@ async function main() {
   const collectionsForOverview = await buildReport("collections", params());
   check("ملخّص العيادة: التحصيل = تقرير التحصيل",
     overview.kpis.find((k) => k.key === "collected")?.minor,
-    collectionsForOverview.kpis.find((k) => k.key === "total")?.minor);
+    collectionsForOverview.kpis.find((k) => k.key === "cur-YER")?.minor);
   check("ملخّص العيادة: الزيارات = سجل الزيارات",
     overview.kpis.find((k) => k.key === "visits")?.count,
     visitsReport.kpis.find((k) => k.key === "visits")?.count);

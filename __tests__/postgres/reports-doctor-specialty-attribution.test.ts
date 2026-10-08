@@ -147,7 +147,8 @@ describe("تقرير الطبيب — من بنوده لا من علاقته ا�
     const sum = (doctor.rows ?? []).filter((row) => row.currency === "YER")
       .reduce((total, row) => total + Number(row.collectedMinor ?? 0), 0);
     expect(sum).toBe(76000);
-    expect(moneyKpi(collections, "total")).toBe(76000);
+    // This fixture is YER tender settling YER only; native and settlement totals agree here.
+    expect(moneyKpi(collections, "cur-YER")).toBe(76000);
   });
 });
 
