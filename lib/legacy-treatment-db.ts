@@ -305,12 +305,16 @@ async function decideLegacyTreatment(client: DbClient, input: {
       } else {
         let orthoCaseId: number | null = null;
         if (specialty === "orthodontics") {
-          const { rows: [ortho] } = await client.query<{ id: number }>(
-            `SELECT o.id FROM ortho_cases o
+          // Same bridge rule as invoice-first (createLinkedInvoice): one unbridged running ortho case, with the
+          // requested arch scope exactly. Several are ambiguous; a different, blank or unknown scope is refused.
+          const { rows: orthos } = await client.query<{ id: number; arches: string | null }>(
+            `SELECT o.id, o.arches FROM ortho_cases o
               WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
                 AND NOT EXISTS (SELECT 1 FROM clinical_cases cc WHERE cc.ortho_case_id = o.id)
-              ORDER BY o.id DESC LIMIT 1`, [patientId]);
-          orthoCaseId = ortho?.id ?? null;
+              ORDER BY o.id${forUpdate}`, [patientId]);
+          if (orthos.length > 1) throw new Refusal("ambiguous_case");
+          if (orthos.length === 1 && (orthos[0].arches ?? "") !== site.scope) throw new Refusal("ortho_scope_mismatch");
+          orthoCaseId = orthos[0]?.id ?? null;
         }
         casePlan = { mode: "new", orthoCaseId, title: orthoCaseId !== null ? "تقويم الأسنان" : legacyCaseTitle(specialty, site) };
       }

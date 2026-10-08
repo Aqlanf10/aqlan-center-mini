@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Route } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
 
@@ -150,5 +150,71 @@ describe("pre-system treatment through the built form", () => {
       const statementText = await pdf(`/print/statement/${patientId}`, "legacy-treatment-statement-print");
       expect(statementText).toMatch(/180,000/);
     } finally { await print.context().close(); }
+  });
+});
+
+describe("legacy preview failure, staleness and form ownership", () => {
+  it("blocks save on a failed preview, ignores a stale response, follows A→B→A, and starts clean after close/reopen", async () => {
+    const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(
+      "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id", [`LGST-${stamp}`, "مريض معاينة اصطناعي"]);
+    const page = await open(patientId, 1280, "?tab=account");
+    let mode: "fail" | "hold" | "pass" = "fail";
+    let held: Route | null = null;
+    const seen: { agreed: unknown; status: number }[] = [];
+    await page.route("**/legacy-treatments/preview", async (route) => {
+      const agreed = (JSON.parse(route.request().postData() ?? "{}") as { agreedAmount?: unknown }).agreedAmount;
+      if (mode === "fail") { seen.push({ agreed, status: 503 }); return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "تعذّرت المعاينة (اختبار)." }) }); }
+      if (mode === "hold" && agreed === "300000" && held === null) { held = route; return; }
+      seen.push({ agreed, status: 200 });
+      return route.continue();
+    });
+    try {
+      await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+      const form = page.getByTestId("legacy-treatment-form");
+      const save = form.getByRole("button", { name: "احفظ العلاج السابق" });
+      const readState = form.getByTestId("legacy-preview-read-state");
+      await form.getByLabel("الخدمة العلاجية").selectOption(String(bridge));
+      await form.getByTestId("legacy-tooth-button").click();
+      const dialog = page.getByTestId("tooth-dialog");
+      for (const tooth of [24, 25]) await dialog.getByTestId(`odontogram-tooth-${tooth}`).click();
+      await page.getByTestId("tooth-dialog-confirm").click();
+      await form.getByLabel("المدفوع قبل النظام").fill("100000");
+      await form.getByLabel("تاريخ المعلومات التاريخية").fill("2026-02-01");
+
+      // A failed preview keeps save disabled and says so.
+      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("250000");
+      await expect.poll(() => readState.innerText(), { timeout: 30_000 }).toContain("تعذّرت المعاينة (اختبار).");
+      expect(await readState.isVisible()).toBe(true);
+      expect(await save.isEnabled()).toBe(false);
+
+      // A (300000) is held; B (400000) answers first; releasing A must not overwrite B's evidence.
+      mode = "hold";
+      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+      await expect.poll(() => held !== null, { timeout: 30_000 }).toBe(true);
+      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("400000");
+      await expect.poll(() => form.getByTestId("legacy-opening-effect").count(), { timeout: 30_000 }).toBe(1);
+      expect(await form.getByTestId("legacy-opening-effect").innerText()).toContain("300,000");
+      await (held as Route | null)?.continue();
+      await page.waitForTimeout(500);
+      expect(await form.getByTestId("legacy-opening-effect").innerText()).toContain("300,000");
+      expect(await save.isEnabled()).toBe(true);
+
+      // A→B→A: back to 300000 shows A's own (fresh) evidence, not B's.
+      mode = "pass";
+      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+      await expect.poll(async () => await form.getByTestId("legacy-opening-effect").count() === 0 ? "" : form.getByTestId("legacy-opening-effect").innerText(),
+        { timeout: 30_000 }).toContain("200,000");
+      expect(seen.some((one) => one.agreed === "400000" && one.status === 200)).toBe(true);
+
+      // Close and reopen: a fresh, empty form with save disabled; nothing was written by any preview.
+      await form.getByRole("button", { name: "إلغاء" }).click();
+      await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+      const reopened = page.getByTestId("legacy-treatment-form");
+      expect(await reopened.getByLabel("المبلغ المتفق عليه أصلًا").inputValue()).toBe("");
+      expect(await reopened.getByRole("button", { name: "احفظ العلاج السابق" }).isEnabled()).toBe(false);
+      expect((await db.query(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1
+        UNION ALL SELECT 1 FROM treatment_plans WHERE patient_id = $1 UNION ALL SELECT 1 FROM patient_opening_balances WHERE patient_id = $1`, [patientId])).rows)
+        .toHaveLength(0);
+    } finally { await page.context().close(); }
   });
 });

@@ -46,6 +46,12 @@ The case is chosen in this order:
 3. Otherwise, for ortho, a bridge to the patient's unbridged active ortho case.
 4. Otherwise, a new case titled «… — حالة بدأت قبل النظام».
 
+The ortho bridge in step 3 uses the same rule as invoice-first (`createLinkedInvoice`): it bridges only when the patient has
+one running, unbridged ortho case whose recorded `arches` equals the requested scope exactly. A different, blank or unknown
+scope is refused with `ortho_scope_mismatch` (409) in both preview and save, and nothing is written. The decision is re-made
+under the save's locks, so a change after a successful preview is refused too. The schema already allows only one open ortho
+case per patient (`ortho_cases_one_open`), so the ambiguity refusal is defensive.
+
 When several open cases fit, the user chooses one. The save refuses `ambiguous_case` until a case is chosen.
 
 ## 4. Preview — the save's own decision (LEGACY-FIX)
@@ -150,7 +156,8 @@ Both modes also refuse with `already_void`, `opening_changed` and `period_locked
 | Unit | `__tests__/legacy-treatment-*.test.ts(x)`; `legacy-treatment-identity-scope` pins that save and preview share `decideLegacyTreatment` and that the preview is read-only |
 | PostgreSQL 18 | `__tests__/postgres/legacy-treatment*.test.ts`, including `legacy-treatment-preview` (preview = save, no writes, case choice/bridge, opening per role, SAR, unallocated receipt, refunded receipt, 20,000 collection) |
 | Built app (HTTP) | `__tests__/security-http/legacy-treatment-http.test.ts` (registration/replay/conflict/duplicate, Arabic validation, roles 401/403/404, preview vs unchanged invoice price authority, unallocated receipt, collection, ordinary and manager-authorized void with stale and other-mode tokens) |
-| Built app (browser) | `__tests__/security-http/legacy-treatment-ui-journey.test.ts`: at 1280 and 390, chart 14–16, preview ready, double-click save, stored rows, no invoice/receipt, no consent, case banner, account, plan and statement PDFs (A4) |
+| Built app (HTTP, review 5451105703/5451120047) | catalog price ≠ historical amount in YER/SAR/USD registers without a price reason or provider, and the item carries the agreed amount with no provider/consent; catalog price = old placeholder: legacy proceeds while the invoice preview keeps `financialReviewRequired`; an ordinary invoice override still needs its reason; ortho upper vs running lower is refused with no writes, while the matching scope registers |
+| Built app (browser) | `__tests__/security-http/legacy-treatment-ui-journey.test.ts`: at 1280 and 390, chart 14–16, preview ready, double-click save, stored rows, no invoice/receipt, no consent, case banner, account, plan and statement PDFs (A4); a failed preview blocks save visibly, a held stale response never overwrites newer evidence, A→B→A shows A's fresh evidence, and close/reopen starts empty with no writes |
 
 All tests use isolated synthetic databases only. No production data is used.
 

@@ -132,6 +132,72 @@ describe("(INV-LEGACY) registration over HTTP", () => {
   });
 });
 
+describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no provider is invented", () => {
+  it.each([
+    { currency: "YER", agreed: "300000", paid: "120000", remaining: 180_000 },
+    { currency: "SAR", agreed: "3000", paid: "1200", remaining: 180_000 },
+    { currency: "USD", agreed: "800", paid: "300", remaining: 50_000 },
+  ])("previews and registers a $currency agreement that differs from every catalog price, without a price reason or doctor", async ({ currency, agreed, paid, remaining }) => {
+    const patient = await newPatient();
+    // Catalog: 300000 YER, 250 SAR, 70 USD — none equals the historical agreement.
+    const { rows: [service] } = await db.query<{ id: number }>(`INSERT INTO services (name, price_minor, price_sar_minor, price_usd_minor,
+        is_active, price_configured, category) VALUES ($1, 300000, 25000, 7000, TRUE, TRUE, 'rct') RETURNING id`, [`عصب بأسعار ${stamp}-${currency}`]);
+    const body = { serviceId: service.id, toothCode: 36, currency, agreedAmount: agreed, previouslyPaidAmount: paid };
+    const seen = await preview("reception", patient, body);
+    expect(seen.status).toBe(200);
+    expect(await json(seen)).toMatchObject({ refusal: null, preview: { opening: { effect: "created", afterMinor: remaining, currency } } });
+    const saved = await post("reception", patient, body);
+    expect(saved.status).toBe(201);
+    expect((await db.query(`SELECT currency, amount_minor::int AS amount FROM patient_opening_balances WHERE patient_id = $1`, [patient])).rows)
+      .toEqual([{ currency, amount: remaining }]);
+    const { rows: [item] } = await db.query<{ unit: number; doctor: number | null; consent: string | null }>(`SELECT i.unit_price_minor::int AS unit,
+        t.primary_doctor_id AS doctor, t.consent_at::text AS consent FROM legacy_treatment_agreements a JOIN plan_items i ON i.id = a.plan_item_id
+        JOIN treatment_plans t ON t.id = i.plan_id WHERE a.patient_id = $1`, [patient]);
+    // The item carries the historical agreement, not today's catalog; no provider and no consent are injected.
+    expect(item).toEqual({ unit: Number(agreed) * (currency === "YER" ? 1 : 100), doctor: null, consent: null });
+    expect(await money(patient)).toMatchObject({ payments: 0, invoices: 0 });
+  });
+
+  it("with a catalog price equal to the old placeholder, legacy proceeds without a provider while the invoice preview keeps its review flag", async () => {
+    const patient = await newPatient();
+    const { rows: [service] } = await db.query<{ id: number }>(`INSERT INTO services (name, price_minor, is_active, price_configured, category)
+      VALUES ($1, 1, TRUE, TRUE, 'rct') RETURNING id`, [`عصب بسعر 1 ${stamp}`]);
+    const invoice = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify({
+      patientId: patient, currency: "YER", items: [{ serviceId: service.id, price: "1", quantity: 1, toothCode: 11, caseId: "" }],
+    }));
+    expect(invoice.status).toBe(200);
+    expect(((await json(invoice)) as { lines: { financialReviewRequired?: boolean }[] }).lines[0].financialReviewRequired).toBe(true);
+    const seen = await preview("reception", patient, { serviceId: service.id, toothCode: 11 });
+    expect(await json(seen)).toMatchObject({ refusal: null });
+    expect((await post("reception", patient, { serviceId: service.id, toothCode: 11 })).status).toBe(201);
+  });
+
+  it("an ordinary invoice price override still needs its reason", async () => {
+    const patient = await newPatient();
+    const override = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({
+      patientId: patient, currency: "YER", items: [{ serviceId: rctService, price: "1000", quantity: 1, toothCode: 11, caseId: "" }],
+    }));
+    expect(override.status).toBe(400);
+    expect((await json(override)).message).toMatch(ARABIC);
+  });
+
+  it("refuses an ortho agreement whose scope differs from the running ortho case, writing nothing", async () => {
+    const patient = await newPatient();
+    const { rows: [ortho] } = await db.query<{ id: number }>(`INSERT INTO services (name, price_minor, is_active, price_configured, category)
+      VALUES ($1, 300000, TRUE, TRUE, 'ortho') RETURNING id`, [`تقويم نطاق ${stamp}-${seq}`]);
+    await db.query(`INSERT INTO ortho_cases (patient_id, appliance, arches, status, start_date, created_by)
+      VALUES ($1, 'fixed_metal', 'lower', 'active', '2026-01-01', 'dr')`, [patient]);
+    const seen = await preview("reception", patient, { serviceId: ortho.id, scope: "upper" });
+    expect(await json(seen)).toMatchObject({ refusal: "ortho_scope_mismatch", refusalMessage: expect.stringMatching(ARABIC) });
+    const saved = await post("reception", patient, { serviceId: ortho.id, scope: "upper" });
+    expect(saved.status).toBe(409);
+    expect(await money(patient)).toEqual({ payments: 0, invoices: 0, opening: null });
+    expect((await db.query(`SELECT 1 FROM clinical_cases WHERE patient_id = $1`, [patient])).rows).toHaveLength(0);
+    const matching = await post("reception", patient, { serviceId: ortho.id, scope: "lower" });
+    expect(matching.status).toBe(201);
+  });
+});
+
 describe("(LEGACY-FIX) the legacy preview and the unchanged invoice price authority", () => {
   it("previews from the agreement data with the save decision, writes nothing, and the invoice preview still refuses a placeholder price", async () => {
     const patient = await newPatient();

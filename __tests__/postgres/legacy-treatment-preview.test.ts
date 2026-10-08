@@ -142,6 +142,65 @@ describe("legacy registration preview uses the agreement data and the save decis
   });
 });
 
+describe("ortho bridge scope (same rule as invoice-first)", () => {
+  const orthoCase = async (patient: number, arches: string) => {
+    await createOrthoCase({
+      patientId: patient, appliance: "fixed_metal", arches: arches as "both", slot: "022", bracketSystem: null,
+      startDate: TODAY, plannedMonths: 18, planId: null, note: null, createdBy: "dr",
+    });
+    return (await q<{ id: number }>(`SELECT id FROM ortho_cases WHERE patient_id = $1 ORDER BY id DESC LIMIT 1`, [patient]))[0].id;
+  };
+
+  it("refuses upper against a running lower case in preview and save, and rolls back every write", async () => {
+    const patient = await newPatient();
+    await orthoCase(patient, "lower");
+    const before = await footprint(patient);
+    expect(await preview(patient, { serviceId: services.ortho, scope: "upper" })).toEqual({ ok: false, reason: "ortho_scope_mismatch" });
+    expect(await create(patient, { serviceId: services.ortho, scope: "upper" })).toEqual({ ok: false, reason: "ortho_scope_mismatch" });
+    expect(await footprint(patient)).toBe(before);
+  });
+
+  it("fails closed on a blank or unknown recorded arch scope", async () => {
+    for (const arches of ["", "unknown"]) {
+      const patient = await newPatient();
+      const id = await orthoCase(patient, "both");
+      await q(`UPDATE ortho_cases SET arches = $2 WHERE id = $1`, [id, arches]);
+      const before = await footprint(patient);
+      expect(await preview(patient, { serviceId: services.ortho, scope: "both" })).toEqual({ ok: false, reason: "ortho_scope_mismatch" });
+      expect(await create(patient, { serviceId: services.ortho, scope: "both" })).toEqual({ ok: false, reason: "ortho_scope_mismatch" });
+      expect(await footprint(patient)).toBe(before);
+    }
+  });
+
+  it("bridges exactly one matching case, once", async () => {
+    const patient = await newPatient();
+    const ortho = await orthoCase(patient, "upper");
+    const saved = await create(patient, { serviceId: services.ortho, scope: "upper" });
+    expect(saved).toMatchObject({ ok: true, caseCreated: true });
+    if (!saved.ok) return;
+    expect(await q(`SELECT ortho_case_id FROM clinical_cases WHERE id = $1`, [saved.agreement.caseId])).toEqual([{ ortho_case_id: ortho }]);
+    expect(await q(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [ortho])).toHaveLength(1);
+  });
+
+  it("re-decides under the save's locks when the evidence changed after a successful preview", async () => {
+    const patient = await newPatient();
+    const id = await orthoCase(patient, "both");
+    expect(await preview(patient, { serviceId: services.ortho, scope: "both" })).toMatchObject({ ok: true, preview: { case: { mode: "bridge" } } });
+    await q(`UPDATE ortho_cases SET arches = 'lower' WHERE id = $1`, [id]);
+    const before = await footprint(patient);
+    expect(await create(patient, { serviceId: services.ortho, scope: "both" })).toEqual({ ok: false, reason: "ortho_scope_mismatch" });
+    expect(await footprint(patient)).toBe(before);
+  });
+
+  it("cannot face two running ortho cases: the schema allows one open case per patient (the ambiguity refusal is defensive)", async () => {
+    const patient = await newPatient();
+    await orthoCase(patient, "both");
+    await expect(q(`INSERT INTO ortho_cases (patient_id, appliance, arches, status, start_date, created_by)
+      SELECT patient_id, appliance, arches, status, start_date, created_by FROM ortho_cases WHERE patient_id = $1`, [patient]))
+      .rejects.toThrow(/ortho_cases_one_open/);
+  });
+});
+
 describe("mixed clinic data: an old payment already entered as a general receipt", () => {
   it("refuses to record «paid before the system» on top of an unallocated receipt, in preview and save, and changes nothing", async () => {
     const patient = await newPatient();
