@@ -56,7 +56,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "appointments", label: "المواعيد", hint: "الحجوزات، الحضور، الإلغاء، عدم الحضور ونسبة الالتزام" },
       { id: "recall", label: "المتابعة والاستدعاء", hint: "المتغيبون والمنقطعون وحالة المتابعة" },
       { id: "inventory", label: "المخزون", hint: "الرصيد، حد الطلب، الإدخال والصرف خلال الفترة" },
-      { id: "daily", label: "التقرير اليومي", hint: "مراجعون، خدمات، تحصيل، آجل، مصروفات، صافي التدفق" },
+      { id: "daily", label: "الحركات المالية اليومية", hint: "فواتير ودفعات ومصروفات اليوم؛ ليس كشفًا لكل من حضر" },
       { id: "patients", label: "تقارير المرضى", hint: "المرضى الجدد وقيمة تعاملهم" },
     ],
   },
@@ -114,6 +114,8 @@ interface LoadedReport {
   result: ReportResult;
   generatedAt: string;
   generatedBy: string;
+  /** Optional display metadata for legacy responses, retained with this result. */
+  clinicTimeZone?: unknown;
   /** The request that produced this result, separate from unapplied form edits. */
   filters: FilterState;
   sectionId: SectionId;
@@ -409,6 +411,14 @@ export default function ReportsPage() {
         links={financeLinks("/reports")}
       >
         <div className="flex flex-wrap gap-1.5">
+          {sessionRole === "admin" ? (
+            <a
+              href="/reports/daily-clinic"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
+            >
+              كشف إقفال اليوم السريري والمالي
+            </a>
+          ) : null}
           <a
             href="/report"
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
@@ -520,7 +530,7 @@ export default function ReportsPage() {
         <ReportView
           result={data.result}
           clinicName={clinicName}
-          generated={{ at: data.generatedAt, by: data.generatedBy }}
+          generated={{ at: data.generatedAt, by: data.generatedBy, clinicTimeZone: data.clinicTimeZone }}
           printHref={`/print/report?${reportSearchParams(
             data.result.report,
             { ...data.filters, preset: "custom", from: data.result.from, to: data.result.to },
@@ -538,3 +548,4 @@ export default function ReportsPage() {
     </main>
   );
 }
+

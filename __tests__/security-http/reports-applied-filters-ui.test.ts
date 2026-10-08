@@ -14,7 +14,8 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); });
 
-function payload(params: URLSearchParams) {
+type GenerationMetadata = { generatedAt?: string; clinicTimeZone?: unknown };
+function payload(params: URLSearchParams, generation: GenerationMetadata = {}) {
   const report = params.get("report") ?? "daily";
   const from = params.get("from") ?? "2026-09-01";
   const to = params.get("to") ?? "2026-09-30";
@@ -27,11 +28,11 @@ function payload(params: URLSearchParams) {
     ],
     rows: [{ patientId: 991, patientName: "مريض تجريبي", count: 1 }],
   };
-  return { result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic" };
+  return { result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic", clinicTimeZone: "Asia/Aden", ...generation };
 }
 
-async function fixture() {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "ar-YE", timezoneId: "Asia/Aden" });
+async function fixture(generation: GenerationMetadata = {}, browserTimeZone = "Asia/Aden") {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, locale: "ar-YE", timezoneId: browserTimeZone });
   const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
@@ -57,7 +58,7 @@ async function fixture() {
     if (params.get("report") === "options") {
       await json(route, { doctors: [], specialties: [], services: [], methods: [], receivers: [], baseCurrency: "YER", clinicName: "Synthetic" });
     } else if (hold) pending.push(route);
-    else await json(route, payload(params));
+    else await json(route, payload(params, generation));
   });
   await page.goto(`${baseUrl}/reports?section=operational&report=daily&preset=custom&from=2026-09-01&to=2026-09-30`);
   await page.getByRole("heading", { name: "تقرير تجريبي daily", exact: true }).waitFor();
@@ -82,6 +83,28 @@ async function copiedParams(page: Page) {
 }
 
 describe("report center applied filters in the built browser", () => {
+  it.each([
+    { clinicTimeZone: "America/New_York", expected: "الأربعاء 02/02/2000 · 5:00 مساءً" },
+    { clinicTimeZone: "Asia/Aden", expected: "الخميس 03/02/2000 · 1:00 صباحًا" },
+    { clinicTimeZone: undefined, expected: "الأربعاء 02/02/2000 · 10:00 مساءً (UTC)" },
+    { clinicTimeZone: "invalid-zone", expected: "الأربعاء 02/02/2000 · 10:00 مساءً (UTC)" },
+  ])("uses matching screen/page-print generation metadata for zone $clinicTimeZone despite browser timezone", async ({ clinicTimeZone, expected }) => {
+    const f = await fixture({ generatedAt: "2000-02-02T22:00:00.000Z", clinicTimeZone }, "Pacific/Honolulu");
+    try {
+      const screen = f.page.locator("main p").filter({ hasText: "أُنشئ في" });
+      expect(await screen.textContent()).toContain(`أُنشئ في ${expected} بواسطة synthetic`);
+      expect(await screen.isVisible()).toBe(true);
+      expect(await f.page.locator(".report-print-footer").textContent())
+        .toContain(`أُنشئ في ${expected} بواسطة synthetic`);
+      expect((await printParams(f.page)).get("from")).toBe("2026-09-01");
+      expect((await printParams(f.page)).get("to")).toBe("2026-09-30");
+      await f.page.emulateMedia({ media: "print" });
+      expect(await f.page.locator(".report-print-footer").isVisible()).toBe(true);
+      expect(await screen.isVisible()).toBe(false);
+      expect(f.errors).toEqual([]);
+    } finally { await f.context.close(); }
+  }, 120_000);
+
   it("keeps print/copy/save on the displayed period through draft edits and a failed Apply, then advances on success", async () => {
     const f = await fixture();
     try {
@@ -128,7 +151,7 @@ describe("report center applied filters in the built browser", () => {
       await f.page.getByRole("navigation", { name: "أقسام التقارير" }).getByRole("button", { name: "تقارير مالية", exact: true }).click();
       await f.fail();
       await f.page.getByRole("heading", { name: "تقرير تجريبي daily", exact: true }).waitFor();
-      expect(await f.page.getByRole("button", { name: "التقرير اليومي", exact: true }).count()).toBe(1);
+      expect(await f.page.getByRole("button", { name: "الحركات المالية اليومية", exact: true }).count()).toBe(1);
       expect((await printParams(f.page)).get("columns")).toBe("patientName");
       expect((await copiedParams(f.page)).get("report")).toBe("daily");
 

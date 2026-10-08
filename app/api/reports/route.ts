@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { canAccessUnifiedReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
-import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions } from "@/lib/reports";
+import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateAnnualReportRange } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
 
@@ -48,13 +49,20 @@ export async function GET(request: Request) {
   }
 
   try {
+    // التحقق من المدخلات الخام قبل أن يستبدل محلّل الفلاتر تاريخًا غير صالح بقيمة افتراضية.
+    if (report === "annual" && params.get("preset") === "custom") {
+      validateAnnualReportRange(params.get("from"), params.get("to"));
+    }
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
     const filters = parseFilters(params, await dbTodayISO());
     const result = await buildReport(report, filters);
     /* (P1-2) العقد الذي تقرؤه الصفحة (`LoadedReport`): التقرير داخل `result`. كان
        يُعاد مسطّحًا ({...result}) فتقرأ الصفحة `data.result` غير معرَّف وتنهار لكل
        مستخدم — والمسار نفسه يعيد 200. */
-    return NextResponse.json({ result, generatedAt: new Date().toISOString(), generatedBy: session.username });
+    return NextResponse.json({
+      result, generatedAt: new Date().toISOString(), generatedBy: session.username,
+      clinicTimeZone: CLINIC_TIME_ZONE,
+    });
   } catch (error) {
     // رسائل المدخلات عربية مكتوبة للمستخدم؛ غيرها لا تُكشف تفاصيله (CLAUDE.md).
     if (error instanceof ReportInputError) {

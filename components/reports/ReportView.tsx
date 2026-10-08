@@ -5,6 +5,7 @@ import { Icon } from "@/components/Icon";
 import { DataTable, KpiGrid, ComparisonPanel, BarsChart, PrintFrame, exportCsv, exportExcel } from "./shared";
 import type { ReportResult } from "@/lib/reports-types";
 import { applyReportView, type ReportViewSpec } from "@/lib/report-view";
+import { formatReportGeneratedAt } from "@/lib/report-generated-time";
 
 /**
  * عارض التقرير — يأخذ نتيجة جاهزة من المحرك ويصيّرها باللبنات المشتركة.
@@ -20,7 +21,7 @@ export function ReportView({
 }: {
   result: ReportResult;
   clinicName: string;
-  generated: { at: string; by: string };
+  generated: { at: string; by: string; clinicTimeZone?: unknown };
   printHref: string;
   view: ReportViewSpec;
   onViewChange: (view: ReportViewSpec) => void;
@@ -241,7 +242,7 @@ export function ReportView({
       ) : null}
 
       <p className="text-[10px] text-slate-400 print:hidden">
-        أُنشئ في {generated.at.slice(0, 16).replace("T", " ")} بواسطة {generated.by} · العملة الأساسية: {result.baseCurrency}
+        أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by} · العملة الأساسية: {result.baseCurrency}
       </p>
     </div>
   );

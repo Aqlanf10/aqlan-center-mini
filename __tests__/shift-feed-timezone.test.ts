@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 vi.stubEnv("CLINIC_TIME_ZONE", "America/New_York");
@@ -15,6 +16,7 @@ vi.mock("../lib/db", async (importOriginal) => {
 const { CLINIC_TIME_ZONE, getOpenShift } = await import("../lib/db");
 const { requireSession } = await import("../lib/session");
 const { GET } = await import("../app/api/shifts/route");
+const { GET: reconciliationGET } = await import("../app/api/finance/reconciliation/route");
 
 afterAll(() => { vi.unstubAllEnvs(); });
 
@@ -33,6 +35,25 @@ describe("shift feed clinic timezone", () => {
     vi.mocked(getOpenShift).mockClear();
     const response = await GET();
     expect(response.status).toBe(401);
+    expect(await response.json()).not.toHaveProperty("clinicTimeZone");
+    expect(getOpenShift).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconciliation feed clinic timezone", () => {
+  it("carries the same canonical server zone on its authorized read", async () => {
+    const response = await reconciliationGET(new NextRequest("http://localhost/api/finance/reconciliation"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ clinicTimeZone: "America/New_York", openShift: null, shifts: [] });
+  });
+
+  it("does not expand anonymous or doctor access", async () => {
+    vi.mocked(requireSession).mockResolvedValueOnce(null);
+    expect((await reconciliationGET(new NextRequest("http://localhost/api/finance/reconciliation"))).status).toBe(401);
+    vi.mocked(requireSession).mockResolvedValueOnce({ userId: 98, username: "restricted-doctor", role: "doctor", expiresAt: 4102444800000 });
+    vi.mocked(getOpenShift).mockClear();
+    const response = await reconciliationGET(new NextRequest("http://localhost/api/finance/reconciliation"));
+    expect(response.status).toBe(403);
     expect(await response.json()).not.toHaveProperty("clinicTimeZone");
     expect(getOpenShift).not.toHaveBeenCalled();
   });
