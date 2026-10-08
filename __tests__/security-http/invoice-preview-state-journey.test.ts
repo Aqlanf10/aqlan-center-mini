@@ -28,14 +28,36 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
+const networkByPage = new WeakMap<Page, { url: string; method: string; status: number; fromServiceWorker: boolean }[]>();
+/** Bounded transport evidence for a failure message: responses seen, SW control, and the row's current inputs. */
+async function transport(page: Page, line = 0) {
+  const row = page.getByTestId(`invoice-row-${line}`);
+  return {
+    responses: (networkByPage.get(page) ?? []).slice(-8),
+    controlled: await page.evaluate(() => Boolean(navigator.serviceWorker?.controller)).catch(() => null),
+    service: await row.getByLabel("الخدمة", { exact: true }).inputValue().catch(() => null),
+    price: await row.getByLabel("السعر", { exact: true }).inputValue().catch(() => null),
+    site: await page.getByTestId(`invoice-tooth-button-${line}`).innerText().catch(() => null),
+  };
+}
+
 async function openInvoice() {
   const { rows: [{ id }] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
     [`IPS-${stamp}-${++serial}`, "مريض اختبار ملكية المعاينة", doctorPartyId]);
-  const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
+  // Route-mocked failure injection needs controlled transport: a service worker can serve requests outside page.route
+  // (Playwright network docs), so this context blocks it, as the other route-mocked browser fixtures do.
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
   const [name, ...value] = h.sessions.reception.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
+  const network: { url: string; method: string; status: number; fromServiceWorker: boolean }[] = [];
+  page.on("response", (response) => {
+    if (!response.url().includes("/api/invoices")) return;
+    network.push({ url: new URL(response.url()).pathname, method: response.request().method(), status: response.status(),
+      fromServiceWorker: response.fromServiceWorker() });
+  });
+  networkByPage.set(page, network);
   await page.goto(`${baseUrl}/patients/${id}?tab=account`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "فاتورة يدوية" }).click();
   return { context, page, patientId: id };
@@ -71,6 +93,10 @@ async function waitForState(target: Locator, attribute: string, expected: string
   } catch {
     throw new Error(`${attribute} never became ${expected}: observed ${JSON.stringify(seen)}; evidence ${JSON.stringify(evidence())}`);
   }
+  // The original oracle was locator.waitFor(): the state must also be visible to the user, not merely attached.
+  await target.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {
+    throw new Error(`${attribute}=${expected} is attached but not visible; evidence ${JSON.stringify(evidence())}`);
+  });
 }
 
 describe("invoice form preview safety and shared chart interruption journeys", () => {
@@ -92,7 +118,11 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true }).fill("1600000");
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).not.toContain("بند خطة جديد");
-      await expect.poll(() => held !== null).toBe(true);
+      try {
+        await expect.poll(() => held !== null, { timeout: 30_000 }).toBe(true);
+      } catch {
+        throw new Error(`the held preview handler was never reached: ${JSON.stringify(await transport(page))}`);
+      }
       await json(held!, { message: "unavailable" }, 503);
       await page.locator('[data-preview-state="unavailable"]').waitFor();
       expect(await save(page).isEnabled()).toBe(false);
@@ -141,7 +171,12 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await selectFilling(page);
       await waitForState(page.getByTestId("invoice-clinical-preview-0"), "data-preview-state", "refused", () => ({
         previews, url: page.url() }));
+      // The intended 400 handler was actually exercised (not a real-server or service-worker response).
+      expect(previews.filter((status) => status === 400).length, JSON.stringify(await transport(page))).toBeGreaterThan(0);
+      expect((networkByPage.get(page) ?? []).some((one) => one.url.endsWith("/clinical-preview") && one.status === 400 && !one.fromServiceWorker)).toBe(true);
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).toContain("اكتب سبب الخصم قبل الحفظ.");
+      // The actionable refusal itself is visible to the user (a hidden attached refusal must not pass).
+      expect(await page.getByTestId("invoice-clinical-preview-0").getByText("اكتب سبب الخصم قبل الحفظ.").isVisible()).toBe(true);
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByRole("button", { name: "إعادة المعاينة" }).count()).toBe(0);
       reject = false;
@@ -264,6 +299,8 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await opener.click();
       const dialog = page.getByTestId("tooth-dialog");
       await waitForState(dialog, "data-chart-state", "unavailable", () => ({ charts, url: page.url() }));
+      // The unavailable state is shown to the user before any tooth is picked.
+      expect(await dialog.getByText("تعذّر تحميل حالة الأسنان", { exact: false }).isVisible()).toBe(true);
       const tooth = dialog.getByTestId("odontogram-tooth-26");
       expect(await tooth.getAttribute("data-chart-known")).toBe("false");
       expect(await tooth.getAttribute("aria-label")).toContain("الحالة غير متاحة");

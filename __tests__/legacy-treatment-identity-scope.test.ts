@@ -16,7 +16,7 @@ function body(source: string, name: string) {
 describe("immutable agreement patient/service selection", () => {
   it.each([
     { source: invoice, name: "inspectExistingWork" }, { source: invoice, name: "financialOnlyLineRefusal" },
-    { source: registration, name: "writeLegacyTreatment" },
+    { source: registration, name: "decideLegacyTreatment" },
   ])("retains immutable identity in the $name reader", ({ source, name }) => {
     const reader = body(source, name);
     expect(reader).toMatch(/\(t\.patient_id = \$1 AND i\.service_id = \$2\) OR EXISTS/);
@@ -45,13 +45,21 @@ describe("immutable agreement patient/service selection", () => {
     expect(reader).toMatch(/current_item\.service_name[\s\S]*current_plan\.patient_id = \$1/);
   });
 
+  it("decides registration and its read-only preview with the same locked/unlocked reader", () => {
+    expect(body(registration, "writeLegacyTreatment")).toContain("await decideLegacyTreatment(client, input, true)");
+    const preview = body(registration, "previewLegacyTreatment");
+    expect(preview).toContain("await decideLegacyTreatment(client, input, false)");
+    expect(preview).toContain("READ ONLY");
+    expect(preview).not.toMatch(/INSERT|UPDATE |DELETE|setPatientOpeningBalanceInTx|insertPlanV2InTx/);
+  });
+
   it("patient-scopes the mutable historical case display join", () => {
     expect(registration).toContain("LEFT JOIN clinical_cases c ON c.id = a.case_id AND c.patient_id = a.patient_id");
   });
 
   it("retains the shared immutable scope resolver after identity selection", () => {
     expect(body(invoice, "inspectExistingWork")).toContain("legacyCoverageOverlaps(legacyCoverageStateFromContext(row.legacy_context), site)");
-    expect(body(registration, "writeLegacyTreatment")).toContain("legacyCoverageOverlaps(coverage, site)");
+    expect(body(registration, "decideLegacyTreatment")).toContain("legacyCoverageOverlaps(coverage, site)");
     expect(body(db, "conflictsWithFinancialWork")).toContain("legacyCoverageOverlaps(legacyCoverageStateFromContext(prior.legacy_context)");
     expect(body(db, "unlinkedPlanSessionConflicts")).toContain("legacyCoverage: legacyCoverageStateFromContext(row.legacy_context)");
   });

@@ -119,7 +119,18 @@ export type LegacyTreatmentRefusal =
   | "no_patient" | "bad_service" | "bad_tooth" | "bad_case" | "ambiguous_case" | "idempotency_conflict"
   | "duplicate_live" | "open_item_exists" | "opening_not_owned" | "opening_edit_forbidden" | "period_locked"
   | "opening_changed" | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
-  | "incompatible_plan" | "needs_financial_review" | "legacy_episode_unsupported";
+  | "incompatible_plan" | "needs_financial_review" | "legacy_episode_unsupported" | "prior_receipts_review"
+  | "ortho_scope_mismatch";
+
+/**
+ * (LEGACY-FIX) معاينة التسجيل كما سيقرّرها الحفظ: الحالة التي سيُربط بها، وأثر الرصيد السابق.
+ * `case`/`opening` فارغان حين يكون الطلب نفسه محفوظًا بالمفتاح ذاته (إعادة إرسال).
+ */
+export interface LegacyTreatmentPreview {
+  case: { mode: "none" | "existing" | "new" | "bridge" | "choose"; id: number | null; title: string | null;
+    options: { id: number; title: string }[] } | null;
+  opening: { effect: "none" | "created" | "increased"; beforeMinor: number | null; afterMinor: number | null; currency: Currency } | null;
+}
 
 export type LegacyVoidRefusal =
   | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason"
@@ -128,6 +139,8 @@ export type LegacyVoidRefusal =
 export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, string> = {
   no_patient: "المريض غير موجود.",
   incompatible_plan: "الخطة الرئيسية القائمة غير قابلة لإضافة العلاج السابق؛ راجع خطط المريض وموافقاتها وعملتها قبل المتابعة.",
+  ortho_scope_mismatch: "حالة التقويم الجارية للمريض بنطاق فكّين مختلف أو غير مسجّل عن نطاق الاتفاق التاريخي — لا يُربط بها. راجع حالة التقويم ونطاقها أولًا.",
+  prior_receipts_review: "للمريض سندات قبض عامّة غير مرتبطة بفاتورة أو خطة أو رصيد سابق — قد يكون بينها مدفوعٌ قديم أُدخل كتحصيل، فيُخصم مرتين لو سُجّل «المدفوع قبل النظام» فوقه. لا يصنّف النظام السند من ملاحظته ولا يعكسه: تحتاج الحالة مراجعة وتسوية من المدير قبل تسجيل الاتفاق؛ هذا الإجراء لا يصحّحها تلقائيًا.",
   needs_financial_review: "هذا العمل له سجل مالي أو اتفاق تاريخي يحتاج مراجعة؛ لا يُعاد تسجيله أو فوترته بهوية جديدة.",
   legacy_episode_unsupported: "تسجيل اتفاق تاريخي لعدة أسنان متوقف مؤقتًا حتى يدعم النظام تغطية الحلقة كاملةً بأمان؛ لا تقسّم مبلغ الاتفاق أو المدفوع على الأسنان تخمينًا.",
   bad_service: "اختر خدمةً علاجية من الدليل (تقويم، علاج جذور، تركيبات، زراعة…) — الكشف والأشعة ليست علاجًا سابقًا.",
@@ -158,7 +171,7 @@ export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoi
 
 export const LEGACY_TREATMENT_STATUS: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, number> = {
   opening_collected: 409, void_forbidden: 403, bad_void_request: 400, preview_required: 400, preview_stale: 409,
-  incompatible_plan: 409, needs_financial_review: 409, legacy_episode_unsupported: 400,
+  incompatible_plan: 409, needs_financial_review: 409, prior_receipts_review: 409, ortho_scope_mismatch: 409, legacy_episode_unsupported: 400,
   no_patient: 404, bad_service: 400, bad_tooth: 400, bad_case: 400, ambiguous_case: 409, idempotency_conflict: 409,
   duplicate_live: 409, open_item_exists: 409, opening_not_owned: 409, opening_edit_forbidden: 403, period_locked: 409,
   opening_changed: 409, tooth_required: 400, episode_split_required: 400, bad_surfaces: 400, bad_scope: 400, not_found: 404, already_void: 409, opening_settled: 409, bad_reason: 400,

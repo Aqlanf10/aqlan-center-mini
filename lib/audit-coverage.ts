@@ -27,6 +27,7 @@ export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
   "PATCH /api/reports/saved": "تعديل تقرير محفوظ شخصي.",
   "DELETE /api/reports/saved": "حذف تقرير محفوظ شخصي.",
   "POST /api/invoices/clinical-preview": "معاينة الربط السريري للفاتورة قبل حفظها — قراءةٌ فقط لا تكتب شيئًا؛ الحفظ يُدقَّق في invoice.create.",
+  "POST /api/patients/[id]/legacy-treatments/preview": "معاينة تسجيل علاجٍ بدأ قبل النظام — معاملة READ ONLY لا تكتب شيئًا؛ الحفظ يُدقَّق في legacy_treatment.create.",
   "POST /api/expenses/quote": "معاينة حساب سند صرف — لا يكتب شيئًا.",
   "POST /api/finance/fx": "إعادة التقييم لا تكتب شيئًا: الدفتر بعملاته الأصلية (native_ledger) أو الفترة مقفلة.",
   "POST /api/settings/messaging/test": "اختبار القناة: نتيجته تُحفظ على القناة نفسها (last_test_at/ok/message).",
