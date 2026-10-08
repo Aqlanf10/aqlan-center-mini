@@ -69,6 +69,46 @@ export function emitCollectionsNativeEvidence(members: readonly CollectionsNativ
   }
 }
 
+/** Separately labelled layout controls, never positive financial evidence.
+ * Exact browser-returned buffers only; emit after the full journey/teardown and
+ * financial immutability checks. No workflow change or filesystem scan. */
+export function emitCollectionsPaginationControls(members: readonly CollectionsNativeEvidenceMember[]): void {
+  const files = ["collections-pagination-old-layout-control.pdf", "collections-pagination-multipage-layout-control.pdf"] as const;
+  if (members.length !== files.length) throw new Error("Pagination controls require exactly two allowlisted PDFs");
+  const byName = new Map<string, CollectionsNativeEvidenceMember>();
+  for (const member of members) {
+    if (!files.some(filename => filename === member.filename) || byName.has(member.filename)
+      || member.mime !== "application/pdf" || !Buffer.isBuffer(member.bytes)
+      || member.bytes.length === 0 || member.bytes.length > 2 * 1024 * 1024
+      || !member.bytes.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii"))
+      || !member.bytes.subarray(-1024).includes(Buffer.from("%%EOF", "ascii"))) {
+      throw new Error("Pagination control filename, MIME, size or signature rejected");
+    }
+    byName.set(member.filename, member);
+  }
+  const runId = /^\d{1,24}$/.test(process.env.GITHUB_RUN_ID ?? "") ? process.env.GITHUB_RUN_ID : "unavailable";
+  const checkoutSha = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(process.env.GITHUB_SHA ?? "") ? process.env.GITHUB_SHA : "unavailable";
+  const prefix = "SYNTHETIC_COLLECTIONS_PAGINATION_CONTROL_V1";
+  const prepared = files.map(filename => {
+    const member = byName.get(filename)!;
+    const base64 = member.bytes.toString("base64");
+    return { base64, metadata: {
+      scope: "collections-pagination-controls", file: filename, mime: "application/pdf", bytes: member.bytes.length,
+      sha256: createHash("sha256").update(member.bytes).digest("hex"), chunks: Math.ceil(base64.length / CHUNK_CHARACTERS),
+      runId, checkoutSha, synthetic: true, acceptance: false, layoutOnly: true,
+      control: filename === files[0] ? "old-layout-negative" : "tall-row-multipage",
+    } };
+  });
+  for (const { base64, metadata } of prepared) {
+    const identity = JSON.stringify(metadata);
+    console.log(`${prefix} BEGIN ${identity}`);
+    for (let index = 0; index < metadata.chunks; index++) {
+      console.log(`${prefix} CHUNK ${metadata.file} ${index + 1}/${metadata.chunks} ${base64.slice(index * CHUNK_CHARACTERS, (index + 1) * CHUNK_CHARACTERS)}`);
+    }
+    console.log(`${prefix} END ${identity}`);
+  }
+}
+
 // Failure diagnostics are a separate protocol. They are never members of FILES
 // and never evidence that the browser witness passed its acceptance assertions.
 export const COLLECTIONS_NATIVE_COLUMN_KEYS = [

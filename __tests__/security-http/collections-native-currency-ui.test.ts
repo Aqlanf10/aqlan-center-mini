@@ -5,8 +5,9 @@ import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import type { ReportResult } from "../../lib/reports-types";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { matchesPrintPdfWord } from "../helpers/print-pdf-glyphs";
 import { authedGet, baseUrl, harness } from "./_server";
-import { COLLECTIONS_NATIVE_COLUMN_KEYS, emitCollectionsNativeEvidence, emitCollectionsNativeFailure,
+import { COLLECTIONS_NATIVE_COLUMN_KEYS, emitCollectionsNativeEvidence, emitCollectionsPaginationControls, emitCollectionsNativeFailure,
   emitCollectionsNativePreGateGeometry, type CollectionsNativeEvidenceMember, type CollectionsNativeLayoutMetrics } from "./_collections-native-evidence";
 
 // Real built report loader, UI, downloads and official Chromium PDFs. Fixtures
@@ -387,16 +388,111 @@ async function assertDownloads(page: Page, result: ReportResult, expected: Witne
 }
 
 interface PdfWord { page: number; pageWidth: number; text: string; xMin: number; xMax: number; yMin: number; yMax: number }
-async function pdfWords(page: Page, path: string): Promise<PdfWord[]> {
+interface PdfSheet { width: number; height: number; words: PdfWord[] }
+async function pdfSheets(page: Page, path: string): Promise<PdfSheet[]> {
   const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 });
   return page.evaluate(source => {
     const doc = new DOMParser().parseFromString(source, "application/xml");
     if (doc.querySelector("parsererror")) throw new Error("PDF bounding-box extraction is invalid");
-    return [...doc.getElementsByTagName("page")].flatMap((sheet, index) =>
-      [...sheet.getElementsByTagName("word")].map(word => ({ page: index, pageWidth: Number(sheet.getAttribute("width")), text: word.textContent ?? "",
+    return [...doc.getElementsByTagName("page")].map((sheet, index) => ({
+      width: Number(sheet.getAttribute("width")), height: Number(sheet.getAttribute("height")),
+      words: [...sheet.getElementsByTagName("word")].map(word => ({ page: index, pageWidth: Number(sheet.getAttribute("width")), text: word.textContent ?? "",
         xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")),
-        yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })));
+        yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
+    }));
   }, xml);
+}
+
+function assertNativePages(pages: PdfSheet[]) {
+  expect(pages.length, "actual PDF contains pages").toBeGreaterThan(0);
+  const margin = 8 * 72 / 25.4;
+  for (const sheet of pages) {
+    expect(Math.abs(sheet.width - 297 * 72 / 25.4), "native landscape A4 width").toBeLessThan(1);
+    expect(Math.abs(sheet.height - 210 * 72 / 25.4), "native landscape A4 height").toBeLessThan(1);
+    expect(sheet.words.length, "no blank trailing PDF page").toBeGreaterThan(0);
+    for (const word of sheet.words) {
+      // Chromium/Poppler round page/glyph coordinates slightly differently.
+      expect(word.xMin, "PDF respects the left print margin").toBeGreaterThanOrEqual(margin - 2);
+      expect(word.xMax, "PDF respects the right print margin").toBeLessThanOrEqual(sheet.width - margin + 2);
+      expect(word.yMin, "PDF respects the top print margin").toBeGreaterThanOrEqual(margin - 2);
+      expect(word.yMax, "PDF respects the bottom print margin").toBeLessThanOrEqual(sheet.height - margin + 2);
+    }
+  }
+}
+
+function assertPdfClosing(pages: PdfSheet[], footerText: string, phone: string, notesTitle: string) {
+  const words = pages.flatMap(sheet => sheet.words);
+  const contacts = words.filter(word => compact(word.text) === compact(phone));
+  expect(contacts, "one readable contact footer in the PDF").toHaveLength(1);
+  const contact = contacts[0];
+  expect(contact.yMax - contact.yMin, "the contact footer keeps its readable native glyph size").toBeGreaterThanOrEqual(7);
+  expect(contact.page, "the contact footer closes the last page").toBe(pages.length - 1);
+  const footerLine = pages[contact.page].words.filter(word => Math.abs(word.yMin - contact.yMin) <= 2);
+  for (const token of footerText.split(/\s+/).filter(Boolean)) {
+    expect(footerLine.some(word => matchesPrintPdfWord(word.text, token)), `PDF contact footer token: ${token}`).toBe(true);
+  }
+  const notes = words.filter(word => compact(word.text).includes("FIFO"));
+  expect(notes, "the original explanatory notes survive pagination").toHaveLength(1);
+  expect(notes[0].yMax - notes[0].yMin, "explanatory notes are not scaled away").toBeGreaterThanOrEqual(6.5);
+  expect(notes[0].page, "closing notes and contact footer share a page").toBe(contact.page);
+  expect(notes[0].yMax, "notes precede the contact footer").toBeLessThan(contact.yMin);
+  for (const token of notesTitle.split(/\s+/).filter(Boolean)) {
+    expect(pages[contact.page].words.some(word => word.yMax < contact.yMin && matchesPrintPdfWord(word.text, token)),
+      `PDF closing notes title: ${token}`).toBe(true);
+  }
+}
+
+async function assertPaginationControls(page: Page, sheet: Locator, expected: WitnessRow[],
+  footerText: string, phone: string, notesTitle: string, controls: CollectionsNativeEvidenceMember[]) {
+  const originalContent = await sheet.innerText();
+  // A style-only counterfactual restores the old spacing and permits its old
+  // orphan break. It is deliberately not a successful financial artifact.
+  const oldLayout = await page.addStyleTag({ content: `
+    .sheet-report[data-report="collections"] .report-table th,
+    .sheet-report[data-report="collections"] .report-table td {
+      padding-top: 1.5mm !important; padding-bottom: 1.5mm !important;
+    }
+    .sheet-report[data-report="collections"] .report-notes { break-after: auto !important; page-break-after: auto !important; }
+    .sheet-report[data-report="collections"] .report-contact-footer {
+      break-before: auto !important; page-break-before: auto !important;
+      break-inside: auto !important; page-break-inside: auto !important;
+    }
+  ` });
+  try {
+    await settlePaint(page);
+    const path = `${artifacts}/collections-pagination-old-layout-control.pdf`;
+    const pdf = await page.pdf({ path, format: "A4", landscape: true, printBackground: true, displayHeaderFooter: false, preferCSSPageSize: true });
+    const pages = await pdfSheets(page, path);
+    assertNativePages(pages);
+    assertPdfRows(pages.flatMap(part => part.words), expected);
+    expect(pages, "old spacing recreates the verified two-page fixture").toHaveLength(2);
+    expect(() => assertPdfClosing(pages, footerText, phone, notesTitle)).toThrow(/closing notes and contact footer share a page/);
+    controls.push({ filename: "collections-pagination-old-layout-control.pdf", mime: "application/pdf", bytes: pdf });
+  } finally { await oldLayout.evaluate(element => element.remove()); }
+
+  // Layout stress only: make the seven real fixture rows tall enough to span
+  // native pages. No row clones, fabricated totals, hidden content or DB writes.
+  // This is not claimed as evidence of a larger financial dataset.
+  const tallRows = await page.addStyleTag({ content: `
+    .sheet-report[data-report="collections"] .report-table tbody tr { height: 24mm !important; }
+  ` });
+  try {
+    await settlePaint(page);
+    expect(await sheet.innerText()).toBe(originalContent);
+    const path = `${artifacts}/collections-pagination-multipage-layout-control.pdf`;
+    const pdf = await page.pdf({ path, format: "A4", landscape: true, printBackground: true, displayHeaderFooter: false, preferCSSPageSize: true });
+    const pages = await pdfSheets(page, path);
+    expect(pages.length, "long content is allowed to use multiple pages").toBeGreaterThan(1);
+    assertNativePages(pages);
+    const words = pages.flatMap(part => part.words);
+    assertPdfRows(words, expected);
+    assertPdfClosing(pages, footerText, phone, notesTitle);
+    const rowPages = new Set(words.filter(word => expected.some(row => row.note === compact(word.text))).map(word => word.page));
+    expect(rowPages.size, "financial rows continue beyond the first page").toBeGreaterThan(1);
+    controls.push({ filename: "collections-pagination-multipage-layout-control.pdf", mime: "application/pdf", bytes: pdf });
+  } finally { await tallRows.evaluate(element => element.remove()); }
+  await settlePaint(page);
+  expect(await sheet.innerText(), "all original report content is restored after layout controls").toBe(originalContent);
 }
 
 function hasPdfWord(text: string, word: string) {
@@ -417,6 +513,7 @@ function assertPdfRows(words: PdfWord[], expected: WitnessRow[]) {
   const anchors = expected.map(row => {
     const matching = words.filter(word => compact(word.text) === row.note);
     expect(matching, `PDF marker ${row.note}`).toHaveLength(1);
+    expect(matching[0].yMax - matching[0].yMin, `PDF native readable row ${row.note}`).toBeGreaterThanOrEqual(7);
     return { row, word: matching[0] };
   });
   for (const { row, word } of anchors) {
@@ -448,11 +545,12 @@ function assertPdfRows(words: PdfWord[], expected: WitnessRow[]) {
 }
 
 async function officialDocument(page: Page, href: string, result: ReportResult, expected: WitnessRow[], kpis: KpiWitness,
-  totals: string[], filtered: boolean, evidence: CollectionsNativeEvidenceMember[]) {
+  totals: string[], filtered: boolean, evidence: CollectionsNativeEvidenceMember[], controls: CollectionsNativeEvidenceMember[]) {
   const response = await page.goto(new URL(href, baseUrl).href, { waitUntil: "load" });
   expect(response?.status()).toBe(200);
   await settlePaint(page);
   const sheet = page.locator(".sheet-report");
+  expect(await sheet.getAttribute("data-report")).toBe("collections");
   const table = sheet.locator(".report-table");
   expect(await table.count()).toBe(1);
   await assertTable(page, table, expected, totals);
@@ -463,12 +561,21 @@ async function officialDocument(page: Page, href: string, result: ReportResult, 
     expect(plain(await card.locator("strong").innerText())).toBe(kpi.text);
   }
   const screenContent = await table.innerText();
+  const reportContent = await sheet.innerText();
+  const footerText = await sheet.locator(".footer-note").innerText();
+  const phone = await sheet.locator(".footer-note [dir=ltr]").innerText();
+  const notesTitle = await sheet.locator(".report-notes > strong").innerText();
+  const typography = await sheet.locator(".clinic-name, .doc-title, .report-table td, .report-notes, .footer-note")
+    .evaluateAll(elements => elements.map(element => getComputedStyle(element).fontSize));
   await page.emulateMedia({ media: "print" });
   // Match A4 landscape's 281 mm printable width (297 mm minus two 8 mm
   // margins), rather than checking a misleading desktop-wide print viewport.
   await page.setViewportSize({ width: Math.floor(281 * 96 / 25.4), height: 900 });
   await settlePaint(page);
   expect(await table.innerText()).toBe(screenContent);
+  expect(await sheet.innerText(), "print media retains all report text").toBe(reportContent);
+  expect(await sheet.locator(".clinic-name, .doc-title, .report-table td, .report-notes, .footer-note")
+    .evaluateAll(elements => elements.map(element => getComputedStyle(element).fontSize)), "print does not reduce font sizes").toEqual(typography);
   await assertPaperBounds(sheet, filtered ? "filtered-paper" : "all-paper");
   expect(await page.getByRole("button", { name: "اطبع", exact: true }).isVisible()).toBe(false);
   const prefix = filtered ? "collections-native-filtered" : "collections-native";
@@ -476,7 +583,11 @@ async function officialDocument(page: Page, href: string, result: ReportResult, 
   const path = `${artifacts}/${prefix}.pdf`;
   const pdf = await page.pdf({ path, format: "A4", landscape: true, printBackground: true, displayHeaderFooter: false, preferCSSPageSize: true });
   evidence.push({ filename: `${prefix}.pdf`, mime: "application/pdf", bytes: pdf });
-  const words = await pdfWords(page, path);
+  const pages = await pdfSheets(page, path);
+  assertNativePages(pages);
+  assertPdfClosing(pages, footerText, phone, notesTitle);
+  expect(pages, "the real short collections fixture and contact footer fit one native A4 page").toHaveLength(1);
+  const words = pages.flatMap(part => part.words);
   assertPdfRows(words, expected);
   const text = words.map(word => word.text).join(" ");
   for (const total of totals) expect(compact(text)).toContain(total.split(" ")[0]);
@@ -490,10 +601,11 @@ async function officialDocument(page: Page, href: string, result: ReportResult, 
       await cell.evaluate(element => { element.textContent = "18,518 ر.ي"; });
       const negativePath = `${artifacts}/collections-native-negative-control.pdf`;
       await page.pdf({ path: negativePath, format: "A4", landscape: true, printBackground: true, displayHeaderFooter: false, preferCSSPageSize: true });
-      const negativeWords = await pdfWords(page, negativePath);
+      const negativeWords = (await pdfSheets(page, negativePath)).flatMap(part => part.words);
       expect(() => assertPdfRows(negativeWords, expected)).toThrow(/PDF native amount NCSAM/);
     } finally { await cell.evaluate((element, value) => { element.textContent = value; }, original); }
     expect(await table.innerText()).toBe(screenContent);
+    await assertPaginationControls(page, sheet, expected, footerText, phone, notesTitle, controls);
   }
   await page.emulateMedia({ media: "screen" });
   await page.setViewportSize({ width: 1920, height: 1200 });
@@ -522,6 +634,7 @@ describe("collections native currency across the actual loader, report, download
       { key: "refunds-SAR", currency: "SAR", minor: 2345, text: "23.45 ر.س" },
     ]);
     const evidence: CollectionsNativeEvidenceMember[] = [];
+    const paginationControls: CollectionsNativeEvidenceMember[] = [];
     const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, locale: "ar-YE", serviceWorkers: "block", acceptDownloads: true });
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -551,7 +664,7 @@ describe("collections native currency across the actual loader, report, download
       expect(printUrl.searchParams.get("from")).toBe(fixtureDay);
       expect(printUrl.searchParams.get("to")).toBe(fixtureDay);
       const printPage = await context.newPage();
-      await officialDocument(printPage, originalHref!, result, rows, allKpis, allTotals, false, evidence);
+      await officialDocument(printPage, originalHref!, result, rows, allKpis, allTotals, false, evidence, paginationControls);
 
       await page.getByRole("button", { name: /فلاتر إضافية/ }).click();
       await page.getByRole("button", { name: "إخفاء الفلاتر", exact: true }).waitFor();
@@ -590,7 +703,7 @@ describe("collections native currency across the actual loader, report, download
       const filteredUrl = new URL(filteredHref!, baseUrl);
       expect(filteredUrl.searchParams.get("currency")).toBe("SAR");
       expect(filteredUrl.searchParams.get("receivedBy")).toBe(receiverA);
-      await officialDocument(printPage, filteredHref!, filteredResult, filtered, filteredKpis, ["130.00 ر.س"], true, evidence);
+      await officialDocument(printPage, filteredHref!, filteredResult, filtered, filteredKpis, ["130.00 ر.س"], true, evidence, paginationControls);
 
       // A copied pre-fix view must not hide the new signed/native money column.
       // Check the real client at phone width and the independent print loader.
@@ -625,6 +738,7 @@ describe("collections native currency across the actual loader, report, download
     }, () => { expect(unexpected, "no external requests or mutations, including print-log").toEqual([]); expect(errors).toEqual([]); });
     expect(await financialSnapshot(), "all stored synthetic money, patient and plan rows remain byte-equivalent").toEqual(before);
     console.log(`SYNTHETIC_COLLECTIONS_GEOMETRY_V1 ${JSON.stringify(geometry)}`);
+    emitCollectionsPaginationControls(paginationControls);
     emitCollectionsNativeEvidence(evidence);
   }, 180_000);
 });
