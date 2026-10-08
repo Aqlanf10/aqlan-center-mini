@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { authedGet, baseUrl, harness } from "./_server";
-import { emitPrintToolbarEvidence, type PrintToolbarEvidenceMember } from "./_print-toolbar-evidence";
+import { emitPrintToolbarEvidence, emitPrintToolbarFailedPdf, type PrintToolbarEvidenceMember } from "./_print-toolbar-evidence";
 
 // Real built routes/CSS and Chromium PDFs, using only new isolated-harness
 // fixtures. Never open the WhatsApp link, call window.print, or post print-log.
@@ -113,6 +113,7 @@ describe("print toolbar containment on real built financial documents", () => {
     expect(before.receipt).toMatchObject({ amount_minor: 11000, base_amount_minor: 11000, currency: "YER" });
     expect(before.invoice.total_minor - before.invoice.discount_minor).toBe(before.receipt.base_amount_minor);
     const evidence: PrintToolbarEvidenceMember[] = [];
+    const generatedPdf: { current?: { kind: "invoice" | "receipt"; bytes: Buffer } } = {};
     const context = await browser.newContext({ viewport: { width: 1280, height: 1200 }, locale: "ar-YE" });
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -127,115 +128,129 @@ describe("print toolbar containment on real built financial documents", () => {
         await route.continue();
       }
     });
-    await guard.run(async () => {
-      const page = await context.newPage();
-      page.on("pageerror", error => errors.push(error.message));
-      for (const spec of [
-        { kind: "invoice", id: invoiceId, paper: "A4", widthMm: 210, title: "فاتورة", number: invoiceNumber, reprint: true },
-        { kind: "receipt", id: receiptId, paper: "A6", widthMm: 105, title: "سند قبض", number: receiptNumber, reprint: false },
-      ] as const) {
-        await page.emulateMedia({ media: "screen" });
-        const response = await page.goto(`${baseUrl}/print/${spec.kind}/${spec.id}`, { waitUntil: "load" });
-        expect(response?.status()).toBe(200);
-        await settlePaint(page);
-        const sheet = page.locator(`.sheet-${spec.paper.toLowerCase()}`);
-        const actions = page.locator(".print-root .print-actions");
-        const toolbar = page.locator(".print-root > .no-print");
-        const whatsApp = page.getByRole("link", { name: /إرسال الفاتورة عبر واتساب/ });
-        expect(await page.evaluate(() => matchMedia("screen").matches)).toBe(true);
-        expect(await actions.isVisible()).toBe(true);
-        expect(await page.getByRole("button", { name: "اطبع", exact: true }).isVisible()).toBe(true);
-        const screenWidth = await sheet.evaluate(element => element.getBoundingClientRect().width);
-        expect(Math.abs(screenWidth - spec.widthMm * 96 / 25.4)).toBeLessThan(0.2);
-        if (spec.kind === "invoice") {
-          expect(await toolbar.evaluate(element => (element as HTMLElement).style.display)).toBe("flex");
-          expect(await toolbar.isVisible()).toBe(true);
-          expect(await whatsApp.isVisible()).toBe(true);
-          expect(await whatsApp.getAttribute("href")).toMatch(/^https:\/\/wa\.me\/967000000000\?/);
-        } else {
-          expect(await toolbar.count()).toBe(0);
-          expect(await whatsApp.count()).toBe(0);
-        }
-        const screenContent = await sheet.innerText();
-        const screenHeader = await sheet.locator("header").innerText();
-        expect(await sheet.locator(".clinic-name").innerText()).toBe(expectedClinicName);
-        expect(await sheet.locator(".doc-title").innerText()).toBe(spec.title);
-        for (const text of [patientName, spec.number]) expect(screenContent).toContain(text);
-        const screenFilename = `print-toolbar-${spec.kind}-screen.png`;
-        evidence.push({ filename: screenFilename, mime: "image/png",
-          bytes: await page.screenshot({ path: `${artifacts}/${screenFilename}`, fullPage: true }) });
-
-        await page.emulateMedia({ media: "print" });
-        await settlePaint(page);
-        expect(await page.evaluate(() => matchMedia("print").matches)).toBe(true);
-        expect(await page.evaluate(() => matchMedia("screen").matches)).toBe(false);
-        expect(await actions.isVisible()).toBe(false);
-        if (spec.kind === "invoice") {
-          expect(await toolbar.evaluate(element => getComputedStyle(element).display)).toBe("none");
-          expect(await toolbar.boundingBox()).toBeNull();
-          expect(await whatsApp.isVisible()).toBe(false);
-        }
-        expect(await sheet.innerText()).toBe(screenContent);
-        expect(await sheet.locator("header").innerText()).toBe(screenHeader);
-        for (const selector of ["header", ".print-logo", ".clinic-name", ".doc-title", ".sign-row", ".footer-note"]) {
-          expect(await sheet.locator(selector).first().isVisible(), `${spec.kind} ${selector} remains visible in print`).toBe(true);
-        }
-        expect(await page.locator(".reprint-mark").isVisible()).toBe(spec.reprint);
-        const printFilename = `print-toolbar-${spec.kind}-print.png`;
-        evidence.push({ filename: printFilename, mime: "image/png",
-          bytes: await page.screenshot({ path: `${artifacts}/${printFilename}`, fullPage: true }) });
-        const path = `${artifacts}/print-toolbar-${spec.kind}.pdf`;
-        const pdf = await page.pdf({ path, format: spec.paper, printBackground: true,
-          displayHeaderFooter: false, preferCSSPageSize: false });
-        expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
-        evidence.push({ filename: `print-toolbar-${spec.kind}.pdf`, mime: "application/pdf", bytes: pdf });
-        const text = pdfText(path);
-        for (const expected of [patientName, spec.number]) expect(text).toContain(expected);
-        // Poppler may emit Arabic words in visual character order. Test each
-        // whole identity/title word in either order rather than changing content.
-        assertPdfWords(text, screenHeader, "PDF clinic header/title word");
-        assertPdfWords(text, await sheet.locator(".sign-row").innerText(), "PDF signature word");
-        if (spec.reprint) assertPdfWords(text, "نسخة معاد طباعتها", "PDF reprint watermark word");
-        else for (const word of ["نسخة", "طباعتها"]) {
-          expect(compact(text)).not.toContain(word);
-          expect(compact(text)).not.toContain([...word].reverse().join(""));
-        }
-        assertNoWhatsAppAnnotation(path);
-        if (spec.kind === "invoice") {
-          for (const expected of ["SYNTHETIC-SERVICE", "SYNTHETIC-INVOICE-NOTE", "E-INVOICE", "VERIFIED", "12,500", "1,500", "11,000"]) {
-            expect(text).toContain(expected);
-          }
-          // A genuine negative PDF witness: restoring the inline flex toolbar
-          // must make the same PDF oracle refuse the WhatsApp annotation.
-          const originalStyle = await toolbar.getAttribute("style");
-          try {
-            await toolbar.evaluate(element => (element as HTMLElement).style.setProperty("display", "flex", "important"));
+    try {
+      await guard.run(async () => {
+        const page = await context.newPage();
+        page.on("pageerror", error => errors.push(error.message));
+        for (const spec of [
+          { kind: "invoice", id: invoiceId, paper: "A4", widthMm: 210, title: "فاتورة", number: invoiceNumber, reprint: true },
+          { kind: "receipt", id: receiptId, paper: "A6", widthMm: 105, title: "سند قبض", number: receiptNumber, reprint: false },
+        ] as const) {
+          generatedPdf.current = undefined;
+          await page.emulateMedia({ media: "screen" });
+          const response = await page.goto(`${baseUrl}/print/${spec.kind}/${spec.id}`, { waitUntil: "load" });
+          expect(response?.status()).toBe(200);
+          await settlePaint(page);
+          const sheet = page.locator(`.sheet-${spec.paper.toLowerCase()}`);
+          const actions = page.locator(".print-root .print-actions");
+          const toolbar = page.locator(".print-root > .no-print");
+          const whatsApp = page.getByRole("link", { name: /إرسال الفاتورة عبر واتساب/ });
+          expect(await page.evaluate(() => matchMedia("screen").matches)).toBe(true);
+          expect(await actions.isVisible()).toBe(true);
+          expect(await page.getByRole("button", { name: "اطبع", exact: true }).isVisible()).toBe(true);
+          const screenWidth = await sheet.evaluate(element => element.getBoundingClientRect().width);
+          expect(Math.abs(screenWidth - spec.widthMm * 96 / 25.4)).toBeLessThan(0.2);
+          if (spec.kind === "invoice") {
+            expect(await toolbar.evaluate(element => (element as HTMLElement).style.display)).toBe("flex");
+            expect(await toolbar.isVisible()).toBe(true);
             expect(await whatsApp.isVisible()).toBe(true);
-            const negativePath = `${artifacts}/print-toolbar-negative-control.pdf`;
-            await page.pdf({ path: negativePath, format: "A4", printBackground: true, displayHeaderFooter: false });
-            expect(() => assertNoWhatsAppAnnotation(negativePath)).toThrow(/WhatsApp toolbar/);
-          } finally {
-            await toolbar.evaluate((element, style) => {
-              if (style === null) element.removeAttribute("style"); else element.setAttribute("style", style);
-            }, originalStyle);
+            expect(await whatsApp.getAttribute("href")).toMatch(/^https:\/\/wa\.me\/967000000000\?/);
+          } else {
+            expect(await toolbar.count()).toBe(0);
+            expect(await whatsApp.count()).toBe(0);
           }
-          expect(await whatsApp.isVisible()).toBe(false);
-        } else {
-          for (const expected of ["SYNTHETIC-RECEIPT-NOTE", "SYNTHETIC-SIGNER", "11,000"]) expect(text).toContain(expected);
+          const screenContent = await sheet.innerText();
+          const screenHeader = await sheet.locator("header").innerText();
+          expect(await sheet.locator(".clinic-name").innerText()).toBe(expectedClinicName);
+          expect(await sheet.locator(".doc-title").innerText()).toBe(spec.title);
+          for (const text of [patientName, spec.number]) expect(screenContent).toContain(text);
+          const screenFilename = `print-toolbar-${spec.kind}-screen.png`;
+          evidence.push({ filename: screenFilename, mime: "image/png",
+            bytes: await page.screenshot({ path: `${artifacts}/${screenFilename}`, fullPage: true }) });
+
+          await page.emulateMedia({ media: "print" });
+          await settlePaint(page);
+          expect(await page.evaluate(() => matchMedia("print").matches)).toBe(true);
+          expect(await page.evaluate(() => matchMedia("screen").matches)).toBe(false);
+          expect(await actions.isVisible()).toBe(false);
+          if (spec.kind === "invoice") {
+            expect(await toolbar.evaluate(element => getComputedStyle(element).display)).toBe("none");
+            expect(await toolbar.boundingBox()).toBeNull();
+            expect(await whatsApp.isVisible()).toBe(false);
+          }
+          expect(await sheet.innerText()).toBe(screenContent);
+          expect(await sheet.locator("header").innerText()).toBe(screenHeader);
+          for (const selector of ["header", ".print-logo", ".clinic-name", ".doc-title", ".sign-row", ".footer-note"]) {
+            expect(await sheet.locator(selector).first().isVisible(), `${spec.kind} ${selector} remains visible in print`).toBe(true);
+          }
+          expect(await page.locator(".reprint-mark").isVisible()).toBe(spec.reprint);
+          const printFilename = `print-toolbar-${spec.kind}-print.png`;
+          evidence.push({ filename: printFilename, mime: "image/png",
+            bytes: await page.screenshot({ path: `${artifacts}/${printFilename}`, fullPage: true }) });
+          const path = `${artifacts}/print-toolbar-${spec.kind}.pdf`;
+          const pdf = await page.pdf({ path, format: spec.paper, printBackground: true,
+            displayHeaderFooter: false, preferCSSPageSize: false });
+          generatedPdf.current = { kind: spec.kind, bytes: pdf };
+          expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+          evidence.push({ filename: `print-toolbar-${spec.kind}.pdf`, mime: "application/pdf", bytes: pdf });
+          const text = pdfText(path);
+          for (const expected of [patientName, spec.number]) expect(text).toContain(expected);
+          // Poppler may emit Arabic words in visual character order. Test each
+          // whole identity/title word in either order rather than changing content.
+          assertPdfWords(text, screenHeader, "PDF clinic header/title word");
+          assertPdfWords(text, await sheet.locator(".sign-row").innerText(), "PDF signature word");
+          if (spec.reprint) assertPdfWords(text, "نسخة معاد طباعتها", "PDF reprint watermark word");
+          else for (const word of ["نسخة", "طباعتها"]) {
+            expect(compact(text)).not.toContain(word);
+            expect(compact(text)).not.toContain([...word].reverse().join(""));
+          }
+          assertNoWhatsAppAnnotation(path);
+          if (spec.kind === "invoice") {
+            for (const expected of ["SYNTHETIC-SERVICE", "SYNTHETIC-INVOICE-NOTE", "E-INVOICE", "VERIFIED", "12,500", "1,500", "11,000"]) {
+              expect(text).toContain(expected);
+            }
+            // A genuine negative PDF witness: restoring the inline flex toolbar
+            // must make the same PDF oracle refuse the WhatsApp annotation.
+            const originalStyle = await toolbar.getAttribute("style");
+            try {
+              await toolbar.evaluate(element => (element as HTMLElement).style.setProperty("display", "flex", "important"));
+              expect(await whatsApp.isVisible()).toBe(true);
+              const negativePath = `${artifacts}/print-toolbar-negative-control.pdf`;
+              await page.pdf({ path: negativePath, format: "A4", printBackground: true, displayHeaderFooter: false });
+              expect(() => assertNoWhatsAppAnnotation(negativePath)).toThrow(/WhatsApp toolbar/);
+            } finally {
+              await toolbar.evaluate((element, style) => {
+                if (style === null) element.removeAttribute("style"); else element.setAttribute("style", style);
+              }, originalStyle);
+            }
+            expect(await whatsApp.isVisible()).toBe(false);
+          } else {
+            for (const expected of ["SYNTHETIC-RECEIPT-NOTE", "SYNTHETIC-SIGNER", "11,000"]) expect(text).toContain(expected);
+          }
+          await page.emulateMedia({ media: "screen" });
+          await settlePaint(page);
+          expect(await actions.isVisible()).toBe(true);
+          expect(await sheet.innerText()).toBe(screenContent);
+          if (spec.kind === "invoice") expect(await whatsApp.isVisible()).toBe(true);
         }
-        await page.emulateMedia({ media: "screen" });
-        await settlePaint(page);
-        expect(await actions.isVisible()).toBe(true);
-        expect(await sheet.innerText()).toBe(screenContent);
-        if (spec.kind === "invoice") expect(await whatsApp.isVisible()).toBe(true);
+      }, () => {
+        expect(unexpected, "no external requests or app mutations, including print-log").toEqual([]);
+        expect(errors).toEqual([]);
+      });
+      expect(await financialSnapshot()).toEqual(before);
+      // Publish only the six positive in-memory outputs after every content,
+      // media, negative-control, no-write, teardown and exact-row assertion.
+      emitPrintToolbarEvidence(evidence);
+    } catch (error) {
+      // The exact generated synthetic PDF is needed to distinguish missing
+      // pixels from Poppler's Arabic glyph/ligature extraction. Keep the failing
+      // assertion and original error; failure diagnostics cannot count as a pass.
+      const diagnostic = generatedPdf.current;
+      if (diagnostic) {
+        try { emitPrintToolbarFailedPdf(diagnostic.kind, diagnostic.bytes); }
+        catch (diagnosticError) { throw new AggregateError([error, diagnosticError], "Print acceptance failed; diagnostic transport also rejected"); }
       }
-    }, () => {
-      expect(unexpected, "no external requests or app mutations, including print-log").toEqual([]);
-      expect(errors).toEqual([]);
-    });
-    expect(await financialSnapshot()).toEqual(before);
-    // Publish only the six positive in-memory outputs after every content,
-    // media, negative-control, no-write, teardown and exact-row assertion.
-    emitPrintToolbarEvidence(evidence);
+      throw error;
+    }
   }, 120_000);
 });

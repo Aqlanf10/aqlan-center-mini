@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { emitPrintToolbarEvidence, type PrintToolbarEvidenceMember } from "./security-http/_print-toolbar-evidence";
+import { emitPrintToolbarEvidence, emitPrintToolbarFailedPdf, type PrintToolbarEvidenceMember } from "./security-http/_print-toolbar-evidence";
 
 const names = [
   "print-toolbar-invoice-screen.png", "print-toolbar-invoice-print.png", "print-toolbar-invoice.pdf",
@@ -17,6 +17,35 @@ function fixtures(): PrintToolbarEvidenceMember[] {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe("bounded synthetic print evidence log transport", () => {
+  it("marks the one bounded failed PDF as diagnostic-only and preserves exact bytes", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const pdf = fixtures()[2].bytes;
+    emitPrintToolbarFailedPdf("invoice", pdf);
+    const lines = log.mock.calls.map(call => String(call[0]));
+    const metadata = JSON.parse(lines[0].slice("SYNTHETIC_PRINT_DIAGNOSTIC_V1 BEGIN ".length));
+    expect(metadata).toMatchObject({ scope: "print-toolbar", file: "print-toolbar-invoice-failed.pdf",
+      mime: "application/pdf", bytes: pdf.length, sha256: createHash("sha256").update(pdf).digest("hex"),
+      synthetic: true, diagnosticOnly: true, acceptance: "failed" });
+    const chunks: string[] = [];
+    for (let index = 1; index <= metadata.chunks; index++) {
+      const prefix = `SYNTHETIC_PRINT_DIAGNOSTIC_V1 CHUNK ${metadata.file} ${index}/${metadata.chunks} `;
+      expect(lines[index].startsWith(prefix)).toBe(true);
+      chunks.push(lines[index].slice(prefix.length));
+    }
+    expect(Buffer.from(chunks.join(""), "base64")).toEqual(pdf);
+    expect(lines.at(-1)).toBe(`SYNTHETIC_PRINT_DIAGNOSTIC_V1 END ${JSON.stringify(metadata)}`);
+    expect(lines).toHaveLength(metadata.chunks + 2);
+    expect(lines.every(line => !line.includes("SYNTHETIC_PRINT_EVIDENCE_V1"))).toBe(true);
+  });
+
+  it("rejects oversized or malformed failed-PDF diagnostics before output", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    for (const bytes of [Buffer.alloc(2 * 1024 * 1024 + 1), Buffer.from("%PDF-1.7\nwithout-EOF"), fixtures()[0].bytes]) {
+      expect(() => emitPrintToolbarFailedPdf("receipt", bytes)).toThrow(/diagnostic rejected/);
+    }
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it("frames each exact member with indexed chunks and verifiable size/hash/provenance", () => {
     vi.stubEnv("GITHUB_RUN_ID", "synthetic-run");
     vi.stubEnv("GITHUB_SHA", "synthetic-checkout");

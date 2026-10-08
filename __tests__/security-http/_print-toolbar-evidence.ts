@@ -69,3 +69,28 @@ export function emitPrintToolbarEvidence(members: readonly PrintToolbarEvidenceM
     console.log(`${PREFIX} END ${identity}`);
   }
 }
+
+/** Failure-only diagnostic, never a positive acceptance frame. The caller must rethrow. */
+export function emitPrintToolbarFailedPdf(kind: "invoice" | "receipt", bytes: Buffer): void {
+  if ((kind !== "invoice" && kind !== "receipt") || !Buffer.isBuffer(bytes)
+    || bytes.length === 0 || bytes.length > 2 * 1024 * 1024
+    || bytes.subarray(0, 5).toString("ascii") !== "%PDF-"
+    || !bytes.subarray(-1024).toString("ascii").includes("%%EOF")) {
+    throw new Error("Synthetic failed-print PDF diagnostic rejected");
+  }
+  const base64 = bytes.toString("base64");
+  const prefix = "SYNTHETIC_PRINT_DIAGNOSTIC_V1";
+  const metadata = {
+    scope: "print-toolbar", file: `print-toolbar-${kind}-failed.pdf`, mime: "application/pdf",
+    bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
+    chunks: Math.ceil(base64.length / CHUNK_CHARACTERS),
+    runId: process.env.GITHUB_RUN_ID ?? "local", checkoutSha: process.env.GITHUB_SHA ?? "unavailable",
+    synthetic: true, diagnosticOnly: true, acceptance: "failed",
+  };
+  const identity = JSON.stringify(metadata);
+  console.log(`${prefix} BEGIN ${identity}`);
+  for (let index = 0; index < metadata.chunks; index++) {
+    console.log(`${prefix} CHUNK ${metadata.file} ${index + 1}/${metadata.chunks} ${base64.slice(index * CHUNK_CHARACTERS, (index + 1) * CHUNK_CHARACTERS)}`);
+  }
+  console.log(`${prefix} END ${identity}`);
+}
