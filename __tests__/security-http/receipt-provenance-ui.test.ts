@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import type { ReceiptProvenance } from "../../lib/receipt-provenance";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { assertPrintPdfHeader, assertPrintPdfSignature, matchesPrintPdfWord, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
+import { assertPrintPdfHeader, assertReceiptPrintPdfSignature, matchesPrintPdfWord, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 import { emitReceiptProvenanceEvidence, emitReceiptProvenanceFailedPdf, type ReceiptProvenanceEvidenceMember } from "./_receipt-provenance-evidence";
 
@@ -327,7 +327,7 @@ describe("receipt provenance on real built pages and native A6 paper", () => {
         for (const reference of spec.references) expect(text).toContain(reference.receiptNumber);
         for (const word of spec.title.split(" ")) expect(paper.words.some(actual => matchesPrintPdfWord(actual.text, word))).toBe(true);
         assertPrintPdfHeader(paper, header);
-        assertPrintPdfSignature(paper, signature);
+        assertReceiptPrintPdfSignature(paper, signature);
         if (spec.scene === "original") {
           assertOriginalPdf(paper, text);
           const saved = await provenance.getAttribute("style");
@@ -341,7 +341,7 @@ describe("receipt provenance on real built pages and native A6 paper", () => {
             expect(negativeText).toContain(original.receiptNumber);
             expect(negativeText).toContain("50,000");
             assertPrintPdfHeader(negativePage, header);
-            assertPrintPdfSignature(negativePage, signature);
+            assertReceiptPrintPdfSignature(negativePage, signature);
           } finally {
             await provenance.evaluate((element, style) => style === null ? element.removeAttribute("style") : element.setAttribute("style", style), saved);
           }
