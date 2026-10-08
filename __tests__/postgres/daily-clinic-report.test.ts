@@ -18,7 +18,7 @@ beforeAll(async () => {
     CREATE TEMP TABLE planned_visits (id integer PRIMARY KEY, plan_id integer);
     CREATE TEMP TABLE visits (id integer PRIMARY KEY, patient_id integer, patient_name text,
       arrived_at timestamptz, signed_at timestamptz, billing_currency text, treatment_done text,
-      doctor_id integer, planned_visit_id integer);
+      doctor_id integer, planned_visit_id integer, invoice_id integer);
     CREATE TEMP TABLE services (id integer PRIMARY KEY, name text);
     CREATE TEMP TABLE treatment_plans (id integer PRIMARY KEY, patient_id integer, title text,
       status text, consent_at timestamptz, base_currency text, total_minor bigint);
@@ -37,14 +37,16 @@ beforeAll(async () => {
       total_minor bigint, discount_minor bigint, status text, plan_id integer,
       invoice_number text, created_at timestamptz DEFAULT '2020-09-01 08:00+00');
     CREATE TEMP TABLE invoice_items (id integer PRIMARY KEY, invoice_id integer, description text,
-      total_minor bigint, plan_item_id integer);
+      total_minor bigint, plan_item_id integer, source_type text, source_id bigint);
     CREATE TEMP TABLE audit_log (id integer PRIMARY KEY, action text, entity text, entity_id text,
       details jsonb, actor text, created_at timestamptz);
     CREATE TEMP TABLE legacy_treatment_agreements (id integer PRIMARY KEY, patient_id integer, service_name text,
       specialty text, tooth_code integer, currency text, agreed_minor bigint, previously_paid_minor bigint,
-      remaining_minor bigint, historical_as_of date, status text, void_reason text, plan_item_id integer, case_id integer);
+      remaining_minor bigint, historical_as_of date, status text, void_reason text, plan_item_id integer, case_id integer,
+      service_id integer, opening_effect text);
     CREATE TEMP TABLE legacy_treatment_coverage_snapshots (agreement_id integer PRIMARY KEY,
-      snapshot_tooth_codes smallint[], snapshot_scope text);
+      snapshot_tooth_codes smallint[], snapshot_scope text, format_version integer, service_id integer, service_category text,
+      anchor_tooth_code smallint, snapshot_mode text, snapshot_surfaces text, recorded_by text, recorded_at timestamptz);
     CREATE TEMP TABLE payments (id integer PRIMARY KEY, patient_id integer, receipt_number text,
       invoice_id integer, plan_id integer, opening_currency text, currency text, amount_minor bigint,
       base_amount_minor bigint, exchange_rate numeric, kind text, method text, created_at timestamptz, reversal_of_id integer);

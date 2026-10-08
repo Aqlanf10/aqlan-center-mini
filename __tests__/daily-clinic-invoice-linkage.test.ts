@@ -156,3 +156,84 @@ describe("daily clinic report — treatment started before the system", () => {
       .toThrow("Legacy agreement arithmetic");
   });
 });
+
+describe("daily clinic report — recorded visit links, installment plans and currency (Dot review 5450750803)", () => {
+  const old = { createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" };
+  it("includes an older invoice recorded on today's visit (visits.invoice_id), once, without counting it as issued today", () => {
+    const report = buildDailyClinicReport(source({
+      visits: [{ ...visit(), invoiceId: 10 }], invoices: [invoice(old)],
+      invoiceLines: [line({ planItemId: null, planId: null, caseId: null, toothCode: null })],
+    }));
+    expect(report.invoices.map((row) => [row.id, row.reasons])).toEqual([[10, ["attached_to_day_visit"]]]);
+    expect(report.totals.invoicesIssuedNet.YER).toBe(0);
+  });
+
+  it("includes an older invoice whose line is sourced from a procedure of today's visit", () => {
+    const report = buildDailyClinicReport(source({
+      invoices: [invoice(old)],
+      invoiceLines: [line({ planItemId: null, planId: null, caseId: null, toothCode: null, sourceType: "visit_procedure", sourceId: 77, sourceVisitId: 1, sourceVisitPatientId: 1 })],
+    }));
+    expect(report.invoices.map((row) => row.reasons)).toEqual([["line_from_day_visit"]]);
+  });
+
+  it("does not infer today's work from an unrelated past invoice", () => {
+    const report = buildDailyClinicReport(source({ invoices: [invoice(old)], invoiceLines: [line({ planItemId: null, planId: null, caseId: null })] }));
+    expect(report.invoices).toEqual([]);
+  });
+
+  it("fails closed on a visit invoice or a line source that belongs to another patient", () => {
+    expect(() => buildDailyClinicReport(source({ visits: [{ ...visit(), invoiceId: 10 }], invoices: [invoice({ ...old, patientId: 2 })], invoiceLines: [] })))
+      .toThrow("Unresolved or cross-patient visit invoice");
+    expect(() => buildDailyClinicReport(source({ invoices: [invoice(old)],
+      invoiceLines: [line({ planItemId: null, planId: null, caseId: null, sourceType: "visit_procedure", sourceId: 77, sourceVisitId: 1, sourceVisitPatientId: 2 })] })))
+      .toThrow("Cross-patient invoice line source");
+  });
+
+  it("refuses a same-patient line that ties the invoice to a plan in another currency", () => {
+    expect(() => buildDailyClinicReport(source({ plans: [plan({ currency: "SAR" })], invoices: [invoice()], invoiceLines: [line()] })))
+      .toThrow("Invoice line plan currency conflict");
+  });
+
+  it("labels an invoice linked only through invoices.plan_id as a plan installment, not as treatment work", () => {
+    const report = buildDailyClinicReport(source({ plans: [plan()],
+      invoices: [invoice({ planId: 1 })], invoiceLines: [line({ planItemId: null, planId: null, caseId: null, toothCode: null })] }));
+    expect(report.invoices[0].linkage).toBe("plan_installment");
+  });
+
+  it("shows the recorded original net and an excess settlement separately, never as patient debt", () => {
+    const report = buildDailyClinicReport(source({ plans: [plan()],
+      invoices: [invoice({ status: "cancelled" }), invoice({ id: 12, invoiceNumber: "INV-12", totalMinor: 40000 })],
+      invoiceLines: [line(), line({ id: 120, invoiceId: 12, planItemId: null, planId: null, caseId: null, totalMinor: 40000 })],
+      payments: [payment({ id: 3, invoiceId: 12, amountMinor: 50000, baseAmountMinor: 50000 })] }));
+    const byId = new Map(report.invoices.map((row) => [row.id, row]));
+    expect(byId.get(10)).toMatchObject({ netMinor: 0, originalNetMinor: 150000, remainingMinor: 0, excessSettledMinor: 0 });
+    expect(byId.get(12)).toMatchObject({ netMinor: 40000, explicitlySettledMinor: 50000, remainingMinor: 0, excessSettledMinor: 10000 });
+  });
+});
+
+describe("daily clinic report — legacy agreements' current effect and coverage", () => {
+  it("states the remaining's current effect: inside the opening when live, removed when void, none when settled historically", () => {
+    const report = buildDailyClinicReport(source({ legacyAgreements: [
+      legacy({ id: 80, openingEffect: "created" }),
+      legacy({ id: 81, status: "void", voidReason: "إدخال مكرر", openingEffect: "created" }),
+      legacy({ id: 82, previouslyPaidMinor: 300000, remainingMinor: 0, openingEffect: "none" }),
+    ] }));
+    expect(report.legacyAgreements.map((row) => [row.id, row.remainingAtStartMinor, row.currentOpeningEffect]))
+      .toEqual([[80, 180000, "in_opening"], [81, 180000, "removed_by_void"], [82, 0, "none"]]);
+    expect(report.warnings.join(" ")).toContain("أُزيل من الرصيد عند الإبطال");
+  });
+
+  it("rejects an opening effect that contradicts the remaining", () => {
+    expect(() => buildDailyClinicReport(source({ legacyAgreements: [legacy({ openingEffect: "none" })] })))
+      .toThrow("Legacy opening effect conflict");
+  });
+
+  it("carries the canonical coverage state and label; unknown or conflicting coverage stays review-needed", () => {
+    const report = buildDailyClinicReport(source({ legacyAgreements: [
+      legacy({ id: 83, coverageState: "verified", coverageLabel: "سن 36 · الأسطح: إنسي (M)، إطباقي (O)" }),
+      legacy({ id: 84, coverageRecorded: true, coverageState: "conflict", coverageLabel: null }),
+    ] }));
+    expect(report.legacyAgreements.map((row) => [row.coverageState, row.coverageLabel]))
+      .toEqual([["verified", "سن 36 · الأسطح: إنسي (M)، إطباقي (O)"], ["conflict", null]]);
+  });
+});

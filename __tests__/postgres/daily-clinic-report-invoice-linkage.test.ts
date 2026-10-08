@@ -147,4 +147,67 @@ describe("(INV-LINK REPORT) daily clinic report over real invoice-first, correct
     expect(report.totals.invoicesIssuedNet.YER).toBe(150000 + 15000);
     expect(report.totals.cancelledInvoicesCount).toBe(1);
   });
+
+  it("keeps recorded visit links, reads legacy coverage canonically, and states a voided remainder's current effect (Dot 5450750803)", async () => {
+    const { DEFAULT_SPECIALTY_TEMPLATES } = await import("../../lib/specialty-templates");
+    const { createLinkedInvoice } = await import("../../lib/invoice-linkage-db");
+    const { parseLegacyTreatmentRequest } = await import("../../lib/legacy-treatment");
+    const { createLegacyTreatment, voidLegacyTreatment } = await import("../../lib/legacy-treatment-db");
+    const date = getDailyClinicReportToday();
+    const doctor = await db.createParty({ name: "Synthetic visit-link doctor", kind: "doctor", phone: null, commissionPercent: 0, note: null });
+    const service = async (name: string, category: string | null) => (await query<{ id: number }>(`INSERT INTO services
+      (name,category,price_minor,is_active,price_configured) VALUES ($1,$2,40000,TRUE,TRUE) RETURNING id`, [name, category]))[0].id;
+    const consult = await service("Synthetic visit consultation", null);
+    const filling = await service("Synthetic filling", "filling");
+    const [{ id: patientId }] = await query<{ id: number }>(
+      "INSERT INTO patients (patient_number,full_name) VALUES ('RPT-LINK-2','Synthetic visit-link patient') RETURNING id");
+    const visit = await db.addVisit({ patientName: "Synthetic visit-link patient", patientPhone: null, note: null, patientId, doctorId: doctor.id });
+    const create = () => createLinkedInvoice({ patientId, baseCurrency: "YER", discountMinor: 0, note: null,
+      createdBy: "synthetic-reception", actorRole: "reception", templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null,
+      auditDetails: {}, items: [{ serviceId: consult, category: null, doctorId: doctor.id, description: "Synthetic consult",
+        quantity: 1, unitPriceMinor: 40000, toothCode: null, caseId: null, scope: null, sessions: null }] as never });
+    const attached = await create();
+    const sourced = await create();
+    const unrelated = await create();
+    if (!attached.ok || !sourced.ok || !unrelated.ok) throw new Error("invoice writer refused");
+    // Fixture-level history: the three real invoices were issued 30 days earlier. Then the recorded links: today's
+    // visit carries the first invoice (visits.invoice_id), and the second's line is sourced from a procedure of today's visit.
+    await query(`UPDATE invoices SET created_at = created_at - INTERVAL '30 days' WHERE id = ANY($1::int[])`,
+      [[attached.invoice.id, sourced.invoice.id, unrelated.invoice.id]]);
+    await query(`UPDATE visits SET invoice_id = $2 WHERE id = $1`, [visit.id, attached.invoice.id]);
+    const [{ id: procedureId }] = await query<{ id: number }>(`INSERT INTO visit_procedures (visit_id, service_id, quantity, unit_price_minor)
+      VALUES ($1, $2, 1, 40000) RETURNING id`, [visit.id, consult]);
+    await query(`UPDATE invoice_items SET source_type = 'visit_procedure', source_id = $2 WHERE invoice_id = $1`, [sourced.invoice.id, procedureId]);
+
+    // Legacy filling with surfaces, then voided: coverage stays the recorded snapshot; the remainder left the opening.
+    const parsed = parseLegacyTreatmentRequest({ serviceId: filling, toothCode: 36, surfaces: "MO", currency: "YER",
+      agreedAmount: "50000", previouslyPaidAmount: "20000", historicalAsOf: "2026-01-15" }, date);
+    if (!parsed.ok) throw new Error(parsed.message);
+    const legacy = await createLegacyTreatment({ patientId, request: parsed.value, actor: "synthetic-admin", actorRole: "admin",
+      canEditOpening: true, templates: DEFAULT_SPECIALTY_TEMPLATES });
+    if (!legacy.ok) throw new Error(legacy.reason);
+    const voided = await voidLegacyTreatment({ patientId, agreementId: legacy.agreement.id, reason: "Synthetic duplicate entry",
+      actor: "synthetic-admin", actorRole: "admin" });
+    expect(voided.ok).toBe(true);
+
+    const before = await fingerprint();
+    const report = await loadDailyClinicReport(date);
+    expect(await fingerprint()).toEqual(before);
+    const reasons = new Map(report.invoices.map((row) => [row.id, row.reasons]));
+    expect(reasons.get(attached.invoice.id)).toEqual(["attached_to_day_visit"]);
+    expect(reasons.get(sourced.invoice.id)).toEqual(["line_from_day_visit"]);
+    expect(reasons.has(unrelated.invoice.id)).toBe(false);
+    expect(report.invoices.filter((row) => row.id === attached.invoice.id)).toHaveLength(1);
+    // Older documents are shown but never counted as issued today.
+    expect(report.invoices.filter((one) => [attached.invoice.id, sourced.invoice.id].includes(one.id)).every((one) => !one.issuedOnReportDay)).toBe(true);
+
+    const row = report.legacyAgreements.find((one) => one.id === legacy.agreement.id)!;
+    expect(row).toMatchObject({ status: "void", remainingAtStartMinor: 30000, openingEffect: "created", currentOpeningEffect: "removed_by_void",
+      coverageState: "verified" });
+    expect(row.coverageLabel).toContain("سن 36");
+    expect(row.coverageLabel).toContain("إنسي (M)");
+    expect(row.coverageLabel).toContain("إطباقي (O)");
+    const account = report.currentAccounts.find((one) => one.patientId === patientId)!;
+    expect(account.byCurrency.YER.openingMinor).toBe(0); // the void removed the 30000 from the opening
+  });
 });

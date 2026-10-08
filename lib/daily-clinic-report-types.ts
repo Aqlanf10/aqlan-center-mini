@@ -119,8 +119,13 @@ export interface DailyClinicInvoice {
   issuedClinicDate: string;
   issuedOnReportDay: boolean;
   /** Why this invoice is in the day's report (it appears once even with several reasons). */
-  reasons: ("issued_today" | "receipt_today" | "linked_to_day_agreement")[];
-  linkage: "financial_only" | "single_plan_item" | "single_case" | "mixed";
+  reasons: ("issued_today" | "receipt_today" | "linked_to_day_agreement" | "attached_to_day_visit" | "line_from_day_visit")[];
+  /** `plan_installment`: only invoices.plan_id links it (an installment/plan payment invoice), no line identifies work. */
+  linkage: "financial_only" | "plan_installment" | "single_plan_item" | "single_case" | "mixed";
+  /** Recorded document value (total − discount) even when cancelled; `netMinor` is the current effect (0 when cancelled). */
+  originalNetMinor: number;
+  /** Explicit settlement above the current net. Shown apart: it is not patient debt and is not moved to a replacement. */
+  excessSettledMinor: number;
   lines: DailyClinicInvoiceLine[];
   explicitPaymentIds: number[];
   explicitlySettledMinor: number;
@@ -138,6 +143,14 @@ export interface DailyClinicLegacyAgreement {
   coverageTeeth: number[] | null;
   coverageScope: string | null;
   coverageRecorded: boolean;
+  /** Canonical decoder result of the immutable snapshot: verified, missing/unsupported (review), or conflicting (review). */
+  coverageState: "verified" | "unknown" | "conflict";
+  /** Full verified site with readable labels (teeth/tooth, surfaces, scope); null when not verified. */
+  coverageLabel: string | null;
+  /** How the remaining at start entered the opening at registration. */
+  openingEffect: "none" | "created" | "increased";
+  /** Current effect of that remaining: inside today's opening, removed by void, or none (historically settled). */
+  currentOpeningEffect: "in_opening" | "removed_by_void" | "none";
   currency: Currency;
   agreedMinor: number;
   /** Paid before the system. Not a receipt and never part of the day's collections. */
@@ -202,6 +215,8 @@ export interface DailyClinicSourceVisit {
   arrivedAt: string; signedAt: string | null; signedClinicDate: string | null;
   billingCurrency: string | null; treatmentDone: string | null;
   doctorName: string | null; plannedPlanId: number | null;
+  /** visits.invoice_id: the invoice recorded as issued for this visit. */
+  invoiceId?: number | null;
 }
 export interface DailyClinicSourcePlan {
   id: number; patientId: number; title: string; status: string; consentAt: string | null;
@@ -227,6 +242,8 @@ export interface DailyClinicSourceInvoice {
 export interface DailyClinicSourceInvoiceLine {
   id: number; invoiceId: number; description: string; totalMinor: number;
   planItemId: number | null; planId: number | null; caseId: number | null; toothCode: number | null;
+  /** invoice_items.source_type/source_id and, for a visit-procedure source, that procedure's visit and patient. */
+  sourceType?: string | null; sourceId?: number | null; sourceVisitId?: number | null; sourceVisitPatientId?: number | null;
 }
 export interface DailyClinicSourceInvoiceCorrection {
   originalInvoiceId: number; correctedInvoiceNumber: string; reason: string | null; at: string; actor: string;
@@ -234,6 +251,8 @@ export interface DailyClinicSourceInvoiceCorrection {
 export interface DailyClinicSourceLegacyAgreement {
   id: number; patientId: number; serviceName: string; specialty: string; toothCode: number | null;
   coverageTeeth: number[] | null; coverageScope: string | null; coverageRecorded: boolean;
+  coverageState?: "verified" | "unknown" | "conflict"; coverageLabel?: string | null;
+  openingEffect?: "none" | "created" | "increased";
   currency: string; agreedMinor: number; previouslyPaidMinor: number; remainingMinor: number;
   historicalAsOf: string; status: string; voidReason: string | null; planItemId: number; caseId: number | null;
 }
