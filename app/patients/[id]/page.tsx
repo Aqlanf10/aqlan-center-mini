@@ -1185,7 +1185,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         />
       ) : tab === "account" ? (
         <>
-          <PatientLedger patientId={patient.id} />
+          <PatientLedger patientId={patient.id} onFinancialChange={() => void load()} />
           <LegacyHistory patientId={patient.id} />
         </>
       ) : (

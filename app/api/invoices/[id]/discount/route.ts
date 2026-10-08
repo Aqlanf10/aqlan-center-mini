@@ -1,0 +1,61 @@
+import { NextResponse } from "next/server";
+import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
+import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
+import { applyAdminInvoiceDiscount, getInvoice, isPeriodLocked } from "@/lib/db";
+import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN } from "@/lib/invoice-discount";
+import { parseAmount } from "@/lib/money";
+import { isAdmin } from "@/lib/roles";
+import { requireSession } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * (FIN-DISC) خصمٌ إداريٌّ على فاتورةٍ صادرة — للمدير وحده، بسببٍ مكتوب.
+ *
+ * الجسم: `{ amount, reason, expectedDiscountMinor }` — المبلغ الإضافي بعملة الفاتورة (نصًّا كما يُكتب في الشاشة)،
+ * والخصم الذي رآه المدير عند فتح النموذج (ليُرفض الطلب إن تغيّر قبل الحفظ أو أُعيد إرساله).
+ */
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const session = await requireSession();
+  if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  if (!isAdmin(session.role)) return NextResponse.json({ message: "الخصم على فاتورةٍ صادرة قرارٌ للمدير وحده." }, { status: 403 });
+  const { id: rawId } = await context.params;
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ message: "رقم الفاتورة غير صالح." }, { status: 400 });
+
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) {
+    const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+  const reason = typeof source.reason === "string" ? source.reason.trim() : "";
+  if (reason.length < ADMIN_DISCOUNT_REASON_MIN || reason.length > ADMIN_DISCOUNT_REASON_MAX) {
+    return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.reason }, { status: 400 });
+  }
+  const expected = source.expectedDiscountMinor;
+  if (!Number.isSafeInteger(expected) || (expected as number) < 0) {
+    return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.stale }, { status: 400 });
+  }
+
+  try {
+    const invoice = await getInvoice(id);
+    if (!invoice) return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.not_found }, { status: 404 });
+    // خصمٌ على فاتورةٍ من فترةٍ مقفلة يغيّر إيراد شهرٍ صُدّق عليه — كالتصحيح والإلغاء تمامًا.
+    if (await isPeriodLocked(invoice.createdAt.slice(0, 10))) {
+      return NextResponse.json({ message: "الفاتورة في فترة مقفلة. سجّل الخصم بقيدٍ في الفترة المفتوحة." }, { status: 409 });
+    }
+    const amount = parseAmount(typeof source.amount === "string" ? source.amount : String(source.amount ?? ""), invoice.baseCurrency ?? "YER");
+    if (amount === null || amount <= 0) return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.invalid_amount }, { status: 400 });
+    const result = await applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: amount, expectedDiscountMinor: expected as number,
+      reason, actor: session.username, actorRole: session.role });
+    if (!result.ok) {
+      const status = result.reason === "not_found" ? 404
+        : result.reason === "cancelled" || result.reason === "paid" || result.reason === "stale" ? 409 : 400;
+      return NextResponse.json({ message: result.message }, { status });
+    }
+    return NextResponse.json({ invoice: result.invoice, remainingAfterMinor: result.remainingAfterMinor }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ message: "تعذّر تسجيل الخصم. لم يتغيّر شيء؛ أعد المحاولة." }, { status: 500 });
+  }
+}

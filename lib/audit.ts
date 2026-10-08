@@ -15,7 +15,7 @@
 
 /** الأفعال المسجَّلة. قائمة مغلقة عمدًا: نصٌّ حرّ يجعل السجل غير قابل للتصفية. */
 export type AuditAction =
-  | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
+  | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.discount" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "payment.recover_installment"
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
@@ -131,6 +131,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
   "invoice.cancel": "إلغاء فاتورة",
   "invoice.correct": "تصحيح فاتورة",
+  "invoice.discount": "خصم إداري على فاتورة",
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.recover_installment": "استعادة تحصيل قسط معكوس على فاتورته الأصلية",
   "payment.create": "سند قبض",
@@ -340,7 +341,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "appointment_service.activate", "appointment_service.deactivate",
   "system.reset",
   "patient.import", "legacy.import",
-  "invoice.cancel", "invoice.correct", "invoice.status", "plan.status",
+  "invoice.cancel", "invoice.correct", "invoice.discount", "invoice.status", "plan.status",
   "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "payment.correct", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",

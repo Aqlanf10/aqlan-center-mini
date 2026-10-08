@@ -8221,6 +8221,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
 import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
+import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN, planAdminDiscount, type AdminDiscountRefusal } from "./invoice-discount";
 import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
@@ -9069,6 +9070,74 @@ export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promis
   return rows
     .map((row) => ({ currency: requireCurrency(row.currency, "دفعة فاتورة", invoiceId), netMinor: toMinor(row.net) }))
     .filter((row) => row.netMinor !== 0);
+}
+
+export type AdminDiscountResult =
+  | { ok: true; invoice: Invoice; afterDiscountMinor: number; remainingAfterMinor: number }
+  | { ok: false; reason: AdminDiscountRefusal; message: string };
+
+/**
+ * (FIN-DISC) خصمٌ إداريٌّ على فاتورةٍ صادرة: يزيد خصم الفاتورة في مكانها بسببٍ مكتوب، داخل معاملةٍ واحدة
+ * مع سطر التدقيق. لا يتجاوز المتبقي بعد المدفوع على الفاتورة صراحةً، ولا يمسّ البنود ولا الدفعات ولا الربط.
+ * الفترة المقفلة يرفضها المسار قبل الوصول هنا (كالتصحيح).
+ */
+export async function applyAdminInvoiceDiscount(input: {
+  invoiceId: number;
+  additionalMinor: number;
+  expectedDiscountMinor: number | null;
+  reason: string;
+  actor: string;
+  actorRole: string | null;
+}): Promise<AdminDiscountResult> {
+  await ensureSchema();
+  const reason = input.reason.trim();
+  if (reason.length < ADMIN_DISCOUNT_REASON_MIN || reason.length > ADMIN_DISCOUNT_REASON_MAX) {
+    return { ok: false, reason: "reason", message: ADMIN_DISCOUNT_MESSAGE.reason };
+  }
+  const outcome = await withTransaction(getPool(), async (client) => {
+    const { rows: [invoice] } = await client.query<{
+      id: number; invoice_number: string; patient_id: number; status: string; total_minor: string; discount_minor: string; base_currency: string;
+    }>(
+      `SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency
+         FROM invoices WHERE id = $1 FOR UPDATE`, [input.invoiceId],
+    );
+    if (!invoice) return { ok: false as const, reason: "not_found" as const };
+    const currency = requireCurrency(invoice.base_currency, "فاتورة", invoice.id);
+    // Payments are append-only; lock the patient's receipts on this invoice so a concurrent receipt cannot race the ceiling.
+    const { rows: payments } = await client.query<{ id: number; kind: string; currency: string; amount_minor: string; base_amount_minor: string }>(
+      `SELECT id, kind, currency, amount_minor, base_amount_minor FROM payments WHERE invoice_id = $1 ORDER BY id FOR SHARE`,
+      [invoice.id],
+    );
+    let settledMinor = 0;
+    for (const payment of payments) {
+      const settled = settlePaymentMinor({ id: payment.id, amountMinor: toMinor(payment.amount_minor),
+        currency: requireCurrency(payment.currency, "دفعة فاتورة", payment.id), baseAmountMinor: toMinor(payment.base_amount_minor) }, currency);
+      settledMinor += payment.kind === "refund" ? -settled : settled;
+    }
+    const plan = planAdminDiscount({ status: invoice.status, totalMinor: toMinor(invoice.total_minor),
+      discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expectedDiscountMinor);
+    if (!plan.ok) return plan;
+    await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
+    await insertAuditRow(client, {
+      action: "invoice.discount", entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoice_number,
+      details: {
+        المريض: invoice.patient_id,
+        الخصم_الإضافي: formatMoney(input.additionalMinor, currency),
+        الخصم_قبل: formatMoney(plan.beforeDiscountMinor, currency),
+        الخصم_بعد: formatMoney(plan.afterDiscountMinor, currency),
+        الصافي_قبل: formatMoney(plan.beforeNetMinor, currency),
+        الصافي_بعد: formatMoney(plan.afterNetMinor, currency),
+        المتبقي_بعد: formatMoney(plan.remainingAfterMinor, currency),
+        السبب: reason,
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true as const, afterDiscountMinor: plan.afterDiscountMinor, remainingAfterMinor: plan.remainingAfterMinor };
+  });
+  if (!outcome.ok) return { ok: false, reason: outcome.reason, message: ADMIN_DISCOUNT_MESSAGE[outcome.reason] };
+  const invoice = await getInvoice(input.invoiceId);
+  if (!invoice) return { ok: false, reason: "not_found", message: ADMIN_DISCOUNT_MESSAGE.not_found };
+  return { ok: true, invoice, afterDiscountMinor: outcome.afterDiscountMinor, remainingAfterMinor: outcome.remainingAfterMinor };
 }
 
 export type InvoiceCorrectionResult =
