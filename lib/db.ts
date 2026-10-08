@@ -145,7 +145,8 @@ export interface QueryResult<T = any> {
 
 export interface DbClient {
   query<T = any>(sql: string, values?: any[]): Promise<QueryResult<T>>;
-  release(): void;
+  /** Passing an error destroys the connection instead of returning it to the pool (node-postgres semantics). */
+  release(error?: Error): void;
 }
 
 export interface DbPool {
@@ -9073,13 +9074,25 @@ export async function invoiceLinkedPaymentsByCurrency(invoiceId: number): Promis
 }
 
 export type AdminDiscountResult =
-  | { ok: true; invoice: Invoice; afterDiscountMinor: number; remainingAfterMinor: number }
+  /** `invoice` is null only when the discount committed but reading it back failed: the result is still success. */
+  | { ok: true; invoice: Invoice | null; afterDiscountMinor: number; remainingAfterMinor: number }
   | { ok: false; reason: AdminDiscountRefusal; message: string };
 
 /**
  * (FIN-DISC) خصمٌ إداريٌّ على فاتورةٍ صادرة: يزيد خصم الفاتورة في مكانها بسببٍ مكتوب، داخل معاملةٍ واحدة
  * مع سطر التدقيق. لا يتجاوز المتبقي بعد المدفوع على الفاتورة صراحةً، ولا يمسّ البنود ولا الدفعات ولا الربط.
- * الفترة المقفلة يرفضها المسار قبل الوصول هنا (كالتصحيح).
+ *
+ * (Review 5461906275)
+ * - Locks: only the invoice row, FOR UPDATE. Every writer of a payment that targets an invoice (receipt, refund, receipt
+ *   correction) takes that invoice row FOR SHARE before inserting, after its own payment/shift locks. Holding it therefore
+ *   excludes any change to the settled amount while this transaction runs, and the discount never waits on a payment or a
+ *   shift row — so it cannot form a cycle with the canonical payment → shift → invoice order. Payments are read unlocked.
+ * - Period: the books-closed date is read here, inside the transaction, from the settings row FOR SHARE (not the cached
+ *   settings), and compared with the invoice's clinic date in the clinic time zone. A close saved concurrently waits for this
+ *   transaction or is seen by it.
+ * - Outcome: a refusal or an error before COMMIT rolls back («لم يتغيّر شيء»). A COMMIT error reported by the server also
+ *   rolled back. A lost connection at COMMIT is reported as uncertain. A failed read-back after a successful COMMIT is
+ *   still success, with `invoice: null`.
  */
 export async function applyAdminInvoiceDiscount(input: {
   invoiceId: number;
@@ -9089,56 +9102,95 @@ export async function applyAdminInvoiceDiscount(input: {
   reason: string;
   actor: string;
   actorRole: string | null;
+  /** Test seam for the post-commit read-back; defaults to `getInvoice`. */
+  readBack?: (id: number) => Promise<Invoice | null>;
 }): Promise<AdminDiscountResult> {
   await ensureSchema();
   const reason = input.reason.trim();
   if (reason.length < ADMIN_DISCOUNT_REASON_MIN || reason.length > ADMIN_DISCOUNT_REASON_MAX) {
     return { ok: false, reason: "reason", message: ADMIN_DISCOUNT_MESSAGE.reason };
   }
-  const outcome = await withTransaction(getPool(), async (client) => {
-    const { rows: [invoice] } = await client.query<{
-      id: number; invoice_number: string; patient_id: number; status: string; total_minor: string; discount_minor: string; base_currency: string;
-    }>(
-      `SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency
-         FROM invoices WHERE id = $1 FOR UPDATE`, [input.invoiceId],
-    );
-    if (!invoice) return { ok: false as const, reason: "not_found" as const };
-    const currency = requireCurrency(invoice.base_currency, "فاتورة", invoice.id);
-    // Payments are append-only; lock the patient's receipts on this invoice so a concurrent receipt cannot race the ceiling.
-    const { rows: payments } = await client.query<{ id: number; kind: string; currency: string; amount_minor: string; base_amount_minor: string }>(
-      `SELECT id, kind, currency, amount_minor, base_amount_minor FROM payments WHERE invoice_id = $1 ORDER BY id FOR SHARE`,
-      [invoice.id],
-    );
-    let settledMinor = 0;
-    for (const payment of payments) {
-      const settled = settlePaymentMinor({ id: payment.id, amountMinor: toMinor(payment.amount_minor),
-        currency: requireCurrency(payment.currency, "دفعة فاتورة", payment.id), baseAmountMinor: toMinor(payment.base_amount_minor) }, currency);
-      settledMinor += payment.kind === "refund" ? -settled : settled;
+  const refuse = (refusal: AdminDiscountRefusal): AdminDiscountResult => ({ ok: false, reason: refusal, message: ADMIN_DISCOUNT_MESSAGE[refusal] });
+  const client = await getPool().connect();
+  let lost: Error | undefined;
+  let applied: { afterDiscountMinor: number; remainingAfterMinor: number };
+  try {
+    await client.query("BEGIN");
+    let outcome: { ok: true; afterDiscountMinor: number; remainingAfterMinor: number } | { ok: false; reason: AdminDiscountRefusal };
+    try {
+      outcome = await (async () => {
+        const { rows: [invoice] } = await client.query<{
+          id: number; invoice_number: string; patient_id: number; status: string; total_minor: string; discount_minor: string;
+          base_currency: string; clinic_date: string;
+        }>(
+          `SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency,
+                  (created_at AT TIME ZONE $2)::date::text AS clinic_date
+             FROM invoices WHERE id = $1 FOR UPDATE`, [input.invoiceId, CLINIC_TIME_ZONE],
+        );
+        if (!invoice) return { ok: false as const, reason: "not_found" as const };
+        const { rows: [period] } = await client.query<{ value: string }>(
+          `SELECT value FROM settings WHERE key = 'finance.locked_before' FOR SHARE`);
+        const lockedBefore = (period?.value ?? "").trim();
+        if (lockedBefore !== "" && invoice.clinic_date < lockedBefore) return { ok: false as const, reason: "period_locked" as const };
+        const currency = requireCurrency(invoice.base_currency, "فاتورة", invoice.id);
+        const { rows: payments } = await client.query<{ id: number; kind: string; currency: string; amount_minor: string; base_amount_minor: string }>(
+          `SELECT id, kind, currency, amount_minor, base_amount_minor FROM payments WHERE invoice_id = $1 ORDER BY id`,
+          [invoice.id],
+        );
+        let settledMinor = 0;
+        for (const payment of payments) {
+          const settled = settlePaymentMinor({ id: payment.id, amountMinor: toMinor(payment.amount_minor),
+            currency: requireCurrency(payment.currency, "دفعة فاتورة", payment.id), baseAmountMinor: toMinor(payment.base_amount_minor) }, currency);
+          settledMinor += payment.kind === "refund" ? -settled : settled;
+        }
+        const plan = planAdminDiscount({ status: invoice.status, totalMinor: toMinor(invoice.total_minor),
+          discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expected);
+        if (!plan.ok) return plan;
+        await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
+        await insertAuditRow(client, {
+          action: "invoice.discount", entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoice_number,
+          details: {
+            المريض: invoice.patient_id,
+            الخصم_الإضافي: formatMoney(input.additionalMinor, currency),
+            الخصم_قبل: formatMoney(plan.beforeDiscountMinor, currency),
+            الخصم_بعد: formatMoney(plan.afterDiscountMinor, currency),
+            الصافي_قبل: formatMoney(plan.beforeNetMinor, currency),
+            الصافي_بعد: formatMoney(plan.afterNetMinor, currency),
+            المتبقي_بعد: formatMoney(plan.remainingAfterMinor, currency),
+            السبب: reason,
+          },
+          actor: input.actor, actorRole: input.actorRole,
+        });
+        return { ok: true as const, afterDiscountMinor: plan.afterDiscountMinor, remainingAfterMinor: plan.remainingAfterMinor };
+      })();
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
     }
-    const plan = planAdminDiscount({ status: invoice.status, totalMinor: toMinor(invoice.total_minor),
-      discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expected);
-    if (!plan.ok) return plan;
-    await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
-    await insertAuditRow(client, {
-      action: "invoice.discount", entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoice_number,
-      details: {
-        المريض: invoice.patient_id,
-        الخصم_الإضافي: formatMoney(input.additionalMinor, currency),
-        الخصم_قبل: formatMoney(plan.beforeDiscountMinor, currency),
-        الخصم_بعد: formatMoney(plan.afterDiscountMinor, currency),
-        الصافي_قبل: formatMoney(plan.beforeNetMinor, currency),
-        الصافي_بعد: formatMoney(plan.afterNetMinor, currency),
-        المتبقي_بعد: formatMoney(plan.remainingAfterMinor, currency),
-        السبب: reason,
-      },
-      actor: input.actor, actorRole: input.actorRole,
-    });
-    return { ok: true as const, afterDiscountMinor: plan.afterDiscountMinor, remainingAfterMinor: plan.remainingAfterMinor };
-  });
-  if (!outcome.ok) return { ok: false, reason: outcome.reason, message: ADMIN_DISCOUNT_MESSAGE[outcome.reason] };
-  const invoice = await getInvoice(input.invoiceId);
-  if (!invoice) return { ok: false, reason: "not_found", message: ADMIN_DISCOUNT_MESSAGE.not_found };
-  return { ok: true, invoice, afterDiscountMinor: outcome.afterDiscountMinor, remainingAfterMinor: outcome.remainingAfterMinor };
+    if (!outcome.ok) {
+      await client.query("ROLLBACK");
+      return refuse(outcome.reason);
+    }
+    try {
+      await client.query("COMMIT");
+    } catch (error) {
+      // A statement error at COMMIT (e.g. a deferred constraint) rolled the transaction back. A connection-level failure —
+      // no SQLSTATE, a connection exception (08xxx) or a server shutdown/termination (57P0x) — leaves the outcome unknown:
+      // never claim that nothing changed, and destroy the connection instead of pooling it.
+      const code = (error as { code?: unknown })?.code;
+      if (typeof code !== "string" || code.startsWith("08") || code.startsWith("57P0")) {
+        lost = error as Error;
+        return refuse("uncertain");
+      }
+      return refuse("failed");
+    }
+    applied = outcome;
+  } finally {
+    client.release(lost);
+  }
+  let invoice: Invoice | null = null;
+  try { invoice = await (input.readBack ?? getInvoice)(input.invoiceId); } catch { invoice = null; }
+  return { ok: true, invoice, afterDiscountMinor: applied.afterDiscountMinor, remainingAfterMinor: applied.remainingAfterMinor };
 }
 
 export type InvoiceCorrectionResult =

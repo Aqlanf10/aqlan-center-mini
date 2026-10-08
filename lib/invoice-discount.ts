@@ -10,7 +10,8 @@ export const ADMIN_DISCOUNT_REASON_MIN = 3;
 export const ADMIN_DISCOUNT_REASON_MAX = 300;
 
 export type AdminDiscountRefusal =
-  | "not_found" | "cancelled" | "paid" | "stale" | "invalid_amount" | "exceeds_remaining" | "reason";
+  | "not_found" | "cancelled" | "paid" | "stale" | "invalid_amount" | "exceeds_remaining" | "reason"
+  | "period_locked" | "failed" | "uncertain";
 
 export const ADMIN_DISCOUNT_MESSAGE: Record<AdminDiscountRefusal, string> = {
   not_found: "الفاتورة غير موجودة.",
@@ -20,6 +21,11 @@ export const ADMIN_DISCOUNT_MESSAGE: Record<AdminDiscountRefusal, string> = {
   invalid_amount: "اكتب مبلغ خصم صحيحًا أكبر من صفر بعملة الفاتورة.",
   exceeds_remaining: "الخصم أكبر من المتبقي على الفاتورة؛ المدفوع عليها لا يُخصم.",
   reason: `اكتب سبب الخصم (من ${ADMIN_DISCOUNT_REASON_MIN} إلى ${ADMIN_DISCOUNT_REASON_MAX} حرفًا).`,
+  period_locked: "الفاتورة في فترة مقفلة. سجّل الخصم بقيدٍ في الفترة المفتوحة.",
+  failed: "تعذّر تسجيل الخصم. لم يتغيّر شيء؛ أعد المحاولة.",
+  // A lost connection at COMMIT: the outcome is unknown. A blind retry is refused anyway (the expected discount changed if it
+  // was saved), but the manager must look first.
+  uncertain: "انقطع الاتصال أثناء الحفظ ولم يُعرف هل سُجّل الخصم. أعد فتح الفاتورة وتحقق من خصمها قبل أي محاولة جديدة.",
 };
 
 export interface AdminDiscountState {

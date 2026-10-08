@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { applyAdminInvoiceDiscount, getInvoice, isPeriodLocked } from "@/lib/db";
+import { applyAdminInvoiceDiscount, getInvoice } from "@/lib/db";
 import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN } from "@/lib/invoice-discount";
 import { parseAmount } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
@@ -43,21 +43,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const invoice = await getInvoice(id);
     if (!invoice) return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.not_found }, { status: 404 });
-    // خصمٌ على فاتورةٍ من فترةٍ مقفلة يغيّر إيراد شهرٍ صُدّق عليه — كالتصحيح والإلغاء تمامًا.
-    if (await isPeriodLocked(invoice.createdAt.slice(0, 10))) {
-      return NextResponse.json({ message: "الفاتورة في فترة مقفلة. سجّل الخصم بقيدٍ في الفترة المفتوحة." }, { status: 409 });
-    }
+    // The closed-period check runs inside the discount transaction, on the invoice's clinic date (review 5461906275).
     const amount = parseAmount(typeof source.amount === "string" ? source.amount : String(source.amount ?? ""), invoice.baseCurrency ?? "YER");
     if (amount === null || amount <= 0) return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.invalid_amount }, { status: 400 });
     const result = await applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: amount, expected: { discountMinor: expectedDiscount as number, settledMinor: expectedSettled as number },
       reason, actor: session.username, actorRole: session.role });
     if (!result.ok) {
       const status = result.reason === "not_found" ? 404
-        : result.reason === "cancelled" || result.reason === "paid" || result.reason === "stale" ? 409 : 400;
+        : result.reason === "cancelled" || result.reason === "paid" || result.reason === "stale" || result.reason === "period_locked" ? 409
+          : result.reason === "failed" ? 500 : result.reason === "uncertain" ? 503 : 400;
       return NextResponse.json({ message: result.message }, { status });
     }
-    return NextResponse.json({ invoice: result.invoice, remainingAfterMinor: result.remainingAfterMinor }, { headers: { "Cache-Control": "no-store" } });
+    // Committed. A failed read-back is still success: say so rather than invite a retry.
+    return NextResponse.json({ invoice: result.invoice, remainingAfterMinor: result.remainingAfterMinor,
+      ...(result.invoice === null ? { message: "سُجّل الخصم. أعد تحميل الفاتورة لعرض رصيدها." } : {}) },
+    { headers: { "Cache-Control": "no-store" } });
   } catch {
-    return NextResponse.json({ message: "تعذّر تسجيل الخصم. لم يتغيّر شيء؛ أعد المحاولة." }, { status: 500 });
+    // Only reachable before the discount transaction committed (it reports its own outcome otherwise).
+    return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.failed }, { status: 500 });
   }
 }
