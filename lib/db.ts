@@ -54,6 +54,7 @@ import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
+import { INVOICE_ADMIN_DISCOUNT_SQL } from "./invoice-admin-discount-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2054,6 +2055,8 @@ export function ensureSchema(): Promise<void> {
     /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
     await getPool().query(LEGACY_TREATMENT_SQL);
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
+    /* (FIN-DISC) أسطر الخصم الإداري الموزَّع على بنود الفاتورة — جسد الهجرة 0044 حرفيًّا. */
+    await getPool().query(INVOICE_ADMIN_DISCOUNT_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -9186,6 +9189,8 @@ export async function applyAdminInvoiceDiscount(input: {
   actorRole: string | null;
   /** Test seam for the post-commit read-back; defaults to `getInvoice`. */
   readBack?: (id: number) => Promise<Invoice | null>;
+  /** Test seam for COMMIT (to simulate a transport error after the server committed); defaults to a plain COMMIT. */
+  commit?: (client: DbClient) => Promise<unknown>;
 }): Promise<AdminDiscountResult> {
   await ensureSchema();
   const reason = input.reason.trim();
@@ -9210,6 +9215,10 @@ export async function applyAdminInvoiceDiscount(input: {
              FROM invoices WHERE id = $1 FOR UPDATE`, [input.invoiceId, CLINIC_TIME_ZONE],
         );
         if (!invoice) return { ok: false as const, reason: "not_found" as const };
+        // Join the settings writers' protocol (saveSettingsAudited takes this key's advisory lock exclusively, then the row):
+        // shared here, so a first close of the books — no settings row yet — waits for this transaction or is seen by it.
+        // Settings writers never lock invoices, so taking it after the invoice row cannot form a cycle.
+        await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('clinic-setting:' || $1))", ["finance.locked_before"]);
         const { rows: [period] } = await client.query<{ value: string }>(
           `SELECT value FROM settings WHERE key = 'finance.locked_before' FOR SHARE`);
         const lockedBefore = (period?.value ?? "").trim();
@@ -9254,13 +9263,16 @@ export async function applyAdminInvoiceDiscount(input: {
       return refuse(outcome.reason);
     }
     try {
-      await client.query("COMMIT");
+      await (input.commit ?? ((tx: DbClient) => tx.query("COMMIT")))(client);
     } catch (error) {
       // A statement error at COMMIT (e.g. a deferred constraint) rolled the transaction back. A connection-level failure —
       // no SQLSTATE, a connection exception (08xxx) or a server shutdown/termination (57P0x) — leaves the outcome unknown:
       // never claim that nothing changed, and destroy the connection instead of pooling it.
+      // Only a real SQLSTATE (five characters) from the server proves a rollback. Transport codes such as ECONNRESET,
+      // EPIPE or ETIMEDOUT are strings too, but say nothing about the outcome (review 5462657687).
       const code = (error as { code?: unknown })?.code;
-      if (typeof code !== "string" || code.startsWith("08") || code.startsWith("57P0")) {
+      const sqlstate = typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : null;
+      if (sqlstate === null || sqlstate.startsWith("08") || sqlstate.startsWith("57P0")) {
         lost = error as Error;
         return refuse("uncertain");
       }

@@ -10,7 +10,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 assertRealPostgresUrl();
 stubPostgresEnv();
 
-const { getPool, resetPoolForTesting, ensureSchema, applyAdminInvoiceDiscount, recordPayment, correctPayment } = await import("../../lib/db");
+const { getPool, resetPoolForTesting, ensureSchema, applyAdminInvoiceDiscount, recordPayment, correctPayment, saveSettingsAudited } = await import("../../lib/db");
 
 let patientId = 0;
 let seq = 0;
@@ -147,6 +147,68 @@ describe("closed period: clinic date, read inside the transaction", () => {
     expect(await discounting).toMatchObject({ ok: false, reason: "period_locked" });
     expect(await discountOf(id)).toBe(0);
     await setLockedBefore("");
+  });
+});
+
+describe("first close of the books with no settings row (review 5462657687)", () => {
+  it("a close committed before the discount reads the period refuses it, starting with the setting absent", async () => {
+    await getPool().query(`DELETE FROM settings WHERE key = 'finance.locked_before'`);
+    const id = await invoice();
+    const hold = await barrier(id);
+    const discounting = discount(id, 1000);
+    await until(async () => await waitingOn("FROM invoices WHERE id = $1 FOR UPDATE") >= 1);
+    expect(await saveSettingsAudited({ values: { "finance.locked_before": "2099-01-01" }, actor: "admin1", actorRole: "admin" }))
+      .toMatchObject({ ok: true });
+    await hold.release();
+    expect(await discounting).toMatchObject({ ok: false, reason: "period_locked" });
+    expect(await discountOf(id)).toBe(0);
+    await getPool().query(`DELETE FROM settings WHERE key = 'finance.locked_before'`);
+  });
+
+  it("a first close started while the discount runs waits for it (shared advisory lock), and never lands underneath it", async () => {
+    await getPool().query(`DELETE FROM settings WHERE key = 'finance.locked_before'`);
+    const id = await invoice();
+    // Pause the discount after it read the period: hold audit_log, which it writes before COMMIT.
+    const pause = new Client({ connectionString: url });
+    await pause.connect();
+    await pause.query("BEGIN");
+    await pause.query("LOCK TABLE audit_log IN ACCESS EXCLUSIVE MODE");
+    const discounting = discount(id, 1000);
+    await until(async () => await waitingOn("audit_log") >= 1);
+    const closing = saveSettingsAudited({ values: { "finance.locked_before": "2099-01-01" }, actor: "admin1", actorRole: "admin" });
+    await until(async () => (await getPool().query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory'`)).rows[0].n >= 1);
+    // The close is blocked: the row still does not exist while the discount is in flight.
+    expect((await getPool().query(`SELECT 1 FROM settings WHERE key = 'finance.locked_before'`)).rows).toHaveLength(0);
+    await pause.query("COMMIT");
+    await pause.end();
+    expect(await discounting).toMatchObject({ ok: true }); // the period was open when it was decided
+    expect(await closing).toMatchObject({ ok: true });     // and the close lands after it
+    expect(await discountOf(id)).toBe(1000);
+    await getPool().query(`DELETE FROM settings WHERE key = 'finance.locked_before'`);
+  });
+});
+
+describe("transport error codes at COMMIT (review 5462657687)", () => {
+  it("a transport code (ECONNRESET) after a COMMIT that did succeed is reported uncertain, not «nothing changed»", async () => {
+    const id = await invoice();
+    const result = await discount(id, 3000, { commit: async (client) => {
+      await client.query("COMMIT");
+      throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    } });
+    expect(result).toMatchObject({ ok: false, reason: "uncertain" });
+    if (!result.ok) expect(result.message).not.toContain("لم يتغيّر شيء");
+    expect(await discountOf(id)).toBe(3000); // it did commit: claiming a rollback would have been false
+  });
+
+  it("control: a server SQLSTATE that rolled back is a definite failure", async () => {
+    const id = await invoice();
+    const result = await discount(id, 3000, { commit: async (client) => {
+      await client.query("ROLLBACK");
+      throw Object.assign(new Error("could not serialize access"), { code: "40001" });
+    } });
+    expect(result).toMatchObject({ ok: false, reason: "failed" });
+    expect(await discountOf(id)).toBe(0);
   });
 });
 
