@@ -371,7 +371,13 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     const planItems = new Set(lines.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]));
     const cases = new Set(lines.flatMap((line) => line.caseId === null ? [] : [line.caseId]));
     const unlinked = lines.some((line) => line.planItemId === null);
-    const linkage: DailyClinicInvoice["linkage"] = planItems.size === 0 ? (invoice.planId !== null ? "plan_installment" : "financial_only")
+    // A line without a plan item still bills clinical work when it is sourced from a recorded visit procedure.
+    const procedureVisit = (line: (typeof lines)[number]) =>
+      line.planItemId === null && line.sourceType === "visit_procedure" && line.sourceVisitId != null ? line.sourceVisitId : null;
+    const procedureLines = lines.filter((line) => procedureVisit(line) !== null).length;
+    const linkage: DailyClinicInvoice["linkage"] = planItems.size === 0
+      ? (procedureLines > 0 ? (procedureLines === lines.length ? "visit_procedures" : "mixed")
+        : invoice.planId !== null ? "plan_installment" : "financial_only")
       : unlinked || cases.size > 1 || (cases.size === 0 && planItems.size > 1) ? "mixed"
         : planItems.size === 1 ? "single_plan_item" : "single_case";
     invoices.push({
@@ -382,7 +388,8 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
       excessSettledMinor: Math.max(0, money(settled - net, "invoice excess settlement")),
       issuedAt: invoice.createdAt, issuedClinicDate: invoice.clinicDate, issuedOnReportDay: issuedToday, reasons, linkage,
       lines: lines.map((line) => ({ id: line.id, description: line.description, totalMinor: line.totalMinor,
-        planItemId: line.planItemId, planId: line.planId, caseId: line.caseId, toothCode: line.toothCode })),
+        planItemId: line.planItemId, planId: line.planId, caseId: line.caseId, toothCode: line.toothCode,
+        sourceVisitId: procedureVisit(line) })),
       explicitPaymentIds: explicit.map((payment) => payment.source.id), explicitlySettledMinor: settled,
       remainingMinor: status === "cancelled" ? 0 : Math.max(0, money(net - settled, "invoice remaining")),
       corrections: source.invoiceCorrections.filter((row) => row.originalInvoiceId === invoice.id).map((row) => ({

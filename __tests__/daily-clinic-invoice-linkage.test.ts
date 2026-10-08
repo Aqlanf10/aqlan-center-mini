@@ -174,6 +174,19 @@ describe("daily clinic report — recorded visit links, installment plans and cu
       invoiceLines: [line({ planItemId: null, planId: null, caseId: null, toothCode: null, sourceType: "visit_procedure", sourceId: 77, sourceVisitId: 1, sourceVisitPatientId: 1 })],
     }));
     expect(report.invoices.map((row) => row.reasons)).toEqual([["line_from_day_visit"]]);
+    // Dot review 5461818993: labelled by its clinical source, not as a bare financial invoice.
+    expect(report.invoices[0].linkage).toBe("visit_procedures");
+    expect(report.invoices[0].lines.map((one) => one.sourceVisitId)).toEqual([1]);
+  });
+
+  it("labels a visit-procedure line beside a bare financial line as mixed, and a plain unsourced line as financial only", () => {
+    const procedure = line({ id: 1, planItemId: null, planId: null, caseId: null, toothCode: null, sourceType: "visit_procedure", sourceId: 77, sourceVisitId: 1, sourceVisitPatientId: 1 });
+    const bare = line({ id: 2, planItemId: null, planId: null, caseId: null, toothCode: null });
+    const mixed = buildDailyClinicReport(source({ invoices: [invoice()], invoiceLines: [procedure, bare] }));
+    expect(mixed.invoices[0].linkage).toBe("mixed");
+    expect(mixed.invoices[0].lines.map((one) => one.sourceVisitId)).toEqual([1, null]);
+    const plain = buildDailyClinicReport(source({ invoices: [invoice()], invoiceLines: [bare] }));
+    expect(plain.invoices[0].linkage).toBe("financial_only");
   });
 
   it("does not infer today's work from an unrelated past invoice", () => {

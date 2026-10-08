@@ -94,6 +94,8 @@ export interface DailyClinicInvoiceLine {
   planId: number | null;
   caseId: number | null;
   toothCode: number | null;
+  /** Visit of the recorded visit procedure this line bills (invoice_items.source_type = 'visit_procedure'); null otherwise. */
+  sourceVisitId: number | null;
 }
 export interface DailyClinicInvoiceCorrection {
   /** Stored audit evidence only (`invoice.correct`); never an inferred replacement chain. */
@@ -120,8 +122,11 @@ export interface DailyClinicInvoice {
   issuedOnReportDay: boolean;
   /** Why this invoice is in the day's report (it appears once even with several reasons). */
   reasons: ("issued_today" | "receipt_today" | "linked_to_day_agreement" | "attached_to_day_visit" | "line_from_day_visit")[];
-  /** `plan_installment`: only invoices.plan_id links it (an installment/plan payment invoice), no line identifies work. */
-  linkage: "financial_only" | "plan_installment" | "single_plan_item" | "single_case" | "mixed";
+  /**
+   * `plan_installment`: only invoices.plan_id links it (an installment/plan payment invoice), no line identifies work.
+   * `visit_procedures`: no plan item, but every line bills a recorded visit procedure — clinical work, not a bare financial invoice.
+   */
+  linkage: "financial_only" | "plan_installment" | "visit_procedures" | "single_plan_item" | "single_case" | "mixed";
   /** Recorded document value (total − discount) even when cancelled; `netMinor` is the current effect (0 when cancelled). */
   originalNetMinor: number;
   /** Explicit settlement above the current net. Shown apart: it is not patient debt and is not moved to a replacement. */

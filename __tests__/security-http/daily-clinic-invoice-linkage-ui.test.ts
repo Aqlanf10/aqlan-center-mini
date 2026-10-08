@@ -94,7 +94,7 @@ describe("(INV-LINK REPORT) invoices and pre-system treatment in the daily clini
       await complete(f.page, 0, dailyClinicReportFixture());
       await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
       const invoices = f.page.getByTestId("daily-clinic-invoices");
-      expect(await invoices.locator("tbody tr[data-invoice-id]").count()).toBe(3);
+      expect(await invoices.locator("tbody tr[data-invoice-id]").count()).toBe(4);
       expect(await invoices.locator('tbody tr[data-invoice-id="900"]').count()).toBe(1);
       const single = invoices.locator('tr[data-invoice-id="900"]');
       expect(await single.innerText()).toContain("بند #3001");
@@ -106,6 +106,13 @@ describe("(INV-LINK REPORT) invoices and pre-system treatment in the daily clini
       expect(await mixed.getAttribute("data-invoice-linkage")).toBe("mixed");
       expect(await mixed.innerText()).toContain("لا توزيع للدفعات على الحالات");
       expect(await mixed.innerText()).toContain("مالي فقط");
+      // A visit-procedure line is labelled by its clinical source, not as a bare financial invoice (Dot review 5461818993).
+      const procedure = invoices.locator('tr[data-invoice-id="880"]');
+      expect(await procedure.getAttribute("data-invoice-linkage")).toBe("visit_procedures");
+      expect(await procedure.innerText()).toContain("إجراء مسجّل في الزيارة #1");
+      expect(await procedure.innerText()).toContain("إجراءات زيارة مسجّلة (بلا بند خطة)");
+      expect(await procedure.innerText()).not.toContain("فاتورة مالية بلا بنود علاجية");
+      expect(await procedure.innerText()).not.toContain("مالي فقط");
       const cancelled = invoices.locator('tr[data-invoice-id="899"]');
       expect(await cancelled.getAttribute("data-invoice-status")).toBe("cancelled");
       expect(await cancelled.innerText()).toContain("صُححت بالفاتورة");

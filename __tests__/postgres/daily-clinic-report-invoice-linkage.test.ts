@@ -196,6 +196,11 @@ describe("(INV-LINK REPORT) daily clinic report over real invoice-first, correct
     const reasons = new Map(report.invoices.map((row) => [row.id, row.reasons]));
     expect(reasons.get(attached.invoice.id)).toEqual(["attached_to_day_visit"]);
     expect(reasons.get(sourced.invoice.id)).toEqual(["line_from_day_visit"]);
+    // The sourced line bills a recorded procedure of today's visit: clinical source, not «مالية بلا بنود علاجية».
+    const byInvoice = new Map(report.invoices.map((row) => [row.id, row]));
+    expect(byInvoice.get(sourced.invoice.id)).toMatchObject({ linkage: "visit_procedures" });
+    expect(byInvoice.get(sourced.invoice.id)?.lines.map((one) => one.sourceVisitId)).toEqual([visit.id]);
+    expect(byInvoice.get(attached.invoice.id)).toMatchObject({ linkage: "financial_only" });
     expect(reasons.has(unrelated.invoice.id)).toBe(false);
     expect(report.invoices.filter((row) => row.id === attached.invoice.id)).toHaveLength(1);
     // Older documents are shown but never counted as issued today.
