@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dailyClinicReportFixture } from "../fixtures/daily-clinic-report";
+import { dailyClinicReportFixture, dailyClinicNormalDayFixture } from "../fixtures/daily-clinic-report";
 import { baseUrl, harness, authedGet } from "./_server";
 import { emitDailyClinicEvidence, emitDailyClinicFailureEvidence, type DailyClinicEvidenceFile } from "./_daily-clinic-evidence";
 
@@ -153,6 +153,16 @@ describe("daily clinic close state, complete output and screen layout", () => {
       // Large tables scroll in their labeled regions, never by clipping amounts.
       const clipped = await root.locator("td, th, bdi").evaluateAll((nodes) => nodes.filter((node) => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1).map((node) => node.textContent));
       expect(clipped).toEqual([]);
+      const numericCells = await root.locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => {
+        const range = document.createRange(); range.selectNodeContents(node);
+        const rects = Array.from(range.getClientRects()), cell = node.closest("td")?.getBoundingClientRect();
+        return { whiteSpace: getComputedStyle(node).whiteSpace, lines: rects.length,
+          fits: !!cell && rects.every((box) => box.left >= cell.left && box.right <= cell.right) };
+      }));
+      expect(numericCells.length).toBeGreaterThan(20);
+      for (const cell of numericCells) { expect(cell.whiteSpace).toBe("nowrap"); expect(cell.lines).toBe(1); expect(cell.fits).toBe(true); }
+      // Show the actual financial columns in the retained screen evidence.
+      await f.page.getByTestId("daily-clinic-attendee-totals").locator('[data-currency="YER"]').last().scrollIntoViewIfNeeded();
       await mkdir(".settings-ui-artifacts", { recursive: true });
       const bytes = await f.page.screenshot({ path: `.settings-ui-artifacts/daily-clinic-${width}.png`, fullPage: false });
       f.assertIsolated();
@@ -243,13 +253,61 @@ describe("daily clinic close state, complete output and screen layout", () => {
 
 const plain = (text: string) => text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
 
+type PaperPage = { width: number; height: number; words: { text: string; xMin: number; xMax: number; yMin: number; yMax: number }[] };
+async function readPaper(page: Page, path: string): Promise<PaperPage[]> {
+  const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  return page.evaluate((xml) => {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.querySelector("parsererror")) throw new Error("Invalid PDF XML");
+    return Array.from(doc.getElementsByTagName("page")).map((page) => ({ width: Number(page.getAttribute("width")), height: Number(page.getAttribute("height")),
+      words: Array.from(page.getElementsByTagName("word")).map((word) => ({ text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")), yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
+    }));
+  }, xml);
+}
+function assertPaperBounds(pages: PaperPage[]) {
+  expect(pages.length).toBeGreaterThan(0);
+  for (const page of pages) {
+    expect(page.words.length).toBeGreaterThan(0);
+    expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5); expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
+    for (const word of page.words) {
+      expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
+      expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+    }
+  }
+}
+const routineSections = ["daily-clinic-attendees", "daily-clinic-account-position", "daily-clinic-work", "daily-clinic-attendee-receipts", "daily-clinic-other-receipts", "daily-clinic-expenses", "daily-clinic-recipients", "daily-clinic-close-summary", "daily-clinic-reconciliation"];
+async function routineMoneySignature(page: Page) {
+  return Promise.all(routineSections.map(async (id) => ({ id, money: await page.getByTestId(id).locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => ({ minor: node.getAttribute("data-minor"), currency: node.getAttribute("data-currency"), text: node.textContent }))) })));
+}
+async function assertRoutineRows(page: Page, counts: { attendees: number; work: number; attendeeReceipts: number; otherReceipts: number; expenses: number }) {
+  for (const id of routineSections) {
+    const section = page.getByTestId(id);
+    expect(await section.isVisible()).toBe(true);
+    const rendered = await section.locator("tbody tr, [data-minor]").evaluateAll((nodes) => nodes.map((node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden"));
+    expect(rendered.every(Boolean)).toBe(true);
+  }
+  expect(await page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
+  expect(await page.getByTestId("daily-clinic-attendees").locator("[data-patient-key]").count()).toBe(counts.attendees);
+  expect(await page.getByTestId("daily-clinic-work").locator("[data-work-key]").count()).toBe(counts.work);
+  expect(await page.getByTestId("daily-clinic-attendee-receipts").locator("[data-receipt-id]").count()).toBe(counts.attendeeReceipts);
+  expect(await page.getByTestId("daily-clinic-other-receipts").locator("[data-receipt-id]").count()).toBe(counts.otherReceipts);
+  expect(await page.getByTestId("daily-clinic-expenses").locator("[data-expense-id]").count()).toBe(counts.expenses);
+  expect(await page.getByTestId("daily-clinic-print-scope").innerText()).toContain("دون ملحق");
+  expect(await page.getByTestId("daily-clinic-end").innerText()).toContain("غير مشمول");
+  const fontSizes = await page.getByTestId("daily-clinic-attendees").locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => parseFloat(getComputedStyle(node).fontSize)));
+  expect(fontSizes.every((size) => size >= 11.3)).toBe(true);
+}
+
 describe("daily clinic full-result A4 print proof", () => {
   it("prints every attendee across pages, repeating currency headers without clipping or footer repetition", async () => {
     const f = await fixture();
     try {
       const count = 56;
-      await complete(f.page, 0, dailyClinicReportFixture("2026-09-30", count));
+      const report = dailyClinicReportFixture("2026-09-30", count);
+      report.work[0].description = "WORK-STRESS عمل سريري اصطناعي مشمول";
+      await complete(f.page, 0, report);
       await expect.poll(() => f.page.getByTestId("daily-clinic-attendees").locator("[data-patient-key]").count()).toBe(count);
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
       await f.page.emulateMedia({ media: "print" });
       await f.page.evaluate(() => document.fonts.ready);
       expect(await f.page.getByTestId("daily-clinic-print").isHidden()).toBe(true);
@@ -312,6 +370,27 @@ describe("daily clinic full-result A4 print proof", () => {
         await writeFile(".settings-ui-artifacts/daily-clinic-print-proof.json", JSON.stringify({ synthetic: true, attendeeCount: count, pageCount: pages.length, attendeePageCount: attendeePages.length, dimensions: pages.map(({ width, height }) => ({ width, height })), complete: true }, null, 2));
         f.assertIsolated();
         evidence.push({ filename: "daily-clinic-full-a4.pdf", mime: "application/pdf", bytes });
+        const financialBefore = await routineMoneySignature(f.page);
+        await f.page.emulateMedia({ media: "screen" });
+        await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("summary");
+        expect(await f.page.getByTestId("daily-clinic-result").getAttribute("data-print-scope")).toBe("summary");
+        await f.page.emulateMedia({ media: "print" });
+        await f.page.evaluate(() => document.fonts.ready);
+        await assertRoutineRows(f.page, { attendees: 56, work: 1, attendeeReceipts: 1, otherReceipts: 1, expenses: 2 });
+        expect(await routineMoneySignature(f.page)).toEqual(financialBefore);
+        const summaryPath = ".settings-ui-artifacts/daily-clinic-summary-a4.pdf";
+        const summaryBytes = await f.page.pdf({ path: summaryPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        try {
+          const summaryPages = await readPaper(f.page, summaryPath);
+          assertPaperBounds(summaryPages);
+          expect(summaryPages.length).toBeLessThanOrEqual(Math.floor(pages.length * 0.7));
+          console.log(`DAILY_CLINIC_STRESS_PAGES ${JSON.stringify({ synthetic: true, patients: count, summaryPages: summaryPages.length, fullPages: pages.length })}`);
+          const words = summaryPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+          for (let i = 1; i <= count; i++) expect(words.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+          for (const marker of ["WORK-STRESS", "SYNTHETIC-NONATTENDEE-501", "SYNTHETIC-EXPENSE-700", "55,308,641,976"]) expect(words).toContain(marker);
+          f.assertIsolated();
+          evidence.push({ filename: "daily-clinic-summary-a4.pdf", mime: "application/pdf", bytes: summaryBytes });
+        } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(summaryBytes); throw error; }
       } catch (error) {
         // This is explicitly failed diagnostic output, not successful evidence.
         // The fixture must still prove all report input was synthetic/isolated.
@@ -319,6 +398,78 @@ describe("daily clinic full-result A4 print proof", () => {
         emitDailyClinicFailureEvidence(bytes);
         throw error;
       }
+    } finally { await f.context.close(); }
+  });
+
+  it("prints a realistic normal day in the default routine scope with every work and cash row", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      expect(await f.page.getByLabel("نطاق الطباعة", { exact: true }).inputValue()).toBe("summary");
+      const financialBefore = await routineMoneySignature(f.page);
+      await f.page.emulateMedia({ media: "print" }); await f.page.evaluate(() => document.fonts.ready);
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 2 });
+      const path = ".settings-ui-artifacts/daily-clinic-normal-day-a4.pdf";
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      const bytes = await f.page.pdf({ path, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      try {
+        const pages = await readPaper(f.page, path); assertPaperBounds(pages);
+        const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= 8; i++) for (const prefix of ["DAY", "WORK"]) expect(words.filter((word) => word === `${prefix}-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        for (const marker of ["RECEIPT-01", "RECEIPT-02", "REVERSE-03", "SPEND-01", "SPEND-02"]) expect(words).toContain(marker);
+        expect(words.some((word) => /^PLAN-/.test(word))).toBe(false);
+        for (const amount of ["90,000", "750.00", "200.00", "30,000", "300.00", "50.00", "60,000", "450.00", "150.00", "8,000", "-25.00"]) expect(words).toContain(amount);
+        await f.page.emulateMedia({ media: "screen" });
+        await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
+        await f.page.emulateMedia({ media: "print" });
+        expect(await f.page.getByTestId("daily-clinic-reference-appendix").isVisible()).toBe(true);
+        expect(await routineMoneySignature(f.page)).toEqual(financialBefore);
+        const fullPath = ".settings-ui-artifacts/daily-clinic-normal-day-full-a4.pdf";
+        await f.page.pdf({ path: fullPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        const fullPages = await readPaper(f.page, fullPath); assertPaperBounds(fullPages);
+        expect(pages.length).toBeLessThan(fullPages.length);
+        const fullWords = fullPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= 8; i++) expect(fullWords.filter((word) => word === `PLAN-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        console.log(`DAILY_CLINIC_NORMAL_DAY_PAGES ${JSON.stringify({ synthetic: true, patients: 8, workRows: 8, receiptRows: 3, expenseRows: 2, summaryPages: pages.length, fullPages: fullPages.length })}`);
+        f.assertIsolated();
+        evidence.push({ filename: "daily-clinic-normal-day-a4.pdf", mime: "application/pdf", bytes });
+      } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(bytes); throw error; }
+    } finally { await f.context.close(); }
+  });
+
+  it("keeps pending visits and per-patient on-account debt or credit distinct in routine print", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      report.attendees[0].visitIds.push(101); report.attendees[0].visitsCount = 2; report.attendees[0].pendingVisitsCount = 1;
+      report.totals.visitsCount = 9; report.totals.pendingVisitsCount = 1;
+      // Older on-account money changes the current patient account only; it
+      // does not become an explicit receipt allocation to today's agreement.
+      report.currentAccounts[0].byCurrency.YER.collectedMinor = 15000;
+      report.currentAccounts[0].byCurrency.YER.receivableMinor = 15000;
+      report.currentAccounts[0].unallocatedPaymentIds = [990];
+      report.totals.currentReceivable.YER = 55000;
+      report.currentAccounts[1].byCurrency.SAR.collectedMinor = 30000;
+      report.currentAccounts[1].byCurrency.SAR.receivableMinor = 0;
+      report.currentAccounts[1].byCurrency.SAR.creditMinor = 5000;
+      report.currentAccounts[1].unallocatedPaymentIds = [991];
+      report.totals.currentReceivable.SAR = 30000; report.totals.currentCredit.SAR = 5000;
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      await f.page.emulateMedia({ media: "print" });
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 2 });
+      const attendance = f.page.getByTestId("daily-clinic-attendees");
+      expect(await attendance.locator('[data-patient-key="patient:1"]').innerText()).toContain("بانتظار");
+      expect(await attendance.locator('[data-patient-key="patient:1"] [data-minor="20000"]').count()).toBe(1);
+      expect(await attendance.locator('[data-patient-key="patient:2"] [data-minor="15000"]').count()).toBe(1);
+      const position = f.page.getByTestId("daily-clinic-account-position");
+      expect(await position.locator('[data-account-patient="1"] [data-minor]').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-minor"))))).toEqual([15000, 0, 0, 0, 0, 0]);
+      expect(await position.locator('[data-account-patient="2"] [data-minor]').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-minor"))))).toEqual([0, 0, 0, 0, 5000, 0]);
+      expect(await position.innerText()).toContain("مديونية"); expect(await position.innerText()).toContain("دائن");
+      expect(await f.page.getByTestId("daily-clinic-attendee-receipts").locator("[data-receipt-id]").count()).toBe(2);
+      f.assertIsolated();
     } finally { await f.context.close(); }
   });
 
@@ -336,6 +487,7 @@ describe("daily clinic full-result A4 print proof", () => {
       await complete(f.page, 0, report);
       await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
       expect(await f.page.getByTestId("daily-clinic-currency-panels").isHidden()).toBe(true);
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
       await f.page.emulateMedia({ media: "print" });
       await f.page.evaluate(() => document.fonts.ready);
       expect(await f.page.getByTestId("daily-clinic-attendees").isHidden()).toBe(true);
@@ -376,6 +528,17 @@ describe("daily clinic full-result A4 print proof", () => {
       // One patient row per explicit currency panel, no printed grouped copy.
       expect(words.filter((word) => word === "SYNTHETIC-0001")).toHaveLength(3);
       expect(await f.page.getByTestId("daily-clinic-end").isVisible()).toBe(true);
+      await f.page.emulateMedia({ media: "screen" });
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("summary");
+      await f.page.emulateMedia({ media: "print" });
+      expect(await f.page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
+      expect(await panels.isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-recipient-currency-panels").isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-attendees").isHidden()).toBe(true);
+      const exactExtreme = panels.locator(`[data-minor="${maximum}"]`);
+      expect(await exactExtreme.count()).toBe(2);
+      expect(await exactExtreme.evaluateAll((nodes) => nodes.every((node) => node.getClientRects().length > 0))).toBe(true);
+      for (const id of ["daily-clinic-account-position", "daily-clinic-work", "daily-clinic-attendee-receipts", "daily-clinic-other-receipts", "daily-clinic-expenses", "daily-clinic-reconciliation", "daily-clinic-close-summary"]) expect(await f.page.getByTestId(id).isVisible()).toBe(true);
       f.assertIsolated();
       evidence.push({ filename: "daily-clinic-extreme-a4.pdf", mime: "application/pdf", bytes });
     } finally { await f.context.close(); }

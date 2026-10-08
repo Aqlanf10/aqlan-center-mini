@@ -41,3 +41,62 @@ export function dailyClinicReportFixture(date = "2026-09-30", count = 2): DailyC
     warnings: ["القيم المالية الحالية قد تتغير بعد يوم الحضور المختار."],
   };
 }
+
+/** Representative synthetic day: eight single-visit patients, short work text,
+ * one agreement each, modest native amounts and named collection/spending rows. */
+export function dailyClinicNormalDayFixture(): DailyClinicReport {
+  const report = dailyClinicReportFixture("2026-09-30", 8);
+  const currencies = ["YER", "SAR", "USD"] as const;
+  const principal = { YER: 30000, SAR: 25000, USD: 10000 };
+  const settled = { YER: 10000, SAR: 10000, USD: 2500 };
+  report.totals.agreement = zero(); report.totals.explicitlySettled = zero();
+  report.totals.agreementRemaining = zero(); report.totals.knownCompletedValue = zero();
+  report.agreements = []; report.work = []; report.currentAccounts = [];
+  report.attendees.forEach((patient, index) => {
+    const currency = currencies[index % currencies.length], suffix = String(index + 1).padStart(2, "0");
+    const agreementId = 1000 + index, visitId = index + 1;
+    patient.patientName = `مراجع تجريبي ${suffix}`; patient.patientNumber = `DAY-${suffix}`;
+    patient.visitIds = [visitId]; patient.visitsCount = 1; patient.signedVisitsCount = 1; patient.pendingVisitsCount = 0;
+    patient.agreementIds = [agreementId]; patient.agreement = zero(); patient.explicitlySettled = zero(); patient.agreementRemaining = zero();
+    patient.agreement[currency] = principal[currency]; patient.explicitlySettled[currency] = settled[currency];
+    patient.agreementRemaining[currency] = principal[currency] - settled[currency];
+    patient.workSummary = index < 6 ? "حشوة ضوئية" : "متابعة تقويم";
+    report.totals.agreement[currency] += principal[currency]; report.totals.explicitlySettled[currency] += settled[currency];
+    report.totals.agreementRemaining[currency] += patient.agreementRemaining[currency];
+    report.agreements.push({ id: agreementId, patientId: index + 1, patientName: patient.patientName,
+      title: `PLAN-${suffix}`, status: "active", consentAt: "2026-09-01T08:00:00.000Z", currency,
+      principalMinor: principal[currency], explicitlySettledMinor: settled[currency], remainingMinor: patient.agreementRemaining[currency],
+      excessSettlementMinor: 0, includedInTotals: true, excludedReason: null, linkedVisitIds: [visitId], paymentIds: [] });
+    report.work.push({ key: `procedure:${visitId}`, patientKey: patient.key, patientName: patient.patientName, visitId,
+      sourceType: "procedure", sourceId: visitId, signedAt: "2026-09-30T09:00:00.000Z",
+      description: `WORK-${suffix} ${patient.workSummary}`, quantity: 1, toothCode: index < 6 ? 11 + index : null,
+      doctorName: "طبيب تجريبي", agreementId, classification: "included",
+      valueMinor: index < 6 ? principal[currency] : null, currency,
+      valuationBasis: index < 6 ? "completed_plan_item" : null,
+      unvaluedReason: index < 6 ? null : "جلسة متابعة مشمولة دون قيمة مستقلة" });
+    if (index < 6) report.totals.knownCompletedValue[currency] += principal[currency];
+    const byCurrency = Object.fromEntries(currencies.map((code) => [code, { openingMinor: 0,
+      billedMinor: code === currency ? principal[currency] : 0,
+      collectedMinor: code === currency ? settled[currency] : 0,
+      receivableMinor: code === currency ? principal[currency] - settled[currency] : 0, creditMinor: 0 }])) as DailyClinicReport["currentAccounts"][number]["byCurrency"];
+    report.currentAccounts.push({ patientId: index + 1, patientName: patient.patientName, byCurrency, unallocatedPaymentIds: [] });
+  });
+  report.totals.visitsCount = 8; report.totals.signedVisitsCount = 8; report.totals.pendingVisitsCount = 0;
+  report.totals.unvaluedWorkCount = 2; report.totals.currentReceivable = { ...report.totals.agreementRemaining }; report.totals.currentCredit = zero();
+  const original = report.receipts[0];
+  report.receipts = [
+    { ...original, receiptNumber: "RECEIPT-01", patientName: report.attendees[0].patientName,
+      tenderCurrency: "YER", tenderMinor: 10000, settlementCurrency: "YER", signedSettlementMinor: 10000, recordedBaseMinor: 10000, exchangeRate: 1 },
+    { ...original, id: 502, receiptNumber: "RECEIPT-02", patientId: 2, patientName: report.attendees[1].patientName,
+      planId: 1001, tenderCurrency: "SAR", tenderMinor: 10000, settlementCurrency: "SAR", signedSettlementMinor: 10000, recordedBaseMinor: 14000, exchangeRate: 140 },
+    { ...report.receipts[1], receiptNumber: "REVERSE-03" },
+  ];
+  report.totals.nativeReceipts = { YER: 10000, SAR: 10000, USD: 0 };
+  report.totals.nativeReversals = { YER: 0, SAR: 2500, USD: 0 };
+  report.totals.nativeNetRecorded = { YER: 10000, SAR: 7500, USD: 0 };
+  report.totals.nativeCashNetRecorded = { YER: 10000, SAR: 10000, USD: 0 };
+  report.totals.nativeTransferNetRecorded = { YER: 0, SAR: -2500, USD: 0 };
+  report.expenses.movements.forEach((movement, index) => { movement.voucherNumber = `SPEND-0${index + 1}`; });
+  report.expenses.movements[1].originalVoucherNumber = "SPEND-01";
+  return report;
+}

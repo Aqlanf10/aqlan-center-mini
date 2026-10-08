@@ -7,6 +7,8 @@ const EXPECTED = new Map([
   ["daily-clinic-1280.png", "image/png"],
   ["daily-clinic-full-a4.pdf", "application/pdf"],
   ["daily-clinic-extreme-a4.pdf", "application/pdf"],
+  ["daily-clinic-summary-a4.pdf", "application/pdf"],
+  ["daily-clinic-normal-day-a4.pdf", "application/pdf"],
 ]);
 export interface DailyClinicEvidenceFile { filename: string; mime: "image/png" | "application/pdf"; bytes: Buffer }
 
@@ -48,8 +50,11 @@ export function emitDailyClinicEvidence(files: readonly DailyClinicEvidenceFile[
 
 /** Failed synthetic PDF diagnostic only. Its different scope is never accepted
  * as the complete successful evidence bundle and cannot turn a failed test green. */
+let failureEvidenceEmitted = false;
 export function emitDailyClinicFailureEvidence(bytes: Buffer): void {
+  if (failureEvidenceEmitted) return;
   const filename = "daily-clinic-failed-a4.pdf";
   emitEvidence([{ filename, mime: "application/pdf", bytes }],
     new Map([[filename, "application/pdf"]]), "daily-clinic-diagnostic", 2 * 1024 * 1024);
+  failureEvidenceEmitted = true;
 }

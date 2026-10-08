@@ -10,11 +10,14 @@
 
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-block: 16px 24px; }
 .controls label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; max-width: 100%; }
-.controls input { min-width: 0; max-width: 100%; border: 1px solid #8799aa; border-radius: 8px; background: white; padding: 9px 12px; direction: ltr; }
+.controls input, .controls select { min-width: 0; max-width: 100%; border: 1px solid #8799aa; border-radius: 8px; background: white; padding: 9px 12px; color: #162a3d; }
+.controls input { direction: ltr; }
+.controls select { font: inherit; }
+.printScopeHint { flex-basis: 100%; font-size: 12px; color: #425870; line-height: 1.8; }
 .button, .primaryButton { border: 1px solid #8799aa; background: white; color: #162a3d; border-radius: 9px; padding: 10px 14px; font-weight: 600; font-size: 13px; }
 .primaryButton { background: #162a3d; color: white; border-color: #162a3d; }
 .button:disabled { opacity: .5; cursor: not-allowed; }
-.button:focus-visible, .primaryButton:focus-visible, .tableScroll:focus-visible { outline: 2px solid #2469aa; outline-offset: 3px; }
+.button:focus-visible, .primaryButton:focus-visible, .controls select:focus-visible, .tableScroll:focus-visible { outline: 2px solid #2469aa; outline-offset: 3px; }
 .result { min-width: 0; }
 .paperHeading { border-bottom: 2px solid #162a3d; margin-bottom: 16px; padding-bottom: 12px; }
 .paperHeading h2 { font-size: 22px; font-weight: 700; margin-block: 3px; }
@@ -37,9 +40,12 @@
 .currencyPanel { margin-block: 14px; }
 .currencyPanel h3 { font-weight: 700; margin-bottom: 6px; }
 .tableScroll { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid #becbd6; border-radius: 8px; background: white; }
-.report table { border-collapse: collapse; width: 100%; font-size: 12px; line-height: 1.7; table-layout: fixed; }
+/* Intrinsic column widths keep financial digits whole on screen. Wide tables
+ * scroll inside their own region, including at narrow viewport sizes. */
+.report table { border-collapse: collapse; width: 100%; font-size: 12px; line-height: 1.7; table-layout: auto; }
 .attendeeTable { min-width: 1120px; }
 .detailsTable { min-width: 800px; }
+.accountPositionTable { min-width: 960px; }
 .summaryTable { min-width: 600px; }
 .patientColumn { width: 18%; }
 .workColumn { width: 22%; }
@@ -54,12 +60,14 @@
 .report tbody th { font-weight: 600; }
 .report small { display: block; margin-top: 3px; color: #425870; font-size: 11px; line-height: 1.6; }
 .documentNumber { display: block; direction: ltr; unicode-bidi: isolate; }
-.amount { font-variant-numeric: tabular-nums; max-width: 100%; overflow-wrap: anywhere; }
+.amount { display: inline-block; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
 .unknown { color: #8b4d09; font-weight: 600; }
 .report .unknown { color: #8b4d09; }
 .endNote { margin-block: 24px 0; padding-top: 12px; border-top: 2px solid #6b8195; font-size: 12px; line-height: 1.8; }
 .printOnly { display: none; }
 .currencyPrintAppendix { display: none; }
+.referenceAppendix { margin-top: 32px; border-top: 2px solid #6b8195; padding-top: 16px; }
+.referenceAppendix > h2 { font-size: 19px; font-weight: 700; }
 
 @media (max-width: 540px) {
   .report { padding: 16px 10px 96px; }
@@ -87,11 +95,18 @@
   }
   .report .screenOnly { display: none !important; }
   .report .printOnly { display: block; }
+  /* References stay visible on screen and in full printing. */
+  .report [data-print-scope="summary"] .referenceOnly { display: none !important; }
+  .report .referenceAppendix { break-before: page; border-top: 0; margin-top: 0; padding-top: 0; }
+  .report .referenceAppendix > h2 { font-size: 12pt; break-after: avoid; }
   .report .section { margin-block: 6mm; }
   .report .section > h2 { font-size: 12pt; break-after: avoid; }
   .report .currencyPanel h3, .report .note { break-after: avoid; }
   .report .tableScroll { overflow: visible; width: 100%; max-width: none; border: 0; border-radius: 0; }
-  .report table { width: 100%; min-width: 0; font-size: 8.5pt; line-height: 1.45; }
+  .report table { width: 100%; min-width: 0; font-size: 8.5pt; line-height: 1.45; table-layout: fixed; }
+  /* Six separate account amounts have room for the longest exact values;
+   * intrinsic sizing reserves that width before patient names wrap. */
+  .report .accountPositionTable { table-layout: auto; }
   /* Financial digits stay whole at the same readable size. Give them width;
    * patient/work prose can wrap. Values beyond this grouped layout use the
    * explicit per-currency print panels, never clipping or a tiny font. */
