@@ -128,7 +128,7 @@ describe("report center applied filters in the built browser", () => {
       await f.page.getByRole("navigation", { name: "أقسام التقارير" }).getByRole("button", { name: "تقارير مالية", exact: true }).click();
       await f.fail();
       await f.page.getByRole("heading", { name: "تقرير تجريبي daily", exact: true }).waitFor();
-      expect(await f.page.getByRole("button", { name: "التقرير اليومي", exact: true }).count()).toBe(1);
+      expect(await f.page.getByRole("button", { name: "الحركات المالية اليومية", exact: true }).count()).toBe(1);
       expect((await printParams(f.page)).get("columns")).toBe("patientName");
       expect((await copiedParams(f.page)).get("report")).toBe("daily");
 

@@ -468,7 +468,7 @@ describe("collections native currency across the actual loader, report, download
       { key: "refunds-SAR", currency: "SAR", minor: 2345, text: "23.45 ر.س" },
     ]);
     const evidence: CollectionsNativeEvidenceMember[] = [];
-    const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, locale: "ar-YE", acceptDownloads: true });
+    const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, locale: "ar-YE", serviceWorkers: "block", acceptDownloads: true });
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const unexpected: string[] = [], errors: string[] = [];
