@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
+import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, matchesPrintPdfWord, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
 import { authedGet, baseUrl, harness } from "./_server";
 import { emitPrintToolbarEvidence, emitPrintToolbarFailedPdf, type PrintToolbarEvidenceMember } from "./_print-toolbar-evidence";
 
@@ -208,6 +208,14 @@ describe("print toolbar containment on real built financial documents", () => {
             expect(await whatsApp.count()).toBe(0);
           }
           const screenContent = await sheet.innerText();
+          if (spec.kind === "invoice") {
+            const reference = sheet.locator(".invoice-document-reference");
+            expect(await reference.locator("p").allTextContents()).toEqual(["بيانات الفاتورة", `مرجع الفاتورة: ${invoiceNumber}-${invoiceId}`]);
+            expect(await reference.locator('bdi[dir="ltr"]').innerText()).toBe(`${invoiceNumber}-${invoiceId}`);
+            for (const unsupported of ["فاتورة علاجية وضريبية معتمدة", "سجل طبي معتمد", "السجل / الرقم الضريبي", "E-INVOICE", "VERIFIED", "✓"]) {
+              expect(screenContent).not.toContain(unsupported);
+            }
+          }
           if (spec.kind === "receipt") {
             expect(await sheet.locator("time").getAttribute("datetime")).toBe(receiptTimestamp);
             expect(await sheet.locator("time").innerText()).toBe("الخميس 03/02/2000 · 1:00 صباحًا");
@@ -249,7 +257,8 @@ describe("print toolbar containment on real built financial documents", () => {
           evidence.push({ filename: `print-toolbar-${spec.kind}.pdf`, mime: "application/pdf", bytes: pdf });
           const text = pdfText(path);
           for (const expected of [patientName, spec.number]) expect(text).toContain(expected);
-          const [paper] = await pdfGeometry(page, path);
+          const papers = await pdfGeometry(page, path);
+          const [paper] = papers;
           // Calibrated against the retained failed PDF's actual bbox glyphs and
           // pixels: ordered header-region words preserve lam-alef glyph pairs.
           assertPrintPdfHeader(paper, screenHeader);
@@ -258,9 +267,20 @@ describe("print toolbar containment on real built financial documents", () => {
           assertPrintPdfWatermark(paper, spec.reprint);
           assertNoWhatsAppAnnotation(path);
           if (spec.kind === "invoice") {
-            for (const expected of ["SYNTHETIC-SERVICE", "SYNTHETIC-INVOICE-NOTE", "E-INVOICE", "VERIFIED", "12,500", "1,500", "11,000"]) {
+            for (const expected of ["SYNTHETIC-SERVICE", "SYNTHETIC-INVOICE-NOTE", `${invoiceNumber}-${invoiceId}`, "12,500", "1,500", "11,000"]) {
               expect(text).toContain(expected);
             }
+            const words = papers.flatMap(paper => paper.words);
+            // Arabic PDF glyph order can differ from logical DOM text. Use the
+            // existing calibrated word matcher for the neutral labels and the
+            // distinctive words in the removed certification/identifier claims.
+            for (const expected of ["بيانات", "الفاتورة", "مرجع"]) {
+              expect(words.some(word => matchesPrintPdfWord(word.text, expected)), `PDF neutral label: ${expected}`).toBe(true);
+            }
+            for (const unsupported of ["وضريبية", "معتمدة", "معتمد", "السجل", "الضريبي:"]) {
+              expect(words.some(word => matchesPrintPdfWord(word.text, unsupported)), `PDF unsupported claim: ${unsupported}`).toBe(false);
+            }
+            expect(text).not.toMatch(/E-INVOICE|VERIFIED|✓/i);
             // Independent actual-PDF controls: losing the header/logo must
             // fail their oracles while the watermark still passes, and vice versa.
             for (const region of ["header", "watermark", "signature"] as const) {
