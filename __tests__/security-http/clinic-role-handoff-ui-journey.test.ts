@@ -194,7 +194,14 @@ describe("real clinic role handoff on one synthetic patient", () => {
     await reception.page.getByRole("button", { name: "احفظ وافتح الملف", exact: true }).click();
     const created = await createdResponse;
     expect(created.status()).toBe(201);
-    const patient = await created.json() as { id: number; patientNumber: string };
+    // The real form navigates with window.location immediately after success.
+    // Chromium can retire its response body first; inspect the committed row
+    // instead of racing response.json() against the application's navigation.
+    const registered = (await db.query<{ id: number; patientNumber: string }>(
+      'SELECT id, patient_number AS "patientNumber" FROM patients WHERE full_name = $1', [patientName],
+    )).rows;
+    expect(registered).toHaveLength(1);
+    const patient = registered[0];
     expect(patient.id).toBeGreaterThan(0);
     await identity(reception.page, patient.id);
     expect((await db.query("SELECT id FROM patients WHERE full_name = $1", [patientName])).rows).toHaveLength(1);
@@ -430,6 +437,79 @@ describe("real clinic role handoff on one synthetic patient", () => {
     } finally {
       if (releaseOld) (releaseOld as () => void)();
       await oldSettled;
+      await cashier.context.close();
+    }
+  }, 120_000);
+
+  it.each([1280, 390])("cashier edit, clear and same-query reopen retire old real responses at %ipx", async (width) => {
+    const cashier = await screen("cashier", width);
+    const manager = await screen("admin");
+    await ensureOpenShift(manager);
+    const held: { release: () => void; done: Promise<void> }[] = [];
+    await cashier.page.route("**/api/patients?*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("q") !== searchA) { await route.continue(); return; }
+      const actual = await route.fetch();
+      expect(actual.status()).toBe(200);
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => { release = resolve; });
+      const done = pending.then(async () => { await route.fulfill({ response: actual }); });
+      held.push({ release, done });
+      await done;
+    });
+    const open = () => cashier.page.getByRole("button", { name: /سند قبض سريع/ }).click();
+    const picker = cashier.page.getByRole("dialog", { name: "اختيار مريض لإصدار سند قبض", exact: true });
+    const input = picker.getByPlaceholder("ابحث بالاسم أو رقم الهاتف أو الملف…");
+    const oldChoice = picker.getByRole("button").filter({ hasText: searchA });
+    const newChoice = picker.getByRole("button").filter({ hasText: searchB });
+    const start = async (count: number) => {
+      await input.fill(searchA);
+      await expect.poll(() => held.length).toBe(count);
+    };
+    const release = async (index: number) => {
+      const response = cashier.page.waitForResponse((item) => {
+        const url = new URL(item.url());
+        return url.pathname === "/api/patients" && url.searchParams.get("q") === searchA;
+      });
+      held[index].release();
+      await held[index].done;
+      await (await response).finished();
+      await bodyPaint(cashier.page);
+    };
+    try {
+      await cashier.page.goto(`${baseUrl}/finance`, { waitUntil: "domcontentloaded" });
+      await open();
+      await start(1); await release(0); await oldChoice.waitFor();
+      await input.fill(searchB);
+      // Immediate withdrawal, including the debounce interval before B exists.
+      expect(await oldChoice.count()).toBe(0);
+      await newChoice.waitFor();
+      await start(2);
+      await picker.getByRole("button", { name: "إلغاء", exact: true }).click();
+      await picker.waitFor({ state: "hidden" });
+      await open(); expect(await input.inputValue()).toBe("");
+      await start(3);
+      await release(1); // Old open's response arrives during the same new query.
+      expect(await input.inputValue()).toBe(searchA);
+      expect(await oldChoice.count()).toBe(0);
+      await capture(cashier.page, `cashier-reopen-waiting-${width}`, picker);
+      await release(2); await oldChoice.waitFor();
+      await oldChoice.click();
+      const collect = cashier.page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
+      await collect.waitFor();
+      expect(await collect.innerText()).toContain(searchA);
+      expect(await collect.innerText()).not.toContain(searchB);
+      await collect.getByRole("button", { name: "إغلاق", exact: true }).click();
+      await open(); await start(4); await input.fill(""); await release(3);
+      expect(await input.inputValue()).toBe(""); expect(await oldChoice.count()).toBe(0);
+      expect(await newChoice.count()).toBe(0);
+      const count = (await db.query("SELECT COUNT(*)::int AS n FROM payments WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = ANY($1::text[]))", [[searchA, searchB]])).rows[0].n;
+      expect(count).toBe(0);
+      console.log(`ROLE_QA_LIFETIME_FACTS ${JSON.stringify({ width, realHeldResponses: held.length,
+        sameQueryReopenOldChoices: 0, clearedQueryOldChoices: 0, paymentCount: count })}`);
+    } finally {
+      for (const item of held) item.release();
+      await Promise.all(held.map((item) => item.done));
       await cashier.context.close();
     }
   }, 120_000);
