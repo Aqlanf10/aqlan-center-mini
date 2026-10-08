@@ -63,10 +63,11 @@ table.items td.num, table.items th.num { text-align: left; white-space: nowrap; 
 }
 
 @media print {
-  .print-actions { display: none; }
+  .print-actions,
+  .print-root .no-print { display: none !important; }
   .sheet { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
-  /* لا هوامش متصفّح ولا رؤوس وتذييلات: المتصفّح يطبع رابط الصفحة وتاريخها في
-     أعلى الورقة افتراضيًا، وهو ما يُفسد سندًا يُعطى لمريض. */
+  /* هوامش المستند فقط. عنوان الصفحة ورابطها وتاريخها من خيار «الرؤوس والتذييلات»
+     في نافذة طباعة المتصفّح؛ هذا الهامش لا يعطّل ذلك الخيار. */
   @page { margin: 8mm; }
 }
 
