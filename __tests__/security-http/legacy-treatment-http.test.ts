@@ -139,9 +139,12 @@ describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no 
     { currency: "USD", agreed: "800", paid: "300", remaining: 50_000 },
   ])("previews and registers a $currency agreement that differs from every catalog price, without a price reason or doctor", async ({ currency, agreed, paid, remaining }) => {
     const patient = await newPatient();
-    // Catalog: 300000 YER, 250 SAR, 70 USD — none equals the historical agreement.
-    const { rows: [service] } = await db.query<{ id: number }>(`INSERT INTO services (name, price_minor, price_sar_minor, price_usd_minor,
-        is_active, price_configured, category) VALUES ($1, 300000, 25000, 7000, TRUE, TRUE, 'rct') RETURNING id`, [`عصب بأسعار ${stamp}-${currency}`]);
+    // Catalog: 250000 YER, 250 SAR, 70 USD — none equals the historical agreement in any currency.
+    const { rows: [service] } = await db.query<{ id: number; yer: number; sar: number; usd: number }>(`INSERT INTO services (name, price_minor,
+        price_sar_minor, price_usd_minor, is_active, price_configured, category) VALUES ($1, 250000, 25000, 7000, TRUE, TRUE, 'rct')
+        RETURNING id, price_minor::int AS yer, price_sar_minor::int AS sar, price_usd_minor::int AS usd`, [`عصب بأسعار ${stamp}-${currency}`]);
+    const agreedMinor = Number(agreed) * (currency === "YER" ? 1 : 100);
+    expect(agreedMinor).not.toBe(currency === "YER" ? service.yer : currency === "SAR" ? service.sar : service.usd);
     const body = { serviceId: service.id, toothCode: 36, currency, agreedAmount: agreed, previouslyPaidAmount: paid };
     const seen = await preview("reception", patient, body);
     expect(seen.status).toBe(200);
@@ -154,7 +157,7 @@ describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no 
         t.primary_doctor_id AS doctor, t.consent_at::text AS consent FROM legacy_treatment_agreements a JOIN plan_items i ON i.id = a.plan_item_id
         JOIN treatment_plans t ON t.id = i.plan_id WHERE a.patient_id = $1`, [patient]);
     // The item carries the historical agreement, not today's catalog; no provider and no consent are injected.
-    expect(item).toEqual({ unit: Number(agreed) * (currency === "YER" ? 1 : 100), doctor: null, consent: null });
+    expect(item).toEqual({ unit: agreedMinor, doctor: null, consent: null });
     expect(await money(patient)).toMatchObject({ payments: 0, invoices: 0 });
   });
 
