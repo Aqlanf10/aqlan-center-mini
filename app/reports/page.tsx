@@ -114,6 +114,8 @@ interface LoadedReport {
   result: ReportResult;
   generatedAt: string;
   generatedBy: string;
+  /** Optional display metadata for legacy responses, retained with this result. */
+  clinicTimeZone?: unknown;
   /** The request that produced this result, separate from unapplied form edits. */
   filters: FilterState;
   sectionId: SectionId;
@@ -528,7 +530,7 @@ export default function ReportsPage() {
         <ReportView
           result={data.result}
           clinicName={clinicName}
-          generated={{ at: data.generatedAt, by: data.generatedBy }}
+          generated={{ at: data.generatedAt, by: data.generatedBy, clinicTimeZone: data.clinicTimeZone }}
           printHref={`/print/report?${reportSearchParams(
             data.result.report,
             { ...data.filters, preset: "custom", from: data.result.from, to: data.result.to },

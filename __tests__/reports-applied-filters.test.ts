@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => ({
   },
   reportProps: null as null | {
     printHref: string; result: ReportResult; onViewChange: (view: ReportViewSpec) => void;
+    generated: { at: string; by: string; clinicTimeZone?: unknown };
     onPatientClick: (patientId: number) => void; onBack?: () => void;
   },
   savedProps: null as null | { queryString: string; sectionId: string },
@@ -85,10 +86,13 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function response(from: string, to = from, options: { report?: string; ok?: boolean } = {}): Response {
+function response(from: string, to = from, options: {
+  report?: string; ok?: boolean; generatedAt?: string; generatedBy?: string; clinicTimeZone?: unknown;
+} = {}): Response {
   const payload = options.ok === false ? { message: "Synthetic rejected request" } : {
     result: { ...result, report: options.report ?? "daily", from, to, title: `Synthetic ${from}` },
-    generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic",
+    generatedAt: options.generatedAt ?? "2026-10-02T08:00:00Z", generatedBy: options.generatedBy ?? "synthetic",
+    clinicTimeZone: "clinicTimeZone" in options ? options.clinicTimeZone : "Asia/Aden",
   };
   return { ok: options.ok ?? true, json: async () => payload } as Response;
 }
@@ -99,7 +103,7 @@ async function settle() {
 }
 beforeEach(() => {
   harness.states = ["operational", "daily", null,
-    { result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic", filters: { ...applied }, sectionId: "operational" },
+    { result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic", clinicTimeZone: "Asia/Aden", filters: { ...applied }, sectionId: "operational" },
     false, null, null, EMPTY_REPORT_VIEW, { ...applied }];
   harness.refs = [];
   harness.session = { role: "admin", username: "synthetic" };
@@ -114,6 +118,71 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("report center applied filter integrity", () => {
+  it("retains the raw instant, author and non-default clinic zone with the successful result", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response("2000-02-01", "2000-02-02", {
+      generatedAt: "2000-02-02T02:00:00.000Z", generatedBy: "synthetic new author", clinicTimeZone: "America/New_York",
+    }));
+    render();
+    harness.filterProps!.onApply();
+    await settle();
+    expect(harness.reportProps!.generated).toEqual({
+      at: "2000-02-02T02:00:00.000Z", by: "synthetic new author", clinicTimeZone: "America/New_York",
+    });
+    expect(harness.reportProps!.result.from).toBe("2000-02-01");
+    expect(harness.reportProps!.result.to).toBe("2000-02-02");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, null, "", "invalid-zone", 3, {}])(
+    "preserves a successful report with legacy or malformed cosmetic zone %j", async (clinicTimeZone) => {
+      const payload = await response("2026-10-01", "2026-10-02", { clinicTimeZone }).json();
+      if (clinicTimeZone === undefined) delete payload.clinicTimeZone;
+      vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => payload } as Response);
+      render();
+      harness.filterProps!.onApply();
+      expect(await settle()).not.toContain('role="alert"');
+      expect(harness.reportProps!.result.from).toBe("2026-10-01");
+      expect(harness.reportProps!.generated).toEqual({
+        at: "2026-10-02T08:00:00Z", by: "synthetic", clinicTimeZone,
+      });
+      expect(printed().get("from")).toBe("2026-10-01");
+    },
+  );
+
+  it.each(["not-an-instant", "2026-02-30T12:00:00Z"])("does not substitute a current time or reject report data for invalid generation instant %s", async (generatedAt) => {
+    vi.mocked(fetch).mockResolvedValueOnce(response("2026-10-01", "2026-10-02", { generatedAt }));
+    render();
+    harness.filterProps!.onApply();
+    expect(await settle()).not.toContain('role="alert"');
+    expect(harness.reportProps!.result.from).toBe("2026-10-01");
+    expect(harness.reportProps!.generated.at).toBe(generatedAt);
+  });
+
+  it("does not mix obsolete metadata into a newer result after the older JSON parse finishes", async () => {
+    const olderJson = deferred<unknown>();
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: () => olderJson.promise } as Response)
+      .mockResolvedValueOnce(response("2026-10-02", "2026-10-02", {
+        generatedAt: "2026-10-02T22:00:00.000Z", generatedBy: "newer author", clinicTimeZone: "America/New_York",
+      }));
+    render();
+    harness.filterProps!.onApply();
+    await settle(); // The older fetch is complete, but its JSON parse remains pending.
+    edit({ from: "2026-10-02", to: "2026-10-02" });
+    harness.filterProps!.onApply();
+    await settle();
+    const newer = harness.reportProps!.generated;
+    expect(newer).toEqual({
+      at: "2026-10-02T22:00:00.000Z", by: "newer author", clinicTimeZone: "America/New_York",
+    });
+    olderJson.resolve(await response("2026-10-01", "2026-10-01", {
+      generatedAt: "2026-10-01T08:00:00.000Z", generatedBy: "obsolete author", clinicTimeZone: "Asia/Aden",
+    }).json());
+    await settle();
+    expect(harness.reportProps!.generated).toEqual(newer);
+    expect(harness.reportProps!.result.from).toBe("2026-10-02");
+    expect(printed().get("from")).toBe("2026-10-02");
+  });
+
   it("keeps the official print period aligned with displayed results until Apply", () => {
     render();
     expect(new URL(harness.reportProps!.printHref, "https://synthetic.invalid").searchParams.get("from"))
@@ -173,6 +242,9 @@ describe("report center applied filter integrity", () => {
     expect(harness.reportProps!.result).toBe(result);
     expect(printed().get("from")).toBe("2026-09-01");
     expect(printed().get("currency")).toBeNull();
+    expect(harness.reportProps!.generated).toEqual({
+      at: "2026-10-02T08:00:00Z", by: "synthetic", clinicTimeZone: "Asia/Aden",
+    });
     expect(saved().get("from")).toBe("2026-09-01");
     expect(window.history.replaceState).not.toHaveBeenCalled();
   });
@@ -242,13 +314,20 @@ describe("report center applied filter integrity", () => {
     harness.filterProps!.onApply();
     edit({ from: "2026-10-02", to: "2026-10-02", doctorId: 22 });
     harness.filterProps!.onApply();
-    newer.resolve(response("2026-10-02"));
+    newer.resolve(response("2026-10-02", undefined, {
+      generatedAt: "2026-10-02T22:00:00.000Z", generatedBy: "newer author", clinicTimeZone: "America/New_York",
+    }));
     await settle();
-    if (olderOutcome === "success") older.resolve(response("2026-10-01"));
+    if (olderOutcome === "success") older.resolve(response("2026-10-01", undefined, {
+      generatedAt: "2026-10-01T08:00:00.000Z", generatedBy: "obsolete author", clinicTimeZone: "Asia/Aden",
+    }));
     else older.reject(new Error("Obsolete request failed"));
     const html = await settle();
     expect(html).not.toContain('role="alert"');
     expect(harness.reportProps!.result.from).toBe("2026-10-02");
+    expect(harness.reportProps!.generated).toEqual({
+      at: "2026-10-02T22:00:00.000Z", by: "newer author", clinicTimeZone: "America/New_York",
+    });
     expect(printed().get("from")).toBe("2026-10-02");
     expect(printed().get("doctorId")).toBe("22");
     expect(saved().get("doctorId")).toBe("22");
@@ -298,7 +377,9 @@ describe("report center applied filter integrity", () => {
     if (typeof cleanup === "function") cleanup();
     pending.resolve(response("2026-10-01"));
     await settle();
-    expect(harness.states[3]).toMatchObject({ result });
+    expect(harness.states[3]).toMatchObject({
+      result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic", clinicTimeZone: "Asia/Aden",
+    });
     expect(window.history.replaceState).not.toHaveBeenCalled();
   });
 

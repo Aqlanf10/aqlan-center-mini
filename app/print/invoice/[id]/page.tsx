@@ -135,16 +135,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <span>المريض: ................</span>
         </div>
 
-        <div style={{ marginTop: "6mm", padding: "3mm", border: "1px solid #cbd5e1", borderRadius: "2mm", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc" }}>
+        <div className="invoice-document-reference" style={{ marginTop: "6mm", padding: "3mm", border: "1px solid #cbd5e1", borderRadius: "2mm", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#f8fafc" }}>
           <div style={{ fontSize: "8pt", color: "#475569" }}>
-            <p style={{ fontWeight: 700, color: "#1e293b", marginBottom: "1mm" }}>فاتورة علاجية وضريبية معتمدة</p>
-            <p>السجل / الرقم الضريبي: {(settings as Record<string, string>)["clinic.tax_number"] || (settings as Record<string, string>)["clinic.cr_number"] || "سجل طبي معتمد"}</p>
-            <p>رمز الفاتورة: {invoice.invoiceNumber}-{id}</p>
-          </div>
-          <div style={{ textAlign: "center", border: "1px solid #94a3b8", padding: "2mm 3mm", background: "#ffffff", borderRadius: "1.5mm", fontSize: "7pt", fontFamily: "monospace" }}>
-            ✓ E-INVOICE VERIFIED
-            <br />
-            <span style={{ fontSize: "6pt", color: "#64748b" }}>نظام الفوترة الإلكتروني</span>
+            <p style={{ fontWeight: 700, color: "#1e293b", marginBottom: "1mm" }}>بيانات الفاتورة</p>
+            <p>مرجع الفاتورة: <bdi dir="ltr">{invoice.invoiceNumber}-{id}</bdi></p>
           </div>
         </div>
 

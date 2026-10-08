@@ -1046,7 +1046,11 @@ async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<
   };
 }
 
-async function loadContext(filters: ReportFilters, needMovements: boolean): Promise<ReportContext> {
+async function loadContext(
+  filters: ReportFilters,
+  needMovements: boolean,
+  expenseComparison: { from: string; to: string } | null = null,
+): Promise<ReportContext> {
   const doctorParties = await listParties("doctor");
   // (TD-05) الأساس دستوري من الكود — التقارير كلها تعرض مكافئاتها به.
   const base = CLINIC_BASE_CURRENCY;
@@ -1059,8 +1063,9 @@ async function loadContext(filters: ReportFilters, needMovements: boolean): Prom
     `SELECT (created_at AT TIME ZONE $1)::date::text AS date,
             base_amount_minor::text AS base, category, payee_text AS payee
        FROM expenses
-      WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
-    [CLINIC_TIME_ZONE, filters.from, filters.to],
+      WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+         OR ($4::date IS NOT NULL AND (created_at AT TIME ZONE $1)::date BETWEEN $4::date AND $5::date)`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to, expenseComparison?.from ?? null, expenseComparison?.to ?? null],
   );
   const expenses: ExpenseEntry[] = expensesRes.rows.map((row) => ({
     date: row.date, minor: num(row.base), category: row.category, payee: row.payee,
@@ -1124,6 +1129,12 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
+  // الطلب السنوي محدود الحجم قبل تحميل أي سياق مالي، من دون اقتطاع المدى.
+  if (report === "annual") {
+    const range = validateAnnualReportRange(filters.from, filters.to);
+    filters = { ...filters, from: range.from, to: range.to };
+  }
+
   const needsMovements = [
     "daily", "monthly", "annual", "debt", "aging",
     "specialty", "doctor", "collections", "services", "patients", "patient-statement", "visits",
@@ -1131,7 +1142,12 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     "practice-overview", "provider-utilization", "practice-trends",
   ].includes(report);
 
-  const ctx = await loadContext(filters, needsMovements);
+  // المقارنة المالية في الشهري فقط؛ اليومي يجمع مصروفات السياق كلها.
+  // اتحاد المدَيَيْن يُبقي الفجوة خارجهما ولا يكرر الحركة إن تداخلا.
+  const expenseComparison = report === "monthly"
+    ? comparisonRange(filters.from, filters.to, filters.compare)
+    : null;
+  const ctx = await loadContext(filters, needsMovements, expenseComparison);
   /* (P0-1) «مستحق الطبيب» في تقرير الطبيب يأتي من محرّك العمولات الواحد (التحصيل
      الفعلي، خصم المختبر، النسبة السارية وقت التحصيل) — لا من صيغةٍ ثانية كانت تضرب
      قيمة الفاتورة كاملةً في نسبة اليوم فتناقض شاشة العمولات. */
@@ -1740,8 +1756,10 @@ function monthlyReport(ctx: ReportContext): ReportResult {
 
 function annualReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
-  const { from, to } = filters;
+  const { from, to, firstMonth, lastMonth } = validateAnnualReportRange(filters.from, filters.to);
   const year = Number(from.slice(0, 4));
+  const endYear = Number(to.slice(0, 4));
+  const spansYears = year !== endYear;
 
   const monthlyRows: ReportRow[] = [];
   // (P-01/D-1) الأشرطة بدلو العملة الأساسية وحده — معنونة بذلك؛ بقية الدلاء في الجدول.
@@ -1750,14 +1768,19 @@ function annualReport(ctx: ReportContext): ReportResult {
   let totalInvoicedByCurrency = emptyCurrencyRecord();
   let totalExpenses = 0;
   let totalNewPatients = 0;
-  const bestMonthByCurrency = new Map<Currency, { month: number; minor: number }>();
+  const bestMonthByCurrency = new Map<Currency, { label: string; minor: number }>();
   const yearPatients = new Set<number>();
 
-  for (let month = 1; month <= 12; month++) {
-    const mFrom = `${from.slice(0, 4)}-${String(month).padStart(2, "0")}-01`;
-    const mTo = endOfMonth(mFrom);
-    if (mFrom > to) break;
-    if (mTo < from) continue;
+  // كل شهر يمسّ المدى، ولو عبر سنة؛ الطرفان داخل حدود الفترة المطلوبة.
+  for (let monthIndex = firstMonth; monthIndex <= lastMonth; monthIndex++) {
+    const month = monthIndex % 12 + 1;
+    const monthStart = `${String(Math.floor(monthIndex / 12)).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+    const mFrom = monthStart < from ? from : monthStart;
+    const monthEnd = endOfMonth(monthStart);
+    const mTo = monthEnd > to ? to : monthEnd;
+    const monthLabel = spansYears ? `${monthName(month)} ${monthStart.slice(0, 4)}` : monthName(month);
+    // وجود الحركة هو المعيار، حتى إن تعادل المصروف مع عكسه فكان صافي الشهر صفرًا.
+    const hasExpenses = ctx.expenses.some((expense) => expense.date >= mFrom && expense.date <= mTo);
 
     const summary = periodSummary(ctx, mFrom, mTo);
     totalCollectedByCurrency = addCurrencyRecords(totalCollectedByCurrency, summary.collectedByCurrency);
@@ -1767,7 +1790,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     for (const currency of CURRENCIES) {
       const best = bestMonthByCurrency.get(currency);
       if (summary.collectedByCurrency[currency] > (best?.minor ?? 0)) {
-        bestMonthByCurrency.set(currency, { month, minor: summary.collectedByCurrency[currency] });
+        bestMonthByCurrency.set(currency, { label: monthLabel, minor: summary.collectedByCurrency[currency] });
       }
     }
 
@@ -1789,7 +1812,8 @@ function annualReport(ctx: ReportContext): ReportResult {
     for (const currency of CURRENCIES) {
       const invoiced = summary.invoicedByCurrency[currency];
       const collected = summary.collectedByCurrency[currency];
-      if (invoiced === 0 && collected === 0 && summary.outstandingEnd[currency] === 0) continue;
+      if (invoiced === 0 && collected === 0 && summary.outstandingEnd[currency] === 0
+          && !(currency === base && hasExpenses)) continue;
       monthActivity.set(currency, {
         invoiced, collected,
         newDebt: summary.newDebtByCurrency[currency],
@@ -1802,7 +1826,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     }
     for (const [currency, activity] of monthActivity) {
       monthlyRows.push({
-        monthLabel: monthName(month),
+        monthLabel,
         currency,
         patients: summary.patients,
         visits: summary.visits,
@@ -1815,7 +1839,7 @@ function annualReport(ctx: ReportContext): ReportResult {
         outstandingMinor: activity.outstanding,
       });
     }
-    bars.push({ label: monthName(month), minor: summary.collectedByCurrency[base] });
+    bars.push({ label: monthLabel, minor: summary.collectedByCurrency[base] });
   }
 
   const outstandingEnd = emptyCurrencyRecord();
@@ -1833,7 +1857,7 @@ function annualReport(ctx: ReportContext): ReportResult {
   return {
     report: "annual",
     title: "التقرير السنوي",
-    subtitle: `سنة ${year}`,
+    subtitle: spansYears ? `السنوات ${year} → ${endYear}` : `سنة ${year}`,
     periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
     from, to, baseCurrency: base,
     kpis: [
@@ -1844,7 +1868,7 @@ function annualReport(ctx: ReportContext): ReportResult {
       countKpi("patients", "مرضى السنة", yearPatients.size),
       countKpi("new", "مرضى جدد", totalNewPatients, "good"),
       ...moneyKpis("avgMonthly", "متوسط التحصيل الشهري", avgMonthlyByCurrency, "info"),
-      { key: "best", label: "أعلى شهر تحصيل (الأساس)", text: bestMonthBase?.month ? monthName(bestMonthBase.month) : "—" },
+      { key: "best", label: "أعلى شهر تحصيل (الأساس)", text: bestMonthBase?.label ?? "—" },
       { key: "topSpecialty", label: "أعلى تخصص إيرادًا", text: topSpecialty },
     ],
     monthly: {
@@ -1858,7 +1882,7 @@ function annualReport(ctx: ReportContext): ReportResult {
         { key: "collectedMinor", label: "المحصّل", type: "money", currencyKey: "currency" },
         { key: "debtMinor", label: "المديونية", type: "money", currencyKey: "currency" },
         { key: "expensesMinor", label: "المصروفات", type: "money", currencyKey: "currency" },
-        { key: "outstandingMinor", label: "مديونية آخر الشهر", type: "money", currencyKey: "currency" },
+        { key: "outstandingMinor", label: "مديونية آخر الشهر", type: "money", currencyKey: "currency", aggregate: "none" },
       ],
       rows: monthlyRows,
       barKey: "collectedMinor",
@@ -1868,6 +1892,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     notes: [
       "(P-01) كل شهرٍ بصفوفٍ لعملاته النشطة — لا يُجمع شهرٌ عملاته في رقمٍ واحد.",
       "الأشرطة البيانية بدلو العملة الأساسية وحده؛ تفصيل بقية العملات في الجدول.",
+      "كل صف شهري محصور بالفترة المختارة؛ مديونية نهايته رصيد لحظي لا يُجمع عبر الأشهر.",
     ],
   };
 }
@@ -2794,7 +2819,7 @@ function doctorReport(ctx: ReportContext): ReportResult {
     }
   }
 
-  // ما لا طبيب له (بندٌ بلا طبيب) يظهر صفًّا صريحًا فتتطابق المجاميع مع تقرير التحصيل.
+  // ما لا طبيب له (بندٌ بلا طبيب) يظهر صفًّا صريحًا لحفظ مجموع التسويات بعملة الحساب.
   if (!filters.doctorId) {
     const orphanCollected = money.collected.get(null) ?? emptyCurrencyRecord();
     const orphanDebt = money.remaining.get(null) ?? emptyCurrencyRecord();
@@ -2858,36 +2883,26 @@ function doctorReport(ctx: ReportContext): ReportResult {
       "مرضاه = من عمل لهم بندًا في فواتير الفترة أو زاروه في الفترة — لا علاقةٌ تاريخية سابقة.",
       "قيمة أعماله = نصيب بنوده من صافي الفاتورة بعد الخصم؛ فاتورة بطبيبين تُقسم على بنود كلٍّ منهما.",
       "المحصّل والمتبقي يُسندان إلى البنود بقاعدة محرّك العمولات: FIFO داخل كل عملة، والرصيد الافتتاحي أولًا، ثم يُقسم على البنود بنسبة صافيها.",
-      "مجموع «المحصّل من الأعمال» + «تحصيل غير منسوب» = إجمالي تقرير التحصيل للفترة داخل كل عملة.",
+      "المحصّل من الأعمال والتحصيل غير المنسوب مقاسان بعملة تسوية الحساب؛ تقرير التحصيل يعرض مبالغ السندات بعملتها الأصلية، وقد تختلف القيم عند اختلاف العملتين.",
     ],
   };
 }
 
 // ─── تقرير التحصيل ──────────────────────────────────────────────────────────
 
-function collectionsReport(ctx: ReportContext, caller = "collections"): ReportResult {
+/** Pure report projection; exported so its real rows/KPIs can be tested without a database. */
+export function collectionsReport(ctx: ReportContext, caller = "collections"): ReportResult {
   const { filters, base, doctors } = ctx;
   const { from, to } = filters;
-
-  // (P-01/D-1) التصنيف (جديد/سابق) داخل كل دلو — الدفعة تسوّي دلوها فتُصنَّف فيه.
-  const newByCurrency = emptyCurrencyRecord();
-  const oldByCurrency = emptyCurrencyRecord();
-  const totalsByCurrency = emptyCurrencyRecord();
-  // الاستردادات بمكافئها الأساسي المسجَّل (عقد الدفعات) — عملة الأساس وحدها.
-  let refundsMinor = 0;
-  const actualByCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+  const nativeByCurrency = emptyCurrencyRecord();
+  const refundsByCurrency = emptyCurrencyRecord();
+  const nativeCurrencies = new Set<Currency>();
+  const refundCurrencies = new Set<Currency>();
   const rows: ReportRow[] = [];
 
   for (const patient of ctx.movements) {
     if (filters.specialty && !patientHasSpecialty(patient, filters.specialty)) continue;
     if (filters.doctorId && !patientHasDoctor(patient, filters.doctorId)) continue;
-
-    const classified = classifyPaymentsByCurrency(patient, from, to);
-    for (const currency of CURRENCIES) {
-      oldByCurrency[currency] += classified[currency].oldMinor;
-      newByCurrency[currency] += classified[currency].newMinor;
-      totalsByCurrency[currency] += classified[currency].oldMinor + classified[currency].newMinor;
-    }
 
     for (const payment of patient.payments) {
       if (payment.date < from || payment.date > to) continue;
@@ -2895,18 +2910,40 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
       if (filters.method && payment.method !== filters.method) continue;
       if (filters.receivedBy && payment.createdBy !== filters.receivedBy) continue;
 
-      const signed = payment.kind === "refund" ? -payment.baseMinor : payment.baseMinor;
-      if (payment.kind === "refund") refundsMinor += payment.baseMinor;
-      actualByCurrency[payment.currency] += payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
+      const nativeMinor = payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
+      nativeByCurrency[payment.currency] += nativeMinor;
+      nativeCurrencies.add(payment.currency);
+      if (payment.kind === "refund") {
+        refundsByCurrency[payment.currency] += payment.amountMinor;
+        refundCurrencies.add(payment.currency);
+      }
+
+      // loadMovements already resolved and validated the linked target (including
+      // cancelled invoices). A fallback account bucket is not evidence of an
+      // agreement: never borrow a patient's current plan or invent an allocation.
+      const targetLabel = payment.invoiceId != null ? `فاتورة #${payment.invoiceId}`
+        : payment.planId != null ? `اتفاق #${payment.planId}`
+          : payment.openingCurrency ? `رصيد افتتاحي (${payment.openingCurrency})`
+            : "غير محدد في السند";
+      const hasRecordedTarget = payment.invoiceId != null || payment.planId != null || payment.openingCurrency != null;
+      const crossCurrency = hasRecordedTarget && payment.settlementCurrency !== payment.currency;
 
       rows.push({
+        receiptId: payment.id,
         date: formatArabicDate(payment.date),
         patientId: patient.patientId,
         patientName: patient.name,
         patientNumber: patient.patientNumber,
         kindLabel: payment.kind === "refund" ? "استرداد" : "قبض",
-        amountText: `${payment.amountMinor} ${payment.currency}`,
-        baseMinor: signed,
+        currency: payment.currency,
+        nativeMinor,
+        // Legacy payload compatibility only. Not an available report column:
+        // every rendered/exported refund uses signed nativeMinor instead.
+        amountText: formatMoney(payment.amountMinor, payment.currency),
+        targetLabel,
+        // This is the canonical recorded settlement, not a new FX calculation.
+        // Unknown targets and same-currency receipts do not acquire YER figures.
+        settlementText: crossCurrency ? formatMoney(signedSettlement(payment), payment.settlementCurrency) : "—",
         methodLabel: PAYMENT_METHOD_LABEL[payment.method] ?? payment.method,
         receiver: payment.createdBy ?? "—",
         note: payment.note ?? "",
@@ -2915,22 +2952,21 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
   }
   rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
+  const visibleCurrencies = CURRENCIES.filter((currency) => nativeCurrencies.has(currency)
+    || filters.currency === currency || (rows.length === 0 && filters.currency === "all"));
   const kpis: KpiItem[] = [
-    ...moneyKpis("total", "إجمالي التحصيل", totalsByCurrency, "good"),
-    ...moneyKpis("new", "تحصيل جديد", newByCurrency, "info", "ما غطّى خدمات الفترة نفسها داخل دلو عملته"),
-    ...moneyKpis("old", "تحصيل مديونية سابقة", oldByCurrency, "warn", "ما غطّى أرصدةً سابقة لبداية الفترة (FIFO داخل كل عملة)"),
-    moneyKpi("refunds", "استردادات (مكافئ أساسي)", refundsMinor, base, "bad",
-      "المسترد بمكافئه الأساسي المسجَّل بسعر يومه — عقد الدفعات، لا تحويل فواتير"),
+    ...visibleCurrencies.map((currency) => moneyKpi(`cur-${currency}`, `صافي التحصيل (${currency})`,
+      nativeByCurrency[currency], currency, "good",
+      "مبالغ السندات المعروضة بعملتها الأصلية بعد الاستردادات والعكس؛ تشمل النقد والتحويل")),
+    ...CURRENCIES.filter((currency) => refundCurrencies.has(currency)).map((currency) =>
+      moneyKpi(`refunds-${currency}`, `استردادات (${currency})`, refundsByCurrency[currency], currency, "bad",
+        "الاستردادات والعكس بعملة السند الأصلية؛ مخصومة بالفعل من صافي التحصيل")),
   ];
-  for (const [currency, amount] of Object.entries(actualByCurrency) as [Currency, number][]) {
-    if (amount === 0) continue;
-    kpis.push({ key: `cur-${currency}`, label: `${currency} (فعلي)`, count: amount, tone: "calm", hint: "مجموع ما قُبض بعملته كما دخل الدرج" });
-  }
 
   return {
     report: caller === "debt" ? "debt" : "collections",
     title: caller === "debt" ? "تحصيل المديونيات خلال الفترة" : "تقرير التحصيل",
-    subtitle: "قيمة الخدمات ≠ التحصيل الفعلي — هنا التحصيل وحده، مفصولًا جديدًا عن سابق، بكل عملة دلوها",
+    subtitle: "التحصيل بعملة كل سند؛ وتظهر التسوية المسجّلة فقط عندما تختلف عملة الهدف المرتبط",
     periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
     from, to, baseCurrency: base,
     kpis,
@@ -2939,8 +2975,9 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
       { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
       { key: "patientNumber", label: "رقم الملف" },
       { key: "kindLabel", label: "النوع" },
-      { key: "amountText", label: "المبلغ (بعملته)" },
-      { key: "baseMinor", label: "المكافئ بالأساس", type: "money" },
+      { key: "nativeMinor", label: "مبلغ السند", type: "money", currencyKey: "currency", stackCurrencyTotals: true },
+      { key: "targetLabel", label: "مرجع السند" },
+      { key: "settlementText", label: "التسوية بعملة أخرى" },
       { key: "methodLabel", label: "طريقة الدفع" },
       { key: "receiver", label: "المستلِم" },
       { key: "note", label: "ملاحظة" },
@@ -2948,11 +2985,15 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "تصنيف جديد/سابق على FIFO داخل كل عملة: الدفعة تُغطّي أقدم رصيد دلوها أولًا.",
-      "أرقام العملات «الفعليّة» بالوحدات الكبرى كما قُبضت — لا تُجمع عملات في رقم واحد.",
+      "فلتر العملة يختار عملة السند الأصلية؛ جميع إجماليات التحصيل والاستردادات تخص السندات المعروضة وطريقة الدفع والمستلِم المختارين.",
+      "فلتر الطبيب أو التخصص يختار مجموعة مرضى وفق ارتباطاتهم المسجّلة، ثم يعرض حركاتهم خلال الفترة؛ ولا ينسب كل سند إلى الطبيب أو التخصص المختار.",
+      "التسوية بعملة مختلفة تظهر فقط لسند مرتبط بفاتورة أو اتفاق أو رصيد افتتاحي؛ وتستخدم قيمة التسوية المسجّلة، لا سعر صرف اليوم. لا تُجمع مع مبلغ السند أو بين العملات.",
+      "«غير محدد في السند» تعني عدم وجود هدف صريح؛ لا تُستنتج عملة الاتفاق من خطة المريض الحالية، ولا تُخصّص الدفعة لدين بافتراض FIFO.",
+      "الاسترداد والعكس يظهران بالسالب ويُخصمان من صافي العملة نفسها. السندات تعرض الحركات المسجّلة، ولا تُثبت وحدها أن نقدًا دخل الدرج أو خرج منه.",
     ],
   };
 }
+
 
 // ─── تقارير الخدمات والإجراءات ──────────────────────────────────────────────
 
@@ -4782,7 +4823,8 @@ async function practiceOverviewReport(ctx: ReportContext): Promise<ReportResult>
     { ...countKpi("no-show", "لم يحضروا", count(appointments, "no-show"), count(appointments, "no-show") > 0 ? "warn" : "calm"), href: drillHref(ctx, "operational", "appointments", { group: "statusLabel" }) },
     { ...countKpi("cancelled", "مواعيد ملغاة", count(appointments, "cancelled")), href: drillHref(ctx, "operational", "appointments", { group: "statusLabel" }) },
     ...withHref(moneyKpis("production", "الإنتاج (قيمة الخدمات)", summary.invoicedByCurrency), drillHref(ctx, "financial", "services")),
-    ...withHref(moneyKpis("collected", "التحصيل", summary.collectedByCurrency, "good"), drillHref(ctx, "financial", "collections")),
+    ...withHref(moneyKpis("collected", "التسويات بعملة الحساب", summary.collectedByCurrency, "good",
+      "التفاصيل تفتح سندات التحصيل بعملتها الأصلية؛ قد تختلف عن عملة تسوية الحساب"), drillHref(ctx, "financial", "collections")),
     ...withHref(moneyKpis("outstanding", "المستحقات القائمة", summary.outstandingEnd, "warn"), drillHref(ctx, "receivables", "debt", { debtMode: "outstanding" })),
     { ...countKpi("plans", "خطط علاج بدأت", count(plans, "plans")), href: drillHref(ctx, "clinical", "treatment-plans") },
     { ...countKpi("plans-active", "خطط جارية منها", count(plans, "active"), "calm"), href: drillHref(ctx, "clinical", "treatment-plans", { group: "statusLabel" }) },
@@ -5908,10 +5950,47 @@ export class ReportInputError extends Error {
   }
 }
 
+/**
+ * سقف تقني لحجم الطلب الواحد، لا حد للاحتفاظ بالتاريخ المالي.
+ * يمكن طلب تاريخ أطول في نوافذ منفصلة؛ 120 شهرًا ميزانية محافظة لا ضمان أداء.
+ */
+const MAX_ANNUAL_REPORT_MONTHS = 120;
+
+/** يتحقق من التقويم والمدى قبل تحميل المالية؛ لا يقتطع أي جزء منه بصمت. */
+export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+  const parseDate = (value: string | null | undefined): { date: string; month: number } => {
+    const invalid = () => new ReportInputError("أدخل تاريخي بداية ونهاية صالحين للتقرير السنوي بصيغة YYYY-MM-DD.");
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) throw invalid();
+    const instant = toUTC(value);
+    if (!Number.isFinite(instant) || fromUTC(instant) !== value) throw invalid();
+    const [year, month] = value.split("-").map(Number);
+    return { date: value, month: year * 12 + month - 1 };
+  };
+  const first = parseDate(from);
+  const last = parseDate(to);
+  const firstMonth = Math.min(first.month, last.month);
+  const lastMonth = Math.max(first.month, last.month);
+  if (lastMonth - firstMonth + 1 > MAX_ANNUAL_REPORT_MONTHS) {
+    throw new ReportInputError(
+      "التقرير السنوي يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.",
+    );
+  }
+  return {
+    from: first.date <= last.date ? first.date : last.date,
+    to: first.date <= last.date ? last.date : first.date,
+    firstMonth,
+    lastMonth,
+  };
+}
+
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
   const presetRaw = params.get("preset") ?? "this_month";
   const preset = (["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const)
     .includes(presetRaw as PeriodPreset) ? (presetRaw as PeriodPreset) : "this_month";
+  // روابط التقرير السنوي المحفوظة والطباعة تمرّ أيضًا بهذا المحلّل.
+  if (params.get("report") === "annual" && preset === "custom") {
+    validateAnnualReportRange(params.get("from"), params.get("to"));
+  }
   const { from, to } = resolvePeriod(preset, params.get("from"), params.get("to"), today);
 
   const doctorIdRaw = params.get("doctorId");

@@ -69,7 +69,10 @@ vi.mock("../components/finance/ReceivablesLabsTab", () => ({ ReceivablesLabsTab:
 vi.mock("../components/finance/CommissionsProfitabilityTab", () => ({ CommissionsProfitabilityTab: () => null }));
 vi.mock("../components/finance/AccountingReportsTab", () => ({ AccountingReportsTab: () => null }));
 vi.mock("../components/finance/ShiftCloseStatus", () => ({ ShiftCloseStatus: () => null }));
-vi.mock("../lib/reminders", () => ({ friendlyDateLong: (date: string) => date }));
+vi.mock("../lib/reminders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/reminders")>();
+  return { ...actual, friendlyDateLong: (date: string) => date };
+});
 vi.mock("../lib/schedule", () => ({ clinicDateString: () => "2030-01-01" }));
 
 type Element = ReactElement<Record<string, unknown>>;

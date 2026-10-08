@@ -50,6 +50,13 @@ function groupTotalText(group: ReportGroup, column: ReportColumn, base: Currency
     : formatMoney(0, base);
 }
 
+function currencyTotalsContent(text: string, column: ReportColumn) {
+  if (!column.stackCurrencyTotals || text === "") return text;
+  return text.split(" · ").map((part, index) => (
+    <span key={index} data-report-currency-total="" style={{ display: "block", whiteSpace: "nowrap" }}>{part}</span>
+  ));
+}
+
 function ReportTable({ title, columns, rows, base, groups }: {
   title?: string;
   columns: ReportColumn[];
@@ -91,7 +98,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
                 <td>مجموع {group.label}</td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className={column.type === "money" ? "num" : undefined}>
-                    {column.type === "money" ? groupTotalText(group, column, base) : ""}
+                    {column.type === "money" ? currencyTotalsContent(groupTotalText(group, column, base), column) : ""}
                   </td>
                 ))}
               </tr>,
@@ -115,7 +122,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
               <td>الإجمالي ({rows.length} صفًا)</td>
               {columns.slice(1).map((column) => (
                 <td key={column.key} className={column.type === "money" ? "num" : undefined}>
-                  {column.type === "money" ? moneyTotals(rows, column, base) : ""}
+                  {column.type === "money" ? currencyTotalsContent(moneyTotals(rows, column, base), column) : ""}
                 </td>
               ))}
             </tr>
@@ -149,7 +156,7 @@ export function PrintableReportDocument({
   return (
     <>
       <style>{`@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 8mm; }`}</style>
-      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`}>
+      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report}>
         <PrintHeader settings={settings} title={result.title} />
 
         <div className="report-meta">
@@ -257,7 +264,9 @@ export function PrintableReportDocument({
           </div>
         ) : null}
 
-        <PrintFooter settings={settings} />
+        {result.report === "collections" ? (
+          <footer className="report-contact-footer"><PrintFooter settings={settings} /></footer>
+        ) : <PrintFooter settings={settings} />}
       </div>
     </>
   );

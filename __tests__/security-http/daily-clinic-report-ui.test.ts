@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dailyClinicReportFixture } from "../fixtures/daily-clinic-report";
+import { dailyClinicReportFixture, dailyClinicNormalDayFixture } from "../fixtures/daily-clinic-report";
 import { baseUrl, harness, authedGet } from "./_server";
 import { emitDailyClinicEvidence, emitDailyClinicFailureEvidence, type DailyClinicEvidenceFile } from "./_daily-clinic-evidence";
 
@@ -153,6 +153,16 @@ describe("daily clinic close state, complete output and screen layout", () => {
       // Large tables scroll in their labeled regions, never by clipping amounts.
       const clipped = await root.locator("td, th, bdi").evaluateAll((nodes) => nodes.filter((node) => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1).map((node) => node.textContent));
       expect(clipped).toEqual([]);
+      const numericCells = await root.locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => {
+        const range = document.createRange(); range.selectNodeContents(node);
+        const rects = Array.from(range.getClientRects()), cell = node.closest("td")?.getBoundingClientRect();
+        return { whiteSpace: getComputedStyle(node).whiteSpace, lines: rects.length,
+          fits: !!cell && rects.every((box) => box.left >= cell.left && box.right <= cell.right) };
+      }));
+      expect(numericCells.length).toBeGreaterThan(20);
+      for (const cell of numericCells) { expect(cell.whiteSpace).toBe("nowrap"); expect(cell.lines).toBe(1); expect(cell.fits).toBe(true); }
+      // Show the actual financial columns in the retained screen evidence.
+      await f.page.getByTestId("daily-clinic-attendee-totals").locator('[data-currency="YER"]').last().scrollIntoViewIfNeeded();
       await mkdir(".settings-ui-artifacts", { recursive: true });
       const bytes = await f.page.screenshot({ path: `.settings-ui-artifacts/daily-clinic-${width}.png`, fullPage: false });
       f.assertIsolated();
@@ -243,13 +253,107 @@ describe("daily clinic close state, complete output and screen layout", () => {
 
 const plain = (text: string) => text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
 
+type PaperPage = { width: number; height: number; words: { text: string; xMin: number; xMax: number; yMin: number; yMax: number }[] };
+async function readPaper(page: Page, path: string): Promise<PaperPage[]> {
+  const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  return page.evaluate((xml) => {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.querySelector("parsererror")) throw new Error("Invalid PDF XML");
+    return Array.from(doc.getElementsByTagName("page")).map((page) => ({ width: Number(page.getAttribute("width")), height: Number(page.getAttribute("height")),
+      words: Array.from(page.getElementsByTagName("word")).map((word) => ({ text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")), yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
+    }));
+  }, xml);
+}
+const PRINT_MARGIN_PT = 10 * 72 / 25.4;
+/** Poppler reports Arabic combining-mark font bounds above the visible glyph.
+ * CI1584 page 4: tanwin bbox 25.828pt, actual 300dpi ink 29.28pt, CSS margin 28.346pt.
+ * Allow at most 3pt of top font bearing for marked Arabic prose only. Financial
+ * digits, ordinary words, horizontal bounds and bottom bounds retain 26pt. */
+function minimumPaperWordTop(text: string): number {
+  const markedArabicProse = /\p{Script=Arabic}/u.test(text) && /[\u064b-\u065f\u0670]/u.test(text) && !/\p{N}/u.test(text);
+  return markedArabicProse ? PRINT_MARGIN_PT - 3 : 26;
+}
+function assertPaperBounds(pages: PaperPage[]) {
+  expect(pages.length).toBeGreaterThan(0);
+  for (const [pageIndex, page] of pages.entries()) {
+    expect(page.words.length).toBeGreaterThan(0);
+    expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5); expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
+    for (const word of page.words) {
+      const context = `PDF page ${pageIndex + 1}, word ${JSON.stringify(word.text).slice(0, 140)}, box ${JSON.stringify({ xMin: word.xMin, xMax: word.xMax, yMin: word.yMin, yMax: word.yMax })}, page ${page.width}×${page.height}pt; CSS margin 10mm`;
+      expect(word.xMin, context).toBeGreaterThanOrEqual(26); expect(word.xMax, context).toBeLessThanOrEqual(page.width - 26);
+      expect(word.yMin, context).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax, context).toBeLessThanOrEqual(page.height - 26);
+    }
+  }
+}
+describe("daily clinic paper font-bound calibration", () => {
+  const page = (word: Partial<PaperPage["words"][number]>): PaperPage => ({ width: 841.89, height: 595.28,
+    words: [{ text: "سجل", xMin: 50, xMax: 90, yMin: 50, yMax: 65, ...word }] });
+  it("accepts bounded marked Arabic top font bearing while preserving the physical margin basis", () => {
+    expect(minimumPaperWordTop("سجل")).toBe(26);
+    expect(minimumPaperWordTop("مستقلًا")).toBeCloseTo(25.3464566929);
+    expect(() => assertPaperBounds([page({ text: "مستقلًا", yMin: 25.82801 })])).not.toThrow();
+    expect(() => assertPaperBounds([page({ text: "علاجٌ", yMin: PRINT_MARGIN_PT - 3 })])).not.toThrow();
+  });
+  it.each([
+    ["marked text beyond the bounded bearing", { text: "علاجٌ", yMin: PRINT_MARGIN_PT - 3 - 0.01 }],
+    ["ordinary Arabic", { text: "سجل", yMin: 25.82801 }],
+    ["Latin text with a combining mark", { text: "e\u0301", yMin: 25.82801 }],
+    ["financial digits", { text: "9,007,199,254,740,991", yMin: 25.82801 }],
+    ["Arabic digits", { text: "١٢٣", yMin: 25.82801 }],
+    ["digits inside marked Arabic", { text: "علاجٌ 1", yMin: 25.82801 }],
+    ["left edge of marked text", { text: "علاجٌ", xMin: 25.82801 }],
+    ["right edge of marked text", { text: "علاجٌ", xMax: 841.89 - 25.82801 }],
+    ["bottom edge of marked text", { text: "علاجٌ", yMax: 595.28 - 25.82801 }],
+  ] satisfies [string, Partial<PaperPage["words"][number]>][])("rejects %s", (_label, word) => {
+    expect(() => assertPaperBounds([page(word)])).toThrow();
+  });
+});
+
+/** Patient file numbers intentionally repeat in account/work details. Prove
+ * primary cohort uniqueness within its printed table, bounded by its exact
+ * unique subtotal, rather than treating later identity labels as duplicate visits. */
+function paperBeforeAmount(pages: PaperPage[], amount: string, includeAmountLine: boolean): PaperPage[] {
+  const index = pages.findIndex((page) => page.words.some((word) => plain(word.text) === amount));
+  if (index < 0) throw new Error(`Missing PDF section amount ${amount}`);
+  const anchor = pages[index].words.filter((word) => plain(word.text) === amount)
+    .reduce((top, word) => word.yMin < top.yMin ? word : top);
+  const lastY = includeAmountLine ? anchor.yMax + 0.1 : anchor.yMin - 0.1;
+  return pages.slice(0, index + 1).map((page, pageIndex) => pageIndex === index ? { ...page, words: page.words.filter((word) => word.yMax <= lastY) } : page);
+}
+
+const routineSections = ["daily-clinic-attendees", "daily-clinic-account-position", "daily-clinic-work", "daily-clinic-attendee-receipts", "daily-clinic-other-receipts", "daily-clinic-expenses", "daily-clinic-recipients", "daily-clinic-close-summary", "daily-clinic-reconciliation"];
+async function routineMoneySignature(page: Page) {
+  return Promise.all(routineSections.map(async (id) => ({ id, money: await page.getByTestId(id).locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => ({ minor: node.getAttribute("data-minor"), currency: node.getAttribute("data-currency"), text: node.textContent }))) })));
+}
+async function assertRoutineRows(page: Page, counts: { attendees: number; work: number; attendeeReceipts: number; otherReceipts: number; expenses: number }) {
+  for (const id of routineSections) {
+    const section = page.getByTestId(id);
+    expect(await section.isVisible()).toBe(true);
+    const rendered = await section.locator("tbody tr, [data-minor]").evaluateAll((nodes) => nodes.map((node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden"));
+    expect(rendered.every(Boolean)).toBe(true);
+  }
+  expect(await page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
+  expect(await page.getByTestId("daily-clinic-attendees").locator("[data-patient-key]").count()).toBe(counts.attendees);
+  expect(await page.getByTestId("daily-clinic-work").locator("[data-work-key]").count()).toBe(counts.work);
+  expect(await page.getByTestId("daily-clinic-attendee-receipts").locator("[data-receipt-id]").count()).toBe(counts.attendeeReceipts);
+  expect(await page.getByTestId("daily-clinic-other-receipts").locator("[data-receipt-id]").count()).toBe(counts.otherReceipts);
+  expect(await page.getByTestId("daily-clinic-expenses").locator("[data-expense-id]").count()).toBe(counts.expenses);
+  expect(await page.getByTestId("daily-clinic-print-scope").innerText()).toContain("دون ملحق");
+  expect(await page.getByTestId("daily-clinic-end").innerText()).toContain("غير مشمول");
+  const fontSizes = await page.getByTestId("daily-clinic-attendees").locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => parseFloat(getComputedStyle(node).fontSize)));
+  expect(fontSizes.every((size) => size >= 11.3)).toBe(true);
+}
+
 describe("daily clinic full-result A4 print proof", () => {
   it("prints every attendee across pages, repeating currency headers without clipping or footer repetition", async () => {
     const f = await fixture();
     try {
       const count = 56;
-      await complete(f.page, 0, dailyClinicReportFixture("2026-09-30", count));
+      const report = dailyClinicReportFixture("2026-09-30", count);
+      report.work[0].description = "WORK-STRESS عمل سريري اصطناعي مشمول";
+      await complete(f.page, 0, report);
       await expect.poll(() => f.page.getByTestId("daily-clinic-attendees").locator("[data-patient-key]").count()).toBe(count);
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
       await f.page.emulateMedia({ media: "print" });
       await f.page.evaluate(() => document.fonts.ready);
       expect(await f.page.getByTestId("daily-clinic-print").isHidden()).toBe(true);
@@ -285,12 +389,14 @@ describe("daily clinic full-result A4 print proof", () => {
           expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
           for (const word of page.words) {
             expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-            expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+            expect(word.yMin).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
           }
         }
         const allWords = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
-        for (let i = 1; i <= count; i++) expect(allWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
-        const attendeePages = pages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
+        const primaryPages = paperBeforeAmount(pages, "55,308,641,976", true);
+        const primaryWords = primaryPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= count; i++) expect(primaryWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+        const attendeePages = primaryPages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
         expect(attendeePages.length).toBeGreaterThan(1);
         for (const page of attendeePages) for (const currency of ["YER", "SAR", "USD"]) expect(page.words.filter((word) => plain(word.text) === currency).length).toBeGreaterThanOrEqual(3);
         // All nine values of the first patient's financial row belong to the
@@ -312,6 +418,28 @@ describe("daily clinic full-result A4 print proof", () => {
         await writeFile(".settings-ui-artifacts/daily-clinic-print-proof.json", JSON.stringify({ synthetic: true, attendeeCount: count, pageCount: pages.length, attendeePageCount: attendeePages.length, dimensions: pages.map(({ width, height }) => ({ width, height })), complete: true }, null, 2));
         f.assertIsolated();
         evidence.push({ filename: "daily-clinic-full-a4.pdf", mime: "application/pdf", bytes });
+        const financialBefore = await routineMoneySignature(f.page);
+        await f.page.emulateMedia({ media: "screen" });
+        await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("summary");
+        expect(await f.page.getByTestId("daily-clinic-result").getAttribute("data-print-scope")).toBe("summary");
+        await f.page.emulateMedia({ media: "print" });
+        await f.page.evaluate(() => document.fonts.ready);
+        await assertRoutineRows(f.page, { attendees: 56, work: 1, attendeeReceipts: 1, otherReceipts: 1, expenses: 2 });
+        expect(await routineMoneySignature(f.page)).toEqual(financialBefore);
+        const summaryPath = ".settings-ui-artifacts/daily-clinic-summary-a4.pdf";
+        const summaryBytes = await f.page.pdf({ path: summaryPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        try {
+          const summaryPages = await readPaper(f.page, summaryPath);
+          assertPaperBounds(summaryPages);
+          expect(summaryPages.length).toBeLessThanOrEqual(Math.floor(pages.length * 0.7));
+          console.log(`DAILY_CLINIC_STRESS_PAGES ${JSON.stringify({ synthetic: true, patients: count, summaryPages: summaryPages.length, fullPages: pages.length })}`);
+          const words = summaryPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+          const primaryWords = paperBeforeAmount(summaryPages, "55,308,641,976", true).flatMap((page) => page.words.map((word) => plain(word.text)));
+          for (let i = 1; i <= count; i++) expect(primaryWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+          for (const marker of ["WORK-STRESS", "SYNTHETIC-NONATTENDEE-501", "SYNTHETIC-EXPENSE-700", "55,308,641,976"]) expect(words).toContain(marker);
+          f.assertIsolated();
+          evidence.push({ filename: "daily-clinic-summary-a4.pdf", mime: "application/pdf", bytes: summaryBytes });
+        } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(summaryBytes); throw error; }
       } catch (error) {
         // This is explicitly failed diagnostic output, not successful evidence.
         // The fixture must still prove all report input was synthetic/isolated.
@@ -319,6 +447,198 @@ describe("daily clinic full-result A4 print proof", () => {
         emitDailyClinicFailureEvidence(bytes);
         throw error;
       }
+    } finally { await f.context.close(); }
+  });
+
+  it("prints a realistic normal day in the default routine scope with every work and cash row", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      expect(await f.page.getByLabel("نطاق الطباعة", { exact: true }).inputValue()).toBe("summary");
+      const financialBefore = await routineMoneySignature(f.page);
+      await f.page.emulateMedia({ media: "print" }); await f.page.evaluate(() => document.fonts.ready);
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 2 });
+      const path = ".settings-ui-artifacts/daily-clinic-normal-day-a4.pdf";
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      const bytes = await f.page.pdf({ path, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      let diagnosticBytes = bytes;
+      try {
+        const pages = await readPaper(f.page, path); assertPaperBounds(pages);
+        const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        const primaryWords = paperBeforeAmount(pages, "90,000", true).flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= 8; i++) {
+          expect(primaryWords.filter((word) => word === `DAY-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+          expect(words.filter((word) => word === `WORK-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        }
+        for (const marker of ["RECEIPT-01", "RECEIPT-02", "REVERSE-03", "SPEND-01", "SPEND-02"]) expect(words).toContain(marker);
+        expect(words.some((word) => /^PLAN-/.test(word))).toBe(false);
+        for (const amount of ["90,000", "750.00", "200.00", "30,000", "300.00", "50.00", "60,000", "450.00", "150.00", "8,000", "-25.00"]) expect(words).toContain(amount);
+        await f.page.emulateMedia({ media: "screen" });
+        await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
+        await f.page.emulateMedia({ media: "print" });
+        expect(await f.page.getByTestId("daily-clinic-reference-appendix").isVisible()).toBe(true);
+        expect(await routineMoneySignature(f.page)).toEqual(financialBefore);
+        const fullPath = ".settings-ui-artifacts/daily-clinic-normal-day-full-a4.pdf";
+        diagnosticBytes = await f.page.pdf({ path: fullPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        const fullPages = await readPaper(f.page, fullPath); assertPaperBounds(fullPages);
+        expect(pages.length).toBeLessThan(fullPages.length);
+        const fullWords = fullPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= 8; i++) expect(fullWords.filter((word) => word === `PLAN-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        console.log(`DAILY_CLINIC_NORMAL_DAY_PAGES ${JSON.stringify({ synthetic: true, patients: 8, workRows: 8, receiptRows: 3, expenseRows: 2, summaryPages: pages.length, fullPages: fullPages.length })}`);
+        f.assertIsolated();
+        evidence.push({ filename: "daily-clinic-normal-day-a4.pdf", mime: "application/pdf", bytes });
+      } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(diagnosticBytes); throw error; }
+    } finally { await f.context.close(); }
+  });
+
+  it("keeps pending visits and per-patient on-account debt or credit distinct in routine print", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      report.attendees[0].visitIds.push(101); report.attendees[0].visitsCount = 2; report.attendees[0].pendingVisitsCount = 1;
+      report.totals.visitsCount = 9; report.totals.pendingVisitsCount = 1;
+      // Older on-account money changes the current patient account only; it
+      // does not become an explicit receipt allocation to today's agreement.
+      report.currentAccounts[0].byCurrency.YER.collectedMinor = 15000;
+      report.currentAccounts[0].byCurrency.YER.receivableMinor = 15000;
+      report.currentAccounts[0].unallocatedPaymentIds = [990];
+      report.totals.currentReceivable.YER = 55000;
+      report.currentAccounts[1].byCurrency.SAR.collectedMinor = 30000;
+      report.currentAccounts[1].byCurrency.SAR.receivableMinor = 0;
+      report.currentAccounts[1].byCurrency.SAR.creditMinor = 5000;
+      report.currentAccounts[1].unallocatedPaymentIds = [991];
+      report.totals.currentReceivable.SAR = 30000; report.totals.currentCredit.SAR = 5000;
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      await f.page.emulateMedia({ media: "print" });
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 2 });
+      const attendance = f.page.getByTestId("daily-clinic-attendees");
+      expect(await attendance.locator('[data-patient-key="patient:1"]').innerText()).toContain("بانتظار");
+      expect(await attendance.locator('[data-patient-key="patient:1"] [data-minor="20000"]').count()).toBe(1);
+      expect(await attendance.locator('[data-patient-key="patient:2"] [data-minor="15000"]').count()).toBe(1);
+      const position = f.page.getByTestId("daily-clinic-account-position");
+      expect(await position.locator('[data-account-patient="1"] [data-minor]').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-minor"))))).toEqual([15000, 0, 0, 0, 0, 0]);
+      expect(await position.locator('[data-account-patient="2"] [data-minor]').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-minor"))))).toEqual([0, 0, 0, 0, 5000, 0]);
+      expect(await position.innerText()).toContain("مديونية"); expect(await position.innerText()).toContain("دائن");
+      expect(await f.page.getByTestId("daily-clinic-attendee-receipts").locator("[data-receipt-id]").count()).toBe(2);
+      f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("prints only explicitly targeted receipt settlements and never invents a YER agreement", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      const original = report.receipts[0], reversal = report.receipts[2];
+      report.receipts = [
+        { ...original, id: 8101, receiptNumber: "SAME-SAR", patientId: 2, patientName: report.attendees[1].patientName,
+          planId: 1001, tenderCurrency: "SAR", tenderMinor: 10000, settlementCurrency: "SAR", signedSettlementMinor: 10000,
+          recordedBaseMinor: 14123, exchangeRate: 141.23 },
+        { ...original, id: 8102, receiptNumber: "PLAN-CROSS", tenderCurrency: "SAR", tenderMinor: 10000,
+          settlementCurrency: "YER", signedSettlementMinor: 14000, recordedBaseMinor: 14000, exchangeRate: 140 },
+        { ...original, id: 8103, receiptNumber: "INVOICE-CROSS", invoiceId: 900, planId: null, tenderCurrency: "SAR", tenderMinor: 10000,
+          settlementCurrency: "YER", signedSettlementMinor: 14000, recordedBaseMinor: 14000, exchangeRate: 140 },
+        { ...original, id: 8104, receiptNumber: "OPENING-CROSS", planId: null, openingCurrency: "YER", tenderCurrency: "SAR", tenderMinor: 5000,
+          settlementCurrency: "YER", signedSettlementMinor: 7000, recordedBaseMinor: 7000, exchangeRate: 140 },
+        { ...original, id: 8105, receiptNumber: "UNLINKED-SAR", patientId: 6000, patientName: "مراجع غير مربوط", attendee: false,
+          planId: null, tenderCurrency: "SAR", tenderMinor: 6000, settlementCurrency: "YER", signedSettlementMinor: 8547,
+          recordedBaseMinor: 8547, exchangeRate: 142.45 },
+        { ...reversal, id: 8106, receiptNumber: "REVERSE-SAR" },
+      ];
+      report.totals.nativeReceipts = { YER: 0, SAR: 41000, USD: 0 };
+      report.totals.nativeReversals = { YER: 0, SAR: 2500, USD: 0 };
+      report.totals.nativeNetRecorded = { YER: 0, SAR: 38500, USD: 0 };
+      report.totals.nativeCashNetRecorded = { YER: 0, SAR: 41000, USD: 0 };
+      report.totals.nativeTransferNetRecorded = { YER: 0, SAR: -2500, USD: 0 };
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      const row = (id: number) => f.page.locator(`[data-receipt-id="${id}"]`);
+      const assertReceipts = async () => {
+        expect(await f.page.locator("[data-receipt-id]").count()).toBe(6);
+        for (const [id, nativeMinor] of [[8101, "10000"], [8106, "-2500"]] as const) {
+          expect(await row(id).innerText()).not.toContain("YER");
+          expect(await row(id).locator("[data-receipt-conversion]").count()).toBe(0);
+          expect(await row(id).locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => [node.getAttribute("data-currency"), node.getAttribute("data-minor")]))).toEqual([["SAR", nativeMinor], ["SAR", nativeMinor]]);
+        }
+        expect(await row(8105).innerText()).not.toContain("YER");
+        expect(await row(8105).locator("[data-receipt-settlement]").innerText()).toContain("لا يوجد هدف تسوية محدد");
+        expect(await row(8105).locator("[data-minor]").count()).toBe(1);
+        expect(await row(8105).locator('[data-minor="6000"][data-currency="SAR"]').count()).toBe(1);
+        expect(await row(8105).locator("[data-receipt-conversion]").count()).toBe(0);
+        for (const [id, settledMinor] of [[8102, "14000"], [8103, "14000"], [8104, "7000"]] as const) {
+          expect(await row(id).locator(`[data-receipt-settlement] [data-minor="${settledMinor}"][data-currency="YER"]`).isVisible()).toBe(true);
+          expect(await row(id).locator("[data-receipt-conversion]").innerText()).toContain("1 SAR = 140 YER");
+        }
+        expect(await f.page.getByTestId("daily-clinic-close-summary").locator('[data-minor="38500"][data-currency="SAR"]').count()).toBe(1);
+        expect(await f.page.getByTestId("daily-clinic-account-position").locator('[data-account-patient="1"] [data-minor="20000"][data-currency="YER"]').count()).toBe(1);
+      };
+      await assertReceipts();
+      const before = await routineMoneySignature(f.page);
+      for (const scope of ["summary", "full"] as const) {
+        await f.page.emulateMedia({ media: "screen" });
+        await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption(scope);
+        await f.page.emulateMedia({ media: "print" });
+        await f.page.evaluate(() => document.fonts.ready);
+        await assertReceipts();
+        expect(await routineMoneySignature(f.page)).toEqual(before);
+        const path = `.settings-ui-artifacts/daily-clinic-receipt-currency-${scope}.pdf`;
+        await mkdir(".settings-ui-artifacts", { recursive: true });
+        const bytes = await f.page.pdf({ path, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        try {
+          const pages = await readPaper(f.page, path); assertPaperBounds(pages);
+          const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
+          for (const marker of ["SAME-SAR", "PLAN-CROSS", "INVOICE-CROSS", "OPENING-CROSS", "UNLINKED-SAR", "REVERSE-SAR"]) expect(words).toContain(marker);
+          for (const forbidden of ["14,123", "141.23", "8,547", "142.45", "3,500"]) expect(words).not.toContain(forbidden);
+          expect(words.filter((word) => word === "14,000")).toHaveLength(2);
+          expect(words).toContain("7,000"); expect(words).toContain("385.00");
+          expect(words.filter((word) => word === "140")).toHaveLength(3);
+          f.assertIsolated();
+        } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(bytes); throw error; }
+      }
+    } finally { await f.context.close(); }
+  });
+
+  it("keeps same-name patients and registered recipients distinguishable in routine print", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      for (const index of [0, 1]) {
+        report.attendees[index].patientName = "اسم مكرر";
+        report.currentAccounts[index].patientName = "اسم مكرر";
+        report.agreements[index].patientName = "اسم مكرر";
+        report.work[index].patientName = "اسم مكرر";
+        report.receipts[index].patientName = "اسم مكرر";
+      }
+      report.attendees[1].patientNumber = null;
+      const recipient = { ...report.expenses.movements[0].recipient, key: "party:701", partyId: 701 };
+      report.expenses.movements.push({ ...report.expenses.movements[0], id: 702, voucherNumber: "SPEND-03", recipient,
+        amountMinor: 5000, payableId: null, payableSourceType: null, allocations: [], unallocatedMinor: 5000 });
+      const extraTotals = { outflowMinor: { YER: 5000, SAR: 0, USD: 0 }, reversalMinor: { YER: 0, SAR: 0, USD: 0 },
+        netOutflowMinor: { YER: 5000, SAR: 0, USD: 0 }, voucherCount: 1, reversalCount: 0, negativeAdjustmentCount: 0 };
+      report.expenses.recipientTotals.push({ recipient, recordedPayeeTexts: ["SYNTHETIC-PAYEE"], totals: extraTotals });
+      report.expenses.totals.outflowMinor.YER = 15000; report.expenses.totals.netOutflowMinor.YER = 13000; report.expenses.totals.voucherCount = 3;
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      const before = await routineMoneySignature(f.page);
+      await f.page.emulateMedia({ media: "print" });
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 3 });
+      expect(await routineMoneySignature(f.page)).toEqual(before);
+      const account = f.page.getByTestId("daily-clinic-account-position");
+      expect(await account.locator('[data-account-patient="1"] [data-patient-number="DAY-01"]').isVisible()).toBe(true);
+      const internal = account.locator('[data-account-patient="2"] [data-patient-reference="2"]');
+      expect(await internal.isVisible()).toBe(true); expect(await internal.innerText()).toContain("مرجع المريض الداخلي");
+      expect(await account.locator('[data-account-patient="2"] [data-patient-number]').count()).toBe(0);
+      expect(await f.page.getByTestId("daily-clinic-work").locator('[data-work-key="procedure:1"] [data-patient-number="DAY-01"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-work").locator('[data-work-key="procedure:2"] [data-patient-reference="2"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-attendee-receipts").locator('[data-receipt-id="502"] [data-patient-reference="2"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-other-receipts").locator('[data-receipt-id="501"] [data-patient-reference="6000"]').isVisible()).toBe(true);
+      const recipients = f.page.getByTestId("daily-clinic-recipients");
+      expect(await recipients.locator("tbody tr").count()).toBe(2);
+      for (const partyId of [700, 701]) expect(await recipients.locator(`[data-recipient-party-id="${partyId}"]`).isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
+      f.assertIsolated();
     } finally { await f.context.close(); }
   });
 
@@ -336,6 +656,7 @@ describe("daily clinic full-result A4 print proof", () => {
       await complete(f.page, 0, report);
       await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
       expect(await f.page.getByTestId("daily-clinic-currency-panels").isHidden()).toBe(true);
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("full");
       await f.page.emulateMedia({ media: "print" });
       await f.page.evaluate(() => document.fonts.ready);
       expect(await f.page.getByTestId("daily-clinic-attendees").isHidden()).toBe(true);
@@ -367,15 +688,28 @@ describe("daily clinic full-result A4 print proof", () => {
         expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5); expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
         for (const word of page.words) {
           expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-          expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+          expect(word.yMin).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
         }
       }
       const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
       expect(words).toContain("9,007,199,254,740,991");
       expect(words).toContain("9,007,199,254,617,535");
-      // One patient row per explicit currency panel, no printed grouped copy.
-      expect(words.filter((word) => word === "SYNTHETIC-0001")).toHaveLength(3);
+      // Three primary currency-panel rows; later account/work identities are
+      // legitimate repeats. Stop at the separately printed current account.
+      const primaryWords = paperBeforeAmount(pages, "8,100", false).flatMap((page) => page.words.map((word) => plain(word.text)));
+      expect(primaryWords.filter((word) => word === "SYNTHETIC-0001")).toHaveLength(3);
       expect(await f.page.getByTestId("daily-clinic-end").isVisible()).toBe(true);
+      await f.page.emulateMedia({ media: "screen" });
+      await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("summary");
+      await f.page.emulateMedia({ media: "print" });
+      expect(await f.page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
+      expect(await panels.isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-recipient-currency-panels").isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-attendees").isHidden()).toBe(true);
+      const exactExtreme = panels.locator(`[data-minor="${maximum}"]`);
+      expect(await exactExtreme.count()).toBe(2);
+      expect(await exactExtreme.evaluateAll((nodes) => nodes.every((node) => node.getClientRects().length > 0))).toBe(true);
+      for (const id of ["daily-clinic-account-position", "daily-clinic-work", "daily-clinic-attendee-receipts", "daily-clinic-other-receipts", "daily-clinic-expenses", "daily-clinic-reconciliation", "daily-clinic-close-summary"]) expect(await f.page.getByTestId(id).isVisible()).toBe(true);
       f.assertIsolated();
       evidence.push({ filename: "daily-clinic-extreme-a4.pdf", mime: "application/pdf", bytes });
     } finally { await f.context.close(); }
