@@ -128,6 +128,9 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
     documentNumberSql: () => "'SYNTHETIC-INVOICE'", conditionForCategory: () => null,
     closePlannedVisitAndSuggestNext: async () => null, createAutoLabOrders: writeEffects,
     deductServiceMaterials: writeEffects, progressReferralsOnSign: writeEffects,
+    // The real legacy gate is SQL-backed and proven by the PostgreSQL suite; here it is a spy so the
+    // protocol proves signClinicalVisit calls it on the owned transaction and propagates its refusal.
+    assertLegacyCaseSignable: vi.fn(async () => {}),
   };
   dependencies.normalizePatientPhone = domain("normalizePatientPhone", { toWhatsAppNumber });
   dependencies.phoneLookupForms = domain("phoneLookupForms", { toWhatsAppNumber });
@@ -187,6 +190,31 @@ describe("exact domain bodies reject bad performer identities without effects (q
       expect(p.state()).toMatchObject({ signed: true, invoiceDoctors: [expected], procedures: [expect.objectContaining({ doctorId: expected })] });
     },
   );
+  it("calls the legacy case gate on the owned transaction before invoicing", async () => {
+    const p = protocol(procedure(12), 11);
+    expect((await p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 11 })).reason).toBeNull();
+    const gate = p.dependencies.assertLegacyCaseSignable as ReturnType<typeof vi.fn>;
+    expect(gate).toHaveBeenCalledOnce();
+    const [gateClient, gatePatient, , gateOrtho] = gate.mock.calls[0];
+    expect(gateClient).toMatchObject({ query: p.query });
+    expect(gatePatient).toBe(101);
+    expect(gateOrtho).toBeNull();
+    const gateOrder = gate.mock.invocationCallOrder[0];
+    const invoiceCall = p.query.mock.calls.findIndex(([sql]) => sql.includes("INSERT INTO invoices"));
+    expect(gateOrder).toBeLessThan(p.query.mock.invocationCallOrder[invoiceCall]);
+  });
+  it("propagates the legacy case gate refusal with rollback and no invoice or downstream effect", async () => {
+    const p = protocol(procedure(12), 11); const before = p.state();
+    const Conflict = p.dependencies.ClinicalPlanConflict as new (message: string) => Error;
+    const refusal = new Conflict("synthetic legacy review refusal");
+    (p.dependencies.assertLegacyCaseSignable as ReturnType<typeof vi.fn>).mockRejectedValueOnce(refusal);
+    await expect(p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 11 })).rejects.toBe(refusal);
+    expectPatientFirst(p.query);
+    expect(p.state()).toEqual(before);
+    expect(p.writeEffects).not.toHaveBeenCalled();
+    expect(p.query.mock.calls.some(([sql]) => sql.includes("INSERT INTO invoices"))).toBe(false);
+    expect(p.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
+  });
   it("keeps the no-treating-doctor refusal when all fallbacks are non-doctors", async () => {
     const p = protocol(procedure(null), 91);
     expect((await p.sign({ visitId: 201, baseCurrency: "YER", signedBy: "synthetic", signerDoctorPartyId: 92 })).reason).toBe("no_treating_doctor");
