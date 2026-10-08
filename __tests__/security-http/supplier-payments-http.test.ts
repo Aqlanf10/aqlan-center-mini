@@ -57,10 +57,17 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
       partyId: labId, description: "تيجان زيركون", amount: "100", currency: "USD",
     });
     expect(response.status).toBe(201);
-    billId = (await response.json()).id;
+    const saved = await response.json();
+    billId = saved.id;
+    expect(saved.category).toBe("lab");
+    const { rows: persisted } = await db.query<{ category: string }>(
+      "SELECT category FROM payables WHERE id = $1", [billId],
+    );
+    expect(persisted[0]?.category).toBe("lab");
     const audit = await lastAudit("payable.create");
     expect(audit.actor).toBe("secadmin");
     expect(audit.details["العملة"]).toBe("USD");
+    expect(audit.details["التصنيف"]).toBe("lab");
   });
 
   it("المعاينة تعرض السعر والمكافئ والمتبقي ولا تكتب شيئًا", async () => {
