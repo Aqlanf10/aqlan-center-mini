@@ -253,7 +253,8 @@ describe("receipt provenance on real built pages and native A6 paper", () => {
         for (const linked of [reversal, replacement]) {
           expect(await marker.locator(`a[href="/print/receipt/${linked.id}"]`).innerText()).toContain(linked.receiptNumber);
         }
-        const originalRow = region.locator("li").filter({ has: marker });
+        const originalRow = region.locator("li").filter({ has: page.locator(`[data-receipt-provenance="${original.id}"]`) });
+        expect(await originalRow.count()).toBe(1);
         expect(await originalRow.locator("p.text-sm").first().innerText()).toContain("50,000");
         expect(await region.locator(`[data-receipt-provenance="${replacement.id}"]`).getAttribute("data-replacement-of")).toBe(String(original.id));
         expect(await region.locator(`[data-receipt-provenance="${reversal.id}"]`).getAttribute("data-correction-reversal")).toBe("correct");
