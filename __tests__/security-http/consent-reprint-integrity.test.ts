@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "pg";
 import sharp from "sharp";
 import { chromium, type Browser, type Page } from "playwright";
 import { authedGet, baseUrl, harness } from "./_server";
+import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
 import { CONSENT_TEMPLATES } from "../../lib/consent-templates";
 
 /**
@@ -24,6 +25,15 @@ let browser: Browser;
 
 const stamp = Date.now();
 const ARTIFACTS = join(process.cwd(), ".settings-ui-artifacts");
+/*
+ * Dot review 5461832436: this run's own consent screens and A4 PDFs are retained in the CI log (bounded, checksummed
+ * `SYNTHETIC_PRINT_EVIDENCE_V1`, with run/checkout identity). A scene is accepted only after all of its assertions passed;
+ * the set is emitted only when complete. The >300-character capture defect is NOT repaired by this; it stays open.
+ */
+const EVIDENCE = new Map<string, EvidenceFile["mime"]>(["signed", "blank", "refused"].flatMap((name) => [
+  [`consent-${name}-1280.png`, "image/png"], [`consent-${name}-390.png`, "image/png"], [`consent-${name}.pdf`, "application/pdf"],
+] as const));
+const accepted: EvidenceFile[] = [];
 const [TEMPLATE_A, TEMPLATE_B] = CONSENT_TEMPLATES;
 /* عنوانٌ مسجَّل يخالف عنوان القالب اليوم — يمثّل قالبًا تغيّر بعد التوقيع. */
 const RECORDED_TITLE = `إقرار مسجّل قديم ${stamp}`;
@@ -156,6 +166,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   await db?.end();
+  if (accepted.length > 0) await emitAcceptedEvidence({ scope: "consent-reprint", expected: EVIDENCE, files: accepted, aggregateCap: 4 * 1024 * 1024 });
 });
 
 describe("إعادة طباعة إقرارٍ موقّع — الدليل المحفوظ وحده", () => {
@@ -346,6 +357,9 @@ describe("الورق والشاشة — A4 وRTL", () => {
         await mobile.screenshot({ path: join(ARTIFACTS, `consent-${name}-390.png`), fullPage: true });
       } finally {
         await mobile.context().close();
+      }
+      for (const filename of [`consent-${name}-1280.png`, `consent-${name}-390.png`, `consent-${name}.pdf`]) {
+        accepted.push({ filename, mime: EVIDENCE.get(filename)!, bytes: await readFile(join(ARTIFACTS, filename)) });
       }
     }
   });
