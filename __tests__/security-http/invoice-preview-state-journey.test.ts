@@ -71,6 +71,10 @@ async function waitForState(target: Locator, attribute: string, expected: string
   } catch {
     throw new Error(`${attribute} never became ${expected}: observed ${JSON.stringify(seen)}; evidence ${JSON.stringify(evidence())}`);
   }
+  // The original oracle was locator.waitFor(): the state must also be visible to the user, not merely attached.
+  await target.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {
+    throw new Error(`${attribute}=${expected} is attached but not visible; evidence ${JSON.stringify(evidence())}`);
+  });
 }
 
 describe("invoice form preview safety and shared chart interruption journeys", () => {
@@ -142,6 +146,8 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await waitForState(page.getByTestId("invoice-clinical-preview-0"), "data-preview-state", "refused", () => ({
         previews, url: page.url() }));
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).toContain("اكتب سبب الخصم قبل الحفظ.");
+      // The actionable refusal itself is visible to the user (a hidden attached refusal must not pass).
+      expect(await page.getByTestId("invoice-clinical-preview-0").getByText("اكتب سبب الخصم قبل الحفظ.").isVisible()).toBe(true);
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByRole("button", { name: "إعادة المعاينة" }).count()).toBe(0);
       reject = false;
@@ -264,6 +270,8 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await opener.click();
       const dialog = page.getByTestId("tooth-dialog");
       await waitForState(dialog, "data-chart-state", "unavailable", () => ({ charts, url: page.url() }));
+      // The unavailable state is shown to the user before any tooth is picked.
+      expect(await dialog.getByText("تعذّر تحميل حالة الأسنان", { exact: false }).isVisible()).toBe(true);
       const tooth = dialog.getByTestId("odontogram-tooth-26");
       expect(await tooth.getAttribute("data-chart-known")).toBe("false");
       expect(await tooth.getAttribute("aria-label")).toContain("الحالة غير متاحة");
