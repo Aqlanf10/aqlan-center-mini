@@ -554,8 +554,17 @@ describe("collections native currency across the actual loader, report, download
       await officialDocument(printPage, originalHref!, result, rows, allKpis, allTotals, false, evidence);
 
       await page.getByRole("button", { name: /فلاتر إضافية/ }).click();
-      await page.getByLabel("العملة", { exact: true }).selectOption("SAR");
-      await page.getByLabel("المستلِم", { exact: true }).selectOption(receiverA);
+      await page.getByRole("button", { name: "إخفاء الفلاتر", exact: true }).waitFor();
+      // Role names exclude the select's own option text inside its wrapping
+      // label; exact getByLabel text includes those descendant options.
+      const currencySelect = page.getByRole("combobox", { name: "العملة", exact: true });
+      const receiverSelect = page.getByRole("combobox", { name: "المستلِم", exact: true });
+      expect(await currencySelect.count()).toBe(1);
+      expect(await receiverSelect.count()).toBe(1);
+      await currencySelect.selectOption("SAR");
+      await receiverSelect.selectOption(receiverA);
+      expect(await currencySelect.inputValue()).toBe("SAR");
+      expect(await receiverSelect.inputValue()).toBe(receiverA);
       // Unapplied edits do not alter the already displayed report or print link.
       await assertScreen(page, result, rows, allKpis, allTotals);
       expect(await printLink.getAttribute("href")).toBe(originalHref);
