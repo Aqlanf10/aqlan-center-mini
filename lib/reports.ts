@@ -1129,6 +1129,12 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
+  // الطلب السنوي محدود الحجم قبل تحميل أي سياق مالي، من دون اقتطاع المدى.
+  if (report === "annual") {
+    const range = validateAnnualReportRange(filters.from, filters.to);
+    filters = { ...filters, from: range.from, to: range.to };
+  }
+
   const needsMovements = [
     "daily", "monthly", "annual", "debt", "aging",
     "specialty", "doctor", "collections", "services", "patients", "patient-statement", "visits",
@@ -1750,8 +1756,10 @@ function monthlyReport(ctx: ReportContext): ReportResult {
 
 function annualReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
-  const { from, to } = filters;
+  const { from, to, firstMonth, lastMonth } = validateAnnualReportRange(filters.from, filters.to);
   const year = Number(from.slice(0, 4));
+  const endYear = Number(to.slice(0, 4));
+  const spansYears = year !== endYear;
 
   const monthlyRows: ReportRow[] = [];
   // (P-01/D-1) الأشرطة بدلو العملة الأساسية وحده — معنونة بذلك؛ بقية الدلاء في الجدول.
@@ -1760,14 +1768,19 @@ function annualReport(ctx: ReportContext): ReportResult {
   let totalInvoicedByCurrency = emptyCurrencyRecord();
   let totalExpenses = 0;
   let totalNewPatients = 0;
-  const bestMonthByCurrency = new Map<Currency, { month: number; minor: number }>();
+  const bestMonthByCurrency = new Map<Currency, { label: string; minor: number }>();
   const yearPatients = new Set<number>();
 
-  for (let month = 1; month <= 12; month++) {
-    const mFrom = `${from.slice(0, 4)}-${String(month).padStart(2, "0")}-01`;
-    const mTo = endOfMonth(mFrom);
-    if (mFrom > to) break;
-    if (mTo < from) continue;
+  // كل شهر يمسّ المدى، ولو عبر سنة؛ الطرفان داخل حدود الفترة المطلوبة.
+  for (let monthIndex = firstMonth; monthIndex <= lastMonth; monthIndex++) {
+    const month = monthIndex % 12 + 1;
+    const monthStart = `${String(Math.floor(monthIndex / 12)).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+    const mFrom = monthStart < from ? from : monthStart;
+    const monthEnd = endOfMonth(monthStart);
+    const mTo = monthEnd > to ? to : monthEnd;
+    const monthLabel = spansYears ? `${monthName(month)} ${monthStart.slice(0, 4)}` : monthName(month);
+    // وجود الحركة هو المعيار، حتى إن تعادل المصروف مع عكسه فكان صافي الشهر صفرًا.
+    const hasExpenses = ctx.expenses.some((expense) => expense.date >= mFrom && expense.date <= mTo);
 
     const summary = periodSummary(ctx, mFrom, mTo);
     totalCollectedByCurrency = addCurrencyRecords(totalCollectedByCurrency, summary.collectedByCurrency);
@@ -1777,7 +1790,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     for (const currency of CURRENCIES) {
       const best = bestMonthByCurrency.get(currency);
       if (summary.collectedByCurrency[currency] > (best?.minor ?? 0)) {
-        bestMonthByCurrency.set(currency, { month, minor: summary.collectedByCurrency[currency] });
+        bestMonthByCurrency.set(currency, { label: monthLabel, minor: summary.collectedByCurrency[currency] });
       }
     }
 
@@ -1799,7 +1812,8 @@ function annualReport(ctx: ReportContext): ReportResult {
     for (const currency of CURRENCIES) {
       const invoiced = summary.invoicedByCurrency[currency];
       const collected = summary.collectedByCurrency[currency];
-      if (invoiced === 0 && collected === 0 && summary.outstandingEnd[currency] === 0) continue;
+      if (invoiced === 0 && collected === 0 && summary.outstandingEnd[currency] === 0
+          && !(currency === base && hasExpenses)) continue;
       monthActivity.set(currency, {
         invoiced, collected,
         newDebt: summary.newDebtByCurrency[currency],
@@ -1812,7 +1826,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     }
     for (const [currency, activity] of monthActivity) {
       monthlyRows.push({
-        monthLabel: monthName(month),
+        monthLabel,
         currency,
         patients: summary.patients,
         visits: summary.visits,
@@ -1825,7 +1839,7 @@ function annualReport(ctx: ReportContext): ReportResult {
         outstandingMinor: activity.outstanding,
       });
     }
-    bars.push({ label: monthName(month), minor: summary.collectedByCurrency[base] });
+    bars.push({ label: monthLabel, minor: summary.collectedByCurrency[base] });
   }
 
   const outstandingEnd = emptyCurrencyRecord();
@@ -1843,7 +1857,7 @@ function annualReport(ctx: ReportContext): ReportResult {
   return {
     report: "annual",
     title: "التقرير السنوي",
-    subtitle: `سنة ${year}`,
+    subtitle: spansYears ? `السنوات ${year} → ${endYear}` : `سنة ${year}`,
     periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
     from, to, baseCurrency: base,
     kpis: [
@@ -1854,7 +1868,7 @@ function annualReport(ctx: ReportContext): ReportResult {
       countKpi("patients", "مرضى السنة", yearPatients.size),
       countKpi("new", "مرضى جدد", totalNewPatients, "good"),
       ...moneyKpis("avgMonthly", "متوسط التحصيل الشهري", avgMonthlyByCurrency, "info"),
-      { key: "best", label: "أعلى شهر تحصيل (الأساس)", text: bestMonthBase?.month ? monthName(bestMonthBase.month) : "—" },
+      { key: "best", label: "أعلى شهر تحصيل (الأساس)", text: bestMonthBase?.label ?? "—" },
       { key: "topSpecialty", label: "أعلى تخصص إيرادًا", text: topSpecialty },
     ],
     monthly: {
@@ -1868,7 +1882,7 @@ function annualReport(ctx: ReportContext): ReportResult {
         { key: "collectedMinor", label: "المحصّل", type: "money", currencyKey: "currency" },
         { key: "debtMinor", label: "المديونية", type: "money", currencyKey: "currency" },
         { key: "expensesMinor", label: "المصروفات", type: "money", currencyKey: "currency" },
-        { key: "outstandingMinor", label: "مديونية آخر الشهر", type: "money", currencyKey: "currency" },
+        { key: "outstandingMinor", label: "مديونية آخر الشهر", type: "money", currencyKey: "currency", aggregate: "none" },
       ],
       rows: monthlyRows,
       barKey: "collectedMinor",
@@ -1878,6 +1892,7 @@ function annualReport(ctx: ReportContext): ReportResult {
     notes: [
       "(P-01) كل شهرٍ بصفوفٍ لعملاته النشطة — لا يُجمع شهرٌ عملاته في رقمٍ واحد.",
       "الأشرطة البيانية بدلو العملة الأساسية وحده؛ تفصيل بقية العملات في الجدول.",
+      "كل صف شهري محصور بالفترة المختارة؛ مديونية نهايته رصيد لحظي لا يُجمع عبر الأشهر.",
     ],
   };
 }
@@ -5935,10 +5950,47 @@ export class ReportInputError extends Error {
   }
 }
 
+/**
+ * سقف تقني لحجم الطلب الواحد، لا حد للاحتفاظ بالتاريخ المالي.
+ * يمكن طلب تاريخ أطول في نوافذ منفصلة؛ 120 شهرًا ميزانية محافظة لا ضمان أداء.
+ */
+const MAX_ANNUAL_REPORT_MONTHS = 120;
+
+/** يتحقق من التقويم والمدى قبل تحميل المالية؛ لا يقتطع أي جزء منه بصمت. */
+export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+  const parseDate = (value: string | null | undefined): { date: string; month: number } => {
+    const invalid = () => new ReportInputError("أدخل تاريخي بداية ونهاية صالحين للتقرير السنوي بصيغة YYYY-MM-DD.");
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) throw invalid();
+    const instant = toUTC(value);
+    if (!Number.isFinite(instant) || fromUTC(instant) !== value) throw invalid();
+    const [year, month] = value.split("-").map(Number);
+    return { date: value, month: year * 12 + month - 1 };
+  };
+  const first = parseDate(from);
+  const last = parseDate(to);
+  const firstMonth = Math.min(first.month, last.month);
+  const lastMonth = Math.max(first.month, last.month);
+  if (lastMonth - firstMonth + 1 > MAX_ANNUAL_REPORT_MONTHS) {
+    throw new ReportInputError(
+      "التقرير السنوي يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.",
+    );
+  }
+  return {
+    from: first.date <= last.date ? first.date : last.date,
+    to: first.date <= last.date ? last.date : first.date,
+    firstMonth,
+    lastMonth,
+  };
+}
+
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
   const presetRaw = params.get("preset") ?? "this_month";
   const preset = (["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const)
     .includes(presetRaw as PeriodPreset) ? (presetRaw as PeriodPreset) : "this_month";
+  // روابط التقرير السنوي المحفوظة والطباعة تمرّ أيضًا بهذا المحلّل.
+  if (params.get("report") === "annual" && preset === "custom") {
+    validateAnnualReportRange(params.get("from"), params.get("to"));
+  }
   const { from, to } = resolvePeriod(preset, params.get("from"), params.get("to"), today);
 
   const doctorIdRaw = params.get("doctorId");

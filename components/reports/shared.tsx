@@ -11,6 +11,7 @@ import {
   type ReportOptions, type PeriodPreset, type DebtMode, type CompareMode,
 } from "@/lib/reports-types";
 import { DEBT_MODES } from "@/lib/reports-types";
+import { formatReportGeneratedAt } from "@/lib/report-generated-time";
 
 /**
  * أدوات عرض التقارير المشتركة — كل تقرير يُصيَّر بنفس اللبنات: بطاقات أرقام،
@@ -401,7 +402,7 @@ export function BarsChart({ bars, base }: { bars: { label: string; minor: number
 export function PrintFrame({ result, clinicName, generated }: {
   result: ReportResult;
   clinicName: string;
-  generated: { at: string; by: string };
+  generated: { at: string; by: string; clinicTimeZone?: unknown };
 }) {
   // الهوية من الإعدادات مباشرة: التقرير المعروض على الشاشة قد يُطبع بعد شهور،
   // والطبيب والعنوان والهاتف يومها قد يكونان تغيّرا — فتُقرأ وقت الطباعة.
@@ -466,7 +467,7 @@ export function PrintFrame({ result, clinicName, generated }: {
         }
       `}</style>
       <div className="report-print-footer">
-        <span>أُنشئ في {generated.at.slice(0, 16).replace("T", " ")} بواسطة {generated.by}</span>
+        <span>أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span>
         <span>{clinicName}</span>
       </div>
     </div>
