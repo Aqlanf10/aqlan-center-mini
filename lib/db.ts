@@ -8,7 +8,7 @@ import {
 import { walkoutLineClass } from "./checkout-summary";
 import { commissionTimeKey, commissionTimestampIso } from "./commission-time";
 import { resolveAutomaticLabPrice } from "./lab-order-pricing";
-import { Pool, type PoolClient } from "pg";
+import { DatabaseError, Pool, type PoolClient } from "pg";
 import { PGlite } from "@electric-sql/pglite";
 import { resolveClinicZone } from "./clinicZone";
 import { RUNTIME_DATABASE_URL_ENV_NAMES } from "./env-contract";
@@ -9268,14 +9268,18 @@ export async function applyAdminInvoiceDiscount(input: {
       // A statement error at COMMIT (e.g. a deferred constraint) rolled the transaction back. A connection-level failure —
       // no SQLSTATE, a connection exception (08xxx) or a server shutdown/termination (57P0x) — leaves the outcome unknown:
       // never claim that nothing changed, and destroy the connection instead of pooling it.
-      // Only a real SQLSTATE (five characters) from the server proves a rollback. Transport codes such as ECONNRESET,
-      // EPIPE or ETIMEDOUT are strings too, but say nothing about the outcome (review 5462657687).
-      const code = (error as { code?: unknown })?.code;
-      const sqlstate = typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : null;
+      // Only an error the server itself reported (node-postgres DatabaseError: a protocol ErrorResponse with severity and
+      // SQLSTATE) proves the COMMIT was rolled back. A transport error is never affirmed as a rollback, whatever its code
+      // looks like — EPIPE is five capital letters too (reviews 5462657687, 5464162959) — nor is a connection-class
+      // (08xxx) or shutdown/termination (57P0x) SQLSTATE.
+      const sqlstate = error instanceof DatabaseError && typeof error.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)
+        ? error.code : null;
       if (sqlstate === null || sqlstate.startsWith("08") || sqlstate.startsWith("57P0")) {
         lost = error as Error;
         return refuse("uncertain");
       }
+      // The server reported the error: make sure the connection leaves the aborted transaction before it is pooled again.
+      await client.query("ROLLBACK").catch(() => undefined);
       return refuse("failed");
     }
     applied = outcome;
@@ -12715,7 +12719,7 @@ export async function commissionReport(
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
-      case_id: number | null; plan_id: number | null;
+      case_id: number | null; plan_id: number | null; item_ids: number[] | null;
     }>(
       `SELECT i.patient_id,
               i.id AS invoice_id,
@@ -12730,7 +12734,9 @@ export async function commissionReport(
               pi.case_id,
               /* فاتورة القسط لا تمرّ بإجراء زيارة: خطتها على الفاتورة نفسها (فتسري نسبة الخطة الخاصة عليها). */
               COALESCE(pi.plan_id, i.plan_id) AS plan_id,
-              COALESCE(SUM(it.total_minor), 0) AS share_minor
+              COALESCE(SUM(it.total_minor), 0) AS share_minor,
+              /* (FIN-DISC) the share's lines, to attach their admin-discount rows */
+              array_agg(it.id) FILTER (WHERE it.id IS NOT NULL) AS item_ids
          FROM invoices i
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
          LEFT JOIN services s ON s.id = it.service_id
@@ -12764,6 +12770,7 @@ export async function commissionReport(
 
   // تجميع الفواتير لكل مريض مع حصص الأطباء فيها — بعملة كل فاتورة (تصحيح ٢).
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
+  const shareItems = new Map<CommissionInvoice["doctorShares"][number], number[]>();
   const clinicDateOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
     clinicDateOfInvoice.set(row.invoice_id, dateText(row.clinic_date));
@@ -12788,9 +12795,45 @@ export async function commissionReport(
         caseId: row.case_id ?? undefined,
         planId: row.plan_id ?? undefined,
       });
+      shareItems.set(invoice.doctorShares[invoice.doctorShares.length - 1], row.item_ids ?? []);
     }
     patientInvoices.set(row.invoice_id, invoice);
     byPatient.set(row.patient_id, patientInvoices);
+  }
+
+  /* (FIN-DISC, owner decision: option 2) Admin-discount rows of the invoices in scope. Decisions up to the report cutoff
+     (clinic date) lower their lines' base from their time on; a later decision is not seen by this report, so its amount
+     is added back to the invoice net as it stood at the cutoff. */
+  const allInvoiceIds = [...byPatient.values()].flatMap((invoices) => [...invoices.keys()]);
+  if (allInvoiceIds.length > 0) {
+    const { rows: discountRows } = await pool.query<{
+      invoice_id: number; invoice_item_id: number; amount_minor: string; discounted_at: Date; discounted_at_us: string; after_cutoff: boolean;
+    }>(
+      `SELECT invoice_id, invoice_item_id, amount_minor, discounted_at, to_char(discounted_at, 'US') AS discounted_at_us,
+              (discounted_at AT TIME ZONE $2)::date > $3::date AS after_cutoff
+         FROM invoice_admin_discount_lines WHERE invoice_id = ANY($1::int[]) ORDER BY discounted_at, id`,
+      [allInvoiceIds, CLINIC_TIME_ZONE, to],
+    );
+    const invoiceById = new Map<number, CommissionInvoice>();
+    for (const invoices of byPatient.values()) for (const invoice of invoices.values()) invoiceById.set(invoice.id, invoice);
+    const shareByItem = new Map<number, CommissionInvoice["doctorShares"][number]>();
+    for (const [share, itemIds] of shareItems) for (const itemId of itemIds) shareByItem.set(itemId, share);
+    for (const row of discountRows) {
+      const invoice = invoiceById.get(row.invoice_id);
+      if (!invoice) continue;
+      const amount = toMinor(row.amount_minor);
+      if (row.after_cutoff) { invoice.netMinor += amount; continue; }
+      const atIso = commissionTimestampIso(row.discounted_at, row.discounted_at_us);
+      const events = invoice.adminDiscounts ?? (invoice.adminDiscounts = []);
+      const last = events[events.length - 1];
+      if (last && last.atIso === atIso) last.amountMinor += amount; else events.push({ atIso, amountMinor: amount });
+      const share = shareByItem.get(row.invoice_item_id);
+      if (share) {
+        const shareEvents = share.adminDiscounts ?? (share.adminDiscounts = []);
+        const lastShare = shareEvents[shareEvents.length - 1];
+        if (lastShare && lastShare.atIso === atIso) lastShare.amountMinor += amount; else shareEvents.push({ atIso, amountMinor: amount });
+      }
+    }
   }
 
   const patientIds = [...byPatient.keys()];

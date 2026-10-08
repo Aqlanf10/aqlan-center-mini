@@ -201,14 +201,29 @@ describe("transport error codes at COMMIT (review 5462657687)", () => {
     expect(await discountOf(id)).toBe(3000); // it did commit: claiming a rollback would have been false
   });
 
-  it("control: a server SQLSTATE that rolled back is a definite failure", async () => {
+  it("EPIPE (five capital letters, but a transport error) after a COMMIT that did succeed is uncertain, and the connection is destroyed", async () => {
     const id = await invoice();
-    const result = await discount(id, 3000, { commit: async (client) => {
-      await client.query("ROLLBACK");
-      throw Object.assign(new Error("could not serialize access"), { code: "40001" });
+    let used: { _ending?: boolean } | null = null;
+    const result = await discount(id, 3100, { commit: async (client) => {
+      used = client as unknown as { _ending?: boolean };
+      await client.query("COMMIT");
+      throw Object.assign(new Error("write EPIPE"), { code: "EPIPE", errno: -32, syscall: "write" });
     } });
+    expect(result).toMatchObject({ ok: false, reason: "uncertain" });
+    if (!result.ok) expect(result.message).not.toContain("لم يتغيّر شيء");
+    expect(await discountOf(id)).toBe(3100); // persisted: a "nothing changed" answer would have been false
+    expect(await audits(id)).toBe(1);
+    expect(used!._ending).toBe(true); // released with the error: destroyed, never pooled again
+  });
+
+  it("control: a real server error (DatabaseError) at COMMIT time is a definite rollback, and the connection is clean", async () => {
+    const id = await invoice();
+    const result = await discount(id, 3000, { commit: async (client) => { await client.query("SELECT 1/0"); } });
     expect(result).toMatchObject({ ok: false, reason: "failed" });
     expect(await discountOf(id)).toBe(0);
+    expect(await audits(id)).toBe(0);
+    // The pool still answers normally (the aborted transaction was rolled back before release).
+    for (let i = 0; i < 5; i++) expect((await getPool().query("SELECT 1 AS one")).rows[0].one).toBe(1);
   });
 });
 

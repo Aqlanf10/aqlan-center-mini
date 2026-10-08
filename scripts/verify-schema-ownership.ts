@@ -204,8 +204,9 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
   const expected = Array.from({ length: 44 }, (_, index) => String(index + 1).padStart(4, "0"));
   const actual = files.map((file) => file.version);
-  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
-  if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
+  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
+    "0044_invoice_admin_discount_lines.sql"];
+  if (actual.join(",") !== expected.join(",") || files.slice(40).length !== reviewedSuffixes.length || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
 }

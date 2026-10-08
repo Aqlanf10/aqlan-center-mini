@@ -8,6 +8,7 @@ const invoice = { version: "0041", filename: "0041_invoice_clinical_linkage.sql"
 const legacy = { version: "0042", filename: "0042_legacy_treatment_agreements.sql" };
 
 const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sql" };
+const adminDiscount = { version: "0044", filename: "0044_invoice_admin_discount_lines.sql" };
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("keeps the pre-invoice baseline at test-only 0041", () => {
@@ -21,6 +22,11 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   });
   it("preserves immutable coverage0043 and selects only test-only0044", () => {
     expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage])).toBe("0044");
+  });
+  it("preserves reviewed admin-discount 0044 and selects only test-only 0045", () => {
+    expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, adminDiscount])).toBe("0045");
+    expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, adminDiscount,
+      { version: "0045", filename: "0045_unreviewed.sql" }])).toThrow();
   });
   it("does not weaken gap, ordering, suffix or future-baseline guards", () => {
     expect(() => periodontalCandidateMigrationVersion(baseline().slice(1))).toThrow();
