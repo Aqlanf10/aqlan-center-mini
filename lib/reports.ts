@@ -2865,28 +2865,33 @@ function doctorReport(ctx: ReportContext): ReportResult {
 
 // ─── تقرير التحصيل ──────────────────────────────────────────────────────────
 
-function collectionsReport(ctx: ReportContext, caller = "collections"): ReportResult {
+/** Pure report projection; exported so its real rows/KPIs can be tested without a database. */
+export function collectionsReport(ctx: ReportContext, caller = "collections"): ReportResult {
   const { filters, base, doctors } = ctx;
   const { from, to } = filters;
 
-  // (P-01/D-1) التصنيف (جديد/سابق) داخل كل دلو — الدفعة تسوّي دلوها فتُصنَّف فيه.
+  // FIFO describes the patient's complete period, not a filtered subset of receipts.
+  // Without per-event allocation provenance, omit that split for collection filters.
+  const collectionFiltered = filters.currency !== "all" || !!filters.method || !!filters.receivedBy;
   const newByCurrency = emptyCurrencyRecord();
   const oldByCurrency = emptyCurrencyRecord();
   const totalsByCurrency = emptyCurrencyRecord();
   // الاستردادات بمكافئها الأساسي المسجَّل (عقد الدفعات) — عملة الأساس وحدها.
   let refundsMinor = 0;
   const actualByCurrency: Record<Currency, number> = { YER: 0, SAR: 0, USD: 0 };
+  const nativeCurrencies = new Set<Currency>();
   const rows: ReportRow[] = [];
 
   for (const patient of ctx.movements) {
     if (filters.specialty && !patientHasSpecialty(patient, filters.specialty)) continue;
     if (filters.doctorId && !patientHasDoctor(patient, filters.doctorId)) continue;
 
-    const classified = classifyPaymentsByCurrency(patient, from, to);
-    for (const currency of CURRENCIES) {
-      oldByCurrency[currency] += classified[currency].oldMinor;
-      newByCurrency[currency] += classified[currency].newMinor;
-      totalsByCurrency[currency] += classified[currency].oldMinor + classified[currency].newMinor;
+    if (!collectionFiltered) {
+      const classified = classifyPaymentsByCurrency(patient, from, to);
+      for (const currency of CURRENCIES) {
+        oldByCurrency[currency] += classified[currency].oldMinor;
+        newByCurrency[currency] += classified[currency].newMinor;
+      }
     }
 
     for (const payment of patient.payments) {
@@ -2897,7 +2902,9 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
 
       const signed = payment.kind === "refund" ? -payment.baseMinor : payment.baseMinor;
       if (payment.kind === "refund") refundsMinor += payment.baseMinor;
+      totalsByCurrency[payment.settlementCurrency] += signedSettlement(payment);
       actualByCurrency[payment.currency] += payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
+      nativeCurrencies.add(payment.currency);
 
       rows.push({
         date: formatArabicDate(payment.date),
@@ -2905,7 +2912,7 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
         patientName: patient.name,
         patientNumber: patient.patientNumber,
         kindLabel: payment.kind === "refund" ? "استرداد" : "قبض",
-        amountText: `${payment.amountMinor} ${payment.currency}`,
+        amountText: formatMoney(payment.amountMinor, payment.currency),
         baseMinor: signed,
         methodLabel: PAYMENT_METHOD_LABEL[payment.method] ?? payment.method,
         receiver: payment.createdBy ?? "—",
@@ -2916,21 +2923,27 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
   rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   const kpis: KpiItem[] = [
-    ...moneyKpis("total", "إجمالي التحصيل", totalsByCurrency, "good"),
-    ...moneyKpis("new", "تحصيل جديد", newByCurrency, "info", "ما غطّى خدمات الفترة نفسها داخل دلو عملته"),
-    ...moneyKpis("old", "تحصيل مديونية سابقة", oldByCurrency, "warn", "ما غطّى أرصدةً سابقة لبداية الفترة (FIFO داخل كل عملة)"),
+    ...moneyKpis("total", "صافي التسوية بعملة الحساب", totalsByCurrency, "good",
+      "تسويات السندات المعروضة بعد الاستردادات والعكس؛ عملة الحساب قد تختلف عن عملة السند"),
+    ...(!collectionFiltered ? [
+      ...moneyKpis("new", "باقي التسوية بعد الرصيد السابق", newByCurrency, "info",
+        "تصنيف مشتق للفترة الكاملة وفق FIFO؛ قد يتضمن رصيدًا مقدمًا، وليس إثباتًا لخدمات جديدة"),
+      ...moneyKpis("old", "تسوية مصنفة على رصيد سابق", oldByCurrency, "warn",
+        "تصنيف مشتق وفق FIFO داخل كل عملة للفترة الكاملة قبل أي تصفية للسندات"),
+    ] : []),
     moneyKpi("refunds", "استردادات (مكافئ أساسي)", refundsMinor, base, "bad",
       "المسترد بمكافئه الأساسي المسجَّل بسعر يومه — عقد الدفعات، لا تحويل فواتير"),
   ];
   for (const [currency, amount] of Object.entries(actualByCurrency) as [Currency, number][]) {
-    if (amount === 0) continue;
-    kpis.push({ key: `cur-${currency}`, label: `${currency} (فعلي)`, count: amount, tone: "calm", hint: "مجموع ما قُبض بعملته كما دخل الدرج" });
+    if (amount === 0 && !nativeCurrencies.has(currency) && filters.currency !== currency) continue;
+    kpis.push(moneyKpi(`cur-${currency}`, `صافي الحركات بعملة السند (${currency})`, amount, currency, "calm",
+      "مبالغ السندات المعروضة بعملتها الأصلية بعد الاستردادات والعكس؛ تشمل النقد والتحويل"));
   }
 
   return {
     report: caller === "debt" ? "debt" : "collections",
     title: caller === "debt" ? "تحصيل المديونيات خلال الفترة" : "تقرير التحصيل",
-    subtitle: "قيمة الخدمات ≠ التحصيل الفعلي — هنا التحصيل وحده، مفصولًا جديدًا عن سابق، بكل عملة دلوها",
+    subtitle: "حركات التحصيل المسجّلة: مبلغ السند بعملته وتسويته بعملة الحساب، بعد الاستردادات والعكس",
     periodLabel: `${formatArabicDate(from)} → ${formatArabicDate(to)}`,
     from, to, baseCurrency: base,
     kpis,
@@ -2940,7 +2953,7 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
       { key: "patientNumber", label: "رقم الملف" },
       { key: "kindLabel", label: "النوع" },
       { key: "amountText", label: "المبلغ (بعملته)" },
-      { key: "baseMinor", label: "المكافئ بالأساس", type: "money" },
+      { key: "baseMinor", label: "المكافئ المسجّل بالأساس", type: "money" },
       { key: "methodLabel", label: "طريقة الدفع" },
       { key: "receiver", label: "المستلِم" },
       { key: "note", label: "ملاحظة" },
@@ -2948,8 +2961,13 @@ function collectionsReport(ctx: ReportContext, caller = "collections"): ReportRe
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "تصنيف جديد/سابق على FIFO داخل كل عملة: الدفعة تُغطّي أقدم رصيد دلوها أولًا.",
-      "أرقام العملات «الفعليّة» بالوحدات الكبرى كما قُبضت — لا تُجمع عملات في رقم واحد.",
+      "فلتر العملة يختار عملة السند الأصلية؛ جميع إجماليات الحركات والتسوية تخص السندات المعروضة وطريقة الدفع والمستلِم المختارين.",
+      "فلتر الطبيب أو التخصص يختار مجموعة مرضى وفق ارتباطاتهم المسجّلة، ثم يعرض حركاتهم خلال الفترة؛ ولا ينسب كل سند إلى الطبيب أو التخصص المختار.",
+      "صافي التسوية بعملة الحساب يختلف عن مبلغ السند بعملته وعن المكافئ الأساسي المسجّل؛ لا تُجمع العملات أو هذه المقاييس معًا.",
+      collectionFiltered
+        ? "لا يُعرض تصنيف الرصيد السابق عند تصفية عملة السند أو طريقة الدفع أو المستلِم؛ إعادة FIFO على سندات منتقاة قد تعطي نسبةً غير صحيحة."
+        : "تصنيف الرصيد السابق مشتق وفق FIFO للفترة الكاملة داخل كل عملة؛ ما بقي قد يكون رصيدًا مقدمًا، وليس إثباتًا لخدمات جديدة.",
+      "السندات تعرض الحركات المسجّلة بما فيها الاسترداد والعكس، ولا تُثبت وحدها أن نقدًا دخل الدرج أو خرج منه.",
     ],
   };
 }
