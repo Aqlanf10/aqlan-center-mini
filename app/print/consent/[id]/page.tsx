@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPatient, getSettingsSafe, getDocumentForDownload } from "@/lib/db";
+import { getPatient, getSettingsSafe, getDocumentForDownload, CLINIC_TIME_ZONE } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
@@ -255,7 +255,7 @@ export default async function ConsentPrintPage({
     const relationText = stored.signatoryRelation === "self"
       ? "المريض شخصياً"
       : `الولي / الوصي الشرعي: ${stored.guardianRelation ?? "صلة القرابة غير مسجّلة"}`;
-    const recordedAt = new Intl.DateTimeFormat("ar-YE", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Aden" })
+    const recordedAt = new Intl.DateTimeFormat("ar-YE", { dateStyle: "medium", timeStyle: "short", timeZone: CLINIC_TIME_ZONE })
       .format(new Date(resolution.recordedAt));
     return (
       <>
