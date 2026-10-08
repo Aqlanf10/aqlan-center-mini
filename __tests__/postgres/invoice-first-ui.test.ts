@@ -112,6 +112,66 @@ describe("needs-assessment, next action and ortho bridging", () => {
     expect(await q(`SELECT 1 FROM audit_log WHERE action = 'ortho.plan_link'`)).toHaveLength(1);
   });
 
+  describe("an ordinary ortho case reused by a current invoice (Dot review 5461388673)", () => {
+    const ordinaryCase = async (patient: number, site: string) => {
+      const made = await db.createClinicalCase({ patientId: patient, actor: "dr", specialty: "orthodontics", title: "تقويم",
+        site, problem: null, responsiblePartyId: null, orthoCaseId: null });
+      if (!made.ok) throw new Error(made.reason);
+      return made.case.id;
+    };
+    const intake = (patient: number, arches: "upper" | "lower" | "both") => createOrthoCase({
+      patientId: patient, appliance: "fixed_metal", arches, slot: "022", bracketSystem: null,
+      startDate: "2026-10-06", plannedMonths: 18, planId: null, note: null, createdBy: "dr",
+    });
+
+    it("bridges the reused case on a matching intake, keeping the case and item identity, with no second ortho context", async () => {
+      const patient = await newPatient("UI-ORTHO-REUSED");
+      const caseA = await ordinaryCase(patient, "الفكّان");
+      const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
+      if (!created.ok) throw new Error("create");
+      expect(created.links[0].caseId).toBe(caseA); // the invoice legitimately reused the ordinary case
+      const [{ origin, title }] = await q<{ origin: string; title: string }>(`SELECT origin, title FROM clinical_cases WHERE id = $1`, [caseA]);
+      expect(origin).not.toBe("invoice");
+      const opened = await intake(patient, "both");
+      expect(opened.ok).toBe(true);
+      if (!opened.ok) return;
+      expect(await q(`SELECT id, ortho_case_id, origin, title FROM clinical_cases WHERE patient_id = $1 ORDER BY id`, [patient]))
+        .toEqual([{ id: caseA, ortho_case_id: opened.id, origin, title }]); // origin and title are not rewritten
+      expect(await q(`SELECT details->>'المصدر' AS source FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`,
+        [String(patient)])).toEqual([{ source: "حالة قائمة أعادت الفاتورة استخدامها" }]);
+      expect(await q(`SELECT case_id FROM plan_items WHERE id = $1`, [created.links[0].planItemId])).toEqual([{ case_id: caseA }]);
+      expect(await q(`SELECT 1 FROM ortho_cases WHERE patient_id = $1`, [patient])).toHaveLength(1);
+    });
+
+    it("refuses a mismatched intake arch for the reused case and writes no ortho case", async () => {
+      const patient = await newPatient("UI-ORTHO-REUSED-MISMATCH");
+      const caseA = await ordinaryCase(patient, "الفكّان");
+      const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
+      if (!created.ok) throw new Error("create");
+      expect(created.links[0].caseId).toBe(caseA);
+      const opened = await intake(patient, "upper");
+      expect(opened.ok).toBe(false);
+      expect(await q(`SELECT 1 FROM ortho_cases WHERE patient_id = $1`, [patient])).toHaveLength(0);
+      expect(await q(`SELECT ortho_case_id FROM clinical_cases WHERE id = $1`, [caseA])).toEqual([{ ortho_case_id: null }]);
+    });
+
+    it("does not treat an ordinary case as invoice work when its only invoice was cancelled, nor when none links it", async () => {
+      const unlinked = await newPatient("UI-ORTHO-UNLINKED");
+      await ordinaryCase(unlinked, "الفكّان");
+      const free = await intake(unlinked, "upper");
+      expect(free.ok).toBe(true); // unchanged behaviour: no verified invoice linkage, no bridge candidate
+
+      const cancelled = await newPatient("UI-ORTHO-CANCELLED");
+      const caseA = await ordinaryCase(cancelled, "الفكّان");
+      const created = await create(cancelled, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
+      if (!created.ok) throw new Error("create");
+      await q(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [created.invoice.id]);
+      const opened = await intake(cancelled, "upper");
+      expect(opened.ok).toBe(true);
+      expect(await q(`SELECT ortho_case_id FROM clinical_cases WHERE id = $1`, [caseA])).toEqual([{ ortho_case_id: null }]);
+    });
+  });
+
   it("an endo intake case stops needing assessment once a signed visit works on it", async () => {
     const patient = await newPatient("UI-ENDO");
     const created = await create(patient, [line(rct, "rct", 80_000, 36)]);
