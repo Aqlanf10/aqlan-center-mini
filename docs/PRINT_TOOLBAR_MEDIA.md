@@ -139,6 +139,19 @@ colons are required. Missing, moved, reordered and punctuation-lost unit control
 and a real signature-hidden PDF must fail, with header/logo/watermark retained.
 The next fresh receipt PDF is still needed to validate its corresponding row.
 
-The existing verification/tax wording is preserved as rendering content only.
-No legal, tax or electronic-invoice certification is established by this
-regression; substantive document-veracity review remains a separate gap.
+The original toolbar regression preserved verification/tax wording as rendering
+content only; it did not establish any certification. The bounded document-copy
+correction now uses a neutral invoice heading and the existing invoice-number/id
+reference. It removes the unconditional verification badge and the unsupported
+tax/registration lookups and invented fallback. Those keys are outside the
+settings allowlist, so the normal settings reader never supplies them.
+
+The native-PDF regression requires the neutral labels/reference and rejects the
+former assertions while retaining its independent header/logo, signature,
+watermark and financial-content checks. Server-render fixtures cover ordinary,
+paid, cancelled and reprinted invoices, including extra unrecognized identifier
+values without adding a settings policy. Receipt content is unchanged.
+
+This is a source-level document-truthfulness correction. The clinic's legal or
+tax status is not assessed, and no electronic-invoice certification is claimed.
+Fresh exact-head CI and native-PDF inspection are still required for release.
