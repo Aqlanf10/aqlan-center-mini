@@ -10,14 +10,16 @@ const explain = () => [{ "Planning Time": 0.1, "Execution Time": 0.2,
   Plan: { "Node Type": "Index Scan", "Relation Name": "synthetic_fixture", "Index Name": "synthetic_fixture_pkey",
     "Plan Rows": 1, "Actual Rows": 1, "Actual Loops": 1, "Shared Hit Blocks": 2, "Shared Read Blocks": 0,
     "Filter": "PRIVATE-PARAMETER", "Output": ["PRIVATE-OUTPUT"] } }];
-function harness(options: { rejectSql?: string; badRows?: boolean; mutateParameters?: boolean; releaseThrows?: boolean } = {}) {
+function harness(options: { rejectSql?: string; badRows?: boolean; mutateParameters?: boolean; releaseThrows?: boolean;
+  explainRows?: unknown[]; explainRowCount?: number | null } = {}) {
   const calls: { sql: string; values: unknown[] | undefined }[] = [];
   const release = vi.fn(() => { if (options.releaseThrows) throw new Error("synthetic release failure"); });
   const query: DbClient["query"] = async <Row>(sql: string, values?: unknown[]) => {
     calls.push({ sql, values });
     if (sql === options.rejectSql) throw new Error("synthetic query failure");
     if (options.mutateParameters && sql === SELECT) (values![0] as number[]).push(2);
-    const result = sql.startsWith(EXPLAIN_PREFIX) ? { rows: [{ "QUERY PLAN": explain() }], rowCount: 1 }
+    const result = sql.startsWith(EXPLAIN_PREFIX) ? { rows: options.explainRows ?? [{ "QUERY PLAN": explain() }],
+      rowCount: Object.hasOwn(options, "explainRowCount") ? options.explainRowCount : 1 }
       : sql === SELECT ? { rows: [{ id: 1 }], rowCount: options.badRows ? 0 : 1 } : { rows: [], rowCount: null };
     return result as QueryResult<Row>;
   };
@@ -145,8 +147,8 @@ describe("actual-client capture lifecycle", () => {
 });
 
 describe("captured-query EXPLAIN replay and bounded evidence", () => {
-  it("prepends only EXPLAIN and uses the exact captured argument array in a read-only transaction", async () => {
-    const h = harness(), select = captured();
+  it.each([null, 1])("prepends only EXPLAIN and uses exact arguments in a read-only transaction with command rowCount %s", async explainRowCount => {
+    const h = harness({ explainRowCount }), select = captured();
     const plans = await explainCapturedQueries(h.pool, [select]);
     expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "COMMIT"]);
     expect(h.calls[1].values).toBe(select.parameters);
@@ -155,6 +157,25 @@ describe("captured-query EXPLAIN replay and bounded evidence", () => {
     expect(plans[0].sql).toBe(SELECT); expect(plans[0].parameters).toEqual(select.parameters);
     expect(plans[0].nodes[0].metrics["Shared Hit Blocks"]).toBe(2);
     expect(JSON.stringify(plans)).not.toMatch(/PRIVATE|Filter|Output/);
+    expect(h.release).toHaveBeenCalledTimes(1);
+  });
+  it.each([0, 2])("rejects %s returned EXPLAIN rows even when command rowCount is null", async resultRows => {
+    const h = harness({ explainRowCount: null, explainRows: Array.from({ length: resultRows }, () => ({ "QUERY PLAN": explain() })) });
+    await expect(explainCapturedQueries(h.pool, [captured()])).rejects.toThrow("EXPLAIN row count");
+    expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "ROLLBACK"]);
+    expect(h.release).toHaveBeenCalledTimes(1);
+  });
+  it.each([undefined, 0, 2, -1, 1.5, NaN, Infinity])("rejects an invalid EXPLAIN command rowCount: %s", async explainRowCount => {
+    const h = harness({ explainRowCount });
+    await expect(explainCapturedQueries(h.pool, [captured()])).rejects.toThrow("EXPLAIN row count");
+    expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "ROLLBACK"]);
+    expect(h.release).toHaveBeenCalledTimes(1);
+  });
+  it.each([0, 2])("rejects %s JSON plan documents even when command rowCount is null", async documents => {
+    const h = harness({ explainRowCount: null,
+      explainRows: [{ "QUERY PLAN": Array.from({ length: documents }, () => explain()[0]) }] });
+    await expect(explainCapturedQueries(h.pool, [captured()])).rejects.toThrow("invalid EXPLAIN envelope");
+    expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "ROLLBACK"]);
     expect(h.release).toHaveBeenCalledTimes(1);
   });
   it.each([BEGIN, EXPLAIN_PREFIX + SELECT, "COMMIT"])("rolls back and releases after replay failure: %s", async rejectSql => {
@@ -176,9 +197,17 @@ describe("captured-query EXPLAIN replay and bounded evidence", () => {
         parametersSha256: sha256(JSON.stringify(parameters)) }])).rejects.toThrow("receipt evidence parameter");
       expect(h.calls.map(call => call.sql)).toEqual([BEGIN, "ROLLBACK"]); expect(h.release).toHaveBeenCalledTimes(1);
     });
-  it("rejects changed root row counts rather than claiming the same actual query observation", async () => {
-    const h = harness();
+  it.each([null, 1])("rejects changed root row counts with EXPLAIN command rowCount %s", async explainRowCount => {
+    const h = harness({ explainRowCount });
     await expect(explainCapturedQueries(h.pool, [{ ...captured(), rowCount: 2 }])).rejects.toThrow("root differs");
+    expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "ROLLBACK"]);
+    expect(h.release).toHaveBeenCalledTimes(1);
+  });
+  it.each([0, 2])("rejects %s root loops even when command rowCount is null", async actualLoops => {
+    const h = harness({ explainRowCount: null,
+      explainRows: [{ "QUERY PLAN": [{ ...explain()[0], Plan: { ...explain()[0].Plan, "Actual Loops": actualLoops } }] }] });
+    await expect(explainCapturedQueries(h.pool, [captured()])).rejects.toThrow("root differs");
+    expect(h.calls.map(call => call.sql)).toEqual([BEGIN, EXPLAIN_PREFIX + SELECT, "ROLLBACK"]);
     expect(h.release).toHaveBeenCalledTimes(1);
   });
   it("validates plan shape and finite observations; bounds nodes and depth", () => {

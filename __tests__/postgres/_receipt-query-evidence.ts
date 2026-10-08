@@ -196,7 +196,8 @@ export async function explainCapturedQueries(pool: Pick<DbPool, "connect">, sele
         || sha256(JSON.stringify(parametersCopy(select.parameters))) !== select.parametersSha256) throw new Error("EXPLAIN capture changed");
       const evidenceParameters = receiptEvidenceParameters(select.parameters);
       const answer = await client.query<{ "QUERY PLAN": unknown }>(EXPLAIN_PREFIX + select.sql, select.parameters);
-      if (answer.rows.length !== 1 || answer.rowCount !== 1) throw new Error("EXPLAIN row count");
+      // EXPLAIN's command tag may omit rowCount; returned rows still must contain one JSON plan.
+      if (answer.rows.length !== 1 || (answer.rowCount !== null && answer.rowCount !== 1)) throw new Error("EXPLAIN row count");
       const plan = summarizePlan(answer.rows[0]["QUERY PLAN"]);
       if (plan.nodes[0].metrics["Actual Rows"] !== select.rowCount || plan.nodes[0].metrics["Actual Loops"] !== 1) {
         throw new Error("EXPLAIN root differs from actual capture");

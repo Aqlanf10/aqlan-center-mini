@@ -194,7 +194,7 @@ describe("receipt provenance is an append-only read projection", () => {
     const owner = await pay(p, 1_000);
     await q(`INSERT INTO payments (receipt_number, patient_id, shift_id, kind, amount_minor, currency,
       exchange_rate, base_amount_minor, base_currency, method, created_by)
-      SELECT 'PROV-BOUND-' || $1::text || '-' || n::text, $1, $2, 'payment', 1, 'YER', 1, 1, 'YER', 'cash', 'synthetic'
+      SELECT 'PROV-BOUND-' || $1::text || '-' || n::text, $1::int, $2, 'payment', 1, 'YER', 1, 1, 'YER', 'cash', 'synthetic'
       FROM generate_series(1, $3::int) n`, [p, owner.shiftId, RECEIPT_PROVENANCE_CONTEXT_LIMIT]);
     const result = await readUnchanged([owner.id]);
     expect(result[owner.id]).toMatchObject({ status: "unavailable", reversal: null,
