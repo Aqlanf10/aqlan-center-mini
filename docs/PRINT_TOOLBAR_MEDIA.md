@@ -45,13 +45,15 @@ The test checks:
    WhatsApp controls. All sheet text, clinic header, logo, signature and existing
    invoice/receipt watermark states remain.
 3. Real Chromium PDF text preserving synthetic identity, document numbers,
-   invoice items/discount/net, receipt amount and signature. Clinic header/title
+   invoice items/discount/net and receipt amount. Complete colon-bearing signature
+   labels and signer are checked in native RTL order on one bounded 8pt-style row.
+   Clinic header/title
    uses ordered bbox words inside the first 180 pt (and first half) of page one,
    with calibrated lam-alef glyph pairing. The actual PDF raster must retain
    colored logo ink in the existing centered 11 mm region. The reprint watermark
    uses exact spatial glyph order in its central large-font region, including
    explicit absence on a first print. WhatsApp link annotations must be absent.
-4. Independent actual negative PDFs hide the header/logo or the watermark:
+4. Independent actual negative PDFs hide the header/logo, signature row or watermark:
    their respective oracles must reject the missing region while the other
    region still passes. A separate negative PDF restores the toolbar's inline
    display; the same annotation validator must reject its WhatsApp link. Every
@@ -118,8 +120,8 @@ The diagonal watermark yields 12 large-font fragments. Their spatial RTL order
 reconstructs exactly `نسخةمعادطباعتها`; the helper does not search the whole-page
 text for independent watermark letters. The observed 96 dpi centered logo region
 contains 192 colored-ink pixels, above the conservative 20-pixel threshold. Real
-header-hidden and watermark-hidden PDF controls must validate these independent
-oracles on the next exact-head CI run.
+header-hidden, signature-hidden and watermark-hidden PDF controls must validate
+these independent oracles on the next exact-head CI run.
 
 Offline parsing/raster inspection of that retained PDF calibrated the proposed
 oracles; no local app, database, TypeScript test or browser test was executed.
@@ -128,3 +130,15 @@ fresh full CI and six-file pixel review. Calibration is limited to these existin
 synthetic document styles and this bounded header/watermark layout, not arbitrary
 Arabic PDFs, fonts or clinic-wide print certification. Product rendering, logo,
 watermark placement and financial values remain unchanged.
+
+Offline review of all remaining invoice Arabic assertions also found colon/dot
+bidi reordering in layout text: `المحاسب................ :` while the bbox contains
+the intact `:بساحملا` word. Signature proof therefore consumes the full labels
+and signer on one geometrically ordered row in the lower document region;
+colons are required. Missing, moved, reordered and punctuation-lost unit controls
+and a real signature-hidden PDF must fail, with header/logo/watermark retained.
+The next fresh receipt PDF is still needed to validate its corresponding row.
+
+The existing verification/tax wording is preserved as rendering content only.
+No legal, tax or electronic-invoice certification is established by this
+regression; substantive document-veracity review remains a separate gap.

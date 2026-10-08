@@ -44,6 +44,20 @@ export function assertPrintPdfHeader(page: PrintPdfPage, expectedText: string): 
   }
 }
 
+/** Colon/dot bidi extraction is checked as native words on one bounded signature row. */
+export function assertPrintPdfSignature(page: PrintPdfPage, expectedText: string): void {
+  const expected = expectedText.split(/\s+/).filter(word => /\p{L}/u.test(word));
+  if (expected.length === 0) throw new Error("PDF signature has no expected words");
+  const words = page.words.filter(word => word.yMin >= page.height * 0.25 && word.yMax <= page.height * 0.9
+    && word.yMax - word.yMin <= 16 && word.xMin >= 0 && word.xMax <= page.width && /\p{L}/u.test(word.text));
+  const anchors = words.filter(word => matchesPrintPdfWord(word.text, expected[0]));
+  if (anchors.length !== 1) throw new Error("PDF signature row anchor missing or duplicated");
+  const row = words.filter(word => Math.abs(word.yMin - anchors[0].yMin) <= 2).sort((a, b) => b.xMin - a.xMin);
+  if (row.length !== expected.length || expected.some((word, index) => !matchesPrintPdfWord(row[index].text, word))) {
+    throw new Error("PDF signature ordered row glyph mismatch");
+  }
+}
+
 /**
  * The rotated 26pt watermark is fragmented by Poppler. Select only its central
  * paper region and large glyph boxes, then reconstruct in spatial RTL order.

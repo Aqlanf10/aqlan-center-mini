@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assertPrintPdfHeader, assertPrintPdfWatermark, matchesPrintPdfWord, type PrintPdfPage } from "./helpers/print-pdf-glyphs";
+import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, matchesPrintPdfWord, type PrintPdfPage } from "./helpers/print-pdf-glyphs";
 
 // Actual synthetic failed PDF from CI37709082384, SHA-256
 // d93af041b99a8b493f54df253efa0fd80b7c336cad3fde654de4480cace09756.
-// Only its bounded header and central watermark glyph boxes are retained.
+// Only its bounded header, signature labels and central watermark glyph boxes are retained.
 const header = "مركز الدكتور عقلان الكامل لتقويم وزراعة وتجميل الأسنان\nد. عقلان الكامل — أخصائي تقويم الأسنان\nجامعة مانيلا المركزية — الفلبين\nفاتورة";
 const observed: PrintPdfPage = {
   "width": 595.91998,
@@ -239,12 +239,47 @@ const observed: PrintPdfPage = {
       "yMin": 441.348,
       "xMax": 214.538,
       "yMax": 481.852
+    },
+    {
+      "text": ":بساحملا",
+      "xMin": 539.064,
+      "yMin": 359.054,
+      "xMax": 572.71,
+      "yMax": 367.974
+    },
+    {
+      "text": ":ضيرملا",
+      "xMin": 59.189,
+      "yMin": 359.054,
+      "xMax": 86.843,
+      "yMax": 367.974
     }
   ]
 };
 const fresh = (): PrintPdfPage => structuredClone(observed);
 
 describe("region-bound print PDF glyph calibration", () => {
+  it("preserves the complete colon-bearing labels on the observed signature row", () => {
+    expect(() => assertPrintPdfSignature(observed, "المحاسب: ................\nالمريض: ................")).not.toThrow();
+  });
+  it("rejects missing, reversed-position, out-of-region or punctuation-lost signature labels", () => {
+    const expected = "المحاسب: ................\nالمريض: ................";
+    const missing = fresh();
+    missing.words = missing.words.filter(word => word.text !== ":بساحملا");
+    expect(() => assertPrintPdfSignature(missing, expected)).toThrow(/PDF signature/);
+    const reordered = fresh();
+    const accountant = reordered.words.find(word => word.text === ":بساحملا")!;
+    const patient = reordered.words.find(word => word.text === ":ضيرملا")!;
+    [accountant.xMin, patient.xMin] = [patient.xMin, accountant.xMin];
+    [accountant.xMax, patient.xMax] = [patient.xMax, accountant.xMax];
+    expect(() => assertPrintPdfSignature(reordered, expected)).toThrow(/PDF signature/);
+    const outside = fresh();
+    for (const word of outside.words) if ([":بساحملا", ":ضيرملا"].includes(word.text)) { word.yMin = 30; word.yMax = 39; }
+    expect(() => assertPrintPdfSignature(outside, expected)).toThrow(/PDF signature/);
+    const punctuation = fresh();
+    punctuation.words.find(word => word.text === ":بساحملا")!.text = "بساحملا";
+    expect(() => assertPrintPdfSignature(punctuation, expected)).toThrow(/PDF signature/);
+  });
   it("recognizes the observed lam-alef glyph order without accepting scrambled words", () => {
     expect(matchesPrintPdfWord("نلاقع", "عقلان")).toBe(true);
     expect(matchesPrintPdfWord("نالقع", "عقلان")).toBe(true);

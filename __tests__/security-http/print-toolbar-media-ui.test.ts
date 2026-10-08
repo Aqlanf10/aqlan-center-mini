@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { assertPrintPdfHeader, assertPrintPdfWatermark, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
+import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
 import { authedGet, baseUrl, harness } from "./_server";
 import { emitPrintToolbarEvidence, emitPrintToolbarFailedPdf, type PrintToolbarEvidenceMember } from "./_print-toolbar-evidence";
 
@@ -70,14 +70,6 @@ beforeAll(async () => {
 afterAll(async () => { try { await browser?.close(); } finally { await db?.end(); } });
 
 const plain = (text: string) => text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
-const compact = (text: string) => plain(text).replace(/\s+/g, "");
-
-function assertPdfWords(text: string, expected: string, label: string) {
-  for (const word of expected.split(/\s+/).filter(word => /\p{L}/u.test(word))) {
-    const direct = compact(word), reversed = [...direct].reverse().join("");
-    expect(compact(text).includes(direct) || compact(text).includes(reversed), `${label}: ${word}`).toBe(true);
-  }
-}
 
 function pdfText(path: string) {
   return plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], {
@@ -215,6 +207,7 @@ describe("print toolbar containment on real built financial documents", () => {
           }
           const screenContent = await sheet.innerText();
           const screenHeader = await sheet.locator("header").innerText();
+          const screenSignature = await sheet.locator(".sign-row").innerText();
           expect(await sheet.locator(".clinic-name").innerText()).toBe(expectedClinicName);
           expect(await sheet.locator(".doc-title").innerText()).toBe(spec.title);
           for (const text of [patientName, spec.number]) expect(screenContent).toContain(text);
@@ -234,6 +227,7 @@ describe("print toolbar containment on real built financial documents", () => {
           }
           expect(await sheet.innerText()).toBe(screenContent);
           expect(await sheet.locator("header").innerText()).toBe(screenHeader);
+          expect(await sheet.locator(".sign-row").innerText()).toBe(screenSignature);
           for (const selector of ["header", ".print-logo", ".clinic-name", ".doc-title", ".sign-row", ".footer-note"]) {
             expect(await sheet.locator(selector).first().isVisible(), `${spec.kind} ${selector} remains visible in print`).toBe(true);
           }
@@ -254,7 +248,7 @@ describe("print toolbar containment on real built financial documents", () => {
           // pixels: ordered header-region words preserve lam-alef glyph pairs.
           assertPrintPdfHeader(paper, screenHeader);
           await assertPdfLogoInk(page, path);
-          assertPdfWords(text, await sheet.locator(".sign-row").innerText(), "PDF signature word");
+          assertPrintPdfSignature(paper, screenSignature);
           assertPrintPdfWatermark(paper, spec.reprint);
           assertNoWhatsAppAnnotation(path);
           if (spec.kind === "invoice") {
@@ -263,8 +257,9 @@ describe("print toolbar containment on real built financial documents", () => {
             }
             // Independent actual-PDF controls: losing the header/logo must
             // fail their oracles while the watermark still passes, and vice versa.
-            for (const region of ["header", "watermark"] as const) {
-              const target = region === "header" ? sheet.locator("header") : page.locator(".reprint-mark");
+            for (const region of ["header", "watermark", "signature"] as const) {
+              const target = region === "header" ? sheet.locator("header")
+                : region === "signature" ? sheet.locator(".sign-row") : page.locator(".reprint-mark");
               const savedStyle = await target.getAttribute("style");
               try {
                 await target.evaluate(element => (element as HTMLElement).style.setProperty("visibility", "hidden", "important"));
@@ -275,9 +270,16 @@ describe("print toolbar containment on real built financial documents", () => {
                   expect(() => assertPrintPdfHeader(negativePaper, screenHeader)).toThrow(/PDF header/);
                   await expect(assertPdfLogoInk(page, negative)).rejects.toThrow(/PDF logo ink/);
                   assertPrintPdfWatermark(negativePaper, true);
-                } else {
+                  assertPrintPdfSignature(negativePaper, screenSignature);
+                } else if (region === "watermark") {
                   expect(() => assertPrintPdfWatermark(negativePaper, true)).toThrow(/PDF watermark/);
                   assertPrintPdfHeader(negativePaper, screenHeader);
+                  await assertPdfLogoInk(page, negative);
+                  assertPrintPdfSignature(negativePaper, screenSignature);
+                } else {
+                  expect(() => assertPrintPdfSignature(negativePaper, screenSignature)).toThrow(/PDF signature/);
+                  assertPrintPdfHeader(negativePaper, screenHeader);
+                  assertPrintPdfWatermark(negativePaper, true);
                   await assertPdfLogoInk(page, negative);
                 }
               } finally {
