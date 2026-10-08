@@ -201,9 +201,9 @@ describe("captured-query EXPLAIN replay and bounded evidence", () => {
     expect(plan.nodes[1].metrics["Shared Hit Blocks"]).toBe(2);
   });
   it("drops unknown or malformed environment provenance instead of logging it", () => {
-    expect(safeRunProvenance({ GITHUB_SHA: "secret", GITHUB_RUN_ID: "https://private", GITHUB_JOB: "private\ntext",
+    expect(safeRunProvenance({ NODE_ENV: "test", GITHUB_SHA: "secret", GITHUB_RUN_ID: "https://private", GITHUB_JOB: "private\ntext",
       GITHUB_RUN_ATTEMPT: "1e4", DATABASE_URL: "secret" })).toEqual({ checkoutSha: null, runId: null, runAttempt: null, job: null });
-    expect(safeRunProvenance({ GITHUB_SHA: "a".repeat(40), GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_JOB: "postgres" }))
+    expect(safeRunProvenance({ NODE_ENV: "test", GITHUB_SHA: "a".repeat(40), GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", GITHUB_JOB: "postgres" }))
       .toEqual({ checkoutSha: "a".repeat(40), runId: "123", runAttempt: "1", job: "postgres" });
   });
   it("prepares bounded, reconstructable, checksummed JSON frames without logging partial payloads", () => {
