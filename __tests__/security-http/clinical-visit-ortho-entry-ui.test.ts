@@ -17,6 +17,7 @@ const visitId = 98312;
 const patientId = 98311;
 const doctorId = 98313;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
+const signedDestination = `/patients/${patientId}?tab=account`;
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 function clinicalVisit(ortho = true) {
   return {
@@ -102,9 +103,10 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     else if (path === "/api/messages") await json(route, { unread: 0, urgent: 0 });
     else if (path === "/api/auth/me") await json(route, { username: "secadmin", role: "admin" });
     else if (path.startsWith("/api/") || path.startsWith("/print/")) { unexpected.push(`${method} ${path}`); await json(route, { message: "Unexpected synthetic read blocked" }, 404); }
-    else if (request.isNavigationRequest() && path === "/") {
-      // The visit page redirects here after success. Keep the destination inert;
-      // reopen the real built visit route below to verify its signed freeze.
+    else if (request.isNavigationRequest() && `${path}${url.search}` === signedDestination) {
+      // A canonical sign result carries this patient ID into account checkout.
+      // Keep that exact destination inert, then reopen the real visit to verify
+      // its signed freeze without reading an unrelated synthetic patient page.
       await route.fulfill({ contentType: "text/html", body: "<html dir=rtl><body>وجهة تجريبية بعد التوقيع</body></html>" });
     } else await route.continue();
   });
@@ -236,7 +238,7 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       await review(f.page).click(); await dialog(f.page).waitFor();
       await expect.poll(() => dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).count()).toBe(1);
       await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
-      await f.page.waitForURL(`${baseUrl}/`);
+      await f.page.waitForURL(`${baseUrl}${signedDestination}`);
       await f.page.goto(`${baseUrl}/visits/${visitId}`);
       await f.page.getByRole("textbox", { name: "ملحق", exact: true }).waitFor();
       const signs = f.writes.filter((body) => body.action === "sign");
@@ -494,7 +496,7 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
       expect(f.writes[0]).toMatchObject({ chiefComplaint: "شكوى اليوم فقط", examination: "فحص اليوم فقط", diagnosis: "تشخيص اليوم فقط", procedures: [] });
       expect(f.writes[0]).not.toHaveProperty("orthoSession");
       await dialog(f.page).getByRole("button", { name: /وقّع الزيارة/ }).click();
-      await f.page.waitForURL(`${baseUrl}/`);
+      await f.page.waitForURL(`${baseUrl}${signedDestination}`);
       const readsBeforeSigned = f.diagnosisReads.length;
       await f.page.goto(`${baseUrl}/visits/${visitId}`);
       await f.page.getByRole("textbox", { name: "ملحق", exact: true }).waitFor();

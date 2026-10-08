@@ -443,16 +443,38 @@ async function readLegacyVoidPreviewInTx(client: DbClient, input: {
   if (!work) throw new Refusal("opening_changed");
   const existing = await lockedOpening(client, input.patientId, currency, lock);
   const liveRemaining = await liveAgreementRemaining(client, input.patientId, currency);
-  const { rows: [collections] } = await client.query<{
-    net_minor: string; unsupported: string; receipt_count: string; last_receipt_id: number | null;
+  const { rows: collections } = await client.query<{
+    currency: string; base_currency: string; native_minor: string; base_minor: string;
+    unsupported: string; receipt_count: string; last_receipt_id: number;
   }>(
-    `SELECT COALESCE(SUM((CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) *
-              (CASE WHEN currency = $2 THEN amount_minor WHEN $2 = 'YER' THEN base_amount_minor ELSE 0 END)), 0)::text AS net_minor,
+    `SELECT currency, base_currency,
+            SUM((CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) * amount_minor::numeric)::text AS native_minor,
+            SUM((CASE WHEN kind = 'refund' THEN -1 ELSE 1 END) * base_amount_minor::numeric)::text AS base_minor,
             COUNT(*) FILTER (WHERE kind NOT IN ('payment', 'refund') OR currency NOT IN ('YER', 'SAR', 'USD')
               OR (currency <> $2 AND $2 <> 'YER')
-              OR (currency <> $2 AND $2 = 'YER' AND base_currency <> 'YER'))::text AS unsupported,
+              OR amount_minor < 0 OR amount_minor > 9007199254740991
+              OR (currency <> $2 AND $2 = 'YER' AND (base_currency <> 'YER'
+                OR base_amount_minor < 0 OR base_amount_minor > 9007199254740991)))::text AS unsupported,
             COUNT(*)::text AS receipt_count, MAX(id) AS last_receipt_id
-       FROM payments WHERE patient_id = $1 AND opening_currency = $2`, [input.patientId, currency]);
+       FROM payments WHERE patient_id = $1 AND opening_currency = $2
+       GROUP BY currency, base_currency ORDER BY currency, base_currency`, [input.patientId, currency]);
+  // Native totals never cross receipt currencies. Only a YER opening may use the already-recorded
+  // base subtotals: each receipt/refund keeps its own historical rate and rounding, without reconversion.
+  let netCollectionsMinor = 0;
+  let collectionsValid = true;
+  for (const bucket of collections) {
+    const native = bucket.currency === currency;
+    const supported = isCurrency(bucket.currency) && (native || (currency === "YER" && bucket.base_currency === "YER"));
+    const subtotal = Number(native ? bucket.native_minor : bucket.base_minor);
+    // Independent refund rounding can make a foreign-base bucket negative; preserve its signed value.
+    // The existing preview policy validates the final target-currency net, without clamping buckets.
+    if (!supported || bucket.unsupported !== "0" || !Number.isSafeInteger(subtotal)
+      || !Number.isSafeInteger(netCollectionsMinor + subtotal)) {
+      collectionsValid = false;
+      break;
+    }
+    netCollectionsMinor += subtotal;
+  }
   const { rows: [history] } = await client.query<{ last_history_id: number | null }>(
     `SELECT MAX(id) AS last_history_id FROM patient_opening_balance_history WHERE patient_id = $1 AND currency = $2`,
     [input.patientId, currency]);
@@ -466,14 +488,15 @@ async function readLegacyVoidPreviewInTx(client: DbClient, input: {
   const impact = previewLegacyVoid({
     patientId: input.patientId, agreementId: input.agreementId, currency, status: agreement.status,
     openingPrincipalBeforeMinor: existing?.amountMinor ?? 0, removedPrincipalMinor: removed,
-    netCollectionsMinor: Number(collections.net_minor),
-    financialEvidenceValid: collections.unsupported === "0" && owned && Number.isSafeInteger(liveRemaining)
+    netCollectionsMinor,
+    financialEvidenceValid: collectionsValid && owned && Number.isSafeInteger(liveRemaining)
       && Number.isSafeInteger(remaining) && remaining >= 0
       && ((agreement.opening_effect === "none" && remaining === 0) || (agreement.opening_effect !== "none" && remaining > 0)),
     periodLocked: removed > 0 && existing !== null && lockedBefore !== "" && existing.asOfDate < lockedBefore,
   }, input.mode);
   // Fingerprint, not authorization: actor/role come only from the verified session; isAdmin is checked separately.
-  // Revisions detect refund/replacement and opening edits even when their aggregate amounts return to the same values.
+  // Ordered buckets retain exact receipt counts/max IDs, detecting refund/replacement even at an unchanged net.
+  // Opening history revisions likewise detect principal edits that return to the same values.
   const previewToken = createHash("sha256").update(JSON.stringify([
     "legacy-void-v1", input.actor, input.actorRole, input.mode, input.patientId, input.agreementId,
     agreement, work, existing, liveRemaining, collections, history.last_history_id, lockedBefore, impact,

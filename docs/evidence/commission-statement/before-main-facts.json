@@ -1,0 +1,48 @@
+{
+  "thead": "التاريخ\tالمريض\tالفاتورة\tالخدمة\tالتخصص / الحالة\tالحصة\tمختبر\tمواد\tنسبة الفاتورة\tمصدرها\tعلى الفاتورة\tالمستحق (ونسبته)\n",
+  "rows": 39,
+  "summary": [
+    "الإجمالي على الفواتير (YER)",
+    "المستحق على المحصّل (YER)",
+    "المصروف له في الفترة (YER)",
+    "الإجمالي على الفواتير (USD)",
+    "المستحق على المحصّل (USD)",
+    "المصروف له في الفترة (USD)"
+  ],
+  "hasBalance": false,
+  "caseHeadings": 0,
+  "pdfinfo": [
+    "Pages:           4",
+    "Page size:       612 x 792 pts (letter)"
+  ],
+  "pageNumbers": [
+    false,
+    false,
+    false,
+    false
+  ],
+  "headerPerPage": [
+    true,
+    true,
+    true,
+    false
+  ],
+  "fit": {
+    "table": 1280,
+    "sheet": 1280
+  },
+  "specialtySummary": [
+    "الإجمالي على الفواتير (YER)",
+    "المستحق على المحصّل (YER)",
+    "المصروف له في الفترة (YER)",
+    "الإجمالي على الفواتير (USD)",
+    "المستحق على المحصّل (USD)",
+    "المصروف له في الفترة (USD)"
+  ],
+  "mobile": {
+    "scrollWidth": 818,
+    "innerWidth": 390
+  },
+  "supplierStatus": 200,
+  "missingStatus": 200
+}

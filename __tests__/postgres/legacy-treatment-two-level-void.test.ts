@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 import { parseLegacyTreatmentRequest } from "../../lib/legacy-treatment";
 import type { LegacyVoidMode } from "../../lib/legacy-treatment-void";
+import type { Currency } from "../../lib/money";
 import { openPeriodontalFixture } from "./_periodontal-fixture";
 
 /** SOURCE ONLY. Real-writer tests for a separately authorized, pristine, owned PostgreSQL fixture.
@@ -14,8 +15,8 @@ let service = 0, sequence = 0;
 const q = async <T = Record<string, unknown>>(sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows as T[];
 const patient = async () => (await q<{ id: number }>("INSERT INTO patients (patient_number,full_name) VALUES ($1,'Synthetic two-level void') RETURNING id", [`SYN-VOID-${++sequence}`]))[0].id;
 const actor = { actor: "synthetic-admin", actorRole: "admin" };
-async function register(patientId: number, toothCode = 16, previouslyPaidAmount = "0") {
-  const parsed = parseLegacyTreatmentRequest({ serviceId: service, toothCode, currency: "YER", agreedAmount: "100000",
+async function register(patientId: number, toothCode = 16, previouslyPaidAmount = "0", currency: Currency = "YER") {
+  const parsed = parseLegacyTreatmentRequest({ serviceId: service, toothCode, currency, agreedAmount: "100000",
     previouslyPaidAmount, historicalAsOf: "2020-01-01" }, "2026-10-07");
   if (!parsed.ok) throw new Error(parsed.message);
   const result = await legacy.createLegacyTreatment({ patientId, request: parsed.value, ...actor,
@@ -35,9 +36,10 @@ async function manager(patientId: number, agreementId: number) {
   return legacy.voidLegacyTreatment({ patientId, agreementId, reason: "Synthetic explicit manager correction",
     ...actor, mode: "manager_authorized", previewToken: reviewed.previewToken });
 }
-async function collect(patientId: number, amountMinor: number, currency: "YER" | "SAR" = "YER", openingCurrency: "YER" | "SAR" = "YER") {
+async function collect(patientId: number, amountMinor: number, currency: Currency = "YER", openingCurrency: Currency = "YER",
+  exchangeRate = currency === "SAR" ? 150 : currency === "USD" ? 530 : 1) {
   const result = await db.recordPayment({ patientId, invoiceId: null, openingCurrency, kind: "payment", amountMinor,
-    currency, baseCurrency: "YER", exchangeRate: currency === "SAR" ? 150 : 1, method: "cash", note: null, createdBy: actor.actor });
+    currency, baseCurrency: "YER", exchangeRate, method: "cash", note: null, createdBy: actor.actor });
   if (result.reason !== null || !result.payment) throw new Error(result.reason ?? "Missing synthetic receipt");
   return result.payment;
 }
@@ -143,6 +145,126 @@ describe("ordinary and explicit manager void share immutable financial lineage",
     await refund(payment);
     expect((await preview(id, agreement.id, "ordinary")).netCollectionsMinor).toBe(0);
     expect((await ordinary(id, agreement.id)).ok).toBe(true);
+  });
+  it("adds native YER and stored SAR/USD equivalents at each receipt's own rate and refund rounding", async () => {
+    const id = await patient(), agreement = await register(id);
+    await register(id, 26);
+    await collect(id, 500);
+    const sar = await collect(id, 101, "SAR", "YER", 150);
+    await collect(id, 203, "SAR", "YER", 160);
+    const usd = await collect(id, 105, "USD", "YER", 530);
+    await refund(sar, 50);
+    await refund(usd, 5);
+    // 500 + round(1.01*150) + round(2.03*160) + round(1.05*530)
+    //     - round(0.50*150) - round(0.05*530): no aggregate conversion or current rate.
+    expect(await q("SELECT base_amount_minor::text FROM payments WHERE patient_id=$1 ORDER BY id", [id]))
+      .toEqual(["500", "152", "325", "557", "75", "27"].map((base_amount_minor) => ({ base_amount_minor })));
+    const before = await state(id);
+    const reviewed = await preview(id, agreement.id);
+    expect(reviewed).toMatchObject({ canVoid: true, netCollectionsMinor: 1432, openingPrincipalAfterMinor: 100000 });
+    expect((await preview(id, agreement.id)).previewToken).toBe(reviewed.previewToken);
+    expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_collected" });
+    expect((await manager(id, agreement.id)).ok).toBe(true);
+    const after = await state(id);
+    expect(after.receipts).toEqual(before.receipts);
+    expect(after.invoices).toEqual(before.invoices);
+  });
+  it("preserves a negative foreign-base bucket caused by legitimate split-refund rounding", async () => {
+    const id = await patient(), agreement = await register(id);
+    await register(id, 26);
+    await collect(id, 500);
+    const payment = await collect(id, 2, "SAR", "YER", 150);
+    await refund(payment, 1);
+    await refund(payment, 1);
+    // The original 0.02 SAR is 3 YER; each independently rounded 0.01 SAR refund is 2 YER.
+    // Preserve the -1 YER SAR bucket: 500 + 3 - 2 - 2 = 499, without clamping or rebalancing.
+    expect(await q("SELECT base_amount_minor::text FROM payments WHERE patient_id=$1 ORDER BY id", [id]))
+      .toEqual(["500", "3", "2", "2"].map((base_amount_minor) => ({ base_amount_minor })));
+    const before = await state(id);
+    expect(await preview(id, agreement.id)).toMatchObject({ canVoid: true, netCollectionsMinor: 499 });
+    expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_collected" });
+    expect((await manager(id, agreement.id)).ok).toBe(true);
+    expect((await state(id)).receipts).toEqual(before.receipts);
+  });
+  it.each(["SAR", "USD"] as const)("keeps %s openings in native minor units through partial and full refunds", async (currency) => {
+    const id = await patient(), agreement = await register(id, 16, "0", currency);
+    const payment = await collect(id, 12345, currency, currency);
+    await refund(payment, 345);
+    expect(await preview(id, agreement.id, "ordinary")).toMatchObject({ currency, netCollectionsMinor: 12000,
+      canVoid: false, refusal: "opening_collected" });
+    expect(await manager(id, agreement.id)).toEqual({ ok: false, reason: "opening_settled" });
+    await refund(payment, 12000);
+    expect((await preview(id, agreement.id, "ordinary")).netCollectionsMinor).toBe(0);
+    expect((await ordinary(id, agreement.id)).ok).toBe(true);
+  });
+});
+
+// Persisted-corruption fixtures stay inside the isolated synthetic database. No guard is disabled,
+// no historical receipt is edited, and production has no path that creates these unsupported rows.
+async function historicalReceipt(patientId: number, openingCurrency: Currency, input: {
+  currency: string; amountMinor: string; baseAmountMinor: string; baseCurrency?: string; kind?: string;
+}) {
+  await q(`INSERT INTO payments (receipt_number, patient_id, shift_id, kind, amount_minor, currency,
+      exchange_rate, base_amount_minor, base_currency, opening_currency, method, created_by)
+    SELECT $1, $2, id, $3, $4::bigint, $5, 1, $6::bigint, $7, $8, 'cash', $9
+      FROM cashier_shifts WHERE status='open'`, [`SYN-CORRUPT-${++sequence}`, patientId,
+    input.kind ?? "payment", input.amountMinor, input.currency, input.baseAmountMinor,
+    input.baseCurrency ?? "YER", openingCurrency, actor.actor]);
+}
+
+describe("collection evidence fails closed before any void mutation", () => {
+  it.each([
+    { opening: "YER", currency: "USD", amountMinor: "100", baseAmountMinor: "530", baseCurrency: "SAR" },
+    { opening: "YER", currency: "SAR", amountMinor: "100", baseAmountMinor: "-150" },
+    { opening: "YER", currency: "USD", amountMinor: "100", baseAmountMinor: "9007199254740992" },
+    { opening: "SAR", currency: "USD", amountMinor: "100", baseAmountMinor: "530" },
+    { opening: "USD", currency: "SAR", amountMinor: "100", baseAmountMinor: "150" },
+    { opening: "SAR", currency: "YER", amountMinor: "100", baseAmountMinor: "100" },
+  ] as const)("refuses unsupported stored currency/base evidence %j", async ({ opening, ...receipt }) => {
+    const id = await patient(), agreement = await register(id, 16, "0", opening);
+    await historicalReceipt(id, opening, receipt);
+    const before = await state(id);
+    for (const mode of ["ordinary", "manager_authorized"] as const) {
+      expect(await preview(id, agreement.id, mode)).toMatchObject({ canVoid: false, refusal: "opening_changed" });
+    }
+    expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_changed" });
+    expect(await manager(id, agreement.id)).toEqual({ ok: false, reason: "opening_changed" });
+    expect(await state(id)).toEqual(before);
+  });
+
+  it.each([
+    { currency: "EUR", amountMinor: "100", baseAmountMinor: "600", constraint: "payments_currency_known" },
+    { currency: "YER", amountMinor: "100", baseAmountMinor: "100", kind: "adjustment", constraint: "payments_kind_known" },
+  ])("existing checks reject impossible new corruption fixtures: %j", async ({ constraint, ...receipt }) => {
+    const id = await patient();
+    await register(id);
+    const before = await state(id);
+    await expect(historicalReceipt(id, "YER", receipt)).rejects.toMatchObject({ code: "23514", constraint });
+    expect(await state(id)).toEqual(before);
+  });
+
+  it.each([
+    [
+      { currency: "YER", amountMinor: "4503599627370500", baseAmountMinor: "4503599627370500" },
+      { currency: "YER", amountMinor: "4503599627370500", baseAmountMinor: "4503599627370500" },
+    ],
+    [
+      { currency: "YER", amountMinor: "9007199254740900", baseAmountMinor: "9007199254740900" },
+      { currency: "SAR", amountMinor: "100", baseAmountMinor: "100" },
+    ],
+    [
+      { currency: "YER", amountMinor: "9007199254740992", baseAmountMinor: "9007199254740992" },
+      { currency: "YER", amountMinor: "9007199254740992", baseAmountMinor: "9007199254740992", kind: "refund" },
+    ],
+  ])("refuses unsafe group totals, cross-group totals or cancelling unsafe receipts: %j", async (first, second) => {
+    const id = await patient(), agreement = await register(id);
+    await historicalReceipt(id, "YER", first);
+    await historicalReceipt(id, "YER", second);
+    const before = await state(id);
+    expect(await preview(id, agreement.id)).toMatchObject({ canVoid: false, refusal: "opening_changed" });
+    expect(await ordinary(id, agreement.id)).toEqual({ ok: false, reason: "opening_changed" });
+    expect(await manager(id, agreement.id)).toEqual({ ok: false, reason: "opening_changed" });
+    expect(await state(id)).toEqual(before);
   });
 });
 

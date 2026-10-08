@@ -143,6 +143,10 @@ async function fixture(automaticTreatment = false) {
       // here concern only errors inside this ClinicalVisit workspace.
       alerts: page.locator("#visit-notes").locator("..").getByRole("alert"),
       clinicalReads: () => clinicalReads,
+      holdReadWithNotes: (notes: Notes) => {
+        stored = { ...stored, ...notes, procedures: [procedure] };
+        holdRefresh = true;
+      },
       succeedWrite: async (index = 0) => {
         const pending = writes[index];
         if (!pending) throw new Error("No synthetic clinical write is pending");
@@ -301,26 +305,60 @@ describe("pending clinical note containment in the built visit page", () => {
     } finally { await f.context.close(); }
   });
 
-  it("releases the lock and preserves the submitted draft when the post-save reload fails", async () => {
+  it("hides editing after a failed post-save reload and restores the exact draft only after an authorized retry", async () => {
     const f = await fixture();
     try {
       const submitted = makeNotes("Synthetic reload failure draft");
       await fillNotes(f.page, submitted);
+      await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("2");
+      await f.page.getByRole("textbox", { name: "الأسطح", exact: true }).fill("MO");
       await f.save.click();
       await expect.poll(() => f.writes.length).toBe(1);
       await f.succeedWrite();
       await expect.poll(() => f.refreshes.length).toBe(1);
       await expectLock(f, true);
       await f.finishRefresh(503);
+      const unavailable = f.page.getByRole("alert").filter({ hasText: "تعذّر تحميل الزيارة الحالية" });
+      await unavailable.waitFor();
+      expect(await f.page.locator("#visit-notes textarea").count()).toBe(0);
+      expect(await f.save.count()).toBe(0);
+      expect(await f.page.getByRole("button", { name: "مراجعة وإنهاء الزيارة", exact: true }).count()).toBe(0);
+      expect(await f.page.getByText("احتُفظ بمسودة الزيارة لهذه الجلسة؛ التعديل والحفظ متوقفان حتى نجاح إعادة التحميل.", { exact: true }).count()).toBe(1);
+      expect(await f.page.getByText("Synthetic reload failure", { exact: true }).count()).toBe(0);
+      expect(f.clinicalReads()).toBe(2);
+      expect(f.writes).toHaveLength(1);
+
+      // A fresh successful read restores authority, but a stale persisted
+      // snapshot must not replace any of the five notes or procedure edits.
+      f.holdReadWithNotes(makeNotes("Synthetic stale persisted"));
+      await f.page.getByRole("button", { name: "أعد تحميل الزيارة", exact: true }).click();
+      await expect.poll(() => f.refreshes.length).toBe(1);
+      expect(await f.page.locator("#visit-notes textarea").count()).toBe(0);
+      expect(await f.save.count()).toBe(0);
+      expect(f.writes).toHaveLength(1);
+      await f.finishRefresh();
       await expect.poll(() => f.save.isEnabled()).toBe(true);
       await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(submitted);
-      expect(await f.alerts.count()).toBe(1);
-      expect(await f.alerts.textContent()).toContain("Synthetic reload failure");
-      const later = makeNotes("Synthetic edit after reload failure");
+      expect(await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).inputValue()).toBe("2");
+      expect(await f.page.getByRole("textbox", { name: "الأسطح", exact: true }).inputValue()).toBe("MO");
+      expect(await f.alerts.count()).toBe(0);
+      expect(f.clinicalReads()).toBe(3);
+      const later = makeNotes("Synthetic correction after authorized recovery");
       await fillNotes(f.page, later);
+      await f.save.click();
+      await expect.poll(() => f.writes.length).toBe(2);
+      expect(f.writes[1].body).toEqual({ ...later, doctorId, billingCurrency: "YER",
+        procedures: [{ ...procedure, quantity: 2, surfaces: "MO" }] });
+      await expectLock(f, true);
+      await f.succeedWrite(1);
+      await expect.poll(() => f.refreshes.length).toBe(1);
+      await expectLock(f, true);
+      await f.finishRefresh();
+      await expect.poll(() => f.save.isEnabled()).toBe(true);
+      await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(later);
-      expect(f.writes).toHaveLength(1);
+      expect(f.writes).toHaveLength(2);
       expectSafe(f);
     } finally { await f.context.close(); }
   });
