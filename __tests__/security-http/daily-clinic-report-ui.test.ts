@@ -266,12 +266,13 @@ async function readPaper(page: Page, path: string): Promise<PaperPage[]> {
 }
 function assertPaperBounds(pages: PaperPage[]) {
   expect(pages.length).toBeGreaterThan(0);
-  for (const page of pages) {
+  for (const [pageIndex, page] of pages.entries()) {
     expect(page.words.length).toBeGreaterThan(0);
     expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5); expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
     for (const word of page.words) {
-      expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-      expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+      const context = `PDF page ${pageIndex + 1}, word ${JSON.stringify(word.text).slice(0, 140)}, box ${JSON.stringify({ xMin: word.xMin, xMax: word.xMax, yMin: word.yMin, yMax: word.yMax })}, page ${page.width}×${page.height}pt; CSS margin 10mm`;
+      expect(word.xMin, context).toBeGreaterThanOrEqual(26); expect(word.xMax, context).toBeLessThanOrEqual(page.width - 26);
+      expect(word.yMin, context).toBeGreaterThanOrEqual(26); expect(word.yMax, context).toBeLessThanOrEqual(page.height - 26);
     }
   }
 }
@@ -429,6 +430,7 @@ describe("daily clinic full-result A4 print proof", () => {
       const path = ".settings-ui-artifacts/daily-clinic-normal-day-a4.pdf";
       await mkdir(".settings-ui-artifacts", { recursive: true });
       const bytes = await f.page.pdf({ path, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+      let diagnosticBytes = bytes;
       try {
         const pages = await readPaper(f.page, path); assertPaperBounds(pages);
         const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
@@ -446,7 +448,7 @@ describe("daily clinic full-result A4 print proof", () => {
         expect(await f.page.getByTestId("daily-clinic-reference-appendix").isVisible()).toBe(true);
         expect(await routineMoneySignature(f.page)).toEqual(financialBefore);
         const fullPath = ".settings-ui-artifacts/daily-clinic-normal-day-full-a4.pdf";
-        await f.page.pdf({ path: fullPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
+        diagnosticBytes = await f.page.pdf({ path: fullPath, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
         const fullPages = await readPaper(f.page, fullPath); assertPaperBounds(fullPages);
         expect(pages.length).toBeLessThan(fullPages.length);
         const fullWords = fullPages.flatMap((page) => page.words.map((word) => plain(word.text)));
@@ -454,7 +456,7 @@ describe("daily clinic full-result A4 print proof", () => {
         console.log(`DAILY_CLINIC_NORMAL_DAY_PAGES ${JSON.stringify({ synthetic: true, patients: 8, workRows: 8, receiptRows: 3, expenseRows: 2, summaryPages: pages.length, fullPages: fullPages.length })}`);
         f.assertIsolated();
         evidence.push({ filename: "daily-clinic-normal-day-a4.pdf", mime: "application/pdf", bytes });
-      } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(bytes); throw error; }
+      } catch (error) { f.assertIsolated(); emitDailyClinicFailureEvidence(diagnosticBytes); throw error; }
     } finally { await f.context.close(); }
   });
 

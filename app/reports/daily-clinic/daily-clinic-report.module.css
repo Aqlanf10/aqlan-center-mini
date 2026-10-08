@@ -107,6 +107,9 @@
   /* Six separate account amounts have room for the longest exact values;
    * intrinsic sizing reserves that width before patient names wrap. */
   .report .accountPositionTable { table-layout: auto; }
+  /* Full-reference columns reserve space for exact unbroken amounts before
+   * historical labels wrap; routine tables keep their existing geometry. */
+  .report .referenceAppendix .detailsTable { table-layout: auto; }
   /* Financial digits stay whole at the same readable size. Give them width;
    * patient/work prose can wrap. Values beyond this grouped layout use the
    * explicit per-currency print panels, never clipping or a tiny font. */
