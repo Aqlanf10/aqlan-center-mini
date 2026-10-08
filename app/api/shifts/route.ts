@@ -6,6 +6,7 @@ import { expenseTotals } from "@/lib/expenses";
 import { CURRENCIES, formatMoney, parseAmount, shiftTotals, type Currency } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,7 @@ export async function GET() {
     const [payments, expenses, drawer] = open
       ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
       : [[], [], null];
+    const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
       clinicTimeZone: CLINIC_TIME_ZONE,
       open,
@@ -58,6 +60,7 @@ export async function GET() {
       // كل إغلاق يبدو ناقصًا بمقدار ما صُرف، فيُتجاهل الفرق ويصير الجرد بلا فائدة.
       expenseTotals: expenseTotals(expenses),
       payments,
+      receiptProvenance,
       expenses,
       recent: await listShifts(15),
     });
