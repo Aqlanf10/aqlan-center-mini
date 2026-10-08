@@ -275,6 +275,18 @@ function assertPaperBounds(pages: PaperPage[]) {
     }
   }
 }
+/** Patient file numbers intentionally repeat in account/work details. Prove
+ * primary cohort uniqueness within its printed table, bounded by its exact
+ * unique subtotal, rather than treating later identity labels as duplicate visits. */
+function paperBeforeAmount(pages: PaperPage[], amount: string, includeAmountLine: boolean): PaperPage[] {
+  const index = pages.findIndex((page) => page.words.some((word) => plain(word.text) === amount));
+  if (index < 0) throw new Error(`Missing PDF section amount ${amount}`);
+  const anchor = pages[index].words.filter((word) => plain(word.text) === amount)
+    .reduce((top, word) => word.yMin < top.yMin ? word : top);
+  const lastY = includeAmountLine ? anchor.yMax + 0.1 : anchor.yMin - 0.1;
+  return pages.slice(0, index + 1).map((page, pageIndex) => pageIndex === index ? { ...page, words: page.words.filter((word) => word.yMax <= lastY) } : page);
+}
+
 const routineSections = ["daily-clinic-attendees", "daily-clinic-account-position", "daily-clinic-work", "daily-clinic-attendee-receipts", "daily-clinic-other-receipts", "daily-clinic-expenses", "daily-clinic-recipients", "daily-clinic-close-summary", "daily-clinic-reconciliation"];
 async function routineMoneySignature(page: Page) {
   return Promise.all(routineSections.map(async (id) => ({ id, money: await page.getByTestId(id).locator("[data-minor]").evaluateAll((nodes) => nodes.map((node) => ({ minor: node.getAttribute("data-minor"), currency: node.getAttribute("data-currency"), text: node.textContent }))) })));
@@ -347,8 +359,10 @@ describe("daily clinic full-result A4 print proof", () => {
           }
         }
         const allWords = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
-        for (let i = 1; i <= count; i++) expect(allWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
-        const attendeePages = pages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
+        const primaryPages = paperBeforeAmount(pages, "55,308,641,976", true);
+        const primaryWords = primaryPages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= count; i++) expect(primaryWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+        const attendeePages = primaryPages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
         expect(attendeePages.length).toBeGreaterThan(1);
         for (const page of attendeePages) for (const currency of ["YER", "SAR", "USD"]) expect(page.words.filter((word) => plain(word.text) === currency).length).toBeGreaterThanOrEqual(3);
         // All nine values of the first patient's financial row belong to the
@@ -386,7 +400,8 @@ describe("daily clinic full-result A4 print proof", () => {
           expect(summaryPages.length).toBeLessThanOrEqual(Math.floor(pages.length * 0.7));
           console.log(`DAILY_CLINIC_STRESS_PAGES ${JSON.stringify({ synthetic: true, patients: count, summaryPages: summaryPages.length, fullPages: pages.length })}`);
           const words = summaryPages.flatMap((page) => page.words.map((word) => plain(word.text)));
-          for (let i = 1; i <= count; i++) expect(words.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+          const primaryWords = paperBeforeAmount(summaryPages, "55,308,641,976", true).flatMap((page) => page.words.map((word) => plain(word.text)));
+          for (let i = 1; i <= count; i++) expect(primaryWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
           for (const marker of ["WORK-STRESS", "SYNTHETIC-NONATTENDEE-501", "SYNTHETIC-EXPENSE-700", "55,308,641,976"]) expect(words).toContain(marker);
           f.assertIsolated();
           evidence.push({ filename: "daily-clinic-summary-a4.pdf", mime: "application/pdf", bytes: summaryBytes });
@@ -417,7 +432,11 @@ describe("daily clinic full-result A4 print proof", () => {
       try {
         const pages = await readPaper(f.page, path); assertPaperBounds(pages);
         const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
-        for (let i = 1; i <= 8; i++) for (const prefix of ["DAY", "WORK"]) expect(words.filter((word) => word === `${prefix}-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        const primaryWords = paperBeforeAmount(pages, "90,000", true).flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= 8; i++) {
+          expect(primaryWords.filter((word) => word === `DAY-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+          expect(words.filter((word) => word === `WORK-${String(i).padStart(2, "0")}`)).toHaveLength(1);
+        }
         for (const marker of ["RECEIPT-01", "RECEIPT-02", "REVERSE-03", "SPEND-01", "SPEND-02"]) expect(words).toContain(marker);
         expect(words.some((word) => /^PLAN-/.test(word))).toBe(false);
         for (const amount of ["90,000", "750.00", "200.00", "30,000", "300.00", "50.00", "60,000", "450.00", "150.00", "8,000", "-25.00"]) expect(words).toContain(amount);
@@ -469,6 +488,48 @@ describe("daily clinic full-result A4 print proof", () => {
       expect(await position.locator('[data-account-patient="2"] [data-minor]').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-minor"))))).toEqual([0, 0, 0, 0, 5000, 0]);
       expect(await position.innerText()).toContain("مديونية"); expect(await position.innerText()).toContain("دائن");
       expect(await f.page.getByTestId("daily-clinic-attendee-receipts").locator("[data-receipt-id]").count()).toBe(2);
+      f.assertIsolated();
+    } finally { await f.context.close(); }
+  });
+
+  it("keeps same-name patients and registered recipients distinguishable in routine print", async () => {
+    const f = await fixture();
+    try {
+      const report = dailyClinicNormalDayFixture();
+      for (const index of [0, 1]) {
+        report.attendees[index].patientName = "اسم مكرر";
+        report.currentAccounts[index].patientName = "اسم مكرر";
+        report.agreements[index].patientName = "اسم مكرر";
+        report.work[index].patientName = "اسم مكرر";
+        report.receipts[index].patientName = "اسم مكرر";
+      }
+      report.attendees[1].patientNumber = null;
+      const recipient = { ...report.expenses.movements[0].recipient, key: "party:701", partyId: 701 };
+      report.expenses.movements.push({ ...report.expenses.movements[0], id: 702, voucherNumber: "SPEND-03", recipient,
+        amountMinor: 5000, payableId: null, payableSourceType: null, allocations: [], unallocatedMinor: 5000 });
+      const extraTotals = { outflowMinor: { YER: 5000, SAR: 0, USD: 0 }, reversalMinor: { YER: 0, SAR: 0, USD: 0 },
+        netOutflowMinor: { YER: 5000, SAR: 0, USD: 0 }, voucherCount: 1, reversalCount: 0, negativeAdjustmentCount: 0 };
+      report.expenses.recipientTotals.push({ recipient, recordedPayeeTexts: ["SYNTHETIC-PAYEE"], totals: extraTotals });
+      report.expenses.totals.outflowMinor.YER = 15000; report.expenses.totals.netOutflowMinor.YER = 13000; report.expenses.totals.voucherCount = 3;
+      await complete(f.page, 0, report);
+      await expect.poll(() => f.page.getByTestId("daily-clinic-result").count()).toBe(1);
+      const before = await routineMoneySignature(f.page);
+      await f.page.emulateMedia({ media: "print" });
+      await assertRoutineRows(f.page, { attendees: 8, work: 8, attendeeReceipts: 2, otherReceipts: 1, expenses: 3 });
+      expect(await routineMoneySignature(f.page)).toEqual(before);
+      const account = f.page.getByTestId("daily-clinic-account-position");
+      expect(await account.locator('[data-account-patient="1"] [data-patient-number="DAY-01"]').isVisible()).toBe(true);
+      const internal = account.locator('[data-account-patient="2"] [data-patient-reference="2"]');
+      expect(await internal.isVisible()).toBe(true); expect(await internal.innerText()).toContain("مرجع المريض الداخلي");
+      expect(await account.locator('[data-account-patient="2"] [data-patient-number]').count()).toBe(0);
+      expect(await f.page.getByTestId("daily-clinic-work").locator('[data-work-key="procedure:1"] [data-patient-number="DAY-01"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-work").locator('[data-work-key="procedure:2"] [data-patient-reference="2"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-attendee-receipts").locator('[data-receipt-id="502"] [data-patient-reference="2"]').isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-other-receipts").locator('[data-receipt-id="501"] [data-patient-reference="6000"]').isVisible()).toBe(true);
+      const recipients = f.page.getByTestId("daily-clinic-recipients");
+      expect(await recipients.locator("tbody tr").count()).toBe(2);
+      for (const partyId of [700, 701]) expect(await recipients.locator(`[data-recipient-party-id="${partyId}"]`).isVisible()).toBe(true);
+      expect(await f.page.getByTestId("daily-clinic-reference-appendix").isHidden()).toBe(true);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -525,8 +586,10 @@ describe("daily clinic full-result A4 print proof", () => {
       const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
       expect(words).toContain("9,007,199,254,740,991");
       expect(words).toContain("9,007,199,254,617,535");
-      // One patient row per explicit currency panel, no printed grouped copy.
-      expect(words.filter((word) => word === "SYNTHETIC-0001")).toHaveLength(3);
+      // Three primary currency-panel rows; later account/work identities are
+      // legitimate repeats. Stop at the separately printed current account.
+      const primaryWords = paperBeforeAmount(pages, "8,100", false).flatMap((page) => page.words.map((word) => plain(word.text)));
+      expect(primaryWords.filter((word) => word === "SYNTHETIC-0001")).toHaveLength(3);
       expect(await f.page.getByTestId("daily-clinic-end").isVisible()).toBe(true);
       await f.page.emulateMedia({ media: "screen" });
       await f.page.getByLabel("نطاق الطباعة", { exact: true }).selectOption("summary");

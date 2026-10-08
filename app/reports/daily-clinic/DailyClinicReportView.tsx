@@ -54,10 +54,16 @@ function SummaryRow({ label, amounts }: { label: string; amounts: DailyCurrencyA
   return <tr><th scope="row">{label}</th><AmountCells amounts={amounts} /></tr>;
 }
 
+function PatientIdentity({ patientNumber, patientId }: { patientNumber?: string | null; patientId?: number | null }) {
+  if (patientNumber?.trim()) return <small data-patient-number={patientNumber}><bdi dir="ltr">{patientNumber}</bdi></small>;
+  if (patientId !== null && patientId !== undefined) return <small data-patient-reference={patientId}>مرجع المريض الداخلي: <bdi dir="ltr">#{patientId}</bdi></small>;
+  return patientId === null ? <small>زائر بلا ملف مرتبط</small> : null;
+}
+
 function Recipient({ recipient }: { recipient: DailyClinicExpenseRecipient }) {
   return <>
     <strong>{recipient.displayName}</strong>
-    <small>{recipient.partyId !== null ? <>جهة مرتبطة<span className={styles.referenceOnly}> #{recipient.partyId}</span></> : recipient.nameSource === "recorded_text" ? "اسم نصّي مسجّل؛ الهوية غير موثّقة" : "المستفيد غير معلوم"}</small>
+    <small>{recipient.partyId !== null ? <>جهة مرتبطة <bdi dir="ltr" data-recipient-party-id={recipient.partyId}>#{recipient.partyId}</bdi></> : recipient.nameSource === "recorded_text" ? "اسم نصّي مسجّل؛ الهوية غير موثّقة" : "المستفيد غير معلوم"}</small>
     {recipient.recordedPayeeText && recipient.partyId !== null ? <small>المستفيد كما سُجّل: {recipient.recordedPayeeText}</small> : null}
   </>;
 }
@@ -68,7 +74,7 @@ function ReceiptTable({ receipts, zone, title, id }: { receipts: DailyClinicRece
       <thead><tr><th scope="col">السند / الوقت</th><th scope="col">المريض</th><th scope="col">الحركة / الوسيلة</th><th scope="col">المبلغ الأصلي</th><th scope="col">الهدف المسجّل</th><th scope="col">تسوية الهدف</th><th scope="col">المعادل / الصرف المسجّل</th></tr></thead>
       <tbody>{receipts.length === 0 ? <tr><td colSpan={7}>لا توجد حركات مسجّلة لهذه الفئة في اليوم المحدد.</td></tr> : receipts.map((receipt) => <tr key={receipt.id} data-receipt-id={receipt.id}>
         <th scope="row"><bdi dir="ltr" className={styles.documentNumber}>{receipt.receiptNumber}</bdi><small className={styles.referenceOnly}>#{receipt.id}</small><small><Timestamp value={receipt.at} zone={zone} /></small></th>
-        <td>{receipt.patientName}<small className={styles.referenceOnly}>ملف #{receipt.patientId}</small></td>
+        <td>{receipt.patientName}<PatientIdentity patientId={receipt.patientId} /></td>
         <td>{receipt.kind === "refund" ? "حركة عكسية / تصحيح مسجّل" : "تحصيل مسجّل"}<small>{receipt.method === "cash" ? "نقد" : receipt.method === "transfer" ? "تحويل" : receipt.method}</small>{receipt.reversalOfId !== null ? <small>عكس السند<span className={styles.referenceOnly}> #{receipt.reversalOfId}</span></small> : null}</td>
         <td><Money minor={receipt.kind === "refund" ? -receipt.tenderMinor : receipt.tenderMinor} currency={receipt.tenderCurrency} /><small><bdi>{receipt.tenderCurrency}</bdi></small></td>
         <td>{receipt.invoiceId !== null ? <small>فاتورة<span className={styles.referenceOnly}> #{receipt.invoiceId}</span></small> : null}{receipt.planId !== null ? <small>خطة<span className={styles.referenceOnly}> #{receipt.planId}</span></small> : null}{receipt.openingCurrency !== null ? <small>رصيد افتتاحي {receipt.openingCurrency}</small> : null}{receipt.invoiceId === null && receipt.planId === null && receipt.openingCurrency === null ? "غير مربوط بوثيقة محددة" : null}</td>
@@ -83,6 +89,8 @@ function ReceiptTable({ receipts, zone, title, id }: { receipts: DailyClinicRece
  * from the complete day activity; money is never recomputed. */
 export function DailyClinicReportBody({ report, clinicName, printScope = "summary" }: { report: DailyClinicReport; clinicName: string; printScope?: PrintScope }) {
   const { totals, expenses, clinicTimeZone: zone } = report;
+  const attendeeByKey = new Map(report.attendees.map((patient) => [patient.key, patient] as const));
+  const patientNumberById = new Map(report.attendees.flatMap((patient) => patient.patientId === null ? [] : [[patient.patientId, patient.patientNumber] as const]));
   // Presentation selection only: never recalculate a balance or round money.
   // The grouped A4 layout reserves width for up to fourteen formatted glyphs.
   const needsCurrencyPanels = [
@@ -119,7 +127,7 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
           <tr><CurrencyHeaders prefix="الاتفاق" /><CurrencyHeaders prefix="المسدّد" /><CurrencyHeaders prefix="المتبقي" /></tr>
         </thead>
         <tbody>{report.attendees.length === 0 ? <tr><td colSpan={11}>لم يُسجّل حضور في هذا اليوم. حركات الصندوق وسندات الصرف، إن وجدت، تظهر منفصلة أدناه.</td></tr> : report.attendees.map((patient) => <tr key={patient.key} data-patient-key={patient.key}>
-          <th scope="row">{patient.patientName}<small>{patient.patientNumber ?? (patient.patientId === null ? "زائر بلا ملف مرتبط" : `ملف #${patient.patientId}`)}</small>{patient.agreementIds.length === 0 ? <small>لا اتفاق موثّق مرتبط؛ الأصفار لا تعني أن حساب المريض بلا دين.</small> : null}</th>
+          <th scope="row">{patient.patientName}<PatientIdentity patientNumber={patient.patientNumber} patientId={patient.patientId} />{patient.agreementIds.length === 0 ? <small>لا اتفاق موثّق مرتبط؛ الأصفار لا تعني أن حساب المريض بلا دين.</small> : null}</th>
           <td>{patient.workSummary || "لا عمل موقّع موثّق قبل حد اليوم"}<small className={styles.referenceOnly}>{patient.visitsCount} زيارة · {patient.signedVisitsCount} موقّعة · {patient.pendingVisitsCount} بانتظار التوقيع</small>{patient.pendingVisitsCount > 0 ? <small className={styles.unknown} data-pending-patient={patient.key}>زيارات بانتظار التوقيع: {patient.pendingVisitsCount}</small> : null}{patient.lateSignedVisitsCount > 0 ? <small className={styles.unknown}>توثيق بعد الحد: {patient.lateSignedVisitsCount}</small> : null}{patient.excludedAgreementCount > 0 ? <small className={styles.unknown}>اتفاقات مستبعدة: {patient.excludedAgreementCount}؛ التفاصيل في الملحق الكامل</small> : null}<small className={styles.referenceOnly}>مراجع الزيارات: {patient.visitIds.join("، ")}</small></td>
           <AmountCells amounts={patient.agreement} /><AmountCells amounts={patient.explicitlySettled} /><AmountCells amounts={patient.agreementRemaining} />
         </tr>)}</tbody>
@@ -133,7 +141,7 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
       {CURRENCIES.map((currency) => <div className={styles.currencyPanel} key={currency}>
         <h3>{CURRENCY_NAME[currency]} · <bdi>{currency}</bdi></h3>
         <table data-panel-currency={currency}><thead><tr><th scope="col">المراجع / العمل</th><th scope="col">الاتفاق <bdi>{currency}</bdi></th><th scope="col">المسدّد المربوط <bdi>{currency}</bdi></th><th scope="col">المتبقي بعد السداد المربوط <bdi>{currency}</bdi></th></tr></thead>
-          <tbody>{report.attendees.map((patient) => <tr key={patient.key}><th scope="row">{patient.patientName}<small>{patient.patientNumber ?? `ملف #${patient.patientId ?? "غير مرتبط"}`}</small><small>{patient.workSummary || "لا عمل موقّع موثّق قبل حد اليوم"}</small><small className={styles.referenceOnly}>{patient.visitsCount} زيارة · {patient.signedVisitsCount} موقّعة · {patient.pendingVisitsCount} بانتظار التوقيع</small>{patient.pendingVisitsCount > 0 ? <small className={styles.unknown} data-pending-patient={patient.key}>زيارات بانتظار التوقيع: {patient.pendingVisitsCount}</small> : null}<small>توثيق بعد الحد: {patient.lateSignedVisitsCount} · اتفاقات مستبعدة: {patient.excludedAgreementCount}</small><small className={styles.referenceOnly}>مراجع الزيارات: {patient.visitIds.join("، ")}</small>{patient.agreementIds.length === 0 ? <small>لا اتفاق موثّق مرتبط؛ الأصفار لا تعني أن حساب المريض بلا دين.</small> : null}</th>
+          <tbody>{report.attendees.map((patient) => <tr key={patient.key}><th scope="row">{patient.patientName}<PatientIdentity patientNumber={patient.patientNumber} patientId={patient.patientId} /><small>{patient.workSummary || "لا عمل موقّع موثّق قبل حد اليوم"}</small><small className={styles.referenceOnly}>{patient.visitsCount} زيارة · {patient.signedVisitsCount} موقّعة · {patient.pendingVisitsCount} بانتظار التوقيع</small>{patient.pendingVisitsCount > 0 ? <small className={styles.unknown} data-pending-patient={patient.key}>زيارات بانتظار التوقيع: {patient.pendingVisitsCount}</small> : null}<small>توثيق بعد الحد: {patient.lateSignedVisitsCount} · اتفاقات مستبعدة: {patient.excludedAgreementCount}</small><small className={styles.referenceOnly}>مراجع الزيارات: {patient.visitIds.join("، ")}</small>{patient.agreementIds.length === 0 ? <small>لا اتفاق موثّق مرتبط؛ الأصفار لا تعني أن حساب المريض بلا دين.</small> : null}</th>
             <td><Money minor={patient.agreement[currency]} currency={currency} /></td><td><Money minor={patient.explicitlySettled[currency]} currency={currency} /></td><td><Money minor={patient.agreementRemaining[currency]} currency={currency} /></td></tr>)}</tbody>
           <tfoot><tr><th scope="row">الإجمالي دون تكرار</th><td><Money minor={totals.agreement[currency]} currency={currency} /></td><td><Money minor={totals.explicitlySettled[currency]} currency={currency} /></td><td><Money minor={totals.agreementRemaining[currency]} currency={currency} /></td></tr></tfoot>
         </table>
@@ -147,7 +155,7 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
           <tr><CurrencyHeaders prefix="مديونية الحساب الحالية" /><CurrencyHeaders prefix="الرصيد الدائن الحالي" /></tr>
         </thead>
         <tbody>{report.currentAccounts.length === 0 ? <tr><td colSpan={7}>لا حسابات مرضى مرتبطة بالحضور. الزائر بلا ملف مرتبط لا يُفترض أن رصيده صفر.</td></tr> : report.currentAccounts.map((account) => <tr key={account.patientId} data-account-patient={account.patientId}>
-          <th scope="row">{account.patientName}</th>
+          <th scope="row">{account.patientName}<PatientIdentity patientNumber={patientNumberById.get(account.patientId)} patientId={account.patientId} /></th>
           {CURRENCIES.map((currency) => <td key={`receivable-${currency}`}><Money minor={account.byCurrency[currency].receivableMinor} currency={currency} /></td>)}
           {CURRENCIES.map((currency) => <td key={`credit-${currency}`}><Money minor={account.byCurrency[currency].creditMinor} currency={currency} /></td>)}
         </tr>)}</tbody>
@@ -158,7 +166,7 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
     <TablePanel id="daily-clinic-work" title="السجلات الحالية للأعمال الموقّعة قبل حد اليوم" note="القيمة المعروفة هي سعر الإجراء المسجّل قبل خصومات الفاتورة، أو قيمة بند خطة مكتمل بسعره المسجّل. ليست إيرادًا صافيًا أو إثبات تحصيل. الجلسة المشمولة بلا قيمة قابلة للتقييم تظهر كمجهولة، ولا يوزع مبلغ الاتفاق عليها تخمينيًا. قد يوثّق الإجراء وسجل التخصص العمل نفسه؛ هذه سطور أدلة لا عدد إجراءات مستقلًا، وأسماؤها وروابطها حالية وليست لقطة تاريخية.">
       <table className={styles.detailsTable} data-testid="daily-clinic-work"><thead><tr><th scope="col">المراجع / الزيارة</th><th scope="col">العمل / الكمية</th><th scope="col">المنفّذ / السن</th><th scope="col">التوثيق / المصدر</th><th scope="col">الارتباط / التصنيف</th><th scope="col">القيمة / أساسها</th></tr></thead>
         <tbody>{report.work.length === 0 ? <tr><td colSpan={6}>لا أعمال موقّعة مؤهلة قبل حد اليوم. الزيارات المعلّقة والتوثيق المتأخر موضّحان في جدول الحضور.</td></tr> : report.work.map((work) => <tr key={work.key} data-work-key={work.key}>
-          <th scope="row">{work.patientName}<small className={styles.referenceOnly}>زيارة #{work.visitId}</small></th><td>{work.description}<small>الكمية: {work.quantity}</small></td><td>{work.doctorName ?? "المنفّذ غير مسجّل"}<small>السن: {work.toothCode ?? "غير محدد"}</small></td>
+          <th scope="row">{work.patientName}<PatientIdentity patientNumber={attendeeByKey.get(work.patientKey)?.patientNumber} patientId={attendeeByKey.get(work.patientKey)?.patientId} /><small className={styles.referenceOnly}>زيارة #{work.visitId}</small></th><td>{work.description}<small>الكمية: {work.quantity}</small></td><td>{work.doctorName ?? "المنفّذ غير مسجّل"}<small>السن: {work.toothCode ?? "غير محدد"}</small></td>
           <td><Timestamp value={work.signedAt} zone={zone} /><small>{({ procedure: "إجراء", ortho_adjustment: "جلسة تقويم", endo_visit: "جلسة عصب", clinical_note: "توثيق العمل" })[work.sourceType]}<span className={styles.referenceOnly}> #{work.sourceId}</span></small></td>
           <td>{work.agreementId === null ? "بلا اتفاق موثّق مرتبط" : <>اتفاق<span className={styles.referenceOnly}> #{work.agreementId}</span></>}<small>{({ included: "جلسة مشمولة بالاتفاق", recorded_charge: "سعر إجراء مسجّل", documented_unpriced: "عمل موثّق؛ أساس القيمة موضّح" })[work.classification]}</small></td>
           <td>{work.valuationBasis === "included_in_completed_item" ? <span>محتسبة ضمن البند</span> : <Money minor={work.valueMinor} currency={work.currency} />}{work.currency ? <small><bdi>{work.currency}</bdi></small> : null}<small>{work.valuationBasis === "recorded_procedure_price" ? "سعر الإجراء قبل خصومات الفاتورة" : work.valuationBasis === "completed_plan_item" ? "القيمة المسجّلة لبند خطة مكتمل" : work.valuationBasis === "included_in_completed_item" ? "لا تكرر قيمة البند" : "لا أساس تسعير معتمد"}</small>{work.unvaluedReason ? <small className={styles.unknown}>{work.unvaluedReason}</small> : null}</td>
@@ -249,7 +257,7 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
           <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`حسابات المراجعين ${currency}`}>
             <table className={styles.detailsTable} data-account-currency={currency}><thead><tr><th scope="col">المريض</th><th scope="col">الافتتاحي</th><th scope="col">المفوتر</th><th scope="col">التسويات</th><th scope="col">المديونية الآن</th><th scope="col">رصيد دائن الآن</th><th scope="col">دفعات غير مربوطة</th></tr></thead>
               <tbody>{report.currentAccounts.length === 0 ? <tr><td colSpan={7}>لا حسابات مرضى مرتبطة بالحضور.</td></tr> : report.currentAccounts.map((account) => <tr key={account.patientId}>
-                <th scope="row">{account.patientName}<small>ملف #{account.patientId}</small></th>
+                <th scope="row">{account.patientName}<PatientIdentity patientId={account.patientId} /></th>
                 <td><Money minor={account.byCurrency[currency].openingMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].billedMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].collectedMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].receivableMinor} currency={currency} /></td><td><Money minor={account.byCurrency[currency].creditMinor} currency={currency} /></td><td>{account.unallocatedPaymentIds.join("، ") || "لا يوجد"}<small>المراجع تخص الحساب بجميع عملاته</small></td>
               </tr>)}</tbody><tfoot><tr><th scope="row" colSpan={4}>إجمالي الحسابات دون تكرار</th><td><Money minor={totals.currentReceivable[currency]} currency={currency} /></td><td><Money minor={totals.currentCredit[currency]} currency={currency} /></td><td> </td></tr></tfoot>
             </table>
