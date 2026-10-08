@@ -156,3 +156,14 @@ composition is reviewed, CI is green for that exact head, migration-candidate te
 are collision-free, and the nonportable tracked `node_modules` symlink is removed from
 Git. This correction does not activate legacy intake or periodontal schema, change real
 Production data, rewrite history, alter credentials, or delete backups.
+
+## Track status (2026-10-08)
+
+| Slice | PR | State |
+|---|---|---|
+| B+C linkage and sign-off containment | #274 | Done. Review 5461388673 fixed: an ordinary case reused by a live invoice line is a bridge candidate; scope stays exact |
+| D invoice UI, tooth chart, ortho bridge | #278 | Done. The original CI-only preview timeout cause is still unproven; transport is controlled and waits self-diagnose |
+| E pre-system treatment | #285 | Done. Own preview (no invoice price authority), mixed-data refusal, ortho scope check, deterministic A→B→A, retained run evidence |
+| Daily close integration | #294 | Integrated release candidate (#274+#278+#285 on current main). Release only as one unit, after exact-head CI and review |
+
+Do not deploy #274 alone. Owner's no-new-merges hold applies.

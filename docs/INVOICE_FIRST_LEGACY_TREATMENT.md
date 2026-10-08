@@ -161,6 +161,14 @@ Both modes also refuse with `already_void`, `opening_changed` and `period_locked
 
 All tests use isolated synthetic databases only. No production data is used.
 
+**Retained run evidence (review 5461563181).** The browser journey writes its own 1280/390 screenshots (form, saved,
+case, account) and the two A4 PDFs (plan, statement) to the CI log as `SYNTHETIC_PRINT_EVIDENCE_V1` BEGIN/CHUNK/END records
+(`__tests__/security-http/_synthetic-evidence-log.ts`, scope `legacy-treatment-journey`). Each record carries `acceptance: true`,
+the byte count, SHA-256, `GITHUB_RUN_ID`/attempt/ref/sha and the checked-out commit with its parents. Files are accepted only
+after all assertions of their width passed, and the set is emitted only when complete, so a failed run never emits an accepted
+set. `decodeEvidence()` in the same module rebuilds the files and verifies order, size and checksum. CI gates and upload
+steps are unchanged.
+
 ## 10. Limits
 
 1. Collections target the opening per currency, not a specific agreement.
