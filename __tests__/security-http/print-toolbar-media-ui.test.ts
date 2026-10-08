@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { execFileSync } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { assertPrintPdfHeader, assertPrintPdfWatermark, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
 import { authedGet, baseUrl, harness } from "./_server";
 import { emitPrintToolbarEvidence, emitPrintToolbarFailedPdf, type PrintToolbarEvidenceMember } from "./_print-toolbar-evidence";
 
@@ -82,6 +83,59 @@ function pdfText(path: string) {
   return plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], {
     encoding: "utf8", maxBuffer: 5 * 1024 * 1024,
   }));
+}
+
+async function pdfGeometry(page: Page, path: string): Promise<PrintPdfPage[]> {
+  const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], {
+    encoding: "utf8", maxBuffer: 5 * 1024 * 1024,
+  });
+  const pages = await page.evaluate(raw => {
+    const document = new DOMParser().parseFromString(raw, "application/xml");
+    if (document.querySelector("parsererror")) throw new Error("Invalid print PDF bbox XML");
+    return Array.from(document.getElementsByTagName("page")).map(node => ({
+      width: Number(node.getAttribute("width")), height: Number(node.getAttribute("height")),
+      words: Array.from(node.getElementsByTagName("word")).map(word => ({
+        text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")),
+        yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")),
+      })),
+    }));
+  }, xml);
+  expect(pages.length).toBeGreaterThan(0);
+  for (const paper of pages) {
+    expect(paper.width).toBeGreaterThan(0); expect(paper.height).toBeGreaterThan(0);
+    for (const word of paper.words) {
+      expect([word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)).toBe(true);
+      expect(word.xMin).toBeGreaterThanOrEqual(0); expect(word.yMin).toBeGreaterThanOrEqual(0);
+      expect(word.xMax).toBeLessThanOrEqual(paper.width); expect(word.yMax).toBeLessThanOrEqual(paper.height);
+    }
+  }
+  return pages;
+}
+
+async function assertPdfLogoInk(page: Page, path: string) {
+  const png = execFileSync("pdftoppm", ["-f", "1", "-l", "1", "-r", "96", "-png", "-singlefile", path], {
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  const ink = await page.evaluate(async source => {
+    const image = new Image(); image.src = source; await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+    const paint = canvas.getContext("2d")!; paint.drawImage(image, 0, 0);
+    // Existing 8mm page margin, 11mm centered logo; 3px antialiasing tolerance.
+    // Colored ink distinguishes the actual blue/gold logo from black header text.
+    const pxPerMm = 96 / 25.4;
+    const x = Math.floor(image.width / 2 - 11 * pxPerMm / 2 - 3);
+    const y = Math.floor(8 * pxPerMm - 3);
+    const width = Math.ceil(11 * pxPerMm + 6), height = Math.ceil(11 * pxPerMm + 6);
+    const pixels = paint.getImageData(x, y, width, height).data;
+    let colored = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const low = Math.min(pixels[i], pixels[i + 1], pixels[i + 2]);
+      const high = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+      if (high - low > 35 && low < 210) colored++;
+    }
+    return colored;
+  }, `data:image/png;base64,${png.toString("base64")}`);
+  expect(ink, "PDF logo ink in the actual centered 11mm raster region").toBeGreaterThan(20);
 }
 
 function assertNoWhatsAppAnnotation(path: string) {
@@ -195,19 +249,42 @@ describe("print toolbar containment on real built financial documents", () => {
           evidence.push({ filename: `print-toolbar-${spec.kind}.pdf`, mime: "application/pdf", bytes: pdf });
           const text = pdfText(path);
           for (const expected of [patientName, spec.number]) expect(text).toContain(expected);
-          // Poppler may emit Arabic words in visual character order. Test each
-          // whole identity/title word in either order rather than changing content.
-          assertPdfWords(text, screenHeader, "PDF clinic header/title word");
+          const [paper] = await pdfGeometry(page, path);
+          // Calibrated against the retained failed PDF's actual bbox glyphs and
+          // pixels: ordered header-region words preserve lam-alef glyph pairs.
+          assertPrintPdfHeader(paper, screenHeader);
+          await assertPdfLogoInk(page, path);
           assertPdfWords(text, await sheet.locator(".sign-row").innerText(), "PDF signature word");
-          if (spec.reprint) assertPdfWords(text, "نسخة معاد طباعتها", "PDF reprint watermark word");
-          else for (const word of ["نسخة", "طباعتها"]) {
-            expect(compact(text)).not.toContain(word);
-            expect(compact(text)).not.toContain([...word].reverse().join(""));
-          }
+          assertPrintPdfWatermark(paper, spec.reprint);
           assertNoWhatsAppAnnotation(path);
           if (spec.kind === "invoice") {
             for (const expected of ["SYNTHETIC-SERVICE", "SYNTHETIC-INVOICE-NOTE", "E-INVOICE", "VERIFIED", "12,500", "1,500", "11,000"]) {
               expect(text).toContain(expected);
+            }
+            // Independent actual-PDF controls: losing the header/logo must
+            // fail their oracles while the watermark still passes, and vice versa.
+            for (const region of ["header", "watermark"] as const) {
+              const target = region === "header" ? sheet.locator("header") : page.locator(".reprint-mark");
+              const savedStyle = await target.getAttribute("style");
+              try {
+                await target.evaluate(element => (element as HTMLElement).style.setProperty("visibility", "hidden", "important"));
+                const negative = `${artifacts}/print-toolbar-${region}-hidden.pdf`;
+                await page.pdf({ path: negative, format: "A4", printBackground: true, displayHeaderFooter: false });
+                const [negativePaper] = await pdfGeometry(page, negative);
+                if (region === "header") {
+                  expect(() => assertPrintPdfHeader(negativePaper, screenHeader)).toThrow(/PDF header/);
+                  await expect(assertPdfLogoInk(page, negative)).rejects.toThrow(/PDF logo ink/);
+                  assertPrintPdfWatermark(negativePaper, true);
+                } else {
+                  expect(() => assertPrintPdfWatermark(negativePaper, true)).toThrow(/PDF watermark/);
+                  assertPrintPdfHeader(negativePaper, screenHeader);
+                  await assertPdfLogoInk(page, negative);
+                }
+              } finally {
+                await target.evaluate((element, style) => {
+                  if (style === null) element.removeAttribute("style"); else element.setAttribute("style", style);
+                }, savedStyle);
+              }
             }
             // A genuine negative PDF witness: restoring the inline flex toolbar
             // must make the same PDF oracle refuse the WhatsApp annotation.

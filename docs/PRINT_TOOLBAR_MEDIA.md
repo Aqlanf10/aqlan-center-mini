@@ -45,11 +45,17 @@ The test checks:
    WhatsApp controls. All sheet text, clinic header, logo, signature and existing
    invoice/receipt watermark states remain.
 3. Real Chromium PDF text preserving synthetic identity, document numbers,
-   invoice items/discount/net, receipt amount and signature, header/title and
-   applicable reprint watermark. WhatsApp link annotations must be absent.
-4. A negative PDF witness temporarily restores the toolbar's inline display;
-   the same annotation validator must reject that PDF. The original inline style
-   is restored, and returning to screen media restores usable screen controls.
+   invoice items/discount/net, receipt amount and signature. Clinic header/title
+   uses ordered bbox words inside the first 180 pt (and first half) of page one,
+   with calibrated lam-alef glyph pairing. The actual PDF raster must retain
+   colored logo ink in the existing centered 11 mm region. The reprint watermark
+   uses exact spatial glyph order in its central large-font region, including
+   explicit absence on a first print. WhatsApp link annotations must be absent.
+4. Independent actual negative PDFs hide the header/logo or the watermark:
+   their respective oracles must reject the missing region while the other
+   region still passes. A separate negative PDF restores the toolbar's inline
+   display; the same annotation validator must reject its WhatsApp link. Every
+   temporary inline style is restored, and screen controls return afterward.
 5. No browser external request, mutation or print-log call; exact fixture invoice,
    item, receipt and print-log rows remain unchanged across viewing/PDF generation.
 
@@ -86,3 +92,39 @@ actual frames and image/PDF review remain pending until the tests execute.
 No owner screenshot or real patient/financial record is copied into fixtures,
 source, commits or evidence. Production completion requires normal merge gates
 and verification of the exact Railway Production release.
+
+## Actual extraction calibration, 2026-10-08
+
+Initial PR290 head `c865e06c47415dd072e19d54f36129313742fc9d` failed its Arabic
+whole-word text oracle, after invoice screen/print DOM checks. Diagnostic-only
+head `c8730406378f90c7571777578c9e39a54143feca`, exact run `37709082384` and checkout
+`53365afb482f79744bb35f00bcd81a9f264173e3`, retained that failure and emitted one
+strictly framed failed synthetic invoice PDF. Its 295,834 bytes have SHA-256
+`d93af041b99a8b493f54df253efa0fd80b7c336cad3fde654de4480cace09756`. This is failed-run
+diagnostic evidence, not six-file acceptance or release proof. That run passed
+7,183 unit and 1,403 PostgreSQL tests; HTTP had 1,044 passes and this one failure.
+The inherited commission screenshot case passed all 17 cases on that run.
+
+The actual one-page A4 raster shows the correct clinic name, logo, financial
+content and watermark without the WhatsApp toolbar. Its raw bbox word is
+`نلاقع` (U+0646 U+0644 U+0627 U+0642 U+0639), while the rendered word is `عقلان`.
+The extracted code points already retain the lam-alef pair; reversing before or
+after Unicode normalization alone does not resolve it. The new helper retains
+lam plus alef as one expected glyph cluster, consumes header words in native
+line/RTL order and refuses missing/reordered/out-of-region words. It does not
+accept unordered character membership across the page.
+
+The diagonal watermark yields 12 large-font fragments. Their spatial RTL order
+reconstructs exactly `نسخةمعادطباعتها`; the helper does not search the whole-page
+text for independent watermark letters. The observed 96 dpi centered logo region
+contains 192 colored-ink pixels, above the conservative 20-pixel threshold. Real
+header-hidden and watermark-hidden PDF controls must validate these independent
+oracles on the next exact-head CI run.
+
+Offline parsing/raster inspection of that retained PDF calibrated the proposed
+oracles; no local app, database, TypeScript test or browser test was executed.
+The newly changed test source, its negative PDFs and the receipt PDF still need
+fresh full CI and six-file pixel review. Calibration is limited to these existing
+synthetic document styles and this bounded header/watermark layout, not arbitrary
+Arabic PDFs, fonts or clinic-wide print certification. Product rendering, logo,
+watermark placement and financial values remain unchanged.
