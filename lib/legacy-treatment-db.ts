@@ -241,14 +241,17 @@ async function decideLegacyTreatment(client: DbClient, input: {
   if (masterId === false) throw new Refusal("incompatible_plan");
 
   /* (LEGACY-FIX) مدفوعٌ قديم قد يكون أُدخل سندَ قبض عامًّا (غير مرتبط بفاتورة أو خطة أو رصيد سابق). تسجيل «المدفوع قبل النظام»
-     فوقه يخصم المبلغ نفسه مرتين. لا يصنّف النظام السند من ملاحظته ولا يعكسه: يُرفض التسجيل حتى يراجعه المدير. */
+     فوقه يخصم المبلغ نفسه مرتين. لا يصنّف النظام السند من ملاحظته ولا يعكسه: يُرفض التسجيل حتى يراجعه المدير.
+     الردّ يُطرح بعملة السند نفسها فقط؛ ردٌّ بعملةٍ أخرى لا يُحوَّل تخمينًا فيبقى السند للمراجعة. */
   if (request.previouslyPaidMinor > 0) {
     const { rows: [unallocated] } = await client.query<{ receipts: string }>(
-      `SELECT COUNT(*)::text AS receipts FROM payments p
-        WHERE p.patient_id = $1 AND p.kind = 'payment' AND p.invoice_id IS NULL AND p.plan_id IS NULL
-          AND p.opening_currency IS NULL AND p.reversal_of_id IS NULL
-          AND p.amount_minor > COALESCE((SELECT SUM(r.amount_minor) FROM payments r
-            WHERE r.reversal_of_id = p.id AND r.kind = 'refund'), 0)`, [patientId]);
+      `SELECT COUNT(*)::text AS receipts FROM (
+         SELECT p.id FROM payments p
+           LEFT JOIN payments r ON r.reversal_of_id = p.id AND r.kind = 'refund' AND r.currency = p.currency
+          WHERE p.patient_id = $1 AND p.kind = 'payment' AND p.invoice_id IS NULL AND p.plan_id IS NULL
+            AND p.opening_currency IS NULL AND p.reversal_of_id IS NULL
+          GROUP BY p.id, p.currency, p.amount_minor
+         HAVING p.amount_minor > COALESCE(SUM(r.amount_minor), 0)) open_receipts`, [patientId]);
     if (unallocated.receipts !== "0") throw new Refusal("prior_receipts_review");
   }
 
