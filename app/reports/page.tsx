@@ -56,7 +56,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
       { id: "appointments", label: "المواعيد", hint: "الحجوزات، الحضور، الإلغاء، عدم الحضور ونسبة الالتزام" },
       { id: "recall", label: "المتابعة والاستدعاء", hint: "المتغيبون والمنقطعون وحالة المتابعة" },
       { id: "inventory", label: "المخزون", hint: "الرصيد، حد الطلب، الإدخال والصرف خلال الفترة" },
-      { id: "daily", label: "التقرير اليومي", hint: "مراجعون، خدمات، تحصيل، آجل، مصروفات، صافي التدفق" },
+      { id: "daily", label: "الحركات المالية اليومية", hint: "فواتير ودفعات ومصروفات اليوم؛ ليس كشفًا لكل من حضر" },
       { id: "patients", label: "تقارير المرضى", hint: "المرضى الجدد وقيمة تعاملهم" },
     ],
   },
@@ -409,6 +409,14 @@ export default function ReportsPage() {
         links={financeLinks("/reports")}
       >
         <div className="flex flex-wrap gap-1.5">
+          {sessionRole === "admin" ? (
+            <a
+              href="/reports/daily-clinic"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
+            >
+              كشف إقفال اليوم السريري والمالي
+            </a>
+          ) : null}
           <a
             href="/report"
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50"
@@ -538,3 +546,4 @@ export default function ReportsPage() {
     </main>
   );
 }
+

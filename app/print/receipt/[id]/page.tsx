@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
-import { getPayment, getSettingsSafe, printCount } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPayment, getSettingsSafe, printCount } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
-import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
+import { formatClinicTimestamp } from "@/lib/clinic-clock";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { canViewMoney } from "@/lib/roles";
@@ -35,8 +35,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
   // (TD-05) الأساس دستوري من الكود.
   const base = CLINIC_BASE_CURRENCY;
-  const stamped = new Date(payment.createdAt);
-  const dateText = `${stamped.getFullYear()}-${String(stamped.getMonth() + 1).padStart(2, "0")}-${String(stamped.getDate()).padStart(2, "0")}`;
+  // Receipt creation is its source instant, not a clinical signature or print time.
+  const createdText = formatClinicTimestamp(payment.createdAt, CLINIC_TIME_ZONE);
   const isRefund = payment.kind === "refund";
 
   return (
@@ -52,7 +52,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         </div>
         <div className="line">
           <span>التاريخ</span>
-          <span>{friendlyDateLong(dateText)} · {friendlyTime(`${String(stamped.getHours()).padStart(2, "0")}:${String(stamped.getMinutes()).padStart(2, "0")}`)}</span>
+          <time dateTime={payment.createdAt}><bdi>{createdText}</bdi></time>
         </div>
         <div className="rule-light" />
 

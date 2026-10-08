@@ -61,6 +61,13 @@ export function writeReportView(params: URLSearchParams, view: ReportViewSpec): 
 /** الأعمدة الظاهرة بترتيب المستخدم — المفاتيح المجهولة تُهمل، والفراغ يعود لأعمدة التقرير كلها. */
 export function resolveColumns(available: ReportColumn[], requested: string[] | null): ReportColumn[] {
   if (!requested || requested.length === 0) return available;
+  // Old collections links selected a formatted tender and an unconditional base
+  // equivalent. Reset that obsolete layout together, rather than silently keeping
+  // just its date/name columns and hiding the new native-currency amount.
+  const nativeCollections = available.some((column) => column.key === "nativeMinor" && column.currencyKey === "currency")
+    && available.some((column) => column.key === "targetLabel")
+    && available.some((column) => column.key === "settlementText");
+  if (nativeCollections && requested.some((key) => key === "amountText" || key === "baseMinor")) return available;
   const byKey = new Map(available.map((column) => [column.key, column]));
   const picked = requested.map((key) => byKey.get(key)).filter((column): column is ReportColumn => Boolean(column));
   return picked.length > 0 ? picked : available;

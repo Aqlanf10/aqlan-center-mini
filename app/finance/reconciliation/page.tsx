@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatMoney, CURRENCIES, type Currency } from "@/lib/money";
-import { friendlyDateLong } from "@/lib/reminders";
+import { formatClinicTimestamp } from "@/lib/clinic-clock";
+import { CLINIC_ZONE_FALLBACK, resolveClinicZone } from "@/lib/clinicZone";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
@@ -44,6 +45,7 @@ export default function ReconciliationPage() {
   const [openShift, setOpenShift] = useState<OpenShiftData | null>(null);
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<Currency>("YER");
+  const [clinicTimeZone, setClinicTimeZone] = useState(CLINIC_ZONE_FALLBACK);
   const [storedShiftReadState, setShiftReadState] = useState<ShiftReadState>("loading");
   const [shiftReadPrincipal, setShiftReadPrincipal] = useState(principalKey);
   const shiftReadState = shiftReadPrincipal === principalKey ? storedShiftReadState : "loading";
@@ -96,6 +98,7 @@ export default function ReconciliationPage() {
       setOpenShift(data.openShift);
       setShifts(data.shifts || []);
       setBaseCurrency(data.baseCurrency || "YER");
+      setClinicTimeZone(resolveClinicZone(typeof data.clinicTimeZone === "string" ? data.clinicTimeZone : null));
       setError(null);
       shiftRequest.current.ready = true;
       setShiftReadState("ready");
@@ -223,7 +226,7 @@ export default function ReconciliationPage() {
               {!shiftReady
                 ? "تُعرض حالة الوردية وأرصدتها بعد التحقق من أحدث البيانات."
                 : openShift
-                ? `فُتحت بواسطة ${openShift.shift.openedBy} في ${friendlyDateLong(openShift.shift.openedAt)}`
+                ? <>فُتحت بواسطة {openShift.shift.openedBy} في <time dateTime={openShift.shift.openedAt}><bdi>{formatClinicTimestamp(openShift.shift.openedAt, clinicTimeZone)}</bdi></time></>
                 : "لا توجد وردية مفتوحة حاليًا. يجب فتح وردية لتسجيل المقبوضات والمصروفات."}
             </p>
           </div>
@@ -346,9 +349,9 @@ export default function ReconciliationPage() {
                   <tr key={s.id} className="hover:bg-slate-50/80 transition">
                     <td className="py-3 pr-2 font-bold text-navy-900">#{s.id}</td>
                     <td className="py-3 font-semibold text-slate-700">{s.openedBy}</td>
-                    <td className="py-3 text-slate-500">{friendlyDateLong(s.openedAt)}</td>
+                    <td className="py-3 text-slate-500"><time dateTime={s.openedAt}><bdi>{formatClinicTimestamp(s.openedAt, clinicTimeZone)}</bdi></time></td>
                     <td className="py-3 text-slate-500">
-                      {s.closedAt ? friendlyDateLong(s.closedAt) : "—"}
+                      {s.closedAt ? <time dateTime={s.closedAt}><bdi>{formatClinicTimestamp(s.closedAt, clinicTimeZone)}</bdi></time> : "—"}
                     </td>
                     <td className="py-3 font-mono text-slate-700">
                       {s.counted ? (
