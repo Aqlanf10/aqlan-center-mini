@@ -176,3 +176,7 @@ steps are unchanged.
 3. Old payments entered as general receipts block a non-zero «paid before» until the manager reviews them (§5). This branch
    does not correct existing production records.
 4. Historical progress is unknown, so no sessions are inferred from amounts.
+
+**Committed run bundle (review 5461563181).** `docs/evidence/legacy-treatment/ci-run-37837236454/` holds the ten files of push run
+37837236454 on `ede1a66`, decoded from that job's log records; `MANIFEST.json` pins the run, the checked-out commit, and each file's
+byte size and SHA-256 (all matched their records). They are that run's own outputs, separate from the older screenshots in the parent folder.
