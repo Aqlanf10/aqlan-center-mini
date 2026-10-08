@@ -323,13 +323,15 @@ export function occasionSendReadiness(gate: OccasionSendGate, nowMs: number): { 
   const positions = { HEADER: 0, BODY: 1, FOOTER: 2 } as const;
   let previous = -1;
   for (const component of gate.template.components) {
-    if (!record(component) || !Object.hasOwn(positions, component.type) || Object.keys(component).length !== 2
+    const componentType: unknown = record(component)?.type;
+    if ((componentType !== "HEADER" && componentType !== "BODY" && componentType !== "FOOTER")
+      || !record(component) || !Object.hasOwn(positions, componentType) || Object.keys(component).length !== 2
       || typeof component.text !== "string" || !component.text.trim() || component.text.length > 4000
-      || /[{}]/.test(component.text) || types.has(component.type) || positions[component.type] <= previous) {
+      || /[{}]/.test(component.text) || types.has(componentType) || positions[componentType] <= previous) {
       return { ok: false, reason: "binding_changed" };
     }
-    types.add(component.type);
-    previous = positions[component.type];
+    types.add(componentType);
+    previous = positions[componentType];
   }
   if (!types.has("BODY") || gate.template.components.length > 3
     || gate.template.renderedText !== gate.template.components.map(component => component.text).join("\n\n")

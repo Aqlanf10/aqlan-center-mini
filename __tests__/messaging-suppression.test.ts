@@ -260,7 +260,7 @@ describe("endpoint-only network authorization scope", () => {
     }, release };
     const deps: OutboundDispatchDeps<Outcome> = {
       connect: vi.fn(async () => connection),
-      readOrdinaryPolicyOn: vi.fn(async () => "allow"),
+      readOrdinaryPolicyOn: vi.fn(async () => "allow" as const),
       dispatch: vi.fn(async scope => {
         if (!(await scope.authorize())) return { kind: "not_sent", providerMessageId: null };
         return { kind: "accepted", providerMessageId: "synthetic-receipt" };
@@ -364,11 +364,11 @@ describe("endpoint-only network authorization scope", () => {
   it("permits initial guard callback SQL before activation and revokes its retained executor on completion", async () => {
     const f = networkFixture();
     let retained: QueryExecutor | null = null;
-    f.network.readOrdinaryPolicyOn = vi.fn(async executor => {
+    f.network.readOrdinaryPolicyOn = vi.fn(async (executor: QueryExecutor) => {
       retained = executor;
       expect(executor).not.toBe(f.connection);
       expect((await readEndpointSuppressionOn(executor, "whatsapp", ENDPOINT)).status).toBe("clear");
-      return "allow";
+      return "allow" as const;
     });
     expect(await withServerOwnedOutboundGuard(request, f.network)).toMatchObject({ kind: "dispatched" });
     const count = f.calls.length;
@@ -550,10 +550,10 @@ describe("all-purpose outbound guard and explicit occasion permissions", () => {
   it("requires current, unique, full endpoint identity for grants", async () => {
     const f = fixture();
     f.deps.readPatientContactProjectionOn = vi.fn(async () => ({ patientId: 1, phone: `+${ENDPOINT}`,
-      localCountry: null, contactRevision: "contact-1", identity: "shared" }));
+      localCountry: null, contactRevision: "contact-1", identity: "shared" as const }));
     await expect(recordOccasionPermission(grant(), f.deps)).rejects.toThrow("occasion_contact_not_current_or_unique");
     f.deps.readPatientContactProjectionOn = vi.fn(async () => ({ patientId: 1, phone: `+${SAME_SUFFIX_OTHER_COUNTRY}`,
-      localCountry: null, contactRevision: "contact-1", identity: "unique" }));
+      localCountry: null, contactRevision: "contact-1", identity: "unique" as const }));
     expect(await readOccasionCandidateOn(f.executor, { patientId: 1, channel: "whatsapp", endpoint: ENDPOINT,
       localCountry: null }, f.deps)).toBeNull();
   });
