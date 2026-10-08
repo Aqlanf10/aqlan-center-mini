@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import { baseUrl, harness, loginStaff, type RoleSessions, type Session } from "./_server";
 import { formatMoney } from "../../lib/money";
+import { formatClinicTimestamp } from "../../lib/clinic-clock";
 import { hashPassword } from "../../lib/auth";
 
 /**
@@ -176,7 +177,8 @@ function noteField(page: Page, label: string) {
 }
 
 interface ShiftRead {
-  open: { id: number } | null;
+  clinicTimeZone: string;
+  open: { id: number; openedAt: string } | null;
   drawer: { expected: { YER: number; SAR: number; USD: number } } | null;
 }
 interface LedgerRead {
@@ -457,9 +459,29 @@ describe("real clinic role handoff on one synthetic patient", () => {
     expect(shiftAfter.drawer!.expected.YER - shiftBefore.drawer!.expected.YER).toBe(COLLECTED);
     expect(shiftAfter.drawer!.expected.SAR).toBe(shiftBefore.drawer!.expected.SAR);
     expect(shiftAfter.drawer!.expected.USD).toBe(shiftBefore.drawer!.expected.USD);
+    const reconciliationResponse = manager.page.waitForResponse((item) =>
+      new URL(item.url()).pathname === "/api/finance/reconciliation" && item.request().method() === "GET");
     await manager.page.goto(`${baseUrl}/finance/reconciliation`, { waitUntil: "domcontentloaded" });
+    const reconciliationResult = await reconciliationResponse;
+    expect(reconciliationResult.status()).toBe(200);
+    const reconciliation = await reconciliationResult.json() as {
+      clinicTimeZone: string; openShift: { shift: { id: number; openedAt: string } };
+      shifts: { openedAt: string; closedAt: string | null }[];
+    };
+    expect(reconciliation.clinicTimeZone).toBe(shiftAfter.clinicTimeZone);
+    expect(reconciliation.openShift.shift.id).toBe(shiftAfter.open!.id);
+    expect(reconciliation.openShift.shift.openedAt).toBe(shiftAfter.open!.openedAt);
     await manager.page.getByRole("button", { name: "جرد وإقفال الوردية", exact: true }).waitFor();
     await expect.poll(() => manager.page.locator("main").last().innerText()).toContain(formatMoney(shiftAfter.drawer!.expected.YER, "YER"));
+    const openedAt = shiftAfter.open!.openedAt;
+    const openedLabels = manager.page.locator(`time[datetime="${openedAt}"]`);
+    const openedText = formatClinicTimestamp(openedAt, shiftAfter.clinicTimeZone);
+    // The history is a bounded latest-30 feed; do not require the open row
+    // to occur there. Count only instants in this actual authorized response.
+    const expectedOccurrences = 1 + reconciliation.shifts.reduce((count, shift) =>
+      count + Number(shift.openedAt === openedAt) + Number(shift.closedAt === openedAt), 0);
+    await expect.poll(() => openedLabels.allTextContents()).toEqual(Array(expectedOccurrences).fill(openedText));
+    expect(openedText).not.toContain(openedAt);
     await capture(manager.page, "manager-reconciliation-1280");
     await manager.page.getByRole("button", { name: "جرد وإقفال الوردية", exact: true }).click();
     for (const currency of ["YER", "SAR", "USD"]) expect(await manager.page.getByLabel(`المعدود ${currency}`).inputValue()).toBe("");

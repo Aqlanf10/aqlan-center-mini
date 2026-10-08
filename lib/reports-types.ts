@@ -132,6 +132,8 @@ export interface ReportColumn {
   currencyKey?: string;
   /** Running balances are display values, never additive totals; omitted keeps legacy sums. */
   aggregate?: "sum" | "none";
+  /** Display each currency subtotal on its own unbroken line; default keeps the existing inline layout. */
+  stackCurrencyTotals?: boolean;
 }
 
 export type ReportRow = Record<string, string | number | null>;

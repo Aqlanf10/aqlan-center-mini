@@ -183,6 +183,51 @@ describe("collections native money and explicit settlement presentation", () => 
     for (const output of [rendered.csv, rendered.excel]) expect(output).toContain("-2.50 SAR");
   });
 
+  it("stacks only the opted-in native currency totals and leaves default report layouts unchanged", () => {
+    const result = collectionsReport(context(mixed()));
+    expect(result.columns?.filter((column) => column.stackCurrencyTotals).map((column) => column.key))
+      .toEqual(["nativeMinor"]);
+    const rendered = outputs(result);
+    for (const output of [rendered.screen, rendered.print]) {
+      expect(output.match(/data-report-currency-total=""/g)).toHaveLength(3);
+      for (const [currency, minor] of [["YER", 800], ["SAR", 1100], ["USD", 500]] as const) {
+        expect(output).toContain(`>${formatMoney(minor, currency)}</span>`);
+      }
+    }
+    expect(rendered.screen).toContain('class="block whitespace-nowrap"');
+    expect(rendered.print).toContain('style="display:block;white-space:nowrap"');
+
+    const defaultColumns = result.columns!.map((column) => {
+      const copy = { ...column };
+      delete copy.stackCurrencyTotals;
+      return copy;
+    });
+    const defaultResult = { ...result, columns: defaultColumns };
+    const defaults = outputs(defaultResult);
+    expect(defaults.screen).not.toContain("data-report-currency-total");
+    expect(defaults.print).not.toContain("data-report-currency-total");
+    expect(defaults.screen).toContain("11.00 ر.س · 5.00 $ · 800 ر.ي");
+    expect(defaults.print).toContain("800 ر.ي · 11.00 ر.س · 5.00 $");
+    expect(rendered.csv).toBe(defaults.csv);
+    expect(rendered.excel).toBe(defaults.excel);
+
+    const view = { ...EMPTY_REPORT_VIEW, group: "methodLabel" };
+    const applied = applyReportView(result.columns!, result.rows!, view, "YER");
+    const groupedScreen = renderToStaticMarkup(createElement(DataTable, {
+      columns: applied.columns, rows: applied.rows, base: "YER", groupKey: applied.view.group,
+    }));
+    const groupedPrint = renderToStaticMarkup(createElement(PrintableReportDocument, {
+      result, view, settings: {} as Parameters<typeof PrintableReportDocument>[0]["settings"],
+      generatedAt: "Synthetic fixed time", generatedBy: "synthetic",
+    }));
+    // Cash and transfer each have two currencies; the overall total has three.
+    for (const output of [groupedScreen, groupedPrint]) {
+      expect(output.match(/data-report-currency-total=""/g)).toHaveLength(7);
+      expect(output).toContain(`>${formatMoney(1000, "SAR")}</span>`);
+      expect(output).toContain(`>${formatMoney(100, "SAR")}</span>`);
+    }
+  });
+
   it("resets obsolete saved collections columns consistently without changing other report layouts", () => {
     const result = collectionsReport(context(mixed()));
     for (const legacy of [["date", "amountText", "baseMinor"], ["date", "baseMinor"], ["amountText"]]) {

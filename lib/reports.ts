@@ -2950,7 +2950,7 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
       { key: "patientName", label: "المريض", type: "link", patientKey: "patientId" },
       { key: "patientNumber", label: "رقم الملف" },
       { key: "kindLabel", label: "النوع" },
-      { key: "nativeMinor", label: "مبلغ السند", type: "money", currencyKey: "currency" },
+      { key: "nativeMinor", label: "مبلغ السند", type: "money", currencyKey: "currency", stackCurrencyTotals: true },
       { key: "targetLabel", label: "مرجع السند" },
       { key: "settlementText", label: "التسوية بعملة أخرى" },
       { key: "methodLabel", label: "طريقة الدفع" },

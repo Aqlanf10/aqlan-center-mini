@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canViewMoney } from "@/lib/roles";
 import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
     const pastShifts = await listShifts(30);
 
     return NextResponse.json({
+      clinicTimeZone: CLINIC_TIME_ZONE,
       baseCurrency,
       openShift: currentShiftSummary,
       shifts: pastShifts,

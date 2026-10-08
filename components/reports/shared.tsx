@@ -52,6 +52,14 @@ function currencyTotalsText(
     .join(" · ");
 }
 
+function currencyTotalsContent(rows: ReportRow[], column: ReportColumn, base: Currency) {
+  const text = currencyTotalsText(rows, column, base);
+  if (!column.stackCurrencyTotals || text === "") return text;
+  return text.split(" · ").map((part, index) => (
+    <span key={index} data-report-currency-total="" className="block whitespace-nowrap">{part}</span>
+  ));
+}
+
 const TONE_STYLES: Record<string, string> = {
   calm: "border-slate-200 bg-white text-navy-900",
   good: "border-success-300 bg-success-50 text-success-900",
@@ -291,7 +299,7 @@ export function DataTable({
                     <td className="px-2.5 py-1.5">مجموع {segment.label}</td>
                     {columns.slice(1).map((column) => (
                       <td key={column.key} className="px-2.5 py-1.5 font-mono tabular-nums">
-                        {column.type === "money" ? currencyTotalsText(segment.rows, column, base) : ""}
+                        {column.type === "money" ? currencyTotalsContent(segment.rows, column, base) : ""}
                       </td>
                     ))}
                   </tr>
@@ -305,7 +313,7 @@ export function DataTable({
                 <td className="px-2.5 py-2.5">الإجمالي ({filtered.length} صفًا)</td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className="px-2.5 py-2.5 font-mono tabular-nums">
-                    {column.type === "money" ? currencyTotalsText(filtered, column, base) : ""}
+                    {column.type === "money" ? currencyTotalsContent(filtered, column, base) : ""}
                   </td>
                 ))}
               </tr>

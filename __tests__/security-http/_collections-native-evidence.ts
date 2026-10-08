@@ -68,3 +68,143 @@ export function emitCollectionsNativeEvidence(members: readonly CollectionsNativ
     console.log(`${PREFIX} END ${identity}`);
   }
 }
+
+// Failure diagnostics are a separate protocol. They are never members of FILES
+// and never evidence that the browser witness passed its acceptance assertions.
+export const COLLECTIONS_NATIVE_COLUMN_KEYS = [
+  "date", "patientName", "patientNumber", "kindLabel", "nativeMinor", "targetLabel",
+  "settlementText", "methodLabel", "receiver", "note",
+] as const;
+export interface CollectionsNativeCellGeometry {
+  left: number; right: number; top: number; bottom: number; width: number; height: number;
+  clientWidth: number; scrollWidth: number; textWidth: number; textHeight: number;
+}
+export interface CollectionsNativeLayoutMetrics {
+  scene: "all-desktop" | "filtered-desktop";
+  rowCount: number;
+  totalsCount: number;
+  bounds: { tableLeft: number; tableRight: number; frameLeft: number; frameRight: number;
+    clientWidth: number; scrollWidth: number; viewportWidth: number };
+  columns: { key: typeof COLLECTIONS_NATIVE_COLUMN_KEYS[number]; header: CollectionsNativeCellGeometry;
+    body: CollectionsNativeCellGeometry[]; footer: CollectionsNativeCellGeometry;
+    totals: CollectionsNativeCellGeometry[] }[];
+}
+export interface CollectionsNativeFailureImage {
+  filename: "collections-native-desktop-failed.png";
+  mime: "image/png";
+  bytes: Buffer;
+}
+const FAILURE_PREFIX = "SYNTHETIC_COLLECTIONS_NATIVE_FAILURE_V1";
+const METRICS_PREFIX = "SYNTHETIC_COLLECTIONS_NATIVE_PRE_GATE_GEOMETRY_V1";
+const MAX_METRICS_BYTES = 64 * 1024;
+const CELL_KEYS = ["left", "right", "top", "bottom", "width", "height", "clientWidth", "scrollWidth", "textWidth", "textHeight"];
+const BOUNDS_KEYS = ["tableLeft", "tableRight", "frameLeft", "frameRight", "clientWidth", "scrollWidth", "viewportWidth"];
+
+function diagnosticRecord(value: unknown, keys: readonly string[]): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))
+    || Object.getOwnPropertySymbols(value).length !== 0
+    || Object.keys(value).sort().join("|") !== [...keys].sort().join("|")) {
+    throw new Error("Synthetic collections diagnostic has invalid metric keys");
+  }
+}
+
+function diagnosticArray(value: unknown, length: number): asserts value is unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length !== length
+    || Object.getOwnPropertySymbols(value).length !== 0
+    || Object.keys(value).join("|") !== Array.from({ length }, (_, index) => String(index)).join("|")) {
+    throw new Error("Synthetic collections diagnostic has invalid cell array structure");
+  }
+}
+
+function diagnosticNumbers(value: unknown, keys: readonly string[]) {
+  diagnosticRecord(value, keys);
+  for (const key of keys) {
+    const entry = value[key];
+    if (typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > 16384
+      || (/Width$|Height$|^width$|^height$/.test(key) && entry < 0)) {
+      throw new Error("Synthetic collections diagnostic has invalid metric numbers");
+    }
+  }
+}
+
+function diagnosticCell(value: unknown) {
+  diagnosticNumbers(value, CELL_KEYS);
+  const cell = value as CollectionsNativeCellGeometry;
+  if (cell.right < cell.left || cell.bottom < cell.top
+    || Math.abs(cell.right - cell.left - cell.width) > 0.03
+    || Math.abs(cell.bottom - cell.top - cell.height) > 0.03) {
+    throw new Error("Synthetic collections diagnostic has inconsistent cell bounds");
+  }
+}
+
+function validatedDiagnosticMetrics(input: CollectionsNativeLayoutMetrics): string {
+  diagnosticRecord(input, ["scene", "rowCount", "totalsCount", "bounds", "columns"]);
+  const count = input.scene === "all-desktop" ? 7 : input.scene === "filtered-desktop" ? 4 : 0;
+  const totals = input.scene === "all-desktop" ? 3 : 1;
+  if (!count || input.rowCount !== count || input.totalsCount !== totals) {
+    throw new Error("Synthetic collections diagnostic has invalid scene or fixture counts");
+  }
+  diagnosticArray(input.columns, COLLECTIONS_NATIVE_COLUMN_KEYS.length);
+  diagnosticNumbers(input.bounds, BOUNDS_KEYS);
+  if (input.bounds.viewportWidth !== 1920) throw new Error("Synthetic collections diagnostic has an unexpected viewport");
+  for (const [index, column] of input.columns.entries()) {
+    diagnosticRecord(column, ["key", "header", "body", "footer", "totals"]);
+    if (column.key !== COLLECTIONS_NATIVE_COLUMN_KEYS[index]) {
+      throw new Error("Synthetic collections diagnostic has invalid column or cell counts");
+    }
+    diagnosticArray(column.body, count);
+    diagnosticArray(column.totals, column.key === "nativeMinor" ? totals : 0);
+    diagnosticCell(column.header);
+    diagnosticCell(column.footer);
+    column.body.forEach(diagnosticCell);
+    column.totals.forEach(diagnosticCell);
+  }
+  const text = JSON.stringify(input);
+  if (Buffer.byteLength(text, "utf8") > MAX_METRICS_BYTES) {
+    throw new Error("Synthetic collections diagnostic exceeds the metrics byte limit");
+  }
+  return text;
+}
+
+function diagnosticProvenance() {
+  return {
+    runId: /^\d{1,24}$/.test(process.env.GITHUB_RUN_ID ?? "") ? process.env.GITHUB_RUN_ID : "unavailable",
+    checkoutSha: /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(process.env.GITHUB_SHA ?? "") ? process.env.GITHUB_SHA : "unavailable",
+  };
+}
+
+/** Bounded numeric-only geometry after synthetic content checks, before the gate. */
+export function emitCollectionsNativePreGateGeometry(metrics: CollectionsNativeLayoutMetrics): void {
+  const text = validatedDiagnosticMetrics(metrics);
+  console.log(`${METRICS_PREFIX} ${JSON.stringify({ scope: "collections-native", synthetic: true,
+    acceptance: false, ...diagnosticProvenance(), metrics: JSON.parse(text) })}`);
+}
+
+/** Only the actual pre-gate screenshot, only when an unchanged bounds gate fails.
+ * Validate both inputs before any diagnostic frame. This protocol has one exact
+ * filename, a 1 MiB PNG cap and no filesystem/network access or error text.
+ */
+export function emitCollectionsNativeFailure(image: CollectionsNativeFailureImage, metrics: CollectionsNativeLayoutMetrics): void {
+  const metricText = validatedDiagnosticMetrics(metrics);
+  diagnosticRecord(image, ["filename", "mime", "bytes"]);
+  if (image.filename !== "collections-native-desktop-failed.png" || image.mime !== "image/png"
+    || !Buffer.isBuffer(image.bytes) || image.bytes.length === 0 || image.bytes.length > 1024 * 1024
+    || image.bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") {
+    throw new Error("Synthetic collections diagnostic has an invalid image");
+  }
+  const base64 = image.bytes.toString("base64");
+  const metadata = { scope: "collections-native", status: "failed-desktop-bounds", acceptance: false,
+    synthetic: true, scene: metrics.scene, file: image.filename, mime: image.mime, bytes: image.bytes.length,
+    sha256: createHash("sha256").update(image.bytes).digest("hex"),
+    chunks: Math.ceil(base64.length / CHUNK_CHARACTERS), ...diagnosticProvenance(),
+    metricsBytes: Buffer.byteLength(metricText, "utf8"),
+    metricsSha256: createHash("sha256").update(metricText).digest("hex") };
+  const identity = JSON.stringify(metadata);
+  console.log(`${FAILURE_PREFIX} BEGIN ${identity}`);
+  console.log(`${FAILURE_PREFIX} METRICS ${metricText}`);
+  for (let index = 0; index < metadata.chunks; index++) {
+    console.log(`${FAILURE_PREFIX} CHUNK ${metadata.file} ${index + 1}/${metadata.chunks} ${base64.slice(index * CHUNK_CHARACTERS, (index + 1) * CHUNK_CHARACTERS)}`);
+  }
+  console.log(`${FAILURE_PREFIX} END ${identity}`);
+}

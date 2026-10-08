@@ -6,7 +6,8 @@ import { mkdir } from "node:fs/promises";
 import type { ReportResult } from "../../lib/reports-types";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { authedGet, baseUrl, harness } from "./_server";
-import { emitCollectionsNativeEvidence, type CollectionsNativeEvidenceMember } from "./_collections-native-evidence";
+import { COLLECTIONS_NATIVE_COLUMN_KEYS, emitCollectionsNativeEvidence, emitCollectionsNativeFailure,
+  emitCollectionsNativePreGateGeometry, type CollectionsNativeEvidenceMember, type CollectionsNativeLayoutMetrics } from "./_collections-native-evidence";
 
 // Real built report loader, UI, downloads and official Chromium PDFs. Fixtures
 // are inserted only into the existing isolated localhost HTTP harness database.
@@ -23,7 +24,7 @@ const receiverA = `SYN-A-${stamp.toString(36)}`;
 const receiverB = `SYN-B-${stamp.toString(36)}`;
 const patients: number[] = [];
 const geometry: { scene: string; bounds: Record<string, number | boolean> }[] = [];
-const columnKeys = ["date", "patientName", "patientNumber", "kindLabel", "nativeMinor", "targetLabel", "settlementText", "methodLabel", "receiver", "note"];
+const columnKeys = COLLECTIONS_NATIVE_COLUMN_KEYS;
 
 interface WitnessRow {
   note: string;
@@ -159,7 +160,7 @@ function assertResult(result: ReportResult, expected: WitnessRow[], kpis: KpiWit
   expect(result.from).toBe(fixtureDay);
   expect(result.to).toBe(fixtureDay);
   expect(result.columns?.map(column => column.key)).toEqual(columnKeys);
-  expect(result.columns?.find(column => column.key === "nativeMinor")).toMatchObject({ type: "money", currencyKey: "currency" });
+  expect(result.columns?.find(column => column.key === "nativeMinor")).toMatchObject({ type: "money", currencyKey: "currency", stackCurrencyTotals: true });
   expect(result.columns?.filter(column => column.type === "money").map(column => column.key)).toEqual(["nativeMinor"]);
   expect(result.rows).toHaveLength(expected.length);
   for (const row of expected) {
@@ -201,7 +202,27 @@ async function assertTable(page: Page, table: Locator, expected: WitnessRow[], t
     expect(plain(await cells.nth(6).innerText())).toBe(row.settlementText);
     expect(plain(await cells.nth(8).innerText())).toBe(row.receiver);
   }
-  expect(plain(await table.locator("tfoot td").nth(4).innerText()).split(" · ").sort()).toEqual([...totals].sort());
+  const nativeFooter = table.locator("tfoot td").nth(4);
+  const totalSpans = nativeFooter.locator("[data-report-currency-total]");
+  expect(await totalSpans.count(), "one atomic footer line per native currency").toBe(totals.length);
+  const totalTexts = (await totalSpans.allTextContents()).map(plain);
+  expect([...totalTexts].sort()).toEqual([...totals].sort());
+  expect(compact(await nativeFooter.textContent() ?? ""), "no joined separators or extra footer amounts")
+    .toBe(totalTexts.map(compact).join(""));
+  const lines = await totalSpans.evaluateAll(elements => elements.map(element => {
+    const r = element.getBoundingClientRect();
+    return { tag: element.tagName, children: element.childElementCount,
+      marker: element.getAttribute("data-report-currency-total"), whiteSpace: getComputedStyle(element).whiteSpace,
+      boxes: element.getClientRects().length, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  }));
+  for (const [index, line] of lines.entries()) {
+    expect(line).toMatchObject({ tag: "SPAN", children: 0, marker: "", whiteSpace: "nowrap", boxes: 1 });
+    expect(line.width).toBeGreaterThan(0);
+    expect(line.height).toBeGreaterThan(0);
+    if (index > 0) {
+      expect(line.top, "native footer currencies occupy distinct non-overlapping vertical lines").toBeGreaterThanOrEqual(lines[index - 1].bottom - 0.5);
+    }
+  }
   expect(await table.locator("tfoot td").nth(6).innerText()).toBe("");
 }
 
@@ -224,18 +245,51 @@ async function assertScreen(page: Page, result: ReportResult, expected: WitnessR
   }
 }
 
-async function assertDesktopTableBounds(page: Page, scene: string) {
-  const bounds = await page.locator("main table").evaluate(table => {
+async function assertDesktopTableBounds(page: Page, scene: CollectionsNativeLayoutMetrics["scene"]) {
+  // Called only after API fixtures and every displayed row/card/footer match.
+  // Capture the real scene before testing width so a failure remains inspectable.
+  const screenshot = await page.screenshot({ fullPage: true });
+  const metrics: CollectionsNativeLayoutMetrics = await page.locator("main table").evaluate((table, input) => {
     const frame = table.parentElement!, t = table.getBoundingClientRect(), f = frame.getBoundingClientRect();
-    return { tableLeft: t.left, tableRight: t.right, frameLeft: f.left, frameRight: f.right,
-      clientWidth: frame.clientWidth, scrollWidth: frame.scrollWidth, viewportWidth: innerWidth };
-  });
-  expect(bounds.scrollWidth, "desktop evidence must show the entire table, not an internally clipped slice").toBeLessThanOrEqual(bounds.clientWidth + 1);
-  expect(bounds.tableLeft).toBeGreaterThanOrEqual(bounds.frameLeft - 1);
-  expect(bounds.tableRight).toBeLessThanOrEqual(bounds.frameRight + 1);
-  expect(bounds.frameLeft).toBeGreaterThanOrEqual(-1);
-  expect(bounds.frameRight).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+    const round = (number: number) => Math.round(number * 100) / 100;
+    const measure = (element: Element) => {
+      const r = element.getBoundingClientRect(), range = document.createRange();
+      range.selectNodeContents(element);
+      const text = range.getBoundingClientRect();
+      return { left: round(r.left), right: round(r.right), top: round(r.top), bottom: round(r.bottom),
+        width: round(r.width), height: round(r.height), clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+        textWidth: round(text.width), textHeight: round(text.height) };
+    };
+    const headers = [...table.querySelectorAll("thead th")], body = [...table.querySelectorAll("tbody tr")];
+    const footers = [...table.querySelectorAll("tfoot td")];
+    return { scene: input.scene, rowCount: body.length,
+      totalsCount: footers[4].querySelectorAll("[data-report-currency-total]").length,
+      bounds: { tableLeft: t.left, tableRight: t.right, frameLeft: f.left, frameRight: f.right,
+        clientWidth: frame.clientWidth, scrollWidth: frame.scrollWidth, viewportWidth: innerWidth },
+      columns: input.keys.map((key, index) => ({ key, header: measure(headers[index]),
+        body: body.map(row => measure(row.querySelectorAll("td")[index])), footer: measure(footers[index]),
+        totals: [...footers[index].querySelectorAll("[data-report-currency-total]")].map(measure) })) };
+  }, { scene, keys: columnKeys });
+  emitCollectionsNativePreGateGeometry(metrics);
+  const bounds = metrics.bounds;
+  try {
+    // Keep these original acceptance limits unchanged. Diagnostics never turn a
+    // failed bound into success, nor enter the seven-member success transport.
+    expect(bounds.scrollWidth, "desktop evidence must show the entire table, not an internally clipped slice").toBeLessThanOrEqual(bounds.clientWidth + 1);
+    expect(bounds.tableLeft).toBeGreaterThanOrEqual(bounds.frameLeft - 1);
+    expect(bounds.tableRight).toBeLessThanOrEqual(bounds.frameRight + 1);
+    expect(bounds.frameLeft).toBeGreaterThanOrEqual(-1);
+    expect(bounds.frameRight).toBeLessThanOrEqual(bounds.viewportWidth + 1);
+  } catch (error) {
+    try {
+      emitCollectionsNativeFailure({ filename: "collections-native-desktop-failed.png", mime: "image/png", bytes: screenshot }, metrics);
+    } catch (diagnosticError) {
+      throw new AggregateError([error, diagnosticError], "Desktop bounds failed and diagnostic preparation also failed");
+    }
+    throw error;
+  }
   geometry.push({ scene, bounds });
+  return screenshot;
 }
 
 async function assertPaperBounds(sheet: Locator, scene: string) {
@@ -486,8 +540,8 @@ describe("collections native currency across the actual loader, report, download
       expect(response?.status()).toBe(200);
       const allTotals = ["750 ر.ي", "190.00 ر.س", "98.76 $"];
       await assertScreen(page, result, rows, allKpis, allTotals);
-      await assertDesktopTableBounds(page, "all-desktop");
-      evidence.push({ filename: "collections-native-screen.png", mime: "image/png", bytes: await page.screenshot({ fullPage: true }) });
+      const allDesktop = await assertDesktopTableBounds(page, "all-desktop");
+      evidence.push({ filename: "collections-native-screen.png", mime: "image/png", bytes: allDesktop });
       await assertDownloads(page, result, rows);
       const printLink = page.getByRole("link", { name: "مستند رسمي / PDF", exact: true });
       const originalHref = await printLink.getAttribute("href");
@@ -519,8 +573,8 @@ describe("collections native currency across the actual loader, report, download
         await assertScreen(page, filteredResult, filtered, filteredKpis, ["130.00 ر.س"]);
       }
       await page.getByRole("button", { name: "إخفاء الفلاتر", exact: true }).click();
-      await assertDesktopTableBounds(page, "filtered-desktop");
-      evidence.push({ filename: "collections-native-filtered-screen.png", mime: "image/png", bytes: await page.screenshot({ fullPage: true }) });
+      const filteredDesktop = await assertDesktopTableBounds(page, "filtered-desktop");
+      evidence.push({ filename: "collections-native-filtered-screen.png", mime: "image/png", bytes: filteredDesktop });
       await assertDownloads(page, filteredResult, filtered);
       const filteredHref = await printLink.getAttribute("href");
       expect(filteredHref).toBeTruthy();

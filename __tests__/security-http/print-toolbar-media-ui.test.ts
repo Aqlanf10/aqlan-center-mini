@@ -26,6 +26,8 @@ const artifacts = ".settings-ui-artifacts";
 // Avoid current report days, P01's 2001-01-17 and commission's February 2023.
 // The receipt exactly settles the invoice net, so no synthetic debtor enters top-N lists.
 const fixtureTimestamp = "2000-02-02T10:00:00.000Z";
+// UTC date differs from the configured Aden clinic day; invoice source remains unchanged.
+const receiptTimestamp = "2000-02-02T22:00:00.000Z";
 
 beforeAll(async () => {
   h = await harness();
@@ -47,13 +49,13 @@ beforeAll(async () => {
   // A dedicated closed fixture avoids disturbing the harness's one-open-shift constraint.
   const { rows: [shift] } = await db.query<{ id: number }>(
     `INSERT INTO cashier_shifts (opened_by, status, closed_by, opened_at, closed_at)
-     VALUES ('synthetic-print', 'closed', 'synthetic-print', $1, $1) RETURNING id`, [fixtureTimestamp]);
+     VALUES ('synthetic-print', 'closed', 'synthetic-print', $1, $2) RETURNING id`, [fixtureTimestamp, receiptTimestamp]);
   const { rows: [receipt] } = await db.query<{ id: number }>(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor,
                            currency, exchange_rate, base_amount_minor, base_currency, method, note, created_by, created_at)
      VALUES ($1, $2, $3, $4, 'payment', 11000, 'YER', 1, 11000, 'YER', 'cash',
              'SYNTHETIC-RECEIPT-NOTE', 'SYNTHETIC-SIGNER', $5) RETURNING id`,
-    [receiptNumber, patient.id, invoiceId, shift.id, fixtureTimestamp]);
+    [receiptNumber, patient.id, invoiceId, shift.id, receiptTimestamp]);
   receiptId = receipt.id;
   // Exercise the existing server-selected watermark without invoking print logging.
   await db.query(`INSERT INTO document_prints (doc_type, doc_id, printed_by, printed_at)
@@ -206,6 +208,10 @@ describe("print toolbar containment on real built financial documents", () => {
             expect(await whatsApp.count()).toBe(0);
           }
           const screenContent = await sheet.innerText();
+          if (spec.kind === "receipt") {
+            expect(await sheet.locator("time").getAttribute("datetime")).toBe(receiptTimestamp);
+            expect(await sheet.locator("time").innerText()).toBe("الخميس 03/02/2000 · 1:00 صباحًا");
+          }
           const screenHeader = await sheet.locator("header").innerText();
           const screenSignature = await sheet.locator(".sign-row").innerText();
           expect(await sheet.locator(".clinic-name").innerText()).toBe(expectedClinicName);
@@ -304,7 +310,7 @@ describe("print toolbar containment on real built financial documents", () => {
             }
             expect(await whatsApp.isVisible()).toBe(false);
           } else {
-            for (const expected of ["SYNTHETIC-RECEIPT-NOTE", "SYNTHETIC-SIGNER", "11,000"]) expect(text).toContain(expected);
+            for (const expected of ["SYNTHETIC-RECEIPT-NOTE", "SYNTHETIC-SIGNER", "11,000", "03/02/2000", "1:00"]) expect(text).toContain(expected);
           }
           await page.emulateMedia({ media: "screen" });
           await settlePaint(page);
