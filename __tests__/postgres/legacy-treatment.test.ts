@@ -135,13 +135,17 @@ describe("ortho 300,000 agreed / 120,000 paid before the system", () => {
     const patient = await newPatient("LEG-ORTHO-ADJ");
     const result = await create(patient, { serviceId: services.ortho, scope: "both" });
     if (!result.ok) throw new Error(result.reason);
+    const [{ title: legacyTitle }] = await q<{ title: string }>(`SELECT title FROM clinical_cases WHERE id = $1`, [result.agreement.caseId]);
     const opened = await createOrthoCase({
       patientId: patient, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null,
       startDate: TODAY, plannedMonths: 18, planId: null, note: null, createdBy: "dr",
     });
     if (!opened.ok) throw new Error(opened.message);
-    const [kase] = await q<{ ortho_case_id: number }>(`SELECT ortho_case_id FROM clinical_cases WHERE id = $1`, [result.agreement.caseId]);
-    expect(kase.ortho_case_id).toBe(opened.id);
+    const [kase] = await q<{ ortho_case_id: number; title: string }>(`SELECT ortho_case_id, title FROM clinical_cases WHERE id = $1`,
+      [result.agreement.caseId]);
+    expect(kase).toEqual({ ortho_case_id: opened.id, title: legacyTitle }); // the legacy case keeps its own title
+    expect(await q(`SELECT details->>'المصدر' AS source FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`,
+      [String(patient)])).toEqual([{ source: "حالة علاج بدأ قبل النظام" }]);
     const visit = await addVisit({ patientName: "م", patientPhone: null, note: null, patientId: patient });
     const preview = await previewVisitBilling(visit.id);
     expect(preview?.orthoAdjustment).toBe("LEGACY_INCLUDED");

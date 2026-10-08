@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page, type Route } from "playwright";
+import { chromium, type Browser, type Page, type Request, type Route } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
 
@@ -187,23 +187,43 @@ describe("legacy preview failure, staleness and form ownership", () => {
       expect(await readState.isVisible()).toBe(true);
       expect(await save.isEnabled()).toBe(false);
 
-      // A (300000) is held; B (400000) answers first; releasing A must not overwrite B's evidence.
+      // A (300000) is held; B (400000) answers; then A is typed again (A2) and answers. Only after A2 is current is the
+      // held A1 released — with a marked copy of its own real response, so a stale landing would be visible. Every step
+      // waits on an explicit signal (request failure, response, painted evidence), not on a sleep.
+      const settled = new Set<Request>();
+      page.on("requestfailed", (request) => { settled.add(request); });
+      page.on("requestfinished", (request) => { settled.add(request); });
       mode = "hold";
       await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
       await expect.poll(() => held !== null, { timeout: 30_000 }).toBe(true);
+      const staleRoute = held as unknown as Route;
+      const staleRequest = staleRoute.request();
       await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("400000");
-      await expect.poll(() => form.getByTestId("legacy-opening-effect").count(), { timeout: 30_000 }).toBe(1);
-      expect(await form.getByTestId("legacy-opening-effect").innerText()).toContain("300,000");
-      await (held as Route | null)?.continue();
-      await page.waitForTimeout(500);
-      expect(await form.getByTestId("legacy-opening-effect").innerText()).toContain("300,000");
-      expect(await save.isEnabled()).toBe(true);
+      const effect = async () => await form.getByTestId("legacy-opening-effect").count() === 0 ? ""
+        : form.getByTestId("legacy-opening-effect").innerText();
+      await expect.poll(effect, { timeout: 30_000 }).toContain("300,000");
 
-      // A→B→A: back to 300000 shows A's own (fresh) evidence, not B's.
       mode = "pass";
+      const freshA = page.waitForResponse((response) => response.url().includes("/legacy-treatments/preview")
+        && (JSON.parse(response.request().postData() ?? "{}") as { agreedAmount?: unknown }).agreedAmount === "300000");
       await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
-      await expect.poll(async () => await form.getByTestId("legacy-opening-effect").count() === 0 ? "" : form.getByTestId("legacy-opening-effect").innerText(),
-        { timeout: 30_000 }).toContain("200,000");
+      await freshA;
+      await expect.poll(effect, { timeout: 30_000 }).toContain("200,000");
+
+      // A2 is current. Release A1 with its real response, marked (after ×3), while A2 is on screen.
+      const real = await staleRoute.fetch();
+      const marked = await real.json() as { preview?: { opening?: { afterMinor?: number } } };
+      expect(marked.preview?.opening?.afterMinor).toBeGreaterThan(0);
+      marked.preview!.opening!.afterMinor = marked.preview!.opening!.afterMinor! * 3;
+      // Today the form aborts A1 when the draft changes, so delivery is refused; were it delivered, the sequence guard
+      // must still drop it. Either way the outcome below is what counts.
+      await staleRoute.fulfill({ status: real.status(), contentType: "application/json", body: JSON.stringify(marked) })
+        .catch(() => undefined);
+      await expect.poll(() => settled.has(staleRequest), { timeout: 30_000 }).toBe(true);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      expect(await effect()).toContain("200,000");
+      expect(await effect()).not.toContain("600,000");
+      expect(await save.isEnabled()).toBe(true);
       expect(seen.some((one) => one.agreed === "400000" && one.status === 200)).toBe(true);
 
       // Close and reopen: a fresh, empty form with save disabled; nothing was written by any preview.
