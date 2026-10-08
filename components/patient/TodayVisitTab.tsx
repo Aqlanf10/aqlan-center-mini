@@ -7,7 +7,7 @@ import {
 import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
-import { CheckoutExtras } from "./CheckoutExtras";
+import { CheckoutExtras, isCheckoutWalkout } from "./CheckoutExtras";
 import type { VisitWalkout } from "@/lib/db";
 import type { WorkflowSummary } from "./SummaryTab";
 
@@ -46,6 +46,8 @@ export function TodayVisitTab({
   patientId,
   patientName,
   summary,
+  retainedOpenVisit,
+  workflowIsCurrent,
   base,
   visits,
   canCollect,
@@ -57,6 +59,8 @@ export function TodayVisitTab({
   patientId: number;
   patientName: string;
   summary: WorkflowSummary | null;
+  retainedOpenVisit?: WorkflowSummary["openVisit"];
+  workflowIsCurrent?: () => boolean;
   base: Currency;
   visits: { id: number; arrivedAt: string; status: string; chair: number | null }[];
   canCollect: boolean;
@@ -100,6 +104,7 @@ export function TodayVisitTab({
   const [checkout, setCheckout] = useState<{
     /** (CHAIR-1) الزيارة الموقَّعة — للتأجيل وملخّص المغادرة وحجز القادمة. */
     visitId: number;
+    financialReviewRequired?: boolean | null;
     duesMinor: number;
     remainingMinor: number;
     invoiceCurrency: Currency;
@@ -109,6 +114,12 @@ export function TodayVisitTab({
     labOrdersCreated: number;
     materialsDeducted: number;
   } | null>(null);
+
+  const onFinancialReadChange = useCallback((read: { visitId: number; reviewRequired: boolean | null }) => {
+    setCheckout((current) => current?.visitId === read.visitId && current.financialReviewRequired !== read.reviewRequired
+      ? { ...current, financialReviewRequired: read.reviewRequired } : current);
+  }, []);
+  const checkoutNeedsFinanceAttention = checkout?.financialReviewRequired === true || checkout?.financialReviewRequired === null;
 
   /* الرصيد الجاري يُقرأ عند الفتح وبعد كل تغيير — وقبل التوقيع هو بنفسه
      «ما قبل التوقيع»، وبعده تحديثُ التحصيل وحده. */
@@ -150,7 +161,8 @@ export function TodayVisitTab({
    * الزيارة الأقدم — وذلك رجوعٌ لا بدءٌ: شبّاك الموقَّعة يبقى مرئيًا حتى
    * التحصيل وإتمام المسار. كذلك null بعد التوقيع لا يصفّر شيئًا، وأول
    * ظهورٍ بعد التحميل ليس تبديلًا (الحالة الابتدائية نظيفة سلفًا). */
-  const openVisit = summary?.openVisit ?? null;
+  // Retain only the editor identity during an unavailable workflow, never its action authority.
+  const openVisit = summary ? summary.openVisit : retainedOpenVisit ?? null;
   const openVisitId = openVisit?.id ?? null;
   const openVisitArrivedAt = openVisit?.arrivedAt ?? null;
   useEffect(() => {
@@ -189,7 +201,8 @@ export function TodayVisitTab({
       const walkout = await response.json() as VisitWalkout & { signedToday?: boolean };
       /* وُقِّعت اليوم بتوقيت العيادة في الخادم؛ ولا تُستعاد إن كانت هناك زيارةٌ مفتوحة أحدث منها (بدء زيارة
          جديدة). زيارةٌ مفتوحة أقدم من الموقَّعة (توقيع الأحدث يعيد الواجهة للأقدم) لا تمنع الاستعادة. */
-      if (cancelled || !walkout.signedAt || !walkout.signedToday) return;
+      if (cancelled || !isCheckoutWalkout(walkout, lastSignedId) || walkout.patientId !== patientId
+        || typeof walkout.signedAt !== "string" || walkout.signedToday !== true || typeof walkout.arrivedAt !== "string") return;
       if (openVisitArrivedAt !== null && openVisitArrivedAt >= walkout.arrivedAt) return;
       signedRef.current = true;
       restoredVisitRef.current = walkout.visitId;
@@ -197,17 +210,18 @@ export function TodayVisitTab({
       setCurrentBalances(walkout.balances);
       setCollected(Boolean(walkout.invoice && walkout.checkout.invoicePaidMinor >= walkout.invoice.netMinor));
       setPaidSome(walkout.checkout.invoicePaidMinor > 0);
-      setCheckout({ visitId: walkout.visitId, invoiceId: walkout.invoice?.id ?? null,
+      setCheckout({ visitId: walkout.visitId, financialReviewRequired: walkout.lines.some((line) => line.financialReviewRequired),
+        invoiceId: walkout.invoice?.id ?? null,
         invoiceCurrency: walkout.invoice?.currency ?? base, duesMinor: walkout.invoice?.netMinor ?? 0,
         remainingMinor: Math.max(0, (walkout.invoice?.netMinor ?? 0) - walkout.checkout.invoicePaidMinor),
         sessionsCompleted: 0, nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0 });
     };
     void restore().catch(() => {});
     return () => { cancelled = true; };
-  }, [canCollect, openVisitArrivedAt, checkout, lastSignedId, base]);
+  }, [canCollect, openVisitArrivedAt, checkout, lastSignedId, base, patientId]);
 
   const startManualVisit = async () => {
-    if (busy) return;
+    if (busy || !summary || workflowIsCurrent?.() === false) return;
     setBusy(true);
     setError(null);
     try {
@@ -290,7 +304,7 @@ export function TodayVisitTab({
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-orange/40 bg-orange-50/60 px-3.5 py-2.5">
             <div>
               <p className="text-sm font-extrabold text-navy-900">
-                زيارة قائمة
+                {summary ? "زيارة قائمة" : "مسودة الزيارة · الملخص غير متاح"}
                 {openVisit.plannedTitle ? ` — ${openVisit.plannedTitle}` : ""}
               </p>
               <p className="text-[11px] text-slate-600">
@@ -348,7 +362,7 @@ export function TodayVisitTab({
         </section>
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
-          <p className="text-sm font-bold text-slate-600">لا زيارة قائمة اليوم</p>
+          <p className="text-sm font-bold text-slate-600">{summary ? "لا زيارة قائمة اليوم" : "تعذّر التحقق من الزيارة القائمة"}</p>
           {summary && summary.plannedVisits.length > 0 ? (
             <p className="mt-1 text-xs text-slate-500">
               ابدأ الجلسة المخطَّطة «{summary.plannedVisits[0].title}» من تبويب الملخص —
@@ -360,7 +374,7 @@ export function TodayVisitTab({
           <button
             type="button"
             onClick={() => void startManualVisit()}
-            disabled={busy}
+            disabled={busy || !summary}
             className="mt-3 rounded-xl bg-brand-orange px-5 py-2.5 text-xs font-extrabold text-white hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "جارٍ التسجيل…" : "🪑 بدء زيارة اليوم"}
@@ -400,18 +414,25 @@ export function TodayVisitTab({
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-slate-500">استحقاق اليوم</dt>
+              <dt className="text-slate-500">{checkoutNeedsFinanceAttention ? "فاتورة اليوم المثبتة" : "استحقاق اليوم"}</dt>
               <dd className="font-extrabold text-navy-900">
-                {formatMoney(checkout.duesMinor, invoiceCurrency)}
+                {checkoutNeedsFinanceAttention && checkout.invoiceId === null
+                  ? (checkout.financialReviewRequired === true ? "لا فاتورة جديدة؛ توجد بنود تحتاج مراجعة مالية" : "لا فاتورة جديدة؛ تغطية العمل غير متحققة")
+                  : formatMoney(checkout.duesMinor, invoiceCurrency)}
                 {invoiceCurrency !== base ? (
                   <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[invoiceCurrency]}</span>
                 ) : null}
               </dd>
             </div>
+            {checkoutNeedsFinanceAttention ? <div role="status" data-testid="checkout-financial-review"
+              className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-amber-900">
+              {checkout.financialReviewRequired === true ? "تغطية بعض العمل غير محسومة وتحتاج مراجعة مالية" : "تعذّر التحقق من تغطية العمل الحالية"}؛ لا يثبت غياب فاتورة أنها مجانية أو مشمولة.
+              الأرصدة والفواتير المثبتة تبقى مستقلة ويمكن تسويتها بمسارها المعتاد.
+            </div> : null}
             {totalDueInInvoiceCurrency !== null ? (
               <div className="flex items-center justify-between border-t border-slate-100 pt-1.5">
                 <dt className="font-bold text-slate-700">
-                  الإجمالي المستحق{invoiceCurrency !== base ? ` (${CURRENCY_LABEL[invoiceCurrency]})` : ""}
+                  {checkoutNeedsFinanceAttention ? "الإجمالي من الأرصدة والفواتير المثبتة" : "الإجمالي المستحق"}{invoiceCurrency !== base ? ` (${CURRENCY_LABEL[invoiceCurrency]})` : ""}
                 </dt>
                 <dd className="text-lg font-black text-amber-700">
                   {formatMoney(totalDueInInvoiceCurrency, invoiceCurrency)}
@@ -473,7 +494,9 @@ export function TodayVisitTab({
               >
                 تحصيل وطباعة السند
               </button>
-            ) : <span className="font-bold text-emerald-800">لا مبلغ مطلوب لهذه الزيارة</span>}
+            ) : checkoutNeedsFinanceAttention
+              ? <span className="font-bold text-amber-900">لا مبلغ مثبت للتحصيل الآن؛ التحقق من تغطية العمل ما زال مطلوبًا</span>
+              : <span className="font-bold text-emerald-800">لا مبلغ مطلوب لهذه الزيارة</span>}
             {checkout.invoiceId ? (
               <a
                 href={`/print/invoice/${checkout.invoiceId}`}
@@ -488,6 +511,7 @@ export function TodayVisitTab({
 
           {/* (CHAIR-1 Slice 5) مشمول بالخطة، تأجيل الدفع، ملخّص المغادرة، وحجز القادمة هنا. */}
           <CheckoutExtras
+            onFinancialReadChange={onFinancialReadChange}
             visitId={checkout.visitId}
             collected={collected}
             suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}

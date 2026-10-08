@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
-import { CONDITION_LABEL, isValidTooth, toothName } from "@/lib/dental";
+import { CONDITION_LABEL, isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
 import { LAB_STATUS_LABEL, type LabOrderStatus } from "@/lib/lab";
 import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
@@ -24,6 +25,7 @@ import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "
 import { ServiceSelect } from "./ServiceSelect";
 import { VisitMaterials } from "./VisitMaterials";
 import { QuickServicePicker } from "./QuickServicePicker";
+import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, plannedItemBlock, visitSignatureBlock } from "./invoice-clinical-readiness";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -114,7 +116,10 @@ interface Visit {
   }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
-    toothCode: number | null; billingRule: BillingRule;
+    toothCode: number | null; surfaces?: string | null; billingRule: BillingRule;
+    caseId?: number | null; caseSite?: string | null; origin?: string;
+    originInvoiceId?: number | null; billedInvoiceId?: number | null; billingStatus?: string;
+    clinicalConsentRecorded?: boolean; financialReviewRequired?: boolean; prebilled?: boolean;
     sessionCount: number; doneSessions: number; unitPriceMinor: number;
     quantity: number; status: string;
     /* (المراجعة النهائية للمالك — TD-05) عملة اتفاق خطة هذا البند بعينه:
@@ -134,6 +139,7 @@ interface Visit {
     planItemId: number; procedureId: number;
     sessionIndex: number; sessionCount: number;
     priceMinor: number; note: string;
+    financialReviewRequired?: boolean; clinicalConsentRecorded?: boolean;
   }[];
   /** طلبات المختبر المرتبطة بالزيارة؛ لا تثبت نسبتها إلى إجراء بعينه. */
   labOrders: {
@@ -150,6 +156,34 @@ interface Visit {
 }
 
 type NoteKey = "chiefComplaint" | "examination" | "diagnosis" | "treatmentDone" | "nextPlan";
+
+/** A completed POST alone does not prove that its subsequent read contains the saved draft. */
+function matchesSubmittedVisit(loaded: Visit, body: Record<string, unknown>): boolean {
+  const noteKeys: NoteKey[] = ["chiefComplaint", "examination", "diagnosis", "treatmentDone", "nextPlan"];
+  if (noteKeys.some((key) => (loaded[key] ?? "") !== (typeof body[key] === "string" ? (body[key] as string).trim().slice(0, key === "chiefComplaint" || key === "nextPlan" ? 500 : 2000) : ""))
+    || loaded.doctorId !== body.doctorId
+    || (loaded.billingCurrency ?? CLINIC_BASE_CURRENCY) !== body.billingCurrency
+    || !Array.isArray(body.procedures) || loaded.procedures.length !== body.procedures.length) return false;
+  const identity = (row: Record<string, unknown>) => JSON.stringify([
+    row.serviceId, row.toothCode ?? null,
+    normalizeSurfaces(typeof row.surfaces === "string" ? row.surfaces : null),
+    row.doctorId ?? null, row.planItemId ?? null,
+  ]);
+  return loaded.procedures.every((row, index) => {
+    const submitted = (body.procedures as unknown[])[index];
+    if (!submitted || typeof submitted !== "object" || Array.isArray(submitted)) return false;
+    const requested = submitted as Record<string, unknown>;
+    if (identity(row as unknown as Record<string, unknown>) !== identity(requested)) return false;
+    if (row.planItemId != null) {
+      // Linked quantities/prices belong to the server's current session rules.
+      // Adopt the authorized canonical estimate; do not recreate pricing here.
+      // Identity and every clinician-owned note/provider/currency still match.
+      return row.quantity === 1 && Number.isSafeInteger(row.unitPriceMinor) && row.unitPriceMinor >= 0;
+    }
+    return row.quantity === Math.max(1, Math.round(Number(requested.quantity) || 1))
+      && row.unitPriceMinor === Math.max(0, Math.round(Number(requested.unitPriceMinor) || 0));
+  });
+}
 
 /** نتيجة التوقيع — ما يحتاجه الشبّاك والملخص بعد الإنهاء. */
 export interface VisitSignResult {
@@ -217,6 +251,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const lastAppliedOwner = useRef<typeof owner | null>(null);
   const command = useRef<{ owner: typeof owner } | null>(null);
   const [loadedOwner, setLoadedOwner] = useState<typeof owner | null>(null);
+  // A route/principal owner is not permission to reuse an old accepted clinical read.
+  // Clear synchronously when any refresh begins; stale event closures cannot sign during it.
+  const acceptedReadOwner = useRef<typeof owner | null>(null);
+  // An accepted signature is a receipt, never another read/write grant. Keep
+  // its one-way status across retries, but never display it after access denial.
+  const confirmedSignOwner = useRef<typeof owner | null>(null);
+  const [deniedOwner, setDeniedOwner] = useState<typeof owner | null>(null);
   useLayoutEffect(() => {
     liveOwner.current = owner;
     return () => {
@@ -247,6 +288,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     chiefComplaint: "", examination: "", diagnosis: "", treatmentDone: "", nextPlan: "",
   });
   const [doctorId, setDoctorId] = useState<number | null>(null);
+  const draftSnapshot = useRef({ owner, notes, drafts, doctorId, visitCurrency });
+  useLayoutEffect(() => {
+    draftSnapshot.current = { owner, notes, drafts, doctorId, visitCurrency };
+  }, [owner, notes, drafts, doctorId, visitCurrency]);
   /* (CASE-1) شدّة التقويم في هذه الزيارة — تُرسل مع التوقيع وتُكتب في معاملته، مرةً واحدة. */
   const [orthoSession, setOrthoSession] = useState<{
     upperWire: string; lowerWire: string; elastics: ElasticClass | ""; elasticNote: string; done: string; nextWeeks: string;
@@ -255,6 +300,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [autoFilled, setAutoFilled] = useState<Set<NoteKey | "doctor">>(new Set());
   /* آخر نصٍّ ولّدته الإجراءات في «ما نُفّذ» — ما دام الحقل عليه (أو فارغًا) يتبع الإجراءات. */
   const lastAutoTreatment = useRef("");
+  // Explicitly authored text, including an intentional blank, survives reads.
+  // A later local procedure edit may resume auto-fill only while it is blank.
+  const explicitTreatmentOwner = useRef<typeof owner | null>(null);
   const phrases = {
     chiefComplaint: parsePhraseList(useSetting("clinical.phrases_complaint")),
     examination: parsePhraseList(useSetting("clinical.phrases_exam")),
@@ -359,28 +407,43 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     return () => { controller.abort(); };
   }, [contextPatientId, ownsVisit, rxOpen, patientContextOwner, currentOwner]);
 
-  const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false) => {
+  const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false,
+    submitted?: { body: Record<string, unknown>; snapshot: typeof draftSnapshot.current }) => {
     if (!currentOwner()) return false;
+    acceptedReadOwner.current = null;
     const sequence = ++loadSequence.current;
     const stillCurrent = () => currentOwner() && sequence === loadSequence.current;
+    // Only locally authored, owner-safe text may be published by a failed read.
+    let failureMessage = "تعذّر تحميل الزيارة الحالية. أعد المحاولة.";
+    const invalid = (message: string): never => { failureMessage = message; throw new Error(message); };
     try {
-      const [visitResponse, serviceResponse, partyResponse] = await Promise.all([
-        fetch(`/api/visits/${visitId}/clinical`, { cache: "no-store" }),
-        fetch("/api/services", { cache: "no-store" }),
+      // Check the authoritative status before reading its body or waiting for
+      // auxiliary catalogues: a stalled 403 body must not retain old clinical authority.
+      const visitResponse = await fetch(`/api/visits/${visitId}/clinical`, { cache: "no-store" });
+      if (!stillCurrent()) return false;
+      if (!visitResponse.ok) {
+        if (visitResponse.status === 401 || visitResponse.status === 403 || visitResponse.status === 404) {
+          setDeniedOwner(owner);
+          invalid("تعذّر تأكيد صلاحية قراءة الزيارة الحالية. أعد التحميل بعد التحقق من الوصول.");
+        }
+        invalid(failureMessage);
+      }
+      const [payload, serviceResponse, partyResponse] = await Promise.all([
+        visitResponse.json(), fetch("/api/services", { cache: "no-store" }),
         fetch("/api/parties?kind=doctor", { cache: "no-store" }),
       ]);
-      const [payload, catalog, parties] = await Promise.all([
-        visitResponse.json(), serviceResponse.ok ? serviceResponse.json() : null,
+      const [catalog, parties] = await Promise.all([
+        serviceResponse.ok ? serviceResponse.json() : null,
         partyResponse.ok ? partyResponse.json() : null,
       ]);
       if (!stillCurrent()) return false;
-      if (!visitResponse.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalid("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
       const loaded = payload as Visit;
       if (loaded.id !== visitId || (expectedPatientId !== undefined && loaded.patientId !== expectedPatientId)) {
-        throw new Error("بيانات الزيارة لا تطابق السياق الحالي. حدّث الزيارة قبل التوثيق.");
+        invalid("بيانات الزيارة لا تطابق السياق الحالي. حدّث الزيارة قبل التوثيق.");
       }
-      if (requiredStatus && loaded.status !== requiredStatus) throw new Error("تعذّر تأكيد حالة الزيارة بعد الحفظ. أعد تحميلها.");
+      const expectedStatus = confirmedSignOwner.current === owner ? "signed" : requiredStatus;
+      if (expectedStatus && loaded.status !== expectedStatus) invalid("تعذّر تأكيد حالة الزيارة بعد الحفظ. أعد تحميلها.");
       const recordList = (value: unknown) => Array.isArray(value)
         && value.every((row) => row !== null && typeof row === "object" && !Array.isArray(row));
       const nullableText = (value: unknown) => value === null || typeof value === "string";
@@ -393,11 +456,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         || (loaded.activeCases != null && !recordList(loaded.activeCases))
         || (catalog !== null && !recordList(catalog))
         || (parties !== null && !recordList(Array.isArray(parties) ? parties : parties?.balances))) {
-        throw new Error("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
+        invalid("بيانات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
       }
       if (loaded.procedures.some((line) => !Number.isSafeInteger(line.serviceId) || line.serviceId <= 0
         || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unitPriceMinor) || line.unitPriceMinor < 0)) {
-        throw new Error("بيانات إجراءات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
+        invalid("بيانات إجراءات الزيارة غير مكتملة. أعد تحميلها قبل التوثيق.");
       }
       // Prepare every editable part before publishing ownership. A malformed B
       // must never combine B identity/notes with procedure drafts left over from A.
@@ -450,16 +513,40 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         setBillingPreview(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
         setServerUnmet([]); setRxOpen(false); setPostOpOpen(false); setPatientContext(null);
         setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = "";
+        explicitTreatmentOwner.current = null;
       }
       lastAppliedOwner.current = owner;
-      setLoadedOwner(owner); setVisit(loaded); setNotes(nextNotes); setDrafts(nextDrafts);
-      setDoctorId(nextDoctorId); setAutoFilled(filled); setVisitCurrency(loadedCurrency); setDirty(false);
+      if (loaded.status === "signed") confirmedSignOwner.current = owner;
+      acceptedReadOwner.current = owner;
+      setLoadedOwner(owner); setVisit(loaded); setDeniedOwner(null);
+      const savedDraftMatches = submitted !== undefined && matchesSubmittedVisit(loaded, submitted.body);
+      const keepLocalDraft = !newOwner && loaded.status === "open"
+        && draftForLeave.current.owner === owner && draftForLeave.current.dirty
+        && (!savedDraftMatches || draftSnapshot.current !== submitted?.snapshot);
+      if (!keepLocalDraft) {
+        setNotes(nextNotes); setDrafts(nextDrafts);
+        setDoctorId(nextDoctorId); setAutoFilled(filled); setVisitCurrency(loadedCurrency); setDirty(false);
+      }
       if (serviceResponse.ok || newOwner) setServices(catalog ?? []);
       if (partyResponse.ok || newOwner) setDoctors(nextDoctors);
+      if (submitted && keepLocalDraft && savedDraftMatches) {
+        setErrorOwner(owner); setError("احتُفظ بتعديلات أحدث من الطلب المحفوظ. احفظها قبل مراجعة التوقيع.");
+        return false;
+      }
+      if (submitted && !savedDraftMatches) {
+        setErrorOwner(owner); setError("تعذّر تأكيد حفظ المسودة كاملة. احتُفظ بتعديلاتك؛ راجعها قبل الحفظ مجددًا.");
+        return false;
+      }
       setError(null);
       return true;
-    } catch (loadError) {
-      if (stillCurrent()) { setErrorOwner(owner); setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل."); }
+    } catch {
+      if (stillCurrent()) {
+        acceptedReadOwner.current = null;
+        setLoadedOwner(null); setReviewOpen(false); setBillingPreview(null);
+        setErrorOwner(owner); setError(failureMessage);
+        // Keep the owner's local notes/drafts in memory, but hide the unverified
+        // persisted view until a fresh authorized read succeeds.
+      }
       return false;
     }
   }, [visitId, expectedPatientId, currentOwner, owner]);
@@ -469,7 +556,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   /* (VISIT-1) «ما نُفّذ» يُكتب من الإجراءات المضافة — ويتبعها ما دام الطبيب لم يكتب فيه بنفسه. */
   const visitOpen = visit?.status === "open";
   useEffect(() => {
-    if (!visitOpen || !ownsVisit || !currentOwner()) return;
+    if (!visitOpen || !ownsVisit || !currentOwner() || explicitTreatmentOwner.current === owner) return;
     const text = treatmentDoneFromProcedures(drafts.map((draft) => ({
       name: services.find((service) => service.id === draft.serviceId)?.name
         ?? visit?.outstanding.find((item) => item.planItemId === draft.planItemId)?.serviceName
@@ -480,19 +567,22 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     lastAutoTreatment.current = text;
     setNotes((current) => (current.treatmentDone.trim() === "" || current.treatmentDone === previous)
       ? { ...current, treatmentDone: text } : current);
-  }, [drafts, services, visitOpen, visit?.outstanding, ownsVisit, currentOwner]);
+  }, [drafts, services, visitOpen, visit?.outstanding, ownsVisit, currentOwner, owner]);
 
   const setNote = (key: NoteKey, value: string) => {
     // A save reloads its submitted snapshot. Do not accept newer edits until
     // both the write and that reload have finished.
-    if (busy || !ownsVisit || !currentOwner()) return;
+    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
     draftForLeave.current = { owner, dirty: true }; setDirty(true);
+    if (key === "treatmentDone") explicitTreatmentOwner.current = owner;
     setNotes((current) => ({ ...current, [key]: value }));
     setAutoFilled((current) => { if (!current.has(key)) return current; const next = new Set(current); next.delete(key); return next; });
   };
   const send = useCallback(async (body: Record<string, unknown>) => {
-    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return false;
+    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner
+      || (confirmedSignOwner.current === owner && body.action !== "addendum")) return false;
     const attempt = { owner }; command.current = attempt;
+    const submitted = body.action ? undefined : { body, snapshot: draftSnapshot.current };
     setBusy(true);
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
@@ -503,7 +593,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       if (!currentOwner() || command.current !== attempt) return false;
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return false; }
       setError(null);
-      const reloaded = await load(undefined, orthoSession !== null);
+      const reloaded = await load(undefined, orthoSession !== null, submitted);
       return reloaded && currentOwner() && command.current === attempt;
     } catch {
       if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
@@ -514,8 +604,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   }, [busy, ownsVisit, currentOwner, owner, visitId, load, orthoSession]);
 
   /** التوقيع — يستجاب بنتيجة الرحلة كاملة فيمرّرها للشبّاك. */
+  const signReadSequence = loadSequence.current;
   const sign = useCallback(async () => {
-    if (busy || !ownsVisit || !currentOwner() || command.current?.owner === owner) return;
+    if (busy || !ownsVisit || acceptedReadOwner.current !== owner || confirmedSignOwner.current === owner
+      || signReadSequence !== loadSequence.current || visit?.status === "signed"
+      || !currentOwner() || command.current?.owner === owner) return;
+    const blocked = visitSignatureBlock(visit);
+    if (blocked) { setError(blocked); return; }
     if (orthoSession?.elastics === "" && visit?.ortho?.visitAdjustmentId === null) {
       setError("اختر صنف المطاطات لهذه الجلسة؛ وصف خط الأساس لا يحدّد الصنف تلقائيًا.");
       return;
@@ -523,6 +618,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     setError(null);
+    const unknownOutcome = () => {
+      if (!currentOwner() || command.current !== attempt) return;
+      acceptedReadOwner.current = null;
+      loadSequence.current += 1;
+      setLoadedOwner(null); setReviewOpen(false); setBillingPreview(null);
+      setErrorOwner(owner); setError("تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.");
+    };
     try {
       const response = await fetch(`/api/visits/${visitId}/clinical`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -552,6 +654,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         setError([payload?.message ?? "تعذّر التوقيع.", ...conflicts].join(" "));
         return;
       }
+      if (!isClinicalSignResult(payload, visitId, expectedPatientId ?? visit?.patientId)) { unknownOutcome(); return; }
+      confirmedSignOwner.current = owner;
       setServerUnmet([]);
       setReviewOpen(false);
       setOrthoSession(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
@@ -579,15 +683,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientId: typeof payload.patientId === "number" ? payload.patientId : null,
       });
     } catch {
-      if (currentOwner()) setError("تعذّر الاتصال بالخادم.");
+      unknownOutcome();
     } finally {
       if (currentOwner() && command.current === attempt) { command.current = null; setBusy(false); }
     }
-  }, [busy, ownsVisit, currentOwner, owner, visitId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason]);
+  }, [busy, ownsVisit, currentOwner, owner, visitId, expectedPatientId, load, onSigned, overrideReason, orthoSession, visit, noChargeAdjustment, noChargeReason, signReadSequence]);
 
   /** (VISIT-2) فتح ملف المريض الجديد من زيارته — يعيد رقم الملف أو null مع رسالة الخطأ. */
   const openPatientFile = useCallback(async (id: number): Promise<number | null> => {
-    if (id !== visitId || !ownsVisit || !currentOwner() || command.current?.owner === owner) return null;
+    if (id !== visitId || !ownsVisit || acceptedReadOwner.current !== owner || !currentOwner() || command.current?.owner === owner) return null;
     const attempt = { owner }; command.current = attempt;
     setBusy(true);
     try {
@@ -619,10 +723,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
   const hasDraft = dirty || orthoSession !== null || Boolean(addendum.trim() || overrideReason.trim() || noChargeAdjustment || noChargeReason.trim());
   useLayoutEffect(() => {
-    draftForLeave.current = { owner, dirty: ownsVisit && hasDraft };
+    draftForLeave.current = { owner, dirty: lastAppliedOwner.current === owner && hasDraft };
   }, [owner, ownsVisit, hasDraft]);
   const canLeave = useCallback(() => {
-    if (!ownsVisit || !currentOwner()) return true;
+    if (!currentOwner()) return true;
     if (command.current?.owner === owner) {
       setError("هناك طلب حفظ أو توقيع قيد التنفيذ. انتظر نتيجته قبل الانتقال.");
       return false;
@@ -638,7 +742,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     if (typeof window === "undefined") return;
     const warn = (event: BeforeUnloadEvent) => {
       const unsaved = draftForLeave.current.owner === owner && draftForLeave.current.dirty;
-      if (!ownsVisit || !currentOwner() || (!unsaved && command.current?.owner !== owner)) return;
+      if (!currentOwner() || (!unsaved && command.current?.owner !== owner)) return;
       event.preventDefault(); event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
@@ -648,7 +752,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   if (!visit || !ownsVisit) {
     const ownedError = errorOwner === owner ? error : null;
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
+      {confirmedSignOwner.current === owner && deniedOwner !== owner ? (
+        <p role="status" data-testid="clinical-sign-confirmed" className="mb-2 font-bold text-success-700">وُقّعت الزيارة بنجاح. تعذّر تأكيد عرض السجل؛ لن يُعاد التوقيع.</p>
+      ) : null}
       <p role={ownedError ? "alert" : undefined}>{ownedError ?? "جارٍ تحميل الزيارة الحالية…"}</p>
+      {lastAppliedOwner.current === owner && draftForLeave.current.dirty && confirmedSignOwner.current !== owner ? (
+        <p className="mt-2 text-xs">احتُفظ بمسودة الزيارة لهذه الجلسة؛ التعديل والحفظ متوقفان حتى نجاح إعادة التحميل.</p>
+      ) : null}
       {ownedError ? <button type="button" onClick={() => void load()}
         className="mt-2 rounded-xl border border-slate-200 px-3 py-2 font-bold text-navy-800">أعد تحميل الزيارة</button> : null}
     </div>;
@@ -666,8 +776,9 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     .filter((work): work is string => typeof work === "string")));
   const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
     // Procedure changes also regenerate treatmentDone.
-    if (busy || !currentOwner()) return;
+    if (busy || !currentOwner() || command.current?.owner === owner) return;
     draftForLeave.current = { owner, dirty: true }; setDirty(true);
+    if (!draftSnapshot.current.notes.treatmentDone.trim()) explicitTreatmentOwner.current = null;
     setDrafts(update);
   };
   const lines = drafts.map((draft) => ({
@@ -746,13 +857,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const plannedToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
   const doneToday = drafts.filter((draft) => draft.planItemId !== null);
   const notDoneToday = visit.outstanding.filter((item) => !addedItemIds.has(item.planItemId));
+  const signatureBlock = visitSignatureBlock(visit);
 
   const addPlannedItem = (item: Visit["outstanding"][number]) => {
     if (busy || !currentOwner() || command.current?.owner === owner) return;
     // سعر الجلسة القادمة وفق قاعدة البند — نفس دالة الخادم، فيتطابق الرقمان.
     const lineTotal = item.unitPriceMinor * item.quantity;
     const sessionIndex = item.doneSessions + 1;
-    const suggested = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+    const suggested = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
     /* (المراجعة النهائية للمالك — TD-05) السعر المقترح يُنسَّق بعملة **بند
        الخطة هذا نفسه** لا بعملةٍ مستنتَجة على مستوى الزيارة: زيارةٌ فارغة لا
        إجراءاتٍ فيها لا تعرف عملتها، فبندٌ دولاري مخزّنٌ ١٥٠٠٠٠ وحدة صغرى
@@ -767,7 +879,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         labCategory: null,
         serviceId: item.serviceId ?? 0,
         toothCode: item.toothCode ? String(item.toothCode) : "",
-        surfaces: "",
+        surfaces: item.surfaces ?? "",
         quantity: 1,
         price: formatAmount(suggested, itemCurrency),
         doctorId,
@@ -1206,13 +1318,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             {plannedToday.map((item) => {
               const sessionIndex = item.doneSessions + 1;
               const lineTotal = item.unitPriceMinor * item.quantity;
-              const price = item.includedByAgreement ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+              const price = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
               return (
-                <li key={item.planItemId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <li key={item.planItemId} data-testid={`planned-item-${item.planItemId}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-navy-900">
                       {item.serviceName}
                       {item.toothCode ? <span className="rounded-lg bg-navy-50 px-1.5 py-0.5 mr-1.5 text-[10px] font-bold text-navy-800">سن {item.toothCode}</span> : null}
+                      {item.surfaces ? <span data-testid={`planned-item-surfaces-${item.planItemId}`} className="ms-1 text-[10px]">أسطح {item.surfaces}</span> : null}
                       {item.sessionCount > 1 ? (
                         <span className="text-[10px] font-normal text-slate-500">
                           {" "}· جلسة {sessionIndex} من {item.sessionCount}
@@ -1220,11 +1334,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       ) : null}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {item.includedByAgreement
-                        ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
+                      {hasUnresolvedClinicalFinance(item)
+                        ? "التغطية المالية غير محسومة؛ يمكن توثيق العمل كمسودة"
+                        : item.prebilled
+                        ? "مفوتر مسبقًا — لا تُنشأ فاتورة ثانية لهذا البند"
+                        : item.includedByAgreement
+                          ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
                         : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
                       {" · من «"}{item.planTitle}{"»"}
                     </p>
+                    {plannedItemBlock(item) ? <p role="status" data-testid={`planned-item-blocked-${item.planItemId}`}
+                      className="text-[10px] font-bold text-amber-800">{plannedItemBlock(item)}</p> : null}
                     {item.unmetRequirements && item.unmetRequirements.length > 0 ? (
                       <p className="text-[10px] font-bold text-amber-800">⚠️ يتطلب أولًا: {item.unmetRequirements.join("، ")}</p>
                     ) : null}
@@ -1495,6 +1615,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             </p>
           ) : null}
 
+        {signatureBlock ? <p role="status" data-testid="visit-signature-blocked"
+          className="mb-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-bold text-amber-900">{signatureBlock}</p> : null}
         <div id="visit-sign" className="flex scroll-mt-4 flex-wrap gap-2">
           <button onClick={() => void send(payload())} disabled={busy}
             className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-navy-800 disabled:opacity-40">
@@ -1549,6 +1671,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               <p className="text-[11px] text-slate-500">{visit.patientName}</p>
             </header>
 
+            {signatureBlock ? <p role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-900">{signatureBlock}</p> : null}
             <dl className="space-y-2 text-xs">
               {orthoSession && visit.ortho?.visitAdjustmentId === null ? (
                 <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
@@ -1634,7 +1757,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 </div>
               ) : null}
 
-              {serverZeroDue ? (
+              {signatureBlock || !billingPreview ? (
+                <div role="status" data-testid="visit-financial-review-required" className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                  <dt className="font-extrabold text-amber-900">الاستحقاق المالي غير متحقق</dt>
+                  <dd className="mt-1 font-bold text-amber-800">{signatureBlock ?? "لم تكتمل معاينة الاستحقاق من الخادم؛ مبالغ المسودة ليست مبلغًا للتحصيل."}</dd>
+                </div>
+              ) : serverZeroDue ? (
                 <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3" data-testid="no-additional-due">
                   <dt className="flex items-center justify-between font-extrabold text-emerald-900">
                     <span>الاستحقاق المالي اليوم</span>
@@ -1685,10 +1813,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
                 رجوع — أكمل العمل
               </button>
-              <button type="button" onClick={() => void sign()} disabled={busy}
+              <button type="button" onClick={() => void sign()} disabled={busy || Boolean(signatureBlock)}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
                 {busy
                   ? "جارٍ الإنهاء…"
+                  : signatureBlock ? "التوقيع متوقف لحين استكمال المراجعة"
+                  : !billingPreview ? "تأكيد التوقيع — يعاد التحقق من الاستحقاق في الخادم"
                   : mixedCurrencies || billingPreview?.mixedCurrencies
                     ? "تأكيد إنهاء الزيارة — عملتان: فاصل الإجراءات أولًا"
                     : serverZeroDue

@@ -190,6 +190,7 @@ export async function POST(request: Request) {
               cross_currency_not_supported: `القسط بعملةٍ مختلفة عن عملة الخطة (${plan.baseCurrency}) غير مدعوم — حصّل بعملة الاتفاق نفسها.`,
               idempotency_conflict: "مفتاح الإعادة مستعمل بعملية مختلفة — مفتاح واحد لعملية واحدة.",
               issued_installment_recovery_required: "يوجد قسط مُصدر عُكس قبضه. اختر إعادة تحصيل الفاتورة الأصلية من الحساب؛ لا تُصدر قسطًا جديدًا.",
+              plan_financial_history_requires_review: "الخطة تحتوي علاجًا ذا سجل مالي أو اتفاق تاريخي؛ لا تُصدر قسطًا جديدًا له. اختر الفاتورة القائمة أو الرصيد السابق وراجع الربط المالي.",
               installment_recovery_review_required: "يوجد قسط مُصدر يحتاج مراجعة ربطه قبل التحصيل. راجع المدير؛ لا تُصدر فاتورة بديلة.",
             } as const;
             return NextResponse.json({ reason: result.reason, message: messages[result.reason], ...("recoveryInvoiceIds" in result ? { recoveryInvoiceIds: result.recoveryInvoiceIds } : {}) }, { status: 409 });
@@ -222,7 +223,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "الخطة غير جارية — لا يمكن تسجيل تحصيل جديد عليها." }, { status: 409 });
     }
     if (reason === "invalid_plan_target") {
-      return NextResponse.json({ message: "الخطة غير موجودة أو لا تخص المريض." }, { status: 409 });
+      return NextResponse.json({ message: "الخطة غير متاحة كهدف لتحصيل جديد؛ تأكد من المريض واختر الفاتورة القائمة أو الرصيد السابق للعلاج التاريخي." }, { status: 409 });
     }
     if (reason === "invalid_opening_target") {
       return NextResponse.json({ message: "لا يوجد على المريض رصيد سابق بهذه العملة." }, { status: 409 });
