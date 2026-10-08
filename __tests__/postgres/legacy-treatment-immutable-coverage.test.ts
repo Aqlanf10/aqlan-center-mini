@@ -217,7 +217,7 @@ describe("old0042 evidence remains unknown without losing money or stored consen
     expect(await q("SELECT 1 FROM visits WHERE id=$1 AND signed_at IS NOT NULL", [visitId])).toHaveLength(0);
     // A completed/closed label is insufficient to bypass unknown immutable coverage.
     await q("UPDATE plan_items SET status='done' WHERE id=$1", [item]);
-    await q("UPDATE clinical_cases SET status='closed' WHERE id=$1", [caseId]);
+    await q("UPDATE clinical_cases SET status='closed', completed_at=NOW() WHERE id=$1", [caseId]);
     const different = await db.createClinicalCase({ patientId: id, specialty: "prosthodontics", title: "Synthetic new episode",
       site: "15", problem: null, responsiblePartyId: null, orthoCaseId: null, actor: "synthetic-doctor", actorRole: "doctor" });
     if (!different.ok) throw new Error("Synthetic distinct case refused");

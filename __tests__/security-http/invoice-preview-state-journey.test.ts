@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type Page, type Route } from "playwright";
+import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
 
@@ -59,6 +59,19 @@ function success(route: Route, refusal: string | null = null) {
 const json = (route: Route, payload: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
 const ready = (page: Page, line = 0) => page.locator(`[data-testid="invoice-clinical-preview-${line}"][data-preview-state="ready"]`).waitFor();
 const save = (page: Page) => page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
+/** Waits for one element's state and, on timeout, reports every observed state plus caller evidence (CI diagnosis). */
+async function waitForState(target: Locator, attribute: string, expected: string, evidence: () => Record<string, unknown>) {
+  const seen: string[] = [];
+  try {
+    await expect.poll(async () => {
+      const value = await target.getAttribute(attribute, { timeout: 1_000 }).catch(() => "absent") ?? "null";
+      if (seen.at(-1) !== value) seen.push(value);
+      return value;
+    }, { timeout: 30_000, interval: 200 }).toBe(expected);
+  } catch {
+    throw new Error(`${attribute} never became ${expected}: observed ${JSON.stringify(seen)}; evidence ${JSON.stringify(evidence())}`);
+  }
+}
 
 describe("invoice form preview safety and shared chart interruption journeys", () => {
   it("invalidates prior success immediately, blocks a pending/failed save, and recovers only after an explicit successful retry", async () => {
@@ -119,11 +132,15 @@ describe("invoice form preview safety and shared chart interruption journeys", (
   it("preserves an actionable server price/discount refusal rather than hiding it behind retry", async () => {
     const { page, context } = await openInvoice();
     let reject = true;
-    await page.route("**/api/invoices/clinical-preview", (route) => reject
-      ? json(route, { message: "اكتب سبب الخصم قبل الحفظ." }, 400) : json(route, success(route)));
+    const previews: number[] = [];
+    await page.route("**/api/invoices/clinical-preview", (route) => {
+      previews.push(reject ? 400 : 200);
+      return reject ? json(route, { message: "اكتب سبب الخصم قبل الحفظ." }, 400) : json(route, success(route));
+    });
     try {
       await selectFilling(page);
-      await page.locator('[data-preview-state="refused"]').waitFor();
+      await waitForState(page.getByTestId("invoice-clinical-preview-0"), "data-preview-state", "refused", () => ({
+        previews, url: page.url() }));
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).toContain("اكتب سبب الخصم قبل الحفظ.");
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByRole("button", { name: "إعادة المعاينة" }).count()).toBe(0);
@@ -235,7 +252,9 @@ describe("invoice form preview safety and shared chart interruption journeys", (
 
   it.each(["failure", "malformed"])("%s chart reads show unknown selectable anatomy; surfaces reset on tooth change and focus remains in the dialog", async (failure) => {
     const { page, context } = await openInvoice();
+    const charts: string[] = [];
     await page.route("**/api/patients/*/chart", async (route) => {
+      charts.push(route.request().url());
       await json(route, failure === "failure" ? { message: "unavailable" } : { records: [{ toothCode: 26 }] }, failure === "failure" ? 503 : 200);
     });
     await page.route("**/api/invoices/clinical-preview", (route) => json(route, success(route)));
@@ -244,7 +263,7 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       const opener = page.getByTestId("invoice-tooth-button-0");
       await opener.click();
       const dialog = page.getByTestId("tooth-dialog");
-      await page.locator('[data-testid="tooth-dialog"][data-chart-state="unavailable"]').waitFor();
+      await waitForState(dialog, "data-chart-state", "unavailable", () => ({ charts, url: page.url() }));
       const tooth = dialog.getByTestId("odontogram-tooth-26");
       expect(await tooth.getAttribute("data-chart-known")).toBe("false");
       expect(await tooth.getAttribute("aria-label")).toContain("الحالة غير متاحة");
