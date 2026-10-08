@@ -15,7 +15,7 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const {
   commissionDetailReport, commissionReport, createCaseOverride, createParty, createStaffUser,
-  ensureSchema, getPool, resetPoolForTesting, updateUser,
+  ensureSchema, getPool, invalidateSettingsCache, resetPoolForTesting, updateUser,
 } = db;
 
 type Currency = "YER" | "SAR" | "USD";
@@ -521,6 +521,10 @@ describe("الأداء — استعلامات دفعية لا استعلام ل�
       }
     };
     const countQueries = async () => {
+      // The report reads settings through a 5-second process cache. Whether that read is counted would depend on
+      // the time between the two measurements (seen on CI: 23 vs 22, the only difference being the settings read),
+      // not on the number of rows. Start each measurement from the same cache state.
+      invalidateSettingsCache();
       const pool = getPool();
       const spy = vi.spyOn(pool, "query");
       try {
