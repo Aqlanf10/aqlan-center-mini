@@ -42,6 +42,9 @@ let photoDoc = 0;
 let removedDoc = 0;
 let malformedDoc = 0;
 let missingFileDoc = 0;
+let noDateDoc = 0;
+let partialDoc = 0;
+let emptyTermsDoc = 0;
 let signatureBytes: Buffer;
 
 type Who = "admin" | "reception" | "doctorA" | "doctorB" | "cashier" | "accountant";
@@ -54,12 +57,13 @@ async function signaturePng(): Promise<Buffer> {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-async function upload(patientId: number, input: { kind: string; note: string | null; title: string; bytes: Buffer }): Promise<number> {
+async function upload(patientId: number, input: { kind: string; note: string | null; title: string; bytes: Buffer; takenOn?: string | null }): Promise<number> {
   const form = new FormData();
   form.set("file", new Blob([new Uint8Array(input.bytes)], { type: "image/png" }), "signature.png");
   form.set("kind", input.kind);
   form.set("title", input.title);
-  form.set("takenOn", "2026-03-15");
+  // A historical upload may legitimately carry no signing date; the API keeps it null.
+  if (input.takenOn !== null) form.set("takenOn", input.takenOn ?? "2026-03-15");
   if (input.note !== null) form.set("note", input.note);
   const response = await fetch(`${baseUrl}/api/patients/${patientId}/documents`, {
     method: "POST",
@@ -134,6 +138,15 @@ beforeAll(async () => {
   removedDoc = await upload(patient1, { kind: "consent", note: consentNote(), title: "إقرار أُخفي", bytes: signatureBytes });
   malformedDoc = await upload(patient1, { kind: "consent", note: "ليس JSON", title: "إقرار بسجل ناقص", bytes: signatureBytes });
   missingFileDoc = await upload(patient1, { kind: "consent", note: consentNote(), title: "إقرار ملفه مفقود", bytes: signatureBytes });
+  noDateDoc = await upload(patient1, { kind: "consent", note: consentNote(), title: "إقرار بلا تاريخ توقيع", bytes: signatureBytes, takenOn: null });
+  partialDoc = await upload(patient1, {
+    kind: "consent", title: "إقرار بنص ناقص", bytes: signatureBytes,
+    note: JSON.stringify({ templateId: TEMPLATE_A.id, signatoryName: SIGNER, signatoryRelation: "self", terms: [SNAPSHOT_TERM] }),
+  });
+  emptyTermsDoc = await upload(patient1, {
+    kind: "consent", title: "إقرار ببنود فارغة", bytes: signatureBytes,
+    note: JSON.stringify({ templateId: TEMPLATE_A.id, signatoryName: SIGNER, signatoryRelation: "self", terms: [" "], risks: [], postOpInstructions: [] }),
+  });
   await db.query(`UPDATE patient_documents SET removed_at = NOW(), removed_by = 'secadmin', removed_note = 'اختبار' WHERE id = $1`, [removedDoc]);
   await db.query(`UPDATE patient_documents SET storage_key = $2 WHERE id = $1`, [missingFileDoc, `missing/${stamp}.png`]);
 
@@ -165,6 +178,40 @@ describe("إعادة طباعة إقرارٍ موقّع — الدليل الم�
     expect(modeOf(body)).toBe("signed");
     expect(body).toContain(SNAPSHOT_TERM);
     expect(body).not.toContain(TEMPLATE_A.terms[0]);
+  });
+
+  it("تاريخ توقيعٍ لم يُسجَّل يبقى «غير مسجّل» — لا يُستبدل بتاريخ الرفع؛ ووقت التسجيل يُذكر منفصلًا", async () => {
+    const before = await documentDigest(noDateDoc);
+    expect(JSON.parse(before.row).taken_on).toBeNull();
+    const uploadedOn = (JSON.parse(before.row).uploaded_at as string).slice(0, 10);
+    const { status, body } = await html("admin", printPath(patient1, `docId=${noDateDoc}`));
+    expect(status).toBe(200);
+    expect(modeOf(body)).toBe("signed");
+    const text = visible(body);
+    expect(text).toContain('data-signing-date="unknown"');
+    expect(text).toContain("غير مسجّل في السجل");
+    expect(text).toContain("وقت التسجيل في النظام أدناه ليس تاريخ التوقيع");
+    expect(text).toContain("العمر الحالي");
+    // The upload day is never printed as the signing date (dates render in Arabic long form; check the ISO day too).
+    expect(text).not.toMatch(new RegExp(`تاريخ التوقيع: [^<]*${uploadedOn}`));
+    expect(text.match(/تاريخ التوقيع: <!-- -->([^<]+)/g)?.every((line) => line.includes("غير مسجّل")) ?? true).toBe(true);
+    expect(await documentDigest(noDateDoc)).toEqual(before);
+  });
+
+  it("نصٌّ محفوظ ناقص يُعرض ناقصًا — لا يُكمَّل من قالب اليوم ولا بقوائم فارغة", async () => {
+    const partial = visible((await html("admin", printPath(patient1, `docId=${partialDoc}`))).body);
+    expect(partial).toContain(SNAPSHOT_TERM);
+    expect(partial).toContain("data-snapshot-partial");
+    expect(partial).toContain("المخاطر والمضاعفات: غير محفوظ في هذا السجل");
+    expect(partial).toContain("تعليمات العناية: غير محفوظ في هذا السجل");
+    expect(partial).not.toContain(TEMPLATE_A.risks[0]);
+    expect(partial).not.toContain(TEMPLATE_A.postOpInstructions[0]);
+    const empty = visible((await html("admin", printPath(patient1, `docId=${emptyTermsDoc}`))).body);
+    expect(empty).toContain("data-snapshot-partial");
+    expect(empty).toContain("محفوظة فارغة");
+    expect(empty).not.toContain(TEMPLATE_A.terms[0]);
+    // A complete stored snapshot is not marked partial.
+    expect(visible((await html("admin", printPath(patient1, `docId=${snapshotDoc}`))).body)).not.toContain("data-snapshot-partial");
   });
 
   it("كل قيمةٍ في الرابط تخالف المحفوظ تُرفض — ولا يظهر التوقيع تحتها", async () => {

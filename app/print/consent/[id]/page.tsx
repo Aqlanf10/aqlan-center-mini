@@ -12,6 +12,7 @@ import {
   getConsentTemplate,
   type ConsentTemplate,
 } from "@/lib/consent-templates";
+import { parseStoredConsent, type StoredConsent, type StoredSection } from "@/lib/consent-record";
 
 export const dynamic = "force-dynamic";
 
@@ -37,55 +38,9 @@ const PAGE_STYLES = `
   }
 `;
 
-interface StoredConsent {
-  templateId: string;
-  signatoryName: string;
-  signatoryRelation: "self" | "guardian";
-  guardianRelation: string | null;
-  procedureName: string | null;
-  title: string | null;
-  /** نص الإقرار كما حُفظ وقت التوقيع — إن حفظه السجل. السجلات الحالية لا تحفظه. */
-  snapshot: { terms: string[]; risks: string[]; postOpInstructions: string[] } | null;
-}
-
-const isTextList = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
-
-/** سجل الإقرار كما حفظته شاشة التوقيع — ناقصٌ أو مشوَّه ⇒ لا نسخة موقّعة. */
-function parseStoredConsent(note: string | null): StoredConsent | null {
-  if (!note) return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(note);
-  } catch {
-    return null;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const text = (key: string) => (typeof record[key] === "string" && (record[key] as string).trim() ? (record[key] as string) : null);
-  const templateId = text("templateId");
-  const signatoryName = text("signatoryName");
-  const relation = record.signatoryRelation;
-  if (!templateId || !signatoryName || (relation !== "self" && relation !== "guardian")) return null;
-  return {
-    templateId,
-    signatoryName,
-    signatoryRelation: relation,
-    guardianRelation: text("guardianRelation"),
-    procedureName: text("procedureName"),
-    title: text("title"),
-    snapshot: isTextList(record.terms)
-      ? {
-        terms: record.terms,
-        risks: isTextList(record.risks) ? record.risks : [],
-        postOpInstructions: isTextList(record.postOpInstructions) ? record.postOpInstructions : [],
-      }
-      : null,
-  };
-}
-
 type SignedResolution =
-  | { ok: true; documentId: number; stored: StoredConsent; signedOn: string; recordedBy: string; recordedAt: string }
+  /** `signedOn` = تاريخ التوقيع المسجَّل، أو `null` إن لم يُسجَّل — لا يُستبدل بتاريخ الرفع. */
+  | { ok: true; documentId: number; stored: StoredConsent; signedOn: string | null; recordedBy: string; recordedAt: string }
   | { ok: false; reason: string };
 
 /* رسالة واحدة لما لا يُكشف عنه: غير موجود، أو لمريضٍ آخر. */
@@ -124,16 +79,18 @@ async function resolveSignedConsent(
     ok: true,
     documentId: document.id,
     stored,
-    signedOn: document.takenOn ?? document.uploadedAt.slice(0, 10),
+    signedOn: document.takenOn ?? null,
     recordedBy: document.uploadedBy,
     recordedAt: document.uploadedAt,
   };
 }
 
-function PatientBox({ patient, dateStr, dateLabel }: {
+function PatientBox({ patient, dateStr, dateLabel, unknownDate }: {
   patient: NonNullable<Awaited<ReturnType<typeof getPatient>>>;
   dateStr: string | null;
   dateLabel: string;
+  /** إقرارٌ موقّع لم يُسجَّل تاريخ توقيعه: يُقال ذلك صراحةً، والعمر يُذكر أنه الحالي لا عمر يوم التوقيع. */
+  unknownDate?: boolean;
 }) {
   // للنموذج غير الموقّع يُحسب العمر بسنة اليوم كما كانت الصفحة تفعل؛ للموقّع بسنة التوقيع المحفوظ.
   const now = new Date();
@@ -152,8 +109,9 @@ function PatientBox({ patient, dateStr, dateLabel }: {
         <span style={{ color: "#64748b" }}>رقم الملف: </span>
         <span className="num" dir="ltr" style={{ fontWeight: 800 }}>{patient.patientNumber}</span>
       </div>
-      <div><span style={{ color: "#64748b" }}>العمر / الجنس: </span><span>{ageText(age)} · {GENDER_LABEL[patient.gender]}</span></div>
-      <div><span style={{ color: "#64748b" }}>{dateLabel}: </span><span>{dateStr ? friendlyDateLong(dateStr) : "...................."}</span></div>
+      <div><span style={{ color: "#64748b" }}>{unknownDate ? "العمر الحالي / الجنس" : "العمر / الجنس"}: </span><span>{ageText(age)} · {GENDER_LABEL[patient.gender]}</span></div>
+      <div><span style={{ color: "#64748b" }}>{dateLabel}: </span><span data-signing-date={unknownDate ? "unknown" : undefined}>
+        {dateStr ? friendlyDateLong(dateStr) : unknownDate ? "غير مسجّل في السجل" : "...................."}</span></div>
     </div>
   );
 }
@@ -188,6 +146,34 @@ function TermsSections({ terms, risks, postOpInstructions }: { terms: string[]; 
           </ul>
         </div>
       ) : null}
+    </>
+  );
+}
+
+/** نص الإقرار المحفوظ كما هو: القسم غير المحفوظ أو غير المقروء يُقال صراحةً، ولا يُملأ من قالب اليوم. */
+function StoredTermsSections({ snapshot }: { snapshot: NonNullable<StoredConsent["snapshot"]> }) {
+  const missing = (label: string, state: StoredSection["state"]) => (
+    <p data-snapshot-section-missing style={{ margin: 0, fontSize: "8pt", color: "#9a3412", fontWeight: 700 }}>
+      {state === "malformed" ? `${label}: محفوظ بصيغةٍ غير مقروءة — لا يُعرض ولا يُستكمل من قالب اليوم.`
+        : `${label}: غير محفوظ في هذا السجل — لا يُستكمل من قالب اليوم.`}
+    </p>
+  );
+  const items = (one: StoredSection) => (one.state === "stored" ? one.items : []);
+  const termsBlank = snapshot.terms.state === "stored" && (snapshot.terms.items.length === 0 || snapshot.terms.items.some((item) => !item.trim()));
+  return (
+    <>
+      {!snapshot.complete ? (
+        <div data-snapshot-partial style={{ marginTop: "2mm", border: "1px dashed #ea580c", borderRadius: "2mm", padding: "2mm 3mm", fontSize: "8.5pt", color: "#7c2d12" }}>
+          النص المحفوظ مع هذا الإقرار ناقص. يُعرض ما حُفظ فقط كما هو؛ وما لم يُحفظ لا يُعاد بناؤه من قالب اليوم ولا يُعدّ معروضًا على الموقّع.
+        </div>
+      ) : null}
+      {snapshot.terms.state !== "stored" ? missing("الشروط والبنود", snapshot.terms.state)
+        : termsBlank ? <p data-snapshot-section-missing style={{ margin: "2mm 0 0", fontSize: "8pt", color: "#9a3412", fontWeight: 700 }}>
+          الشروط والبنود: محفوظة فارغة أو بسطورٍ فارغة — لا تُعدّ نصًّا كاملًا.</p> : null}
+      <TermsSections terms={items(snapshot.terms).filter((item) => item.trim())} risks={items(snapshot.risks)}
+        postOpInstructions={items(snapshot.postOpInstructions)} />
+      {snapshot.risks.state !== "stored" ? missing("المخاطر والمضاعفات", snapshot.risks.state) : null}
+      {snapshot.postOpInstructions.state !== "stored" ? missing("تعليمات العناية", snapshot.postOpInstructions.state) : null}
     </>
   );
 }
@@ -263,7 +249,7 @@ export default async function ConsentPrintPage({
         <PrintButton />
         <div className="sheet sheet-a4 consent-sheet" data-consent-mode="signed" style={{ padding: "10mm 12mm", fontSize: "9pt", lineHeight: "1.45" }}>
           <PrintHeader settings={settings} title="إقرار موافقة مستنيرة — نسخة معاد طباعتها من سجلٍّ محفوظ" compact />
-          <PatientBox patient={patient} dateStr={resolution.signedOn} dateLabel="تاريخ التوقيع" />
+          <PatientBox patient={patient} dateStr={resolution.signedOn} dateLabel="تاريخ التوقيع" unknownDate={resolution.signedOn === null} />
 
           <div style={{ marginTop: "3.5mm", borderBottom: "1.5px solid #0f172a", paddingBottom: "1.5mm" }}>
             <span style={{ fontSize: "11pt", fontWeight: 900, color: "#0f172a" }}>
@@ -277,7 +263,7 @@ export default async function ConsentPrintPage({
           {stored.snapshot ? (
             <>
               <p style={{ margin: "2mm 0", fontSize: "8pt", color: "#334155" }}>النص أدناه هو المحفوظ مع الإقرار وقت التوقيع.</p>
-              <TermsSections {...stored.snapshot} />
+              <StoredTermsSections snapshot={stored.snapshot} />
             </>
           ) : (
             <div data-no-snapshot style={{ marginTop: "3mm", border: "1px dashed #94a3b8", borderRadius: "2mm", padding: "3mm", fontSize: "8.5pt", color: "#0f172a" }}>
@@ -295,7 +281,9 @@ export default async function ConsentPrintPage({
                 <img data-signature-img src={`/api/documents/${resolution.documentId}`} alt="التوقيع المحفوظ للمقر"
                   style={{ maxHeight: "18mm", maxWidth: "90%", objectFit: "contain" }} />
               </div>
-              <div style={{ fontSize: "7.5pt", color: "#64748b" }}>تاريخ التوقيع: {friendlyDateLong(resolution.signedOn)}</div>
+              <div style={{ fontSize: "7.5pt", color: "#64748b" }}>
+                تاريخ التوقيع: {resolution.signedOn ? friendlyDateLong(resolution.signedOn) : "غير مسجّل في السجل (وقت التسجيل في النظام أدناه ليس تاريخ التوقيع)"}
+              </div>
             </div>
             <div style={{ fontSize: "8pt", color: "#334155", lineHeight: 1.7 }}>
               <div style={{ fontWeight: 800, color: "#0f172a" }}>بيانات السجل</div>
