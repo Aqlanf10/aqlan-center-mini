@@ -200,6 +200,9 @@ class EndoRequestError extends Error {
 interface PatientEndoProps {
   patientId: number; authorityKey?: string; canWrite: boolean; canEditPlans?: boolean; openVisitId: number | null;
   onDraftChange?: (pending: boolean) => void;
+  onClinicalChange?: () => void;
+  workflowReady?: boolean;
+  workflowIsCurrent?: () => boolean;
   onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
   onOpenToday?: () => void; onOpenPlans?: () => void; onOpenAccount?: () => void;
 }
@@ -211,7 +214,7 @@ export function PatientEndo(props: PatientEndoProps) {
   return <PatientEndoWorkspace key={JSON.stringify([props.patientId, authority, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
-function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount }: PatientEndoProps) {
+function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
   const [treatments, setTreatments] = useState<EndoTreatmentView[] | null>(null);
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
@@ -357,6 +360,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
         return list.some((one) => one.id === payload.id) ? list.map((one) => (one.id === payload.id ? payload : one)) : [payload, ...list];
       });
       setSelectedId(payload.id);
+      onClinicalChange?.();
       return payload;
     } catch (failure) {
       if (mounted.current && mutationSequence.current === ticket) {
@@ -384,7 +388,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const todayRecord = selected && openVisitId !== null ? selected.visits.find((visit) => visit.visitId === openVisitId) ?? null : null;
 
   const startForm = (treatment: EndoTreatmentView) => {
-    if (!referenceRead.current.clinical || !mounted.current) return;
+    if (!workflowReady || workflowIsCurrent?.() === false || !referenceRead.current.clinical || !mounted.current) return;
     if (!discard()) return;
     setOpenForm(null); setAddendum(null); setClosing(null); setCrownLink({ crown: "", rct: "" });
     setSelectedId(treatment.id);
@@ -561,7 +565,9 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
           {/* ── تسجيل جلسة اليوم ── */}
           {canWrite && selected.status === "in_progress" ? (
             <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="تسجيل الجلسة">
-              {openVisitId === null && !form ? (
+              {!workflowReady && !form ? (
+                <p role="status">تعذّر التحقق من الزيارة المفتوحة. أعد تحميل الملخص قبل تسجيل جلسة.</p>
+              ) : openVisitId === null && !form ? (
                 <p className="text-xs text-amber-800" data-testid="endo-no-visit">لا توجد زيارة مفتوحة لهذا المريض — ابدأ الزيارة من «زيارة اليوم» ثم سجّل الجلسة هنا.</p>
               ) : !form ? (
                 <button type="button" data-testid="endo-record" onClick={() => startForm(selected)}
@@ -570,7 +576,8 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
                 </button>
               ) : (
                 <div className="space-y-3" data-testid="endo-form">
-                  {formVisitId !== openVisitId ? <p role="alert">تغيّرت الزيارة المفتوحة. بقيت المسودة لزيارة #{formVisitId}؛ راجع السياق قبل التسجيل.</p> : null}
+                  {!workflowReady ? <p role="status">الملخص غير متاح؛ بقيت المسودة دون اعتماد سياق الزيارة.</p> : null}
+                  {workflowReady && formVisitId !== openVisitId ? <p role="alert">تغيّرت الزيارة المفتوحة. بقيت المسودة لزيارة #{formVisitId}؛ راجع السياق قبل التسجيل.</p> : null}
                   <div className="grid gap-3 sm:grid-cols-3" data-testid="endo-primary-fields">
                     <label className={label}>عمل الجلسة
                       <Select value={form.stage} onChange={(value) => patch({ stage: value || "assessment" })} options={ENDO_STAGES.map((key) => [key, ENDO_STAGE_LABEL[key]] as [string, string])} testId="endo-stage" />
@@ -614,9 +621,9 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
                   </details>
                   <div className="grid gap-2 sm:grid-cols-2" data-testid="endo-note-fields">{renderField("note")}{renderField("nextStep")}</div>
                   <div className="flex gap-2">
-                    <button type="button" data-testid="endo-save" disabled={busy || formVisitId !== openVisitId || formTreatmentId !== selected.id || selected.status !== "in_progress"}
+                    <button type="button" data-testid="endo-save" disabled={!workflowReady || busy || formVisitId !== openVisitId || formTreatmentId !== selected.id || selected.status !== "in_progress"}
                       onClick={async () => {
-                        if (formVisitId === null || formVisitId !== openVisitId || formTreatmentId === null || formTreatmentId !== selected.id || selected.status !== "in_progress") return;
+                        if (!workflowReady || workflowIsCurrent?.() === false || formVisitId === null || formVisitId !== openVisitId || formTreatmentId === null || formTreatmentId !== selected.id || selected.status !== "in_progress") return;
                         const saved = await mutate(() => request(`/api/patients/${patientId}/endo/${formTreatmentId}/visits`, "PUT", payloadFrom(form, formVisitId, editingVersion)));
                         if (saved) { setForm(null); setNotice("حُفظ سجلّ الجلسة."); }
                       }}
