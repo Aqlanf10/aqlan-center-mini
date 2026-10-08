@@ -63,10 +63,10 @@ function Recipient({ recipient }: { recipient: DailyClinicExpenseRecipient }) {
 
 function ReceiptTable({ receipts, zone, title, id }: { receipts: DailyClinicReceipt[]; zone: string; title: string; id: string }) {
   return <TablePanel id={id} title={title} note="حركات مسجّلة في اليوم المحدد. المبلغ الأصلي وعملة تسوية الهدف مختلفان؛ الحركة العكسية قد تكون تصحيح تسجيل وليست إثبات رد نقدي.">
-    <table className={styles.detailsTable} data-testid={id}>
+    <table className={`${styles.detailsTable} ${styles.receiptTable}`} data-testid={id}>
       <thead><tr><th scope="col">السند / الوقت</th><th scope="col">المريض</th><th scope="col">الحركة / الوسيلة</th><th scope="col">المبلغ الأصلي</th><th scope="col">الهدف المسجّل</th><th scope="col">تسوية الهدف</th><th scope="col">المعادل / الصرف المسجّل</th></tr></thead>
       <tbody>{receipts.length === 0 ? <tr><td colSpan={7}>لا توجد حركات مسجّلة لهذه الفئة في اليوم المحدد.</td></tr> : receipts.map((receipt) => <tr key={receipt.id} data-receipt-id={receipt.id}>
-        <th scope="row">{receipt.receiptNumber}<small>#{receipt.id}</small><small><Timestamp value={receipt.at} zone={zone} /></small></th>
+        <th scope="row"><bdi dir="ltr" className={styles.documentNumber}>{receipt.receiptNumber}</bdi><small>#{receipt.id}</small><small><Timestamp value={receipt.at} zone={zone} /></small></th>
         <td>{receipt.patientName}<small>ملف #{receipt.patientId}</small></td>
         <td>{receipt.kind === "refund" ? "حركة عكسية / تصحيح مسجّل" : "تحصيل مسجّل"}<small>{receipt.method === "cash" ? "نقد" : receipt.method === "transfer" ? "تحويل" : receipt.method}</small>{receipt.reversalOfId !== null ? <small>عكس السند #{receipt.reversalOfId}</small> : null}</td>
         <td><Money minor={receipt.kind === "refund" ? -receipt.tenderMinor : receipt.tenderMinor} currency={receipt.tenderCurrency} /><small><bdi>{receipt.tenderCurrency}</bdi></small></td>

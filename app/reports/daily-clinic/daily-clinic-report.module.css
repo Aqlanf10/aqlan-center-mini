@@ -53,6 +53,7 @@
 .report tfoot th, .report tfoot td { background: #eef5fa; font-weight: 700; border-top: 2px solid #6b8195; }
 .report tbody th { font-weight: 600; }
 .report small { display: block; margin-top: 3px; color: #425870; font-size: 11px; line-height: 1.6; }
+.documentNumber { display: block; direction: ltr; unicode-bidi: isolate; }
 .amount { font-variant-numeric: tabular-nums; max-width: 100%; overflow-wrap: anywhere; }
 .unknown { color: #8b4d09; font-weight: 600; }
 .report .unknown { color: #8b4d09; }
@@ -96,6 +97,9 @@
    * explicit per-currency print panels, never clipping or a tiny font. */
   .report .patientColumn, .report .recipientColumn { width: 11%; }
   .report .workColumn, .report .countColumn { width: 13%; }
+  /* Leave enough space for a receipt reference without mixing wrapped parts
+   * with the adjacent RTL patient column in paper reading order. */
+  .report .receiptTable thead th:first-child { width: 24%; }
   .report .amount { font-family: Arial, "Liberation Sans", sans-serif; font-size: 8.5pt; white-space: nowrap; overflow-wrap: normal; word-break: normal; }
   .report .groupedCurrencyPrintHidden { display: none !important; }
   .report .currencyPrintAppendix { display: block; }

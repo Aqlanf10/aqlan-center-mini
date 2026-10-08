@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dailyClinicReportFixture } from "../fixtures/daily-clinic-report";
 import { baseUrl, harness, authedGet } from "./_server";
-import { emitDailyClinicEvidence, type DailyClinicEvidenceFile } from "./_daily-clinic-evidence";
+import { emitDailyClinicEvidence, emitDailyClinicFailureEvidence, type DailyClinicEvidenceFile } from "./_daily-clinic-evidence";
 
 // Built page + isolated test database for authentication only. Every report
 // payload is synthetic and intercepted; no live clinic record enters artifacts.
@@ -261,49 +261,64 @@ describe("daily clinic full-result A4 print proof", () => {
       const path = ".settings-ui-artifacts/daily-clinic-full-a4.pdf";
       await mkdir(".settings-ui-artifacts", { recursive: true });
       const bytes = await f.page.pdf({ path, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
-      expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
-      const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
-      const pages = await f.page.evaluate((xml) => {
-        const document = new DOMParser().parseFromString(xml, "application/xml");
-        if (document.querySelector("parsererror")) throw new Error("Invalid PDF XML");
-        return Array.from(document.getElementsByTagName("page")).map((page) => ({
-          width: Number(page.getAttribute("width")), height: Number(page.getAttribute("height")),
-          words: Array.from(page.getElementsByTagName("word")).map((word) => ({ text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")), yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
-        }));
-      }, xml);
-      expect(pages.length).toBeGreaterThan(2);
-      for (const page of pages) {
-        expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5);
-        expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
-        for (const word of page.words) {
-          expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-          expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+      try {
+        const reference = f.page.getByTestId("daily-clinic-other-receipts").locator('tbody th[scope="row"] > bdi');
+        expect(await reference.innerText()).toBe("SYNTHETIC-NONATTENDEE-501");
+        expect(await reference.getAttribute("dir")).toBe("ltr");
+        expect(await reference.evaluate((node) => {
+          const range = document.createRange(); range.selectNodeContents(node);
+          return range.getClientRects().length;
+        })).toBe(1);
+        expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+        const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+        const pages = await f.page.evaluate((xml) => {
+          const document = new DOMParser().parseFromString(xml, "application/xml");
+          if (document.querySelector("parsererror")) throw new Error("Invalid PDF XML");
+          return Array.from(document.getElementsByTagName("page")).map((page) => ({
+            width: Number(page.getAttribute("width")), height: Number(page.getAttribute("height")),
+            words: Array.from(page.getElementsByTagName("word")).map((word) => ({ text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")), yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
+          }));
+        }, xml);
+        expect(pages.length).toBeGreaterThan(2);
+        for (const page of pages) {
+          expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5);
+          expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
+          for (const word of page.words) {
+            expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
+            expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+          }
         }
+        const allWords = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
+        for (let i = 1; i <= count; i++) expect(allWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
+        const attendeePages = pages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
+        expect(attendeePages.length).toBeGreaterThan(1);
+        for (const page of attendeePages) for (const currency of ["YER", "SAR", "USD"]) expect(page.words.filter((word) => plain(word.text) === currency).length).toBeGreaterThanOrEqual(3);
+        // All nine values of the first patient's financial row belong to the
+        // same paper page as that patient's marker, including its long summary.
+        const first = attendeePages.find((page) => page.words.some((word) => plain(word.text) === "SYNTHETIC-0001"))!;
+        const firstText = first.words.map((word) => plain(word.text)).join(" ");
+        for (const amount of ["987,654,321", "234,567.89", "345,678.90", "123,456", "4,567.89", "5,678.90", "987,530,865", "230,000.00", "340,000.00"]) expect(firstText).toContain(amount);
+        // Footer figures must also remain whole words, not merely reconstruct
+        // correctly after removing line breaks from a damaged paper layout.
+        expect(allWords).toContain("55,308,641,976");
+        const compact = allWords.join("");
+        expect(compact).toContain("SYNTHETIC-NONATTENDEE-501");
+        expect(compact).toContain("SYNTHETIC-EXPENSE-700");
+        expect(allWords).not.toContain("SYNTHETIC-CREATOR-NOT-RECIPIENT");
+        expect(await f.page.getByTestId("daily-clinic-end").isVisible()).toBe(true);
+        // Exact unique amounts in the main footer stay present once in that DOM
+        // footer. The separate closing summary is intentionally a labeled repeat.
+        expect(await f.page.getByTestId("daily-clinic-attendee-totals").count()).toBe(1);
+        await writeFile(".settings-ui-artifacts/daily-clinic-print-proof.json", JSON.stringify({ synthetic: true, attendeeCount: count, pageCount: pages.length, attendeePageCount: attendeePages.length, dimensions: pages.map(({ width, height }) => ({ width, height })), complete: true }, null, 2));
+        f.assertIsolated();
+        evidence.push({ filename: "daily-clinic-full-a4.pdf", mime: "application/pdf", bytes });
+      } catch (error) {
+        // This is explicitly failed diagnostic output, not successful evidence.
+        // The fixture must still prove all report input was synthetic/isolated.
+        f.assertIsolated();
+        emitDailyClinicFailureEvidence(bytes);
+        throw error;
       }
-      const allWords = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
-      for (let i = 1; i <= count; i++) expect(allWords.filter((word) => word === `SYNTHETIC-${String(i).padStart(4, "0")}`)).toHaveLength(1);
-      const attendeePages = pages.filter((page) => page.words.some((word) => /^SYNTHETIC-\d{4}$/.test(plain(word.text))));
-      expect(attendeePages.length).toBeGreaterThan(1);
-      for (const page of attendeePages) for (const currency of ["YER", "SAR", "USD"]) expect(page.words.filter((word) => plain(word.text) === currency).length).toBeGreaterThanOrEqual(3);
-      // All nine values of the first patient's financial row belong to the
-      // same paper page as that patient's marker, including its long summary.
-      const first = attendeePages.find((page) => page.words.some((word) => plain(word.text) === "SYNTHETIC-0001"))!;
-      const firstText = first.words.map((word) => plain(word.text)).join(" ");
-      for (const amount of ["987,654,321", "234,567.89", "345,678.90", "123,456", "4,567.89", "5,678.90", "987,530,865", "230,000.00", "340,000.00"]) expect(firstText).toContain(amount);
-      // Footer figures must also remain whole words, not merely reconstruct
-      // correctly after removing line breaks from a damaged paper layout.
-      expect(allWords).toContain("55,308,641,976");
-      const compact = allWords.join("");
-      expect(compact).toContain("SYNTHETIC-NONATTENDEE-501");
-      expect(compact).toContain("SYNTHETIC-EXPENSE-700");
-      expect(allWords).not.toContain("SYNTHETIC-CREATOR-NOT-RECIPIENT");
-      expect(await f.page.getByTestId("daily-clinic-end").isVisible()).toBe(true);
-      // Exact unique amounts in the main footer stay present once in that DOM
-      // footer. The separate closing summary is intentionally a labeled repeat.
-      expect(await f.page.getByTestId("daily-clinic-attendee-totals").count()).toBe(1);
-      await writeFile(".settings-ui-artifacts/daily-clinic-print-proof.json", JSON.stringify({ synthetic: true, attendeeCount: count, pageCount: pages.length, attendeePageCount: attendeePages.length, dimensions: pages.map(({ width, height }) => ({ width, height })), complete: true }, null, 2));
-      f.assertIsolated();
-      evidence.push({ filename: "daily-clinic-full-a4.pdf", mime: "application/pdf", bytes });
     } finally { await f.context.close(); }
   });
 
