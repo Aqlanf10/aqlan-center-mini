@@ -36,3 +36,11 @@ Files:
 What the test asserts: the invoice appears once with its plan item, case and tooth (`single_plan_item`); the agreement row
 shows 300,000 / 120,000 / 180,000; the patient's only receipts are 50,000 (invoice) and 20,000 (opening) — the 120,000 is
 never a receipt or today's collection.
+
+## Retained run evidence (CI log)
+
+The real-records journey also writes this run's own files (the six screens above and `daily-clinic-real-a4.pdf`) to the CI log
+as `SYNTHETIC_PRINT_EVIDENCE_V1` records, scope `daily-clinic-real-records`. Each record has `acceptance: true`, SHA-256, the run
+identity and the checked-out commit with its parents. Files are accepted per scenario only after all of its assertions passed,
+and the set is emitted only when complete. `decodeEvidence()` in `__tests__/security-http/_synthetic-evidence-log.ts` rebuilds
+and verifies them. Locally, all 7 decoded byte-identical.

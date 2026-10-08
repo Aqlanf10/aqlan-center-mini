@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { authedMutation, baseUrl, harness } from "./_server";
+import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
 
 /**
  * (INV-LINK REPORT, Dot review 5461818993 evidence gap) The daily clinic close rendered by the built app from records
@@ -22,6 +23,17 @@ let patientId = 0;
 let invoiceId = 0;
 let invoiceNumber = "";
 let agreementId = 0;
+// Dot review 5461818993/5461563181: this run's own screens and PDF are retained in the CI log (bounded, checksummed,
+// with run/checkout identity), accepted per scenario only after all its assertions passed, emitted only when complete.
+const EVIDENCE = new Map<string, EvidenceFile["mime"]>([
+  ...[1280, 390].flatMap((width) => ["invoices", "legacy"].map((name) => [`daily-clinic-real-${name}-${width}.png`, "image/png"] as const)),
+  ["daily-clinic-real-invoices-390-scrolled.png", "image/png"], ["daily-clinic-real-legacy-390-scrolled.png", "image/png"],
+  ["daily-clinic-real-a4.pdf", "application/pdf"],
+]);
+const accepted: EvidenceFile[] = [];
+const accept = async (names: string[]) => { for (const filename of names) {
+  accepted.push({ filename, mime: EVIDENCE.get(filename)!, bytes: await readFile(`${ARTIFACTS}/${filename}`) });
+} };
 const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Aden" }).format(new Date());
 
 beforeAll(async () => {
@@ -61,7 +73,10 @@ beforeAll(async () => {
   agreementId = (await legacy.json() as { agreement: { id: number } }).agreement.id;
   expect((await pay({ amount: "20000", invoiceId: null, openingCurrency: "YER" })).status).toBeLessThan(300);
 }, 240_000);
-afterAll(async () => { await browser?.close(); await db?.end(); });
+afterAll(async () => {
+  await browser?.close(); await db?.end();
+  if (accepted.length > 0) await emitAcceptedEvidence({ scope: "daily-clinic-real-records", expected: EVIDENCE, files: accepted, aggregateCap: 4 * 1024 * 1024 });
+});
 
 async function openReport(width: number) {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
@@ -124,6 +139,8 @@ describe("(INV-LINK REPORT) daily close from real records", () => {
         await writeFile(`${ARTIFACTS}/daily-clinic-real-${name}-390-scrolled.png`, await page.screenshot());
       }
       expect(errors).toEqual([]);
+      await accept(["invoices", "legacy"].flatMap((name) => [`daily-clinic-real-${name}-${width}.png`,
+        ...(width === 390 ? [`daily-clinic-real-${name}-390-scrolled.png`] : [])]));
     } finally { await context.close(); }
   });
 
@@ -139,6 +156,7 @@ describe("(INV-LINK REPORT) daily close from real records", () => {
       expect(text).toContain(invoiceNumber);
       expect(text).toContain("قبل النظام");
       for (const amount of ["300,000", "120,000", "180,000"]) expect(text).toContain(amount);
+      await accept(["daily-clinic-real-a4.pdf"]);
     } finally { await context.close(); }
   });
 });
