@@ -147,19 +147,33 @@ describe("additive immutable coverage on an owned PostgreSQL18 fixture", () => {
     expect(agreementTable).toBeGreaterThanOrEqual(0);
     expect(coverageTable).toBeGreaterThan(agreementTable);
     const coverageSection = sql.slice(coverageTable).split(/\n-- /)[0];
-    expect(coverageSection).toContain(recorded.stamp);
-    expect(coverageSection).toContain("{14,15,16}");
+    // The backup writes the same microsecond instant in ISO form (T separator, ±HH:MM offset) rather than PostgreSQL text form.
+    const isoStamp = recorded.stamp.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+    expect(isoStamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}:\d{2}$/);
+    expect(coverageSection).toContain(`'${isoStamp}'`);
+    // Arrays are written as quoted-element literals; prove the literal restores to the exact smallint[] value.
+    expect(coverageSection).toContain(`'{"14","15","16"}'`);
+    expect((await pool().query(`SELECT '{"14","15","16"}'::smallint[] = ARRAY[14,15,16]::smallint[] AS same`)).rows[0].same).toBe(true);
     expect(coverageSection).toContain("recorded_at");
     expect(coverageSection).not.toMatch(/setval\(/);
   });
-  it("preserves the existing patient-owned cascade without permitting standalone coverage deletion", async () => {
+  it("keeps the declared patient-owned cascade, refuses standalone coverage deletion, and the plan's RESTRICT key keeps history while it exists", async () => {
     const agreement = await seedAgreement(pool());
     await insertSnapshot(pool(), agreement);
     await expect(pool().query("DELETE FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1", [agreement.id])).rejects.toThrow("append-only");
-    // The pristine fresh-UUID fixture contains synthetic records only. No reset or real-data deletion is used.
-    await pool().query("DELETE FROM patients WHERE id=$1", [agreement.patient_id]);
-    expect((await pool().query("SELECT 1 FROM legacy_treatment_agreements WHERE id=$1", [agreement.id])).rows).toHaveLength(0);
-    expect((await pool().query("SELECT 1 FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1", [agreement.id])).rows).toHaveLength(0);
+    const { rows: actions } = await pool().query<{ child: string; action: string }>(`
+      SELECT conrelid::regclass::text AS child, confdeltype::text AS action FROM pg_constraint
+       WHERE contype = 'f' AND confrelid IN ('patients'::regclass, 'legacy_treatment_agreements'::regclass)
+         AND conrelid IN ('legacy_treatment_agreements'::regclass, 'legacy_treatment_coverage_snapshots'::regclass)
+         AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = conrelid
+           AND attname = CASE conrelid WHEN 'legacy_treatment_agreements'::regclass THEN 'patient_id' ELSE 'agreement_id' END)]
+       ORDER BY 1`);
+    expect(actions).toEqual([{ child: "legacy_treatment_agreements", action: "c" }, { child: "legacy_treatment_coverage_snapshots", action: "c" }]);
+    // The pristine fresh-UUID fixture contains synthetic records only. A patient that owns the agreement's plan cannot be
+    // deleted (treatment_plans.patient_id is RESTRICT), so the historical agreement and its coverage remain intact.
+    await expect(pool().query("DELETE FROM patients WHERE id=$1", [agreement.patient_id])).rejects.toThrow("treatment_plans_patient_id_fkey");
+    expect((await pool().query("SELECT 1 FROM legacy_treatment_agreements WHERE id=$1", [agreement.id])).rows).toHaveLength(1);
+    expect((await pool().query("SELECT 1 FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1", [agreement.id])).rows).toHaveLength(1);
   });
   it("rolls back agreement and snapshot together if the encompassing writer transaction fails", async () => {
     const client = await pool().connect();

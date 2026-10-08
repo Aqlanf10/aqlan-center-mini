@@ -104,6 +104,8 @@ describe.each(["live", "void"] as const)("immutable %s legacy identity survives 
     expect(signed.sessionConflicts?.join(" ")).not.toContain("Synthetic foreign private clinical label");
     expect(await q("SELECT 1 FROM visit_procedures WHERE visit_id=$1", [freeVisit])).toHaveLength(1);
     expect(await q("SELECT 1 FROM visits WHERE id=$1 AND signed_at IS NOT NULL", [freeVisit])).toHaveLength(0);
+    // Leave the queue with documentation still unsigned: the one-active-visit-per-day guard (LIVE-4) stays in force.
+    expect((await db.finishVisit(freeVisit))?.status).toBe("done");
 
     // Catalog reclassification into a financial-only line must use the same immutable identity fence.
     await q("UPDATE services SET category='consultation' WHERE id=$1", [originalService]);
