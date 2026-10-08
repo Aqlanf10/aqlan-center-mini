@@ -120,7 +120,10 @@ These checks cover existing work and sibling lines within one request.
 
 A bridged orthodontic case uses its actual orthodontic lifecycle. Closing it shares
 patient-first serialization with financial linkage. Intake bridges only one compatible
-shell; ambiguous or mismatched scope is refused. No invoice creates wires, diagnosis,
+candidate; ambiguous or mismatched scope is refused. A candidate is an unbridged running ortho
+case that an invoice opened (`origin = 'invoice'`) or an ordinary case that a non-cancelled
+invoice line reused through its plan item (verified linkage, review 5461388673). The bridge
+never rewrites the reused case's origin or title; its audit row names the source. No invoice creates wires, diagnosis,
 endodontic findings, laboratory orders, or an `ortho_cases` clinical record.
 
 An ordinary billed orthodontic item is NOT an unlimited adjustment package. Its exact

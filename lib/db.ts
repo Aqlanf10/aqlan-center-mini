@@ -21197,6 +21197,19 @@ export async function listOrthoCases(today: string, status?: CaseStatus): Promis
   return hydrateCases(rows, today);
 }
 
+/**
+ * (Dot 5461388673) An ordinary case is invoice work when a live invoice line is recorded on one of its plan items:
+ * the invoice reused it rather than opening an intake shell. That verified link — not a rewritten origin — makes it
+ * the ortho intake's bridge candidate. A cancelled invoice never makes it one.
+ */
+const CASE_HAS_LIVE_INVOICE_WORK_SQL = `EXISTS (
+  SELECT 1 FROM plan_items work_item
+    JOIN treatment_plans work_plan ON work_plan.id = work_item.plan_id AND work_plan.patient_id = clinical_cases.patient_id
+    JOIN invoice_items work_line ON work_line.plan_item_id = work_item.id
+    JOIN invoices work_invoice ON work_invoice.id = work_line.invoice_id
+      AND work_invoice.patient_id = clinical_cases.patient_id AND work_invoice.status <> 'cancelled'
+   WHERE work_item.case_id = clinical_cases.id)`;
+
 export async function createOrthoCase(input: {
   patientId: number;
   appliance: Appliance;
@@ -21237,9 +21250,10 @@ export async function createOrthoCase(input: {
     );
     /* (INV-LINK D) حالة التقويم الأولية التي فتحتها فاتورة («تحتاج تقييمًا سريريًّا») تُجسَر إلى الحالة الحقيقية
        في المعاملة نفسها — فلا يبقى للمريض سياقان للتقويم، مع الحفاظ على نطاقها؛ تمويل الجلسات يتبع بندها الصريح. واحدةٌ فقط تُجسَر. */
-    const { rows: shells } = await client.query<{ id: number; site: string | null }>(
-      `SELECT id, site FROM clinical_cases
-        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL AND origin = 'invoice'
+    const { rows: shells } = await client.query<{ id: number; site: string | null; origin: string }>(
+      `SELECT id, site, origin FROM clinical_cases
+        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL
+          AND (origin = 'invoice' OR ${CASE_HAS_LIVE_INVOICE_WORK_SQL})
           AND status IN ('active', 'waiting')
         ORDER BY id FOR UPDATE`, [input.patientId]);
     const expectedSite = input.arches === "upper" ? "الفك العلوي" : input.arches === "lower" ? "الفك السفلي" : "الفكّان";
@@ -21248,11 +21262,14 @@ export async function createOrthoCase(input: {
       return { ok: false, message: "راجع حالة التقويم الأولية وموضعها؛ لا تُنشأ حالة أخرى أو تُجسَر بنطاق مختلف." };
     }
     if (shells.length === 1) {
+      // Only an intake shell gets the ortho title; a reused ordinary case keeps its own title and origin.
       await client.query(
-        `UPDATE clinical_cases SET ortho_case_id = $2, title = 'تقويم الأسنان' WHERE id = $1`, [shells[0].id, rows[0].id]);
+        `UPDATE clinical_cases SET ortho_case_id = $2, title = CASE WHEN origin = 'invoice' THEN 'تقويم الأسنان' ELSE title END
+          WHERE id = $1`, [shells[0].id, rows[0].id]);
       await insertAuditRow(client, {
         action: "ortho.plan_link", entity: "patient", entityId: input.patientId, entityLabel: "تقويم الأسنان",
-        details: { الحالة_التخصصية: shells[0].id, حالة_التقويم: rows[0].id, المصدر: "تقييم حالة فتحتها فاتورة" },
+        details: { الحالة_التخصصية: shells[0].id, حالة_التقويم: rows[0].id,
+          المصدر: shells[0].origin === "invoice" ? "تقييم حالة فتحتها فاتورة" : "حالة قائمة أعادت الفاتورة استخدامها" },
         actor: input.createdBy, actorRole: null,
       });
     }
