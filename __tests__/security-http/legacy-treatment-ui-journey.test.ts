@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Request, type Route } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
+import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
 
 /**
  * (INV-LINK LEGACY) Treatment started before the system, through the real built form and the shared Dental Chart.
@@ -18,6 +19,21 @@ let bridge = 0;
 const stamp = Date.now();
 const SHOTS = ".settings-ui-artifacts";
 
+/*
+ * Dot review 5461563181: this run's own desktop/mobile journey screenshots and native PDFs are retained in the CI log
+ * (bounded, checksummed `SYNTHETIC_PRINT_EVIDENCE_V1`, with run/checkout identity). A width's files are accepted only
+ * after every assertion of that width passed; the set is emitted only when complete.
+ */
+const EVIDENCE = new Map<string, EvidenceFile["mime"]>([
+  ...[1280, 390].flatMap((width) => ["form", "saved", "case", "account"].map((scene) =>
+    [`legacy-treatment-${scene}-${width}.png`, "image/png"] as const)),
+  ["legacy-treatment-plan-print.pdf", "application/pdf"], ["legacy-treatment-statement-print.pdf", "application/pdf"],
+]);
+const accepted: EvidenceFile[] = [];
+const accept = (names: string[]) => { for (const filename of names) {
+  accepted.push({ filename, mime: EVIDENCE.get(filename)!, bytes: readFileSync(`${SHOTS}/${filename}`) });
+} };
+
 beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
@@ -28,7 +44,10 @@ beforeAll(async () => {
     [`جسر قبل النظام ${stamp}`]));
   mkdirSync(SHOTS, { recursive: true });
 }, 240_000);
-afterAll(async () => { await browser?.close(); await db?.end(); });
+afterAll(async () => {
+  await browser?.close(); await db?.end();
+  if (accepted.length > 0) await emitAcceptedEvidence({ scope: "legacy-treatment-journey", expected: EVIDENCE, files: accepted, aggregateCap: 4 * 1024 * 1024 });
+});
 
 async function open(patientId: number, width: number, path: string): Promise<Page> {
   const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
@@ -129,7 +148,8 @@ describe("pre-system treatment through the built form", () => {
       } finally { await account.context().close(); }
     }
 
-    if (width !== 1280) return;
+    const screens = ["form", "saved", "case", "account"].map((scene) => `legacy-treatment-${scene}-${width}.png`);
+    if (width !== 1280) { accept(screens); return; }
     const print = await open(patientId, 1280, "");
     try {
       const pdf = async (url: string, name: string) => {
@@ -150,6 +170,7 @@ describe("pre-system treatment through the built form", () => {
       const statementText = await pdf(`/print/statement/${patientId}`, "legacy-treatment-statement-print");
       expect(statementText).toMatch(/180,000/);
     } finally { await print.context().close(); }
+    accept([...screens, "legacy-treatment-plan-print.pdf", "legacy-treatment-statement-print.pdf"]);
   });
 });
 
