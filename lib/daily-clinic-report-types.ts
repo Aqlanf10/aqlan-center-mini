@@ -85,6 +85,72 @@ export interface DailyClinicReceipt {
   recordedBaseMinor: number;
   exchangeRate: number;
 }
+/** (INV-LINK REPORT) One row per invoice; explicit receipts only, never an estimated split across cases. */
+export interface DailyClinicInvoiceLine {
+  id: number;
+  description: string;
+  totalMinor: number;
+  planItemId: number | null;
+  planId: number | null;
+  caseId: number | null;
+  toothCode: number | null;
+}
+export interface DailyClinicInvoiceCorrection {
+  /** Stored audit evidence only (`invoice.correct`); never an inferred replacement chain. */
+  originalInvoiceId: number;
+  originalInvoiceNumber: string | null;
+  correctedInvoiceNumber: string;
+  reason: string | null;
+  at: string;
+  actor: string;
+}
+export interface DailyClinicInvoice {
+  id: number;
+  invoiceNumber: string;
+  patientId: number;
+  patientName: string;
+  status: "open" | "paid" | "cancelled";
+  currency: Currency;
+  totalMinor: number;
+  discountMinor: number;
+  /** Zero when cancelled, as in the canonical patient balance. */
+  netMinor: number;
+  issuedAt: string;
+  issuedClinicDate: string;
+  issuedOnReportDay: boolean;
+  /** Why this invoice is in the day's report (it appears once even with several reasons). */
+  reasons: ("issued_today" | "receipt_today" | "linked_to_day_agreement")[];
+  linkage: "financial_only" | "single_plan_item" | "single_case" | "mixed";
+  lines: DailyClinicInvoiceLine[];
+  explicitPaymentIds: number[];
+  explicitlySettledMinor: number;
+  remainingMinor: number;
+  corrections: DailyClinicInvoiceCorrection[];
+  correctsInvoiceNumbers: string[];
+}
+export interface DailyClinicLegacyAgreement {
+  id: number;
+  patientId: number;
+  patientName: string;
+  serviceName: string;
+  specialty: string;
+  toothCode: number | null;
+  coverageTeeth: number[] | null;
+  coverageScope: string | null;
+  coverageRecorded: boolean;
+  currency: Currency;
+  agreedMinor: number;
+  /** Paid before the system. Not a receipt and never part of the day's collections. */
+  previouslyPaidMinor: number;
+  /** Remaining at system start; already inside the opening balance, never added again to current debt. */
+  remainingAtStartMinor: number;
+  historicalAsOf: string;
+  status: "live" | "void";
+  voidReason: string | null;
+  planItemId: number;
+  caseId: number | null;
+}
+
 export interface DailyClinicReport {
   date: string;
   clinicTimeZone: string;
@@ -101,6 +167,8 @@ export interface DailyClinicReport {
   work: DailyClinicWork[];
   currentAccounts: DailyClinicAccount[];
   receipts: DailyClinicReceipt[];
+  invoices: DailyClinicInvoice[];
+  legacyAgreements: DailyClinicLegacyAgreement[];
   expenses: DailyClinicExpenseReport;
   totals: {
     attendeesCount: number;
@@ -120,6 +188,10 @@ export interface DailyClinicReport {
     nativeNetRecorded: DailyCurrencyAmounts;
     nativeCashNetRecorded: DailyCurrencyAmounts;
     nativeTransferNetRecorded: DailyCurrencyAmounts;
+    /** Net of non-cancelled invoices issued on the report day, per currency. */
+    invoicesIssuedNet: DailyCurrencyAmounts;
+    invoicesIssuedCount: number;
+    cancelledInvoicesCount: number;
   };
   warnings: string[];
 }
@@ -134,6 +206,8 @@ export interface DailyClinicSourceVisit {
 export interface DailyClinicSourcePlan {
   id: number; patientId: number; title: string; status: string; consentAt: string | null;
   currency: string; totalMinor: number; funded: boolean;
+  /** A live (non-cancelled) invoice line references one of this plan's items via invoice_items.plan_item_id. */
+  invoiceLinked: boolean;
 }
 export interface DailyClinicSourceItem {
   id: number; planId: number; serviceName: string; quantity: number; unitPriceMinor: number;
@@ -148,6 +222,20 @@ export interface DailyClinicSourceWork {
 export interface DailyClinicSourceInvoice {
   id: number; patientId: number; currency: string; totalMinor: number; discountMinor: number;
   status: string; planId: number | null;
+  invoiceNumber: string; createdAt: string; clinicDate: string;
+}
+export interface DailyClinicSourceInvoiceLine {
+  id: number; invoiceId: number; description: string; totalMinor: number;
+  planItemId: number | null; planId: number | null; caseId: number | null; toothCode: number | null;
+}
+export interface DailyClinicSourceInvoiceCorrection {
+  originalInvoiceId: number; correctedInvoiceNumber: string; reason: string | null; at: string; actor: string;
+}
+export interface DailyClinicSourceLegacyAgreement {
+  id: number; patientId: number; serviceName: string; specialty: string; toothCode: number | null;
+  coverageTeeth: number[] | null; coverageScope: string | null; coverageRecorded: boolean;
+  currency: string; agreedMinor: number; previouslyPaidMinor: number; remainingMinor: number;
+  historicalAsOf: string; status: string; voidReason: string | null; planItemId: number; caseId: number | null;
 }
 export interface DailyClinicSourcePayment {
   id: number; patientId: number; patientName: string; receiptNumber: string;
@@ -165,6 +253,9 @@ export interface DailyClinicSource {
   items: DailyClinicSourceItem[];
   work: DailyClinicSourceWork[];
   invoices: DailyClinicSourceInvoice[];
+  invoiceLines: DailyClinicSourceInvoiceLine[];
+  invoiceCorrections: DailyClinicSourceInvoiceCorrection[];
+  legacyAgreements: DailyClinicSourceLegacyAgreement[];
   payments: DailyClinicSourcePayment[];
   openings: DailyClinicSourceOpening[];
   additionalPlanLinks: { planId: number; patientId: number; visitId: number }[];

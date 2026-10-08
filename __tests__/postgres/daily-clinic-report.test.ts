@@ -24,7 +24,8 @@ beforeAll(async () => {
       status text, consent_at timestamptz, base_currency text, total_minor bigint);
     CREATE TEMP TABLE plan_installments (id integer PRIMARY KEY, plan_id integer);
     CREATE TEMP TABLE plan_items (id integer PRIMARY KEY, plan_id integer, service_name text,
-      quantity integer, unit_price_minor bigint, status text, visit_id integer, done_at timestamptz);
+      quantity integer, unit_price_minor bigint, status text, visit_id integer, done_at timestamptz,
+      case_id integer, tooth_code integer);
     CREATE TEMP TABLE visit_procedures (id integer PRIMARY KEY, visit_id integer, service_id integer,
       quantity integer, tooth_code integer, doctor_id integer, plan_item_id integer, unit_price_minor bigint);
     CREATE TEMP TABLE ortho_cases (id integer PRIMARY KEY, patient_id integer, plan_id integer, responsible_doctor_id integer);
@@ -33,7 +34,17 @@ beforeAll(async () => {
     CREATE TEMP TABLE endo_visits (id integer PRIMARY KEY, treatment_id integer, visit_id integer, stage text, doctor_id integer);
     CREATE TEMP TABLE treatment_sessions (id integer PRIMARY KEY, visit_id integer, plan_item_id integer);
     CREATE TEMP TABLE invoices (id integer PRIMARY KEY, patient_id integer, base_currency text,
-      total_minor bigint, discount_minor bigint, status text, plan_id integer);
+      total_minor bigint, discount_minor bigint, status text, plan_id integer,
+      invoice_number text, created_at timestamptz DEFAULT '2020-09-01 08:00+00');
+    CREATE TEMP TABLE invoice_items (id integer PRIMARY KEY, invoice_id integer, description text,
+      total_minor bigint, plan_item_id integer);
+    CREATE TEMP TABLE audit_log (id integer PRIMARY KEY, action text, entity text, entity_id text,
+      details jsonb, actor text, created_at timestamptz);
+    CREATE TEMP TABLE legacy_treatment_agreements (id integer PRIMARY KEY, patient_id integer, service_name text,
+      specialty text, tooth_code integer, currency text, agreed_minor bigint, previously_paid_minor bigint,
+      remaining_minor bigint, historical_as_of date, status text, void_reason text, plan_item_id integer, case_id integer);
+    CREATE TEMP TABLE legacy_treatment_coverage_snapshots (agreement_id integer PRIMARY KEY,
+      snapshot_tooth_codes smallint[], snapshot_scope text);
     CREATE TEMP TABLE payments (id integer PRIMARY KEY, patient_id integer, receipt_number text,
       invoice_id integer, plan_id integer, opening_currency text, currency text, amount_minor bigint,
       base_amount_minor bigint, exchange_rate numeric, kind text, method text, created_at timestamptz, reversal_of_id integer);
@@ -51,7 +62,8 @@ beforeEach(async () => {
   await client.query(`TRUNCATE pg_temp.patients,pg_temp.parties,pg_temp.planned_visits,pg_temp.visits,
     pg_temp.services,pg_temp.treatment_plans,pg_temp.plan_installments,pg_temp.plan_items,pg_temp.visit_procedures,
     pg_temp.ortho_cases,pg_temp.ortho_adjustments,pg_temp.endo_treatments,pg_temp.endo_visits,pg_temp.treatment_sessions,
-    pg_temp.invoices,pg_temp.payments,pg_temp.patient_opening_balances,pg_temp.payables,pg_temp.expense_categories,
+    pg_temp.invoices,pg_temp.invoice_items,pg_temp.audit_log,pg_temp.legacy_treatment_agreements,
+    pg_temp.legacy_treatment_coverage_snapshots,pg_temp.payments,pg_temp.patient_opening_balances,pg_temp.payables,pg_temp.expense_categories,
     pg_temp.expenses,pg_temp.expense_payable_allocations`);
 });
 afterAll(async () => { await client.end(); });

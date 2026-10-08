@@ -149,6 +149,32 @@ export function DailyClinicReportBody({ report, clinicName }: { report: DailyCli
       </table>
     </TablePanel>
 
+    <TablePanel id="daily-clinic-invoices" title="الفواتير: كل فاتورة مرة واحدة مع ربط بنودها" note="الربط من بند الفاتورة نفسه (بند الخطة والحالة والسن)، لا من حقل خطة الفاتورة وحده. الدفعات هنا هي المربوطة بالفاتورة صراحةً فقط؛ الفاتورة المختلطة لا توزع دفعاتها على الحالات. الملغاة تظهر بقيمة صفرية، والتصحيح من سجل التدقيق المخزّن وحده.">
+      <table className={styles.detailsTable} data-testid="daily-clinic-invoices"><thead><tr><th scope="col">الفاتورة / المريض</th><th scope="col">الحالة / سبب الظهور</th><th scope="col">البنود وربطها</th><th scope="col">العملة</th><th scope="col">الصافي</th><th scope="col">المدفوع المربوط</th><th scope="col">المتبقي</th><th scope="col">التصحيح</th></tr></thead>
+        <tbody>{report.invoices.length === 0 ? <tr><td colSpan={8}>لا فواتير صادرة اليوم أو مسددة اليوم أو مرتبطة باتفاقات اليوم.</td></tr> : report.invoices.map((invoice) => <tr key={invoice.id} data-invoice-id={invoice.id} data-invoice-status={invoice.status} data-invoice-linkage={invoice.linkage}>
+          <th scope="row"><bdi>{invoice.invoiceNumber}</bdi><small>{invoice.patientName} · <Timestamp value={invoice.issuedAt} zone={zone} /></small></th>
+          <td>{({ open: "مفتوحة", paid: "مسددة", cancelled: "ملغاة" })[invoice.status]}<small>{invoice.reasons.map((reason) => ({ issued_today: "صدرت اليوم", receipt_today: "سُدد عليها اليوم", linked_to_day_agreement: "مرتبطة باتفاق اليوم" })[reason]).join("، ")}</small></td>
+          <td>{invoice.lines.map((line) => <small key={line.id} data-invoice-line={line.id}>{line.description}{line.toothCode !== null ? ` · سن ${line.toothCode}` : ""} — {line.planItemId === null ? "مالي فقط" : `بند #${line.planItemId}${line.planId !== null ? ` · خطة #${line.planId}` : ""}${line.caseId !== null ? ` · حالة #${line.caseId}` : ""}`} · <Money minor={line.totalMinor} currency={invoice.currency} /></small>)}<small>{({ financial_only: "فاتورة مالية بلا بنود علاجية", single_plan_item: "بند علاجي واحد", single_case: "حالة واحدة", mixed: "مختلطة: لا توزيع للدفعات على الحالات" })[invoice.linkage]}</small></td>
+          <td><bdi>{invoice.currency}</bdi></td><td><Money minor={invoice.netMinor} currency={invoice.currency} />{invoice.discountMinor > 0 ? <small>خصم: <Money minor={invoice.discountMinor} currency={invoice.currency} /></small> : null}</td>
+          <td><Money minor={invoice.explicitlySettledMinor} currency={invoice.currency} /><small>السندات: {invoice.explicitPaymentIds.join("، ") || "لا يوجد"}</small></td>
+          <td><Money minor={invoice.remainingMinor} currency={invoice.currency} /></td>
+          <td>{invoice.corrections.map((correction, index) => <small key={index}>صُححت بالفاتورة <bdi>{correction.correctedInvoiceNumber}</bdi> · {correction.reason ?? "بلا سبب مسجّل"} · {correction.actor}</small>)}{invoice.correctsInvoiceNumbers.map((number) => <small key={number}>تصحيح للفاتورة <bdi>{number}</bdi></small>)}{invoice.corrections.length === 0 && invoice.correctsInvoiceNumbers.length === 0 ? <small>لا تصحيح مسجّل</small> : null}</td>
+        </tr>)}</tbody>
+        <tfoot><tr><th scope="row" colSpan={4}>صافي الفواتير الصادرة اليوم (غير الملغاة)</th><td colSpan={4}>{CURRENCIES.map((currency) => <small key={currency}><bdi>{currency}</bdi>: <Money minor={totals.invoicesIssuedNet[currency]} currency={currency} /></small>)}<small>عدد الصادرة: {totals.invoicesIssuedCount} · الملغاة الظاهرة: {totals.cancelledInvoicesCount}</small></td></tr></tfoot>
+      </table>
+    </TablePanel>
+
+    <TablePanel id="daily-clinic-legacy" title="علاج بدأ قبل النظام: الحقائق التاريخية" note="المدفوع قبل النظام ليس تحصيل اليوم ولا سندًا. المتبقي عند البداية مُدرج في الرصيد الافتتاحي لحساب المريض ولا يضاف إلى الدين مرة ثانية. التغطية من اللقطة الثابتة المسجّلة؛ غيابها يعني مراجعة لا تخمينًا.">
+      <table className={styles.detailsTable} data-testid="daily-clinic-legacy"><thead><tr><th scope="col">المريض / العلاج</th><th scope="col">التغطية</th><th scope="col">العملة</th><th scope="col">المتفق عليه</th><th scope="col">المدفوع قبل النظام</th><th scope="col">المتبقي عند البداية</th><th scope="col">حتى تاريخ</th><th scope="col">الحالة</th></tr></thead>
+        <tbody>{report.legacyAgreements.length === 0 ? <tr><td colSpan={8}>لا علاج سابق للنظام لمراجعي اليوم.</td></tr> : report.legacyAgreements.map((row) => <tr key={row.id} data-legacy-id={row.id}>
+          <th scope="row">{row.patientName}<small>حالة بدأت قبل النظام · {row.serviceName} · اتفاق #{row.id}</small></th>
+          <td>{row.coverageRecorded ? (row.coverageTeeth && row.coverageTeeth.length > 0 ? `أسنان ${row.coverageTeeth.join("، ")}` : row.coverageScope ?? "مسجّلة") : <span className={styles.unknown}>التغطية غير مثبتة — تحتاج مراجعة</span>}{row.toothCode !== null ? <small>السن المرجعي {row.toothCode}</small> : null}</td>
+          <td><bdi>{row.currency}</bdi></td><td><Money minor={row.agreedMinor} currency={row.currency} /></td><td><Money minor={row.previouslyPaidMinor} currency={row.currency} /></td><td><Money minor={row.remainingAtStartMinor} currency={row.currency} /></td>
+          <td><bdi dir="ltr">{row.historicalAsOf}</bdi></td><td>{row.status === "live" ? "قائم" : "مُبطل"}{row.voidReason ? <small>{row.voidReason}</small> : null}</td>
+        </tr>)}</tbody>
+      </table>
+    </TablePanel>
+
     <TablePanel id="daily-clinic-work" title="السجلات الحالية للأعمال الموقّعة قبل حد اليوم" note="القيمة المعروفة هي سعر الإجراء المسجّل قبل خصومات الفاتورة، أو قيمة بند خطة مكتمل بسعره المسجّل. ليست إيرادًا صافيًا أو إثبات تحصيل. الجلسة المشمولة بلا قيمة قابلة للتقييم تظهر كمجهولة، ولا يوزع مبلغ الاتفاق عليها تخمينيًا. قد يوثّق الإجراء وسجل التخصص العمل نفسه؛ هذه سطور أدلة لا عدد إجراءات مستقلًا، وأسماؤها وروابطها حالية وليست لقطة تاريخية.">
       <table className={styles.detailsTable} data-testid="daily-clinic-work"><thead><tr><th scope="col">المراجع / الزيارة</th><th scope="col">العمل / الكمية</th><th scope="col">المنفّذ / السن</th><th scope="col">التوثيق / المصدر</th><th scope="col">الارتباط / التصنيف</th><th scope="col">القيمة / أساسها</th></tr></thead>
         <tbody>{report.work.length === 0 ? <tr><td colSpan={6}>لا أعمال موقّعة مؤهلة قبل حد اليوم. الزيارات المعلّقة والتوثيق المتأخر موضّحان في جدول الحضور.</td></tr> : report.work.map((work) => <tr key={work.key} data-work-key={work.key}>
@@ -214,6 +240,7 @@ export function DailyClinicReportBody({ report, clinicName }: { report: DailyCli
 
     <TablePanel id="daily-clinic-reconciliation" title="تفصيل الحركات للمراجعة" note="مبالغ السندات الأصلية والعكس ووسيلة الدفع والأرصدة الدائنة، لمن يحتاج المطابقة التفصيلية. هذه الأرقام من المصدر نفسه ولا تُجمع مع صافيها مرة ثانية.">
       <table className={styles.summaryTable} data-testid="daily-clinic-reconciliation"><thead><tr><th scope="col">البند التفصيلي</th><CurrencyHeaders prefix="التفصيل" /></tr></thead><tbody>
+        <SummaryRow label="صافي الفواتير الصادرة اليوم" amounts={totals.invoicesIssuedNet} />
         <SummaryRow label="سندات التحصيل الأصلية المسجّلة اليوم" amounts={totals.nativeReceipts} />
         <SummaryRow label="عكس التحصيل والتصحيحات المسجّلة اليوم" amounts={totals.nativeReversals} />
         <SummaryRow label="صافي التحصيل: وسيلة النقد" amounts={totals.nativeCashNetRecorded} />
