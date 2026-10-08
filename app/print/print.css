@@ -208,4 +208,25 @@ html[data-reprint="true"] .reprint-mark {
     min-height: 0;
   }
   .report-kpis { grid-template-columns: repeat(4, 1fr); }
+
+  /* Collections keep the same native A4 margins, type and financial content.
+     Reclaim only cell whitespace: 1 mm per row leaves room for the contact
+     footer. Longer reports still paginate at natural row breaks. */
+  .sheet-report[data-report="collections"] .report-table th,
+  .sheet-report[data-report="collections"] .report-table td {
+    padding-top: 1mm;
+    padding-bottom: 1mm;
+  }
+  /* When more space is needed, carry the closing notes with the contact footer
+     instead of creating a page containing only the address and phone number. */
+  .sheet-report[data-report="collections"] .report-notes {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  .sheet-report[data-report="collections"] .report-contact-footer {
+    break-before: avoid-page;
+    page-break-before: avoid;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
 }

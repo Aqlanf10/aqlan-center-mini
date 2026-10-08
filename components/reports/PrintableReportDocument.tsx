@@ -156,7 +156,7 @@ export function PrintableReportDocument({
   return (
     <>
       <style>{`@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 8mm; }`}</style>
-      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`}>
+      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report}>
         <PrintHeader settings={settings} title={result.title} />
 
         <div className="report-meta">
@@ -264,7 +264,9 @@ export function PrintableReportDocument({
           </div>
         ) : null}
 
-        <PrintFooter settings={settings} />
+        {result.report === "collections" ? (
+          <footer className="report-contact-footer"><PrintFooter settings={settings} /></footer>
+        ) : <PrintFooter settings={settings} />}
       </div>
     </>
   );
