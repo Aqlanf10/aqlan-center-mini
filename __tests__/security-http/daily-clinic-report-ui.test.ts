@@ -264,6 +264,15 @@ async function readPaper(page: Page, path: string): Promise<PaperPage[]> {
     }));
   }, xml);
 }
+const PRINT_MARGIN_PT = 10 * 72 / 25.4;
+/** Poppler reports Arabic combining-mark font bounds above the visible glyph.
+ * CI1584 page 4: tanwin bbox 25.828pt, actual 300dpi ink 29.28pt, CSS margin 28.346pt.
+ * Allow at most 3pt of top font bearing for marked Arabic prose only. Financial
+ * digits, ordinary words, horizontal bounds and bottom bounds retain 26pt. */
+function minimumPaperWordTop(text: string): number {
+  const markedArabicProse = /\p{Script=Arabic}/u.test(text) && /[\u064b-\u065f\u0670]/u.test(text) && !/\p{N}/u.test(text);
+  return markedArabicProse ? PRINT_MARGIN_PT - 3 : 26;
+}
 function assertPaperBounds(pages: PaperPage[]) {
   expect(pages.length).toBeGreaterThan(0);
   for (const [pageIndex, page] of pages.entries()) {
@@ -272,10 +281,34 @@ function assertPaperBounds(pages: PaperPage[]) {
     for (const word of page.words) {
       const context = `PDF page ${pageIndex + 1}, word ${JSON.stringify(word.text).slice(0, 140)}, box ${JSON.stringify({ xMin: word.xMin, xMax: word.xMax, yMin: word.yMin, yMax: word.yMax })}, page ${page.width}×${page.height}pt; CSS margin 10mm`;
       expect(word.xMin, context).toBeGreaterThanOrEqual(26); expect(word.xMax, context).toBeLessThanOrEqual(page.width - 26);
-      expect(word.yMin, context).toBeGreaterThanOrEqual(26); expect(word.yMax, context).toBeLessThanOrEqual(page.height - 26);
+      expect(word.yMin, context).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax, context).toBeLessThanOrEqual(page.height - 26);
     }
   }
 }
+describe("daily clinic paper font-bound calibration", () => {
+  const page = (word: Partial<PaperPage["words"][number]>): PaperPage => ({ width: 841.89, height: 595.28,
+    words: [{ text: "سجل", xMin: 50, xMax: 90, yMin: 50, yMax: 65, ...word }] });
+  it("accepts bounded marked Arabic top font bearing while preserving the physical margin basis", () => {
+    expect(minimumPaperWordTop("سجل")).toBe(26);
+    expect(minimumPaperWordTop("مستقلًا")).toBeCloseTo(25.3464566929);
+    expect(() => assertPaperBounds([page({ text: "مستقلًا", yMin: 25.82801 })])).not.toThrow();
+    expect(() => assertPaperBounds([page({ text: "علاجٌ", yMin: PRINT_MARGIN_PT - 3 })])).not.toThrow();
+  });
+  it.each([
+    ["marked text beyond the bounded bearing", { text: "علاجٌ", yMin: PRINT_MARGIN_PT - 3 - 0.01 }],
+    ["ordinary Arabic", { text: "سجل", yMin: 25.82801 }],
+    ["Latin text with a combining mark", { text: "e\u0301", yMin: 25.82801 }],
+    ["financial digits", { text: "9,007,199,254,740,991", yMin: 25.82801 }],
+    ["Arabic digits", { text: "١٢٣", yMin: 25.82801 }],
+    ["digits inside marked Arabic", { text: "علاجٌ 1", yMin: 25.82801 }],
+    ["left edge of marked text", { text: "علاجٌ", xMin: 25.82801 }],
+    ["right edge of marked text", { text: "علاجٌ", xMax: 841.89 - 25.82801 }],
+    ["bottom edge of marked text", { text: "علاجٌ", yMax: 595.28 - 25.82801 }],
+  ] satisfies [string, Partial<PaperPage["words"][number]>][])("rejects %s", (_label, word) => {
+    expect(() => assertPaperBounds([page(word)])).toThrow();
+  });
+});
+
 /** Patient file numbers intentionally repeat in account/work details. Prove
  * primary cohort uniqueness within its printed table, bounded by its exact
  * unique subtotal, rather than treating later identity labels as duplicate visits. */
@@ -356,7 +389,7 @@ describe("daily clinic full-result A4 print proof", () => {
           expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
           for (const word of page.words) {
             expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-            expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+            expect(word.yMin).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
           }
         }
         const allWords = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
@@ -582,7 +615,7 @@ describe("daily clinic full-result A4 print proof", () => {
         expect(Math.abs(page.width - 841.89)).toBeLessThan(1.5); expect(Math.abs(page.height - 595.28)).toBeLessThan(1.5);
         for (const word of page.words) {
           expect(word.xMin).toBeGreaterThanOrEqual(26); expect(word.xMax).toBeLessThanOrEqual(page.width - 26);
-          expect(word.yMin).toBeGreaterThanOrEqual(26); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
+          expect(word.yMin).toBeGreaterThanOrEqual(minimumPaperWordTop(word.text)); expect(word.yMax).toBeLessThanOrEqual(page.height - 26);
         }
       }
       const words = pages.flatMap((page) => page.words.map((word) => plain(word.text)));
