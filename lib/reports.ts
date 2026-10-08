@@ -1046,7 +1046,11 @@ async function loadSpecialtyExtras(filters: ReportFilters): Promise<NonNullable<
   };
 }
 
-async function loadContext(filters: ReportFilters, needMovements: boolean): Promise<ReportContext> {
+async function loadContext(
+  filters: ReportFilters,
+  needMovements: boolean,
+  expenseComparison: { from: string; to: string } | null = null,
+): Promise<ReportContext> {
   const doctorParties = await listParties("doctor");
   // (TD-05) الأساس دستوري من الكود — التقارير كلها تعرض مكافئاتها به.
   const base = CLINIC_BASE_CURRENCY;
@@ -1059,8 +1063,9 @@ async function loadContext(filters: ReportFilters, needMovements: boolean): Prom
     `SELECT (created_at AT TIME ZONE $1)::date::text AS date,
             base_amount_minor::text AS base, category, payee_text AS payee
        FROM expenses
-      WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
-    [CLINIC_TIME_ZONE, filters.from, filters.to],
+      WHERE (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+         OR ($4::date IS NOT NULL AND (created_at AT TIME ZONE $1)::date BETWEEN $4::date AND $5::date)`,
+    [CLINIC_TIME_ZONE, filters.from, filters.to, expenseComparison?.from ?? null, expenseComparison?.to ?? null],
   );
   const expenses: ExpenseEntry[] = expensesRes.rows.map((row) => ({
     date: row.date, minor: num(row.base), category: row.category, payee: row.payee,
@@ -1131,7 +1136,12 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     "practice-overview", "provider-utilization", "practice-trends",
   ].includes(report);
 
-  const ctx = await loadContext(filters, needsMovements);
+  // المقارنة المالية في الشهري فقط؛ اليومي يجمع مصروفات السياق كلها.
+  // اتحاد المدَيَيْن يُبقي الفجوة خارجهما ولا يكرر الحركة إن تداخلا.
+  const expenseComparison = report === "monthly"
+    ? comparisonRange(filters.from, filters.to, filters.compare)
+    : null;
+  const ctx = await loadContext(filters, needsMovements, expenseComparison);
   /* (P0-1) «مستحق الطبيب» في تقرير الطبيب يأتي من محرّك العمولات الواحد (التحصيل
      الفعلي، خصم المختبر، النسبة السارية وقت التحصيل) — لا من صيغةٍ ثانية كانت تضرب
      قيمة الفاتورة كاملةً في نسبة اليوم فتناقض شاشة العمولات. */
