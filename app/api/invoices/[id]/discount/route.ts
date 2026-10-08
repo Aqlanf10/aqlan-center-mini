@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 /**
  * (FIN-DISC) خصمٌ إداريٌّ على فاتورةٍ صادرة — للمدير وحده، بسببٍ مكتوب.
  *
- * الجسم: `{ amount, reason, expectedDiscountMinor }` — المبلغ الإضافي بعملة الفاتورة (نصًّا كما يُكتب في الشاشة)،
+ * الجسم: `{ amount, reason, expectedDiscountMinor, expectedSettledMinor }` — المبلغ الإضافي بعملة الفاتورة (نصًّا كما يُكتب في الشاشة)،
  * والخصم الذي رآه المدير عند فتح النموذج (ليُرفض الطلب إن تغيّر قبل الحفظ أو أُعيد إرساله).
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -33,8 +33,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (reason.length < ADMIN_DISCOUNT_REASON_MIN || reason.length > ADMIN_DISCOUNT_REASON_MAX) {
     return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.reason }, { status: 400 });
   }
-  const expected = source.expectedDiscountMinor;
-  if (!Number.isSafeInteger(expected) || (expected as number) < 0) {
+  // Both what the manager saw must still hold: the discount and the explicit settlement on the invoice.
+  const expectedDiscount = source.expectedDiscountMinor;
+  const expectedSettled = source.expectedSettledMinor;
+  if (!Number.isSafeInteger(expectedDiscount) || (expectedDiscount as number) < 0 || !Number.isSafeInteger(expectedSettled)) {
     return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.stale }, { status: 400 });
   }
 
@@ -47,7 +49,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
     const amount = parseAmount(typeof source.amount === "string" ? source.amount : String(source.amount ?? ""), invoice.baseCurrency ?? "YER");
     if (amount === null || amount <= 0) return NextResponse.json({ message: ADMIN_DISCOUNT_MESSAGE.invalid_amount }, { status: 400 });
-    const result = await applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: amount, expectedDiscountMinor: expected as number,
+    const result = await applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: amount, expected: { discountMinor: expectedDiscount as number, settledMinor: expectedSettled as number },
       reason, actor: session.username, actorRole: session.role });
     if (!result.ok) {
       const status = result.reason === "not_found" ? 404

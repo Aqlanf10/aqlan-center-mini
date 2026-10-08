@@ -23,7 +23,9 @@ export function InvoiceAdminDiscount({ invoice, settledMinor, onDone, onCancel }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitting = useRef(false);
+  // The numbers the manager decides on, frozen when the form opens; the server refuses if either changed.
   const expectedDiscountMinor = useRef(invoice.discountMinor).current;
+  const expectedSettledMinor = useRef(settledMinor).current;
 
   const remaining = invoiceRemainingMinor({ status: invoice.status, totalMinor: invoice.totalMinor,
     discountMinor: invoice.discountMinor, settledMinor });
@@ -42,7 +44,7 @@ export function InvoiceAdminDiscount({ invoice, settledMinor, onDone, onCancel }
     try {
       const response = await fetch(`/api/invoices/${invoice.id}/discount`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, reason: trimmedReason, expectedDiscountMinor }),
+        body: JSON.stringify({ amount, reason: trimmedReason, expectedDiscountMinor, expectedSettledMinor }),
       });
       const payload = await response.json().catch(() => null) as { message?: unknown } | null;
       if (!response.ok) {

@@ -61,9 +61,9 @@ const arabic = async (response: Response) => {
 describe("(FIN-DISC) admin discount API", () => {
   it("is refused for every non-admin role and anonymous callers, with no change", async () => {
     const id = await invoice();
-    expect((await post(id, null, { amount: "1000", reason: "خصم", expectedDiscountMinor: 0 })).status).toBe(401);
+    expect((await post(id, null, { amount: "1000", reason: "خصم", expectedDiscountMinor: 0, expectedSettledMinor: 0 })).status).toBe(401);
     for (const role of ["reception", "doctorA", "cashier", "accountant"] as const) {
-      const response = await post(id, role, { amount: "1000", reason: "قرار", expectedDiscountMinor: 0 });
+      const response = await post(id, role, { amount: "1000", reason: "قرار", expectedDiscountMinor: 0, expectedSettledMinor: 0 });
       expect(response.status, role).toBe(403);
       await arabic(response);
     }
@@ -72,16 +72,20 @@ describe("(FIN-DISC) admin discount API", () => {
 
   it("applies for the admin within the remaining amount and refuses the rest in Arabic", async () => {
     const id = await invoice(100000, 70000);
-    let response = await post(id, "admin", { amount: "1000", reason: "x", expectedDiscountMinor: 0 });
+    let response = await post(id, "admin", { amount: "1000", reason: "x", expectedDiscountMinor: 0, expectedSettledMinor: 70000 });
     expect(response.status).toBe(400); await arabic(response);
-    response = await post(id, "admin", { amount: "abc", reason: "قرار الإدارة", expectedDiscountMinor: 0 });
+    response = await post(id, "admin", { amount: "abc", reason: "قرار الإدارة", expectedDiscountMinor: 0, expectedSettledMinor: 70000 });
     expect(response.status).toBe(400); await arabic(response);
-    response = await post(id, "admin", { amount: "30001", reason: "قرار الإدارة", expectedDiscountMinor: 0 });
+    response = await post(id, "admin", { amount: "30001", reason: "قرار الإدارة", expectedDiscountMinor: 0, expectedSettledMinor: 70000 });
     expect(response.status).toBe(400); expect(await arabic(response)).toContain("المتبقي");
-    response = await post(id, "admin", { amount: "10000", reason: "قرار الإدارة", expectedDiscountMinor: 0 });
+    response = await post(id, "admin", { amount: "10000", reason: "قرار الإدارة", expectedDiscountMinor: 0, expectedSettledMinor: 70000 });
     expect(response.status).toBe(200);
     expect(await discountOf(id)).toBe(10000);
-    response = await post(id, "admin", { amount: "10000", reason: "قرار الإدارة", expectedDiscountMinor: 0 });
+    // A decision taken on a balance that changed (the form saw nothing paid) is stale.
+    response = await post(id, "admin", { amount: "1000", reason: "قرار الإدارة", expectedDiscountMinor: 10000, expectedSettledMinor: 0 });
+    expect(response.status).toBe(409); await arabic(response);
+    expect(await discountOf(id)).toBe(10000);
+    response = await post(id, "admin", { amount: "10000", reason: "قرار الإدارة", expectedDiscountMinor: 0, expectedSettledMinor: 70000 });
     expect(response.status).toBe(409); await arabic(response);
     expect(await discountOf(id)).toBe(10000);
   });
@@ -113,7 +117,13 @@ describe("(FIN-DISC) admin discount on the built patient account page", () => {
       expect(await headerBalance()).toBe(before - 15000);
       await expect.poll(() => page.getByText(`مستحق: ${(before - 15000).toLocaleString("en-US")}`).count()).toBeGreaterThan(0);
       expect(await page.getByText(`مستحق: ${before.toLocaleString("en-US")}`).count()).toBe(0);
+      // The ledger's own balance card shows the same new amount due…
+      await expect.poll(() => page.getByText(`على المريض ${(before - 15000).toLocaleString("en-US")}`).count()).toBeGreaterThan(0);
       await page.screenshot({ path: `${SHOTS}/invoice-admin-discount-done-${width}.png`, fullPage: true });
+      // …and so does the patient summary tab when opened afterwards.
+      await page.goto(`${baseUrl}/patients/${patientId}?tab=summary`, { waitUntil: "domcontentloaded" });
+      await expect.poll(() => page.getByText(`الرصيد: ${(before - 15000).toLocaleString("en-US")}`).count()).toBeGreaterThan(0);
+      expect(await page.getByText(`الرصيد: ${before.toLocaleString("en-US")}`).count()).toBe(0);
     } finally { await context.close(); }
 
     const reception = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });

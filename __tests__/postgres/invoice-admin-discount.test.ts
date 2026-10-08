@@ -38,8 +38,12 @@ async function pay(invoiceId: number, amount: number, kind: "payment" | "refund"
 const due = async () => (await computeDebtRows([patientId])).find((row) => row.currency === "YER")?.dueMinor ?? 0;
 const state = async (id: number) => (await getPool().query(
   `SELECT discount_minor::int AS discount, status, total_minor::int AS total FROM invoices WHERE id = $1`, [id])).rows[0];
-const apply = (invoiceId: number, additionalMinor: number, expectedDiscountMinor: number | null, reason = "قرار الإدارة") =>
-  applyAdminInvoiceDiscount({ invoiceId, additionalMinor, expectedDiscountMinor, reason, actor: "admin1", actorRole: "admin" });
+const settledOf = async (invoiceId: number) => Number((await getPool().query(`SELECT COALESCE(SUM(CASE WHEN kind = 'refund'
+  THEN -amount_minor ELSE amount_minor END), 0)::int AS n FROM payments WHERE invoice_id = $1`, [invoiceId])).rows[0].n);
+/** `expectedSettledMinor` defaults to what a freshly opened form would show now. */
+const apply = async (invoiceId: number, additionalMinor: number, expectedDiscountMinor: number, reason = "قرار الإدارة",
+  expectedSettledMinor?: number) => applyAdminInvoiceDiscount({ invoiceId, additionalMinor, reason, actor: "admin1", actorRole: "admin",
+  expected: { discountMinor: expectedDiscountMinor, settledMinor: expectedSettledMinor ?? await settledOf(invoiceId) } });
 
 describe("(FIN-DISC) admin discount on an issued invoice", () => {
   it("reduces the invoice net and the patient's due once, keeps items/payments, and audits the decision", async () => {
@@ -89,5 +93,29 @@ describe("(FIN-DISC) admin discount on an issued invoice", () => {
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(results.filter((result) => !result.ok && result.reason === "stale")).toHaveLength(1);
     expect(await state(id)).toMatchObject({ discount: 10000 });
+  });
+
+  it("refuses a decision taken on a balance that changed since the form opened (a receipt in between), changing nothing", async () => {
+    const id = await invoice();
+    const seenSettled = await settledOf(id); // the form opens: nothing paid yet
+    await pay(id, 40000);                    // the cashier collects meanwhile
+    const before = await due();
+    expect(await apply(id, 60000, 0, "قرار الإدارة", seenSettled)).toMatchObject({ ok: false, reason: "stale" });
+    expect(await state(id)).toMatchObject({ discount: 0 });
+    expect(await due()).toBe(before);
+  });
+
+  it("serializes a discount against a concurrent receipt: the discount never applies to a settlement it did not see", async () => {
+    const id = await invoice();
+    const [discount] = await Promise.all([apply(id, 60000, 0, "قرار الإدارة", 0), pay(id, 50000)]);
+    const { discount: applied } = await state(id);
+    if (discount.ok) {
+      // The discount committed first, on the settlement it saw (0); the receipt then followed under its own guard.
+      expect(applied).toBe(60000);
+    } else {
+      expect(discount.reason).toBe("stale");
+      expect(applied).toBe(0);
+    }
+    expect((await getPool().query(`SELECT COUNT(*)::int AS n FROM payments WHERE invoice_id = $1`, [id])).rows[0].n).toBeLessThanOrEqual(1);
   });
 });

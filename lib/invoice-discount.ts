@@ -37,13 +37,20 @@ export function invoiceRemainingMinor(state: AdminDiscountState): number {
 }
 
 /** يقرّر الخصم الإضافي دون أثرٍ جانبي — المصدر الواحد للمسار والمعاينة. */
-export function planAdminDiscount(state: AdminDiscountState, additionalMinor: number, expectedDiscountMinor: number | null):
+/** What the manager saw when opening the form: both the discount and the paid amount must still hold. */
+export interface AdminDiscountExpectation { discountMinor: number; settledMinor: number }
+
+export function planAdminDiscount(state: AdminDiscountState, additionalMinor: number, expected: AdminDiscountExpectation | null):
   | { ok: true; beforeDiscountMinor: number; afterDiscountMinor: number; beforeNetMinor: number; afterNetMinor: number;
       remainingBeforeMinor: number; remainingAfterMinor: number }
   | { ok: false; reason: AdminDiscountRefusal } {
   if (state.status === "cancelled") return { ok: false, reason: "cancelled" };
   if (state.status === "paid") return { ok: false, reason: "paid" };
-  if (expectedDiscountMinor !== null && expectedDiscountMinor !== state.discountMinor) return { ok: false, reason: "stale" };
+  // A changed discount OR a changed balance (a receipt, refund or correction since the form opened) is stale:
+  // the manager decided on numbers that no longer hold.
+  if (expected !== null && (expected.discountMinor !== state.discountMinor || expected.settledMinor !== state.settledMinor)) {
+    return { ok: false, reason: "stale" };
+  }
   if (!Number.isSafeInteger(additionalMinor) || additionalMinor <= 0) return { ok: false, reason: "invalid_amount" };
   const remainingBeforeMinor = invoiceRemainingMinor(state);
   if (additionalMinor > remainingBeforeMinor) return { ok: false, reason: "exceeds_remaining" };

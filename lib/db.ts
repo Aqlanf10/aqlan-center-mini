@@ -8221,7 +8221,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
 import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
-import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN, planAdminDiscount, type AdminDiscountRefusal } from "./invoice-discount";
+import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN, planAdminDiscount, type AdminDiscountExpectation, type AdminDiscountRefusal } from "./invoice-discount";
 import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
@@ -9084,7 +9084,8 @@ export type AdminDiscountResult =
 export async function applyAdminInvoiceDiscount(input: {
   invoiceId: number;
   additionalMinor: number;
-  expectedDiscountMinor: number | null;
+  /** The discount and explicit settlement the manager saw; null only for internal callers. */
+  expected: AdminDiscountExpectation | null;
   reason: string;
   actor: string;
   actorRole: string | null;
@@ -9115,7 +9116,7 @@ export async function applyAdminInvoiceDiscount(input: {
       settledMinor += payment.kind === "refund" ? -settled : settled;
     }
     const plan = planAdminDiscount({ status: invoice.status, totalMinor: toMinor(invoice.total_minor),
-      discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expectedDiscountMinor);
+      discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expected);
     if (!plan.ok) return plan;
     await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
     await insertAuditRow(client, {
