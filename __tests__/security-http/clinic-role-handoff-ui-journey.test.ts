@@ -4,14 +4,15 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page, t
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
-import { baseUrl, harness, type RoleSessions } from "./_server";
+import { baseUrl, harness, loginStaff, type RoleSessions, type Session } from "./_server";
 import { formatMoney } from "../../lib/money";
+import { hashPassword } from "../../lib/auth";
 
 /**
  * Actual built-app role handoff on the existing disposable HTTP database.
  * No fulfilled business responses, role impersonation, Production URL, real
- * patient, workflow change or product change. Only two search-only patients
- * and one catalogue service are SQL fixtures. The story's patient, visit,
+ * patient, workflow change or product change. Only two search-only patients,
+ * one catalogue service and one price-authorized doctor are SQL fixtures. The story's patient, visit,
  * doctor assignment, notes, invoice and receipt are created by real UI actions.
  * This bounded story is YER consultation / on-account partial collection.
  * It does not certify plans, consent, specialty episodes, refunds or day close.
@@ -22,6 +23,7 @@ const stamp = randomUUID().replace(/\d/g, (digit) => "ABCDEFGHIJ"[Number(digit)]
 const patientName = `مريض رحلة الأدوار الاصطناعية ${stamp}`;
 const alertText = `تنبيه اصطناعي لا يخص مريضاً حقيقياً ${stamp}`;
 const serviceName = `كشف اصطناعي لرحلة الأدوار ${stamp}`;
+const pricedDoctorUsername = `qa_doc_${stamp.replace(/-/g, "").toLowerCase()}`;
 const searchA = `QASEARCHALPHA${stamp}`;
 const searchB = `QASEARCHBETA${stamp}`;
 const TOTAL = 12_000;
@@ -31,6 +33,7 @@ let db: Client;
 let browser: Browser;
 let serviceId = 0;
 let doctorId = 0;
+let pricedDoctorSession: Pick<Session, "cookie">;
 const contexts: BrowserContext[] = [];
 const externalRequests: string[] = [];
 const pageErrors: string[] = [];
@@ -42,13 +45,14 @@ function cookie(raw: string) {
   return { name, value: value.join("=") };
 }
 
-type StaffRole = Exclude<keyof RoleSessions, "portalA" | "portalB">;
+type StaffRole = Exclude<keyof RoleSessions, "portalA" | "portalB"> | "pricedDoctor";
 async function screen(role: StaffRole, width = 1280) {
   const context = await browser.newContext({
     viewport: { width, height: 900 }, locale: "ar-YE", serviceWorkers: "block",
   });
   contexts.push(context);
-  await context.addCookies([{ ...cookie(h.sessions[role].cookie), url: baseUrl }]);
+  const roleSession = role === "pricedDoctor" ? pricedDoctorSession : h.sessions[role];
+  await context.addCookies([{ ...cookie(roleSession.cookie), url: baseUrl }]);
   await context.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== baseUrl) {
@@ -206,10 +210,24 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   expect((await db.query<{ name: string }>("SELECT current_database() AS name")).rows[0].name).toBe("aqlan_sec_http");
-  doctorId = Number((await db.query<{ party_id: number }>(
-    "SELECT party_id FROM users WHERE username = 'secdoctora' AND role = 'doctor' AND is_active = TRUE",
-  )).rows[0].party_id);
+  // A priced-procedure journey needs the existing explicit catalogue grant.
+  // Create its own isolated doctor, never widen the shared restricted doctor.
+  doctorId = Number((await db.query<{ id: number }>(
+    "INSERT INTO parties (name, kind) VALUES ($1, 'doctor') RETURNING id",
+    [`طبيب رحلة الأدوار الاصطناعية ${stamp}`],
+  )).rows[0].id);
   expect(doctorId).toBeGreaterThan(0);
+  const testPassword = `RoleQa#${randomUUID()}`;
+  await db.query(
+    `INSERT INTO users (username, display_name, password_hash, role, party_id, permissions)
+     VALUES ($1, $2, $3, 'doctor', $4, $5)`,
+    [pricedDoctorUsername, "طبيب اصطناعي مصرح بعرض أسعار الخدمات", await hashPassword(testPassword), doctorId,
+      JSON.stringify({ canViewAllPatients: false, canAddPatient: true, canEditPatient: true,
+        canDeletePatient: false, canViewPlans: true, canEditPlans: true, canViewXrays: true,
+        canUploadXrays: true, canViewAllAppointments: false, canViewServicePrices: true,
+        canViewPatientPayments: false, canViewCashDrawer: false, canUseAiChat: false })],
+  );
+  pricedDoctorSession = await loginStaff(pricedDoctorUsername, testPassword);
   serviceId = Number((await db.query<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, price_sar_minor, price_usd_minor)
      VALUES ($1, 'consultation', $2, TRUE, NULL, NULL) RETURNING id`, [serviceName, TOTAL],
@@ -236,15 +254,28 @@ afterAll(async () => {
 });
 
 describe("real clinic role handoff on one synthetic patient", () => {
-  it("reception → manager assignment → doctor sign → cashier receipt → accountant and manager reconciliation", async () => {
+  it("reception → manager assignment → price-authorized doctor sign → cashier receipt → accountant and manager reconciliation", async () => {
     const reception = await screen("reception");
     const manager = await screen("admin");
-    const doctor = await screen("doctorA");
+    const doctor = await screen("pricedDoctor");
+    const restrictedDoctor = await screen("doctorA");
     const cashier = await screen("cashier", 390);
     const accountant = await screen("accountant");
     const shiftBefore = await ensureOpenShift(manager);
     expect(shiftBefore.open?.id).toBeGreaterThan(0);
     expect(shiftBefore.drawer).not.toBeNull();
+    // Confirm real API admission and exact fixture identity before touching UI.
+    // A missing catalogue is not repaired by selecting an arbitrary service.
+    expect((await restrictedDoctor.context.request.get(`${baseUrl}/api/services`)).status()).toBe(403);
+    const doctorIdentity = await get<{ username: string; role: string; doctorPartyId: number; permissions: { canViewServicePrices: boolean; canViewPatientPayments: boolean } }>(doctor.context, "/api/auth/me");
+    expect(doctorIdentity.username).toBe(pricedDoctorUsername);
+    expect(doctorIdentity.role).toBe("doctor");
+    expect(doctorIdentity.doctorPartyId).toBe(doctorId);
+    expect(doctorIdentity.permissions.canViewServicePrices).toBe(true);
+    expect(doctorIdentity.permissions.canViewPatientPayments).toBe(false);
+    const catalog = await get<{ id: number; name: string; category: string; priceMinor: number; priceConfigured: boolean; isActive: boolean }[]>(doctor.context, "/api/services");
+    expect(catalog.find((row) => row.id === serviceId)).toMatchObject({ id: serviceId, name: serviceName,
+      category: "consultation", priceMinor: TOTAL, priceConfigured: true, isActive: true });
 
     await reception.page.goto(`${baseUrl}/patients`, { waitUntil: "domcontentloaded" });
     await reception.page.getByRole("button", { name: "+ مريض جديد", exact: true }).click();
@@ -325,7 +356,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
     expect(Number(bills[0].id)).toBe(signResult.invoiceId);
     expect(Number(bills[0].total_minor) - Number(bills[0].discount_minor)).toBe(TOTAL);
     expect(bills[0].base_currency).toBe("YER");
-    expect((await db.query("SELECT signed_by FROM visits WHERE id = $1", [visit.id])).rows[0].signed_by).toBe("secdoctora");
+    expect((await db.query("SELECT signed_by FROM visits WHERE id = $1", [visit.id])).rows[0].signed_by).toBe(pricedDoctorUsername);
 
     await cashier.page.goto(`${baseUrl}/finance`, { waitUntil: "domcontentloaded" });
     await cashier.page.getByRole("button", { name: /سند قبض سريع/ }).click();
@@ -439,6 +470,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
       visitId: visit.id, invoiceId: signResult.invoiceId, receiptId: receipt.id,
       invoiceMinor: TOTAL, paymentMinor: COLLECTED, balanceMinor: TOTAL - COLLECTED, currency: "YER",
       roles: ["reception", "admin", "doctor", "cashier", "accountant"],
+      doctorScope: "synthetic doctor with explicit canViewServicePrices and no patient-payment grant",
       shiftAction: "read-and-cancel-only", clinicalScope: "consultation-no-plan-or-consent" })}`);
   }, 240_000);
 
