@@ -468,7 +468,7 @@ async function assertPaginationControls(page: Page, sheet: Locator, expected: Wi
     expect(pages, "old spacing recreates the verified two-page fixture").toHaveLength(2);
     expect(() => assertPdfClosing(pages, footerText, phone, notesTitle)).toThrow(/closing notes and contact footer share a page/);
     controls.push({ filename: "collections-pagination-old-layout-control.pdf", mime: "application/pdf", bytes: pdf });
-  } finally { await oldLayout.evaluate(element => element.remove()); }
+  } finally { await oldLayout.evaluate(element => element.parentNode?.removeChild(element)); }
 
   // Layout stress only: make the seven real fixture rows tall enough to span
   // native pages. No row clones, fabricated totals, hidden content or DB writes.
@@ -490,7 +490,7 @@ async function assertPaginationControls(page: Page, sheet: Locator, expected: Wi
     const rowPages = new Set(words.filter(word => expected.some(row => row.note === compact(word.text))).map(word => word.page));
     expect(rowPages.size, "financial rows continue beyond the first page").toBeGreaterThan(1);
     controls.push({ filename: "collections-pagination-multipage-layout-control.pdf", mime: "application/pdf", bytes: pdf });
-  } finally { await tallRows.evaluate(element => element.remove()); }
+  } finally { await tallRows.evaluate(element => element.parentNode?.removeChild(element)); }
   await settlePaint(page);
   expect(await sheet.innerText(), "all original report content is restored after layout controls").toBe(originalContent);
 }
