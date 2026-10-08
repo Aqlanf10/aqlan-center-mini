@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Response as BrowserResponse } from "playwright";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { build } from "esbuild";
 import { baseUrl, harness, type RoleSessions } from "./_server";
 import { formatMoney } from "../../lib/money";
 
@@ -59,6 +60,21 @@ async function screen(role: StaffRole, width = 1280) {
   });
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
+  // Passive driver events only: do not replace fetch, response methods or
+  // consumption of an obsolete response in the application under test.
+  let transportEvents = 0;
+  const recordTransport = (urlValue: string, phase: string, status?: number) => {
+    const url = new URL(urlValue);
+    if (url.origin !== baseUrl || url.pathname !== "/api/patients" || !url.searchParams.has("q")
+      || transportEvents >= 40) return;
+    transportEvents += 1;
+    const query = url.searchParams.get("q") ?? "";
+    console.log(`ROLE_QA_TRANSPORT ${JSON.stringify({ role, phase, status,
+      queryClass: query.startsWith("QASEARCHALPHA") ? "alpha" : query.startsWith("QASEARCHBETA") ? "beta" : "other" })}`);
+  };
+  page.on("response", (response) => recordTransport(response.url(), "headers", response.status()));
+  page.on("requestfinished", (request) => recordTransport(request.url(), "finished"));
+  page.on("requestfailed", (request) => recordTransport(request.url(), "failed"));
   page.on("pageerror", (error) => pageErrors.push(`${role}: ${error.message}`));
   // An alert is not an acceptance gate. Confirmations are never auto-accepted.
   page.on("dialog", (dialog) => void dialog.dismiss());
@@ -76,6 +92,52 @@ async function bodyPaint(page: Page) {
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
+}
+
+async function observeReleasedResponse(page: Page, response: BrowserResponse, scene: string) {
+  expect(response.status()).toBe(200);
+  // A retired response need not be consumed by the product. Transport finish
+  // is useful diagnostic evidence, not a prerequisite for UI authority. Never
+  // drain a response/clone or change the application's fetch scheduling here.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const finished = await Promise.race([
+    response.finished().then((result) => result === null, () => false),
+    new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), 1000); }),
+  ]);
+  if (timer) clearTimeout(timer);
+  await bodyPaint(page);
+  console.log(`ROLE_QA_RELEASED ${JSON.stringify({ scene, routeFulfillAcknowledged: true,
+    actualHeadersStatus: response.status(), finishedObservedWithinOneSecond: finished })}`);
+}
+
+type ChoiceWatch = { obsoleteSeen: boolean; observer: MutationObserver };
+async function watchObsoleteChoice(page: Page, marker: string) {
+  await page.evaluate((needle) => {
+    const target = document.querySelector('[role="dialog"][aria-label="اختيار مريض لإصدار سند قبض"]');
+    if (!target) throw new Error("Patient picker missing before old-response release");
+    const global = window as unknown as { __roleQaChoiceWatch?: ChoiceWatch };
+    global.__roleQaChoiceWatch?.observer.disconnect();
+    const watch = { obsoleteSeen: false, observer: null as unknown as MutationObserver };
+    const inspect = () => {
+      if (Array.from(target.querySelectorAll("button")).some((button) => button.textContent?.includes(needle))) {
+        watch.obsoleteSeen = true;
+      }
+    };
+    watch.observer = new MutationObserver(inspect);
+    watch.observer.observe(target, { subtree: true, childList: true, characterData: true });
+    inspect();
+    global.__roleQaChoiceWatch = watch;
+  }, marker);
+}
+async function endChoiceWatch(page: Page) {
+  return await page.evaluate(() => {
+    const global = window as unknown as { __roleQaChoiceWatch?: ChoiceWatch };
+    const watch = global.__roleQaChoiceWatch;
+    if (!watch) throw new Error("Patient choice observation missing");
+    watch.observer.disconnect();
+    delete global.__roleQaChoiceWatch;
+    return watch.obsoleteSeen;
+  });
 }
 
 async function capture(page: Page, scene: string, target?: Locator) {
@@ -101,7 +163,7 @@ async function capture(page: Page, scene: string, target?: Locator) {
 
 async function identity(page: Page, id: number) {
   await expect.poll(() => page.url()).toContain(`/patients/${id}`);
-  await expect.poll(() => page.locator("main").innerText()).toContain(patientName);
+  await expect.poll(() => page.getByTestId("patient-workspace").innerText()).toContain(patientName);
   expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
 }
 
@@ -234,7 +296,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
 
     await doctor.page.goto(`${baseUrl}/patients/${patient.id}?tab=today`, { waitUntil: "domcontentloaded" });
     await identity(doctor.page, patient.id);
-    await expect.poll(() => doctor.page.locator("main").innerText()).toContain(alertText);
+    await expect.poll(() => doctor.page.getByTestId("patient-workspace").innerText()).toContain(alertText);
     await noteField(doctor.page, "① الشكوى الرئيسية").fill("فحص اصطناعي لا يخص مريضاً حقيقياً");
     await noteField(doctor.page, "② الفحص").fill("نتيجة فحص اصطناعية لاختبار انتقال السياق");
     await noteField(doctor.page, "② التشخيص").fill(`تشخيص اصطناعي خاص ${stamp}`);
@@ -325,8 +387,8 @@ describe("real clinic role handoff on one synthetic patient", () => {
     await accountant.page.getByRole("note").filter({ hasText: "وضع الاطلاع" }).waitFor();
     await accountant.page.getByPlaceholder("بحث باسم المريض أو رقم السند…").fill(patientName);
     await accountant.page.locator(`a[href="/print/receipt/${receipt.id}"]`).waitFor();
-    expect(await accountant.page.locator("main").innerText()).toContain(formatMoney(COLLECTED, "YER"));
-    expect(await accountant.page.locator("main").innerText()).not.toContain(alertText);
+    expect(await accountant.page.locator("main").last().innerText()).toContain(formatMoney(COLLECTED, "YER"));
+    expect(await accountant.page.locator("main").last().innerText()).not.toContain(alertText);
     for (const name of [/سند قبض سريع/, /سند صرف نثري/, /إغلاق الوردية/, /تصحيح السند/]) {
       expect(await accountant.page.getByRole("button", { name }).count(), String(name)).toBe(0);
     }
@@ -365,7 +427,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
     expect(shiftAfter.drawer!.expected.USD).toBe(shiftBefore.drawer!.expected.USD);
     await manager.page.goto(`${baseUrl}/finance/reconciliation`, { waitUntil: "domcontentloaded" });
     await manager.page.getByRole("button", { name: "جرد وإقفال الوردية", exact: true }).waitFor();
-    await expect.poll(() => manager.page.locator("main").innerText()).toContain(formatMoney(shiftAfter.drawer!.expected.YER, "YER"));
+    await expect.poll(() => manager.page.locator("main").last().innerText()).toContain(formatMoney(shiftAfter.drawer!.expected.YER, "YER"));
     await capture(manager.page, "manager-reconciliation-1280");
     await manager.page.getByRole("button", { name: "جرد وإقفال الوردية", exact: true }).click();
     for (const currency of ["YER", "SAR", "USD"]) expect(await manager.page.getByLabel(`المعدود ${currency}`).inputValue()).toBe("");
@@ -415,14 +477,15 @@ describe("real clinic role handoff on one synthetic patient", () => {
       await input.fill(searchB);
       expect((await newer).status()).toBe(200);
       await picker.getByRole("button").filter({ hasText: searchB }).waitFor();
+      await watchObsoleteChoice(cashier.page, searchA);
       const oldResponse = cashier.page.waitForResponse((response) => {
         const url = new URL(response.url());
         return url.pathname === "/api/patients" && url.searchParams.get("q") === searchA;
       });
       (releaseOld as unknown as () => void)();
       await oldSettled;
-      await (await oldResponse).finished();
-      await bodyPaint(cashier.page);
+      await observeReleasedResponse(cashier.page, await oldResponse, "older-query-after-newer");
+      const obsoleteSeen = await endChoiceWatch(cashier.page);
       const shownOld = await picker.getByRole("button").filter({ hasText: searchA }).count();
       const shownNew = await picker.getByRole("button").filter({ hasText: searchB }).count();
       const countsAfter = (await db.query("SELECT COUNT(*)::int AS n FROM payments WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = ANY($1::text[]))", [[searchA, searchB]])).rows[0].n;
@@ -431,6 +494,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
         inputIsLatest: await input.inputValue() === searchB, oldPatientButtons: shownOld, latestPatientButtons: shownNew,
         paymentCountBefore: countsBefore, paymentCountAfter: countsAfter })}`);
       expect(countsAfter).toBe(countsBefore);
+      expect(obsoleteSeen, "No obsolete patient may appear even transiently after release").toBe(false);
       expect(await input.inputValue()).toBe(searchB);
       expect(shownOld, "An old patient must never replace the results for the visible latest query").toBe(0);
       expect(shownNew).toBe(1);
@@ -473,8 +537,7 @@ describe("real clinic role handoff on one synthetic patient", () => {
       });
       held[index].release();
       await held[index].done;
-      await (await response).finished();
-      await bodyPaint(cashier.page);
+      await observeReleasedResponse(cashier.page, await response, `reopen-${width}-release-${index}`);
     };
     try {
       await cashier.page.goto(`${baseUrl}/finance`, { waitUntil: "domcontentloaded" });
@@ -489,7 +552,9 @@ describe("real clinic role handoff on one synthetic patient", () => {
       await picker.waitFor({ state: "hidden" });
       await open(); expect(await input.inputValue()).toBe("");
       await start(3);
+      await watchObsoleteChoice(cashier.page, searchA);
       await release(1); // Old open's response arrives during the same new query.
+      expect(await endChoiceWatch(cashier.page)).toBe(false);
       expect(await input.inputValue()).toBe(searchA);
       expect(await oldChoice.count()).toBe(0);
       await capture(cashier.page, `cashier-reopen-waiting-${width}`, picker);
@@ -510,6 +575,89 @@ describe("real clinic role handoff on one synthetic patient", () => {
     } finally {
       for (const item of held) item.release();
       await Promise.all(held.map((item) => item.done));
+      await cashier.context.close();
+    }
+  }, 120_000);
+
+  it("the passive completion oracle detects the exact pre-fix component's obsolete patient", async () => {
+    // Counterfactual challenge, not fixed-product or whole-app acceptance.
+    // Preserve the exact old component bytes rather than inventing a buggy toy.
+    const oldSource = readFileSync("__tests__/fixtures/QuickCollectModal-before-guard.tsx");
+    const oldBlob = createHash("sha1").update(`blob ${oldSource.length}\0`).update(oldSource).digest("hex");
+    expect(oldBlob).toBe("e6bbaeaaf2a7ccab41bdad89d4f839bc2f09b9f6");
+    const bundle = await build({
+      stdin: { resolveDir: process.cwd(), loader: "tsx", contents: `
+        import { createElement, useState } from "react";
+        import { createRoot } from "react-dom/client";
+        import { QuickCollectModal } from "./__tests__/fixtures/QuickCollectModal-before-guard";
+        function Fixture() {
+          const [open, setOpen] = useState(true);
+          return createElement(QuickCollectModal, { isOpen: open, onClose: () => setOpen(false),
+            onSelectPatient: () => {}, debtors: [], currency: "YER" });
+        }
+        createRoot(document.getElementById("counterfactual-root")!).render(createElement(Fixture));
+      ` },
+      bundle: true, write: false, format: "iife", platform: "browser", jsx: "automatic",
+      alias: { "@": process.cwd() }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent",
+    });
+    const cashier = await screen("cashier", 390);
+    await cashier.page.route("**/__role-qa-counterfactual", (route) => route.fulfill({
+      status: 200, contentType: "text/html; charset=utf-8",
+      body: '<!doctype html><html dir="rtl"><body><div id="counterfactual-root"></div></body></html>',
+    }));
+    let releaseOld: (() => void) | null = null;
+    let released: Promise<void> | null = null;
+    await cashier.page.route("**/api/patients?*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("q") !== searchA) { await route.continue(); return; }
+      const actual = await route.fetch();
+      expect(actual.status()).toBe(200);
+      const wait = new Promise<void>((resolve) => { releaseOld = resolve; });
+      released = wait.then(async () => { await route.fulfill({ response: actual }); });
+      await released;
+    });
+    const unexpectedCounterfactual: string[] = [];
+    // Highest-priority route: the counterfactual can only read this synthetic
+    // origin. All mutations and external requests are blocked before fallback.
+    await cashier.page.route("**/*", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.origin !== baseUrl || !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+        unexpectedCounterfactual.push(`${request.method()} ${url.pathname}`);
+        await route.abort();
+        return;
+      }
+      await route.fallback();
+    });
+    try {
+      await cashier.page.goto(`${baseUrl}/__role-qa-counterfactual`);
+      await cashier.page.addScriptTag({ content: bundle.outputFiles[0].text });
+      const picker = cashier.page.getByRole("dialog", { name: "اختيار مريض لإصدار سند قبض", exact: true });
+      const input = picker.getByPlaceholder("ابحث بالاسم أو رقم الهاتف أو الملف…");
+      await input.fill(searchA); await expect.poll(() => releaseOld !== null).toBe(true);
+      await input.fill(searchB);
+      await picker.getByRole("button").filter({ hasText: searchB }).waitFor();
+      await watchObsoleteChoice(cashier.page, searchA);
+      const oldResponse = cashier.page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === "/api/patients" && url.searchParams.get("q") === searchA;
+      });
+      (releaseOld as unknown as () => void)(); await released;
+      await observeReleasedResponse(cashier.page, await oldResponse, "counterfactual-old-query");
+      const detected = await endChoiceWatch(cashier.page);
+      const oldChoices = await picker.getByRole("button").filter({ hasText: searchA }).count();
+      const latestChoices = await picker.getByRole("button").filter({ hasText: searchB }).count();
+      expect(await input.inputValue()).toBe(searchB);
+      expect(detected, "The unchanged old handler must fail this same stale-choice oracle").toBe(true);
+      expect(oldChoices).toBe(1); expect(latestChoices).toBe(0);
+      const count = (await db.query("SELECT COUNT(*)::int AS n FROM payments WHERE patient_id IN (SELECT id FROM patients WHERE patient_number = ANY($1::text[]))", [[searchA, searchB]])).rows[0].n;
+      expect(count).toBe(0);
+      expect(unexpectedCounterfactual).toEqual([]);
+      console.log(`ROLE_QA_COUNTERFACTUAL ${JSON.stringify({ oldBlob, oracleDetected: detected,
+        latestInputPreserved: true, oldChoices, latestChoices, paymentCount: count })}`);
+    } finally {
+      if (releaseOld) (releaseOld as () => void)();
+      await released;
       await cashier.context.close();
     }
   }, 120_000);
