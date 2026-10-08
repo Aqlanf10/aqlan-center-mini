@@ -18,6 +18,7 @@ import {
 } from "./db";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, siteText, validateLineSite, type LineSite,
+  type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 import { legacyCoverageOverlaps, legacyCoverageStateFromContext, legacyCoverageStateFromSnapshot, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { isAdmin } from "./roles";
@@ -25,7 +26,7 @@ import { isLegacyVoidMode, parseLegacyVoidRequest, previewLegacyVoid, type Legac
 import { reusableMaster } from "./invoice-linkage-db";
 import {
   legacyCaseTitle, legacyTreatmentFingerprint,
-  type LegacyTreatmentRefusal, type LegacyTreatmentRequest, type LegacyVoidRefusal,
+  type LegacyTreatmentPreview, type LegacyTreatmentRefusal, type LegacyTreatmentRequest, type LegacyVoidRefusal,
 } from "./legacy-treatment";
 import { formatMoney, isCurrency, type Currency } from "./money";
 import { clinicDateString } from "./schedule";
@@ -154,6 +155,216 @@ export async function createLegacyTreatment(input: {
   return { ok: true, replayed: written.replayed, caseCreated: written.caseCreated, agreement: await readAgreement(written.id) };
 }
 
+/** ما سيفعله الحفظ بالاتفاق — يقرّره الكاتب تحت الأقفال، وتقرأه المعاينة بلا أقفال ولا كتابة، بالقواعد نفسها. */
+interface LegacyDecision {
+  service: { id: number; name: string; category: string | null };
+  specialty: LinkageSpecialty;
+  needsCase: boolean;
+  site: LineSite;
+  masterId: number | null;
+  opening: {
+    effect: "none" | "created" | "increased";
+    before: { amountMinor: number; asOfDate: string } | null;
+    after: { amountMinor: number; asOfDate: string } | null;
+    existingNote: string | null;
+  };
+  /** الحالة: لا حاجة، أو قائمة تُعاد، أو جديدة (جسرٌ لحالة تقويم قائمة إن وُجدت)، أو يلزم اختيار المستخدم. */
+  casePlan:
+    | { mode: "none" }
+    | { mode: "existing"; id: number; title: string | null }
+    | { mode: "new"; orthoCaseId: number | null; title: string }
+    | { mode: "choose"; options: { id: number; title: string }[] };
+}
+
+/**
+ * القرار الواحد للحفظ والمعاينة. `lock` للكاتب وحده (FOR UPDATE)؛ المعاينة تقرأ في معاملة قراءة فقط.
+ * ترمي `Refusal` بالسبب نفسه الذي يرفض به الحفظ.
+ */
+async function decideLegacyTreatment(client: DbClient, input: {
+  patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean;
+}, lock: boolean): Promise<LegacyDecision> {
+  const { patientId, request } = input;
+  const { rows: [service] } = await client.query<{ id: number; name: string; category: string | null }>(
+    `SELECT id, name, category FROM services WHERE id = $1 AND is_active = TRUE`, [request.serviceId]);
+  const linkage = service ? lineLinkage({ serviceId: service.id, category: service.category }) : { kind: "financial" as const };
+  if (!service || linkage.kind !== "clinical") throw new Refusal("bad_service");
+  /* (INV-LINK TOOTH) القاعدة نفسها التي تحكم بند الفاتورة: خدمةٌ تخص سنًّا بلا سن لا تُسجَّل (fail closed). */
+  const checked = validateLineSite({
+    category: service.category, toothCode: request.toothCode, surfaces: request.surfaces,
+    episodeTeeth: request.episodeTeeth, scope: request.scope,
+  });
+  if (!checked.ok) throw new Refusal(checked.reason as LegacyTreatmentRefusal);
+  const site = checked.site;
+  // The complete normalized site is captured atomically below; it never creates per-tooth prices/items.
+  if (lock) {
+    await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
+    await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
+      WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [patientId]);
+  }
+
+  // Existing identity survives cancellation, void, and drift in mutable plan/item patient or service.
+  const { rows: priorWork } = await client.query<{
+    id: number; case_id: number | null; tooth_code: number | null; case_site: string | null; status: string; plan_status: string; case_status: string | null;
+    financial_review: boolean; financial_lineage: boolean; has_legacy: boolean; live_legacy: boolean; legacy_context: unknown;
+  }>(
+    `SELECT i.id, i.case_id, i.tooth_code, c.site AS case_site, i.status, t.status AS plan_status, c.status AS case_status,
+      ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review, ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} AS financial_lineage,
+      EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.plan_item_id = i.id) AS has_legacy,
+      EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.plan_item_id = i.id AND la.status = 'live') AS live_legacy, ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context
+     FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN clinical_cases c ON c.id = i.case_id
+     WHERE ((t.patient_id = $1 AND i.service_id = $2) OR EXISTS (
+       SELECT 1 FROM legacy_treatment_agreements legacy_identity
+       WHERE legacy_identity.plan_item_id = i.id AND legacy_identity.patient_id = $1 AND legacy_identity.service_id = $2))
+       AND (i.tooth_code IS NOT DISTINCT FROM $3::smallint OR i.tooth_code = ANY($4::smallint[])
+         OR i.tooth_code IS NULL OR $3::smallint IS NULL OR ${PLAN_ITEM_LEGACY_LINEAGE_SQL})
+     ORDER BY i.id`, [patientId, service.id, site.toothCode, site.episodeTeeth ?? (site.toothCode === null ? [] : [site.toothCode])]);
+  for (const prior of priorWork) {
+    if (prior.has_legacy) {
+      const coverage = legacyCoverageStateFromContext(prior.legacy_context);
+      if (!legacyCoverageOverlaps(coverage, site)) continue;
+      if (coverage.kind !== "verified") throw new Refusal("needs_financial_review");
+    } else if (!caseSiteOverlaps(prior.tooth_code === null ? prior.case_site : String(prior.tooth_code), site)) continue;
+    // An explicit different episode may follow closed, completed, financially resolved ordinary work.
+    // Existing legacy live-scope uniqueness is deliberately retained until episode identity is redesigned.
+    if (!prior.has_legacy && request.caseId !== null && prior.case_id !== null && request.caseId !== prior.case_id
+      && prior.status === "done" && (prior.case_status === "completed" || prior.case_status === "closed")
+      && !prior.financial_review) continue;
+    if (prior.financial_review) throw new Refusal("needs_financial_review");
+    if (prior.live_legacy) throw new Refusal("duplicate_live");
+    if (prior.financial_lineage) throw new Refusal("needs_financial_review");
+    if (prior.plan_status === "active" && (prior.status === "planned" || prior.status === "in_progress")) {
+      throw new Refusal("open_item_exists");
+    }
+    throw new Refusal("needs_financial_review");
+  }
+  const masterId = await reusableMaster(client, patientId, request.currency);
+  if (masterId === false) throw new Refusal("incompatible_plan");
+
+  /* (LEGACY-FIX) مدفوعٌ قديم قد يكون أُدخل سندَ قبض عامًّا (غير مرتبط بفاتورة أو خطة أو رصيد سابق). تسجيل «المدفوع قبل النظام»
+     فوقه يخصم المبلغ نفسه مرتين. لا يصنّف النظام السند من ملاحظته ولا يعكسه: يُرفض التسجيل حتى يراجعه المدير. */
+  if (request.previouslyPaidMinor > 0) {
+    const { rows: [unallocated] } = await client.query<{ receipts: string }>(
+      `SELECT COUNT(*)::text AS receipts FROM payments p
+        WHERE p.patient_id = $1 AND p.kind = 'payment' AND p.invoice_id IS NULL AND p.plan_id IS NULL
+          AND p.opening_currency IS NULL AND p.reversal_of_id IS NULL
+          AND p.amount_minor > COALESCE((SELECT SUM(r.amount_minor) FROM payments r
+            WHERE r.reversal_of_id = p.id AND r.kind = 'refund'), 0)`, [patientId]);
+    if (unallocated.receipts !== "0") throw new Refusal("prior_receipts_review");
+  }
+
+  // ── الرصيد السابق: المتبقي وحده، بمحرّك الرصيد الافتتاحي نفسه ──
+  let opening: LegacyDecision["opening"] = { effect: "none", before: null, after: null, existingNote: null };
+  if (request.remainingMinor > 0) {
+    const existing = await lockedOpening(client, patientId, request.currency, lock && input.canEditOpening);
+    if (existing) {
+      /* رصيدٌ قائم: يُضاف إليه فقط إن كان كلّه متبقيات اتفاقاتٍ حيّة (لا رصيدٌ يدوي قد يشمل هذا العلاج فيُحسب مرتين)،
+         والإضافة إلى رصيدٍ قائم تعديلٌ — للمدير وحده كما في المحرّك. */
+      if (existing.amountMinor !== await liveAgreementRemaining(client, patientId, request.currency)) {
+        throw new Refusal("opening_not_owned");
+      }
+      if (!input.canEditOpening) throw new Refusal("opening_edit_forbidden");
+      const asOfDate = existing.asOfDate < request.historicalAsOf ? existing.asOfDate : request.historicalAsOf;
+      if (await isPeriodLocked(existing.asOfDate) || await isPeriodLocked(asOfDate)) throw new Refusal("period_locked");
+      opening = {
+        effect: "increased", existingNote: existing.note,
+        before: { amountMinor: existing.amountMinor, asOfDate: existing.asOfDate },
+        after: { amountMinor: existing.amountMinor + request.remainingMinor, asOfDate },
+      };
+    } else {
+      if (await isPeriodLocked(request.historicalAsOf)) throw new Refusal("period_locked");
+      opening = { effect: "created", existingNote: null, before: null,
+        after: { amountMinor: request.remainingMinor, asOfDate: request.historicalAsOf } };
+    }
+  }
+
+  // ── الحالة التخصصية: المفتوحة الموافقة تُعاد، أو تُجسَر حالة التقويم القائمة، أو تُفتح حالةٌ موسومة ──
+  const specialty = linkage.specialty;
+  let casePlan: LegacyDecision["casePlan"] = { mode: "none" };
+  if (linkage.needsCase) {
+    const forUpdate = lock ? " FOR UPDATE" : "";
+    if (request.caseId !== null) {
+      const { rows: [chosen] } = await client.query<{ id: number; title: string | null; site: string | null }>(
+        `SELECT id, title, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND status IN ('active', 'waiting')
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('active', 'retention')))${forUpdate}`,
+        [request.caseId, patientId, specialty]);
+      if (!chosen || !caseSiteFits(specialty, chosen.site, site)) throw new Refusal("bad_case");
+      casePlan = { mode: "existing", id: chosen.id, title: chosen.title };
+    } else {
+      const { rows: sameSpecialty } = await client.query<{ id: number; title: string | null; site: string | null }>(
+        `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+          ORDER BY id${forUpdate}`, [patientId, specialty]);
+      const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
+      if (open.length > 1) {
+        casePlan = { mode: "choose", options: open.map((row) => ({ id: row.id, title: row.title ?? `#${row.id}` })) };
+      } else if (open.length === 1) {
+        casePlan = { mode: "existing", id: open[0].id, title: open[0].title };
+      } else {
+        let orthoCaseId: number | null = null;
+        if (specialty === "orthodontics") {
+          const { rows: [ortho] } = await client.query<{ id: number }>(
+            `SELECT o.id FROM ortho_cases o
+              WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+                AND NOT EXISTS (SELECT 1 FROM clinical_cases cc WHERE cc.ortho_case_id = o.id)
+              ORDER BY o.id DESC LIMIT 1`, [patientId]);
+          orthoCaseId = ortho?.id ?? null;
+        }
+        casePlan = { mode: "new", orthoCaseId, title: orthoCaseId !== null ? "تقويم الأسنان" : legacyCaseTitle(specialty, site) };
+      }
+    }
+  }
+  return { service, specialty, needsCase: linkage.needsCase, site, masterId, opening, casePlan };
+}
+
+export type LegacyTreatmentPreviewResult =
+  | { ok: true; replayed: boolean; preview: LegacyTreatmentPreview }
+  | { ok: false; reason: LegacyTreatmentRefusal };
+
+/**
+ * (LEGACY-FIX) معاينة التسجيل من بيانات الاتفاق التاريخي نفسها وبقرار الحفظ نفسه — قراءةٌ فقط في معاملة READ ONLY.
+ * لا سعر فاتورة ولا صلاحية تسعير؛ والحفظ يعيد القرار تحت الأقفال (المعاينة ليست وعدًا).
+ */
+export async function previewLegacyTreatment(input: {
+  patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean;
+}): Promise<LegacyTreatmentPreviewResult> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const { rows: [patient] } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
+    if (!patient) throw new Refusal("no_patient");
+    let replayed = false;
+    if (input.request.idempotencyKey) {
+      const { rows: [prior] } = await client.query<{ idempotency_request_hash: string | null; patient_id: number }>(
+        `SELECT idempotency_request_hash, patient_id FROM legacy_treatment_agreements WHERE idempotency_key = $1`,
+        [input.request.idempotencyKey]);
+      if (prior) {
+        if (prior.idempotency_request_hash !== legacyTreatmentFingerprint(input.patientId, input.request)
+          || prior.patient_id !== input.patientId) throw new Refusal("idempotency_conflict");
+        replayed = true;
+      }
+    }
+    const decision = replayed ? null : await decideLegacyTreatment(client, input, false);
+    const preview: LegacyTreatmentPreview = decision === null
+      ? { case: null, opening: null }
+      : {
+        case: decision.casePlan.mode === "none" ? { mode: "none", id: null, title: null, options: [] }
+          : decision.casePlan.mode === "existing" ? { mode: "existing", id: decision.casePlan.id, title: decision.casePlan.title, options: [] }
+          : decision.casePlan.mode === "choose" ? { mode: "choose", id: null, title: null, options: decision.casePlan.options }
+          : { mode: decision.casePlan.orthoCaseId !== null ? "bridge" : "new", id: null, title: decision.casePlan.title, options: [] },
+        opening: { effect: decision.opening.effect, beforeMinor: decision.opening.before?.amountMinor ?? null,
+          afterMinor: decision.opening.after?.amountMinor ?? null, currency: input.request.currency },
+      };
+    return { ok: true, replayed, preview };
+  } catch (error) {
+    if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyTreatmentRefusal };
+    throw error;
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
+    client.release();
+  }
+}
+
 async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatment>[0]):
   Promise<{ ok: true; id: number; replayed: boolean; caseCreated: boolean } | { ok: false; reason: LegacyTreatmentRefusal }> {
   const { patientId, request } = input;
@@ -179,105 +390,37 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       }
     }
 
-    const { rows: [service] } = await client.query<{ id: number; name: string; category: string | null }>(
-      `SELECT id, name, category FROM services WHERE id = $1 AND is_active = TRUE`, [request.serviceId]);
-    const linkage = service ? lineLinkage({ serviceId: service.id, category: service.category }) : { kind: "financial" as const };
-    if (!service || linkage.kind !== "clinical") throw new Refusal("bad_service");
-    /* (INV-LINK TOOTH) القاعدة نفسها التي تحكم بند الفاتورة: خدمةٌ تخص سنًّا بلا سن لا تُسجَّل (fail closed). */
-    const checked = validateLineSite({
-      category: service.category, toothCode: request.toothCode, surfaces: request.surfaces,
-      episodeTeeth: request.episodeTeeth, scope: request.scope,
-    });
-    if (!checked.ok) throw new Refusal(checked.reason as LegacyTreatmentRefusal);
-    const site = checked.site;
-    // The complete normalized site is captured atomically below; it never creates per-tooth prices/items.
-    await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
-    await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
-      WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [patientId]);
-
-    // Existing identity survives cancellation, void, and drift in mutable plan/item patient or service.
-    const { rows: priorWork } = await client.query<{
-      id: number; case_id: number | null; tooth_code: number | null; case_site: string | null; status: string; plan_status: string; case_status: string | null;
-      financial_review: boolean; financial_lineage: boolean; has_legacy: boolean; live_legacy: boolean; legacy_context: unknown;
-    }>(
-      `SELECT i.id, i.case_id, i.tooth_code, c.site AS case_site, i.status, t.status AS plan_status, c.status AS case_status,
-        ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review, ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL} AS financial_lineage,
-        EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.plan_item_id = i.id) AS has_legacy,
-        EXISTS (SELECT 1 FROM legacy_treatment_agreements la WHERE la.plan_item_id = i.id AND la.status = 'live') AS live_legacy, ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context
-       FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN clinical_cases c ON c.id = i.case_id
-       WHERE ((t.patient_id = $1 AND i.service_id = $2) OR EXISTS (
-         SELECT 1 FROM legacy_treatment_agreements legacy_identity
-         WHERE legacy_identity.plan_item_id = i.id AND legacy_identity.patient_id = $1 AND legacy_identity.service_id = $2))
-         AND (i.tooth_code IS NOT DISTINCT FROM $3::smallint OR i.tooth_code = ANY($4::smallint[])
-           OR i.tooth_code IS NULL OR $3::smallint IS NULL OR ${PLAN_ITEM_LEGACY_LINEAGE_SQL})
-       ORDER BY i.id`, [patientId, service.id, site.toothCode, site.episodeTeeth ?? (site.toothCode === null ? [] : [site.toothCode])]);
-    for (const prior of priorWork) {
-      if (prior.has_legacy) {
-        const coverage = legacyCoverageStateFromContext(prior.legacy_context);
-        if (!legacyCoverageOverlaps(coverage, site)) continue;
-        if (coverage.kind !== "verified") throw new Refusal("needs_financial_review");
-      } else if (!caseSiteOverlaps(prior.tooth_code === null ? prior.case_site : String(prior.tooth_code), site)) continue;
-      // An explicit different episode may follow closed, completed, financially resolved ordinary work.
-      // Existing legacy live-scope uniqueness is deliberately retained until episode identity is redesigned.
-      if (!prior.has_legacy && request.caseId !== null && prior.case_id !== null && request.caseId !== prior.case_id
-        && prior.status === "done" && (prior.case_status === "completed" || prior.case_status === "closed")
-        && !prior.financial_review) continue;
-      if (prior.financial_review) throw new Refusal("needs_financial_review");
-      if (prior.live_legacy) throw new Refusal("duplicate_live");
-      if (prior.financial_lineage) throw new Refusal("needs_financial_review");
-      if (prior.plan_status === "active" && (prior.status === "planned" || prior.status === "in_progress")) {
-        throw new Refusal("open_item_exists");
-      }
-      throw new Refusal("needs_financial_review");
-    }
-    const masterId = await reusableMaster(client, patientId, request.currency);
-    if (masterId === false) throw new Refusal("incompatible_plan");
+    const decision = await decideLegacyTreatment(client, input, true);
+    if (decision.casePlan.mode === "choose") throw new Refusal("ambiguous_case");
+    const { service, specialty, site, masterId } = decision;
 
     const amounts = `المتفق ${formatMoney(request.agreedMinor, request.currency)} · المدفوع قبل النظام `
       + `${formatMoney(request.previouslyPaidMinor, request.currency)} · المتبقي ${formatMoney(request.remainingMinor, request.currency)}`;
 
     // ── الرصيد السابق: المتبقي وحده، بمحرّك الرصيد الافتتاحي نفسه ──
-    let openingEffect: "none" | "created" | "increased" = "none";
+    const openingEffect = decision.opening.effect;
+    const openingBefore = decision.opening.before;
+    const openingAfter = decision.opening.after;
     let openingHistoryId: number | null = null;
-    let openingBefore: { amountMinor: number; asOfDate: string } | null = null;
-    let openingAfter: { amountMinor: number; asOfDate: string } | null = null;
-    if (request.remainingMinor > 0) {
-      const existing = await lockedOpening(client, patientId, request.currency, input.canEditOpening);
-      if (existing) {
-        /* رصيدٌ قائم: يُضاف إليه فقط إن كان كلّه متبقيات اتفاقاتٍ حيّة (لا رصيدٌ يدوي قد يشمل هذا العلاج فيُحسب مرتين)،
-           والإضافة إلى رصيدٍ قائم تعديلٌ — للمدير وحده كما في المحرّك. */
-        if (existing.amountMinor !== await liveAgreementRemaining(client, patientId, request.currency)) {
-          throw new Refusal("opening_not_owned");
-        }
-        if (!input.canEditOpening) throw new Refusal("opening_edit_forbidden");
-        const asOfDate = existing.asOfDate < request.historicalAsOf ? existing.asOfDate : request.historicalAsOf;
-        if (await isPeriodLocked(existing.asOfDate) || await isPeriodLocked(asOfDate)) throw new Refusal("period_locked");
-        openingBefore = { amountMinor: existing.amountMinor, asOfDate: existing.asOfDate };
-        openingAfter = { amountMinor: existing.amountMinor + request.remainingMinor, asOfDate };
-        const saved = await setPatientOpeningBalanceInTx(client, {
-          patientId, currency: request.currency, amountMinor: openingAfter.amountMinor, asOfDate,
-          note: existing.note, createdBy: input.actor, addOnly: false, expectedBefore: openingBefore,
-          reason: `إضافة متبقي علاجٍ بدأ قبل النظام — ${service.name}: ${amounts}`,
-        });
-        if (!saved) throw new Refusal("no_patient");
-        openingEffect = "increased";
-        openingHistoryId = saved.historyId;
-      } else {
-        if (await isPeriodLocked(request.historicalAsOf)) throw new Refusal("period_locked");
-        openingAfter = { amountMinor: request.remainingMinor, asOfDate: request.historicalAsOf };
-        const saved = await setPatientOpeningBalanceInTx(client, {
-          patientId, currency: request.currency, amountMinor: request.remainingMinor, asOfDate: request.historicalAsOf,
-          note: `متبقي علاجٍ بدأ قبل النظام — ${service.name}: ${amounts}`, createdBy: input.actor,
-          addOnly: !input.canEditOpening, expectedBefore: null,
-        });
-        if (!saved) throw new Refusal("no_patient");
-        openingEffect = "created";
-        openingHistoryId = saved.historyId;
-      }
+    if (openingEffect === "increased" && openingBefore && openingAfter) {
+      const saved = await setPatientOpeningBalanceInTx(client, {
+        patientId, currency: request.currency, amountMinor: openingAfter.amountMinor, asOfDate: openingAfter.asOfDate,
+        note: decision.opening.existingNote, createdBy: input.actor, addOnly: false, expectedBefore: openingBefore,
+        reason: `إضافة متبقي علاجٍ بدأ قبل النظام — ${service.name}: ${amounts}`,
+      });
+      if (!saved) throw new Refusal("no_patient");
+      openingHistoryId = saved.historyId;
+    } else if (openingEffect === "created" && openingAfter) {
+      const saved = await setPatientOpeningBalanceInTx(client, {
+        patientId, currency: request.currency, amountMinor: request.remainingMinor, asOfDate: request.historicalAsOf,
+        note: `متبقي علاجٍ بدأ قبل النظام — ${service.name}: ${amounts}`, createdBy: input.actor,
+        addOnly: !input.canEditOpening, expectedBefore: null,
+      });
+      if (!saved) throw new Refusal("no_patient");
+      openingHistoryId = saved.historyId;
     }
 
     // Historical financial coverage is not current clinical consent. Reuse the compatible canonical master.
-    const specialty = linkage.specialty;
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const where = siteText(site);
     const planTitle = `علاج بدأ قبل النظام — ${service.name}${where ? ` — ${site.toothCode !== null && !site.episodeTeeth?.[1] ? `سن ${where}` : where}` : ""}`;
@@ -303,53 +446,29 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       actor: input.actor, actorRole: input.actorRole,
     });
 
-    // ── الحالة التخصصية: المفتوحة الموافقة تُعاد، أو تُجسَر حالة التقويم القائمة، أو تُفتح حالةٌ موسومة ──
+    // ── الحالة التخصصية كما قرّرها `decideLegacyTreatment` تحت الأقفال ──
     let caseId: number | null = null;
     let caseCreated = false;
-    if (linkage.needsCase) {
-      if (request.caseId !== null) {
-        const { rows: [chosen] } = await client.query<{ id: number; site: string | null }>(
-          `SELECT id, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND status IN ('active', 'waiting')
-            AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('active', 'retention')))
-            FOR UPDATE`, [request.caseId, patientId, specialty]);
-        if (!chosen || !caseSiteFits(specialty, chosen.site, site)) throw new Refusal("bad_case");
-        caseId = chosen.id;
-      } else {
-        const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
-          `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
-            AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
-            ORDER BY id FOR UPDATE`, [patientId, specialty]);
-        const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
-        if (open.length > 1) throw new Refusal("ambiguous_case");
-        if (open.length === 1) {
-          caseId = open[0].id;
-        } else {
-          let orthoCaseId: number | null = null;
-          if (specialty === "orthodontics") {
-            const { rows: [ortho] } = await client.query<{ id: number }>(
-              `SELECT o.id FROM ortho_cases o
-                WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
-                  AND NOT EXISTS (SELECT 1 FROM clinical_cases cc WHERE cc.ortho_case_id = o.id)
-                ORDER BY o.id DESC LIMIT 1`, [patientId]);
-            orthoCaseId = ortho?.id ?? null;
-          }
-          const title = orthoCaseId !== null ? "تقويم الأسنان" : legacyCaseTitle(specialty, site);
-          const { rows: [created] } = await client.query<{ id: number }>(
-            `INSERT INTO clinical_cases (patient_id, specialty, title, site, ortho_case_id, created_by, origin)
-             VALUES ($1, $2, $3, $4::text, $5::int, $6, 'clinical') RETURNING id`,
-            [patientId, specialty, title, siteText(site), orthoCaseId, input.actor]);
-          caseId = created.id;
-          caseCreated = true;
-          await audit(client, {
-            action: "case.create", entity: "patient", entityId: patientId, entityLabel: title,
-            details: {
-              الحالة: caseId, التخصص: LINKAGE_SPECIALTY_LABEL[specialty], المصدر: "علاج بدأ قبل النظام",
-              جسر_التقويم: orthoCaseId ?? "—", وضع_الحالة: "حالة بدأت قبل النظام",
-            },
-            actor: input.actor, actorRole: input.actorRole,
-          });
-        }
-      }
+    if (decision.casePlan.mode === "existing") {
+      caseId = decision.casePlan.id;
+    } else if (decision.casePlan.mode === "new") {
+      const { orthoCaseId, title } = decision.casePlan;
+      const { rows: [created] } = await client.query<{ id: number }>(
+        `INSERT INTO clinical_cases (patient_id, specialty, title, site, ortho_case_id, created_by, origin)
+         VALUES ($1, $2, $3, $4::text, $5::int, $6, 'clinical') RETURNING id`,
+        [patientId, specialty, title, siteText(site), orthoCaseId, input.actor]);
+      caseId = created.id;
+      caseCreated = true;
+      await audit(client, {
+        action: "case.create", entity: "patient", entityId: patientId, entityLabel: title,
+        details: {
+          الحالة: caseId, التخصص: LINKAGE_SPECIALTY_LABEL[specialty], المصدر: "علاج بدأ قبل النظام",
+          جسر_التقويم: orthoCaseId ?? "—", وضع_الحالة: "حالة بدأت قبل النظام",
+        },
+        actor: input.actor, actorRole: input.actorRole,
+      });
+    }
+    if (decision.needsCase) {
       await client.query(`UPDATE plan_items SET case_id = $2 WHERE id = $1`, [itemId, caseId]);
       await audit(client, {
         action: "plan.item_case", entity: "patient", entityId: patientId, entityLabel: service.name,

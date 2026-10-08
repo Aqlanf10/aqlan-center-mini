@@ -6,11 +6,10 @@ import { clinicDateString } from "@/lib/schedule";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { previewLegacyReconciliation, type OpeningSnapshot } from "@/lib/legacy-reconciliation-preview";
 import { allowedScopes, lineLinkage, validateLineSite, LINKAGE_SPECIALTY_LABEL, SITE_SCOPE_LABEL } from "@/lib/invoice-clinical-linkage";
-import { LEGACY_CASE_LABEL, LEGACY_TREATMENT_MESSAGE } from "@/lib/legacy-treatment";
+import { LEGACY_CASE_LABEL, LEGACY_TREATMENT_MESSAGE, type LegacyTreatmentPreview } from "@/lib/legacy-treatment";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ServiceSelect } from "./ServiceSelect";
 import { useSession } from "./SessionProvider";
-import { previewForRow, readPreviewLines, type PreviewState } from "./dental/invoice-preview-state";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
 import {
   MODE_HINT, emptyToothFields, invoiceToothMode, selectionLabel, selectionOfRow, toothPayload, toothProblem, usesToothChart,
@@ -23,8 +22,17 @@ import {
  * الخدمة العلاجية من الدليل (التصنيف نفسه الذي يربط بنود الفاتورة) والسن، والمتفق عليه أصلًا، والمدفوع قبل النظام،
  * وتاريخ المعلومات، والعملة. المعاينة الحيّة بدالة المقارنة نفسها التي يتحقق بها الخادم (`previewLegacyReconciliation`):
  * المتبقي = المتفق − المدفوع، ولا سند للمدفوع سابقًا، والرصيد السابق = المتبقي وحده.
- * الحالة: تُعرض كما سيقرّرها الحفظ (قائمة/جسر/جديدة/اختيار) من معاينة الربط السريري القائمة.
+ * الحالة وأثر الرصيد السابق: تُعرض كما سيقرّرها الحفظ (قائمة/جسر/جديدة/اختيار) من معاينة العلاج السابق نفسها
+ * (`/api/patients/[id]/legacy-treatments/preview`) — ببيانات الاتفاق التاريخي وقرار الحفظ، لا بمعاينة فاتورة وسعرٍ مؤقت.
  */
+
+/** قراءة المعاينة مربوطةً بالطلب الذي أنتجها: لا تُعرض قراءةُ مسودةٍ سابقة على مسودةٍ تغيّرت. */
+interface LegacyRead {
+  requestKey: string;
+  status: "pending" | "ready" | "refused" | "unavailable";
+  preview: LegacyTreatmentPreview | null;
+  message: string | null;
+}
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
 
@@ -63,7 +71,7 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
   const [previouslyPaidAmount, setPreviouslyPaidAmount] = useState("");
   const [historicalAsOf, setHistoricalAsOf] = useState("");
   const [note, setNote] = useState("");
-  const [caseRead, setCaseRead] = useState<PreviewState | null>(null);
+  const [read, setRead] = useState<LegacyRead | null>(null);
 
   const clinicalServices = useMemo(
     () => services.filter((service) => lineLinkage({ serviceId: service.id, category: service.category }).kind === "clinical"),
@@ -110,50 +118,64 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
     && siteProblem === null && siteError === null;
 
   // Request identity and sequence both matter: A → B → A must not revive A's old evidence.
-  const previewKey = JSON.stringify([patientId, serviceId, service?.category, sitePayload, caseId, currency, siteError]);
-  if (caseRead && caseRead.requestKey !== previewKey) setCaseRead(null);
+  const draftBody = { serviceId, ...sitePayload, caseId: caseId || null, currency, agreedAmount, previouslyPaidAmount, historicalAsOf };
+  const previewKey = JSON.stringify([patientId, valid, draftBody]);
+  if (read && read.requestKey !== previewKey) setRead(null);
   useEffect(() => {
-    const [ownerId, id, , place, chosen, money, selectionError] = JSON.parse(previewKey) as [
-      number, number | null, string | null, Record<string, unknown>, string, string, string | null,
-    ];
+    const [ownerId, ready, body] = JSON.parse(previewKey) as [number, boolean, Record<string, unknown>];
     const sequence = ++generation.current;
     const controller = new AbortController();
     const current = () => !controller.signal.aborted && sequence === generation.current;
-    if (id === null || selectionError) return () => { generation.current += 1; controller.abort(); };
-    setCaseRead({ requestKey: previewKey, status: "pending", byRow: new Map() });
+    if (!ready) return () => { generation.current += 1; controller.abort(); };
+    setRead({ requestKey: previewKey, status: "pending", preview: null, message: null });
     const timer = setTimeout(() => {
-      void fetch("/api/invoices/clinical-preview", {
-        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ patientId: ownerId, currency: money, items: [{ serviceId: id, price: "1", quantity: 1, ...place, caseId: chosen }] }),
+      void fetch(`/api/patients/${ownerId}/legacy-treatments/preview`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify(body),
       }).then(async (response) => {
         if (!current()) return;
+        const payload = await response.json().catch(() => null) as {
+          message?: unknown; refusal?: unknown; refusalMessage?: unknown; preview?: LegacyTreatmentPreview | null;
+        } | null;
+        if (!current()) return;
         if (!response.ok) {
-          setCaseRead({ requestKey: previewKey, status: response.status === 401 || response.status === 403 ? "refused" : "unavailable",
-            byRow: new Map(), message: "تعذّر التحقق من صلاحية تسجيل العلاج. أعد المحاولة بعد مراجعة الصلاحيات والاتصال." });
+          setRead({ requestKey: previewKey, status: response.status === 401 || response.status === 403 ? "refused" : "unavailable", preview: null,
+            message: typeof payload?.message === "string" && payload.message.trim() ? payload.message
+              : "تعذّر التحقق من تسجيل العلاج السابق. أعد المحاولة بعد مراجعة الصلاحيات والاتصال." });
           return;
         }
-        const payload: unknown = await response.json().catch(() => null);
-        if (!current()) return;
-        const byRow = readPreviewLines(payload, [{ key: "legacy", clinical: true }]);
-        setCaseRead({ requestKey: previewKey, status: byRow ? "ready" : "unavailable", byRow: byRow ?? new Map() });
+        if (typeof payload?.refusal === "string") {
+          setRead({ requestKey: previewKey, status: "refused", preview: null,
+            message: typeof payload.refusalMessage === "string" ? payload.refusalMessage : "سيُرفض الحفظ؛ راجع البيانات." });
+          return;
+        }
+        const preview = payload?.preview ?? null;
+        setRead({ requestKey: previewKey, status: preview?.case && preview.opening ? "ready" : "unavailable", preview,
+          message: preview?.case && preview.opening ? null : "تعذّر قراءة معاينة التسجيل. أعد فتح النموذج." });
       }).catch(() => {
-        if (current()) setCaseRead({ requestKey: previewKey, status: "unavailable", byRow: new Map() });
+        if (current()) setRead({ requestKey: previewKey, status: "unavailable", preview: null,
+          message: "تعذّر الاتصال للتحقق من تسجيل العلاج السابق. أعد المحاولة." });
       });
     }, 300);
     return () => { generation.current += 1; controller.abort(); clearTimeout(timer); };
   }, [previewKey]);
-  const evidence = previewForRow(caseRead, previewKey, "legacy");
-  const casePreview = evidence.line;
+  const evidence = read && read.requestKey === previewKey ? read : null;
+  const casePreview = evidence?.status === "ready" ? evidence.preview?.case ?? null : null;
+  const openingPreview = evidence?.status === "ready" ? evidence.preview?.opening ?? null : null;
+  const mustChoose = casePreview?.mode === "choose";
+  const saveReady = valid && evidence?.status === "ready" && !mustChoose;
 
   const existingOpening = positions?.find((position) => position.currency === currency) ?? null;
-  const conflict = casePreview && (casePreview.item?.mode === "existing" || Boolean(casePreview.refusal)
-    || casePreview.financialReviewRequired === true);
-  const caseText = !casePreview?.case || serviceId === null ? null
-    : casePreview.case.mode === "existing" ? `ستُربط بالحالة الموجودة: ${casePreview.case.title ?? `#${casePreview.case.id}`}`
-    : casePreview.case.mode === "bridge" ? "ستُربط بحالة التقويم القائمة في وحدة التقويم"
-    : casePreview.case.mode === "new" ? `ستُفتح حالة ${specialtyLabel ?? ""} موسومة «${LEGACY_CASE_LABEL}» — ويُراجع الطبيب الوضع الحالي وتُسجّل الموافقة الفعلية`
-    : casePreview.case.mode === "choose" ? "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة"
+  const refused = evidence?.status === "refused";
+  const caseText = !casePreview || serviceId === null ? null
+    : casePreview.mode === "existing" ? `ستُربط بالحالة الموجودة: ${casePreview.title ?? `#${casePreview.id}`}`
+    : casePreview.mode === "bridge" ? "ستُربط بحالة التقويم القائمة في وحدة التقويم"
+    : casePreview.mode === "new" ? `ستُفتح حالة ${specialtyLabel ?? ""} موسومة «${LEGACY_CASE_LABEL}» — ويُراجع الطبيب الوضع الحالي وتُسجّل الموافقة الفعلية`
+    : casePreview.mode === "choose" ? "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة"
     : null;
+  const openingText = !openingPreview ? null
+    : openingPreview.effect === "created" ? `سيُنشأ رصيد سابق بالمتبقي وحده: ${formatMoney(openingPreview.afterMinor ?? 0, openingPreview.currency)}.`
+    : openingPreview.effect === "increased" ? `سيُضاف المتبقي إلى الرصيد السابق القائم من اتفاقات سابقة: من ${formatMoney(openingPreview.beforeMinor ?? 0, openingPreview.currency)} إلى ${formatMoney(openingPreview.afterMinor ?? 0, openingPreview.currency)}.`
+    : "لا رصيد سابق يُسجَّل — الاتفاق مسدَّد تاريخيًّا.";
 
   return (
     <section aria-label="علاج بدأ قبل النظام" data-testid="legacy-treatment-form"
@@ -237,24 +259,25 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
         </label>
       </div>
 
-      {service && evidence.status !== "ready" ? (
-        <p role="status" data-testid="legacy-preview-read-state" className="mt-3 text-xs font-bold text-amber-900">
-          {evidence.status === "pending" ? "جارٍ التحقق من ربط الحالة…" : evidence.message ?? casePreview?.refusalMessage
-            ?? "تعذّر اعتماد ربط الحالة. راجع الاختيار أو أعد فتح النموذج للتحقق قبل الحفظ."}
+      {service && evidence?.status !== "ready" ? (
+        <p role={refused ? "alert" : "status"} data-testid="legacy-preview-read-state"
+          className={`mt-3 text-xs font-bold ${refused ? "rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-rose-800" : "text-amber-900"}`}>
+          {!valid ? "أكمل الموضع وبيانات الاتفاق التاريخي ليُتحقق من الحفظ قبل تفعيله."
+            : evidence?.status === "pending" || !evidence ? "جارٍ التحقق من تسجيل العلاج السابق…"
+            : evidence.message ?? "تعذّر التحقق من تسجيل العلاج السابق. أعد فتح النموذج."}
         </p>
       ) : null}
-      {caseText || conflict ? (
-        <div data-testid="legacy-case-preview" className={`mt-3 rounded-xl border p-2.5 text-xs font-bold ${
-          conflict ? "border-rose-200 bg-rose-50 text-rose-800" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
+      {caseText || openingText ? (
+        <div data-testid="legacy-case-preview" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-xs font-bold text-sky-900">
           {caseText ? <p>{caseText}</p> : null}
-          {casePreview?.case?.mode === "choose" || (casePreview?.case?.options.length ?? 0) > 1 ? (
+          {mustChoose ? (
             <select value={caseId} aria-label="حالة العلاج السابق" onChange={(event) => setCaseId(event.target.value)}
               className="mt-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
               <option value="">— اختر الحالة —</option>
-              {casePreview?.case?.options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              {casePreview?.options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
             </select>
           ) : null}
-          {conflict ? <p>لهذا العلاج والسن بندٌ مفتوح أو مسجّل في النظام — سيُرفض الحفظ حتى تُراجع الخطة.</p> : null}
+          {openingText ? <p data-testid="legacy-opening-effect" className="mt-1">{openingText}</p> : null}
         </div>
       ) : null}
 
@@ -297,9 +320,9 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" disabled={busy || !valid || evidence.status !== "ready" || Boolean(conflict)}
+        <button type="button" disabled={busy || !saveReady}
           onClick={async () => {
-            if (submitting.current || busy || !valid || evidence.status !== "ready" || conflict) return;
+            if (submitting.current || busy || !saveReady) return;
             submitting.current = true;
             try {
               await onSubmit({ serviceId, ...sitePayload, caseId: caseId || null, currency, agreedAmount,
