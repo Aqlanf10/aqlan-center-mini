@@ -80,3 +80,48 @@ export function assertPrintPdfWatermark(page: PrintPdfPage, expected: boolean): 
     throw new Error(`PDF watermark ordered glyph mismatch: ${reversedFragments || "missing"}`);
   }
 }
+
+/**
+ * Receipt-only calibration from CI37834754641's native A6 reversal PDF:
+ * SHA-256 8acbb0ad010ea856084d66d69755f95947b4e9acd96d44b59f4610e031df7446.
+ * Poppler splits سجّله: into RTL-adjacent جّس and :هل, 0.352173pt apart.
+ * Decode only that exact marked label; keep the shared signature oracle intact.
+ */
+export function assertReceiptPrintPdfSignature(page: PrintPdfPage, expectedText: string): void {
+  const expectedLabel = expectedText.split(/\s+/).find(word => /\p{L}/u.test(word));
+  if (expectedLabel !== "سجّله:") return assertPrintPdfSignature(page, expectedText);
+
+  // Preserve marks on their base glyph while reversing each native fragment.
+  const reverseMarkedGlyphs = (text: string) =>
+    (compact(text).match(/[^\p{M}]\p{M}*|\p{M}+/gu) ?? []).reverse().join("");
+  const rightFragments = page.words.filter(word => compact(word.text) === "جّس");
+  const leftFragments = page.words.filter(word => compact(word.text) === ":هل");
+  const wholeLabels = page.words.filter(word => matchesPrintPdfWord(word.text, expectedLabel)
+    || reverseMarkedGlyphs(word.text) === expectedLabel);
+  // Count before region filtering so a second or displaced copy cannot hide.
+  if (rightFragments.length !== 1 || leftFragments.length !== 1 || wholeLabels.length !== 0) {
+    throw new Error("PDF signature receipt fragments missing or duplicated");
+  }
+  const right = rightFragments[0], left = leftFragments[0];
+  const inRegion = (word: PrintPdfWord) =>
+    [page.width, page.height, word.xMin, word.xMax, word.yMin, word.yMax].every(Number.isFinite)
+    && word.xMin >= 0 && word.xMin < word.xMax && word.xMax <= page.width
+    && word.yMin >= page.height * 0.25 && word.yMin < word.yMax
+    && word.yMax <= page.height * 0.9 && word.yMax - word.yMin <= 16;
+  const gap = right.xMin - left.xMax;
+  const merged: PrintPdfWord = {
+    text: reverseMarkedGlyphs(right.text) + reverseMarkedGlyphs(left.text),
+    xMin: left.xMin, xMax: right.xMax,
+    yMin: Math.min(left.yMin, right.yMin), yMax: Math.max(left.yMax, right.yMax),
+  };
+  if (!inRegion(right) || !inRegion(left) || !inRegion(merged)
+    || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    || merged.text !== expectedLabel) {
+    throw new Error("PDF signature receipt fragments violate exact glyph geometry");
+  }
+  // Neither input words nor their geometry change. The unchanged shared oracle
+  // still requires a unique anchor and the complete, exact RTL signature row.
+  assertPrintPdfSignature({ ...page,
+    words: [...page.words.filter(word => word !== right && word !== left), merged],
+  }, expectedText);
+}
