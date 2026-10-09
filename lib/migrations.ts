@@ -42,6 +42,21 @@ export { BASELINE_VERSION, checksumOf, defaultMigrationsDir, loadMigrationFiles,
  *    المسارين تتطابق. التقاعد الكامل لensureSchema قرار P2 بعد إثبات المسار.
  */
 
+/**
+ * السلسلة المتوقعة لملفات الهجرات المُرقَّمة في أي شجرة عملٍ سليمة.
+ *
+ * 0001–0040: قاعدة main. 0041–0043: محجوزة لفرعي invoice-first المفتوحين
+ * (INV-LINK B+E). 0044–0045: هذه المرحلة (HR-1/HR-2 ملفات الطاقم والمهام).
+ * الحارس يقبل **السلسلة الصريحة نفسها** لا عدّادًا فحسب: أي هجرةٍ بلا إعلان
+ * هنا، أو فجوةٌ غير معلنة، أو إعادة ترقيمٍ لملفٍ مُطبَّق — كلها تُسقط البوابة.
+ * عند دمج 0041–0043 تُستكمل السلسلة فتصير متصلة 0001..0045 بلا تغييرٍ في ملفات
+ * هذه المرحلة.
+ */
+export const COORDINATED_MIGRATION_VERSIONS: readonly string[] = [
+  ...Array.from({ length: 40 }, (_, index) => String(index + 1).padStart(4, "0")),
+  "0044", "0045",
+];
+
 export interface AppliedMigrationRow {
   version: string;
   name: string;

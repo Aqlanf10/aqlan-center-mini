@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { COORDINATED_MIGRATION_VERSIONS } from "../lib/migrations";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preflightConnection, runPreflightCli, preflightErrorCode } from "../scripts/db-preflight";
 import { loadMigrationFiles } from "../lib/migration-files";
@@ -71,7 +72,7 @@ describe("read-only preflight connection contract", () => {
   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
     const files = await loadMigrationFiles();
     expect(files[0].version).toBe("0001");
-    expect(files).toHaveLength(40);
+    expect(files.map((file: { version: string }) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
     for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
       const source = await readFile(file, "utf8");
       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");

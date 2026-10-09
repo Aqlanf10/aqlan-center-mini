@@ -125,7 +125,13 @@ export type AuditAction =
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
-  | "system.reset";
+  | "system.reset"
+  /* (HR-1) ملفات الطاقم: إنشاء وتعديل (بما فيه شروط الأجر) وربط/فكّ حساب الدخول. */
+  | "hr.staff.create" | "hr.staff.update" | "hr.staff.link_user" | "hr.staff.unlink_user"
+  /* (HR-2) المهام: بيانات وصفية فقط في التدقيق — عنوان الخاصة لا يُكتب في السجل العام.
+     التفاصيل الكاملة (من/ماذا/القيم) في hr_task_events خلف صلاحية القراءة نفسها. */
+  | "task.create" | "task.update" | "task.status" | "task.assign" | "task.visibility"
+  | "task.comment" | "task.checklist" | "task.link" | "task.unlink";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -144,6 +150,19 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.update": "تعديل بيانات مريض",
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
+  "hr.staff.create": "إنشاء ملف موظف",
+  "hr.staff.update": "تعديل ملف موظف",
+  "hr.staff.link_user": "ربط ملف موظف بحساب دخول",
+  "hr.staff.unlink_user": "فكّ ربط ملف موظف بحسابه",
+  "task.create": "إنشاء مهمة",
+  "task.update": "تعديل مهمة",
+  "task.status": "تغيير حالة مهمة",
+  "task.assign": "إسناد مهمة",
+  "task.visibility": "تحويل مهمة خاصة إلى مشتركة",
+  "task.comment": "تعليق على مهمة",
+  "task.checklist": "بند في قائمة تحقق مهمة",
+  "task.link": "ربط مهمة بسجل",
+  "task.unlink": "فكّ ربط مهمة عن سجل",
   "patient.import": "استيراد مرضى من ملف",
   "reminder.auto": "جولة التذكير الآلي بواتساب",
   "messaging.channel.update": "تعديل إعدادات قناة مراسلة",

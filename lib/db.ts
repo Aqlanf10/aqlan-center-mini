@@ -47,6 +47,8 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
+import { HR_STAFF_SQL } from "./hr-schema";
+import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2041,6 +2043,10 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(ORTHO_BILLING_DECISION_SQL);
     /* (ENDO-1) سير عمل علاج العصب (نوبات، سجلات زيارات، قنوات، ملاحق) — جسد الهجرة 0040 حرفيًّا. */
     await getPool().query(ENDODONTICS_SQL);
+    /* (HR-1) ملفات الطاقم وسجل تغييراته — جسد الهجرة 0044 حرفيًّا. */
+    await getPool().query(HR_STAFF_SQL);
+    /* (HR-2) المهام وقوائمها التعليقات وسجل تغييراتها — جسد الهجرة 0045 حرفيًّا. */
+    await getPool().query(HR_TASKS_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //

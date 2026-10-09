@@ -12,7 +12,7 @@ import {
 } from "../lib/schema-manifest";
 import { SUPPORTED_POSTGRES_MAJOR } from "../lib/env-contract";
 import { validateLocalVerificationTarget } from "../lib/verification-target-policy.mjs";
-import { loadMigrationFiles, migrate } from "../lib/migrations";
+import { COORDINATED_MIGRATION_VERSIONS, loadMigrationFiles, migrate } from "../lib/migrations";
 import { classifyOpenFindings, parseOpenFindingsManifest } from "../lib/schema-ownership-open-findings";
 
 export const OPEN_FINDINGS_MANIFEST_PATH = fileURLToPath(new URL("../schema/schema-ownership-open-findings.pg18.json", import.meta.url));
@@ -202,7 +202,7 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 }
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
-  const expected = Array.from({ length: 40 }, (_, index) => String(index + 1).padStart(4, "0"));
+  const expected = COORDINATED_MIGRATION_VERSIONS;
   const actual = files.map((file) => file.version);
   if (actual.join(",") !== expected.join(",")) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
