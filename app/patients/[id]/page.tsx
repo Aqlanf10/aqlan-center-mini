@@ -51,7 +51,9 @@ import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
+import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
+import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
@@ -107,12 +109,16 @@ export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: stri
   { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
-export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
+export default function PatientFilePage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = use(params);
-  return <PatientFileWorkspace key={id} id={id} />;
+  const query = searchParams ? use(searchParams) : undefined;
+  return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={readCheckoutVisitRequest(query?.checkoutVisit)} />;
 }
 
-function PatientFileWorkspace({ id }: { id: string }) {
+function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checkoutVisitRequest: CheckoutVisitRequest }) {
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -138,6 +144,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenu = useDismissibleDetails(moreOpen, setMoreOpen);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
   const alertScope = patientAlertScope(Number(id), session);
   const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
@@ -198,7 +205,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "today" || tab === "treatment";
+  const compactWorkspace = tab === "summary" || tab === "today" || tab === "treatment";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
@@ -471,6 +478,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
     .join("");
 
   const workflowAction = (() => {
+    if (tab === "today" && checkoutVisitRequest !== null) {
+      return typeof checkoutVisitRequest === "number" ? {
+        label: `عرض تحصيل الزيارة #${checkoutVisitRequest}`,
+        run: () => document.getElementById("requested-visit-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" }), primary: true,
+      } : null;
+    }
     if (!step) return null;
     switch (step.kind) {
       case "continue_visit":
@@ -504,6 +517,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const primaryAction = workflowAction ? { ...workflowAction, run: () => {
     if (workflowIsCurrent()) workflowAction.run();
   } } : null;
+  const secondaryActionClass = "flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50";
 
   // Clinical warnings remain visible independently of the optional details disclosure.
   const medicalAlertBanner = patient.medicalAlert ? (
@@ -556,10 +570,10 @@ function PatientFileWorkspace({ id }: { id: string }) {
         identity={compactWorkspace ? (
           <div className="flex min-w-0 items-center gap-2" data-testid="patient-compact-identity">
             {patient.photoDocumentId ? <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
-              className="h-8 w-8 shrink-0 rounded-lg object-cover" />
-              : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
+              className="h-11 w-11 shrink-0 rounded-xl object-cover" />
+              : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-navy-900 text-sm font-black text-white">{initials || "م"}</span>}
             <div className="min-w-0 flex-1">
-              <h1 className="break-words text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
+              <h1 className="break-words [overflow-wrap:anywhere] text-lg font-black leading-tight text-navy-900">{patient.fullName}</h1>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                 <button type="button" onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")} title="نسخ رقم الملف الطبي"
                   className="rounded bg-slate-100 px-1.5 font-bold text-navy-900">#{patient.patientNumber}</button>
@@ -571,7 +585,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         ) : undefined}
         primaryAction={compactWorkspace && primaryAction ? (
           <button type="button" onClick={primaryAction.run} disabled={busyAction}
-            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
+            className="rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
             {primaryAction.label}
           </button>
         ) : undefined}
@@ -582,11 +596,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
           }}
             aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
             className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
-            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
+            {patientDetailsOpen ? "إغلاق المزيد" : "المزيد"}
           </button>
         ) : undefined}
         safety={compactWorkspace ? <>
           <PatientFlagChips flags={patient.flags} />
+          {!vitals ? <span className="text-[11px] text-slate-500">العلامات الحيوية في تنبيه الملف: غير مسجلة</span> : null}
           {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
             <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
               className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
@@ -607,11 +622,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
         className="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" data-testid="patient-details-panel">
+        {compactWorkspace ? <h2 className="mb-3 text-xs font-extrabold text-slate-600">تفاصيل وإجراءات إضافية</h2> : null}
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
             {/* (PAT-3) صورة المريض إن وُجدت — تمييز المتشابهة أسماؤهم والتوائم — وإلا الأحرف الأولى. */}
-            {patient.photoDocumentId ? (
+            {!compactWorkspace ? patient.photoDocumentId ? (
               <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
                 className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-md ring-2 ring-white" />
             ) : (
@@ -624,10 +640,10 @@ function PatientFileWorkspace({ id }: { id: string }) {
             >
               {initials || "م"}
             </div>
-            )}
+            ) : null}
 
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
+              {!compactWorkspace ? <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-black text-navy-900 leading-tight">
                   {patient.fullName}
                 </h1>
@@ -690,13 +706,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
                           </span>
                         ))
                   : null}
-              </div>
+              </div> : null}
 
               {/* المعلومات الديموغرافية والاتصال السريع */}
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <span className="font-semibold text-slate-700">
+                {!compactWorkspace ? <span className="font-semibold text-slate-700">
                   {GENDER_LABEL[patient.gender]} · {ageText(age)}
-                </span>
+                </span> : null}
                 {patient.referralSource ? (
                   <span className="font-medium text-slate-700">
                     · المصدر: {patient.referralSource}{patient.referredBy ? ` (${patient.referredBy})` : ""}
@@ -761,7 +777,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <button
               type="button"
               onClick={() => setShowBookModal(true)}
-              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"
+              className={compactWorkspace ? secondaryActionClass : "rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"}
             >
               📅 حجز موعد
             </button>
@@ -769,7 +785,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <button
               type="button"
               onClick={() => setShowTabletMode(true)}
-              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-900 transition-colors hover:bg-indigo-100 flex items-center gap-1.5 shadow-xs"
+              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-900 transition-colors hover:bg-indigo-100 flex items-center gap-1.5 shadow-xs"}
               title="شاشة لمس مخصصة لطبيب الأسنان بجانب الكرسي الطبي"
             >
               <span>📱</span>
@@ -792,7 +808,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <button
               type="button"
               onClick={() => setShowVitalsModal(true)}
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-xs"
+              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-xs"}
               title="تسجيل وتحديث العلامات الحيوية وفصيلة الدم وضغط الدم"
             >
               <span>🩺</span>
@@ -803,7 +819,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
             <button
               type="button"
               onClick={() => setShowProfitability(true)}
-              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-xs"
+              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-xs"}
               title="فحص هامش ربح حالة هذا المريض — تكلفة المواد فيها من حركات المخزون نفسها"
             >
               <span>📈</span>
@@ -811,11 +827,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
-              <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+            <details ref={moreMenu.ref} className="relative" open={moreOpen} onKeyDown={moreMenu.onKeyDown} data-testid="patient-more-actions">
+              <summary onClick={moreMenu.onSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
+                className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
-              <div className="absolute left-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div id="patient-more-actions-panel" onClick={moreMenu.onActionClick}
+                className="absolute end-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
@@ -879,7 +897,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         </div>
 
         {/* شريط المؤشرات الحيوية السريعة (Vital Signs Quick Strip) */}
-        <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        {!compactWorkspace || vitals ? <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
           {vitals ? (
             <>
               {vitals.bpSystolic && vitals.bpDiastolic ? (
@@ -947,7 +965,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
               <span>+ تسجيل العلامات الحيوية وفصيلة الدم</span>
             </button>
           )}
-        </div>
+        </div> : null}
 
         {/* التنبيه الطبي وشارات السلامة السريرية */}
         {!compactWorkspace ? medicalAlertBanner : null}
@@ -1088,18 +1106,6 @@ function PatientFileWorkspace({ id }: { id: string }) {
           <div className="space-y-4" hidden={!summary} inert={!summary}>
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
-          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
-              patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
-          ) : null}
-          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-          ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1108,6 +1114,17 @@ function PatientFileWorkspace({ id }: { id: string }) {
             patientNumber={patient.patientNumber}
             patientPhone={patient.phone}
             base={base}
+            patientDetails={!isRestrictedRole(session?.role) ? (
+              <>
+                {/* Existing editors stay mounted when the disclosure closes. */}
+                <PatientContactPanel
+                  patient={patient}
+                  canEdit
+                  onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+                />
+                <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+              </>
+            ) : null}
             onVisitStarted={() => {
               setSuccessMsg("بدأت الزيارة — انتقل إلى تبويب «زيارة اليوم».");
               setTab("today");
@@ -1256,6 +1273,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
           )}
         </div>
       ) : tab === "today" ? (
+        checkoutVisitRequest === "invalid" ? (
+          <section id="requested-visit-checkout" role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+            رابط تحصيل الزيارة غير صالح. ارجع إلى قائمة التوقيعات واختر الزيارة من جديد.
+            <a href="/" className="mt-2 block underline">العودة إلى الاستقبال</a>
+          </section>
+        ) :
         <TodayVisitTab
           patientId={patient.id}
           patientName={patient.fullName}
@@ -1265,6 +1288,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
+          requestedCheckoutVisitId={checkoutVisitRequest}
           onNavigationGuardChange={trackClinicalGuard}
           onVisitStarted={() => {
             setSuccessMsg("بدأت الزيارة.");
@@ -1345,7 +1369,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
       <CollectPaymentModal
         patientId={patient.id}
         patientName={patient.fullName}
-        isOpen={showCollect}
+        isOpen={showCollect && !(tab === "today" && checkoutVisitRequest !== null)}
         onClose={() => setShowCollect(false)}
         onSuccess={() => {
           setShowCollect(false);
@@ -1816,3 +1840,5 @@ function Field({
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-navy-900 outline-none transition-colors focus:border-navy-800";
+
+

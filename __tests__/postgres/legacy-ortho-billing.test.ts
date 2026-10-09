@@ -70,6 +70,25 @@ async function balance(patientId: number): Promise<number> {
 }
 
 describe("P0-B legacy orthodontic billing guard", () => {
+  it("keeps an unpaid opening 180000 through adjustment-only signing and repeated canonical reads", async () => {
+    const { patientId, caseId, visitId } = await legacyPatient({ mode: "opening_balance" });
+    await db.setPatientOpeningBalance({ patientId, currency: "YER", amountMinor: 180000, asOfDate: today,
+      note: null, createdBy: "synthetic", reason: null });
+    await adjustment(caseId);
+    const signed = await signClinicalVisit({ visitId, baseCurrency: "YER", signedBy: "doctor", signerDoctorPartyId: doctorId });
+    expect(signed).toMatchObject({ reason: null, invoiceId: null, duesMinor: 0, orthoBillingClass: "LEGACY_INCLUDED" });
+    for (let read = 0; read < 2; read++) {
+      const walkout = await visitWalkout(visitId);
+      expect(walkout?.lines).toEqual([]);
+      expect(walkout?.orthoAdjustment?.billingClass).toBe("LEGACY_INCLUDED");
+      expect(walkout?.checkout.previous.YER).toBe(180000);
+      expect(walkout?.checkout.current.YER).toBe(180000);
+      expect(walkout?.balances).toContainEqual({ currency: "YER", balanceMinor: 180000 });
+      expect((await db.patientWorkflow(patientId, today)).financial?.byCurrency.YER.balanceMinor).toBe(180000);
+    }
+    expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual([]);
+  });
+
   it("records the adjustment against an evidenced old receivable without a second invoice", async () => {
     const { patientId, caseId, visitId } = await legacyPatient({ mode: "opening_balance", opening: true });
     const paid = await recordPayment({

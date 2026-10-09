@@ -3,7 +3,7 @@ import { Client } from "pg";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Response as BrowserResponse } from "playwright";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
 import { baseUrl, harness } from "./_server";
 
 /**
@@ -356,6 +356,21 @@ describe("النهائية د: بند دولاري + بند سعودي — مج�
   }, 240_000);
 });
 
+
+// A visible checkout or absent error banner is not verified financial evidence.
+async function verifiedCheckout(checkout: Locator): Promise<void> {
+  await checkout.waitFor({ timeout: 60_000 });
+  await expect.poll(() => checkout.getAttribute("data-financial-state"), { timeout: 30_000 }).toBe("verified");
+}
+function moneyRow(checkout: Locator, kind: "previous-balance" | "current-balance" | "visit-invoice", currency: "YER" | "SAR" | "USD") {
+  return checkout.locator(`[data-testid="checkout-${kind}"][data-currency="${currency}"]`);
+}
+async function exactMoney(checkout: Locator, kind: "previous-balance" | "current-balance" | "visit-invoice", currency: "YER" | "SAR" | "USD", displayed: string) {
+  const row = moneyRow(checkout, kind, currency);
+  await expect.poll(() => row.count(), { timeout: 30_000 }).toBe(1);
+  await expect.poll(async () => (await row.textContent())?.match(/-?\d[\d,]*(?:\.\d+)?/g), { timeout: 30_000 }).toEqual([displayed]);
+}
+
 /* ══════════════ الاختبار هـ: زيارتان متتاليتان بلا مغادرة الشاشة ══════════════ */
 
 describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل ← زيارة ب على الشاشة نفسها", () => {
@@ -373,12 +388,12 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today`);
     await signViaUi();
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
     /* شبّاك أ: سابق ٥٠٠ + اليوم ١٥٠٠ = ٢٠٠٠ — المبلغ الصحيح لزيارة أ. */
-    const previousA = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
+    const previousA = moneyRow(checkout, "previous-balance", "USD");
     await expect.poll(async () => previousA.textContent(), { timeout: 30_000 }).toContain("500.00");
-    const totalA = checkout.locator("div", { hasText: "الإجمالي المستحق (دولار)" }).last();
+    const totalA = moneyRow(checkout, "current-balance", "USD");
     await totalA.waitFor({ timeout: 30_000 });
     expect(await totalA.textContent()).toContain("2,000.00");
 
@@ -397,8 +412,9 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     await expect.poll(async () => paymentCount(), { timeout: 60_000 }).toBe(beforePay + 1);
 
     /* الرصيد الحالي بعد التحصيل: ١٠٠٠$ متبقّية. */
-    const currentRow = checkout.locator("div", { hasText: "الرصيد الحالي" }).last();
-    await expect.poll(async () => currentRow.textContent(), { timeout: 30_000 }).toContain("1,000");
+    await verifiedCheckout(checkout);
+    await exactMoney(checkout, "previous-balance", "USD", "500.00");
+    await exactMoney(checkout, "current-balance", "USD", "1,000.00");
 
     /* ── (OP-03) إعادة التحميل بعد التحصيل الجزئي: الشبّاك يُستعاد من الخادم بالمتبقي نفسه —
        بلا سندٍ ولا فاتورةٍ جديدة، وزرّ تحصيل المتبقي ما زال متاحًا. */
@@ -425,7 +441,7 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     page.on("pageerror", observeError);
     try {
       await page.reload();
-      await restored.waitFor({ timeout: 60_000 });
+      await verifiedCheckout(restored);
     } catch (error) {
       try {
         // Preserve the original failure, with synthetic browser/DB evidence for
@@ -462,8 +478,8 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
       page.off("response", observeResponse);
       page.off("pageerror", observeError);
     }
-    const restoredRow = restored.locator("div", { hasText: "الرصيد الحالي" }).last();
-    await expect.poll(async () => restoredRow.textContent(), { timeout: 30_000 }).toContain("1,000");
+    await exactMoney(restored, "current-balance", "USD", "1,000.00");
+    await exactMoney(restored, "previous-balance", "USD", "500.00");
     await restored.getByRole("button", { name: /تحصيل وطباعة السند/ }).waitFor({ timeout: 30_000 });
     expect(await paymentCount()).toBe(paymentsBeforeReload);
 
@@ -489,26 +505,28 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
 
     /* ── ٩) توقيع ب: شبّاكها لها وحدها. */
     await signViaUi();
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
-    /* الرصيد السابق لب = لقطة ما قبل توقيع ب الجديدة: ١٠٠٠$ المتبقّية بعد
-       تحصيل أ — لا لقطة أ المجمّدة (٥٠٠$) ولا فاتورة ب محسوبة مرتين. */
-    const previousB = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
-    await expect.poll(async () => previousB.textContent(), { timeout: 30_000 }).toContain("1,000.00");
+    /* B's canonical prior reference excludes B's invoice and all arrival-day payments:
+       original 500 + A's invoice 1500 = 2000. Current debt alone includes A's 1000 payment. */
+    const previousB = moneyRow(checkout, "previous-balance", "USD");
+    await exactMoney(checkout, "previous-balance", "USD", "2,000.00");
     expect(await previousB.textContent()).not.toContain("500.00");
 
     /* اليوم = استحقاق ب وحده: ١٥٠٠$. */
-    const todayB = checkout.locator("div", { hasText: "استحقاق اليوم" }).last();
+    const todayB = moneyRow(checkout, "visit-invoice", "USD");
     await expect.poll(async () => todayB.textContent(), { timeout: 30_000 }).toContain("1,500.00");
 
     /* الإجمالي = ١٠٠٠ + ١٥٠٠ = ٢٥٠٠$ — لا ٢٠٠٠ (لقطة أ) ولا ٣٥٠٠/٤٠٠٠ (مزدوج). */
-    const totalB = checkout.locator("div", { hasText: "الإجمالي المستحق (دولار)" }).last();
+    const totalB = moneyRow(checkout, "current-balance", "USD");
     await totalB.waitFor({ timeout: 30_000 });
     expect(await totalB.textContent()).toContain("2,500.00");
     const checkoutText = await checkout.locator("dl").textContent();
     expect(checkoutText).not.toContain("3,500");
     expect(checkoutText).not.toContain("4,000");
-    expect(checkoutText).not.toContain("2,000.00");
+    // 2000 is now a legitimate prior reference, but never B's current debt.
+    expect(await totalB.textContent()).not.toContain("2,000.00");
+    await exactMoney(checkout, "current-balance", "USD", "2,500.00");
 
     /* ── ١٠) زرّ التحصيل متاح لب — «تم التحصيل» لا يُورَّث أبدًا. */
     expect(await checkout.getByRole("button", { name: /تحصيل وطباعة السند/ }).count()).toBe(1);
@@ -617,3 +635,4 @@ async function paymentCount(): Promise<number> {
   );
   return row.n;
 }
+

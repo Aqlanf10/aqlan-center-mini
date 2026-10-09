@@ -98,12 +98,20 @@ export function PatientCockpit({
 
   return (
     <div className={compact
-      ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
+      ? "mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs"
       : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
       aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
-          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
+      {compact ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">{identity ?? <span className="text-base font-black text-navy-900">{patientName}</span>}</div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="patient-main-actions">
+            {primaryAction}
+            {secondaryActions}
+          </div>
+        </div>
+      ) : null}
+      <div className={`${compact ? "mt-3 border-t border-slate-100 pt-3" : ""} flex flex-wrap items-center gap-2 text-xs`}>
+        {!compact ? <span className="truncate text-sm font-black text-navy-900">{patientName}</span> : null}
         {alerts.length > 0 ? (
           <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
             ⚠️ {compact ? alerts.join(" • ") : alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
@@ -122,12 +130,13 @@ export function PatientCockpit({
         ) : null}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         {!compact ? visitSteps : null}
 
         <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
-          {compact ? primaryAction : null}
-          {compact ? secondaryActions : null}
+          {compact && (canEnterChair || canOperate && active && !visit?.cleared && visit?.checklist !== null) ? (
+            <span className="text-[11px] font-bold text-slate-500">إجراءات الزيارة</span>
+          ) : null}
           {canOperate && active && !visit?.cleared && visit?.checklist !== null ? (
             <button type="button" onClick={() => void clear()} disabled={busy}
               title={(visit?.checklist ?? []).map((item) => item.label).join("\n")}
@@ -144,7 +153,9 @@ export function PatientCockpit({
                 </select>
               ) : null}
               <button type="button" onClick={() => void enterChair()} disabled={busy || !selectedChair}
-                className="rounded-lg bg-brand-orange px-3 py-1 text-[11px] font-extrabold text-white disabled:opacity-40">
+                className={`rounded-lg px-3 py-2 text-[11px] font-extrabold disabled:opacity-40 ${compact && primaryAction
+                  ? "border border-slate-300 bg-white text-navy-800"
+                  : "bg-brand-orange text-white"}`}>
                 إدخال إلى الكرسي{selectedChair ? ` ${selectedChair}` : ""}
               </button>
             </span>
@@ -191,3 +202,4 @@ export function PatientCockpit({
     </div>
   );
 }
+

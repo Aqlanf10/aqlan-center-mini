@@ -47,7 +47,13 @@ describe("reception signature discovery on the built application", () => {
     const reception = await contextFor(h.sessions.reception.cookie), doctor = await contextFor(h.sessions.doctorA.cookie);
     const unexpected: string[] = [], errors: string[] = [];
     let signPermit = false;
-    const receptionGuard = await guardBrowserRoutes(reception, baseUrl, unexpected, route => allowBuiltBoardRead(route, unexpected));
+    const receptionGuard = await guardBrowserRoutes(reception, baseUrl, unexpected, async route => {
+      const request = route.request(), url = new URL(request.url());
+      if (url.origin === baseUrl && ["GET", "HEAD"].includes(request.method()) && [
+        `/patients/${patientId}`, `/api/patients/${patientId}`, `/api/patients/${patientId}/workflow`, `/api/visits/${visitId}/walkout`,
+      ].includes(url.pathname)) { await route.continue(); return; }
+      await allowBuiltBoardRead(route, unexpected);
+    });
     const doctorGuard = await guardBrowserRoutes(doctor, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin === baseUrl && request.method() === "POST" && url.pathname === `/api/visits/${visitId}/clinical`
@@ -88,6 +94,16 @@ describe("reception signature discovery on the built application", () => {
         await receptionPage.reload({ waitUntil: "domcontentloaded" });
         await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
         expect(await item(receptionPage, visitId).innerText()).not.toContain("توقيع جديد");
+        // Another open visit must not displace this exact signed handoff.
+        const newerVisit = (await db.query(`INSERT INTO visits (patient_id, patient_name, status, arrived_at)
+          VALUES ($1, $2, 'waiting', NOW()) RETURNING id`, [patientId, NAME])).rows[0].id as number;
+        await item(receptionPage, visitId).getByRole("link").click();
+        const checkout = receptionPage.getByRole("region", { name: "شبّاك ما بعد الزيارة" });
+        await checkout.waitFor();
+        await expect.poll(() => checkout.innerText()).toContain(`زيارة #${visitId}`);
+        expect(await receptionPage.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${newerVisit}`);
+        expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${visitId}`);
+        expect(await receptionPage.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
         expect((await db.query(`SELECT status, invoice_id, signed_at FROM visits WHERE id = $1`, [visitId])).rows[0]).toMatchObject({ status: "done", invoice_id: null, signed_at: expect.any(Date) });
         expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
       }, () => {});

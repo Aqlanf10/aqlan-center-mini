@@ -64,6 +64,99 @@ async function draft(page: Page) {
 }
 
 describe("patient context navigation on the built application", () => {
+  it.each([1280, 390])("keeps Summary task-first, safety visible and disclosure drafts mounted at %ipx", async width => {
+    const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
+    try {
+      const [name, ...value] = h.sessions.doctorA.cookie.split("=");
+      await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+      const unexpected: string[] = [], errors: string[] = [];
+      const warning = "تنبيه سلامة اصطناعي يبقى ظاهرًا عند طي بيانات التواصل";
+      const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
+        const request = route.request(), url = new URL(request.url());
+        if (url.origin !== baseUrl || !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+          unexpected.push(`${request.method()} ${url.pathname}`); await route.abort(); return;
+        }
+        if (url.pathname === `/api/patients/${patientId}`) {
+          const response = await route.fetch(); const payload = await response.json();
+          expect(response.ok()).toBe(true); expect(payload.patient.id).toBe(patientId);
+          payload.patient.medicalAlert = warning;
+          await route.fulfill({ response, json: payload }); return;
+        }
+        await route.continue();
+      });
+      const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+      await routes.run(async () => {
+        await page.goto(`${baseUrl}/patients/${patientId}?tab=summary`, { waitUntil: "domcontentloaded" });
+        const tasks = page.getByTestId("summary-current-work"); await tasks.waitFor();
+        expect(await page.getByTestId("patient-workspace").getAttribute("data-compact")).toBe("true");
+        expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+        expect(await page.locator("h1:visible").count()).toBe(1);
+        expect(await page.getByTestId("patient-primary-action").count()).toBe(1);
+        expect(await page.getByTestId("patient-medical-alert-banner").innerText()).toContain(warning);
+        expect(await page.getByTestId("patient-context-strip").innerText()).toContain("العلامات الحيوية في تنبيه الملف: غير مسجلة");
+        await page.getByTestId("patient-details-toggle").click();
+        expect(await page.locator("h1:visible").count()).toBe(1);
+        expect(await page.getByRole("button", { name: "+ تسجيل العلامات الحيوية وفصيلة الدم", exact: true }).count()).toBe(0);
+        expect(await page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true }).isVisible()).toBe(true);
+        await page.getByTestId("patient-details-toggle").click();
+        await page.getByRole("region", { name: "التاريخ الطبي", exact: true }).waitFor();
+        expect(await page.getByRole("region", { name: "ما قاله المريض عن صحته", exact: true }).isVisible()).toBe(true);
+        const details = page.getByTestId("summary-administrative-details");
+        expect(await details.getAttribute("open")).toBeNull();
+        expect(await page.getByRole("region", { name: "الهوية والتواصل", exact: true }).isVisible()).toBe(false);
+        const order = await page.evaluate(() => {
+          const tasks = document.querySelector('[data-testid="summary-current-work"]')!;
+          const details = document.querySelector('[data-testid="summary-administrative-details"]')!;
+          return Boolean(tasks.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING);
+        });
+        expect(order).toBe(true);
+        const toggle = details.locator(":scope > summary");
+        await toggle.focus(); await page.keyboard.press("Enter");
+        // The existing label gains a Save button while dirty; target its single
+        // email input so the assertion does not depend on that changing label text.
+        const email = details.locator('input[type="email"]');
+        await expect.poll(() => email.isEnabled()).toBe(true);
+        await email.fill("unsaved-synthetic@example.test");
+        await toggle.click(); expect(await email.isVisible()).toBe(false);
+        expect(await page.getByTestId("patient-medical-alert-banner").isVisible()).toBe(true);
+        await toggle.focus(); await page.keyboard.press("Enter");
+        expect(await email.inputValue()).toBe("unsaved-synthetic@example.test");
+        await toggle.click();
+        for (const direction of ["rtl", "ltr"]) {
+          await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
+          await page.getByTestId("patient-details-toggle").click();
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(true);
+          expect(await page.locator("h1:visible").count()).toBe(1);
+          await toggle.click();
+          expect(await email.isVisible()).toBe(true);
+          expect(await email.inputValue()).toBe("unsaved-synthetic@example.test");
+          // Independent disclosures can stay open together without a second identity.
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(true);
+          expect(await page.getByTestId("patient-primary-action").count()).toBe(1);
+          expect(await page.getByTestId("patient-medical-alert-banner").isVisible()).toBe(true);
+          const layout = await page.evaluate(() => ({
+            viewport: innerWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            overflowing: Array.from(document.querySelectorAll("body *")).flatMap(element => {
+              const rect = element.getBoundingClientRect();
+              return rect.width > 0 && (rect.left < -1 || rect.right > innerWidth + 1)
+                ? [{ tag: element.tagName, testId: element.getAttribute("data-testid"),
+                    className: element.getAttribute("class"), left: rect.left, right: rect.right }]
+                : [];
+            }).slice(0, 20),
+          }));
+          expect(layout.scrollWidth <= layout.viewport + 1,
+            `Expanded Summary overflow at ${width}px ${direction}: ${JSON.stringify(layout)}`).toBe(true);
+          await toggle.click();
+          await page.getByTestId("patient-details-toggle").click();
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+          expect(await details.getAttribute("open")).toBeNull();
+        }
+        expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+      }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
+    } finally { await context.close(); }
+  });
+
   it("opens Summary's Ortho shortcut atomically, persists URL/reload, and accepts legacy aliases", async () => {
     const { context, page } = await open("?tab=summary&review=1");
     try {
@@ -128,7 +221,7 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
         const more = page.getByTestId("patient-more-actions");
         await more.locator("summary").click();
         await more.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
-        await more.locator("summary").click();
+        await expect.poll(() => more.getAttribute("open")).toBeNull();
         const editor = page.getByRole("region", { name: "تعديل البيانات", exact: true });
         await editor.getByRole("textbox", { name: /تنبيه طبي/ }).fill(alert);
         await editor.getByRole("button", { name: "حفظ التغييرات", exact: true }).click();
@@ -402,3 +495,4 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       });
     });
   });
+
