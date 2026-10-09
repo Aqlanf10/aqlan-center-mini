@@ -113,6 +113,7 @@ interface Visit {
   activeCases?: {
     id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
     responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+    historicalProgressUnknown?: boolean;
   }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
@@ -1095,6 +1096,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               <span className="font-extrabold text-navy-900">{one.title}</span>
               {one.status === "waiting" ? <span className="text-amber-700"> · بانتظار</span> : null}
               {one.totalSteps > 0 ? <span className="text-slate-500"> · {one.doneSteps}/{one.totalSteps}</span> : null}
+              {one.historicalProgressUnknown ? <span> · تقدّم العلاج السابق غير معلوم؛ العدّ للعمل المعروف خارج البنود التاريخية</span> : null}
               {one.nextStep ? <span> · التالي: {one.nextStep}</span> : null}
               {one.responsibleName ? <span className="text-slate-500"> · {one.responsibleName}</span> : null}
             </p>

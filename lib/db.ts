@@ -1,5 +1,6 @@
 import { caseSiteOverlaps, validateLineSite, SITE_SCOPE_LABEL, type LineSite, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
+import { historicalClinicalProgress, combineClinicalProgress, type ClinicalProgressView } from "./historical-clinical-projection";
 import { normalizeClinicalProcedureId } from "./clinical-procedure-id";
 import { readRecoveryDocumentStates, publicRecoveryRead, hasInstallmentReversalSignal, type PatientInstallmentRecoveryRead } from "./reversed-installment-recovery-db";
 import {
@@ -15897,6 +15898,7 @@ export interface ClinicalVisit {
   activeCases: {
     id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
     responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+    historicalProgressUnknown?: boolean;
   }[];
   /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
   outstanding: {
@@ -16469,16 +16471,26 @@ async function visitWorkflowContext(
     ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
     : null;
   const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  // Historical identity (including void) is not a next clinical step. Retain all saved open sessions.
+  const { rows: historicalItems } = await pool.query<{ plan_item_id: number; open_session: boolean }>(
+    `SELECT la.plan_item_id, EXISTS (SELECT 1 FROM treatment_sessions s
+       WHERE s.plan_item_id = la.plan_item_id AND s.status IN ('planned', 'in_progress')) AS open_session
+       FROM legacy_treatment_agreements la WHERE la.patient_id = $1`, [patientId]);
+  const historicalIds = new Set(historicalItems.map((item) => item.plan_item_id));
+  const historicalWithoutFuture = new Set(historicalItems.filter((item) => !item.open_session).map((item) => item.plan_item_id));
   const activeCases = cases
     .filter((one) => one.status === "active" || one.status === "waiting")
     .map((one) => {
       const items = one.id === null ? [] : caseItems.items.filter((item) => item.caseId === one.id);
-      const next = items.find((item) => item.status === "in_progress") ?? items.find((item) => item.status === "planned");
+      const knownItems = items.filter((item) => !historicalIds.has(item.id));
+      const futureItems = items.filter((item) => !historicalWithoutFuture.has(item.id));
+      const next = futureItems.find((item) => item.status === "in_progress") ?? futureItems.find((item) => item.status === "planned");
       return {
         id: one.id, kind: one.kind, title: one.title, specialty: one.specialty, status: one.status,
         responsibleName: one.responsibleName,
-        doneSteps: items.filter((item) => item.status === "done").length,
-        totalSteps: items.filter((item) => item.status !== "cancelled").length,
+        historicalProgressUnknown: items.some((item) => historicalIds.has(item.id)),
+        doneSteps: knownItems.filter((item) => item.status === "done").length,
+        totalSteps: knownItems.filter((item) => item.status !== "cancelled").length,
         nextStep: next ? `${next.serviceName}${next.toothCode ? ` — سن ${next.toothCode}` : ""}` : null,
       };
     });
@@ -16518,7 +16530,7 @@ async function visitWorkflowContext(
     }
   }
   const unmetByItem = await unmetPlanItemRequirements(pool, itemRows.map((item) => item.id));
-  const outstanding = itemRows.map((item) => ({
+  const outstanding = itemRows.filter((item) => !historicalWithoutFuture.has(item.id)).map((item) => ({
     planItemId: item.id,
     serviceId: item.service_id,
     planTitle: item.plan_title,
@@ -19850,6 +19862,8 @@ export interface PlanItemDraft {
    * الجلسة نفسها من الخطوة نفسها لعدة أسنان تُجمع في زيارةٍ واحدة. بغيابه السلوك القائم.
    */
   sessionPlan?: { title: string; minutes: number; afterDays?: number; visitKey: string; visitTitle: string }[];
+  /** Historical agreement alone supplies no clinical schedule. Explicit future work keeps the default. */
+  scheduleSessions?: boolean;
 }
 
 export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
@@ -19932,6 +19946,7 @@ export async function insertPlanV2InTx(client: DbClient, input: PlanV2Input, exi
      جلساتها. البند بلا خطة جلسات يبقى على «زيارةٍ لكل بند» كما كان. */
   const templateVisits = new Map<string, { title: string; minutes: number; afterDays: number | null; id: number }>();
   for (const draft of input.items) {
+    if (draft.scheduleSessions === false) continue;
     for (const plan of draft.sessionPlan ?? []) {
       const existing = templateVisits.get(plan.visitKey);
       if (existing) existing.minutes += plan.minutes;
@@ -19979,6 +19994,9 @@ export async function insertPlanV2InTx(client: DbClient, input: PlanV2Input, exi
     );
     const itemId = itemRows[0].id;
     itemIds.push(itemId);
+
+    // Preserve the financial item; do not invent visits or sessions from historical money.
+    if (draft.scheduleSessions === false) continue;
 
     if (draft.sessionPlan && draft.sessionPlan.length > 0) {
       for (let index = 0; index < draft.sessionPlan.length; index += 1) {
@@ -20356,6 +20374,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     consentAt: string | null; itemsCount: number; doneItems: number;
     totalMinor: number; doneMinor: number; remainingMinor: number;
     baseCurrency: Currency;
+    clinicalProgress?: ClinicalProgressView;
     nextDueDate: string | null; overdueMinor: number;
   }[];
   plannedVisits: PlannedVisitView[];
@@ -20363,10 +20382,12 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    clinicalProgress?: ClinicalProgressView;
     agreementPaidMinor: number; agreementRemainingMinor: number;
     byCurrency: Record<Currency, {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
       agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+      clinicalProgress?: ClinicalProgressView;
       agreementPaidMinor: number; agreementRemainingMinor: number;
     }>;
   } | null;
@@ -20495,6 +20516,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
     // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
     baseCurrency: plan.baseCurrency,
+    clinicalProgress: historicalClinicalProgress(plan.items),
   }));
 
   /*
@@ -20533,6 +20555,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   const byCurrency = {} as Record<Currency, {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    clinicalProgress: ClinicalProgressView;
     agreementPaidMinor: number; agreementRemainingMinor: number;
   }>;
   for (const currency of CURRENCIES) {
@@ -20552,6 +20575,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
       agreedMinor, agreementPaidMinor, agreementRemainingMinor,
       treatmentDoneMinor,
       remainingTreatmentMinor: Math.max(0, agreedMinor - treatmentDoneMinor),
+      clinicalProgress: combineClinicalProgress(currencyPlans.map((plan) => historicalClinicalProgress(plan.items))),
     };
   }
   const baseView = byCurrency[CLINIC_BASE_CURRENCY];
@@ -20565,6 +20589,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     agreementRemainingMinor: baseView.agreementRemainingMinor,
     treatmentDoneMinor: baseView.treatmentDoneMinor,
     remainingTreatmentMinor: baseView.remainingTreatmentMinor,
+    clinicalProgress: baseView.clinicalProgress,
     byCurrency,
   };
 
