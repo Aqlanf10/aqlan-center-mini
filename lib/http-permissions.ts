@@ -104,6 +104,25 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
   // (HR-1) دليل الإسناد الآمن: بلا مبالغ — للمدير والاستقبال فقط.
   "/api/hr/directory": { GET: FRONT_DESK },
+  // (HR-3) العقود والقوالب والملاحق: للمدير وحده.
+  "/api/hr/contracts": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/contracts/[id]": { GET: ADMIN, PATCH: ADMIN, POST: ADMIN },
+  // (HR-4) جداول العمل والورديات: قراءة للاستقبال، تعديل للمدير.
+  "/api/hr/schedules": { GET: FRONT_DESK, POST: ADMIN },
+  "/api/hr/schedules/[id]": { GET: FRONT_DESK, PATCH: ADMIN },
+  // (HR-4) الحضور وتصحيحاته والإضافي:
+  "/api/hr/attendance": { GET: FRONT_DESK, POST: FRONT_DESK },
+  "/api/hr/attendance/corrections": { GET: ADMIN, POST: ADMIN },
+  // (HR-4) الإجازات والأرصدة:
+  "/api/hr/leaves": { GET: CLINIC, POST: CLINIC },
+  "/api/hr/leaves/[id]": { GET: CLINIC, PATCH: FRONT_DESK },
+  "/api/hr/leaves/balances": { GET: CLINIC, POST: ADMIN },
+  // (HR-5) المسير والصرف والسياسات: للمدير وحده.
+  "/api/hr/payroll/periods": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/runs": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/disburse": { POST: ADMIN },
+  "/api/hr/settings": { GET: ADMIN, PATCH: ADMIN },
+  "/api/hr/reports": { GET: ADMIN },
   "/api/internal/backup/run": { POST: INTERNAL },
   "/api/internal/reminders/run": { POST: INTERNAL },
   "/api/inventory": { GET: CLINIC, POST: FRONT_DESK },

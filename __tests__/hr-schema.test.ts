@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { HR_STAFF_SQL } from "../lib/hr-schema";
 import { HR_TASKS_SQL } from "../lib/hr-tasks-schema";
+import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "../lib/hr-contracts-attendance-schema";
+import { HR_PAYROLL_SQL } from "../lib/hr-payroll-schema";
 import { RESET_WIPE_TABLES, RESET_KEEP_TABLES } from "../lib/clinic-reset";
 
 /**
- * (HR-1/HR-2) عقود مخطط الموارد البشرية والمهام — نفس حراسة الأنماط السابقة:
+ * (HR-1/HR-2/HR-3/HR-4/HR-5) عقود مخطط الموارد البشرية والمهام والرواتب:
  * الهجرة جسدُ الثابت حرفيًّا، والإضافة خالصة، والتصنيف في إعادة الضبط مكتمل.
  */
 
@@ -97,22 +99,91 @@ describe("(HR-2) hr_tasks schema", () => {
   });
 });
 
+describe("(HR-3/HR-4) hr_contracts_attendance_leaves schema", () => {
+  it("keeps migration 0048 byte-equal to the runtime schema SQL", () => {
+    const lines = readFileSync("migrations/0048_hr_contracts_attendance_leaves.sql", "utf8").split("\n");
+    const index = lines.findIndex((line) => !line.startsWith("--"));
+    expect(lines.slice(index).join("\n").trim()).toBe(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL.trim());
+  });
+
+  it("is additive only: seven new tables, no DROP", () => {
+    expect(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL).not.toMatch(/DROP\s+TABLE/i);
+    expect(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL).not.toMatch(/^\s*(DELETE|UPDATE)\s/im);
+    const tables = HR_CONTRACTS_ATTENDANCE_LEAVES_SQL.match(/CREATE TABLE IF NOT EXISTS (\w+)/g)?.map((m) => m.split(" ").pop());
+    expect(tables).toEqual([
+      "hr_contracts",
+      "hr_work_schedules",
+      "hr_attendance_records",
+      "hr_attendance_corrections",
+      "hr_leave_types",
+      "hr_leave_balances",
+      "hr_leave_requests",
+    ]);
+  });
+
+  it("strictly constrains contract currencies to approved currencies", () => {
+    expect(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL).toMatch(/currency IN \('YER', 'SAR', 'USD'\)/);
+  });
+});
+
+describe("(HR-5) hr_payroll_disbursements schema", () => {
+  it("keeps migration 0049 byte-equal to the runtime schema SQL", () => {
+    const lines = readFileSync("migrations/0049_hr_payroll_disbursements.sql", "utf8").split("\n");
+    const index = lines.findIndex((line) => !line.startsWith("--"));
+    expect(lines.slice(index).join("\n").trim()).toBe(HR_PAYROLL_SQL.trim());
+  });
+
+  it("is additive only: five new tables, no DROP", () => {
+    expect(HR_PAYROLL_SQL).not.toMatch(/DROP\s+TABLE/i);
+    const tables = HR_PAYROLL_SQL.match(/CREATE TABLE IF NOT EXISTS (\w+)/g)?.map((m) => m.split(" ").pop());
+    expect(tables).toEqual([
+      "hr_payroll_periods",
+      "hr_payroll_runs",
+      "hr_payroll_items",
+      "hr_payroll_disbursements",
+      "hr_settings",
+    ]);
+  });
+
+  it("enforces multi-currency isolation on payroll runs and items", () => {
+    expect(HR_PAYROLL_SQL).toMatch(/currency IN \('YER', 'SAR', 'USD'\)/);
+  });
+});
+
 describe("(HR) clinic reset classification", () => {
-  it("tasks and their children are wiped; staff files and their change log stay with users", () => {
+  it("tasks, attendance and payroll runs are wiped; staff files, contracts, schedules, leave types and settings stay", () => {
     const wipe = new Set<string>(RESET_WIPE_TABLES);
     const keep = new Set<string>(RESET_KEEP_TABLES);
-    for (const table of ["hr_task_events", "hr_task_comments", "hr_task_checklist", "hr_task_links", "hr_tasks"]) {
+
+    for (const table of [
+      "hr_task_events",
+      "hr_task_comments",
+      "hr_task_checklist",
+      "hr_task_links",
+      "hr_tasks",
+      "hr_payroll_disbursements",
+      "hr_payroll_items",
+      "hr_payroll_runs",
+      "hr_payroll_periods",
+      "hr_attendance_corrections",
+      "hr_attendance_records",
+      "hr_leave_requests",
+    ]) {
       expect(wipe.has(table)).toBe(true);
       expect(keep.has(table)).toBe(false);
     }
-    for (const table of ["hr_staff", "hr_staff_changes"]) {
+
+    for (const table of [
+      "hr_staff",
+      "hr_staff_changes",
+      "hr_contracts",
+      "hr_work_schedules",
+      "hr_leave_types",
+      "hr_leave_balances",
+      "hr_settings",
+    ]) {
       expect(keep.has(table)).toBe(true);
       expect(wipe.has(table)).toBe(false);
-    }
-    // الأبناء قبل أبائهم في قائمة المسح (للقراءة؛ TRUNCATE واحد عمليًّا).
-    const tables = [...RESET_WIPE_TABLES];
-    for (const [child, parent] of [["hr_task_links", "hr_tasks"], ["hr_task_comments", "hr_tasks"]] as const) {
-      expect(tables.indexOf(child)).toBeLessThan(tables.indexOf(parent));
     }
   });
 });

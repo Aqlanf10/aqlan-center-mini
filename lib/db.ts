@@ -57,6 +57,8 @@ import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFrom
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
 import { HR_STAFF_SQL } from "./hr-schema";
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
+import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
+import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2060,6 +2062,10 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_STAFF_SQL);
     /* (HR-2) المهام وقوائمها التعليقات وسجل تغييراتها — جسد الهجرة 0046 حرفيًّا. */
     await getPool().query(HR_TASKS_SQL);
+    /* (HR-3/HR-4) العقود وجداول الدوام والحضور والإجازات — جسد الهجرة 0048 حرفيًّا. */
+    await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
+    /* (HR-5/HR-6) المسير والمستحقات وسندات الصرف والسياسات — جسد الهجرة 0049 حرفيًّا. */
+    await getPool().query(HR_PAYROLL_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //

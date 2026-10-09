@@ -13,7 +13,7 @@
  * بعد الالتزام (انظر updateStaff).
  */
 
-import { getPool, recordAudit, type DbClient, type DbPool } from "./db";
+import { getPool, insertAuditRow, recordAudit, type DbClient, type DbPool } from "./db";
 import { withTransaction } from "./transactions";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
@@ -220,16 +220,16 @@ export async function createStaff(input: CreateStaffInput, session: SessionPaylo
        VALUES ($1, $2, $3, 'create', NULL, $4)`,
       [row.id, session.username, session.role, input.fullName],
     );
+    await insertAuditRow(client, {
+      action: "hr.staff.create",
+      entity: "hr_staff",
+      entityId: String(row.id),
+      entityLabel: `إنشاء ملف الموظف «${input.fullName}»`,
+      details: { department: input.department, contractKind: input.contractKind, workStatus: input.workStatus },
+      actor: session.username,
+      actorRole: session.role,
+    });
     return row;
-  });
-  await recordAudit({
-    action: "hr.staff.create",
-    entity: "hr_staff",
-    entityId: String(result.id),
-    entityLabel: `إنشاء ملف الموظف «${input.fullName}»`,
-    details: { department: input.department, contractKind: input.contractKind, workStatus: input.workStatus },
-    actor: session.username,
-    actorRole: session.role,
   });
   return staffToView(result, true);
 }
@@ -406,21 +406,19 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
          change.field, change.oldValue, change.newValue, patch.reason?.trim() || null],
       );
     }
+    await insertAuditRow(client, {
+      action: "hr.staff.update",
+      entity: "hr_staff",
+      entityId: String(id),
+      entityLabel: `تعديل ملف الموظف «${updatedRow.full_name}» (${changes.map((c) => c.field).join("، ")})`,
+      details: { fields: changes.map((c) => c.field), reason: patch.reason?.trim() || null },
+      actor: session.username,
+      actorRole: session.role,
+    });
     return { outcome: "updated" as const, row: updatedRow, changes };
   });
   if ("missing" in outcome) return { ok: false, error: "ملف الموظف غير موجود.", status: 404 };
   if ("ok" in outcome) return outcome; // رفض 409/400 بسببٍ واضح
-  if (outcome.outcome === "updated") {
-    await recordAudit({
-      action: "hr.staff.update",
-      entity: "hr_staff",
-      entityId: String(id),
-      entityLabel: `تعديل ملف الموظف «${outcome.row.full_name}» (${outcome.changes.map((c) => c.field).join("، ")})`,
-      details: { fields: outcome.changes.map((c) => c.field), reason: patch.reason?.trim() || null },
-      actor: session.username,
-      actorRole: session.role,
-    });
-  }
   return { ok: true, staff: staffToView(outcome.row, true), changed: outcome.outcome === "updated" };
 }
 
@@ -446,6 +444,15 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
          VALUES ($1, $2, $3, 'unlink_user', 'user_id', $4, NULL, $5)`,
         [id, session.username, session.role, String(row.user_id), reason],
       );
+      await insertAuditRow(client, {
+        action: "hr.staff.unlink_user",
+        entity: "hr_staff",
+        entityId: String(id),
+        entityLabel: `فكّ ربط حساب الدخول عن ملف الموظف «${row.full_name}»`,
+        details: { previousUserId: row.user_id, reason },
+        actor: session.username,
+        actorRole: session.role,
+      });
       return { ok: true as const, kind: "unlink" as const, fullName: row.full_name, previousUserId: row.user_id } as const;
     }
 
@@ -465,32 +472,19 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
        VALUES ($1, $2, $3, 'link_user', 'user_id', $4, $5, $6)`,
       [id, session.username, session.role, row.user_id === null ? null : String(row.user_id), String(userId), reason],
     );
-    return { ok: true as const, kind: "link" as const, fullName: row.full_name, userId, username: String(user.rows[0].username) } as const;
-  });
-  if (!outcome.ok) return outcome;
-  // التدقيق بعد الالتزام — لا اتصالٌ يُمسك أثناء انتظار الأقفال.
-  const refreshedRow = staffRowMapper((await getPool().query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);
-  if (outcome.kind === "unlink") {
-    await recordAudit({
-      action: "hr.staff.unlink_user",
-      entity: "hr_staff",
-      entityId: String(id),
-      entityLabel: `فكّ ربط حساب الدخول عن ملف الموظف «${outcome.fullName}»`,
-      details: { previousUserId: outcome.previousUserId, reason },
-      actor: session.username,
-      actorRole: session.role,
-    });
-  } else {
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "hr.staff.link_user",
       entity: "hr_staff",
       entityId: String(id),
-      entityLabel: `ربط ملف الموظف «${outcome.fullName}» بحساب الدخول «${outcome.username}»`,
+      entityLabel: `ربط ملف الموظف «${row.full_name}» بحساب الدخول «${String(user.rows[0].username)}»`,
       details: { userId, reason },
       actor: session.username,
       actorRole: session.role,
     });
-  }
+    return { ok: true as const, kind: "link" as const, fullName: row.full_name, userId, username: String(user.rows[0].username) } as const;
+  });
+  if (!outcome.ok) return outcome;
+  const refreshedRow = staffRowMapper((await getPool().query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);
   return { ok: true, staff: staffToView(refreshedRow, true) };
 }
 

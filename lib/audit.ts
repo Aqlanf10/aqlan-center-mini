@@ -133,7 +133,16 @@ export type AuditAction =
   /* (HR-2) المهام: بيانات وصفية فقط في التدقيق — عنوان الخاصة لا يُكتب في السجل العام.
      التفاصيل الكاملة (من/ماذا/القيم) في hr_task_events خلف صلاحية القراءة نفسها. */
   | "task.create" | "task.update" | "task.status" | "task.assign" | "task.visibility"
-  | "task.comment" | "task.checklist" | "task.link" | "task.unlink";
+  | "task.comment" | "task.checklist" | "task.link" | "task.unlink"
+  /* (HR-3) العقود الإدارية: إنشاء، تعديل، اعتماد، إنهاء، وملحق */
+  | "hr.contract.create" | "hr.contract.update" | "hr.contract.approve" | "hr.contract.terminate" | "hr.contract.addendum"
+  /* (HR-4) جداول العمل والحضور والإجازات */
+  | "hr.schedule.create" | "hr.schedule.update"
+  | "hr.attendance.record" | "hr.attendance.correct" | "hr.attendance.overtime"
+  | "hr.leave.request" | "hr.leave.decision" | "hr.leave.balance_adjust"
+  /* (HR-5/HR-6) المستحقات والمسير والصرف والسياسات */
+  | "hr.payroll.period.create" | "hr.payroll.calculate" | "hr.payroll.approve"
+  | "hr.payroll.disburse" | "hr.payroll.close" | "hr.settings.update";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -165,6 +174,25 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "task.checklist": "بند في قائمة تحقق مهمة",
   "task.link": "ربط مهمة بسجل",
   "task.unlink": "فكّ ربط مهمة عن سجل",
+  "hr.contract.create": "إنشاء مسودة عقد",
+  "hr.contract.update": "تعديل عقد",
+  "hr.contract.approve": "اعتماد عقد",
+  "hr.contract.terminate": "إنهاء عقد",
+  "hr.contract.addendum": "إصدار ملحق عقد",
+  "hr.schedule.create": "إنشاء جدول دوام",
+  "hr.schedule.update": "تعديل جدول دوام",
+  "hr.attendance.record": "تسجيل حضور وانصراف",
+  "hr.attendance.correct": "تصحيح سجل حضور",
+  "hr.attendance.overtime": "اعتماد ساعات إضافية",
+  "hr.leave.request": "تقديم طلب إجازة",
+  "hr.leave.decision": "قرار بشأن طلب إجازة",
+  "hr.leave.balance_adjust": "تعديل رصيد إجازات",
+  "hr.payroll.period.create": "إنشاء فترة مسير رواتب",
+  "hr.payroll.calculate": "احتساب مسير رواتب",
+  "hr.payroll.approve": "اعتماد مسير رواتب",
+  "hr.payroll.disburse": "صرف مستحقات مسير",
+  "hr.payroll.close": "إقفال فترة مسير رواتب",
+  "hr.settings.update": "تحديث سياسات الموارد البشرية",
   "patient.import": "استيراد مرضى من ملف",
   "reminder.auto": "جولة التذكير الآلي بواتساب",
   "messaging.channel.update": "تعديل إعدادات قناة مراسلة",

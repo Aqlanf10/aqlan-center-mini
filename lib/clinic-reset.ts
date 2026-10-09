@@ -70,6 +70,14 @@ export const RESET_WIPE_TABLES = [
   "hr_task_checklist",
   "hr_task_links",
   "hr_tasks",
+  // (HR-3/HR-4/HR-5) الحضور والإجازات والمسير والصرف — سجلات تشغيلية تُمسح
+  "hr_payroll_disbursements",
+  "hr_payroll_items",
+  "hr_payroll_runs",
+  "hr_payroll_periods",
+  "hr_leave_requests",
+  "hr_attendance_corrections",
+  "hr_attendance_records",
   // المال
   "journal_manual_lines",
   "journal_manual",
@@ -108,6 +116,11 @@ export const RESET_KEEP_TABLES = [
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",
   "hr_staff_changes",
+  "hr_contracts",
+  "hr_work_schedules",
+  "hr_leave_types",
+  "hr_leave_balances",
+  "hr_settings",
   "settings",
   "parties",
   "doctor_commission_history",
