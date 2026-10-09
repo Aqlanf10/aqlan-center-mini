@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getCephStudy, linkCephStudyToCase } from "@/lib/db";
+import { cephLinkAuthorizer } from "@/lib/ceph-link-authority";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -62,6 +63,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       analysisId, orthoCaseId: Number(source.orthoCaseId),
       expected: { phase: expected.phase, xrayDate, status: expected.status },
       actor: session.username, actorRole: session.role,
+      // يُعاد الفحص داخل معاملة الحفظ نفسها (انظر lib/ceph-link-authority.ts).
+      authorize: cephLinkAuthorizer(session),
     });
     if (!result.ok) return say(result.message, result.status);
     return NextResponse.json({ ok: true, changed: result.changed });

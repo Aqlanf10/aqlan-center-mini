@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/session", () => ({ requireSession: vi.fn() }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: vi.fn() }));
-vi.mock("@/lib/db", () => ({ getCephStudy: vi.fn(), linkCephStudyToCase: vi.fn() }));
+vi.mock("@/lib/db", () => ({ getCephStudy: vi.fn(), linkCephStudyToCase: vi.fn(), findUserByUsername: vi.fn() }));
 
 import { POST } from "@/app/api/ceph/[id]/link-case/route";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
-import { getCephStudy, linkCephStudyToCase } from "@/lib/db";
+import { findUserByUsername, getCephStudy, linkCephStudyToCase } from "@/lib/db";
 
 const arabic = /[؀-ۿ]/;
 const good = { orthoCaseId: 4, confirm: true, expected: { phase: "pretreatment", xrayDate: "2025-11-20", status: "completed" } };
@@ -35,6 +35,7 @@ describe("POST /api/ceph/[id]/link-case — explicit, confirmed, clinician-only"
       expect(await response.json()).toEqual({ ok: true, changed: true });
       expect(linkCephStudyToCase).toHaveBeenLastCalledWith({
         analysisId: 41, orthoCaseId: 4, expected: good.expected, actor: `synthetic-${role}`, actorRole: role,
+        authorize: expect.any(Function),
       });
     }
   });
@@ -86,8 +87,26 @@ describe("POST /api/ceph/[id]/link-case — explicit, confirmed, clinician-only"
     expect(linkCephStudyToCase).not.toHaveBeenCalled();
   });
 
-  it("passes the domain refusal status and Arabic message through (404 / 409)", async () => {
-    for (const status of [404, 409] as const) {
+  it("the in-transaction authorizer re-checks the live account (role + patient scope) on the transaction client", async () => {
+    await call(good);
+    const { authorize } = vi.mocked(linkCephStudyToCase).mock.calls[0][0];
+    const client = { query: vi.fn(), release: vi.fn() } as never;
+    vi.mocked(findUserByUsername).mockResolvedValue({ role: "doctor" } as never);
+    vi.mocked(canAccessPatient).mockResolvedValue(true);
+    expect(await authorize(client, 101)).toBe(true);
+    expect(canAccessPatient).toHaveBeenLastCalledWith(expect.objectContaining({ role: "doctor" }), 101, "canUploadXrays", client);
+    expect(findUserByUsername).toHaveBeenLastCalledWith("synthetic-doctor", client);
+    vi.mocked(findUserByUsername).mockResolvedValue(null as never); // account deactivated / removed
+    expect(await authorize(client, 101)).toBe(false);
+    vi.mocked(findUserByUsername).mockResolvedValue({ role: "reception" } as never); // role changed since the session
+    expect(await authorize(client, 101)).toBe(false);
+    vi.mocked(findUserByUsername).mockResolvedValue({ role: "doctor" } as never);
+    vi.mocked(canAccessPatient).mockResolvedValue(false); // permission withdrawn / patient no longer theirs
+    expect(await authorize(client, 101)).toBe(false);
+  });
+
+  it("passes the domain refusal status and Arabic message through (403 / 404 / 409)", async () => {
+    for (const status of [403, 404, 409] as const) {
       vi.mocked(linkCephStudyToCase).mockResolvedValueOnce({ ok: false, status, message: "رسالة عربية من الخادم" });
       const response = await call(good);
       expect(response.status).toBe(status);

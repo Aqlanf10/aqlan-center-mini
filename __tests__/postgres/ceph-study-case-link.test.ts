@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { Client } from "pg";
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
 
 /**
@@ -14,6 +15,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 
 const db = await import("../../lib/db");
+const { cephLinkAuthorizer } = await import("../../lib/ceph-link-authority");
 const {
   ensureSchema, getPool, resetPoolForTesting, createOrthoCase, createCephAnalysis, updateCephCalibration,
   completeCephAnalysis, linkCephStudyToCase,
@@ -27,6 +29,11 @@ let fixture = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  doctorParty = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'Synthetic Doctor') RETURNING id`))[0].id;
+  await createUser("link-admin", "admin", null, null);
+  await createUser("link-doctor", "doctor", { canUploadXrays: true, canViewXrays: true }, doctorParty);
+  admin = sessionOf("link-admin", "admin");
+  actor = actorOf(admin);
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -72,7 +79,33 @@ const measurementsOf = async (id: number) => q(`SELECT code, value FROM ceph_mea
 const linkAudits = async (analysisId: number) => q(
   `SELECT actor, details FROM audit_log WHERE action = 'ceph.link' AND entity_id = $1::text`, [analysisId]);
 const expected = (phase: string, xrayDate: string | null, status: string) => ({ phase, xrayDate, status });
-const actor = { actor: "dr-link", actorRole: "doctor" };
+const FAR_FUTURE = 4_102_444_800_000;
+type Who = { username: string; role: string; expiresAt: number; userId: number };
+const sessionOf = (username: string, role: string, expiresAt = FAR_FUTURE): Who => ({ username, role, expiresAt, userId: 1 });
+const actorOf = (who: Who) => ({ actor: who.username, actorRole: who.role, authorize: cephLinkAuthorizer(who) });
+// The admin account and the doctor who owns the patients below (real rows, so the live in-transaction checks run).
+let admin: Who;
+let actor: ReturnType<typeof actorOf>;
+let doctorParty = 0;
+const createUser = async (username: string, role: string, permissions: Record<string, boolean> | null, partyId: number | null) =>
+  q(`INSERT INTO users (username, display_name, password_hash, role, party_id, permissions) VALUES ($1, $1, 'x', $2, $3, $4)`,
+    [username, role, partyId, permissions ? JSON.stringify(permissions) : null]);
+const owned = async (label: string) => {
+  const id = await newPatient(label);
+  await q(`UPDATE patients SET primary_doctor_id = $2 WHERE id = $1`, [id, doctorParty]);
+  return id;
+};
+
+/** ينتظر حتى يصير استعلامٌ محجوبٌ خلف قفلٍ مُمسَك (مؤشرٌ قاطع على أن الطلب في الانتظار). */
+let probe: Client;
+beforeAll(async () => { probe = new Client({ connectionString: process.env.DATABASE_URL, ssl: false }); await probe.connect(); });
+afterAll(async () => { await probe?.end(); });
+/** مراقبةٌ على اتصالٍ مستقل عن تجمّع التطبيق كي لا يتأثر بعدد الاتصالات المحجوزة في السيناريو. */
+async function waitUntilBlocked(blockerPid: number) {
+  await expect.poll(async () => (await probe.query<{ blocked: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE $1 = ANY(pg_blocking_pids(a.pid))) AS blocked`, [blockerPid])).rows[0].blocked,
+  { timeout: 8000, interval: 25 }).toBe(true);
+}
 
 describe("(ORTHO-ID-2) explicit link of an earlier study to the case", () => {
   it("creating the case never links an earlier study by itself", async () => {
@@ -102,7 +135,7 @@ describe("(ORTHO-ID-2) explicit link of an earlier study to the case", () => {
     expect((await studyRow(decoy)).ortho_case_id).toBeNull(); // the other earlier study is never picked for the doctor
     const audits = await linkAudits(older);
     expect(audits).toHaveLength(1);
-    expect(audits[0]).toMatchObject({ actor: "dr-link", details: expect.objectContaining({ الدراسة: older, الحالة: caseId }) });
+    expect(audits[0]).toMatchObject({ actor: "link-admin", details: expect.objectContaining({ الدراسة: older, الحالة: caseId }) });
   });
 
   it("an unknown study date and an unapproved draft are linkable only with the same stated context", async () => {
@@ -227,5 +260,102 @@ describe("(ORTHO-ID-2) explicit link of an earlier study to the case", () => {
     const before = await snapshot();
     await linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: expected("pretreatment", "2025-11-20", "completed"), ...actor });
     expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe("(ORTHO-ID-2) authority is re-checked inside the saving transaction", () => {
+  const doctor = () => sessionOf("link-doctor", "doctor");
+  const ctx = (phase = "pretreatment", date: string | null = "2025-11-20", status = "draft") => expected(phase, date, status);
+  const prepare = async (label: string) => {
+    const patientId = await owned(label);
+    const older = await study(patientId, { phase: "pretreatment", xrayDate: "2025-11-20", approve: false });
+    const caseId = await newCase(patientId);
+    return { patientId, older, caseId };
+  };
+  const untouched = async (id: number) => {
+    expect((await studyRow(id)).ortho_case_id).toBeNull();
+    expect(await linkAudits(id)).toHaveLength(0);
+  };
+  /** يمسك صفًّا بتعديلٍ غير مُلتزَم على اتصالٍ مستقل؛ يُعيد دالتي الالتزام/التراجع ومعرّف الخلفية. */
+  const hold = async (sql: string, params: unknown[]) => {
+    const blocker = await getPool().connect();
+    await blocker.query("BEGIN");
+    await blocker.query(sql, params);
+    const pid = (await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    return {
+      pid,
+      commit: async () => { await blocker.query("COMMIT"); blocker.release(); },
+      rollback: async () => { await blocker.query("ROLLBACK"); blocker.release(); },
+    };
+  };
+  const reset = async () => {
+    await q(`UPDATE users SET permissions = $1, is_active = TRUE, role = 'doctor' WHERE username = 'link-doctor'`, [JSON.stringify({ canUploadXrays: true, canViewXrays: true })]);
+  };
+
+  it("a doctor with the permission who owns the patient may link", async () => {
+    const { older, caseId } = await prepare("authorized doctor");
+    expect(await linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(doctor()) })).toEqual({ ok: true, changed: true });
+  });
+
+  it("refuses a doctor who does not own the patient, an expired session and a role the account no longer has — nothing written", async () => {
+    const stranger = await newPatient("not owned");
+    const older = await study(stranger, { phase: "pretreatment", xrayDate: "2025-11-20", approve: false });
+    const caseId = await newCase(stranger);
+    for (const who of [doctor(), sessionOf("link-admin", "admin", Date.now() - 1_000), sessionOf("link-admin", "doctor"), sessionOf("link-nobody", "admin")]) {
+      expect(await linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(who) }))
+        .toMatchObject({ ok: false, status: 403, message: expect.stringMatching(/[؀-ۿ]/) });
+    }
+    await untouched(older);
+  });
+
+  it.each([
+    ["the upload permission is withdrawn", `UPDATE users SET permissions = '{"canUploadXrays":false}' WHERE username = 'link-doctor'`, [] as unknown[]],
+    ["the account is deactivated", `UPDATE users SET is_active = FALSE WHERE username = 'link-doctor'`, []],
+    ["the account's role is changed", `UPDATE users SET role = 'reception' WHERE username = 'link-doctor'`, []],
+  ])("a request already waiting when %s is refused once the change commits", async (_name, sql, params) => {
+    const { older, caseId } = await prepare("revoked while waiting");
+    const revoker = await hold(sql, params);
+    try {
+      const pending = linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(doctor()) });
+      await waitUntilBlocked(revoker.pid);
+      await revoker.commit();
+      expect(await pending).toMatchObject({ ok: false, status: 403 });
+    } finally { await reset(); }
+    await untouched(older);
+  });
+
+  it("a request waiting while the patient stops being the doctor's is refused once that commits", async () => {
+    const { patientId, older, caseId } = await prepare("ownership moved while waiting");
+    const mover = await hold(`UPDATE patients SET primary_doctor_id = NULL WHERE id = $1`, [patientId]);
+    const pending = linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(doctor()) });
+    await waitUntilBlocked(mover.pid);
+    await mover.commit();
+    expect(await pending).toMatchObject({ ok: false, status: 403 });
+    await untouched(older);
+  });
+
+  it("when the link wins the race the withdrawal waits for it — no interleaving in between", async () => {
+    const { older, caseId } = await prepare("link wins");
+    // Hold the study row so the link passes its authority check (taking the shared lock) and then waits on the study.
+    const studyHolder = await hold(`SELECT id FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [older]);
+    const link = linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(doctor()) });
+    await waitUntilBlocked(studyHolder.pid);
+    const revoker = new Client({ connectionString: process.env.DATABASE_URL, ssl: false });
+    await revoker.connect();
+    const revokerPid = (await revoker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    let revoked = false;
+    const revocation = revoker.query(`UPDATE users SET permissions = '{"canUploadXrays":false}' WHERE username = 'link-doctor'`)
+      .then(() => { revoked = true; });
+    try {
+      // The withdrawal itself is waiting on the link's shared lock on the account row.
+      await expect.poll(async () => (await probe.query<{ waiting: boolean }>(
+        `SELECT (wait_event_type = 'Lock') AS waiting FROM pg_stat_activity WHERE pid = $1`, [revokerPid])).rows[0].waiting,
+      { timeout: 8000, interval: 25 }).toBe(true);
+      expect(revoked).toBe(false); // queued behind the link — it cannot slip in between the check and the write
+      await studyHolder.rollback();
+      expect(await link).toEqual({ ok: true, changed: true });
+      await revocation;
+      expect((await studyRow(older)).ortho_case_id).toBe(caseId);
+    } finally { await revoker.end(); await reset(); }
   });
 });

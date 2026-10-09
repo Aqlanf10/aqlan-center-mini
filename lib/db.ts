@@ -23134,7 +23134,7 @@ export async function duplicateCephAnalysis(
 
 export type CephLinkResult =
   | { ok: true; changed: boolean }
-  | { ok: false; status: 404 | 409; message: string };
+  | { ok: false; status: 403 | 404 | 409; message: string };
 
 /**
  * (ORTHO-ID-2) ربط دراسة سيفالو سابقة (T1 التي سبقت إنشاء الحالة مثلًا) بحالة تقويم باختيار الطبيب الصريح.
@@ -23143,6 +23143,11 @@ export type CephLinkResult =
  * وحالة الاعتماد). يلمس مؤشر الحالة وحده — لا قياسات ولا معالم ولا اعتماد ولا تاريخ ولا مرحلة — ويُدقَّق في المعاملة
  * نفسها. دراسة مريضٍ آخر أو حالته تُجاب كالمفقودة (لا كشف وجود). المنقولة بين حالتين تُرفض، وتكرار الطلب نفسه إعادةٌ
  * بلا أثر ثانٍ. السياق القديم (تغيّرت الدراسة بعد المعاينة) يُرفض برسالة عربية.
+ *
+ * **التفويض داخل المعاملة:** فحص الجلسة في المسار قبل الحفظ لا يكفي — صلاحيةٌ تُسحب أو ملكيةُ مريضٍ تتغيّر أثناء
+ * انتظار الطلب لا يجوز أن تُكمل الربط. فيُنفَّذ `authorize` داخل المعاملة قبل أي كتابة وبأقفال القراءة المشتركة التي
+ * يأخذها الحارس القانوني على صف المستخدم وشهود الملكية (`canAccessPatient(..., client)`): تعديلٌ متزامن للصلاحية أو
+ * الملكية إما يسبق الفحص فيراه، أو ينتظر حتى تنتهي المعاملة.
  */
 export async function linkCephStudyToCase(input: {
   analysisId: number;
@@ -23150,10 +23155,18 @@ export async function linkCephStudyToCase(input: {
   expected: { phase: string; xrayDate: string | null; status: string };
   actor: string;
   actorRole: string | null;
+  /** يُنفَّذ داخل المعاملة على اتصالها؛ false ⇒ لا كتابة. */
+  authorize: (client: DbClient, patientId: number) => Promise<boolean>;
 }): Promise<CephLinkResult> {
   await ensureSchema();
   const missing: CephLinkResult = { ok: false, status: 404, message: "الدراسة أو الحالة غير موجودة لهذا المريض." };
   return withTransaction(getPool(), async (client): Promise<CephLinkResult> => {
+    const { rows: [owner] } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM ceph_analyses WHERE id = $1`, [input.analysisId]);
+    if (!owner) return missing;
+    if (!(await input.authorize(client, owner.patient_id))) {
+      return { ok: false, status: 403, message: "لم تعد تملك صلاحية ربط هذه الدراسة." };
+    }
     const { rows: [study] } = await client.query<{
       patient_id: number; status: string; phase: string; xray_date_text: string | null; ortho_case_id: number | null;
     }>(

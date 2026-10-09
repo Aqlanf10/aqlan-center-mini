@@ -651,6 +651,7 @@ export function PatientCeph({
           authority={authority}
           studies={unlinkedStudies}
           onLinked={() => void load(readOwner.begin())}
+          onRefresh={() => void load(readOwner.begin())}
         />
       )}
 

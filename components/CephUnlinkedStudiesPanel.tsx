@@ -18,17 +18,26 @@ export interface UnlinkedStudy {
   xrayDate: string | null;
 }
 
-type Pending = { studyId: number; confirmed: boolean; saving: boolean };
+/** ما راجعه الطبيب لحظة اختياره — التأكيد مربوطٌ بهذه اللقطة لا بما تعرضه القائمة بعد تحديثها. */
+type Reviewed = { phase: CephDiagnosticStage; xrayDate: string | null; status: "draft" | "completed" };
+type Pending = { studyId: number; reviewed: Reviewed; confirmed: boolean; saving: boolean };
+
+const snapshotOf = (study: UnlinkedStudy): Reviewed => ({ phase: study.phase, xrayDate: study.xrayDate, status: study.status === "completed" ? "completed" : "draft" });
+const sameAsReviewed = (study: UnlinkedStudy | undefined, reviewed: Reviewed): boolean =>
+  !!study && study.phase === reviewed.phase && study.xrayDate === reviewed.xrayDate && study.status === reviewed.status;
 
 export function CephUnlinkedStudiesPanel({
-  patientId, orthoCaseId, authority, studies, onLinked,
+  patientId, orthoCaseId, authority, studies, onLinked, onRefresh,
 }: {
   patientId: number;
   orthoCaseId: number;
   /** هوية الجلسة وصلاحياتها: تغيّرها تُسقط أي تأكيد مفتوح. */
   authority: string;
   studies: UnlinkedStudy[];
+  /** يُستدعى بعد ربطٍ ناجح أو بعد رفضٍ يوجب إعادة القراءة. */
   onLinked: () => void;
+  /** تحديثٌ يدوي للقائمة (قد تكون تغيّرت من تبويبٍ آخر). */
+  onRefresh: () => void;
 }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -37,6 +46,9 @@ export function CephUnlinkedStudiesPanel({
   const contextRef = useRef(context);
   const sequence = useRef(0);
   const busy = useRef(false);
+  // آخر قائمة معروضة، تقرؤها المعالجات دون أن تلتقط نسخةً قديمة منها.
+  const latest = useRef(studies);
+  latest.current = studies;
   useEffect(() => {
     contextRef.current = context;
     sequence.current += 1;
@@ -46,9 +58,23 @@ export function CephUnlinkedStudiesPanel({
     return () => { sequence.current += 1; busy.current = false; };
   }, [context]);
 
+  // التأكيد لا يبقى إن تغيّرت الدراسة التي راجعها الطبيب (أو غابت) عند تحديث القائمة — ويُلغى فورًا لا عند نقرٍ لاحق.
+  useEffect(() => {
+    if (!pending || pending.saving) return;
+    const current = studies.find((item) => Number(item.id) === pending.studyId);
+    if (sameAsReviewed(current, pending.reviewed)) return;
+    setPending(null);
+    setMessage({
+      kind: "error",
+      text: current
+        ? "تغيّرت الدراسة أثناء المراجعة (المرحلة أو التاريخ أو الاعتماد) — أُلغي التأكيد، راجعها من جديد قبل الربط."
+        : "لم تعد الدراسة ضمن القائمة (ربما رُبطت أو رُفضت من تبويبٍ آخر) — أُلغي التأكيد.",
+    });
+  }, [studies, pending]);
+
   if (studies.length === 0 && !message) return null;
 
-  const describe = (study: UnlinkedStudy) => {
+  const describe = (study: Pick<UnlinkedStudy, "phase" | "xrayDate" | "status">) => {
     // labelAr يحمل رمز المرحلة أصلًا («قبل العلاج (T1)») فلا يُكرَّر.
     const stage = CEPH_DIAGNOSTIC_STAGES[study.phase];
     return `${stage?.labelAr ?? study.phase} — ${study.xrayDate ? friendlyDateLong(study.xrayDate) : "تاريخ الأشعة غير معروف"} — ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
@@ -57,11 +83,18 @@ export function CephUnlinkedStudiesPanel({
   const link = async (study: UnlinkedStudy) => {
     const studyId = Number(study.id);
     if (busy.current || !pending || pending.studyId !== studyId || !pending.confirmed) return;
+    // آخر فحصٍ قبل الإرسال: ما راجعه الطبيب يجب أن يكون ما تعرضه القائمة الآن.
+    if (!sameAsReviewed(latest.current.find((item) => Number(item.id) === studyId), pending.reviewed)) {
+      setPending(null);
+      setMessage({ kind: "error", text: "تغيّرت الدراسة أثناء المراجعة — أُلغي التأكيد، راجعها من جديد قبل الربط." });
+      return;
+    }
     busy.current = true;
     const mine = ++sequence.current;
     const key = contextRef.current;
     const current = () => sequence.current === mine && contextRef.current === key;
-    setPending({ studyId, confirmed: true, saving: true });
+    const reviewed = pending.reviewed;
+    setPending({ studyId, reviewed, confirmed: true, saving: true });
     setMessage(null);
     try {
       const response = await fetch(`/api/ceph/${studyId}/link-case`, {
@@ -69,7 +102,8 @@ export function CephUnlinkedStudiesPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orthoCaseId, confirm: true,
-          expected: { phase: study.phase, xrayDate: study.xrayDate, status: study.status },
+          // اللقطة التي راجعها الطبيب لا ما تعرضه القائمة الآن: إن تغيّر شيءٌ بعدها يرفضه الخادم.
+          expected: reviewed,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -82,12 +116,12 @@ export function CephUnlinkedStudiesPanel({
         const text = typeof data?.message === "string" ? data.message : "تعذّر ربط الدراسة بالحالة. أعد المحاولة.";
         // 409/404: السياق تغيّر (أو لم يعد صالحًا) — يُغلق التأكيد وتُعاد القراءة. غير ذلك: يبقى تأكيد الطبيب مفتوحًا لإعادة المحاولة.
         if (response.status === 409 || response.status === 404) { setPending(null); onLinked(); }
-        else setPending({ studyId, confirmed: true, saving: false });
+        else setPending({ studyId, reviewed, confirmed: true, saving: false });
         setMessage({ kind: "error", text });
       }
     } catch {
       if (!current()) return;
-      setPending({ studyId, confirmed: true, saving: false });
+      setPending({ studyId, reviewed, confirmed: true, saving: false });
       setMessage({ kind: "error", text: "تعذّر تأكيد الربط. قد يكون الطلب نُفّذ؛ حدّث الدراسات قبل المحاولة مجددًا." });
     } finally {
       if (sequence.current === mine) busy.current = false;
@@ -96,7 +130,13 @@ export function CephUnlinkedStudiesPanel({
 
   return (
     <section aria-labelledby="ceph-unlinked-title" className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 text-right">
-      <h4 id="ceph-unlinked-title" className="text-xs font-extrabold text-sky-900">دراسات سابقة غير مرتبطة بأي حالة</h4>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 id="ceph-unlinked-title" className="text-xs font-extrabold text-sky-900">دراسات سابقة غير مرتبطة بأي حالة</h4>
+        <button type="button" onClick={onRefresh} disabled={pending?.saving === true}
+          className="rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-900 hover:bg-sky-100 disabled:opacity-40">
+          تحديث القائمة
+        </button>
+      </div>
       <p className="mt-0.5 text-[11px] text-sky-800">
         الربط اختيارك الصريح: لا تُربط دراسة تلقائيًا، ولا يتغير أي قياس أو اعتماد أو تاريخ. اختر الدراسة المقصودة لهذه الحالة (#{orthoCaseId}) ثم أكّد.
       </p>
@@ -119,7 +159,7 @@ export function CephUnlinkedStudiesPanel({
                 </p>
                 {!open && (
                   <button type="button" disabled={pending?.saving === true}
-                    onClick={() => { setMessage(null); setPending({ studyId, confirmed: false, saving: false }); }}
+                    onClick={() => { setMessage(null); setPending({ studyId, reviewed: snapshotOf(study), confirmed: false, saving: false }); }}
                     className="shrink-0 rounded-lg border border-navy-800 px-3 py-1 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50 disabled:opacity-40">
                     ربط بهذه الحالة
                   </button>
@@ -128,11 +168,11 @@ export function CephUnlinkedStudiesPanel({
               {open && pending && (
                 <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
                   <p className="text-[11px] text-amber-900">
-                    ستُربط هذه الدراسة بحالة التقويم #{orthoCaseId}. لا تتغير قياساتها ولا اعتمادها ولا تاريخها.
+                    ما راجعتَه: {describe(pending.reviewed)}. ستُربط هذه الدراسة بحالة التقويم #{orthoCaseId}، ولا تتغير قياساتها ولا اعتمادها ولا تاريخها.
                   </p>
                   <label className="flex items-start gap-2 text-[11px] font-bold text-slate-800">
                     <input type="checkbox" className="mt-0.5 h-4 w-4 accent-navy-800" checked={pending.confirmed} disabled={pending.saving}
-                      onChange={(event) => setPending({ studyId, confirmed: event.target.checked, saving: false })} />
+                      onChange={(event) => setPending({ studyId, reviewed: pending.reviewed, confirmed: event.target.checked, saving: false })} />
                     <span>راجعتُ الدراسة وأؤكد أنها المقصودة بهذه الحالة</span>
                   </label>
                   <div className="flex flex-wrap gap-2">

@@ -174,6 +174,70 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 explicit T1 link �
   });
 });
 
+describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 confirmation is bound to what the doctor reviewed — viewport $width", ({ width }) => {
+  it("a study that changes after the doctor ticked the box cancels the confirmation instead of linking the new data", async () => {
+    const f = await seed(`late${width}`);
+    const { context, page, errors } = await open("admin", width);
+    try {
+      const { panel } = await openRecords(page, f.patientId, `late${width}`);
+      const posts: string[] = [];
+      page.on("request", (request) => { if (request.url().includes("/link-case")) posts.push(request.url()); });
+      const row = () => panel.getByRole("listitem").filter({ hasText: `#${f.oldT1}` });
+      await row().getByRole("button", { name: "ربط بهذه الحالة" }).click();
+      await row().getByRole("checkbox").check();
+      expect(await row().innerText()).toContain("قبل العلاج");
+
+      // Another user/tab changes the study while the confirmation is open; the doctor refreshes the list.
+      await db.query(`UPDATE ceph_analyses SET phase = 'followup' WHERE id = $1`, [f.oldT1]);
+      await panel.getByRole("button", { name: "تحديث القائمة" }).click();
+      await panel.getByRole("alert").filter({ hasText: "تغيّرت الدراسة أثناء المراجعة" }).waitFor();
+      await expect.poll(() => row().getByRole("checkbox").count()).toBe(0); // the tick did not survive the changed data
+      expect(posts).toHaveLength(0);
+      expect((await state(f.oldT1)).ortho_case_id).toBeNull();
+      await shot(page, `late-cancelled-${width}`, panel);
+
+      // Re-reviewing shows the new data; only then can the doctor confirm it.
+      await row().getByRole("button", { name: "ربط بهذه الحالة" }).click();
+      expect(await row().innerText()).toContain("متابعة");
+      await row().getByRole("checkbox").check();
+      await row().getByRole("button", { name: "تأكيد الربط" }).click();
+      await page.getByText(`تم ربط الدراسة #${f.oldT1} بحالة التقويم #${f.caseId}.`).waitFor();
+      expect(posts).toHaveLength(1);
+      expect((await state(f.oldT1)).ortho_case_id).toBe(f.caseId);
+      expect(errors).toEqual([]);
+    } finally { await context.close(); }
+  });
+
+  it("a study linked from another tab disappears from this tab's open confirmation on refresh — no second link is sent", async () => {
+    const f = await seed(`tab${width}`);
+    const first = await open("admin", width);
+    const second = await open("admin", width);
+    try {
+      const one = await openRecords(first.page, f.patientId, `tab${width}`);
+      const posts: string[] = [];
+      first.page.on("request", (request) => { if (request.url().includes("/link-case")) posts.push(request.url()); });
+      const rowOne = one.panel.getByRole("listitem").filter({ hasText: `#${f.undated}` });
+      await rowOne.getByRole("button", { name: "ربط بهذه الحالة" }).click();
+      await rowOne.getByRole("checkbox").check();
+
+      // The second tab links the very same study first, through the real UI.
+      const two = await openRecords(second.page, f.patientId, `tab${width}`);
+      const rowTwo = two.panel.getByRole("listitem").filter({ hasText: `#${f.undated}` });
+      await rowTwo.getByRole("button", { name: "ربط بهذه الحالة" }).click();
+      await rowTwo.getByRole("checkbox").check();
+      await rowTwo.getByRole("button", { name: "تأكيد الربط" }).click();
+      await second.page.getByText(`تم ربط الدراسة #${f.undated} بحالة التقويم #${f.caseId}.`).waitFor();
+
+      await one.panel.getByRole("button", { name: "تحديث القائمة" }).click();
+      await one.panel.getByRole("alert").filter({ hasText: "لم تعد الدراسة ضمن القائمة" }).waitFor();
+      expect(posts).toHaveLength(0);
+      expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'ceph.link' AND entity_id = $1`, [String(f.undated)])).rows).toHaveLength(1);
+      expect(first.errors).toEqual([]);
+      expect(second.errors).toEqual([]);
+    } finally { await first.context.close(); await second.context.close(); }
+  });
+});
+
 describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 correct this study — viewport $width", ({ width }) => {
   it("opens a correction draft that points at its origin, keeps the origin untouched, and two tabs end on one draft", async () => {
     const f = await seed(`fix${width}`);
