@@ -128,7 +128,7 @@ function commitEffects(tree: Tree): Tree {
     hooks.pending.splice(0).forEach((effect) => effect());
     if (!hooks.changed) break;
     tree = renderPass();
-  } while (true);
+  } while (rounds <= 20);
   return tree;
 }
 const render = () => commitEffects(renderPass());
