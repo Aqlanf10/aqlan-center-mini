@@ -48,9 +48,10 @@ async function insertSnapshot(client: DbPool | DbClient, agreement: Agreement, p
 beforeAll(async () => {
   fixture = await openPeriodontalFixture(process.env, { pristine: true });
   const files = await loadMigrationFiles();
-  expect(files).toHaveLength(43);
+  expect(files).toHaveLength(44);
   expect(files.slice(40).map((file) => file.filename)).toEqual([
     "0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
+    "0044_invoice_admin_discount_lines.sql",
   ]);
   await migrate(pool(), { apply: true, files: files.slice(0, 42) });
   old = await seedAgreement(pool());
@@ -66,7 +67,7 @@ describe("additive immutable coverage on an owned PostgreSQL18 fixture", () => {
     expect(row.facts).toEqual(oldFacts);
     expect(row.snapshot).toBeNull();
     expect(legacyCoverageStateFromSnapshot(row.snapshot, expected(old))).toEqual({ kind: "unknown", reason: "missing_snapshot" });
-    expect((await pool().query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count).toBe(43);
+    expect((await pool().query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count).toBe(44);
     expect((await pool().query("SELECT to_regclass('public.periodontal_records')::text AS relation")).rows[0].relation).toBeNull();
   });
   it("keeps one complete snapshot with an actual recording time and no additional financial rows", async () => {

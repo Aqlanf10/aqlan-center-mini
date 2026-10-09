@@ -71,7 +71,7 @@ describe("read-only preflight connection contract", () => {
   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
     const files = await loadMigrationFiles();
     expect(files[0].version).toBe("0001");
-    expect(files).toHaveLength(43);
+    expect(files).toHaveLength(44);
     for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
       const source = await readFile(file, "utf8");
       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");

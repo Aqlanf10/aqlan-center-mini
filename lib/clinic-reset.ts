@@ -75,6 +75,7 @@ export const RESET_WIPE_TABLES = [
   "party_opening_advances",
   "payables",
   "payments",
+  "invoice_admin_discount_lines",
   "invoice_items",
   "invoices",
   "plan_installments",

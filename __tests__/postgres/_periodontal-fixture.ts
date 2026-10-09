@@ -7,8 +7,9 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
-  const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
-  if (files.length < 40 || files.length > 43) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
+  const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
+    "0044_invoice_admin_discount_lines.sql"];
+  if (files.length < 40 || files.length > 44) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
   files.forEach((file, index) => {
     const expected = String(index + 1).padStart(4, "0");
     if (file.version !== expected) throw new Error("Shipped migration chain is missing, reordered or duplicated.");
@@ -16,7 +17,7 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
       throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
     }
   });
-  return ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044" } as const)[files.length as 40 | 41 | 42 | 43];
+  return ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 44: "0045" } as const)[files.length as 40 | 41 | 42 | 43 | 44];
 }
 
 const NAME = /^aqlan_perio_[a-f0-9]{32}(?![\s\S])/;

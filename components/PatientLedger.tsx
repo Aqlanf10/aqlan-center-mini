@@ -9,6 +9,7 @@ import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
+import { InvoiceAdminDiscount } from "./InvoiceAdminDiscount";
 import { ReceiptCorrection } from "./ReceiptCorrection";
 import { ReceiptProvenance } from "./ReceiptProvenance";
 import { receiptProvenanceFor } from "@/lib/receipt-provenance";
@@ -268,15 +269,22 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
       || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
 }
 
-export function PatientLedger({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+export function PatientLedger({ patientId, onFinancialChange, onClinicalChange }: {
+  patientId: number;
+  /** (FIN-DISC) يُستدعى بعد خصمٍ إداري ليعيد ملف المريض قراءة رصيده المعروض في الترويسة. */
+  onFinancialChange?: () => void;
+  onClinicalChange?: () => void;
+}) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
   const scope = JSON.stringify([patientId, session]);
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
-  return <PatientLedgerContent key={scope} patientId={patientId} onClinicalChange={onClinicalChange} />;
+  return <PatientLedgerContent key={scope} patientId={patientId} onFinancialChange={onFinancialChange} onClinicalChange={onClinicalChange} />;
 }
 
-function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientLedgerContent({ patientId, onFinancialChange, onClinicalChange }: {
+  patientId: number; onFinancialChange?: () => void; onClinicalChange?: () => void;
+}) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -296,6 +304,8 @@ function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: numb
   const admin = isAdmin(session?.role);
   /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
   const [correcting, setCorrecting] = useState<number | null>(null);
+  /* (FIN-DISC) الفاتورة المفتوحة لخصمٍ إداري الآن. */
+  const [discounting, setDiscounting] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   /* (RC-1) سند القبض المفتوح للتصحيح الآن. */
   const [correctingReceipt, setCorrectingReceipt] = useState<number | null>(null);
@@ -710,8 +720,15 @@ function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: numb
                     ) : null}
                   </span>
                   <span className="flex gap-2">
+                    {admin && invoice.status === "open" && discounting !== invoice.id ? (
+                      <button type="button" data-testid={`invoice-admin-discount-open-${invoice.id}`}
+                        onClick={() => { setDiscounting(invoice.id); setCorrecting(null); setNotice(null); }}
+                        className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">
+                        خصم إداري
+                      </button>
+                    ) : null}
                     {admin && invoice.status !== "cancelled" && correcting !== invoice.id ? (
-                      <button type="button" onClick={() => { setCorrecting(invoice.id); setNotice(null); }}
+                      <button type="button" onClick={() => { setCorrecting(invoice.id); setDiscounting(null); setNotice(null); }}
                         className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
                         تصحيح
                       </button>
@@ -724,6 +741,18 @@ function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: numb
                 </div>
                 {invoice.note && invoice.note.startsWith("تصحيح للفاتورة") ? (
                   <p className="mt-1 text-[11px] font-bold text-amber-800">{invoice.note}</p>
+                ) : null}
+                {discounting === invoice.id ? (
+                  <InvoiceAdminDiscount
+                    invoice={{ ...invoice, baseCurrency: invoice.baseCurrency ?? base }}
+                    settledMinor={(ledger?.payments ?? []).filter((payment) => payment.invoiceId === invoice.id).reduce((sum, payment) => {
+                      const currency = invoice.baseCurrency ?? base;
+                      const settled = payment.currency === currency ? payment.amountMinor : currency === base ? payment.baseAmountMinor : 0;
+                      return sum + (payment.kind === "refund" ? -settled : settled);
+                    }, 0)}
+                    onCancel={() => setDiscounting(null)}
+                    onDone={(message) => { setDiscounting(null); setNotice(message); void load(); onFinancialChange?.(); }}
+                  />
                 ) : null}
                 {correcting === invoice.id ? (
                   <InvoiceCorrection
