@@ -117,6 +117,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
   const [payAmount, setPayAmount] = useState("");
   const [payCurrency, setPayCurrency] = useState<Currency>(fallback);
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
+  const [lastReceiptIsInstallment, setLastReceiptIsInstallment] = useState(true);
   const [consentFor, setConsentFor] = useState<number | null>(null);
 
   const readRef = useRef({ active: false, generation: 0, controller: null as AbortController | null });
@@ -193,6 +194,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
       if (!result || result.kind === "busy") return;
       if (result.kind !== "confirmed") { setError(result.message); return; }
       setLastReceipt(result.acknowledgment.paymentId);
+      setLastReceiptIsInstallment(result.attempt.request.operation === "installment");
       money.consume(result.attempt);
       setPayFor(null);
       setPayAmount("");
@@ -216,7 +218,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
 
       {lastReceipt && canSeeFinancial ? (
         <div className="mb-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-center">
-          <p className="mb-2 text-sm font-bold text-emerald-800">سُجّل القسط.</p>
+          <p className="mb-2 text-sm font-bold text-emerald-800">{lastReceiptIsInstallment ? "سُجّل القسط." : "سُجّلت الدفعة."}</p>
           <div className="flex flex-wrap items-start justify-center gap-2">
             <a href={`/print/receipt/${lastReceipt}`} target="_blank" rel="noopener"
               onClick={() => setLastReceipt(null)}
