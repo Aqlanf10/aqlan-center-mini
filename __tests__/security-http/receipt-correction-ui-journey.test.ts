@@ -59,6 +59,43 @@ beforeAll(async () => {
   });
 }, 240_000);
 
+describe("DOT-PF-01 correction reconciliation", () => {
+  it("reopens a correction after a committed response was lost, even when remaining is zero", async () => {
+    const wrongId = await receipt(500, `RCU-LOST-${stamp()}`);
+    const { context, tab } = await openAccount(h.sessions.admin.cookie);
+    const requests: { key: string; body: string | null }[] = [];
+    await tab.route(`**/api/payments/${wrongId}/correct`, async (route) => {
+      requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postData() });
+      if (requests.length === 1) {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        await route.fulfill({ status: 201, contentType: "application/json", body: "{}" });
+      } else await route.continue();
+    });
+    try {
+      const payments = tab.getByRole("region", { name: "الدفعات" });
+      await payments.getByRole("button", { name: "تصحيح السند" }).first().click();
+      const editor = tab.getByRole("group", { name: /^تصحيح / });
+      await editor.getByLabel("المبلغ الصحيح").fill("50");
+      await editor.getByLabel("سبب تصحيح السند").fill("Synthetic correction retry");
+      await editor.getByRole("button", { name: "صحّح السند", exact: true }).click();
+      await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
+      await editor.getByRole("button", { name: "إلغاء", exact: true }).click();
+      // An ordinary ledger refresh can observe the committed reversal. Its
+      // zero-remaining receipt must retain access to the exact pending request.
+      await tab.evaluate(() => window.dispatchEvent(new Event("focus")));
+      const originalRow = payments.locator("li").filter({ has: tab.locator(`a[href="/print/receipt/${wrongId}"]`) });
+      await originalRow.getByRole("button", { name: "تصحيح السند" }).click();
+      await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
+      await tab.getByText(/وصدر بدله/).first().waitFor();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual(requests[0]);
+      const { rows } = await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM payments WHERE reversal_of_id = $1", [wrongId]);
+      expect(rows[0].n).toBe(1);
+    } finally { await context.close(); }
+  }, 120_000);
+});
+
 afterAll(async () => {
   await browser?.close();
   await db?.end();

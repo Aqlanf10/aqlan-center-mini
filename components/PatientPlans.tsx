@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { useMoneyAttempt } from "./useMoneyAttempt";
+import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
 import {
   CURRENCIES,
   CURRENCY_LABEL,
@@ -180,32 +181,19 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
     };
   }, [load]);
 
-  /* (FIN-1) مفتاح إعادة لكل محاولة تحصيل — كما في CollectPaymentModal: انقطاع الرد ثم ضغطٌ
-     ثانٍ بالمبلغ نفسه يرسل المفتاح نفسه فيُعاد السند الأول لا يُنشأ ثانٍ. تغيير المبلغ أو
-     العملة أو الخطة طلبٌ جديد بمفتاحٍ جديد، ويُمسح المفتاح بعد النجاح. والـref (لا الحالة)
-     يمنع إرسالين قبل إعادة الرسم. */
-  const attemptRef = useRef<{ target: string; key: string } | null>(null);
-  const inFlightRef = useRef(false);
+  // DOT-PF-01: share pending collections with the patient collection modal.
+  const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied);
 
-  const collect = async (plan: Plan) => {
-    if (!readRef.current.active || busy || inFlightRef.current) return;
+  const collect = async (plan?: Plan) => {
+    if (!readRef.current.active || busy) return;
     const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
-    const target = `${plan.id}:${body}`;
-    if (attemptRef.current?.target !== target) {
-      attemptRef.current = { target, key: newIdempotencyKey("inst") };
-    }
-    inFlightRef.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/plans/${plan.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": attemptRef.current.key },
-        body,
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { setError(payload?.message ?? "تعذّر التحصيل."); return; }
-      attemptRef.current = null;
-      setLastReceipt((payload as { paymentId: number }).paymentId);
+      const result = await money.run(plan ? { url: `/api/plans/${plan.id}`, body, operation: "installment" } : undefined);
+      if (!result || result.kind === "busy") return;
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      setLastReceipt(result.acknowledgment.paymentId);
+      money.consume(result.attempt);
       setPayFor(null);
       setPayAmount("");
       setError(null);
@@ -213,13 +201,15 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
     } catch {
       setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل القسط مرتين.");
     } finally {
-      inFlightRef.current = false;
       setBusy(false);
     }
   };
 
   return (
     <div data-testid="patient-plans-content">
+      {canSeeFinancial && !readUnavailable && !readDenied ? (
+        <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
+      ) : null}
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-red-700 text-red-700">{error}</p>
       ) : null}
@@ -418,10 +408,10 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
-                      <input value={payAmount} onChange={(event) => setPayAmount(event.target.value)}
+                      <input disabled={busy || money.attempt !== null} value={payAmount} onChange={(event) => setPayAmount(event.target.value)}
                         placeholder="مبلغ القسط" aria-label="مبلغ القسط" inputMode="decimal" dir="ltr" autoFocus
                         className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
-                      <select value={payCurrency} onChange={(event) => setPayCurrency(event.target.value as Currency)}
+                      <select disabled={busy || money.attempt !== null} value={payCurrency} onChange={(event) => setPayCurrency(event.target.value as Currency)}
                         aria-label="العملة"
                         className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
                         {CURRENCIES.map((currency) => (
@@ -430,7 +420,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                       </select>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => collect(plan)} disabled={busy || !payAmount.trim()}
+                      <button onClick={() => collect(plan)} disabled={busy || money.attempt !== null || !payAmount.trim()}
                         className="flex-1 rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
                         سجّل القسط واطبع السند
                       </button>

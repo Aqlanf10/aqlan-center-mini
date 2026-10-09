@@ -80,11 +80,11 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
       await dialog.getByLabel("المبلغ").fill("1234");
       const submit = dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند" });
       await submit.click();
-      await dialog.getByText("تعذّر الاتصال بالخادم").waitFor();
+      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
       expect(await paymentsCount()).toBe(before + 1); // سُجّل رغم انقطاع الرد
 
       const replay = page.waitForResponse((response) => response.url().endsWith("/api/payments"));
-      await submit.click();
+      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       expect((await replay).status()).toBe(200); // إعادة (replay) لا سند جديد (201)
       await dialog.waitFor({ state: "hidden" });
 
@@ -117,7 +117,7 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
     }
   }, 120_000);
 
-  it("تعديل المبلغ بعد خطأ طلبٌ جديد بمفتاحٍ جديد — لا تعارض مفتاح", async () => {
+  it("an uncertain request freezes its amount through close/reopen and reuses its key", async () => {
     const { context, page } = await openCollect();
     const keys: string[] = [];
     let failFirst = true;
@@ -136,13 +136,15 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
       await dialog.getByLabel("المبلغ").fill("500");
       const submit = dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند" });
       await submit.click();
-      await dialog.getByText("تعذّر الاتصال بالخادم").waitFor();
-      await dialog.getByLabel("المبلغ").fill("600");
-      await submit.click();
+      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
+      expect(await dialog.getByLabel("المبلغ").isDisabled()).toBe(true);
+      await dialog.getByRole("button", { name: "إغلاق", exact: true }).click();
+      await page.getByRole("button", { name: "سند قبض" }).click();
+      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       await dialog.waitFor({ state: "hidden" });
       expect(await paymentsCount()).toBe(before + 1);
       expect(keys).toHaveLength(2);
-      expect(keys[1]).not.toBe(keys[0]);
+      expect(keys[1]).toBe(keys[0]);
     } finally {
       await context.close();
     }

@@ -5,6 +5,7 @@ import type { Currency } from "@/lib/money";
 import { isAdmin } from "@/lib/roles";
 import { useSession } from "./SessionProvider";
 import { ReceiptCorrection } from "./ReceiptCorrection";
+import { useMoneyAttempt } from "./useMoneyAttempt";
 
 /**
  * (RC-2) زرّ «تصحيح السند» في كل مكانٍ يظهر فيه سند قبض — لا في تبويب الحساب وحده.
@@ -36,6 +37,7 @@ export function ReceiptCorrectionLauncher({ paymentId, patientId, label = "تص�
   onDone?: (message: string, replacementId: number | null) => void;
 }) {
   const session = useSession();
+  const correction = useMoneyAttempt(`correction:${paymentId}`);
   const [ledger, setLedger] = useState<LedgerForCorrection | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,7 +78,7 @@ export function ReceiptCorrectionLauncher({ paymentId, patientId, label = "تص�
       {error ? <p role="alert" className="w-full text-xs font-bold text-red-700">{error}</p> : null}
       {done ? <p role="status" className="w-full text-xs font-bold text-emerald-800">{done}</p> : null}
       {open && ledger ? (
-        !receipt || receipt.kind !== "payment" || remaining <= 0 ? (
+        !receipt || receipt.kind !== "payment" || (remaining <= 0 && !correction.attempt) ? (
           <p className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
             هذا السند معكوسٌ بالكامل سلفًا — لا شيء يُصحَّح فيه.{" "}
             <button type="button" onClick={() => setOpen(false)} className="underline">إغلاق</button>
