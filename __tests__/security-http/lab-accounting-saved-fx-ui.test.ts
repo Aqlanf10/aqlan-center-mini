@@ -299,6 +299,55 @@ async function assertCaptureTargetVisible(locator: Locator) {
   expect(geometry.hitPoints.every(point => point.owned), detail).toBe(true);
 }
 
+async function assertCaptureTextUnclipped(locator: Locator) {
+  const layout = await locator.evaluate(target => {
+    const bounds = (rect: DOMRect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    return { rect: bounds(target.getBoundingClientRect()),
+      textRects: Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0).map(bounds),
+      clientWidth: target.clientWidth, scrollWidth: target.scrollWidth,
+      textOverflow: getComputedStyle(target).textOverflow };
+  });
+  const detail = JSON.stringify(layout);
+  expect(layout.textRects.length, detail).toBeGreaterThan(0);
+  expect(layout.textOverflow, detail).not.toBe("ellipsis");
+  expect(layout.scrollWidth, detail).toBeLessThanOrEqual(layout.clientWidth + 1);
+  for (const rect of layout.textRects) {
+    expect(rect.left, detail).toBeGreaterThanOrEqual(layout.rect.left - 0.5);
+    expect(rect.top, detail).toBeGreaterThanOrEqual(layout.rect.top - 0.5);
+    expect(rect.right, detail).toBeLessThanOrEqual(layout.rect.right + 0.5);
+    expect(rect.bottom, detail).toBeLessThanOrEqual(layout.rect.bottom + 0.5);
+  }
+}
+
+async function assertSavedLedgerReadable(page: Page, width: number) {
+  const ledger = page.locator("#lab-accounting-ledger");
+  const layout = await ledger.evaluate(target => ({ scrollLeft: target.scrollLeft,
+    clientWidth: target.clientWidth, scrollWidth: target.scrollWidth }));
+  // Initial horizontal position only: never pan the table to manufacture a
+  // passing capture. Mobile rows must expose every field without horizontal UI.
+  expect(layout.scrollLeft).toBe(0);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  const cells = ledger.getByRole("cell");
+  expect(await cells.count()).toBe(12);
+  for (const cell of await cells.all()) {
+    await assertCaptureTargetVisible(cell);
+    await assertCaptureTextUnclipped(cell);
+  }
+  const nativeAmount = await page.evaluate(() => `${(25).toLocaleString()} USD`);
+  for (const [side, label] of [["debit", "مدين"], ["credit", "دائن"]] as const) {
+    const heading = page.locator(`#lab-accounting-${side}-${width < 640 ? "label" : "header"}`);
+    expect((await heading.textContent())?.trim()).toBe(label);
+    await assertCaptureTargetVisible(heading);
+    await assertCaptureTextUnclipped(heading);
+    const amount = page.locator(`#lab-accounting-${side}-amount`);
+    expect((await amount.textContent())?.replace(/\s+/g, " ").trim()).toBe(nativeAmount);
+    await assertCaptureTargetVisible(amount);
+    await assertCaptureTextUnclipped(amount);
+  }
+}
+
 describe("saved lab accounting FX through the real built /lab page", () => {
   it("preserves metadata-only snapshots, fences stale edits, and never reuses a pending currency quote", async () => {
     const original = await settings();
@@ -330,16 +379,22 @@ describe("saved lab accounting FX through the real built /lab page", () => {
           await first.settle();
           await assertPreview(first.page, "saved", "USD", "13,001", "531.125");
           // Prove both viewport axes, every clipping ancestor, and sampled hit
-          // ownership for the visible saved-FX area, not the entire form.
-          for (const locator of [first.cost, first.preview, first.save]) {
+          // ownership, including the formerly clipped currency and ledger.
+          for (const locator of [first.cost, first.currency, first.preview, first.save]) {
             await assertCaptureTargetVisible(locator);
           }
-          // Native modal capture; no setContent, render imitation or style edits.
+          expect(await first.currency.inputValue()).toBe("USD");
+          expect(await first.currency.locator("option:checked").textContent()).toBe("دولار");
+          expect((await first.currency.boundingBox())!.width).toBeGreaterThanOrEqual(100);
+          await assertSavedLedgerReadable(first.page, width);
+          // Native modal capture at the initial horizontal position; no
+          // setContent, render imitation, style edits or hidden financial fields.
           const bytes = await first.modal.screenshot();
           // Screenshot auto-scrolling must not invalidate the checked region.
-          for (const locator of [first.cost, first.preview, first.save]) {
+          for (const locator of [first.cost, first.currency, first.preview, first.save]) {
             await assertCaptureTargetVisible(locator);
           }
+          await assertSavedLedgerReadable(first.page, width);
           evidence.push({ filename: `lab-accounting-saved-fx-${width}.png`, mime: "image/png",
             bytes });
         }

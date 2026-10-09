@@ -7867,7 +7867,7 @@ export async function listSettingHistory(filter: {
         AND ($6::text IS NULL OR created_at < ($6::date + 1)::timestamptz)
         AND ($8::bigint IS NULL OR id < $8::bigint)
         AND ($9::text IS NULL OR action = $9::text)
-      ORDER BY id DESC
+      ORDER BY audit_log.id DESC
       LIMIT $7`,
     [
       SETTINGS_AUDIT_ENTITY,

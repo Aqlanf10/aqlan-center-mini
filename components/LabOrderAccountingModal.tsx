@@ -267,7 +267,7 @@ export function LabOrderAccountingModal({
           </div>
         </div>
 
-        <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+        <div className="p-4 sm:p-6 space-y-6 max-h-[80vh] overflow-y-auto">
           {/* Messages */}
           {errorMsg && (
             <div
@@ -421,7 +421,7 @@ export function LabOrderAccountingModal({
                       setMoneyRevision((revision) => revision + 1);
                     }}
                     placeholder="التكلفة..."
-                    className="flex-1 text-xs rounded-xl border border-slate-300 p-2.5 bg-white text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="min-w-0 flex-1 text-xs rounded-xl border border-slate-300 p-2.5 bg-white text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                   <select
                     id="lab-accounting-currency-select"
@@ -432,7 +432,7 @@ export function LabOrderAccountingModal({
                       setMoneyTouched(true);
                       setMoneyRevision((revision) => revision + 1);
                     }}
-                    className="w-28 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-28 shrink-0 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="YER">ريال يمني</option>
                     <option value="SAR">ريال سعودي</option>
@@ -465,7 +465,7 @@ export function LabOrderAccountingModal({
           </div>
 
           {/* Double-Entry Accounting Voucher / Journal Preview */}
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/60 to-slate-50 p-4 space-y-3">
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/60 to-slate-50 p-3 sm:p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
                 <span>📋</span> معاينة القيد المحاسبي المزدوج (سند الاستحقاق قبل الترحيل)
@@ -475,48 +475,78 @@ export function LabOrderAccountingModal({
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-right border-collapse">
-                <thead>
-                  <tr className="border-b border-indigo-200/80 text-slate-500 text-[11px]">
-                    <th className="py-2 px-2">الطرف</th>
-                    <th className="py-2 px-2">رمز الحساب</th>
-                    <th className="py-2 px-2">اسم الحساب</th>
-                    <th className="py-2 px-2">بند المصروف</th>
-                    <th className="py-2 px-2 text-left">مدين</th>
-                    <th className="py-2 px-2 text-left">دائن</th>
+            <div id="lab-accounting-ledger" className="min-w-0 max-w-full overflow-x-auto">
+              {/* Keep all six fields readable on narrow screens, with table
+                  roles explicit because mobile rows use a grid layout. */}
+              <table role="table" className="block w-full text-xs text-right border-collapse sm:table">
+                <thead role="rowgroup" className="sr-only sm:not-sr-only sm:table-header-group">
+                  <tr role="row" className="border-b border-indigo-200/80 text-slate-500 text-[11px]">
+                    <th role="columnheader" scope="col" className="py-2 px-2">الطرف</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">رمز الحساب</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">اسم الحساب</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">بند المصروف</th>
+                    <th id="lab-accounting-debit-header" role="columnheader" scope="col" className="py-2 px-2 text-left">مدين</th>
+                    <th id="lab-accounting-credit-header" role="columnheader" scope="col" className="py-2 px-2 text-left">دائن</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-indigo-100/80 font-medium">
+                <tbody role="rowgroup" className="block divide-y divide-indigo-100/80 font-medium sm:table-row-group">
                   {/* Debit Line */}
-                  <tr className="bg-white/60">
-                    <td className="py-2.5 px-2 text-emerald-700 font-bold">المدين (+مصروف)</td>
-                    <td className="py-2.5 px-2 font-mono text-indigo-900">
+                  <tr role="row" className="grid grid-cols-2 bg-white/60 sm:table-row">
+                    <td role="cell" className="min-w-0 py-1 px-2 text-emerald-700 font-bold sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">الطرف: </span>
+                      المدين (+مصروف)
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 font-mono text-indigo-900 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">رمز الحساب: </span>
                       {selectedExpenseAccObj.code}
                     </td>
-                    <td className="py-2.5 px-2 text-slate-800">{selectedExpenseAccObj.name}</td>
-                    <td className="py-2.5 px-2 text-slate-600">
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-800 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">اسم الحساب: </span>
+                      {selectedExpenseAccObj.name}
+                    </td>
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-600 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">بند المصروف: </span>
                       {selectedCategory?.name || "تكاليف المعامل"}
                     </td>
-                    <td className="py-2.5 px-2 text-left font-bold text-emerald-700 font-mono">
-                      {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                    <td role="cell" className="min-w-0 break-words py-1 px-2 text-left font-bold text-emerald-700 font-mono sm:py-2.5">
+                      <span id="lab-accounting-debit-label" aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">مدين</span>
+                      <span id="lab-accounting-debit-amount" className="block">
+                        {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                      </span>
                     </td>
-                    <td className="py-2.5 px-2 text-left text-slate-400 font-mono">—</td>
+                    <td role="cell" className="min-w-0 py-1 px-2 text-left text-slate-400 font-mono sm:py-2.5">
+                      <span aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">دائن</span>
+                      —
+                    </td>
                   </tr>
 
                   {/* Credit Line */}
-                  <tr className="bg-white/60">
-                    <td className="py-2.5 px-2 text-rose-700 font-bold">الدائن (+التزام)</td>
-                    <td className="py-2.5 px-2 font-mono text-indigo-900">
+                  <tr role="row" className="grid grid-cols-2 bg-white/60 sm:table-row">
+                    <td role="cell" className="min-w-0 py-1 px-2 text-rose-700 font-bold sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">الطرف: </span>
+                      الدائن (+التزام)
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 font-mono text-indigo-900 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">رمز الحساب: </span>
                       {selectedPayableAccObj.code}
                     </td>
-                    <td className="py-2.5 px-2 text-slate-800">
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-800 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">اسم الحساب: </span>
                       {selectedPayableAccObj.name} ({order.labName})
                     </td>
-                    <td className="py-2.5 px-2 text-slate-500">—</td>
-                    <td className="py-2.5 px-2 text-left text-slate-400 font-mono">—</td>
-                    <td className="py-2.5 px-2 text-left font-bold text-rose-700 font-mono">
-                      {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                    <td role="cell" className="min-w-0 col-span-2 py-1 px-2 text-slate-500 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">بند المصروف: </span>
+                      —
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 text-left text-slate-400 font-mono sm:py-2.5">
+                      <span aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">مدين</span>
+                      —
+                    </td>
+                    <td role="cell" className="min-w-0 break-words py-1 px-2 text-left font-bold text-rose-700 font-mono sm:py-2.5">
+                      <span id="lab-accounting-credit-label" aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">دائن</span>
+                      <span id="lab-accounting-credit-amount" className="block">
+                        {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                      </span>
                     </td>
                   </tr>
                 </tbody>
