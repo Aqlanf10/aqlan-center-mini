@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "../HistoricalClinicalNote";
 import type { AssessmentCase, LegacyCase } from "@/lib/patient-workflow-cases";
@@ -81,9 +81,12 @@ export function SummaryTab({
   onChanged,
   onGoToTab,
   workflowIsCurrent,
+  patientDetails,
 }: {
   summary: WorkflowSummary;
   workflowIsCurrent?: () => boolean;
+  /** Presentation only: existing contact/family editors keep their own state and authority. */
+  patientDetails?: ReactNode;
   patientId: number;
   patientName: string;
   /** رقم الملف — مفتاح بوّابة المريض نصفه، وبطاقته المطبوعة تحمله كاملًا. */
@@ -177,23 +180,6 @@ export function SummaryTab({
         </ul>
       ) : null}
 
-      <PatientIntakeHistory patientId={patientId} />
-
-      {/*
-        * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ
-        * رحلة الاستقبال مع المريض: البطاقة في جيبه تختصر البحث إلى رقم،
-        * والرابط على جوّاله يعطيه مواعيده بنفسه.
-        */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
-            🪪 بطاقة الملف
-          </a>
-        </div>
-        <PortalInviteRow patientNumber={patientNumber} phone={patientPhone} />
-      </div>
-
       {/*
         * وصولٌ سريع للتقويم والأشعة من أول شاشة (طلب المالك): العين تجدهما هنا
         * قبل فتح أي تبويب — والتقويم يظهر حتى بلا حالة قائمة لأن فتحها يبدأ منه.
@@ -217,7 +203,7 @@ export function SummaryTab({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2" data-testid="summary-current-work">
         {/* الموعد القادم */}
         <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
@@ -370,6 +356,25 @@ export function SummaryTab({
         </section>
       ) : null}
 
+      {/* Self-reported medical information remains visible, never inside administrative details. */}
+      <PatientIntakeHistory patientId={patientId} />
+
+      <details className="rounded-2xl border border-slate-200 bg-white p-4" data-testid="summary-administrative-details">
+        <summary className="cursor-pointer text-xs font-extrabold text-navy-900">
+          التواصل والعائلة وبطاقة الملف
+        </summary>
+        <div className="mt-3 space-y-3">
+          {patientDetails}
+          <div className="flex flex-wrap items-center gap-2">
+            <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+              🪪 بطاقة الملف
+            </a>
+          </div>
+          <PortalInviteRow patientNumber={patientNumber} phone={patientPhone} />
+        </div>
+      </details>
+
       {/* الحساب — للمخوّل ماليًا فقط؛ الخادم أرسل الرصيد لمن يملكه */}
       {financial ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="الحساب">
@@ -467,3 +472,4 @@ export function SummaryTab({
     </div>
   );
 }
+

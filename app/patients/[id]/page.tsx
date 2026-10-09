@@ -198,7 +198,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "today" || tab === "treatment";
+  const compactWorkspace = tab === "summary" || tab === "today" || tab === "treatment";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
@@ -1088,18 +1088,6 @@ function PatientFileWorkspace({ id }: { id: string }) {
           <div className="space-y-4" hidden={!summary} inert={!summary}>
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
-          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
-              patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
-          ) : null}
-          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-          ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1108,6 +1096,17 @@ function PatientFileWorkspace({ id }: { id: string }) {
             patientNumber={patient.patientNumber}
             patientPhone={patient.phone}
             base={base}
+            patientDetails={!isRestrictedRole(session?.role) ? (
+              <>
+                {/* Existing editors stay mounted when the disclosure closes. */}
+                <PatientContactPanel
+                  patient={patient}
+                  canEdit
+                  onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+                />
+                <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+              </>
+            ) : null}
             onVisitStarted={() => {
               setSuccessMsg("بدأت الزيارة — انتقل إلى تبويب «زيارة اليوم».");
               setTab("today");
@@ -1816,3 +1815,4 @@ function Field({
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-navy-900 outline-none transition-colors focus:border-navy-800";
+
