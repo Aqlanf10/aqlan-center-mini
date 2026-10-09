@@ -74,7 +74,15 @@ describe("DOT-PF-01 correction reconciliation", () => {
     });
     try {
       const payments = tab.getByRole("region", { name: "الدفعات" });
-      await payments.getByRole("button", { name: "تصحيح السند" }).first().click();
+      // Provenance also links to the original receipt from its replacement.
+      // Select the row's own print link, not a provenance reference to it.
+      const originalPrint = tab.getByRole("link", { name: "السند", exact: true })
+        .and(tab.locator(`a[href="/print/receipt/${wrongId}"]`));
+      const originalRow = payments.locator("li").filter({ has: originalPrint });
+      const correctionButton = originalRow.getByRole("button", { name: "تصحيح السند", exact: true });
+      await expect.poll(() => originalRow.count()).toBe(1);
+      await expect.poll(() => correctionButton.count()).toBe(1);
+      await correctionButton.click();
       const editor = tab.getByRole("group", { name: /^تصحيح / });
       await editor.getByLabel("المبلغ الصحيح").fill("50");
       await editor.getByLabel("سبب تصحيح السند").fill("Synthetic correction retry");
@@ -91,13 +99,9 @@ describe("DOT-PF-01 correction reconciliation", () => {
       // The canonical read includes only positive remaining amounts (HAVING > 0).
       expect(ledger.receiptRemaining).toBeTypeOf("object");
       expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
-      // Provenance also links to the original receipt from its replacement.
-      // Select the row's own print link, not a provenance reference to it.
-      const originalPrint = tab.getByRole("link", { name: "السند", exact: true })
-        .and(tab.locator(`a[href="/print/receipt/${wrongId}"]`));
-      const originalRow = payments.locator("li").filter({ has: originalPrint });
       await expect.poll(() => originalRow.count()).toBe(1);
-      await originalRow.getByRole("button", { name: "تصحيح السند" }).click();
+      await expect.poll(() => correctionButton.count()).toBe(1);
+      await correctionButton.click();
       await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       await tab.getByText(/وصدر بدله/).first().waitFor();
       expect(requests).toHaveLength(2);
