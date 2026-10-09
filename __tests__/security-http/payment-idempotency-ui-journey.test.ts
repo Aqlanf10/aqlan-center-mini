@@ -139,7 +139,7 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
       await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
       expect(await dialog.getByLabel("المبلغ").isDisabled()).toBe(true);
       await dialog.getByRole("button", { name: "إغلاق", exact: true }).click();
-      await page.getByRole("button", { name: "سند قبض" }).click();
+      await page.getByRole("button", { name: "قبض دفعة", exact: true }).click();
       await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       await dialog.waitFor({ state: "hidden" });
       expect(await paymentsCount()).toBe(before + 1);

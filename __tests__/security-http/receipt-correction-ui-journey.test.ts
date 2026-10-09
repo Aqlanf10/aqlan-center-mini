@@ -86,15 +86,26 @@ describe("DOT-PF-01 correction reconciliation", () => {
       await tab.getByRole("button", { name: /الملخص/ }).first().click();
       const refreshed = tab.waitForResponse((response) => response.url().endsWith(`/api/patients/${patientId}/ledger`));
       await tab.getByRole("button", { name: /الحساب/ }).first().click();
-      expect((await (await refreshed).json()).receiptRemaining[String(wrongId)]).toBe(0);
+      const ledger = await (await refreshed).json();
+      expect(ledger.payments).toContainEqual(expect.objectContaining({ id: wrongId, kind: "payment", amountMinor: 500 }));
+      // The canonical read includes only positive remaining amounts (HAVING > 0).
+      expect(ledger.receiptRemaining).toBeTypeOf("object");
+      expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
       const originalRow = payments.locator("li").filter({ has: tab.locator(`a[href="/print/receipt/${wrongId}"]`) });
       await originalRow.getByRole("button", { name: "تصحيح السند" }).click();
       await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       await tab.getByText(/وصدر بدله/).first().waitFor();
       expect(requests).toHaveLength(2);
       expect(requests[1]).toEqual(requests[0]);
-      const { rows } = await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM payments WHERE reversal_of_id = $1", [wrongId]);
-      expect(rows[0].n).toBe(1);
+      const { rows } = await db.query<{ kind: string; amount_minor: string; patient_id: number }>(
+        `SELECT kind, amount_minor::text, patient_id FROM payments
+         WHERE id = $1 OR reversal_of_id = $1 OR note = (SELECT 'بدل السند ' || receipt_number FROM payments WHERE id = $1)
+         ORDER BY id`, [wrongId]);
+      expect(rows).toEqual([
+        { kind: "payment", amount_minor: "500", patient_id: patientId },
+        { kind: "refund", amount_minor: "500", patient_id: patientId },
+        { kind: "payment", amount_minor: "50", patient_id: patientId },
+      ]);
     } finally { await context.close(); }
   }, 120_000);
 });

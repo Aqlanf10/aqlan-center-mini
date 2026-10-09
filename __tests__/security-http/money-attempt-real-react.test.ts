@@ -31,7 +31,13 @@ async function open() {
   return { page, context };
 }
 async function submit(page: Page) {
-  await page.getByLabel("المبلغ", { exact: true }).fill("500");
+  const amount = page.getByLabel("المبلغ", { exact: true });
+  // Switching patient or reopening reuses the component. Wait for its new
+  // session initialization to clear the previous amount before entering one.
+  await expect.poll(() => amount.inputValue()).toBe("");
+  await expect.poll(() => amount.isEnabled()).toBe(true);
+  await amount.fill("500");
+  await expect.poll(() => amount.inputValue()).toBe("500");
   await page.getByRole("button", { name: "سجّل الدفعة واطبع السند" }).click();
   await expect.poll(async () => (await snapshot(page)).requests.length).toBeGreaterThan(0);
 }
@@ -61,7 +67,9 @@ describe("DOT-PF-01 real forms", () => {
     try {
       await submit(f.page); await f.page.evaluate(() => window.__moneyFixture.fail(0));
       await expect.poll(() => retry(f.page).isEnabled()).toBe(true);
-      await f.page.locator("#patient-b").click(); await submit(f.page);
+      await f.page.locator("#patient-b").click();
+      await f.page.getByRole("region", { name: "تحصيل دفعة من Synthetic 102" }).waitFor();
+      await submit(f.page);
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(2);
       await f.page.evaluate(() => window.__moneyFixture.fail(1));
       await expect.poll(() => retry(f.page).isEnabled()).toBe(true);
@@ -95,6 +103,7 @@ describe("DOT-PF-01 real forms", () => {
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(1);
       await f.page.evaluate(() => window.__moneyFixture.reply(0, '{"id":701}'));
       await expect.poll(async () => (await snapshot(f.page)).successes.length).toBe(1);
+      await f.page.getByRole("dialog").waitFor({ state: "hidden" });
       await f.page.locator("#open").click(); await submit(f.page);
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(2);
       const { requests } = await snapshot(f.page);
