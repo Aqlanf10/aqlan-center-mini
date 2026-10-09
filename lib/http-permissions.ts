@@ -71,6 +71,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ceph/[id]/ai-analyze": { POST: CLINIC },
   "/api/ceph/[id]/complete": { POST: CLINIC },
   "/api/ceph/[id]/duplicate": { POST: CLINIC },
+  "/api/ceph/[id]/link-case": { POST: CLINIC },
   "/api/ceph/compare": { GET: CLINICAL },
   "/api/ceph/superimpose": { GET: CLINICAL },
   // الاستعلام العام عن الطابور (كشاشة الصالة) مفتوح؛ متابعة تذكرةٍ أو هاتفٍ والحضور الذاتي بجلسة البوابة.

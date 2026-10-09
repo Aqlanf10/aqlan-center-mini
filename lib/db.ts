@@ -53,6 +53,7 @@ import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
 import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
+import { CEPH_CORRECTION_LINEAGE_SQL } from "./ceph-correction-lineage-schema";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
 import { ENDO_STAGE_LABEL } from "./endodontics";
@@ -2054,6 +2055,8 @@ export function ensureSchema(): Promise<void> {
     /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
     await getPool().query(LEGACY_TREATMENT_SQL);
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
+    /* (ORTHO-ID-2) أصل تصحيح دراسة السيفالو corrects_analysis_id — جسد الهجرة 0047 حرفيًّا (محجوزة من dot). */
+    await getPool().query(CEPH_CORRECTION_LINEAGE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -22193,6 +22196,10 @@ export interface CephAnalysisRow {
   completedAt: string | null;
   /** أهم نتائج اللقطة للمعتمد — تُقرأ من ceph_measurements لا حسابًا. */
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
+  /** (ORTHO-ID-2) الدراسة المعتمدة التي تصحّحها هذه — فارغ إن لم تكن تصحيحًا (أو سبقت عمود الأصل ولا أصل مسجَّل لها). */
+  correctsAnalysisId: number | null;
+  /** (ORTHO-ID-2) تصحيحاتها غير المرفوضة بترتيب الإنشاء — لا يُخفى التاريخ السابق. */
+  correctedBy: number[];
 }
 
 interface CephAnalysisDbRow {
@@ -22214,11 +22221,16 @@ interface CephAnalysisDbRow {
   created_at: Date;
   completed_by: string | null;
   completed_at: Date | null;
+  corrects_analysis_id?: number | string | null;
 }
 
 // Read DATE as text: pg parses it at local midnight, PGlite at UTC midnight.
 // Neither driver-specific Date representation should change the calendar day.
-type CephAnalysisReadRow = CephAnalysisDbRow & { xray_date_text: string | null };
+type CephAnalysisReadRow = CephAnalysisDbRow & { xray_date_text: string | null; corrected_by?: number[] | null };
+
+/** (ORTHO-ID-2) أرقام التصحيحات غير المرفوضة لكل دراسة — int4 كي لا يعيدها pg نصوصًا (int8[]). */
+const CEPH_CORRECTED_BY_SQL = `(SELECT COALESCE(array_agg(c.id::int ORDER BY c.id), '{}'::int[])
+    FROM ceph_analyses c WHERE c.corrects_analysis_id = ceph_analyses.id AND c.status <> 'discarded') AS corrected_by`;
 
 function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   const calibrated = row.cal_x1 != null && row.cal_y1 != null && row.cal_x2 != null
@@ -22245,6 +22257,8 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
     completedBy: row.completed_by,
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     findings: null,
+    correctsAnalysisId: row.corrects_analysis_id == null ? null : Number(row.corrects_analysis_id),
+    correctedBy: row.corrected_by ?? [],
   };
 }
 
@@ -22331,7 +22345,7 @@ export async function createCephAnalysis(input: {
 export async function listPatientCephAnalyses(patientId: number): Promise<CephAnalysisRow[]> {
   await ensureSchema();
   const { rows } = await getPool().query<CephAnalysisReadRow>(
-    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
+    `SELECT *, xray_date::text AS xray_date_text, ${CEPH_CORRECTED_BY_SQL} FROM ceph_analyses
      WHERE patient_id = $1 AND status <> 'discarded'
      ORDER BY (status = 'draft') DESC, created_at DESC`,
     [patientId],
@@ -22664,7 +22678,7 @@ export async function getCephStudy(id: number): Promise<{
 } | null> {
   await ensureSchema();
   const { rows } = await getPool().query<CephAnalysisReadRow>(
-    `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses
+    `SELECT *, xray_date::text AS xray_date_text, ${CEPH_CORRECTED_BY_SQL} FROM ceph_analyses
      WHERE id = $1 AND status <> 'discarded'`, [id],
   );
   if (!rows[0]) return null;
@@ -23039,19 +23053,21 @@ export async function discardCephAnalysis(
 }
 
 /**
- * نسخةٌ جديدة عن تحليل معتمد — طريقُ التصحيح الوحيد بعده.
+ * «تصحيح هذه الدراسة» — مسودة تصحيح عن دراسة معتمدة، وهي غير «دراسة متابعة جديدة».
  *
- * المعالم والمعايرة تُنسخ كما هي إلى مسودة جديدة على الشععة نفسها: الطبيب يعدّل
- * ما غيّره لا يبدأ من الصفر، والمعتمد يبقى شهادةً على ما كان.
+ * المعالم والمعايرة تُنسخ كما هي إلى مسودة جديدة على الشععة نفسها بهوية المعتمد (المريض والحالة والمرحلة وتاريخ
+ * الأشعة والجهاز والمرجع) ومعها **رابط الأصل** `corrects_analysis_id`: الطبيب يعدّل ما غيّره، والمعتمد يبقى شهادةً
+ * على ما كان بقياساته وتاريخه، ويُعرض الأصل وتصحيحاته معًا. إن وُجدت مسودة تصحيح مفتوحة لهذا الأصل نفسه فهي
+ * النتيجة نفسها (ضغطٌ مزدوج أو تبويبان: لا مسودة ثانية ولا خطأ)؛ ومسودة أخرى للمريض ترفض بجملة عربية.
+ * الإدراج وسطر التدقيق في معاملة واحدة: فشل التدقيق يتراجع بكل شيء.
  */
 export async function duplicateCephAnalysis(
   id: number, by: string,
-): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+): Promise<{ ok: true; id: number; replayed: boolean } | { ok: false; message: string }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    // DATE يُقرأ نصًّا: Date المحلي يُزيح اليوم إن أُعيد تسلسله (انظر CephAnalysisReadRow).
     const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
       `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
@@ -23061,21 +23077,25 @@ export async function duplicateCephAnalysis(
       await client.query("ROLLBACK");
       return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
     }
-    // مسودة أخرى قائمة؟ النسخة ستكون مسودة — فيحكمها القيد ذاته.
-    const { rows: open } = await client.query<{ n: string }>(
-      `SELECT 1 AS n FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
+    // مسودة مفتوحة للمريض؟ إن كانت تصحيحًا لهذا الأصل نفسه فهي النتيجة (إعادة)، وإلا ترفض.
+    const { rows: open } = await client.query<{ id: number; corrects_analysis_id: number | string | null }>(
+      `SELECT id, corrects_analysis_id FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
       [source.patient_id],
     );
     if (open[0]) {
       await client.query("ROLLBACK");
+      if (open[0].corrects_analysis_id != null && Number(open[0].corrects_analysis_id) === Number(id)) {
+        return { ok: true, id: Number(open[0].id), replayed: true };
+      }
       return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
     }
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO ceph_analyses
          (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
-          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
+          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind,
+          corrects_analysis_id)
        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
-         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
+         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16, $17::bigint) RETURNING id`,
       [
         source.patient_id, source.document_id,
         source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
@@ -23084,21 +23104,23 @@ export async function duplicateCephAnalysis(
         by,
         // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
         source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
+        id,
       ],
     );
-    const newId = created[0].id;
+    const newId = Number(created[0].id);
     await client.query(
       `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
        SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,
       [id, newId, by],
     );
-    await client.query("COMMIT");
-    await recordAudit({
-      action: "ceph.create", entity: "ceph_analysis", entityId: String(newId),
+    await insertAuditRow(client, {
+      action: "ceph.create", entity: "ceph_analysis", entityId: newId,
       entityLabel: `نسخة تصحيح عن #${id}`,
-      actor: by,
+      details: { الدراسة: newId, الأصل: id, المريض: source.patient_id, المرحلة: source.phase, الحالة: source.ortho_case_id ?? "—" },
+      actor: by, actorRole: null,
     });
-    return { ok: true, id: newId };
+    await client.query("COMMIT");
+    return { ok: true, id: newId, replayed: false };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     if ((error as { code?: string }).code === "23505") {
@@ -23108,6 +23130,62 @@ export async function duplicateCephAnalysis(
   } finally {
     client.release();
   }
+}
+
+export type CephLinkResult =
+  | { ok: true; changed: boolean }
+  | { ok: false; status: 404 | 409; message: string };
+
+/**
+ * (ORTHO-ID-2) ربط دراسة سيفالو سابقة (T1 التي سبقت إنشاء الحالة مثلًا) بحالة تقويم باختيار الطبيب الصريح.
+ *
+ * لا ربط شامل ولا اختيار أقدم/أحدث تلقائي: الطبيب يعيّن دراسةً بعينها وحالةً بعينها ويؤكد ما رآه (المرحلة وتاريخ الأشعة
+ * وحالة الاعتماد). يلمس مؤشر الحالة وحده — لا قياسات ولا معالم ولا اعتماد ولا تاريخ ولا مرحلة — ويُدقَّق في المعاملة
+ * نفسها. دراسة مريضٍ آخر أو حالته تُجاب كالمفقودة (لا كشف وجود). المنقولة بين حالتين تُرفض، وتكرار الطلب نفسه إعادةٌ
+ * بلا أثر ثانٍ. السياق القديم (تغيّرت الدراسة بعد المعاينة) يُرفض برسالة عربية.
+ */
+export async function linkCephStudyToCase(input: {
+  analysisId: number;
+  orthoCaseId: number;
+  expected: { phase: string; xrayDate: string | null; status: string };
+  actor: string;
+  actorRole: string | null;
+}): Promise<CephLinkResult> {
+  await ensureSchema();
+  const missing: CephLinkResult = { ok: false, status: 404, message: "الدراسة أو الحالة غير موجودة لهذا المريض." };
+  return withTransaction(getPool(), async (client): Promise<CephLinkResult> => {
+    const { rows: [study] } = await client.query<{
+      patient_id: number; status: string; phase: string; xray_date_text: string | null; ortho_case_id: number | null;
+    }>(
+      `SELECT patient_id, status, phase, xray_date::text AS xray_date_text, ortho_case_id
+         FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [input.analysisId]);
+    if (!study) return missing;
+    const { rows: [target] } = await client.query<{ patient_id: number; status: string }>(
+      `SELECT patient_id, status FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId]);
+    if (!target || target.patient_id !== study.patient_id) return missing;
+    if (study.status === "discarded") return { ok: false, status: 409, message: "الدراسة مرفوضة — لا تُربط بحالة." };
+    if (study.phase !== input.expected.phase || study.xray_date_text !== input.expected.xrayDate
+      || study.status !== input.expected.status) {
+      return { ok: false, status: 409, message: "تغيّرت الدراسة منذ المعاينة (المرحلة أو التاريخ أو الاعتماد) — أعد تحميل الصفحة وراجعها قبل الربط." };
+    }
+    if (study.ortho_case_id === input.orthoCaseId) return { ok: true, changed: false };
+    if (study.ortho_case_id !== null) {
+      return { ok: false, status: 409, message: `الدراسة مرتبطة بحالة أخرى (#${study.ortho_case_id}) — لا تُنقل بصمت.` };
+    }
+    if (target.status !== "active" && target.status !== "retention") {
+      return { ok: false, status: 409, message: "حالة التقويم مغلقة — تُربط الدراسات بالحالات الجارية فقط." };
+    }
+    await client.query(`UPDATE ceph_analyses SET ortho_case_id = $2 WHERE id = $1`, [input.analysisId, input.orthoCaseId]);
+    await insertAuditRow(client, {
+      action: "ceph.link", entity: "ceph_analysis", entityId: input.analysisId, entityLabel: `حالة #${input.orthoCaseId}`,
+      details: {
+        الدراسة: input.analysisId, الحالة: input.orthoCaseId, المريض: study.patient_id, المرحلة: study.phase,
+        تاريخ_الأشعة: study.xray_date_text ?? "غير معروف", الاعتماد: study.status === "completed" ? "معتمدة" : "مسودة",
+      },
+      actor: input.actor, actorRole: input.actorRole,
+    });
+    return { ok: true, changed: true };
+  });
 }
 
 /**

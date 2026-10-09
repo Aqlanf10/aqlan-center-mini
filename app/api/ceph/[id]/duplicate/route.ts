@@ -6,11 +6,13 @@ import { canAccessPatient } from "@/lib/patient-access";
 export const dynamic = "force-dynamic";
 
 /**
- * نسخة تصحيح عن تحليل معتمد.
+ * «تصحيح هذه الدراسة»: مسودة تصحيح عن تحليل معتمد.
  *
  * طريقُ التعديل الوحيد بعد الاعتماد: المعتمد يبقى كما خُتم، والنسخة مسودةٌ جديدة
- * على الشععة نفسها بمعالمها ومعايرتها — يعدّل الطبيب ما غيّره ثم يعتمد من جديد.
- * وبهذا يبقى في السجل تاريخٌ كامل: ما قيل أولًا، وما قيل بعده، ومن قال.
+ * على الشععة نفسها بمعالمها ومعايرتها وهوية الدراسة (الحالة والمرحلة والتاريخ والجهاز والمرجع) ورابط أصلها
+ * `corrects_analysis_id` — يعدّل الطبيب ما غيّره ثم يعتمد من جديد. وبهذا يبقى في السجل تاريخٌ كامل: ما قيل أولًا،
+ * وما قيل بعده، ومن قال. هذا غير «إضافة دراسة متابعة» (دراسة جديدة بمرحلتها وتاريخها الفعليين).
+ * تكرار الطلب لأصلٍ له مسودة تصحيح مفتوحة يعيدها نفسها (200) ولا ينشئ ثانية.
  */
 
 const denied = () =>
@@ -36,7 +38,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   try {
     const created = await duplicateCephAnalysis(id, session.username);
     if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
-    return NextResponse.json({ id: created.id }, { status: 201 });
+    return NextResponse.json({ id: created.id, replayed: created.replayed }, { status: created.replayed ? 200 : 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح نسخة التصحيح." }, { status: 500 });
   }

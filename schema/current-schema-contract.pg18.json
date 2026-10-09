@@ -2,12 +2,12 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.4",
   "counts": {
     "tables": 88,
-    "columns": 1156,
-    "constraints": 1074,
-    "indexes": 275,
+    "columns": 1157,
+    "constraints": 1076,
+    "indexes": 277,
     "triggers": 28
   },
   "tables": {
@@ -985,6 +985,10 @@
           "type": "text",
           "nullable": true
         },
+        "corrects_analysis_id": {
+          "type": "int8",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -1047,11 +1051,23 @@
       ],
       "unique": [],
       "checks": [
+        "ceph_analyses_corrects_older_chk",
         "ceph_analyses_kind_check",
         "ceph_analyses_phase_check",
         "ceph_analyses_status_check"
       ],
       "foreignKeys": [
+        {
+          "columns": [
+            "patient_id",
+            "corrects_analysis_id"
+          ],
+          "refTable": "ceph_analyses",
+          "refColumns": [
+            "patient_id",
+            "id"
+          ]
+        },
         {
           "columns": [
             "ortho_case_id"
@@ -1081,9 +1097,22 @@
         }
       ],
       "indexes": {
+        "ceph_analyses_corrects_idx": {
+          "columns": [
+            "corrects_analysis_id"
+          ],
+          "unique": false
+        },
         "ceph_analyses_one_draft": {
           "columns": [
             "patient_id"
+          ],
+          "unique": true
+        },
+        "ceph_analyses_patient_id_key": {
+          "columns": [
+            "patient_id",
+            "id"
           ],
           "unique": true
         },

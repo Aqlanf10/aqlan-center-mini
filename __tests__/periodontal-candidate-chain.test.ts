@@ -22,6 +22,13 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   it("preserves immutable coverage0043 and selects only test-only0044", () => {
     expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage])).toBe("0044");
   });
+  it("accepts the reserved Ceph lineage 0047 after the declared 0044–0046 gap and still selects only test-only 0044", () => {
+    const ceph = { version: "0047", filename: "0047_ceph_correction_lineage.sql" };
+    expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, ceph])).toBe("0044");
+    expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, { ...ceph, filename: "0047_unreviewed.sql" }])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, { version: "0045", filename: "0045_hr_staff.sql" }])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage, ceph, { version: "0048", filename: "0048_future.sql" }])).toThrow();
+  });
   it("does not weaken gap, ordering, suffix or future-baseline guards", () => {
     expect(() => periodontalCandidateMigrationVersion(baseline().slice(1))).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, coverage])).toThrow();
