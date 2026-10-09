@@ -114,7 +114,7 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 explicit T1 link â€
 
       // It is now a study of this case, no longer offered; the unlinked one remains offered.
       await expect.poll(() => panel.getByRole("listitem").count()).toBe(1);
-      await expect(card.getByRole("cell", { name: `#${f.oldT1}`, exact: false }).first()).toBeVisible();
+      await card.getByRole("cell", { name: `#${f.oldT1}`, exact: false }).first().waitFor();
 
       await page.reload({ waitUntil: "domcontentloaded" });
       const reopened = await openRecords(page, f.patientId, `link${width}`);
