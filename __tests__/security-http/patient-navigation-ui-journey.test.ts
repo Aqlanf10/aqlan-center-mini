@@ -124,7 +124,21 @@ describe("patient context navigation on the built application", () => {
         await toggle.click();
         for (const direction of ["rtl", "ltr"]) {
           await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
+          await page.getByTestId("patient-details-toggle").click();
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(true);
+          expect(await page.locator("h1:visible").count()).toBe(1);
+          await toggle.click();
+          expect(await email.isVisible()).toBe(true);
+          expect(await email.inputValue()).toBe("unsaved-synthetic@example.test");
+          // Independent disclosures can stay open together without a second identity.
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(true);
+          expect(await page.getByTestId("patient-primary-action").count()).toBe(1);
+          expect(await page.getByTestId("patient-medical-alert-banner").isVisible()).toBe(true);
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+          await toggle.click();
+          await page.getByTestId("patient-details-toggle").click();
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
+          expect(await details.getAttribute("open")).toBeNull();
         }
         expect(unexpected).toEqual([]); expect(errors).toEqual([]);
       }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
