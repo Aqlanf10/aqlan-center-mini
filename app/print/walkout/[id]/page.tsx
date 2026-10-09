@@ -7,6 +7,8 @@ import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
+import { WALKOUT_CLASS_LABEL, adjustmentLabel, lineNeedsReview, walkoutNeedsReview, PREVIOUS_BALANCE_LABEL, PREVIOUS_BALANCE_NOTE } from "@/lib/walkout-presentation";
+import { CURRENCIES } from "@/lib/money";
 import { canSeeWalkout } from "@/lib/walkout-access";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +30,7 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
   const [walkout, settings] = await Promise.all([visitWalkout(id), getSettingsSafe()]);
   if (!walkout) notFound();
   const day = clinicDateString(new Date(walkout.arrivedAt), CLINIC_TIME_ZONE);
-  const financialReviewRequired = walkout.lines.some((line) => line.financialReviewRequired);
+  const financialReviewRequired = walkoutNeedsReview(walkout);
 
   return (
     <>
@@ -48,14 +50,18 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
             <tr><th>عمل اليوم</th><th className="num">الكمية</th><th className="num">السعر</th></tr>
           </thead>
           <tbody>
-            {walkout.lines.length === 0 ? (
-              <tr><td colSpan={3}>كشف ومتابعة</td></tr>
-            ) : walkout.lines.map((line, index) => (
+            {walkout.orthoAdjustment ? (
+              <tr><td>شدّة تقويم</td><td className="num">1</td><td>{adjustmentLabel(walkout.orthoAdjustment)}</td></tr>
+            ) : null}
+            {walkout.lines.length === 0 && !walkout.orthoAdjustment ? (
+              <tr><td colSpan={3}>لا توجد إجراءات مسجلة في ملخص هذه الزيارة</td></tr>
+            ) : null}
+            {walkout.lines.map((line, index) => (
               <tr key={index}>
                 <td>{line.description}{line.toothCode ? ` — سن ${line.toothCode}` : ""}</td>
                 <td className="num" dir="ltr">{line.quantity}</td>
-                <td className="num">{line.financialReviewRequired ? "يحتاج مراجعة مالية — التغطية غير محسومة"
-                  : line.included ? "مشمول بالخطة" : formatMoney(line.unitPriceMinor * line.quantity, line.currency)}</td>
+                <td className="num">{lineNeedsReview(line) ? "يحتاج مراجعة مالية — التغطية غير محسومة"
+                  : line.billingClass === "NEW_BILLABLE" ? formatMoney(line.unitPriceMinor * line.quantity, line.currency) : WALKOUT_CLASS_LABEL[line.billingClass].text}</td>
               </tr>
             ))}
           </tbody>
@@ -80,6 +86,13 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
           </div>
         ))}
         {walkout.deferred ? <div className="line"><span>الدفع</span><span>مؤجَّل</span></div> : null}
+        <p className="footer-note">{PREVIOUS_BALANCE_NOTE}</p>
+        {CURRENCIES.filter((currency) => (walkout.checkout.previous[currency] ?? 0) !== 0).map((currency) => (
+          <div className="line" key={`previous-${currency}`}>
+            <span>{PREVIOUS_BALANCE_LABEL} ({CURRENCY_LABEL[currency]})</span>
+            <span className="num">{formatMoney(walkout.checkout.previous[currency]!, currency)}</span>
+          </div>
+        ))}
         {walkout.balances.length === 0 ? (
           <div className="line"><span>الرصيد</span><span>لا رصيد مستحق</span></div>
         ) : walkout.balances.map((row) => (

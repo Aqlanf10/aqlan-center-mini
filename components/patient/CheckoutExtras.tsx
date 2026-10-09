@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
 import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
 import type { BillingClassification } from "@/lib/billing-classification";
+import { WALKOUT_CLASS_LABEL as CLASS_LABEL, adjustmentLabel, lineNeedsReview, walkoutNeedsReview } from "@/lib/walkout-presentation";
 import { useSession } from "../SessionProvider";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
@@ -15,14 +16,6 @@ import type { VisitWalkout, WalkoutLine } from "@/lib/db";
 type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[] };
 
 /** تسميات التصنيف القانوني — المصدر في الخادم، والواجهة تعرضه فقط. */
-const CLASS_LABEL: Record<BillingClassification, { text: string; tone: string }> = {
-  NEW_BILLABLE: { text: "مستحق جديد", tone: "bg-amber-100 text-amber-900" },
-  INCLUDED: { text: "مشمول بالاتفاق", tone: "bg-sky-100 text-sky-900" },
-  LEGACY_INCLUDED: { text: "مشمول بالعلاج السابق", tone: "bg-violet-100 text-violet-900" },
-  OUTSIDE_CONTRACT: { text: "خارج العقد — قرار فوترة", tone: "bg-rose-100 text-rose-900" },
-  NO_CHARGE: { text: "بلا رسوم", tone: "bg-slate-100 text-slate-700" },
-};
-
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 const positiveId = (value: unknown): value is number => integer(value) && value > 0;
@@ -48,7 +41,7 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
 
 /** Review evidence takes precedence over historical generic billing classification. */
 export function WalkoutLineBilling({ line }: { line: WalkoutLine }) {
-  if (line.financialReviewRequired) return (
+  if (lineNeedsReview(line)) return (
     <span role="status" data-testid="walkout-line-financial-review"
       className="rounded-full bg-amber-100 px-2 py-0.5 font-black text-amber-900">
       يحتاج مراجعة مالية — التغطية غير محسومة
@@ -77,6 +70,7 @@ export function WalkoutLineBilling({ line }: { line: WalkoutLine }) {
  */
 interface CheckoutExtrasProps {
   visitId: number;
+  expectedPatientId?: number;
   collected: boolean;
   suggestedDate: string | null;
   durationMinutes: number | null;
@@ -88,16 +82,16 @@ interface CheckoutExtrasProps {
 export function CheckoutExtras(props: CheckoutExtrasProps) {
   const session = useSession();
   if (!session) return null;
-  const owner = JSON.stringify([props.visitId, session.username, session.role, session.permissions ?? null]);
+  const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
   return <OwnedCheckoutExtras key={owner} {...props} />;
 }
-function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ visitId, expectedPatientId, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
   const walkout = walkoutRead?.visitId === visitId ? walkoutRead : null;
   const readRequest = useRef<AbortController | null>(null);
-  const financialReviewRequired = walkout?.lines.some((line) => line.financialReviewRequired) ?? false;
+  const financialReviewRequired = walkout ? walkoutNeedsReview(walkout) : false;
   const [collectLegacy, setCollectLegacy] = useState<CheckoutCurrencyLine | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -121,11 +115,12 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
       const response = await fetch(`/api/visits/${visitId}/walkout`, { cache: "no-store", signal: request.signal });
       const payload: unknown = await response.json().catch(() => null);
       if (!mounted.current || request.signal.aborted || readRequest.current !== request) return;
-      const verified = response.ok && isCheckoutWalkout(payload, visitId) ? payload : null;
+      const verified = response.ok && isCheckoutWalkout(payload, visitId)
+        && (expectedPatientId === undefined || payload.patientId === expectedPatientId) ? payload : null;
       setWalkout(verified);
-      onFinancialReadChange?.({ visitId, reviewRequired: verified ? verified.lines.some((line) => line.financialReviewRequired) : null });
+      onFinancialReadChange?.({ visitId, reviewRequired: verified ? walkoutNeedsReview(verified) : null });
     } catch { if (mounted.current && !request.signal.aborted && readRequest.current === request) setWalkout(null); }
-  }, [visitId, onFinancialReadChange]);
+  }, [visitId, expectedPatientId, onFinancialReadChange]);
 
   useEffect(() => {
     const first = setTimeout(() => { void load(); }, 0);
@@ -200,11 +195,7 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
               <li className="flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-800">شدّة تقويم</span>
                 <span className={`rounded-full px-2 py-0.5 font-black ${CLASS_LABEL[walkout.orthoAdjustment.billingClass].tone}`}>
-                  {walkout.orthoAdjustment.pendingDecision
-                    ? "خارج العقد — قرار فوترة معلّق"
-                    : walkout.orthoAdjustment.billingClass === "NEW_BILLABLE"
-                      ? "فوتِرت بسطر «شدّة تقويم»"
-                      : `${CLASS_LABEL[walkout.orthoAdjustment.billingClass].text} · بلا رسوم جديدة`}
+                  {adjustmentLabel(walkout.orthoAdjustment)}
                 </span>
               </li>
             ) : null}

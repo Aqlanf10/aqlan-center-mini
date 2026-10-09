@@ -8,41 +8,15 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras, isCheckoutWalkout } from "./CheckoutExtras";
-import type { VisitWalkout } from "@/lib/db";
+import { hasWalkoutFinancials, workflowBalanceRows, type FinancialReadState } from "@/lib/walkout-financial-read";
+import { walkoutNeedsReview, PREVIOUS_BALANCE_LABEL, PREVIOUS_BALANCE_NOTE } from "@/lib/walkout-presentation";
 import type { WorkflowSummary } from "./SummaryTab";
 
-/**
- * تبويب «زيارة اليوم» — مساحة عمل الطبيب (المواصفة §١٢).
- *
- * لا تُفتح صفحةً فارغة: الزيارة القائمة (أو أزرار بدئها)، وآخر زيارة وما تم فيها،
- * وعمل الزيارة نفسه في المكوّن السريري. وبعد التوقيع يظهر **الشبّاك**: الرصيد
- * السابق + استحقاق اليوم = الإجمالي المستحق، ثم التحصيل الموحَّد وحجز الجلسة
- * القادمة المقترحة — الرحلة كلها من شاشةٍ واحدة (المواصفة §٢٧).
- *
- * (TD-05 owner review — Finding 1) الشبّاك بعملاتها المستقلة: استحقاق اليوم
- * بعملة فاتورته الفعلية، والرصيد السابق سطرٌ لكل عملةٍ ذات نشاط، والإجمالي
- * يُجمع داخل عملة الفاتورة وحدها حين يكون لها رصيدٌ سابق — أما عملات الاتفاق
- * الأخرى فتُعرض كلٌّ بسطرها الموسوم ولا تُجمع مع غيرها أبدًا. والتحصيل يفتح
- * مستهدفًا فاتورة اليوم نفسها بعملتها.
- *
- * (TD-05 second owner review — Finding 6) **لقطة ما قبل التوقيع هي «السابق»**:
- * كانت الأرصدة تُعاد قراءته بعد التوقيع — أي بعد ولادة فاتورة اليوم — ثم يُضاف
- * إليها استحقاق اليوم، فتُحسَب الفاتورة مرتين (٥٠٠ سابق + ١٥٠٠ اليوم = ٣٥٠٠
- * بدل ٢٠٠٠). الآن:
- *  * `preSignBalances` — لقطةٌ مجمَّدة تُقرأ عند بدء سياق الزيارة/الشبّاك، وتُثبَّت
- *    لحظة نجاح التوقيع؛ لا تُعاد قراءتها بعده أبدًا.
- *  * `currentBalances` — الحالة المالية الجارية؛ تُحدَّث بعد التحصيل وحده
- *    لعرض «الرصيد الحالي بعد التحصيل»، دون مسح اللقطة المجمّدة أبدًا.
- *
- * (المراجعة النهائية للمالك — TD-05، الاستنتاج أ) **الحالة ملك معرّف الزيارة**:
- * التبويب يبقى محمّلًا والمريض نفسه قد يبدأ زيارةً ثانية بعد أن وقّعت الأولى
- * وحُصّلت — فلا ترث الزيارة الثانية شيئًا من شبّاك الأولى. حين يظهر معرّفُ
- * زيارةٍ جديدة (غير null ومخالف لما قبله) تُصفَّر حالة الزيارة كلها — لقطة ما
- * قبل التوقيع، والشبّاك، وstate التحصيل — وتُقرأ لقطةٌ جديدة للزيارة الجديدة.
- * والتصفير لا يقع لمجرّد أن الزيارة صارت null بعد توقيعها: شبّاكها يبقى
- * مرئيًا حتى التحصيل وإتمام المسار الطبيعي.
- */
-export function TodayVisitTab({
+/** Uses canonical workflow / walkout reads. Unknown money is never zero. */
+export function TodayVisitTab(props: Parameters<typeof OwnedTodayVisitTab>[0]) {
+  return <OwnedTodayVisitTab key={props.patientId} {...props} />;
+}
+function OwnedTodayVisitTab({
   patientId,
   patientName,
   summary,
@@ -80,14 +54,8 @@ export function TodayVisitTab({
       setAutoReview(new URLSearchParams(window.location.search).get("review") === "1");
     } catch { /* بلا عنوان يُقرأ — لا مراجعة تلقائية */ }
   }, []);
-  /* (TD-05 second owner review — Finding 6) لقطة ما قبل التوقيع — تُقرأ عند بدء
-     سياق الزيارة وتُجمَّد لحظة التوقيع؛ هي وحدها «الرصيد السابق» في الشبّاك. */
-  const [preSignBalances, setPreSignBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
-  /* الحالة الجارية — تُحدَّث بعد التحصيل وحده لعرض الرصيد الحالي، لا تمس
-     اللقطة المجمّدة. */
+  const [previousBalances, setPreviousBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
   const [currentBalances, setCurrentBalances] = useState<{ currency: Currency; balanceMinor: number }[] | null>(null);
-  /* هل وقّعت هذه الجلسة؟ يحرس المرآة: قراءةٌ متأخرة بعد التوقيع لا تلطّخ اللقطة. */
-  const signedRef = useRef(false);
   /* (المراجعة النهائية — الاستنتاج أ) معرّف الزيارة النشِطة التي تملك حالة
      الشبّاك أعلاه: التبويب محمّلٌ وقد تتوالى الزيارات عليه، فلا بدّ من
      معرفةٍ صريحة بأيّ زيارةٍ تعمل الحالة الحالية لصالحها — ومعها وقتُ
@@ -115,41 +83,80 @@ export function TodayVisitTab({
     materialsDeducted: number;
   } | null>(null);
 
-  const onFinancialReadChange = useCallback((read: { visitId: number; reviewRequired: boolean | null }) => {
-    setCheckout((current) => current?.visitId === read.visitId && current.financialReviewRequired !== read.reviewRequired
-      ? { ...current, financialReviewRequired: read.reviewRequired } : current);
-  }, []);
   const checkoutNeedsFinanceAttention = checkout?.financialReviewRequired === true || checkout?.financialReviewRequired === null;
 
-  /* الرصيد الجاري يُقرأ عند الفتح وبعد كل تغيير — وقبل التوقيع هو بنفسه
-     «ما قبل التوقيع»، وبعده تحديثُ التحصيل وحده. */
-  const loadCurrentBalances = useCallback(async () => {
+  const [financialRead, setFinancialRead] = useState<FinancialReadState>("loading");
+  const requestRef = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const checkoutVisitRef = useRef<number | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; requestRef.current?.abort(); };
+  }, []);
+
+  const loadCurrentBalances = useCallback(async (visitId = checkoutVisitRef.current, restore = false) => {
+    requestRef.current?.abort();
+    const request = new AbortController();
+    requestRef.current = request;
+    const current = () => mounted.current && !request.signal.aborted && requestRef.current === request;
+    setCurrentBalances(null);
+    setPreviousBalances(null);
+    setFinancialRead("loading");
     if (!canCollect) return;
     try {
-      const response = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store" });
-      if (!response.ok) return;
-      const payload = await response.json();
-      const byCurrency = payload?.financial?.byCurrency;
-      if (!byCurrency || typeof byCurrency !== "object") {
-        setCurrentBalances(null);
-        if (!signedRef.current) setPreSignBalances(null);
-        return;
+      const response = await fetch(visitId === null
+        ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout`,
+        { cache: "no-store", signal: request.signal });
+      if (!response.ok) throw new Error("Financial read failed");
+      const payload: unknown = await response.json();
+      if (!current()) return;
+      if (visitId === null) {
+        setCurrentBalances(workflowBalanceRows(payload, patientId));
+      } else {
+        if (!isCheckoutWalkout(payload, visitId) || !hasWalkoutFinancials(payload, patientId, visitId)) {
+          throw new Error("Unverified walkout");
+        }
+        if (restore) {
+          const restored = payload as typeof payload & { signedToday?: boolean };
+          if (restored.signedToday !== true || (activeVisitRef.current !== null
+            && activeVisitRef.current.arrivedAt >= payload.arrivedAt)) {
+            const workflow = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store", signal: request.signal });
+            if (!workflow.ok) throw new Error("Financial read failed");
+            const latest: unknown = await workflow.json();
+            if (!current()) return;
+            setCurrentBalances(workflowBalanceRows(latest, patientId));
+            setFinancialRead("verified");
+            return;
+          }
+          restoredVisitRef.current = visitId;
+        }
+        checkoutVisitRef.current = visitId;
+        setPreviousBalances(CURRENCIES.map((currency) => ({
+          currency, balanceMinor: payload.checkout.previous[currency]!,
+        })).filter((row) => row.balanceMinor !== 0));
+        setCurrentBalances(payload.balances);
+        const remainingMinor = Math.max(0, (payload.invoice?.netMinor ?? 0) - payload.checkout.invoicePaidMinor);
+        setCollected(Boolean(payload.invoice && remainingMinor === 0));
+        setPaidSome(payload.checkout.invoicePaidMinor > 0);
+        setCheckout((previous) => ({
+          visitId, financialReviewRequired: walkoutNeedsReview(payload),
+          invoiceId: payload.invoice?.id ?? null, invoiceCurrency: payload.invoice?.currency ?? base,
+          duesMinor: payload.invoice?.netMinor ?? 0, remainingMinor,
+          sessionsCompleted: previous?.visitId === visitId ? previous.sessionsCompleted : 0,
+          nextPlannedVisit: previous?.visitId === visitId ? previous.nextPlannedVisit : null,
+          labOrdersCreated: previous?.visitId === visitId ? previous.labOrdersCreated : 0,
+          materialsDeducted: previous?.visitId === visitId ? previous.materialsDeducted : 0,
+        }));
       }
-      const rows = CURRENCIES
-        .map((currency) => ({
-          currency,
-          balanceMinor: Math.round(Number(byCurrency[currency]?.balanceMinor ?? 0)) || 0,
-        }))
-        .filter((row) => row.balanceMinor !== 0);
-      setCurrentBalances(rows);
-      /* ما دام التوقيع لم يقع فالقراءة الجارية هي ما قبل التوقيع نفسها —
-         تُعرض في «الرصيد السابق». وبعده لا تُلمس اللقطة أبدًا (حتى لا تحتسب
-         فاتورة اليوم مرتين). */
-      if (!signedRef.current) setPreSignBalances(rows);
+      setFinancialRead("verified");
     } catch {
-      // الرصيد مساعدةٌ للعرض — تعذّره لا يوقف الرحلة.
+      if (current()) {
+        setCurrentBalances(null);
+        setPreviousBalances(null);
+        setFinancialRead("error");
+      }
     }
-  }, [patientId, canCollect]);
+  }, [patientId, canCollect, base]);
 
   useEffect(() => { void loadCurrentBalances(); }, [loadCurrentBalances]);
 
@@ -180,45 +187,23 @@ export function TodayVisitTab({
       /* رجوعٌ لزيارةٍ أقدم (أو معاصرة) لا يُصفّر — بدءُ زيارةٍ أحدث وحده يُصفّر. */
       return;
     }
-    signedRef.current = false;
+    checkoutVisitRef.current = null;
+    requestRef.current?.abort();
     setCheckout(null);
     setCollected(false);
     setPaidSome(false);
     setCollectOpen(false);
-    setPreSignBalances(null);
+    setPreviousBalances(null);
     setCurrentBalances(null);
     void loadCurrentBalances();
   }, [openVisitId, openVisitArrivedAt, loadCurrentBalances]);
 
-  // Recover the signed visit from server records; no financial mutations on remount.
+  // Reopen through exactly the same verified read as signing and collection.
   const lastSignedId = summary?.lastVisit?.id;
   useEffect(() => {
     if (!canCollect || checkout || !lastSignedId) return;
-    let cancelled = false;
-    const restore = async () => {
-      const response = await fetch(`/api/visits/${lastSignedId}/walkout`, { cache: "no-store" });
-      if (!response.ok) return;
-      const walkout = await response.json() as VisitWalkout & { signedToday?: boolean };
-      /* وُقِّعت اليوم بتوقيت العيادة في الخادم؛ ولا تُستعاد إن كانت هناك زيارةٌ مفتوحة أحدث منها (بدء زيارة
-         جديدة). زيارةٌ مفتوحة أقدم من الموقَّعة (توقيع الأحدث يعيد الواجهة للأقدم) لا تمنع الاستعادة. */
-      if (cancelled || !isCheckoutWalkout(walkout, lastSignedId) || walkout.patientId !== patientId
-        || typeof walkout.signedAt !== "string" || walkout.signedToday !== true || typeof walkout.arrivedAt !== "string") return;
-      if (openVisitArrivedAt !== null && openVisitArrivedAt >= walkout.arrivedAt) return;
-      signedRef.current = true;
-      restoredVisitRef.current = walkout.visitId;
-      setPreSignBalances(CURRENCIES.map((currency) => ({ currency, balanceMinor: walkout.checkout.previous[currency] ?? 0 })).filter((row) => row.balanceMinor !== 0));
-      setCurrentBalances(walkout.balances);
-      setCollected(Boolean(walkout.invoice && walkout.checkout.invoicePaidMinor >= walkout.invoice.netMinor));
-      setPaidSome(walkout.checkout.invoicePaidMinor > 0);
-      setCheckout({ visitId: walkout.visitId, financialReviewRequired: walkout.lines.some((line) => line.financialReviewRequired),
-        invoiceId: walkout.invoice?.id ?? null,
-        invoiceCurrency: walkout.invoice?.currency ?? base, duesMinor: walkout.invoice?.netMinor ?? 0,
-        remainingMinor: Math.max(0, (walkout.invoice?.netMinor ?? 0) - walkout.checkout.invoicePaidMinor),
-        sessionsCompleted: 0, nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0 });
-    };
-    void restore().catch(() => {});
-    return () => { cancelled = true; };
-  }, [canCollect, openVisitArrivedAt, checkout, lastSignedId, base, patientId]);
+    void loadCurrentBalances(lastSignedId, true);
+  }, [canCollect, checkout, lastSignedId, loadCurrentBalances]);
 
   const startManualVisit = async () => {
     if (busy || !summary || workflowIsCurrent?.() === false) return;
@@ -250,13 +235,12 @@ export function TodayVisitTab({
   const lastVisit = summary?.lastVisit ?? null;
   const previousVisits = visits.filter((visit) => visit.status === "done");
 
-  /* استحقاق اليوم بعملة فاتورته — والرصيد السابق (اللقطة المجمّدة) بعملة
-     الفاتورة وحدها يُجمع معه؛ بقية العملات تُعرض منفصلة ولا تدخل أي مجموع أبدًا. */
+  // Current account debt is read directly; previous + fees is not a current debt calculation.
   const invoiceCurrency = checkout?.invoiceCurrency ?? base;
-  const sameCurrencyBefore = preSignBalances?.find((row) => row.currency === invoiceCurrency) ?? null;
-  const otherCurrencyRows = preSignBalances?.filter((row) => row.currency !== invoiceCurrency) ?? [];
-  const totalDueInInvoiceCurrency =
-    checkout && sameCurrencyBefore ? sameCurrencyBefore.balanceMinor + checkout.duesMinor : null;
+  const sameCurrencyBefore = previousBalances?.find((row) => row.currency === invoiceCurrency) ?? null;
+  const otherCurrencyRows = currentBalances?.filter((row) => row.currency !== invoiceCurrency) ?? [];
+  const totalDueInInvoiceCurrency = financialRead === "verified"
+    ? currentBalances?.find((row) => row.currency === invoiceCurrency)?.balanceMinor ?? 0 : null;
 
   /* فاتورة اليوم المستهدفة — التحصيل يفتح عليها بعملتها لا على الحساب. */
   const presetInvoice = useMemo(
@@ -281,6 +265,12 @@ export function TodayVisitTab({
         </p>
       ) : null}
 
+      {canCollect && financialRead !== "verified" ? (
+        <div data-testid="checkout-financial-read" role={financialRead === "error" ? "alert" : "status"} className="rounded-xl border border-amber-200 p-3 text-sm">
+          {financialRead === "loading" ? "جارٍ التحقق من الأرصدة…" : "تعذّر التحقق من الأرصدة؛ لا يُعد المبلغ صفرًا"}
+          {financialRead === "error" ? <button type="button" onClick={() => void loadCurrentBalances(checkoutVisitRef.current ?? lastSignedId ?? null, checkoutVisitRef.current === null && !!lastSignedId)}>إعادة التحقق من الأرصدة</button> : null}
+        </div>
+      ) : null}
       {/* آخر زيارة — يُقرأ لا يُخمَّن */}
       {lastVisit ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-3.5" aria-label="آخر زيارة">
@@ -338,13 +328,11 @@ export function TodayVisitTab({
             onNavigationGuardChange={onNavigationGuardChange}
             autoReview={autoReview}
             onSigned={(result) => {
-              /* (TD-05 second owner review — Finding 6) تجميد اللقطة لحظة
-                 التوقيع: ما قُرئ قبل التوقيع هو «السابق» — ولا تُعاد قراءته
-                 بعد ولادة فاتورة اليوم فيُحسب مرتين أبدًا. المرآة signedRef
-                 تحرس هذا: أي قراءةٍ جارية تصل متأخرةً لا تلمس اللقطة. */
-              signedRef.current = true;
+              if (!mounted.current || activeVisitRef.current?.id !== openVisit.id) return;
+                    checkoutVisitRef.current = openVisit.id;
               setCheckout({
                 visitId: openVisit.id,
+                financialReviewRequired: null,
                 duesMinor: result?.duesMinor ?? 0,
                 remainingMinor: result?.duesMinor ?? 0,
                 invoiceCurrency: result?.invoiceCurrency ?? base,
@@ -355,8 +343,7 @@ export function TodayVisitTab({
                 materialsDeducted: result?.materialsDeducted ?? 0,
               });
               onChanged();
-              /* لا قراءة رصيد هنا عمدًا: أي قراءةٍ الآن ستشمل فاتورة اليوم
-                 فتزوّد الشبّاك برقمٍ محسوبٍ مرتين. */
+              void loadCurrentBalances(openVisit.id);
             }}
           />
         </section>
@@ -393,18 +380,18 @@ export function TodayVisitTab({
           </h3>
           <dl className="space-y-1 rounded-xl border border-emerald-200 bg-white p-3 text-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-slate-500">الرصيد السابق</dt>
+              <dt className="text-slate-500">{PREVIOUS_BALANCE_LABEL}</dt>
               <dd className="font-bold">
-                {preSignBalances === null ? (
+                {financialRead !== "verified" || previousBalances === null ? (
                   "—"
-                ) : preSignBalances.length === 0 ? (
+                ) : previousBalances.length === 0 ? (
                   "لا رصيد سابق"
                 ) : (
                   <span className="flex flex-col items-end">
-                    {preSignBalances.map((row) => (
+                    {previousBalances.map((row) => (
                       <span key={row.currency} className="font-bold">
                         {formatMoney(row.balanceMinor, row.currency)}
-                        {preSignBalances.length > 1 ? (
+                        {previousBalances.length > 1 ? (
                           <span className="mr-1 text-[10px] font-bold text-slate-400">{CURRENCY_LABEL[row.currency]}</span>
                         ) : null}
                       </span>
@@ -413,10 +400,11 @@ export function TodayVisitTab({
                 )}
               </dd>
             </div>
+            <p className="text-xs text-slate-500">{PREVIOUS_BALANCE_NOTE}</p>
             <div className="flex items-center justify-between">
               <dt className="text-slate-500">{checkoutNeedsFinanceAttention ? "فاتورة اليوم المثبتة" : "استحقاق اليوم"}</dt>
               <dd className="font-extrabold text-navy-900">
-                {checkoutNeedsFinanceAttention && checkout.invoiceId === null
+                {financialRead !== "verified" ? "غير متحقق" : checkoutNeedsFinanceAttention && checkout.invoiceId === null
                   ? (checkout.financialReviewRequired === true ? "لا فاتورة جديدة؛ توجد بنود تحتاج مراجعة مالية" : "لا فاتورة جديدة؛ تغطية العمل غير متحققة")
                   : formatMoney(checkout.duesMinor, invoiceCurrency)}
                 {invoiceCurrency !== base ? (
@@ -432,7 +420,7 @@ export function TodayVisitTab({
             {totalDueInInvoiceCurrency !== null ? (
               <div className="flex items-center justify-between border-t border-slate-100 pt-1.5">
                 <dt className="font-bold text-slate-700">
-                  {checkoutNeedsFinanceAttention ? "الإجمالي من الأرصدة والفواتير المثبتة" : "الإجمالي المستحق"}{invoiceCurrency !== base ? ` (${CURRENCY_LABEL[invoiceCurrency]})` : ""}
+                  {"الرصيد الحالي في الدفتر"}{invoiceCurrency !== base ? ` (${CURRENCY_LABEL[invoiceCurrency]})` : ""}
                 </dt>
                 <dd className="text-lg font-black text-amber-700">
                   {formatMoney(totalDueInInvoiceCurrency, invoiceCurrency)}
@@ -452,9 +440,7 @@ export function TodayVisitTab({
               </div>
             ) : null}
 
-            {/* (TD-05 second owner review — Finding 6) الحالة الجارية بعد
-                التحصيل: تحديثٌ مستقل لا يمس اللقطة المجمّدة أعلاه أبدًا. */}
-            {collected || paidSome ? (
+            {financialRead === "verified" && (collected || paidSome) ? (
               <div className="border-t border-emerald-200 pt-1.5">
                 <dt className="text-[11px] font-bold text-emerald-700">الرصيد الحالي (بعد التحصيل)</dt>
                 <dd className="text-right text-[11px] font-bold text-emerald-800">
@@ -482,7 +468,9 @@ export function TodayVisitTab({
           <div className="mt-3 flex flex-wrap gap-2">
             {/* بعد التحصيل الناجح يختفي زرّه — فالسند سُجّل، والشبّاك يعرض
                 اللقطة المجمّدة والرصيد الجاري وحده. */}
-            {collected ? (
+            {financialRead !== "verified" ? (
+              <span role="status">الرصيد غير متحقق؛ لا يمكن تأكيد المبلغ المطلوب</span>
+            ) : collected && !currentBalances?.some((row) => row.balanceMinor > 0) ? (
               <span className="flex-[2] rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-sm font-extrabold text-white">
                 تم التحصيل — سند الاستحقاق سُجّل
               </span>
@@ -511,12 +499,12 @@ export function TodayVisitTab({
 
           {/* (CHAIR-1 Slice 5) مشمول بالخطة، تأجيل الدفع، ملخّص المغادرة، وحجز القادمة هنا. */}
           <CheckoutExtras
-            onFinancialReadChange={onFinancialReadChange}
             visitId={checkout.visitId}
+            expectedPatientId={patientId}
             collected={collected}
             suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}
             durationMinutes={checkout.nextPlannedVisit?.durationMinutes ?? null}
-            onChanged={onChanged}
+            onChanged={() => { onChanged(); void loadCurrentBalances(); }}
           />
 
           {checkout.nextPlannedVisit ? (
@@ -591,28 +579,13 @@ export function TodayVisitTab({
       <CollectPaymentModal
         patientId={patientId}
         patientName={patientName}
-        isOpen={collectOpen}
+        isOpen={collectOpen && financialRead === "verified"}
         onClose={() => setCollectOpen(false)}
         onSuccess={() => {
           setCollectOpen(false);
-          /* (TD-05 second owner review — Finding 6) بعد التحصيل الناجح: تبقى
-             لقطة ما قبل التوقيع كما جمّدت (هي «السابق» المرجعي)، وتتحدث الحالة
-             الجارية وحدها لتُعرض في «الرصيد الحالي بعد التحصيل». */
+          if (!mounted.current || checkoutVisitRef.current !== checkout?.visitId) return;
           setPaidSome(true);
-          if (checkout) {
-            void fetch(`/api/visits/${checkout.visitId}/walkout`, { cache: "no-store" })
-              .then(async (response) => response.ok ? await response.json() as VisitWalkout : null)
-              .then((walkout) => {
-                if (!walkout) return;
-                const remainingMinor = Math.max(0, (walkout.invoice?.netMinor ?? 0) - walkout.checkout.invoicePaidMinor);
-                setCollected(Boolean(walkout.invoice && remainingMinor === 0));
-                setCheckout((current) => current?.visitId === walkout.visitId ? { ...current, remainingMinor } : current);
-              }).catch(() => {});
-          }
-          /* لا نعرض لقطةً قديمة على أنها «الرصيد الحالي» ولو لجزءٍ من الثانية:
-             بعد نجاح السداد تصبح القيمة السابقة stale. نفرّغها أولًا ثم نقرأ
-             المصدر المالي من جديد؛ أثناء ذلك تظهر «…» بدل رقمٍ قديم مضلل. */
-          setCurrentBalances(null);
+          setCollected(false);
           onChanged();
           void loadCurrentBalances();
         }}

@@ -6,7 +6,7 @@ import { formatMoney } from "../lib/money";
 // Render the actual parent view with a current, already-restored read projection.
 // No routes/database or asynchronous effects run in this focused presentation test.
 const state = vi.hoisted(() => ({ cursor: 0, review: false as boolean | null, invoiceId: null as number | null,
-  dues: 0, balance: 0 }));
+  dues: 0, balance: 0, read: "verified" as "verified" | "loading" | "error" }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return { ...react,
@@ -15,7 +15,7 @@ vi.mock("react", async (original) => {
       const value = index === 8 ? { visitId: 10, financialReviewRequired: state.review, duesMinor: state.dues,
         remainingMinor: state.dues, invoiceCurrency: "YER", invoiceId: state.invoiceId, sessionsCompleted: 0,
         nextPlannedVisit: null, labOrdersCreated: 0, materialsDeducted: 0 }
-        : index === 4 || index === 5 ? (state.balance ? [{ currency: "YER", balanceMinor: state.balance }] : [])
+        : index === 9 ? state.read : index === 4 || index === 5 ? (state.balance ? [{ currency: "YER", balanceMinor: state.balance }] : [])
           : typeof initial === "function" ? initial() : initial;
       return [value, () => undefined];
     },
@@ -31,9 +31,16 @@ const render = () => {
   return renderToStaticMarkup(TodayVisitTab({ patientId: 1, patientName: "Synthetic", summary: null,
     base: "YER", visits: [], canCollect: true, onVisitStarted: () => undefined, onChanged: () => undefined }));
 };
-beforeEach(() => { state.review = false; state.invoiceId = null; state.dues = 0; state.balance = 0; });
+beforeEach(() => { state.review = false; state.invoiceId = null; state.dues = 0; state.balance = 0; state.read = "verified"; });
 
 describe("restored checkout review precedence", () => {
+  it.each(["loading", "error"] as const)("does not infer zero while balances are %s", (read) => {
+    state.read = read;
+    const html = render();
+    expect(html).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+    expect(html).toContain("الرصيد غير متحقق");
+  });
+
   it.each([true, null])("does not turn unresolved or unavailable coverage %s into a zero-owed claim", (review) => {
     state.review = review;
     const html = render();

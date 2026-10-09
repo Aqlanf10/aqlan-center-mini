@@ -73,7 +73,7 @@ describe("printed walkout uses canonical financial-review evidence", () => {
   it("preserves the existing verified included rendering when review is not required", async () => {
     state.walkout!.lines[0] = { ...state.walkout!.lines[0], financialReviewRequired: false, included: true, billingClass: "INCLUDED" };
     const html = await render();
-    expect(html).toContain("مشمول بالخطة");
+    expect(html).toContain("مشمول بالاتفاق");
     expect(html).not.toContain("التغطية غير محسومة");
   });
 });
