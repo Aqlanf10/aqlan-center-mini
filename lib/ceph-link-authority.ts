@@ -19,3 +19,9 @@ export function cephLinkAuthorizer(session: SessionPayload) {
     return canAccessPatient(live, patientId, "canUploadXrays", client);
   };
 }
+
+/**
+ * (ORTHO-ID-3) المُفوِّض نفسه لكل كتابة سيفالو تُنفَّذ داخل معاملتها: إنشاء دراسة، اعتمادها، رفضها، تصحيحها. صلاحية الأشعة
+ * والجلسة والمريض تُفحص على **هوية الدراسة الحالية** داخل المعاملة لا على ما رآه المسار قبلها.
+ */
+export const cephWriteAuthorizer = cephLinkAuthorizer;

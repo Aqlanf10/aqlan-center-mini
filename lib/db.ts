@@ -22262,6 +22262,38 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   };
 }
 
+/**
+ * (ORTHO-ID-3) تفويض كتابة سيفالو داخل معاملتها — يُنفَّذ على اتصال المعاملة ويقرّر `false` ⇒ لا كتابة.
+ * المُفوِّض الجاهز: `cephWriteAuthorizer(session)` في lib/ceph-link-authority.ts (مُحقِّق الجلسة المعتمد + صلاحية الأشعة).
+ */
+export type CephWriteAuthorizer = (client: DbClient, patientId: number) => Promise<boolean>;
+export type CephWriteRefusal = { ok: false; message: string; status?: 403 | 404 };
+
+const CEPH_FORBIDDEN: CephWriteRefusal = { ok: false, status: 403, message: "لم تعد تملك صلاحية على هذه الدراسة." };
+const CEPH_STUDY_MISSING: CephWriteRefusal = { ok: false, status: 404, message: "التحليل غير موجود." };
+
+/**
+ * ترتيب أقفال كتابات الدراسة = ترتيب دمج/حذف المرضى: **المريض أولًا بـFOR KEY SHARE** ثم التفويض (الحساب وشهود الملكية
+ * بأقفالها المشتركة) ثم الدراسة. الدمج يقفل الملفين FOR UPDATE ثم ينقل الدراسات؛ فمن يقفل المريض أولًا ينتظر الدمج أو يُنتظَر،
+ * ولا تقوم دورة (الدراسة قبل المريض كانت تشابك الإدراج — مفتاحه الأجنبي يطلب المريض — مع دمجٍ يحجز المريض ثم الدراسة).
+ *
+ * والتفويض على **هوية الدراسة الحالية**: دمجٌ يسبقنا ينقل الدراسة إلى مريضٍ آخر ويحذف المصدر، فيُعاد حلّ المريض من الدراسة
+ * نفسها (محاولتان إضافيتان) ويُفوَّض الفاعل على الهدف — طبيبٌ مخوّل للمصدر وحده يُرفض بدل أن يعتمد سجلًّا لا صلاحية له عليه.
+ */
+async function lockCephStudyPatient(
+  client: DbClient, analysisId: number, authorize: CephWriteAuthorizer | undefined,
+): Promise<{ ok: true; patientId: number } | CephWriteRefusal> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { rows: [head] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ceph_analyses WHERE id = $1`, [analysisId]);
+    if (!head) return CEPH_STUDY_MISSING;
+    const { rows: [locked] } = await client.query<{ id: number }>(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [head.patient_id]);
+    if (!locked) continue; // دُمج المريض أو حُذف أثناء الانتظار: الدراسة قد تكون انتقلت — نقرأ مريضها الحالي.
+    if (authorize && !(await authorize(client, head.patient_id))) return CEPH_FORBIDDEN;
+    return { ok: true, patientId: head.patient_id };
+  }
+  return CEPH_STUDY_MISSING;
+}
+
 /** يفتح مسودة تحليل على شععة موجودة للمريض نفسه — الصورة مرجعٌ لا نسخة. */
 export async function createCephAnalysis(input: {
   patientId: number;
@@ -22272,11 +22304,21 @@ export async function createCephAnalysis(input: {
   xrayDate?: string | null;
   device?: string | null;
   refSet?: string | null;
-}): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
+  /** (ORTHO-ID-3) يُنفَّذ داخل معاملة الحفظ بعد قفل المريض — انظر lockCephStudyPatient. */
+  authorize?: CephWriteAuthorizer;
+}): Promise<{ ok: true; id: number } | CephWriteRefusal> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    /* المريض أولًا (FOR KEY SHARE) قبل أي قراءة أو إدراج: الإدراج يطلب قفل المريض ضمنيًا بمفتاحه الأجنبي بعد أن يحجز
+       مدخل فهرس «مسودة واحدة لكل مريض»؛ ولو سبقنا دمجٌ يحجز المريض ثم ينقل مسودة المصدر إلى هذا المريض لانتظر كلٌّ منا الآخر. */
+    const { rows: [lockedPatient] } = await client.query<{ id: number }>(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [input.patientId]);
+    if (!lockedPatient) { await client.query("ROLLBACK"); return { ok: false, status: 404, message: "المريض غير موجود." }; }
+    if (input.authorize && !(await input.authorize(client, input.patientId))) {
+      await client.query("ROLLBACK");
+      return CEPH_FORBIDDEN;
+    }
     // الشععة تُنتمي للمريض نفسه: تحليلٌ على شععة غيره يضع قياسات مريضٍ في ملف آخر.
     const { rows: docs } = await client.query<{ id: number; mime_type: string; removed_at: Date | null }>(
       `SELECT id, mime_type, removed_at FROM patient_documents WHERE id = $1 AND patient_id = $2`,
@@ -22837,6 +22879,8 @@ export async function updateCephLandmarks(
 export interface CephCompleteResult {
   ok: boolean;
   message?: string;
+  /** (ORTHO-ID-3) 403 تفويضٌ سقط داخل المعاملة، 404 غير موجودة. */
+  status?: 403 | 404;
   summary?: string;
   measurements?: { code: string; value: number }[];
 }
@@ -22951,17 +22995,19 @@ export async function getCephReferenceSet(key: string): Promise<CephReferenceSet
  * مسودةٌ معتمدة بلا أرقام، ولا أرقامٌ لتحليلٍ ما زال مسودة.
  */
 export async function completeCephAnalysis(
-  id: number, by: string,
+  id: number, by: string, options: { authorize?: CephWriteAuthorizer } = {},
 ): Promise<CephCompleteResult> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const owner = await lockCephStudyPatient(client, id, options.authorize);
+    if (!owner.ok) { await client.query("ROLLBACK"); return owner; }
     const { rows } = await client.query<CephAnalysisDbRow>(
       `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
     const analysis = rows[0];
-    if (!analysis) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    if (!analysis || analysis.patient_id !== owner.patientId) { await client.query("ROLLBACK"); return CEPH_STUDY_MISSING; }
     if (analysis.status === "completed") {
       await client.query("ROLLBACK");
       return { ok: false, message: "التحليل معتمد سلفًا." };
@@ -23022,16 +23068,18 @@ export async function completeCephAnalysis(
 
 /** رفض مسودة — بدل حذفٍ صامت: الرفض يُوثَّق باسم رافضه. */
 export async function discardCephAnalysis(
-  id: number, by: string, note: string | null,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+  id: number, by: string, note: string | null, options: { authorize?: CephWriteAuthorizer } = {},
+): Promise<{ ok: true } | CephWriteRefusal> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<{ status: string }>(
-      `SELECT status FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+    const owner = await lockCephStudyPatient(client, id, options.authorize);
+    if (!owner.ok) { await client.query("ROLLBACK"); return owner; }
+    const { rows } = await client.query<{ status: string; patient_id: number }>(
+      `SELECT status, patient_id FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
-    if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    if (!rows[0] || rows[0].patient_id !== owner.patientId) { await client.query("ROLLBACK"); return CEPH_STUDY_MISSING; }
     if (rows[0].status !== "draft") {
       await client.query("ROLLBACK");
       return { ok: false, message: "المعتمد لا يُرفض — تاريخُ ما قُرئ لا يُمحى. افتح نسخةً للتصحيح." };
@@ -23047,6 +23095,9 @@ export async function discardCephAnalysis(
       actor: by,
     });
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }
@@ -23062,23 +23113,21 @@ export async function discardCephAnalysis(
  * الإدراج وسطر التدقيق في معاملة واحدة: فشل التدقيق يتراجع بكل شيء.
  */
 export async function duplicateCephAnalysis(
-  id: number, by: string,
-): Promise<{ ok: true; id: number; replayed: boolean } | { ok: false; message: string }> {
+  id: number, by: string, options: { authorize?: CephWriteAuthorizer } = {},
+): Promise<{ ok: true; id: number; replayed: boolean } | CephWriteRefusal> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     /* ترتيب دمج/حذف المرضى: المريض أولًا (FOR KEY SHARE) ثم الدراسة. الإدراج أدناه يطلب قفل المريض ضمنيًا بالمفتاح
        الأجنبي؛ لو أخذنا الدراسة قبله لتشابكنا مع دمجٍ يقفل المريض ثم يعدّل الدراسة. */
-    const { rows: [head] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ceph_analyses WHERE id = $1`, [id]);
-    if (!head) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
-    const { rows: [lockedPatient] } = await client.query<{ id: number }>(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [head.patient_id]);
-    if (!lockedPatient) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    const owner = await lockCephStudyPatient(client, id, options.authorize);
+    if (!owner.ok) { await client.query("ROLLBACK"); return owner; }
     const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
       `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
     const source = rows[0];
-    if (!source || source.patient_id !== head.patient_id) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    if (!source || source.patient_id !== owner.patientId) { await client.query("ROLLBACK"); return CEPH_STUDY_MISSING; }
     if (source.status !== "completed") {
       await client.query("ROLLBACK");
       return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };

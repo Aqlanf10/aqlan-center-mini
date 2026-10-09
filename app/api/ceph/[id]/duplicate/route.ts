@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { duplicateCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +37,8 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    const created = await duplicateCephAnalysis(id, session.username);
-    if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
+    const created = await duplicateCephAnalysis(id, session.username, { authorize: cephWriteAuthorizer(session) });
+    if (!created.ok) return NextResponse.json({ message: created.message }, { status: created.status ?? 409 });
     return NextResponse.json({ id: created.id, replayed: created.replayed }, { status: created.replayed ? 200 : 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح نسخة التصحيح." }, { status: 500 });

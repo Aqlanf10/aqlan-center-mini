@@ -8,6 +8,7 @@ import {
 import { isCephLandmarkCode } from "@/lib/ceph";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -145,8 +146,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* الرفض بلا ملاحظة جائز */ }
 
   try {
-    const done = await discardCephAnalysis(id, session.username, note);
-    if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+    const done = await discardCephAnalysis(id, session.username, note, { authorize: cephWriteAuthorizer(session) });
+    if (!done.ok) return NextResponse.json({ message: done.message }, { status: done.status ?? 409 });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ message: "تعذّر رفض المسودة." }, { status: 500 });
