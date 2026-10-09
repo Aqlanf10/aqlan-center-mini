@@ -83,7 +83,10 @@ describe("DOT-PF-01 correction reconciliation", () => {
       await editor.getByRole("button", { name: "إلغاء", exact: true }).click();
       // An ordinary ledger refresh can observe the committed reversal. Its
       // zero-remaining receipt must retain access to the exact pending request.
-      await tab.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await tab.getByRole("button", { name: /الملخص/ }).first().click();
+      const refreshed = tab.waitForResponse((response) => response.url().endsWith(`/api/patients/${patientId}/ledger`));
+      await tab.getByRole("button", { name: /الحساب/ }).first().click();
+      expect((await (await refreshed).json()).receiptRemaining[String(wrongId)]).toBe(0);
       const originalRow = payments.locator("li").filter({ has: tab.locator(`a[href="/print/receipt/${wrongId}"]`) });
       await originalRow.getByRole("button", { name: "تصحيح السند" }).click();
       await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
