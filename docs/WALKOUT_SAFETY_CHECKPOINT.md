@@ -63,3 +63,7 @@ never an automatic YER collection. The browser selects the existing opening-curr
 for both SAR and USD and verifies the request currency/openingCurrency and absent invoiceId.
 The built-browser test intercepts the planned synthetic payment POST, verifies no settled
 invoiceId is sent, and verifies the retry body/key are unchanged. No real payment is sent.
+
+Review red CI 37983065265: exactly the 3 new review regressions failed; 8353 tests passed,
+including all 9 financial read lifetime and 17 strict transport tests. Positive-price work
+without an established invoice is treated as needing review, not labelled free from absence.

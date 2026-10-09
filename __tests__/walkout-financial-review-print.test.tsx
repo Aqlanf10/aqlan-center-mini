@@ -39,6 +39,7 @@ describe("printed walkout uses canonical financial-review evidence", () => {
     const html = await render();
     expect(html).toContain("لا فاتورة جديدة مثبتة لهذه الزيارة");
     expect(html).not.toContain("لا رسوم على هذه الزيارة");
+    expect(html).not.toContain("بلا رسوم");
     expect(html).toContain(formatMoney(432100, "YER"));
   });
 
@@ -65,7 +66,7 @@ describe("printed walkout uses canonical financial-review evidence", () => {
   it("never prints unresolved work as free/included/collectible while retaining known account balances", async () => {
     const html = await render();
     expect(html).toContain("يحتاج مراجعة مالية — التغطية غير محسومة");
-    expect(html).toContain("لا فاتورة جديدة للزيارة؛ توجد بنود تحتاج مراجعة مالية");
+    expect(html).toContain("لا فاتورة جديدة مثبتة لهذه الزيارة؛ توجد بنود تحتاج مراجعة مالية");
     expect(html).not.toContain("لا رسوم على هذه الزيارة");
     expect(html).not.toContain("مشمول بالخطة");
     expect(html).not.toContain(formatMoney(987654, "YER"));
