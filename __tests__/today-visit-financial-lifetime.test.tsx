@@ -110,5 +110,9 @@ describe("TodayVisitTab canonical financial read lifetime", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise((done) => { release = done; })));
     const a = mount(); a.sign(); a.unmount(); release(response(walkout())); await turns();
     expect(a.props.onChanged).toHaveBeenCalledTimes(1);
+    expect(a.text()).not.toContain(formatMoney(180000, "YER"));
+    const first = TodayVisitTab(a.props) as ReactElement;
+    const other = TodayVisitTab({ ...a.props, patientId: 2 }) as ReactElement;
+    expect(other.key).not.toBe(first.key);
   });
 });

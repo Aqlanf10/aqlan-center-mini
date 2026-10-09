@@ -58,7 +58,8 @@ describe("built patient walkout verifies balances for reception", () => {
         if (fault === "amount") (body.checkout.current as { YER: unknown }).YER = "0";
         if (fault === "foreign") body.patientId++;
         await json(route, body);
-      } else if (path === "/api/visits") await json(route, []);
+      } else if (path === "/api/visits/readiness") await json(route, { visit: null });
+      else if (path === "/api/visits") await json(route, []);
       else if (path === "/api/booking-requests") await json(route, []);
       else if (path === "/api/lab") await json(route, { late: 0 });
       else if (path === "/api/messages") await json(route, { unread: 0, urgent: 0 });
