@@ -105,6 +105,36 @@ describe("event-time commission after an admin discount", () => {
     }
   });
 
+  it("review 5464652001: full settlement after a decision never earns above the reduced accrual (odd minor units)", () => {
+    // Line 3 at 50%, receipt 1 at T1, admin discount 1 at T2, receipt 1 at T3: settled 2 = new net; accrued round(2×50%) = 1.
+    const tiny = base({ netMinor: 2, adminDiscounts: [{ atIso: T2, amountMinor: 1 }],
+      doctorShares: [{ doctorId: 1, amountMinor: 3, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 1 }] }] });
+    expect(one(run(tiny, [{ invoiceId: 1, amount: 1, sourceTime: T1 }, { invoiceId: 1, amount: 1, sourceTime: T3 }])))
+      .toEqual({ accruedMinor: 1, earnedMinor: 1 });
+    // The prefix alone is still exact: before the second receipt, the 1 earned on the first is kept.
+    expect(one(run(tiny, [{ invoiceId: 1, amount: 1, sourceTime: T1 }]))).toEqual({ accruedMinor: 1, earnedMinor: 1 });
+  });
+
+  it("full settlement with odd amounts, several doctors and rates: each doctor ends exactly at their reduced accrual", () => {
+    for (const [a, b, cut, first] of [[3, 3, 1, 1], [7, 5, 3, 2], [100001, 33333, 7777, 33333], [5, 1, 2, 1], [99, 2, 50, 30]]) {
+      const allocation = new Map([[1, Math.floor((cut * a) / (a + b))], [2, cut - Math.floor((cut * a) / (a + b))]]);
+      const invoice: CommissionInvoice = {
+        id: 1, netMinor: a + b - cut, currency: "YER", createdAt: T0, adminDiscounts: [{ atIso: T2, amountMinor: cut }],
+        doctorShares: [
+          { doctorId: 1, amountMinor: a, currency: "YER", adminDiscounts: allocation.get(1) ? [{ atIso: T2, amountMinor: allocation.get(1)! }] : [] },
+          { doctorId: 2, amountMinor: b, currency: "YER", adminDiscounts: allocation.get(2) ? [{ atIso: T2, amountMinor: allocation.get(2)! }] : [] },
+        ],
+      };
+      const result = commissionForPatientAtEventTime([invoice], [
+        { invoiceId: 1, amount: first, sourceTime: T1 }, { invoiceId: 1, amount: a + b - cut - first, sourceTime: T3 },
+      ], policies({ 1: 50, 2: 33 }));
+      for (const doctorId of [1, 2]) {
+        const value = result.get(doctorId)?.YER ?? { accruedMinor: 0, earnedMinor: 0 };
+        expect(value.earnedMinor, `case ${[a, b, cut, first]} doctor ${doctorId}`).toBe(value.accruedMinor);
+      }
+    }
+  });
+
   it("zero net after a full discount with nothing collected: no commission", () => {
     expect(one(run(discounted(100000, 0), []))).toEqual({ accruedMinor: 0, earnedMinor: 0 });
   });

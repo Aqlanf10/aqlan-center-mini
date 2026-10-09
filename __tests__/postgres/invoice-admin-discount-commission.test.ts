@@ -341,3 +341,35 @@ describe("paid commission is a fact: a conflicting decision is refused for an ad
     await statementMatchesReport([d]);
   });
 });
+
+describe("full settlement with odd minor units ends exactly at the reduced accrual (review 5464652001)", () => {
+  it("one line of 3 at 50%: receipt 1, discount 1, receipt 1 — earned 1, not 2", async () => {
+    const d = await doctor(50);
+    const patientId = await patient();
+    const id = await bill(patientId, [[d, 3]]);
+    await pay(patientId, id, 1);
+    expect(await discount(id, 1)).toMatchObject({ ok: true, afterDiscountMinor: 1 });
+    expect(row(await commissionReport("2000-01-01", today()), d)).toEqual({ accrued: 1, earned: 1 }); // prefix kept
+    await pay(patientId, id, 1);
+    expect(row(await commissionReport("2000-01-01", today()), d)).toEqual({ accrued: 1, earned: 1 });
+    expect(await dueOf(patientId)).toBe(0);
+    await statementMatchesReport([d]);
+  });
+
+  it.each(["YER", "SAR"] as const)("two doctors at 50%% and 33%%, odd lines, full settlement in %s: each ends at their accrual", async (currency) => {
+    const a = await doctor(50);
+    const b = await doctor(33);
+    const patientId = await patient();
+    const id = await bill(patientId, [[a, 7], [b, 5]], currency);
+    await pay(patientId, id, 2, currency);
+    expect(await discount(id, 3)).toMatchObject({ ok: true });
+    await pay(patientId, id, 7, currency);
+    const report = await commissionReport("2000-01-01", today());
+    for (const doctorId of [a, b]) {
+      const { accrued, earned } = row(report, doctorId, currency);
+      expect(earned).toBe(accrued);
+    }
+    expect(await dueOf(patientId, currency)).toBe(0);
+    await statementMatchesReport([a, b]);
+  });
+});

@@ -620,15 +620,17 @@ export function commissionForPatientAtEventTime(
             part = Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
           } else {
             /* Collections before the first decision earn exactly the classic amount (same formula, same rounding, on the
-               net as it stood then), so a decision can never lower what was already earned — or paid out. Collections
-               from a decision on earn the remaining base over the remaining net, in collection order, with this group's
-               base rules; added once and rounded once. */
+               net as it stood then), so a decision never lowers what was already earned — or paid out. From a decision on,
+               this group's earned is its reduced accrual × the share of its reduced base consumed so far (remaining base
+               over remaining net, in collection order), rounded once: a full settlement consumes the whole reduced base and
+               ends exactly at the reduced accrual — never one unit above or below it (review 5464652001). The larger of the
+               two is kept, so the historical prefix is never clawed back and more collection never lowers earned. */
             const firstEventIso = invoiceEvents.reduce((min, event) => (event.atIso < min ? event.atIso : min), invoiceEvents[0].atIso);
             const netBefore = netAt("");
             let preCovered = 0;
             let consumed = 0;
             let coveredSoFar = 0;
-            let laterMine = 0;
+            let mine = 0;
             covering.forEach((chunk, index) => {
               const base = shareBase({ ...share, amountMinor: shareAt(chunk.sourceTime) }, group.policy);
               const remainingBase = Math.max(0, base - consumed);
@@ -637,12 +639,15 @@ export function commissionForPatientAtEventTime(
               consumed += portion;
               coveredSoFar += chunk.amount;
               if (chunkKeys[index] !== groupKey) return;
+              mine += portion;
               if (chunk.sourceTime < firstEventIso) preCovered += chunk.amount;
-              else laterMine += portion;
             });
             const accruedBefore = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
             const prePart = preCovered > 0 && netBefore > 0 ? Math.round(accruedBefore * Math.min(1, preCovered / netBefore)) : 0;
-            part = prePart + Math.round((laterMine * group.policy.percent) / 100);
+            const reducedBase = shareBase(current, group.policy);
+            const reducedAccrued = Math.round((reducedBase * group.policy.percent) / 100);
+            const fromNow = reducedBase > 0 ? Math.round(reducedAccrued * Math.min(1, mine / reducedBase)) : 0;
+            part = Math.max(prePart, fromNow);
           }
           earned += part;
           parts.push({
