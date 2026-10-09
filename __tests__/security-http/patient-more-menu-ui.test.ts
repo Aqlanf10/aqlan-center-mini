@@ -88,7 +88,10 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
           await page.getByTestId("endo-record").waitFor();
           await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
+          expect(await details.innerText()).toBe("بيانات المريض والإجراءات");
+          expect(await page.getByRole("button", { name: "المزيد", exact: true }).count()).toBe(0);
           await details.click();
+          expect(await page.locator("h1:visible").count()).toBe(1);
           await closed();
         };
         await routes.run(async () => {
@@ -208,9 +211,19 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           await expect.poll(() => page.getByTestId("patient-tab-summary").getAttribute("aria-current")).toBe("page");
           await closed();
           await page.reload(); await page.getByTestId("patient-tab-summary").waitFor(); await closed();
+          // The restored Summary has the original full header and only the
+          // pictured inner More menu, without a second More-labeled disclosure.
+          expect(await page.getByTestId("patient-workspace").getAttribute("data-compact")).toBe("false");
+          expect(await details.count()).toBe(0);
+          expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(true);
+          await activate(toggle); await opened();
+          await activate(page.getByRole("heading", { level: 1 })); await closed();
+          await activate(toggle); await opened();
+          await page.keyboard.press("Escape"); await closed(); await focused(toggle);
           expect(unexpected).toEqual([]); expect(errors).toEqual([]);
         }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
       } finally { await context.close(); }
     });
   },
 );
+

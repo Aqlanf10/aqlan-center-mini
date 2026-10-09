@@ -12,9 +12,10 @@ vi.mock("../components/PortalInviteRow", () => ({ PortalInviteRow: () => createE
 vi.mock("../components/patient/PatientTimeline", () => ({ PatientTimeline: () => createElement("div", { "data-testid": "timeline" }) }));
 vi.mock("../components/patient/PatientIntakeHistory", () => ({ PatientIntakeHistory: () => createElement("section", { "data-testid": "intake-history" }, "Self-reported medical information") }));
 vi.mock("../components/SettingsProvider", () => ({ useChairCount: () => 3 }));
-const cockpit = vi.hoisted(() => ({ unavailable: false }));
+const cockpit = vi.hoisted(() => ({ unavailable: false,
+  alerts: ["تحذير طبي ظاهر", "تحذير طبي ثانٍ", "تحذير طبي ثالث لا يُخفى في عنوان"] }));
 vi.mock("../components/patient/usePatientCockpitReadiness", () => ({ usePatientCockpitReadiness: () => ({
-  visit: null, alerts: ["تحذير طبي ظاهر"], readiness: cockpit.unavailable ? "unavailable" : "ready",
+  visit: null, alerts: cockpit.alerts, readiness: cockpit.unavailable ? "unavailable" : "ready",
   chairsState: cockpit.unavailable ? "unavailable" : "ready", coherent: !cockpit.unavailable,
   canOperate: true, active: false, freeChairs: [1], selectedChair: 1, busy: false, message: null,
   canEnterChair: !cockpit.unavailable, setChair: () => undefined, reload: () => undefined,
@@ -33,7 +34,6 @@ function render(patch: Partial<WorkflowSummary> = {}) {
   return renderToStaticMarkup(createElement(SummaryTab, {
     summary: { ...summary, ...patch }, patientId: 91, patientName: "مريض اصطناعي", patientNumber: "SYNTH-91", patientPhone: null,
     base: "YER", onVisitStarted: noop, onChanged: noop, onGoToTab: noop,
-    patientDetails: createElement("div", { "data-testid": "contact-family" }, "Existing patient editors"),
   }));
 }
 function before(html: string, first: string, second: string) {
@@ -41,23 +41,25 @@ function before(html: string, first: string, second: string) {
   expect(html.indexOf(second)).toBeGreaterThan(html.indexOf(first));
 }
 
-describe("task-first Summary presentation", () => {
-  it("groups one identity and primary task while retaining subordinate chair controls and unknown-state feedback", () => {
+describe("restored patient Summary presentation", () => {
+  it("retains the original compact identity and actions with complete warnings and unknown-state feedback", () => {
     const props = {
       patientId: 91, patientName: "مريض اصطناعي", patientPhone: null, fallbackAlert: null,
       summary: null, onOpenTab: noop, onChanged: noop, compact: true,
       identity: createElement("h1", null, "مريض اصطناعي"),
       primaryAction: createElement("button", { "data-testid": "synthetic-primary" }, "المهمة الحالية"),
-      secondaryActions: createElement("button", null, "المزيد"),
+      secondaryActions: createElement("button", null, "بيانات المريض والإجراءات"),
     };
     cockpit.unavailable = false;
     const html = renderToStaticMarkup(createElement(PatientCockpit, props));
     expect(html.match(/<h1>/g)).toHaveLength(1);
     expect(html.match(/data-testid="synthetic-primary"/g)).toHaveLength(1);
-    expect(html).toContain("إجراءات الزيارة");
+    expect(html).toContain("بيانات المريض والإجراءات");
     expect(html).toContain("إدخال إلى الكرسي");
-    expect(html).not.toContain("bg-brand-orange");
+    expect(html).toContain("bg-brand-orange");
     expect(html).toContain("تحذير طبي ظاهر");
+    const expanded = renderToStaticMarkup(createElement(PatientCockpit, { ...props, compact: false }));
+    expect(expanded).toContain(`⚠️ ${cockpit.alerts.join(" • ")}`);
     cockpit.unavailable = true;
     const unavailable = renderToStaticMarkup(createElement(PatientCockpit, props));
     expect(unavailable).toContain("تعذّر التحقق من الزيارة؛ إدخال الكرسي متوقف حتى التحديث.");
@@ -66,22 +68,19 @@ describe("task-first Summary presentation", () => {
     cockpit.unavailable = false;
   });
 
-  it("keeps safety, shortcuts and planned work before secondary administration", () => {
+  it("restores visible intake/card/portal before current and planned work without hiding safety", () => {
     const html = render();
     before(html, "تحذير يحتاج المراجعة", 'data-testid="summary-current-work"');
-    before(html, 'data-testid="summary-open-ortho"', 'data-testid="summary-administrative-details"');
+    before(html, "تحذير يحتاج المراجعة", 'data-testid="intake-history"');
+    before(html, 'data-testid="intake-history"', 'href="/print/patient-card/91"');
+    before(html, 'href="/print/patient-card/91"', 'data-testid="portal-invite"');
+    before(html, 'data-testid="portal-invite"', 'data-testid="summary-open-ortho"');
+    before(html, 'data-testid="summary-open-ortho"', 'data-testid="summary-current-work"');
     before(html, 'data-testid="summary-current-work"', "الجلسات المخطَّطة (1)");
-    before(html, "الجلسات المخطَّطة (1)", 'data-testid="intake-history"');
-    before(html, 'data-testid="intake-history"', 'data-testid="summary-administrative-details"');
-    before(html, 'data-testid="summary-administrative-details"', 'data-testid="timeline"');
+    before(html, "الجلسات المخطَّطة (1)", 'data-testid="timeline"');
     expect(html).toContain('href="/print/patient-card/91"');
-    expect(html).toContain('data-testid="contact-family"');
     expect(html).toContain('data-testid="portal-invite"');
-    const disclosure = html.match(/<details[^>]*data-testid="summary-administrative-details"[^>]*>/)?.[0];
-    expect(disclosure).toBeTruthy();
-    expect(disclosure).not.toMatch(/\bopen(?:=|\s|>)/);
-    // Self-reported health information is not concealed by this disclosure.
-    expect(html.indexOf('data-testid="intake-history"')).toBeLessThan(html.indexOf("<details"));
+    expect(html).not.toContain('data-testid="summary-administrative-details"');
   });
 
   it("retains no-appointment/no-plan states without inventing clinical or financial work", () => {
@@ -112,3 +111,4 @@ describe("task-first Summary presentation", () => {
     expect(JSON.stringify(financial)).toBe(original);
   });
 });
+

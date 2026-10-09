@@ -205,7 +205,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "summary" || tab === "today" || tab === "treatment";
+  const compactWorkspace = tab === "today" || tab === "treatment";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
@@ -517,7 +517,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const primaryAction = workflowAction ? { ...workflowAction, run: () => {
     if (workflowIsCurrent()) workflowAction.run();
   } } : null;
-  const secondaryActionClass = "flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50";
+  const DetailsHeading = compactWorkspace ? "h2" : "h1";
 
   // Clinical warnings remain visible independently of the optional details disclosure.
   const medicalAlertBanner = patient.medicalAlert ? (
@@ -570,10 +570,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         identity={compactWorkspace ? (
           <div className="flex min-w-0 items-center gap-2" data-testid="patient-compact-identity">
             {patient.photoDocumentId ? <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
-              className="h-11 w-11 shrink-0 rounded-xl object-cover" />
-              : <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-navy-900 text-sm font-black text-white">{initials || "م"}</span>}
+              className="h-8 w-8 shrink-0 rounded-lg object-cover" />
+              : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
             <div className="min-w-0 flex-1">
-              <h1 className="break-words [overflow-wrap:anywhere] text-lg font-black leading-tight text-navy-900">{patient.fullName}</h1>
+              <h1 className="break-words [overflow-wrap:anywhere] text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                 <button type="button" onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")} title="نسخ رقم الملف الطبي"
                   className="rounded bg-slate-100 px-1.5 font-bold text-navy-900">#{patient.patientNumber}</button>
@@ -585,7 +585,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         ) : undefined}
         primaryAction={compactWorkspace && primaryAction ? (
           <button type="button" onClick={primaryAction.run} disabled={busyAction}
-            className="rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
+            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
             {primaryAction.label}
           </button>
         ) : undefined}
@@ -596,7 +596,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           }}
             aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
             className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
-            {patientDetailsOpen ? "إغلاق المزيد" : "المزيد"}
+            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
           </button>
         ) : undefined}
         safety={compactWorkspace ? <>
@@ -622,12 +622,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
         className="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" data-testid="patient-details-panel">
-        {compactWorkspace ? <h2 className="mb-3 text-xs font-extrabold text-slate-600">تفاصيل وإجراءات إضافية</h2> : null}
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
             {/* (PAT-3) صورة المريض إن وُجدت — تمييز المتشابهة أسماؤهم والتوائم — وإلا الأحرف الأولى. */}
-            {!compactWorkspace ? patient.photoDocumentId ? (
+            {patient.photoDocumentId ? (
               <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
                 className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-md ring-2 ring-white" />
             ) : (
@@ -640,13 +639,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             >
               {initials || "م"}
             </div>
-            ) : null}
+            )}
 
             <div className="min-w-0">
-              {!compactWorkspace ? <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-black text-navy-900 leading-tight">
+              <div className="flex flex-wrap items-center gap-2">
+                <DetailsHeading className="text-xl font-black text-navy-900 leading-tight">
                   {patient.fullName}
-                </h1>
+                </DetailsHeading>
 
                 {/* رقم الملف مع زر النسخ السريع */}
                 <button
@@ -706,13 +705,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                           </span>
                         ))
                   : null}
-              </div> : null}
+              </div>
 
               {/* المعلومات الديموغرافية والاتصال السريع */}
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                {!compactWorkspace ? <span className="font-semibold text-slate-700">
+                <span className="font-semibold text-slate-700">
                   {GENDER_LABEL[patient.gender]} · {ageText(age)}
-                </span> : null}
+                </span>
                 {patient.referralSource ? (
                   <span className="font-medium text-slate-700">
                     · المصدر: {patient.referralSource}{patient.referredBy ? ` (${patient.referredBy})` : ""}
@@ -777,7 +776,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <button
               type="button"
               onClick={() => setShowBookModal(true)}
-              className={compactWorkspace ? secondaryActionClass : "rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"}
+              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"
             >
               📅 حجز موعد
             </button>
@@ -785,7 +784,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <button
               type="button"
               onClick={() => setShowTabletMode(true)}
-              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-900 transition-colors hover:bg-indigo-100 flex items-center gap-1.5 shadow-xs"}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-900 transition-colors hover:bg-indigo-100 flex items-center gap-1.5 shadow-xs"
               title="شاشة لمس مخصصة لطبيب الأسنان بجانب الكرسي الطبي"
             >
               <span>📱</span>
@@ -808,7 +807,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <button
               type="button"
               onClick={() => setShowVitalsModal(true)}
-              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-xs"}
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors flex items-center gap-1.5 shadow-xs"
               title="تسجيل وتحديث العلامات الحيوية وفصيلة الدم وضغط الدم"
             >
               <span>🩺</span>
@@ -819,7 +818,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <button
               type="button"
               onClick={() => setShowProfitability(true)}
-              className={compactWorkspace ? secondaryActionClass : "rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-xs"}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors flex items-center gap-1.5 shadow-xs"
               title="فحص هامش ربح حالة هذا المريض — تكلفة المواد فيها من حركات المخزون نفسها"
             >
               <span>📈</span>
@@ -897,7 +896,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </div>
 
         {/* شريط المؤشرات الحيوية السريعة (Vital Signs Quick Strip) */}
-        {!compactWorkspace || vitals ? <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
           {vitals ? (
             <>
               {vitals.bpSystolic && vitals.bpDiastolic ? (
@@ -965,7 +964,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <span>+ تسجيل العلامات الحيوية وفصيلة الدم</span>
             </button>
           )}
-        </div> : null}
+        </div>
 
         {/* التنبيه الطبي وشارات السلامة السريرية */}
         {!compactWorkspace ? medicalAlertBanner : null}
@@ -1106,6 +1105,18 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           <div className="space-y-4" hidden={!summary} inert={!summary}>
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
+          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientContactPanel
+              patient={patient}
+              canEdit
+              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            />
+          ) : null}
+          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+          ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1114,17 +1125,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             patientNumber={patient.patientNumber}
             patientPhone={patient.phone}
             base={base}
-            patientDetails={!isRestrictedRole(session?.role) ? (
-              <>
-                {/* Existing editors stay mounted when the disclosure closes. */}
-                <PatientContactPanel
-                  patient={patient}
-                  canEdit
-                  onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-                />
-                <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-              </>
-            ) : null}
             onVisitStarted={() => {
               setSuccessMsg("بدأت الزيارة — انتقل إلى تبويب «زيارة اليوم».");
               setTab("today");

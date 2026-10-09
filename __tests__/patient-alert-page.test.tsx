@@ -157,16 +157,16 @@ beforeEach(async () => {
 afterEach(() => { clearHooks(); vi.unstubAllGlobals(); });
 
 describe("patient disclosure lifecycle", () => {
-  it("closes nested More when details hide and keeps Summary compact without restoring it", () => {
+  it("closes nested More when details hide and restores the full Summary header without reopening More", () => {
     click("patient-details-toggle"); openMore();
     click("patient-details-toggle");
     expect(control("patient-details-panel").props.hidden).toBe(true);
     expect(more().props.open).toBe(false);
     click("patient-tab-summary");
     expect(url.searchParams.get("tab")).toBe("summary");
-    expect(control("patient-details-panel").props.hidden).toBe(true);
-    expect(render().find((element) => element.type === PatientCockpit)?.props.compact).toBe(true);
-    expect(control("patient-details-toggle").props["aria-expanded"]).toBe(false);
+    expect(control("patient-details-panel").props.hidden).toBe(false);
+    expect(render().find((element) => element.type === PatientCockpit)?.props.compact).toBe(false);
+    expect(render().find(element => element.props["data-testid"] === "patient-details-toggle")).toBeUndefined();
     expect(more().props.open).toBe(false);
     click("patient-tab-treatment");
     expect(control("patient-details-panel").props.hidden).toBe(true);
@@ -371,4 +371,5 @@ describe("Cases navigation uses the patient-owned guarded destination", () => {
     await mount("91"); const returned = url.href; expect(open(old)).toBe(false); expect(url.href).toBe(returned);
   });
 });
+
 
