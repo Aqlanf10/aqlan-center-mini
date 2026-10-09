@@ -53,7 +53,9 @@ describe("exact reception checkout on the built patient workspace", () => {
       if (method === "POST" && path === "/api/payments" && permitPayment) {
         permitPayment = false;
         const body: unknown = request.postDataJSON();
-        expect(body).toMatchObject({ patientId, invoiceId, currency: "SAR", amount: "50", kind: "payment" });
+        expect(body).toMatchObject({ patientId, invoiceId: String(invoiceId), currency: "SAR", amount: "50", kind: "payment" });
+        expect(body).not.toHaveProperty("planId");
+        expect(body).not.toHaveProperty("openingCurrency");
         writes.push({ body, key: request.headers()["idempotency-key"] });
         collected = true; mode = "failed";
         await json(route, { id: 98891 }); return; // Fulfilled synthetic response; never a real payment write.
@@ -111,7 +113,13 @@ describe("exact reception checkout on the built patient workspace", () => {
         expect(await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).count()).toBe(0);
         await checkout(page).getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }); await dialog.waitFor();
-        expect(await dialog.getByLabel("العملة", { exact: true }).inputValue()).toBe("SAR");
+        // The shared modal initializes its target/currency/amount in the opening
+        // session effect. Visible DOM alone is not evidence that it is ready.
+        await expect.poll(async () => ({
+          invoiceId: await dialog.getByLabel("فاتورة الهدف", { exact: true }).inputValue(),
+          currency: await dialog.getByLabel("العملة", { exact: true }).inputValue(),
+          amount: await dialog.getByLabel("المبلغ", { exact: true }).inputValue(),
+        })).toEqual({ invoiceId: String(invoiceId), currency: "SAR", amount: "50.00" });
         await dialog.getByLabel("المبلغ", { exact: true }).fill("50"); permitPayment = true;
         await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
         await dialog.waitFor({ state: "detached" });

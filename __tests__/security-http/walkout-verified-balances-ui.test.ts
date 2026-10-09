@@ -3,6 +3,7 @@ import { chromium, type Browser, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { formatMoney } from "../../lib/money";
+import { MONEY_UNCERTAIN } from "../../lib/money-attempt";
 
 /** Actual built patient page. Synthetic transport only; unknown routes and all unplanned writes remain blocked.
  * Persistence/signing is tested separately in postgres/legacy-ortho-billing.test.ts.
@@ -166,12 +167,20 @@ describe("built patient walkout verifies balances for reception", () => {
       expect(await dialog.innerText()).toContain("دفعة على الحساب بالريال اليمني");
       await dialog.getByLabel("المبلغ", { exact: true }).fill("1000");
       await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
-      await dialog.getByText("Synthetic retry", { exact: true }).waitFor();
+      const reconcile = dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true });
+      await reconcile.waitFor();
+      expect(await dialog.innerText()).toContain(MONEY_UNCERTAIN);
+      expect(await dialog.innerText()).not.toContain("Synthetic retry");
+      expect(paymentAttempts).toHaveLength(1);
+      expect(paymentAttempts[0].body).toMatchObject({ patientId, amount: "1000", currency: "YER", kind: "payment" });
+      expect(paymentAttempts[0].body).not.toHaveProperty("invoiceId");
+      expect(paymentAttempts[0].body).not.toHaveProperty("planId");
+      expect(paymentAttempts[0].key).toBeTruthy();
       // PR313 preserves the unresolved request and locks new submission. Reconcile
       // the same attempt through its explicit action, never submit a fresh payment.
       expect(await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).isDisabled()).toBe(true);
       expect(await dialog.getByLabel("المبلغ", { exact: true }).isDisabled()).toBe(true);
-      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }).click();
+      await reconcile.click();
       await dialog.waitFor({ state: "detached" });
       expect(paymentAttempts).toHaveLength(2);
       expect(paymentAttempts[0].body).toMatchObject({ patientId, amount: "1000", currency: "YER", kind: "payment" });
@@ -202,4 +211,5 @@ describe("built patient walkout verifies balances for reception", () => {
     }, verify);
   });
 });
+
 

@@ -114,9 +114,12 @@ export function CollectPaymentModal({
   const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
   const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey);
   const initializedSessionRef = useRef<string | null>(null);
+  const [initializedFor, setInitializedFor] = useState<string | null>(null);
+  const formReady = initializedFor === initializationKey;
   useEffect(() => {
     if (!isOpen) {
       initializedSessionRef.current = null;
+      setInitializedFor(null);
       return;
     }
     if (initializedSessionRef.current === initializationKey) return;
@@ -129,6 +132,9 @@ export function CollectPaymentModal({
     setOpeningCurrency(!presetInvoice && !presetPlanId && presetOpeningCurrency ? presetOpeningCurrency : "");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
+    // Commit readiness with these fields. A reopened/new target must not submit
+    // the previous session's nonempty amount or currency before initialization.
+    setInitializedFor(initializationKey);
   }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice, presetOpeningCurrency, presetPlanId]);
 
   if (!isOpen) return null;
@@ -136,7 +142,7 @@ export function CollectPaymentModal({
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
   const submit = async (retry = false) => {
-    if (busy || (!retry && !amount.trim())) return;
+    if (busy || (!retry && (!formReady || !amount.trim()))) return;
     if (!retry && missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
       return;
@@ -192,7 +198,7 @@ export function CollectPaymentModal({
 
         <CurrentCollectionGuidance />
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
-        <fieldset disabled={busy || money.attempt !== null} className="min-w-0">
+        <fieldset disabled={!formReady || busy || money.attempt !== null} className="min-w-0">
 
         {contextLabel ? (
           <p className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-navy-900">
@@ -346,7 +352,7 @@ export function CollectPaymentModal({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || money.attempt !== null || !amount.trim() || missingForeignTarget}
+          disabled={!formReady || busy || money.attempt !== null || !amount.trim() || missingForeignTarget}
           className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           {busy ? "جارٍ التسجيل…" : "سجّل الدفعة واطبع السند"}
@@ -355,3 +361,4 @@ export function CollectPaymentModal({
     </div>
   );
 }
+

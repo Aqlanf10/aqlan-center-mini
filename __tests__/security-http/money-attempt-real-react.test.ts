@@ -111,6 +111,34 @@ describe("DOT-PF-01 real forms", () => {
     } finally { await f.context.close(); }
   });
 
+  it("blocks old populated fields while a closed account form reopens on a foreign invoice", async () => {
+    const f = await open();
+    try {
+      const amount = f.page.getByLabel("المبلغ", { exact: true });
+      await expect.poll(() => amount.isEnabled()).toBe(true);
+      await amount.fill("123");
+      await f.page.locator("#close").click();
+      await f.page.getByRole("dialog").waitFor({ state: "hidden" });
+      await f.page.locator("#reopen-foreign").click();
+      await expect.poll(async () => (await snapshot(f.page)).openingProbes).toEqual([
+        { currency: "YER", invoiceId: "", amount: "123", inputDisabled: true, submitDisabled: true },
+      ]);
+      expect((await snapshot(f.page)).requests).toEqual([]);
+      await expect.poll(async () => ({
+        currency: await f.page.getByLabel("العملة", { exact: true }).inputValue(),
+        invoiceId: await f.page.getByLabel("فاتورة الهدف", { exact: true }).inputValue(),
+        amount: await amount.inputValue(),
+        enabled: await amount.isEnabled(),
+      })).toEqual({ currency: "SAR", invoiceId: "202", amount: "50.00", enabled: true });
+      await amount.fill("50");
+      await f.page.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
+      await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(1);
+      const request = (await snapshot(f.page)).requests[0];
+      expect(JSON.parse(request.body)).toMatchObject({ patientId: 101, invoiceId: "202", currency: "SAR", amount: "50" });
+      expect(request.key).toBeTruthy();
+    } finally { await f.context.close(); }
+  });
+
   it("correction cannot become a void after an invalid reply, including cancellation/remount", async () => {
     const f = await open();
     try {
@@ -131,3 +159,4 @@ describe("DOT-PF-01 real forms", () => {
     } finally { await f.context.close(); }
   });
 });
+
