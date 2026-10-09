@@ -210,7 +210,7 @@ describe("(HR) browser journey — staff files and tasks", () => {
       await page.waitForTimeout(600);
       const modalText = await page.textContent("[role='dialog'], .mx-auto");
       expect(modalText).toContain("أعد التحميل ثم أعد المحاولة");
-      expect(editForm.getByLabel("العنوان")).toHaveValue("تعديل من جلسة قديمة");
+      expect(await editForm.getByLabel("العنوان").inputValue()).toBe("تعديل من جلسة قديمة");
       await page.screenshot({ path: join(EVIDENCE_DIR, "hr-task-stale-409-1280.png"), fullPage: true });
 
       // الأولوية الجديدة من الجلسة الأخرى ظاهرة بعد إعادة فتح التفاصيل.
