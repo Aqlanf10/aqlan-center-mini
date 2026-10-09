@@ -11,6 +11,8 @@ import {
 } from "@/lib/money";
 import { ShiftCloseStatus } from "./ShiftCloseStatus";
 import { ReceiptCorrectionLauncher } from "../ReceiptCorrectionLauncher";
+import { ReceiptProvenance } from "../ReceiptProvenance";
+import { receiptDocumentTitle, receiptProvenanceFor } from "@/lib/receipt-provenance";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABEL,
@@ -79,6 +81,7 @@ interface CashShiftTabProps {
   canShift?: boolean;
   shift: ShiftData | null;
   payments: PaymentItem[];
+  receiptProvenance?: unknown;
   expenses: ExpenseItem[];
   recentShifts: ShiftData[];
   expectedInBox: Record<Currency, number> | null;
@@ -126,6 +129,7 @@ export function CashShiftTab({
   canShift = canMutate,
   shift,
   payments,
+  receiptProvenance,
   expenses,
   recentShifts,
   expectedInBox,
@@ -718,7 +722,9 @@ export function CashShiftTab({
                           : "bg-emerald-100 text-emerald-800"
                       }`}
                     >
-                      {payment.kind === "refund" ? "استرداد" : "قبض"}
+                      {payment.kind === "refund"
+                        ? receiptDocumentTitle(payment.kind, receiptProvenanceFor(receiptProvenance, payment.id, payment.amountMinor, payment.kind, payment.receiptNumber))
+                        : "قبض"}
                     </span>
                     <Link
                       href={`/patients/${payment.patientId}`}
@@ -762,6 +768,8 @@ export function CashShiftTab({
                   </a>
                 </div>
                 {/* (RC-2) سندٌ بمبلغٍ خطأ يُصحَّح من الصندوق نفسه — والنموذج يأخذ سطرًا كاملًا في البطاقة. */}
+                <ReceiptProvenance paymentId={payment.id} currency={payment.currency}
+                  provenance={receiptProvenanceFor(receiptProvenance, payment.id, payment.amountMinor, payment.kind, payment.receiptNumber)} />
                 {isAdmin && payment.kind === "payment" ? (
                   <ReceiptCorrectionLauncher paymentId={payment.id} patientId={payment.patientId}
                     onDone={(_message, replacementId) => onReceiptCorrected?.(payment.id, replacementId)} />
