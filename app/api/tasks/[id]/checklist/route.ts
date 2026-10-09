@@ -29,12 +29,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const source = (body ?? {}) as Record<string, unknown>;
 
   let operation: ChecklistOperation;
+  // مفتاح معاملة العميل: فقدان الرد ثم إعادة الإرسال يعيد البند الأصلي لا نسخة.
+  const clientRequestId = typeof source.clientRequestId === "string" && source.clientRequestId.trim().length >= 8
+    ? source.clientRequestId.trim().slice(0, 100)
+    : null;
   if (source.op === "add") {
     const label = typeof source.label === "string" ? source.label.trim() : "";
     if (!label || label.length > 300) {
       return NextResponse.json({ message: "بند التحقق نصٌّ من 1 إلى 300 حرف." }, { status: 400 });
     }
-    operation = { op: "add", label };
+    operation = { op: "add", label, clientRequestId };
   } else if (source.op === "toggle") {
     const itemId = Number(source.itemId);
     if (!Number.isInteger(itemId) || itemId <= 0) {

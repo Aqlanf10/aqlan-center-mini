@@ -20,11 +20,11 @@ import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
 import {
   canAssignTasks, canManageTask, canSeeTask, canUseTasks, canWorkOnTask,
-  TASK_LINK_KIND_LABEL, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
+  TASK_LINK_KIND_LABEL, TASK_LINK_KINDS, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
   taskToView, staffToView,
   type HrContractKind, type HrStaffRow, type HrStaffView, type HrTaskRow,
   type HrTaskView, type HrDepartment, type HrWorkStatus, type TaskLinkKind,
-  type TaskPriority, type TaskStatus, type PayTermsInput,
+  type TaskPriority, type TaskStatus, type PayTermsInput, type StaffUpdateResult,
 } from "./hr-shared";
 
 /** أي منفّذ استعلام (pool أو client معاملة) — للدوال التي تعمل في السياقين. */
@@ -42,15 +42,17 @@ export interface TaskEventInput {
   field?: string | null;
   oldValue?: string | null;
   newValue?: string | null;
+  /** معرّف الرابط لأحداث link/unlink — به تُطبّق صلاحية السجل عند كل قراءة. */
+  linkId?: number | null;
 }
 
 /** سجل تغييرات المهمة append-only على مستوى القاعدة — الفاعل هو صاحب الجلسة فعلًا. */
 export async function recordTaskEvent(client: DbClient, input: TaskEventInput): Promise<void> {
   await client.query(
-    `INSERT INTO hr_task_events (task_id, actor_user_id, actor_display_name, action, field, old_value, new_value)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO hr_task_events (task_id, actor_user_id, actor_display_name, action, field, old_value, new_value, link_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [input.taskId, input.actorUserId, input.actorDisplayName, input.action,
-     input.field ?? null, input.oldValue ?? null, input.newValue ?? null],
+     input.field ?? null, input.oldValue ?? null, input.newValue ?? null, input.linkId ?? null],
   );
 }
 
@@ -190,6 +192,9 @@ export interface CreateStaffInput {
   jobTitle: string;
   department: HrDepartment;
   hireDate: string | null;
+  /** الحالة التي اختارها المستخدم فعلًا — لا «نشط» مفروضة من الخادم. */
+  workStatus: HrWorkStatus;
+  endDate: string | null;
   contractKind: HrContractKind;
   payTerms: PayTermsInput | null;
   phone: string | null;
@@ -200,12 +205,12 @@ export async function createStaff(input: CreateStaffInput, session: SessionPaylo
   const result = await withTransaction(getPool(), async (client) => {
     const inserted = await client.query(
       `INSERT INTO hr_staff
-         (full_name, job_title, department, work_status, hire_date, contract_kind,
+         (full_name, job_title, department, work_status, hire_date, end_date, contract_kind,
           salary_amount_minor, salary_currency, salary_period, salary_effective_on, phone, note, created_by)
-       VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING *`,
-      [input.fullName, input.jobTitle, input.department, input.hireDate, input.contractKind,
-       input.payTerms?.amountMinor ?? null, input.payTerms?.currency ?? null,
+      [input.fullName, input.jobTitle, input.department, input.workStatus, input.hireDate, input.endDate,
+       input.contractKind, input.payTerms?.amountMinor ?? null, input.payTerms?.currency ?? null,
        input.payTerms?.period ?? null, input.payTerms?.effectiveOn ?? null,
        input.phone, input.note, session.username],
     );
@@ -222,7 +227,7 @@ export async function createStaff(input: CreateStaffInput, session: SessionPaylo
     entity: "hr_staff",
     entityId: String(result.id),
     entityLabel: `إنشاء ملف الموظف «${input.fullName}»`,
-    details: { department: input.department, contractKind: input.contractKind },
+    details: { department: input.department, contractKind: input.contractKind, workStatus: input.workStatus },
     actor: session.username,
     actorRole: session.role,
   });
@@ -242,24 +247,42 @@ export interface UpdateStaffPatch {
   phone?: string | null;
   note?: string | null;
   reason?: string;
+  /** طابع تحديثٍ يتوقعه العميل — اختلافه يعني نسخة أحدث: 409 لا كتابة فوقها. */
+  expectedUpdatedAt?: string;
 }
 
 /**
  * تعديل ملف موظف: كل حقلٍ تغيّر يترك سطرًا في سجل الملف (القيمة القديمة والجديدة)،
  * وشروط الأجر تُسجَّل سطرًا واحدًا مجمّعًا مع تاريخ السريان — من عدّل وعلى ماذا
  * ولماذا، بلا استثناء.
+ *
+ * نوع التعاقد وشروطه يُحسمان معًا في التحديث نفسه: «نسبة» تمسح شروط الراتب
+ * كلها، وراتب/راتب ونسبة يتطلبها مكتملة، وexpectedUpdatedAt يحمي من الكتابة
+ * فوق نسخة أحدث (409).
  */
 
-export async function updateStaff(id: number, patch: UpdateStaffPatch, session: SessionPayload): Promise<HrStaffView | null> {
+export async function updateStaff(id: number, patch: UpdateStaffPatch, session: SessionPayload): Promise<StaffUpdateResult> {
   /* التدقيق يُكتب **بعد** التزام المعاملة لا داخلها: سطر التدقيق يحتاج اتصالاً من
      الـpool نفسه، وكتابته داخل معاملةٍ تحتفظ بقفل صفٍّ تنتظر عليه معاملاتٌ أخرى
      يفتح جمودًا اتصاليًّا (كل اتصالٍ ينتظر قفلًا يحمله اتصالٌ ينتظر اتصالًا).
      القاعدة: المعاملة تُعيد ما سيُدقَّق، والتدقيق يُطلق بعد الالتزام — فلا يُكتب
      أبدًا لعمليةٍ فشلت، ولا يمسك اتصالًا وهو ينتظر. */
-  const outcome = await withTransaction(getPool(), async (client) => {
+  const outcome = await withTransaction(getPool(), async (client): Promise<
+    { missing: true }
+    | StaffUpdateResult
+    | { outcome: "none" | "updated"; row: HrStaffRow; changes: { field: string; oldValue: string; newValue: string }[] }
+  > => {
     const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
-    if (current.rowCount === 0) return null;
+    if (current.rowCount === 0) return { missing: true as const };
     const row = staffRowMapper(current.rows[0]);
+
+    if (patch.expectedUpdatedAt !== undefined) {
+      const expected = new Date(patch.expectedUpdatedAt).getTime();
+      if (!Number.isFinite(expected) || expected !== new Date(row.updated_at).getTime()) {
+        return { ok: false as const, error: "غُيِّر ملف الموظف من جلسة أخرى بعد فتحك له — أعد التحميل ثم أعد المحاولة.", status: 409 };
+      }
+    }
+
     const changes: { field: string; oldValue: string; newValue: string }[] = [];
     const sets: string[] = [];
     const params: unknown[] = [];
@@ -325,8 +348,25 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
       pushChange("note", row.note, patch.note);
     }
 
-    // شروط الأجر: مجموعة واحدة — مبلغ وعملة ودورية وتاريخ سريان معًا.
-    const nextPayTerms = patch.payTerms;
+    // شروط الأجر: مجموعة واحدة — مبلغ وعملة ودورية وتاريخ سريان معًا،
+    // محسومة مع نوع التعاقد النهائي (بعد أي تغييرٍ له في هذا الطلب):
+    // «نسبة» تمسح الأربعة كلها، وراتب/راتب ونسبة يتطلب الأربعة مكتملة.
+    const nextKind = patch.contractKind ?? row.contract_kind;
+    const userPayTerms = patch.payTerms;
+    let nextPayTerms: PayTermsInput | null | undefined = userPayTerms;
+    if (nextKind === "commission") {
+      // لا راتب تحت نسبة — قيد القاعدة يرفضه، فالمسح هنا جزء من نفس التحديث.
+      nextPayTerms = null;
+    } else if (userPayTerms === null) {
+      // إلغاء راتبٍ صريح تحت نوعٍ براتب: رفضٌ بسببٍ واضح — الإلغاء بتحويل النوع إلى نسبة.
+      return { ok: false as const, error: "لا يُلغى الراتب مع بقاء نوع التعاقد براتبًا — حوّل النوع إلى «نسبة» ليُمسح الراتب.", status: 400 };
+    } else if (nextPayTerms === undefined) {
+      const hasExisting = row.salary_amount_minor !== null && row.salary_currency !== null
+        && row.salary_period !== null && row.salary_effective_on !== null;
+      if (!hasExisting) {
+        return { ok: false as const, error: "نوع التعاقد براتبٍ يتطلب المبلغ والعملة والدورية وتاريخ السريان معًا.", status: 400 };
+      }
+    }
     const payChanged = nextPayTerms !== undefined && (
       nextPayTerms === null
         ? row.salary_amount_minor !== null || row.salary_currency !== null || row.salary_period !== null || row.salary_effective_on !== null
@@ -335,15 +375,16 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
           || nextPayTerms.period !== row.salary_period
           || nextPayTerms.effectiveOn !== row.salary_effective_on
     );
-    if (payChanged) {
+    if (payChanged && nextPayTerms !== undefined) {
       if (nextPayTerms === null) {
         sets.push(`salary_amount_minor = NULL, salary_currency = NULL, salary_period = NULL, salary_effective_on = NULL`);
         pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(), "");
       } else {
-        params.push(nextPayTerms.amountMinor, nextPayTerms.currency, nextPayTerms.period, nextPayTerms.effectiveOn);
+        const pay = nextPayTerms;
+        params.push(pay.amountMinor, pay.currency, pay.period, pay.effectiveOn);
         sets.push(`salary_amount_minor = $${params.length - 3}, salary_currency = $${params.length - 2}, salary_period = $${params.length - 1}, salary_effective_on = $${params.length}`);
         pushChange("pay_terms", `${row.salary_amount_minor ?? ""} ${row.salary_currency ?? ""} ${row.salary_period ?? ""} ${row.salary_effective_on ?? ""}`.trim(),
-          `${nextPayTerms.amountMinor} ${nextPayTerms.currency} ${nextPayTerms.period} ${nextPayTerms.effectiveOn}`);
+          `${pay.amountMinor} ${pay.currency} ${pay.period} ${pay.effectiveOn}`);
       }
     }
 
@@ -367,7 +408,8 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
     }
     return { outcome: "updated" as const, row: updatedRow, changes };
   });
-  if (!outcome) return null;
+  if ("missing" in outcome) return { ok: false, error: "ملف الموظف غير موجود.", status: 404 };
+  if ("ok" in outcome) return outcome; // رفض 409/400 بسببٍ واضح
   if (outcome.outcome === "updated") {
     await recordAudit({
       action: "hr.staff.update",
@@ -379,7 +421,7 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
       actorRole: session.role,
     });
   }
-  return staffToView(outcome.row, true);
+  return { ok: true, staff: staffToView(outcome.row, true), changed: outcome.outcome === "updated" };
 }
 
 /**
@@ -492,11 +534,14 @@ export async function listTasks(session: SessionPayload, filters: TaskListFilter
   const params: unknown[] = [session.userId];
 
   // بناء شرط الرؤية — مكان واحد يحكم القائمة والعدادات والبحث معًا.
+  // مسؤولية المكلّف عبر الربط الحالي (hr_staff.user_id ← معرّف الملف) حصرًا:
+  // assignee_user_id المخزَّن لقطة تاريخية لا تُفتح بها رؤية — فكّ الربط
+  // يسحب الوصول فورًا من القائمة والعدادات والبحث معًا.
   const visibility: string[] = [`(t.is_private AND t.owner_user_id = $1)`];
   if (oversight) {
     visibility.push(`(NOT t.is_private)`);
   } else {
-    visibility.push(`(NOT t.is_private AND (t.owner_user_id = $1 OR t.assignee_user_id = $1))`);
+    visibility.push(`(NOT t.is_private AND t.owner_user_id = $1)`);
   }
   if (viewerStaffId !== null) {
     params.push(viewerStaffId);
@@ -504,7 +549,7 @@ export async function listTasks(session: SessionPayload, filters: TaskListFilter
   }
   let mineOnly: string | null = null;
   if (filters.scope === "mine") {
-    const mine = [`t.owner_user_id = $1`, `t.assignee_user_id = $1`];
+    const mine = [`t.owner_user_id = $1`];
     if (viewerStaffId !== null) mine.push(`t.assignee_staff_id = $${params.length}`);
     mineOnly = `(${mine.join(" OR ")})`;
   }
@@ -589,7 +634,7 @@ export async function getTaskForSession(
     `SELECT id, author_user_id, author_display_name, body, created_at FROM hr_task_comments WHERE task_id = $1 ORDER BY id`, [taskId],
   );
   const eventsResult = await runner.query(
-    `SELECT id, actor_user_id, actor_display_name, action, field, old_value, new_value, created_at
+    `SELECT id, actor_user_id, actor_display_name, action, field, old_value, new_value, link_id, created_at
      FROM hr_task_events WHERE task_id = $1 ORDER BY id DESC LIMIT 200`, [taskId],
   );
   const linksResult = await runner.query(
@@ -619,15 +664,36 @@ export async function getTaskForSession(
       body: String(comment.body),
       createdAt: new Date(comment.created_at).toISOString(),
     })),
-    events: eventsResult.rows.map((event) => ({
-      id: Number(event.id),
-      actorUserId: Number(event.actor_user_id),
-      actorDisplayName: String(event.actor_display_name),
-      action: String(event.action),
-      field: event.field ? String(event.field) : null,
-      oldValue: event.old_value ? String(event.old_value) : null,
-      newValue: event.new_value ? String(event.new_value) : null,
-      createdAt: new Date(event.created_at).toISOString(),
+    events: await Promise.all(eventsResult.rows.map(async (event) => {
+      const action = String(event.action);
+      const field = event.field ? String(event.field) : null;
+      let oldValue = event.old_value ? String(event.old_value) : null;
+      let newValue = event.new_value ? String(event.new_value) : null;
+      // أحداث الربط تحمل في قيمها وسم السجل المرتبط (رقم المريض واسمه…) —
+      // تُطبَّق صلاحية السجل نفسها هنا: بمعرّف رابطٍ يُفحص وصوله لحظة القراءة
+      // (سحب صلاحية المريض يسري على البيانات القديمة المعروضة)، وبلا معرّفٍ
+      // (صفوف سابقة على عمود link_id) تُسنَت القيم فشلَ الإغلاق.
+      if ((action === "link" || action === "unlink") && field !== null) {
+        const kind = field as TaskLinkKind;
+        const linkId = event.link_id === null || event.link_id === undefined ? null : Number(event.link_id);
+        const readable = linkId !== null
+          && (TASK_LINK_KINDS as readonly string[]).includes(kind)
+          && await linkReadableForSession(session, kind, linkId, runner);
+        if (!readable) {
+          oldValue = null;
+          newValue = null;
+        }
+      }
+      return {
+        id: Number(event.id),
+        actorUserId: Number(event.actor_user_id),
+        actorDisplayName: String(event.actor_display_name),
+        action,
+        field,
+        oldValue,
+        newValue,
+        createdAt: new Date(event.created_at).toISOString(),
+      };
     })),
     links,
     permissions: {
@@ -690,7 +756,11 @@ export interface CreateTaskInput {
   isPrivate: boolean;
   priority: TaskPriority;
   dueAt: string | null;
+  /** تاريخ التخطيط المستقل عن الاستحقاق — حالة «مخطّطة» وحدها لا تعوّضه. */
+  plannedFor: string | null;
   assigneeStaffId: number | null;
+  /** مفتاح معاملة من العميل لمنع تكرار الإنشاء عند فقدان الرد. */
+  clientRequestId?: string | null;
 }
 
 export type TaskMutationResult<T> = { ok: true; value: T } | { ok: false; error: string; status: number };
@@ -698,12 +768,17 @@ export type TaskMutationResult<T> = { ok: true; value: T } | { ok: false; error:
 /**
  * إنشاء مهمة: الخاصة تُملك لصاحبها ولا تقبل مسؤولًا (القاعدة نفسها تمنعه)،
  * والمسندة تُحسم إلى موظفٍ من ملفات الطاقم — بحسابٍ أو بلا حساب — وتُثبَّت
- * هوية المسؤول كاسمٍ معروض وقت الإسناد.
+ * هوية المسؤول كاسمٍ معروض وقت الإسناد. **الإسناد للإدارة المخولة وحدها**
+ * (canAssignTasks) — صاحب المهمة يبدأها بلا مسؤولٍ وتديرها هو.
+ * إعادة الإرسال بنفس clientRequestId تعيد المهمة الأصلية ولا تنشئ نسخة.
  */
 export async function createTask(input: CreateTaskInput, session: SessionPayload): Promise<TaskMutationResult<HrTaskView>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
   if (input.isPrivate && input.assigneeStaffId !== null) {
     return { ok: false, error: "المهمة الخاصة لا تُسند إلى غيرك — حوّلها إلى مشتركة أولًا.", status: 400 };
+  }
+  if (!input.isPrivate && input.assigneeStaffId !== null && !canAssignTasks(session.role)) {
+    return { ok: false, error: "إسناد المهام للإدارة المخولة (المدير والاستقبال) — أنشئ المهمة بلا مسؤولٍ وستتابعها الإدارة.", status: 403 };
   }
   let assigneeStaffId: number | null = null;
   let assigneeUserId: number | null = null;
@@ -722,15 +797,29 @@ export async function createTask(input: CreateTaskInput, session: SessionPayload
   }
 
   const displayName = await sessionDisplayName(session);
-  const inserted = await withTransaction(getPool(), async (client) => {
+  const { row: inserted, duplicate } = await withTransaction(getPool(), async (client) => {
     const result = await client.query(
       `INSERT INTO hr_tasks
-         (title, description, is_private, status, priority, due_at, owner_user_id, owner_display_name,
-          assignee_staff_id, assignee_user_id, assignee_label, created_by)
-       VALUES ($1, $2, $3, 'planned', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [input.title, input.description, input.isPrivate, input.priority, input.dueAt,
-       session.userId, displayName, assigneeStaffId, assigneeUserId, assigneeLabel, session.username],
+         (title, description, is_private, status, priority, due_at, planned_for, owner_user_id, owner_display_name,
+          assignee_staff_id, assignee_user_id, assignee_label, created_by, client_request_id)
+       VALUES ($1, $2, $3, 'planned', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (client_request_id) WHERE client_request_id IS NOT NULL DO NOTHING
+       RETURNING *`,
+      [input.title, input.description, input.isPrivate, input.priority, input.dueAt, input.plannedFor,
+       session.userId, displayName, assigneeStaffId, assigneeUserId, assigneeLabel, session.username,
+       input.clientRequestId ?? null],
     );
+    if (result.rows.length === 0) {
+      // فقدان الرد ثم إعادة الإرسال بنفس المفتاح: الصف الأصلي يعود ولا نسخة ثانية.
+      const existing = await client.query(
+        `SELECT * FROM hr_tasks WHERE client_request_id = $1`, [input.clientRequestId ?? null],
+      );
+      if (existing.rows.length > 0) {
+        return { row: taskRowMapper(existing.rows[0]), duplicate: true as const };
+      }
+      // مفتاح طُعن فيه من مهمة أخرى؟ (مستحيل بندريًّا — الفهرس فريد عالميًّا)
+      return { row: null, duplicate: true as const };
+    }
     const row = taskRowMapper(result.rows[0]);
     await recordTaskEvent(client, {
       taskId: row.id, actorUserId: session.userId, actorDisplayName: displayName,
@@ -738,10 +827,16 @@ export async function createTask(input: CreateTaskInput, session: SessionPayload
       field: input.isPrivate ? "is_private" : null,
       newValue: input.isPrivate ? "خاصة" : assigneeLabel || null,
     });
-    return row;
+    return { row, duplicate: false as const };
   });
+  if (inserted === null || duplicate) {
+    // لا حدث ولا تدقيق لعمليةٍ لم تقع — الأصل عاد كما هو.
+    if (inserted === null) return { ok: false, error: "تعذّر إنشاء المهمة — أعد المحاولة.", status: 500 };
+    return { ok: true, value: taskToView(inserted) };
+  }
   await auditTask("task.create", session, inserted.id,
-    input.isPrivate ? "إنشاء مهمة خاصة" : `إنشاء مهمة مسندة إلى ${assigneeLabel || "لا أحد"}`);
+    input.isPrivate ? "إنشاء مهمة خاصة" : `إنشاء مهمة مسندة إلى ${assigneeLabel || "لا أحد"}`,
+    { private: input.isPrivate });
   return { ok: true, value: taskToView(inserted) };
 }
 
@@ -756,10 +851,14 @@ export interface UpdateTaskPatch {
   description?: string;
   priority?: TaskPriority;
   dueAt?: string | null;
+  /** تاريخ التخطيط المستقل عن الاستحقاق. */
+  plannedFor?: string | null;
   status?: TaskStatus;
   assigneeStaffId?: number | null;
   /** التحويل إلى مشتركة فعلٌ صريح مستقل — لا يمرّ عبر تعديل عادي. */
   convertToShared?: true;
+  /** طابع تحديثٍ يتوقعه العميل — اختلافه يعني نسخة أحدث: 409 لا كتابة فوقها. */
+  expectedUpdatedAt?: string;
 }
 
 const TASK_STATUS_EVENT: Record<TaskStatus, string> = {
@@ -771,8 +870,14 @@ const TASK_STATUS_EVENT: Record<TaskStatus, string> = {
 };
 
 /**
- * تحديث مهمة موجودة. المسؤول يعمل في مهمته (حالة/بيانات)، والإدارة تدير. أي
- * تحديثٍ نيابةً عن موظفٍ بلا حساب يحمل هوية من ضغط الزر — صاحب الجلسة فعلًا.
+ * تحديث مهمة موجودة — **فصلٌ صريح بين المشاهدة والإدارة والعمل**:
+ * - الرؤية (canSeeTask) شرطُ دخولٍ وحده: غير المرئي يُجاب 404 بلا فرقٍ عن المجهول.
+ * - حقول الإدارة (العنوان/الوصف/الأولوية/الموعدان/المسؤول/التحويل إلى مشتركة)
+ *   تتطلب canManageTask في الخادم على مستوى الحقل: المكلّف لا يعدّلها ولا
+ *   يُعيد إسناد المهمة — فإعادة الإسناد تمنح غيره الوصول، وهي قرار إداري.
+ * - تغيير الحالة عملٌ يُتاح للمكلّف (canWorkOnTask).
+ * - expectedUpdatedAt يحمي من الحفظ فوق نسخةٍ أحدث (409).
+ * أي تحديثٍ نيابةً عن موظفٍ بلا حساب يحمل هوية من ضغط الزر — صاحب الجلسة فعلًا.
  */
 
 
@@ -781,6 +886,15 @@ export async function updateTask(
 ): Promise<TaskMutationResult<HrTaskView>> {
   if (!canUseTasks(session.role)) return { ok: false as const, error: "المهام خارج صلاحيات دورك.", status: 403 };
   const displayName = await sessionDisplayName(session);
+
+  const managementChangeRequested =
+    patch.title !== undefined
+    || patch.description !== undefined
+    || patch.priority !== undefined
+    || patch.dueAt !== undefined
+    || patch.plannedFor !== undefined
+    || patch.assigneeStaffId !== undefined
+    || patch.convertToShared === true;
 
   /* التدقيق بعد الالتزام — انظر updateStaff: سطر التدقيق لا يُكتب داخل معاملةٍ
      تحتفظ بقفل الصف، فلا جمود اتصالي تحت التحميل المتوازي. */
@@ -791,6 +905,21 @@ export async function updateTask(
     const viewerStaffId = await staffIdForUser(session.userId, client);
     if (!canSeeTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    }
+    // الحماية الحقلية في الخادم: canManageTask قرارٌ مستقل عن canSeeTask —
+    // اختبار الدالة وحدها لا يحمي المسار؛ هذا الحارس هنا يحميه.
+    if (managementChangeRequested && !canManageTask(row, session)) {
+      return {
+        ok: false as const,
+        error: "تعديل عنوان المهمة أو وصفها أو أولويتها أو موعديها أو مسؤولها أو مشاركتها يتطلب صلاحية إدارة المهمة — المكلّف يغيّر الحالة ويعلّق ويعمل في القائمة.",
+        status: 403,
+      };
+    }
+    if (patch.expectedUpdatedAt !== undefined) {
+      const expected = new Date(patch.expectedUpdatedAt).getTime();
+      if (!Number.isFinite(expected) || expected !== new Date(row.updated_at).getTime()) {
+        return { ok: false as const, error: "غُيِّرت المهمة من جلسة أخرى بعد فتحك لها — أعد التحميل ثم أعد المحاولة.", status: 409 };
+      }
     }
 
     const sets: string[] = [];
@@ -820,6 +949,11 @@ export async function updateTask(
       params.push(patch.dueAt);
       sets.push(`due_at = $${params.length}`);
       events.push({ action: "update", field: "due_at", oldValue: row.due_at ? new Date(row.due_at).toISOString() : null, newValue: patch.dueAt });
+    }
+    if (patch.plannedFor !== undefined && (patch.plannedFor ?? null) !== (row.planned_for ? String(row.planned_for).slice(0, 10) : null)) {
+      params.push(patch.plannedFor);
+      sets.push(`planned_for = $${params.length}`);
+      events.push({ action: "update", field: "planned_for", oldValue: row.planned_for ? String(row.planned_for).slice(0, 10) : null, newValue: patch.plannedFor });
     }
     if (patch.assigneeStaffId !== undefined && patch.assigneeStaffId !== row.assignee_staff_id) {
       if (row.is_private) return { ok: false as const, error: "المهمة الخاصة لا تقبل إسنادًا.", status: 400 };
@@ -853,7 +987,7 @@ export async function updateTask(
       events.push({ action: "status", field: "status", oldValue: TASK_STATUS_LABEL[row.status], newValue: TASK_STATUS_LABEL[patch.status] });
     }
 
-    if (sets.length === 0) return { ok: true as const, value: taskToView(row), events: [], wasPrivate: row.is_private };
+    if (sets.length === 0) return { ok: true as const, value: taskToView(row), events: [], wasPrivate: row.is_private, changed: false as const };
 
     params.push(taskId);
     sets.push(`updated_at = NOW()`);
@@ -865,9 +999,11 @@ export async function updateTask(
         action: event.action, field: event.field, oldValue: event.oldValue, newValue: event.newValue,
       });
     }
-    return { ok: true as const, value: taskToView(updatedRow), events, wasPrivate: updatedRow.is_private };
+    // راية الخصوصية من الصف قبل العملية: ما جرى وهو خاصٌّ يُدقّق محميًّا وفق خصوصيته.
+    return { ok: true as const, value: taskToView(updatedRow), events, wasPrivate: row.is_private, changed: true as const };
   }).then(async (result) => {
     if (!result.ok) return result;
+    if (!result.changed) return { ok: true as const, value: result.value };
     // التدقيق العام بعد الالتزام: بيانات وصفية فقط — عنوان الخاصة لا يُكتب أبدًا.
     const events = result.events ?? [];
     const primary = events[0];
@@ -889,7 +1025,7 @@ export async function updateTask(
 }
 
 export async function addTaskComment(
-  taskId: number, body: string, session: SessionPayload,
+  taskId: number, body: string, session: SessionPayload, clientRequestId?: string | null,
 ): Promise<TaskMutationResult<{ id: number; createdAt: string }>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
   const displayName = await sessionDisplayName(session);
@@ -898,27 +1034,53 @@ export async function addTaskComment(
     if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
     const row = taskRowMapper(current.rows[0]);
     const viewerStaffId = await staffIdForUser(session.userId, client);
+    // التوحيد: غير المرئي (خاصةً لغير صاحبها) 404 بلا فرقٍ عن المجهول — لا استنتاج
+    // بوجود مهمةٍ خاصة من 403. والعمل (تعليق) للمكلّف بعد ثبوت الرؤية.
+    if (!canSeeTask(row, session, viewerStaffId)) {
+      return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    }
     if (!canWorkOnTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "لا تعمل في هذه المهمة.", status: 403 };
     }
-    const result = await client.query(
-      `INSERT INTO hr_task_comments (task_id, author_user_id, author_display_name, body)
-       VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-      [taskId, session.userId, displayName, body],
-    );
+    const result = clientRequestId
+      ? await client.query(
+          `INSERT INTO hr_task_comments (task_id, author_user_id, author_display_name, body, client_request_id)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (task_id, client_request_id) WHERE client_request_id IS NOT NULL DO NOTHING
+           RETURNING id, created_at`,
+          [taskId, session.userId, displayName, body, clientRequestId],
+        )
+      : await client.query(
+          `INSERT INTO hr_task_comments (task_id, author_user_id, author_display_name, body)
+           VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+          [taskId, session.userId, displayName, body],
+        );
+    if (result.rows.length === 0) {
+      // فقدان الرد ثم إعادة الإرسال بنفس المفتاح: التعليق الأصلي يعود ولا نسخة.
+      const existing = await client.query(
+        `SELECT id, created_at FROM hr_task_comments WHERE task_id = $1 AND client_request_id = $2`,
+        [taskId, clientRequestId],
+      );
+      if (existing.rows.length > 0) {
+        return { ok: true as const, id: Number(existing.rows[0].id), createdAt: new Date(existing.rows[0].created_at).toISOString(), duplicate: true as const, wasPrivate: row.is_private };
+      }
+      return { ok: false as const, error: "تعذّر إضافة التعليق — أعد المحاولة.", status: 500 };
+    }
     await client.query(`UPDATE hr_tasks SET updated_at = NOW() WHERE id = $1`, [taskId]);
     await recordTaskEvent(client, {
       taskId, actorUserId: session.userId, actorDisplayName: displayName, action: "comment",
     });
-    return { ok: true as const, id: Number(result.rows[0].id), createdAt: new Date(result.rows[0].created_at).toISOString() };
+    return { ok: true as const, id: Number(result.rows[0].id), createdAt: new Date(result.rows[0].created_at).toISOString(), duplicate: false as const, wasPrivate: row.is_private };
   });
   if (!inserted.ok) return inserted;
-  await auditTask("task.comment", session, taskId, `تعليق على مهمة (#${taskId})`);
+  if (!inserted.duplicate) {
+    await auditTask("task.comment", session, taskId, `تعليق على مهمة (#${taskId})`, { private: inserted.wasPrivate });
+  }
   return { ok: true, value: { id: inserted.id, createdAt: inserted.createdAt } };
 }
 
 export type ChecklistOperation =
-  | { op: "add"; label: string }
+  | { op: "add"; label: string; clientRequestId?: string | null }
   | { op: "toggle"; itemId: number; done: boolean }
   | { op: "remove"; itemId: number };
 
@@ -933,17 +1095,34 @@ export async function mutateTaskChecklist(
     if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
     const row = taskRowMapper(current.rows[0]);
     const viewerStaffId = await staffIdForUser(session.userId, client);
+    // التوحيد: غير المرئي 404 بلا فرقٍ عن المجهول، والعمل بعد ثبوت الرؤية.
+    if (!canSeeTask(row, session, viewerStaffId)) {
+      return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    }
     if (!canWorkOnTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "لا تعمل في هذه المهمة.", status: 403 };
     }
 
     let auditSummary: string | null = null;
     if (operation.op === "add") {
-      const position = await client.query(`SELECT COALESCE(MAX(position), 0) + 1 AS next FROM hr_task_checklist WHERE task_id = $1`, [taskId]);
-      await client.query(
-        `INSERT INTO hr_task_checklist (task_id, label, position) VALUES ($1, $2, $3)`,
-        [taskId, operation.label, Number(position.rows[0].next)],
-      );
+      const insertResult = operation.clientRequestId
+        ? await client.query(
+            `INSERT INTO hr_task_checklist (task_id, label, position, client_request_id)
+             SELECT $1, $2, COALESCE(MAX(position), 0) + 1, $3 FROM hr_task_checklist WHERE task_id = $1
+             ON CONFLICT (task_id, client_request_id) WHERE client_request_id IS NOT NULL DO NOTHING
+             RETURNING id`,
+            [taskId, operation.label, operation.clientRequestId],
+          )
+        : await client.query(
+            `INSERT INTO hr_task_checklist (task_id, label, position)
+             SELECT $1, $2, COALESCE(MAX(position), 0) + 1 FROM hr_task_checklist WHERE task_id = $1
+             RETURNING id`,
+            [taskId, operation.label],
+          );
+      if (insertResult.rows.length === 0) {
+        // فقدان الرد ثم إعادة الإرسال بنفس المفتاح: البند الأصلي يعود ولا نسخة.
+        return { ok: true as const, auditSummary: null, wasPrivate: row.is_private };
+      }
       await recordTaskEvent(client, {
         taskId, actorUserId: session.userId, actorDisplayName: displayName,
         action: "checklist", field: "add", newValue: operation.label,
@@ -972,10 +1151,12 @@ export async function mutateTaskChecklist(
       auditSummary = `حذف بند تحقق (#${taskId})`;
     }
     await client.query(`UPDATE hr_tasks SET updated_at = NOW() WHERE id = $1`, [taskId]);
-    return { ok: true as const, auditSummary };
+    return { ok: true as const, auditSummary, wasPrivate: row.is_private };
   });
   if (!outcome.ok) return outcome;
-  await auditTask("task.checklist", session, taskId, outcome.auditSummary);
+  if (outcome.auditSummary !== null) {
+    await auditTask("task.checklist", session, taskId, outcome.auditSummary, { private: outcome.wasPrivate });
+  }
   return { ok: true, value: { ok: true } };
 }
 
@@ -999,6 +1180,11 @@ export async function addTaskLink(
     const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
     if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
     const row = taskRowMapper(current.rows[0]);
+    const viewerStaffId = await staffIdForUser(session.userId, client);
+    // التوحيد: غير المرئي 404 بلا فرقٍ عن المجهول — لا استنتاج بوجود مهمةٍ خاصة.
+    if (!canSeeTask(row, session, viewerStaffId)) {
+      return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    }
     if (!canManageTask(row, session)) return { ok: false as const, error: "لا تدير هذه المهمة.", status: 403 };
     const duplicate = await client.query(
       `SELECT 1 FROM hr_task_links WHERE task_id = $1 AND link_kind = $2 AND link_id = $3`, [taskId, kind, linkId],
@@ -1011,12 +1197,13 @@ export async function addTaskLink(
     await client.query(`UPDATE hr_tasks SET updated_at = NOW() WHERE id = $1`, [taskId]);
     await recordTaskEvent(client, {
       taskId, actorUserId: session.userId, actorDisplayName: displayName,
-      action: "link", field: kind, newValue: label,
+      action: "link", field: kind, newValue: label, linkId,
     });
-    return { ok: true as const };
+    return { ok: true as const, wasPrivate: row.is_private };
   });
   if (!outcome.ok) return outcome;
-  await auditTask("task.link", session, taskId, `ربط مهمة (#${taskId}) بـ${TASK_LINK_KIND_LABEL[kind]}`, { kind, linkId });
+  await auditTask("task.link", session, taskId, `ربط مهمة (#${taskId}) بـ${TASK_LINK_KIND_LABEL[kind]}`,
+    { kind, linkId, private: outcome.wasPrivate });
   return { ok: true, value: { label } };
 }
 
@@ -1027,6 +1214,10 @@ export async function removeTaskLink(taskId: number, linkId: number, session: Se
     const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
     if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
     const row = taskRowMapper(current.rows[0]);
+    const viewerStaffId = await staffIdForUser(session.userId, client);
+    if (!canSeeTask(row, session, viewerStaffId)) {
+      return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    }
     if (!canManageTask(row, session)) return { ok: false as const, error: "لا تدير هذه المهمة.", status: 403 };
     const link = await client.query(`SELECT id, link_kind, link_id, link_label FROM hr_task_links WHERE id = $1 AND task_id = $2`, [linkId, taskId]);
     if (!link.rowCount) return { ok: false as const, error: "الرابط غير موجود.", status: 404 };
@@ -1035,10 +1226,12 @@ export async function removeTaskLink(taskId: number, linkId: number, session: Se
     await recordTaskEvent(client, {
       taskId, actorUserId: session.userId, actorDisplayName: displayName,
       action: "unlink", field: String(link.rows[0].link_kind), oldValue: String(link.rows[0].link_label),
+      linkId: Number(link.rows[0].link_id),
     });
-    return { ok: true as const, kind: String(link.rows[0].link_kind) };
+    return { ok: true as const, kind: String(link.rows[0].link_kind), wasPrivate: row.is_private };
   });
   if (!outcome.ok) return outcome;
-  await auditTask("task.unlink", session, taskId, `فكّ ربط مهمة (#${taskId}) عن ${outcome.kind}`);
+  await auditTask("task.unlink", session, taskId, `فكّ ربط مهمة (#${taskId}) عن ${outcome.kind}`,
+    { private: outcome.wasPrivate });
   return { ok: true, value: { ok: true } };
 }

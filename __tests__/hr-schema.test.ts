@@ -10,8 +10,8 @@ import { RESET_WIPE_TABLES, RESET_KEEP_TABLES } from "../lib/clinic-reset";
  */
 
 describe("(HR-1) hr_staff schema", () => {
-  it("keeps migration 0044 byte-equal to the runtime schema SQL", () => {
-    const lines = readFileSync("migrations/0044_hr_staff.sql", "utf8").split("\n");
+  it("keeps migration 0045 byte-equal to the runtime schema SQL", () => {
+    const lines = readFileSync("migrations/0045_hr_staff.sql", "utf8").split("\n");
     const index = lines.findIndex((line) => !line.startsWith("--"));
     expect(lines.slice(index).join("\n").trim()).toBe(HR_STAFF_SQL.trim());
   });
@@ -42,11 +42,16 @@ describe("(HR-1) hr_staff schema", () => {
   it("commission-only files hold no salary row, and staff files hold no commission engine", () => {
     expect(HR_STAFF_SQL).not.toMatch(/commission_percent/);
   });
+
+  it("the salary currency is locked to the clinic's approved currencies, not any ISO-looking code", () => {
+    expect(HR_STAFF_SQL).toMatch(/salary_currency IS NULL OR salary_currency IN \('YER','SAR','USD'\)/);
+    expect(HR_STAFF_SQL).not.toMatch(/salary_currency[^\n]*'\^\[A-Z\]\{3\}\$'/);
+  });
 });
 
 describe("(HR-2) hr_tasks schema", () => {
-  it("keeps migration 0045 byte-equal to the runtime schema SQL", () => {
-    const lines = readFileSync("migrations/0045_hr_tasks.sql", "utf8").split("\n");
+  it("keeps migration 0046 byte-equal to the runtime schema SQL", () => {
+    const lines = readFileSync("migrations/0046_hr_tasks.sql", "utf8").split("\n");
     const index = lines.findIndex((line) => !line.startsWith("--"));
     expect(lines.slice(index).join("\n").trim()).toBe(HR_TASKS_SQL.trim());
   });
@@ -73,6 +78,17 @@ describe("(HR-2) hr_tasks schema", () => {
   it("the task event log is append-only at the database level", () => {
     expect(HR_TASKS_SQL).toMatch(/CREATE OR REPLACE FUNCTION aqlan_hr_task_events_append_only/);
     expect(HR_TASKS_SQL).toMatch(/CREATE TRIGGER hr_task_events_append_only\s+BEFORE UPDATE OR DELETE ON hr_task_events/);
+  });
+
+  it("carries a planning date separate from the due date — the «planned» status alone does not substitute it", () => {
+    expect(HR_TASKS_SQL).toMatch(/planned_for\s+DATE/);
+  });
+
+  it("deduplicates retried requests: a client request key is unique where present, on tasks, comments and checklist", () => {
+    expect(HR_TASKS_SQL.match(/client_request_id/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(HR_TASKS_SQL).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS hr_tasks_request_dedupe_idx\s+ON hr_tasks \(client_request_id\) WHERE client_request_id IS NOT NULL/);
+    expect(HR_TASKS_SQL).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS hr_task_comments_request_dedupe_idx\s+ON hr_task_comments \(task_id, client_request_id\) WHERE client_request_id IS NOT NULL/);
+    expect(HR_TASKS_SQL).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS hr_task_checklist_request_dedupe_idx\s+ON hr_task_checklist \(task_id, client_request_id\) WHERE client_request_id IS NOT NULL/);
   });
 
   it("links are unique per task and record, and hold no money", () => {

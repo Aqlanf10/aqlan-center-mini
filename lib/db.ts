@@ -15695,6 +15695,14 @@ export async function listAudit(input: {
         AND ($3::text IS NULL OR action = $3::text)
         AND ($4::text IS NULL OR actor = $4::text)
         AND ($5::text IS NULL OR (entity = $5::text AND ($6::text IS NULL OR entity_id = $6::text)))
+        /* (HR-2) خصوصية المهام الخاصة: عمليات المهمة الخاصة تُدقَّق في القاعدة
+           (الأثر محفوظ append-only للتحقيق) ولا تُعاد في واجهة التدقيق العام —
+           فلترة مشتقة من حالة المهمة لحظة القراءة لا من علمٍ مكتوب، فلا تُتبَّع
+           مهمةٌ خاصة بمعرّفها أو فاعلها أو وقتها أو روابطها حتى من المدير. */
+        AND NOT (entity = 'hr_task' AND EXISTS (
+          SELECT 1 FROM hr_tasks pt
+           WHERE pt.id::text = audit_log.entity_id AND pt.is_private
+        ))
       ORDER BY id DESC
       LIMIT $8`,
     [

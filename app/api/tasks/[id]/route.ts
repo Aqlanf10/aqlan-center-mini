@@ -80,6 +80,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       patch.dueAt = parsed.toISOString();
     }
   }
+  // تاريخ التخطيط: يومٌ مستقل عن الاستحقاق — حالة «مخطّطة» وحدها لا تعوّضه.
+  if (source.plannedFor !== undefined) {
+    if (source.plannedFor === null || source.plannedFor === "") {
+      patch.plannedFor = null;
+    } else if (typeof source.plannedFor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(source.plannedFor)) {
+      patch.plannedFor = source.plannedFor;
+    } else {
+      return NextResponse.json({ message: "تاريخ التخطيط بصيغة YYYY-MM-DD." }, { status: 400 });
+    }
+  }
   if (source.status !== undefined) {
     if (typeof source.status !== "string" || !["planned", "in_progress", "blocked", "completed", "cancelled"].includes(source.status)) {
       return NextResponse.json({ message: "الحالة: مخططة أو جارية أو متعطلة أو مكتملة أو ملغاة." }, { status: 400 });
@@ -98,6 +108,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
   }
   if (source.convertToShared === true) patch.convertToShared = true;
+  // حماية من الحفظ فوق نسخةٍ أحدث أو تكرار الطلب: يرسلها العميل كما رآها.
+  if (typeof source.expectedUpdatedAt === "string" && source.expectedUpdatedAt) {
+    patch.expectedUpdatedAt = source.expectedUpdatedAt;
+  }
 
   try {
     const result = await updateTask(id, patch, session);

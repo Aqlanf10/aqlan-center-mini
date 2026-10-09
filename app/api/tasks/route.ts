@@ -74,6 +74,19 @@ export async function POST(request: Request) {
     }
     dueAt = parsed.toISOString();
   }
+  // تاريخ التخطيط: يومٌ مستقل عن الاستحقاق — حالة «مخطّطة» وحدها لا تعوّضه.
+  let plannedFor: string | null = null;
+  if (source.plannedFor !== undefined && source.plannedFor !== null && source.plannedFor !== "") {
+    const raw = String(source.plannedFor);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return NextResponse.json({ message: "تاريخ التخطيط بصيغة YYYY-MM-DD." }, { status: 400 });
+    }
+    plannedFor = raw;
+  }
+  // مفتاح معاملة العميل لمنع تكرار الإنشاء عند فقدان الرد — طولٌ معقول ومضبوط.
+  const clientRequestId = typeof source.clientRequestId === "string" && source.clientRequestId.trim().length >= 8
+    ? source.clientRequestId.trim().slice(0, 100)
+    : null;
   const rawAssignee = Number(source.assigneeStaffId);
   const assigneeStaffId = source.assigneeStaffId !== undefined && source.assigneeStaffId !== null
     && Number.isInteger(rawAssignee) && rawAssignee > 0 ? rawAssignee : null;
@@ -82,7 +95,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await createTask({ title, description, isPrivate, priority: priorityInput, dueAt, assigneeStaffId }, session);
+    const result = await createTask({ title, description, isPrivate, priority: priorityInput, dueAt, plannedFor, assigneeStaffId, clientRequestId }, session);
     if (!result.ok) return NextResponse.json({ message: result.error }, { status: result.status });
     return NextResponse.json(result.value, { status: 201 });
   } catch {

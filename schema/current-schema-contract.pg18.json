@@ -5,9 +5,9 @@
   "generatedOnServerVersion": "18.4",
   "counts": {
     "tables": 93,
-    "columns": 1187,
-    "constraints": 1121,
-    "indexes": 285,
+    "columns": 1192,
+    "constraints": 1124,
+    "indexes": 288,
     "triggers": 28
   },
   "tables": {
@@ -3150,6 +3150,10 @@
     },
     "hr_task_checklist": {
       "columns": {
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -3188,6 +3192,7 @@
       ],
       "unique": [],
       "checks": [
+        "hr_task_checklist_client_request_id_check",
         "hr_task_checklist_label_check"
       ],
       "foreignKeys": [
@@ -3205,6 +3210,13 @@
         "hr_task_checklist_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "hr_task_checklist_request_dedupe_idx": {
+          "columns": [
+            "task_id",
+            "client_request_id"
           ],
           "unique": true
         },
@@ -3233,6 +3245,10 @@
           "type": "text",
           "nullable": false
         },
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -3251,7 +3267,8 @@
       ],
       "unique": [],
       "checks": [
-        "hr_task_comments_body_check"
+        "hr_task_comments_body_check",
+        "hr_task_comments_client_request_id_check"
       ],
       "foreignKeys": [
         {
@@ -3277,6 +3294,13 @@
         "hr_task_comments_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "hr_task_comments_request_dedupe_idx": {
+          "columns": [
+            "task_id",
+            "client_request_id"
           ],
           "unique": true
         },
@@ -3315,6 +3339,10 @@
         "id": {
           "type": "int4",
           "nullable": false
+        },
+        "link_id": {
+          "type": "int4",
+          "nullable": true
         },
         "new_value": {
           "type": "text",
@@ -3475,6 +3503,10 @@
           "type": "int4",
           "nullable": true
         },
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
         "completed_at": {
           "type": "timestamptz",
           "nullable": true
@@ -3511,6 +3543,10 @@
           "type": "int4",
           "nullable": false
         },
+        "planned_for": {
+          "type": "date",
+          "nullable": true
+        },
         "priority": {
           "type": "text",
           "nullable": false
@@ -3537,6 +3573,7 @@
         "hr_tasks_check",
         "hr_tasks_check1",
         "hr_tasks_check2",
+        "hr_tasks_client_request_id_check",
         "hr_tasks_description_check",
         "hr_tasks_no_assignee_on_private",
         "hr_tasks_priority_check",
@@ -3597,6 +3634,12 @@
         "hr_tasks_pkey": {
           "columns": [
             "id"
+          ],
+          "unique": true
+        },
+        "hr_tasks_request_dedupe_idx": {
+          "columns": [
+            "client_request_id"
           ],
           "unique": true
         },

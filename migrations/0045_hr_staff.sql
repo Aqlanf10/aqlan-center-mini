@@ -1,6 +1,8 @@
 -- (HR-1) ملفات الطاقم: كيان مستقل عن حساب الدخول — مسمًى وظيفيًّا حرًّا لا يمنح صلاحية،
 -- نوع تعاقد (نسبة/راتب/راتب ونسبة) ومبلغ راتب بعملته ودوريته وتاريخ سريانه، وربط اختياري
 -- فريد بحسابٍ موجود. سجل تغييرات append-only. إضافيٌّ خالص: جدولان جديدان.
+-- 0044 محجوز لـ 0044_invoice_admin_discount_lines.sql (PR #301) — سلسلة الفواتير المتفق عليها
+-- 0041–0044، وهذه المرحلة تلتقط 0045 بعد آخر هجرة منشورة في الفروع المفتوحة.
 -- Body must remain byte-for-byte equal to HR_STAFF_SQL after these comments.
 CREATE TABLE IF NOT EXISTS hr_staff (
   id                   SERIAL      PRIMARY KEY,
@@ -17,7 +19,8 @@ CREATE TABLE IF NOT EXISTS hr_staff (
     CHECK (contract_kind IN ('commission','salary','salary_commission')),
   -- مبلغ الراتب: بعملته ودوريته وتاريخ سريانه — ثلاثتها معًا أو لا شيء
   salary_amount_minor  BIGINT      CHECK (salary_amount_minor IS NULL OR salary_amount_minor > 0),
-  salary_currency      TEXT        CHECK (salary_currency IS NULL OR salary_currency ~ '^[A-Z]{3}$'),
+  -- العملة مقيدة على العملات المعتمدة للمركز (lib/money.ts) لا أي رمز ISO من ثلاثة أحرف
+  salary_currency      TEXT        CHECK (salary_currency IS NULL OR salary_currency IN ('YER','SAR','USD')),
   salary_period        TEXT        CHECK (salary_period IS NULL OR salary_period IN ('monthly','weekly','daily','per_shift')),
   salary_effective_on  DATE,
   -- الربط الاختياري الفريد بحسابٍ موجود — يُنشأ يدويًّا من شاشة المستخدمين لا من هنا

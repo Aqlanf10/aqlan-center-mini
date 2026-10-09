@@ -7,8 +7,10 @@ import {
 
 /**
  * (HR-1/HR-2) حراسة الخصوصية والصلاحيات — دوال خالصة بجدول: الخاصة لصاحبها
- * وحده (المدير ليس استثناءً)، ودليل الإسناد بلا مبالغ، وشروط الأجر ثلاثتها
- * معًا أو لا شيء.
+ * وحده (المدير ليس استثناءً)، ومسؤولية المكلّف عبر **الربط الحالي** بين حسابه
+ * وملف الطاقم حصرًا (مراجعة دوت: فكّ الربط يسحب الوصول فورًا — لا مساءلة عبر
+ * assignee_user_id المخزَّن)، وحقول الإدارة محصورة بـcanManageTask، وشروط
+ * الأجر ثلاثتها معًا أو لا شيء بعملةٍ معتمدة.
  */
 
 const adminSession = { userId: 1, role: "admin" } as const;
@@ -18,15 +20,15 @@ const cashierSession = { userId: 4, role: "cashier" } as const;
 
 const sharedRow = (overrides: Partial<HrTaskRow> = {}): HrTaskRow => ({
   id: 10, title: "مهمة", description: "", is_private: false, status: "planned", priority: "normal",
-  due_at: null, owner_user_id: 2, owner_display_name: "الاستقبال", assignee_staff_id: 7,
-  assignee_user_id: null, assignee_label: "الحارس", completed_at: null, created_by: "t",
-  created_at: new Date(), updated_at: new Date(), ...overrides,
+  due_at: null, planned_for: null, owner_user_id: 2, owner_display_name: "الاستقبال", assignee_staff_id: 7,
+  assignee_user_id: null, assignee_label: "الحارس", completed_at: null, client_request_id: null,
+  created_by: "t", created_at: new Date(), updated_at: new Date(), ...overrides,
 });
 
 const privateRow = (ownerUserId: number): HrTaskRow =>
   sharedRow({ is_private: true, owner_user_id: ownerUserId, assignee_staff_id: null, assignee_label: "" });
 
-describe("task visibility — row-level, server-side", () => {
+describe("task visibility — row-level, server-side, via the CURRENT account↔staff link", () => {
   it("a private task is visible to its owner alone — including the admin", () => {
     expect(canSeeTask(privateRow(3), doctorSession)).toBe(true);
     expect(canSeeTask(privateRow(3), adminSession)).toBe(false);
@@ -34,25 +36,36 @@ describe("task visibility — row-level, server-side", () => {
     expect(canSeeTask(privateRow(3), cashierSession)).toBe(false);
   });
 
-  it("a shared task is visible to management, its owner, and the assignee user", () => {
+  it("a shared task is visible to management and its owner — never via the stored assignee_user_id", () => {
     expect(canSeeTask(sharedRow(), adminSession)).toBe(true);
     expect(canSeeTask(sharedRow(), receptionSession)).toBe(true);
     expect(canSeeTask(sharedRow(), { userId: 2, role: "doctor" })).toBe(true); // الصاحب طبيب هنا
-    expect(canSeeTask(sharedRow({ assignee_user_id: 3 }), doctorSession)).toBe(true);
-    expect(canSeeTask(sharedRow({ assignee_user_id: null }), doctorSession)).toBe(false);
+    // لقطة assignee_user_id القديمة لا تفتح رؤيةً ولو طابقت الجلسة —
+    // مراجعة دوت: الحساب السابق يفقد الوصول فور فكّ الربط.
+    expect(canSeeTask(sharedRow({ assignee_user_id: 3 }), doctorSession)).toBe(false);
   });
 
-  it("a doctor assigned through his staff file (no user link on the task) sees the task", () => {
+  it("assignment access flows only through the CURRENT staff-file link (viewerStaffId)", () => {
+    // الطبيب مرتبط حاليًّا بملفه رقم 7 المسند إليه: يرى المهمة.
     expect(canSeeTask(sharedRow({ assignee_user_id: null }), doctorSession, 7)).toBe(true);
-    expect(canSeeTask(sharedRow({ assignee_user_id: null }), doctorSession, 99)).toBe(false);
+    expect(canSeeTask(sharedRow({ assignee_user_id: 3 }), doctorSession, 7)).toBe(true);
+    // الربط فُكّ (viewerStaffId=null) أو تغيّر (99): الوصول سقط فورًا رغم اللقطة.
+    expect(canSeeTask(sharedRow({ assignee_user_id: 3 }), doctorSession, null)).toBe(false);
+    expect(canSeeTask(sharedRow({ assignee_user_id: 3 }), doctorSession, 99)).toBe(false);
+  });
+
+  it("work rights follow the same current-link rule", () => {
+    expect(canWorkOnTask(sharedRow({ assignee_user_id: 3 }), doctorSession, 7)).toBe(true);
+    expect(canWorkOnTask(sharedRow({ assignee_user_id: 3 }), doctorSession, null)).toBe(false);
+    expect(canWorkOnTask(privateRow(3), receptionSession)).toBe(false);
   });
 
   it("management edits; the assignee works (status/checklist/comments) but cannot reassign or convert", () => {
-    const row = sharedRow({ assignee_user_id: 3 });
+    const row = sharedRow();
     expect(canManageTask(row, adminSession)).toBe(true);
     expect(canManageTask(row, receptionSession)).toBe(true);
     expect(canManageTask(row, doctorSession)).toBe(false); // مسؤولٌ فقط لا مدير
-    expect(canWorkOnTask(row, doctorSession)).toBe(true);
+    expect(canWorkOnTask(row, doctorSession, 7)).toBe(true);
 
     const privateTask = privateRow(3);
     expect(canManageTask(privateTask, adminSession)).toBe(false);
@@ -71,11 +84,15 @@ describe("task visibility — row-level, server-side", () => {
   });
 });
 
-describe("pay terms — currency, period and effective date travel together", () => {
+describe("pay terms — currency, period and effective date travel together, currency locked to approved ones", () => {
   it("accepts a complete triple and normalizes it", () => {
     const result = validatePayTermsInput({ salaryAmountMinor: 150000, salaryCurrency: "YER", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" });
     expect(typeof result).toBe("object");
     expect(result).toEqual({ amountMinor: 150000, currency: "YER", period: "monthly", effectiveOn: "2026-10-01" });
+    expect(validatePayTermsInput({ salaryAmountMinor: 15000000, salaryCurrency: "SAR", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" }))
+      .toEqual({ amountMinor: 15000000, currency: "SAR", period: "monthly", effectiveOn: "2026-10-01" });
+    expect(validatePayTermsInput({ salaryAmountMinor: 15000000, salaryCurrency: "USD", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" }))
+      .toEqual({ amountMinor: 15000000, currency: "USD", period: "monthly", effectiveOn: "2026-10-01" });
   });
 
   it("rejects any incomplete or malformed piece", () => {
@@ -85,6 +102,14 @@ describe("pay terms — currency, period and effective date travel together", ()
     expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "YER", salaryPeriod: "yearly", salaryEffectiveOn: "2026-10-01" })).toBe("string");
     expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "YER", salaryPeriod: "monthly", salaryEffectiveOn: "شهر الجديد" })).toBe("string");
     expect(validatePayTermsInput({})).toBeNull();
+  });
+
+  it("rejects currencies outside the clinic's approved set (YER/SAR/USD) — no arbitrary ISO codes", () => {
+    // مراجعة دوت: العملة لم تعد أي رمزٍ من ثلاثة أحرف — EUR وAED وXYZ مرفوضة.
+    expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "EUR", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" })).toBe("string");
+    expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "AED", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" })).toBe("string");
+    expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "XYZ", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" })).toBe("string");
+    expect(typeof validatePayTermsInput({ salaryAmountMinor: 100, salaryCurrency: "YEE", salaryPeriod: "monthly", salaryEffectiveOn: "2026-10-01" })).toBe("string");
   });
 });
 
@@ -111,7 +136,7 @@ describe("staff view — salaries never leak through shared views", () => {
   });
 });
 
-describe("task view — overdue is derived on the server", () => {
+describe("task view — overdue and the planning date are derived on the server", () => {
   const now = Date.parse("2026-10-08T12:00:00Z");
   it("marks past-due open tasks only", () => {
     const overdue = taskToView(sharedRow({ due_at: new Date("2026-10-01T00:00:00Z"), status: "in_progress" }), now);
@@ -120,6 +145,13 @@ describe("task view — overdue is derived on the server", () => {
     expect(onTime.overdue).toBe(false);
     const doneLate = taskToView(sharedRow({ due_at: new Date("2026-10-01T00:00:00Z"), status: "completed" }), now);
     expect(doneLate.overdue).toBe(false);
+  });
+
+  it("carries the planning date separate from the due date", () => {
+    const view = taskToView(sharedRow({ planned_for: "2026-10-12", due_at: new Date("2026-10-20T00:00:00Z") }), now);
+    expect(view.plannedFor).toBe("2026-10-12");
+    expect(view.dueAt).not.toBeNull();
+    expect(taskToView(sharedRow(), now).plannedFor).toBeNull();
   });
 });
 

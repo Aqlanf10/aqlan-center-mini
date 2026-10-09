@@ -53,6 +53,7 @@ export default async function HrTasksPrintPage({
             <th>الأولوية</th>
             <th>المسؤول</th>
             <th>صاحبها</th>
+            <th>التخطيط</th>
             <th>الاستحقاق</th>
             <th>التأخر</th>
             <th>الخصوصية</th>
@@ -69,6 +70,7 @@ export default async function HrTasksPrintPage({
                 <td>{TASK_PRIORITY_LABEL[task.priority]}</td>
                 <td>{task.assigneeLabel || "—"}</td>
                 <td>{task.ownerDisplayName}</td>
+                <td className="num">{task.plannedFor ?? "—"}</td>
                 <td className="num">{task.dueAt ? new Date(task.dueAt).toISOString().slice(0, 10) : "—"}</td>
                 <td className="num">{overdueDays !== null ? `${overdueDays} يومًا` : "—"}</td>
                 <td>{task.isPrivate ? "خاصة" : "مشتركة"}</td>
@@ -76,7 +78,7 @@ export default async function HrTasksPrintPage({
             );
           })}
           {payload.tasks.length === 0 && (
-            <tr><td colSpan={9} className="empty">لا مهام مطابقة.</td></tr>
+            <tr><td colSpan={10} className="empty">لا مهام مطابقة.</td></tr>
           )}
         </tbody>
       </table>

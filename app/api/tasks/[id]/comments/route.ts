@@ -31,9 +31,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!commentBody || commentBody.length > 2000) {
     return NextResponse.json({ message: "اكتب التعليق (من 1 إلى 2000 حرف)." }, { status: 400 });
   }
+  // مفتاح معاملة العميل: فقدان الرد ثم إعادة الإرسال يعيد التعليق الأصلي لا نسخة.
+  const clientRequestId = typeof source.clientRequestId === "string" && source.clientRequestId.trim().length >= 8
+    ? source.clientRequestId.trim().slice(0, 100)
+    : null;
 
   try {
-    const result = await addTaskComment(id, commentBody, session);
+    const result = await addTaskComment(id, commentBody, session, clientRequestId);
     if (!result.ok) return NextResponse.json({ message: result.error }, { status: result.status });
     return NextResponse.json(result.value, { status: 201 });
   } catch {

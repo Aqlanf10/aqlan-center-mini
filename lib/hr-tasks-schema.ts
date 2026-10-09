@@ -2,7 +2,7 @@
  * (HR-2) المهام — مصدرٌ واحد لمسارَي المخطط.
  *
  * النص نفسه يُنفَّذ في `ensureSchema()` وهو جسد الهجرة
- * `migrations/0045_hr_tasks.sql` حرفيًّا — واختبار الوحدة يُسقط البناء إن افترقا.
+ * `migrations/0046_hr_tasks.sql` حرفيًّا — واختبار الوحدة يُسقط البناء إن افترقا.
  *
  * المهمة الخاصة (is_private) ملكٌ لصاحبها وحده: القاعدة نفسها تمنع خاصّةً لها
  * مسؤول (CHECK) — الخصوصية قرارٌ بنيويّ لا تفصيلٌ في الواجهة. والتحويل إلى
@@ -14,6 +14,9 @@
  *
  * الربط بمريضٍ أو أمر مختبرٍ أو بند مخزون مرجعٌ يُفحص وصوله عند الإنشاء وعند
  * كل قراءة — إسناد المهمة لا يمنح وصولًا، وإكمالها لا يغيّر السجل المرتبط.
+ *
+ * planned_for تاريخ التخطيط المستقل عن due_at، وclient_request_id مفتاح معاملة
+ * من العميل يمنع التكرار عند فقدان الرد — فريد جزئيًّا في المهام والتعليقات والقائمة.
  *
  * إضافيٌّ خالص: خمسة جداول جديدة — لا عمودٌ قديم يُمسّ ولا صفٌّ يُعاد كتابته.
  */
@@ -27,12 +30,14 @@ export const HR_TASKS_SQL = `CREATE TABLE IF NOT EXISTS hr_tasks (
   priority           TEXT        NOT NULL DEFAULT 'normal'
     CHECK (priority IN ('low','normal','high','urgent')),
   due_at             TIMESTAMPTZ,
+  planned_for        DATE,
   owner_user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   owner_display_name TEXT        NOT NULL,
   assignee_staff_id  INTEGER     REFERENCES hr_staff(id) ON DELETE SET NULL,
   assignee_user_id   INTEGER     REFERENCES users(id) ON DELETE SET NULL,
   assignee_label     TEXT        NOT NULL DEFAULT '' CHECK (length(btrim(assignee_label)) <= 120),
   completed_at       TIMESTAMPTZ,
+  client_request_id  TEXT        CHECK (client_request_id IS NULL OR length(btrim(client_request_id)) BETWEEN 8 AND 100),
   created_by         TEXT        NOT NULL,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -47,6 +52,8 @@ CREATE INDEX IF NOT EXISTS hr_tasks_owner_idx ON hr_tasks (owner_user_id, create
 CREATE INDEX IF NOT EXISTS hr_tasks_assignee_user_idx ON hr_tasks (assignee_user_id, created_at DESC) WHERE assignee_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS hr_tasks_assignee_staff_idx ON hr_tasks (assignee_staff_id, created_at DESC) WHERE assignee_staff_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS hr_tasks_status_due_idx ON hr_tasks (status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS hr_tasks_request_dedupe_idx
+  ON hr_tasks (client_request_id) WHERE client_request_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS hr_task_links (
   id          SERIAL      PRIMARY KEY,
@@ -68,9 +75,12 @@ CREATE TABLE IF NOT EXISTS hr_task_checklist (
   done_by     TEXT,
   done_at     TIMESTAMPTZ,
   position    INTEGER     NOT NULL DEFAULT 0,
+  client_request_id TEXT   CHECK (client_request_id IS NULL OR length(btrim(client_request_id)) BETWEEN 8 AND 100),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS hr_task_checklist_task_idx ON hr_task_checklist (task_id, position, id);
+CREATE UNIQUE INDEX IF NOT EXISTS hr_task_checklist_request_dedupe_idx
+  ON hr_task_checklist (task_id, client_request_id) WHERE client_request_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS hr_task_comments (
   id                  SERIAL      PRIMARY KEY,
@@ -78,9 +88,12 @@ CREATE TABLE IF NOT EXISTS hr_task_comments (
   author_user_id      INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   author_display_name TEXT        NOT NULL,
   body                TEXT        NOT NULL CHECK (length(btrim(body)) BETWEEN 1 AND 2000),
+  client_request_id   TEXT        CHECK (client_request_id IS NULL OR length(btrim(client_request_id)) BETWEEN 8 AND 100),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS hr_task_comments_task_idx ON hr_task_comments (task_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS hr_task_comments_request_dedupe_idx
+  ON hr_task_comments (task_id, client_request_id) WHERE client_request_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS hr_task_events (
   id                  SERIAL      PRIMARY KEY,
@@ -92,6 +105,7 @@ CREATE TABLE IF NOT EXISTS hr_task_events (
   field               TEXT,
   old_value           TEXT,
   new_value           TEXT,
+  link_id             INTEGER,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS hr_task_events_task_idx ON hr_task_events (task_id, id);

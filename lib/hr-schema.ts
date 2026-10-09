@@ -2,7 +2,7 @@
  * (HR-1) ملفات الطاقم — مصدرٌ واحد لمسارَي المخطط.
  *
  * النص نفسه يُنفَّذ في `ensureSchema()` وهو جسد الهجرة
- * `migrations/0044_hr_staff.sql` حرفيًّا — واختبار الوحدة يُسقط البناء إن افترقا.
+ * `migrations/0045_hr_staff.sql` حرفيًّا — واختبار الوحدة يُسقط البناء إن افترقا.
  *
  * ملف الموظف **كيانٌ مستقل عن حساب الدخول**: الحارس والمنسق والسكرتيرة لهم ملفٌ
  * بلا حساب، وحسابٌ لا ملف، وملفٌّ يُربط اختياريًّا بحسابٍ موجود واحد (`user_id`
@@ -37,7 +37,8 @@ export const HR_STAFF_SQL = `CREATE TABLE IF NOT EXISTS hr_staff (
     CHECK (contract_kind IN ('commission','salary','salary_commission')),
   -- مبلغ الراتب: بعملته ودوريته وتاريخ سريانه — ثلاثتها معًا أو لا شيء
   salary_amount_minor  BIGINT      CHECK (salary_amount_minor IS NULL OR salary_amount_minor > 0),
-  salary_currency      TEXT        CHECK (salary_currency IS NULL OR salary_currency ~ '^[A-Z]{3}$'),
+  -- العملة مقيدة على العملات المعتمدة للمركز (lib/money.ts) لا أي رمز ISO من ثلاثة أحرف
+  salary_currency      TEXT        CHECK (salary_currency IS NULL OR salary_currency IN ('YER','SAR','USD')),
   salary_period        TEXT        CHECK (salary_period IS NULL OR salary_period IN ('monthly','weekly','daily','per_shift')),
   salary_effective_on  DATE,
   -- الربط الاختياري الفريد بحسابٍ موجود — يُنشأ يدويًّا من شاشة المستخدمين لا من هنا

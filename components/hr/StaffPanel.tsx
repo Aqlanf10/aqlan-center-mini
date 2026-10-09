@@ -6,6 +6,7 @@ import {
   HR_CONTRACT_KIND_LABEL, HR_DEPARTMENT_LABEL, HR_SALARY_PERIOD_LABEL, HR_WORK_STATUS_LABEL,
   type HrContractKind, type HrDepartment, type HrSalaryPeriod, type HrWorkStatus,
 } from "@/lib/hr-shared";
+import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 
 /**
  * لوحة الطاقم — المدير وحده (الخادم يحرسها والشاشة تعكس ذلك).
@@ -40,9 +41,14 @@ interface StaffDetail {
 
 interface AdminUserOption { id: number; username: string; displayName: string; role: string; linked: boolean }
 
-// أرقام لاتينية بفواصل ثلاثية — عين أعمدة المبالغ في بقية البرنامج (formatAmount).
-function fmtMoney(minor: number): string {
-  return (minor / 100).toLocaleString("en", { maximumFractionDigits: 2 });
+// المبالغ بأدوات المال المعتمدة (lib/money.ts): العرض بعملة الصف نفسها
+// (اليمني بوحدةٍ واحدة، والسعودي والدولار بالهللة/السنت) — لا قسمة ثابتة.
+function fmtMoney(minor: number, currency: string): string {
+  return isApprovedCurrency(currency) ? formatAmount(minor, currency) : minor.toLocaleString("en");
+}
+
+function isApprovedCurrency(value: string): value is Currency {
+  return (CURRENCIES as string[]).includes(value);
 }
 
 function fmtDate(value: string | null): string {
@@ -153,7 +159,7 @@ export function HrStaffPanel() {
                   <td className="p-3 text-xs">{HR_CONTRACT_KIND_LABEL[member.contractKind]}</td>
                   <td className="p-3 text-xs">
                     {member.payTerms
-                      ? <span className="ltr-nums">{fmtMoney(member.payTerms.amountMinor)} {member.payTerms.currency} — {HR_SALARY_PERIOD_LABEL[member.payTerms.period]}</span>
+                      ? <span className="ltr-nums">{fmtMoney(member.payTerms.amountMinor, member.payTerms.currency)} {CURRENCY_SHORT[member.payTerms.currency as Currency] ?? member.payTerms.currency} — {HR_SALARY_PERIOD_LABEL[member.payTerms.period]}</span>
                       : "—"}
                   </td>
                   <td className="p-3 text-xs">{member.userId !== null ? "مرتبط" : "بلا حساب"}</td>
@@ -188,9 +194,10 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
   const [hireDate, setHireDate] = useState(existing?.hireDate ?? "");
   const [endDate, setEndDate] = useState(existing?.endDate ?? "");
   const [contractKind, setContractKind] = useState<HrContractKind>(existing?.contractKind ?? "commission");
-  const [hasPay, setHasPay] = useState(existing?.payTerms != null);
-  const [amount, setAmount] = useState(existing?.payTerms ? String(existing.payTerms.amountMinor) : "");
-  const [currency, setCurrency] = useState(existing?.payTerms?.currency ?? "YER");
+  // الإدخال بوحدات المبلغ البشرية (1,500,000 ريال) لا وحداتٍ صغرى — التحويل بأدوات
+  // المال المعتمدة حسب العملة (اليمني وحدة، والسعودي والدولار هللة/سنت).
+  const [amount, setAmount] = useState(existing?.payTerms ? toInputAmount(existing.payTerms.amountMinor, (isApprovedCurrency(existing.payTerms.currency) ? existing.payTerms.currency : "YER")) : "");
+  const [currency, setCurrency] = useState<Currency>(isApprovedCurrency(existing?.payTerms?.currency ?? "") ? (existing!.payTerms!.currency as Currency) : "YER");
   const [period, setPeriod] = useState<HrSalaryPeriod>(existing?.payTerms?.period ?? "monthly");
   const [effectiveOn, setEffectiveOn] = useState(existing?.payTerms?.effectiveOn ?? "");
   const [phone, setPhone] = useState(existing?.phone ?? "");
@@ -216,7 +223,7 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
     })();
   }, [linkMode]);
 
-  const buildBody = (): Record<string, unknown> => {
+  const buildBody = (): Record<string, unknown> | { error: string } => {
     const body: Record<string, unknown> = {
       fullName: fullName.trim(), jobTitle: jobTitle.trim(), department,
       hireDate: hireDate || null,
@@ -224,25 +231,46 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
       contractKind,
       phone: phone.trim() || null, note: note.trim() || null,
     };
-    if (!existing) body.workStatus = workStatus;
-    if (contractKind !== "commission" && hasPay) {
-      body.salaryAmountMinor = Number(amount);
-      body.salaryCurrency = currency.trim().toUpperCase();
+    // حالة العمل تُرسل دائمًا: ما اختاره المستخدم هو ما يُحفظ (وفي الإنشاء والتعديل).
+    body.workStatus = workStatus;
+    if (contractKind === "commission") {
+      // لا مفاتيح راتب: الخادم يمسح شروط الراتب في نفس التحديث عند التحويل إلى نسبة.
+    } else {
+      // راتب/راتب ونسبة: الشروط الأربعة إلزامية — بالوحدات البشرية هنا وتتحول
+      // إلى وحداتٍ صغرى بأدوات المال حسب العملة (لا قسمة ثابتة).
+      const parsedAmount = parseAmount(amount.trim(), currency);
+      if (parsedAmount === null || parsedAmount <= 0) {
+        return { error: `اكتب مبلغ الراتب بعملة ${CURRENCY_SHORT[currency]} — الرقم الذي تكتبه هو المبلغ الظاهر لا وحداتٍ صغرى.` };
+      }
+      if (!effectiveOn) {
+        return { error: "اختر تاريخ سريان الراتب." };
+      }
+      body.salaryAmountMinor = parsedAmount;
+      body.salaryCurrency = currency;
       body.salaryPeriod = period;
       body.salaryEffectiveOn = effectiveOn;
     }
-    if (existing) body.reason = reason.trim() || undefined;
+    if (existing) {
+      body.reason = reason.trim() || undefined;
+      // حماية من الحفظ فوق نسخةٍ أحدث: الطابع كما رأيناه عند فتح الملف.
+      body.expectedUpdatedAt = existing.updatedAt;
+    }
     return body;
   };
 
   const submit = async () => {
+    const built = buildBody();
+    if ("error" in built && typeof built.error === "string") {
+      setError(built.error);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const response = await fetch(existing ? `/api/hr/staff/${existing.id}` : "/api/hr/staff", {
         method: existing ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(buildBody()),
+        body: JSON.stringify(built),
       });
       if (!response.ok) {
         const payloadError = (await response.json().catch(() => null)) as { message?: string } | null;
@@ -306,17 +334,15 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
                 ))}
               </select>
             </label>
-            {!existing && (
-              <label className="grid gap-1 text-sm font-semibold text-navy-800">
-                حالة العمل
-                <select value={workStatus} onChange={(event) => setWorkStatus(event.target.value as HrWorkStatus)}
-                  className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
-                  {(Object.keys(HR_WORK_STATUS_LABEL) as HrWorkStatus[]).map((status) => (
-                    <option key={status} value={status}>{HR_WORK_STATUS_LABEL[status]}</option>
-                  ))}
-                </select>
-              </label>
-            )}
+            <label className="grid gap-1 text-sm font-semibold text-navy-800">
+              حالة العمل
+              <select value={workStatus} onChange={(event) => setWorkStatus(event.target.value as HrWorkStatus)}
+                className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
+                {(Object.keys(HR_WORK_STATUS_LABEL) as HrWorkStatus[]).map((status) => (
+                  <option key={status} value={status}>{HR_WORK_STATUS_LABEL[status]}</option>
+                ))}
+              </select>
+            </label>
             <label className="grid gap-1 text-sm font-semibold text-navy-800">
               تاريخ الالتحاق
               <input type="date" value={hireDate} onChange={(event) => setHireDate(event.target.value)}
@@ -336,32 +362,31 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
                 {(Object.keys(HR_CONTRACT_KIND_LABEL) as HrContractKind[]).map((kind) => (
                   <label key={kind} className="flex items-center gap-1.5 font-semibold text-navy-800">
                     <input type="radio" name="contractKind" checked={contractKind === kind}
-                      onChange={() => { setContractKind(kind); if (kind === "commission") setHasPay(false); }} />
+                      onChange={() => setContractKind(kind)} />
                     {HR_CONTRACT_KIND_LABEL[kind]}
                   </label>
                 ))}
               </div>
               <p className="rounded-lg bg-info-50 p-2 text-xs text-info-900">
-                تعاقد «النسبة» يُقرأ من ملف الطبيب في الجهات الحالي ولا يُعدَّل من هنا — إضافة ملفٍ لا تغيّر نسبته.
-                أما الراتب فيُحفظ بعملته ودوريته وتاريخ سريانه.
+                تعاقد «النسبة» يُقرأ من ملف الطبيب في الجهات الحالي ولا يُعدَّل من هنا — إضافة ملفٍ لا تغيّر نسبته،
+                والتحويل إلى «نسبة» يمسح شروط الراتب المحفوظة في نفس الحفظ. أما الراتب فيُحفظ بعملته ودوريته وتاريخ سريانه.
               </p>
               {contractKind !== "commission" && (
-                <label className="flex items-center gap-2 text-sm font-semibold text-navy-800">
-                  <input type="checkbox" checked={hasPay} onChange={(event) => setHasPay(event.target.checked)} />
-                  يوجد راتبٌ محدد الآن
-                </label>
-              )}
-              {contractKind !== "commission" && hasPay && (
                 <div className="grid gap-3 sm:grid-cols-4">
                   <label className="grid gap-1 text-sm font-semibold text-navy-800 sm:col-span-1">
-                    المبلغ (وحدات صغرى)
-                    <input type="number" min={1} value={amount} onChange={(event) => setAmount(event.target.value)}
+                    المبلغ ({CURRENCY_SHORT[currency]})
+                    <input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)}
+                      placeholder={currency === "YER" ? "مثل: 1500000" : "مثل: 1500.00"}
                       className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
                   </label>
                   <label className="grid gap-1 text-sm font-semibold text-navy-800">
                     العملة
-                    <input value={currency} onChange={(event) => setCurrency(event.target.value)} maxLength={3}
-                      className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums uppercase" />
+                    <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
+                      className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
+                      {CURRENCIES.map((value) => (
+                        <option key={value} value={value}>{value} — {CURRENCY_SHORT[value]}</option>
+                      ))}
+                    </select>
                   </label>
                   <label className="grid gap-1 text-sm font-semibold text-navy-800">
                     الدورية

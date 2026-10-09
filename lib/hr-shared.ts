@@ -23,6 +23,7 @@
  */
 
 import type { SessionPayload } from "./auth";
+import { isCurrency } from "./money";
 
 /* ── المفردات المغلقة ─────────────────────────────────────────────────────── */
 
@@ -198,12 +199,15 @@ export interface HrTaskRow {
   status: TaskStatus;
   priority: TaskPriority;
   due_at: Date | string | null;
+  planned_for: Date | string | null;
   owner_user_id: number;
   owner_display_name: string;
   assignee_staff_id: number | null;
+  /** لقطة تاريخية لربط الحساب وقت الإسناد — لا تُستعمل في الصلاحية إطلاقًا. */
   assignee_user_id: number | null;
   assignee_label: string;
   completed_at: Date | string | null;
+  client_request_id: string | null;
   created_by: string;
   created_at: Date | string;
   updated_at: Date | string;
@@ -217,6 +221,8 @@ export interface HrTaskView {
   status: TaskStatus;
   priority: TaskPriority;
   dueAt: string | null;
+  /** تاريخ التخطيط المستقل عن الاستحقاق — حالة «مخطّطة» لا تعوّضه. */
+  plannedFor: string | null;
   overdue: boolean;
   /** أيام التأخر عند تجاوز الموعد وحالة المهمة مفتوحة — صفرٌ وإلا. */
   overdueDays: number;
@@ -234,19 +240,23 @@ export interface HrTaskView {
 
 /**
  * من يرى المهمة؟ الخاصة لصاحبها وحده — المدير ليس استثناءً: ما هو خاصٌّ خاصٌّ.
- * والمشتركة للإدارة المخولة ولصاحبها وللمسؤول (بحسابه) ولمن أُسندت إلى ملفه.
+ * والمشتركة للإدارة المخولة ولصاحبها وللمسؤول.
+ *
+ * **مسؤولية المهمّف تُحسب عبر الربط الحالي بين حسابه وملف الطاقم فقط** (viewerStaffId
+ * يُشتق من hr_staff.user_id لحظة الفحص): `assignee_user_id` المخزَّن على المهمة
+ * لقطة تاريخية وقت الإسناد لا تُثبت شيئًا — فكّ الربط أو تغييره أو تعطيل الحساب
+ * يسحب الوصول فورًا عبر كل المسارات، وإعادة الربط بحسابٍ آخر تمنحه لمالكه الجديد،
+ * دون أي نقلٍ لملكية المهام الخاصة.
  */
 export function canSeeTask(
-  task: Pick<HrTaskRow, "is_private" | "owner_user_id" | "assignee_user_id" | "assignee_staff_id">,
+  task: Pick<HrTaskRow, "is_private" | "owner_user_id" | "assignee_staff_id">,
   session: Pick<SessionPayload, "userId" | "role">,
   viewerStaffId: number | null = null,
 ): boolean {
   if (task.is_private) return task.owner_user_id === session.userId;
   if (canAssignTasks(session.role)) return true;
   if (task.owner_user_id === session.userId) return true;
-  if (task.assignee_user_id !== null && task.assignee_user_id === session.userId) return true;
-  if (viewerStaffId !== null && task.assignee_staff_id !== null && task.assignee_staff_id === viewerStaffId) return true;
-  return false;
+  return viewerStaffId !== null && task.assignee_staff_id !== null && task.assignee_staff_id === viewerStaffId;
 }
 
 /** من يعدّل بيانات المهمة (عنوان/وصف/أولوية/موعد/مسؤول/روابط/تحويل)؟ */
@@ -259,23 +269,40 @@ export function canManageTask(
   return task.owner_user_id === session.userId;
 }
 
-/** من يعمل في المهمة (تغيير الحالة/التحقق/التعليق)؟ المسؤول فيها كصاحبها في العمل. */
+/**
+ * من يعمل في المهمة (تغيير الحالة/التحقق/التعليق)؟ المسؤول فيها كصاحبها في العمل —
+ * **والعمل وحده**: تعديل حقول الإدارة ليس من العمل، ويحرسه canManageTask على حدة.
+ */
 export function canWorkOnTask(
-  task: Pick<HrTaskRow, "is_private" | "owner_user_id" | "assignee_user_id" | "assignee_staff_id">,
+  task: Pick<HrTaskRow, "is_private" | "owner_user_id" | "assignee_staff_id">,
   session: Pick<SessionPayload, "userId" | "role">,
   viewerStaffId: number | null = null,
 ): boolean {
   if (canManageTask(task, session)) return true;
   if (task.is_private) return false;
-  if (task.assignee_user_id !== null && task.assignee_user_id === session.userId) return true;
-  if (viewerStaffId !== null && task.assignee_staff_id !== null && task.assignee_staff_id === viewerStaffId) return true;
-  return false;
+  return viewerStaffId !== null && task.assignee_staff_id !== null && task.assignee_staff_id === viewerStaffId;
 }
+
+/**
+ * حقول الإدارة التي تتجاوز العمل في المهمة — يتطلب أيًّا منها canManageTask
+ * في الخادم على مستوى المسار والحقل، لا في الواجهة: المكلّف يغيّر الحالة
+ * ويعلّق ويعمل في القائمة، ولا يعدّل العنوان أو الأولوية أو الموعد ولا
+ * يُعيد الإسناد (فإعادة الإسناد تمنح غيره الوصول — قرار إداري لا قرار مكلّف).
+ */
+export const TASK_MANAGEMENT_FIELDS = [
+  "title", "description", "priority", "dueAt", "plannedFor", "assigneeStaffId", "convertToShared",
+] as const;
+
+export type TaskManagementField = (typeof TASK_MANAGEMENT_FIELDS)[number];
+
+/** نتيجة تعديل ملف موظف — رفضٌ بسببٍ واضح (400/404/409) أو نجاح بالملف المحدَّث. */
+export type StaffUpdateResult =
+  | { ok: true; staff: HrStaffView; changed: boolean }
+  | { ok: false; error: string; status: number };
 
 /* ── التحقق من المدخلات — خالص وقابل للاختبار ────────────────────────────── */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const CURRENCY_RE = /^[A-Z]{3}$/;
 
 export interface PayTermsInput {
   amountMinor: number;
@@ -286,8 +313,9 @@ export interface PayTermsInput {
 
 /**
  * شروط الأجر تُقبل ثلاثتها معًا أو تُرفض كلها: مبلغٌ بلا عملةٍ ودوريةٍ وتاريخ
- * سريانٍ هو رقمٌ بلا معنى يتعارض يوم الحساب. العملة حروفٌ لاتينية كبيرة ثلاثة
- * (YER وSAR وUSD…) — لا اجتهادٌ في رموز.
+ * سريانٍ هو رقمٌ بلا معنى يتعارض يوم الحساب. المبلغ بالوحدات الصغرى للعملة
+ * (lib/money.ts: اليمني بوحدةٍ واحدة، والسعودي والدولار بالهللة/السنت)،
+ * والعملة إحدى عملات المركز المعتمدة حصرًا (YER/SAR/USD) لا أي رمزٍ من ثلاثة أحرف.
  */
 export function validatePayTermsInput(source: Record<string, unknown>): PayTermsInput | null | string {
   const rawAmount = source.salaryAmountMinor;
@@ -299,10 +327,10 @@ export function validatePayTermsInput(source: Record<string, unknown>): PayTerms
   }
   const amount = Number(rawAmount);
   if (!Number.isInteger(amount) || amount <= 0 || amount > 9_000_000_000_000) {
-    return "مبلغ الراتب رقمٌ صحيح موجب بالوحدات الصغرى.";
+    return "مبلغ الراتب رقمٌ صحيح موجب بالوحدات الصغرى لعملته (اليمني وحدة، والسعودي والدولار هللة/سنت).";
   }
-  if (typeof rawCurrency !== "string" || !CURRENCY_RE.test(rawCurrency)) {
-    return "عملة الراتب ثلاثة أحرف لاتينية كبيرة مثل YER.";
+  if (typeof rawCurrency !== "string" || !isCurrency(rawCurrency)) {
+    return "عملة الراتب إحدى عملات المركز المعتمدة: YER أو SAR أو USD.";
   }
   if (!isHrSalaryPeriod(rawPeriod)) {
     return "دورية الراتب: شهري أو أسبوعي أو يومي أو لكل وردية.";
@@ -394,6 +422,7 @@ export function taskToView(row: HrTaskRow, nowMs: number = Date.now()): HrTaskVi
     status: row.status,
     priority: row.priority,
     dueAt: row.due_at ? new Date(row.due_at).toISOString() : null,
+    plannedFor: dateToIsoDate(row.planned_for),
     overdue,
     overdueDays: overdue ? Math.max(0, Math.floor((nowMs - dueMs) / 86_400_000)) : 0,
     ownerUserId: row.owner_user_id,

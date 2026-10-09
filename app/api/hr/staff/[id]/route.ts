@@ -134,11 +134,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (typeof source.reason === "string" && source.reason.trim()) {
     patch.reason = source.reason.trim().slice(0, 300);
   }
+  // حماية من الحفظ فوق نسخةٍ أحدث: يرسلها العميل كما رآها عند الفتح.
+  if (typeof source.expectedUpdatedAt === "string" && source.expectedUpdatedAt) {
+    patch.expectedUpdatedAt = source.expectedUpdatedAt;
+  }
 
   try {
-    const staff = await updateStaff(id, patch, session);
-    if (!staff) return NextResponse.json({ message: "ملف الموظف غير موجود." }, { status: 404 });
-    return NextResponse.json(staff);
+    const result = await updateStaff(id, patch, session);
+    if (!result.ok) return NextResponse.json({ message: result.error }, { status: result.status });
+    return NextResponse.json(result.staff);
   } catch {
     return NextResponse.json({ message: "تعذّر تعديل الملف — راجع القيم (مثل تعاقد نسبةٍ مع مبلغ راتب)." }, { status: 500 });
   }

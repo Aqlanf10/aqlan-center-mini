@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
-  TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
-  type TaskPriority, type TaskStatus,
+  TASK_LINK_KIND_LABEL, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
+  type TaskLinkKind, type TaskPriority, type TaskStatus,
 } from "@/lib/hr-shared";
 import { canAssignTasks, canUseTasks } from "@/lib/hr-shared";
 import type { SessionInfo } from "@/components/SessionProvider";
@@ -25,6 +25,7 @@ interface TaskView {
   status: TaskStatus;
   priority: TaskPriority;
   dueAt: string | null;
+  plannedFor: string | null;
   overdue: boolean;
   ownerUserId: number;
   ownerDisplayName: string;
@@ -73,6 +74,12 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 function fmtDate(value: string | null): string {
   if (!value) return "—";
   return new Intl.DateTimeFormat("ar", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+/** مفتاح معاملةٍ للعميل: فقدان الرد ثم إعادة الإرسال لا يكرّر الإنشاء. */
+function newRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
@@ -239,6 +246,7 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
                 <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-navy-600">
                   {task.assigneeLabel && <span>المسؤول: {task.assigneeLabel}</span>}
                   <span>صاحبها: {task.ownerDisplayName}</span>
+                  {task.plannedFor && <span>التخطيط: {task.plannedFor}</span>}
                   {task.dueAt && <span>الاستحقاق: {fmtDate(task.dueAt)}</span>}
                 </div>
               </button>
@@ -303,6 +311,7 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
   const [isPrivate, setIsPrivate] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [dueAt, setDueAt] = useState("");
+  const [plannedFor, setPlannedFor] = useState("");
   const [assignee, setAssignee] = useState("");
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -326,7 +335,9 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
         body: JSON.stringify({
           title, description, isPrivate, priority,
           dueAt: dueAt || null,
+          plannedFor: plannedFor || null,
           assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
+          clientRequestId: newRequestId(),
         }),
       });
       if (!response.ok) {
@@ -365,6 +376,11 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
                 <option key={p} value={p}>{TASK_PRIORITY_LABEL[p]}</option>
               ))}
             </select>
+          </label>
+          <label className="grid gap-1 text-sm font-semibold text-navy-800">
+            تاريخ التخطيط
+            <input type="date" value={plannedFor} onChange={(event) => setPlannedFor(event.target.value)}
+              className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
           </label>
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             موعد الاستحقاق
@@ -422,29 +438,48 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
   const [busy, setBusy] = useState(false);
   const [confirmShared, setConfirmShared] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // نموذج التحرير الإداري — لمن يملك canManage: العنوان والأولوية والموعدان والإسناد.
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editPriority, setEditPriority] = useState<TaskPriority>(task.priority);
+  const [editDueAt, setEditDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 16) : "");
+  const [editPlannedFor, setEditPlannedFor] = useState(task.plannedFor ?? "");
+  const [editAssignee, setEditAssignee] = useState(task.assigneeStaffId ? String(task.assigneeStaffId) : "");
+  const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
+  const [editOpen, setEditOpen] = useState(false);
 
-  const patch = async (body: Record<string, unknown>) => {
+  useEffect(() => {
+    if (!editOpen || !oversight) return;
+    void (async () => {
+      const response = await fetch("/api/hr/directory", { cache: "no-store" });
+      if (response.ok) setDirectory((await response.json()) as DirectoryEntry[]);
+    })();
+  }, [editOpen, oversight]);
+
+  const patch = async (body: Record<string, unknown>): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       const response = await fetch(`/api/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        // حماية الحفظ فوق نسخةٍ أحدث: الطابع كما رأيناه — والخادم يردّ 409 عند الاختلاف.
+        body: JSON.stringify({ ...body, expectedUpdatedAt: task.updatedAt }),
       });
       if (!response.ok) {
         const payloadError = (await response.json().catch(() => null)) as { message?: string } | null;
         throw new Error(payloadError?.message ?? "تعذّر التحديث.");
       }
       await onReloadDetail();
+      return true;
     } catch (patchError) {
       setError(patchError instanceof Error ? patchError.message : "تعذّر التحديث.");
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const post = async (path: string, body: Record<string, unknown>, method = "POST") => {
+  const post = async (path: string, body: Record<string, unknown>, method = "POST"): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
@@ -458,11 +493,27 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
         throw new Error(payloadError?.message ?? "تعذّر التنفيذ.");
       }
       await onReloadDetail();
+      return true;
     } catch (postError) {
       setError(postError instanceof Error ? postError.message : "تعذّر التنفيذ.");
+      return false;
     } finally {
       setBusy(false);
     }
+  };
+
+  const submitManagementEdit = async () => {
+    const body: Record<string, unknown> = {
+      title: editTitle.trim(),
+      priority: editPriority,
+      dueAt: editDueAt ? new Date(editDueAt).toISOString() : null,
+      plannedFor: editPlannedFor || null,
+    };
+    if (oversight && !task.isPrivate) {
+      body.assigneeStaffId = editAssignee ? Number(editAssignee) : null;
+    }
+    const ok = await patch(body);
+    if (ok) setEditOpen(false);
   };
 
   return (
@@ -481,6 +532,66 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
         </div>
 
         {task.description && <p className="whitespace-pre-wrap rounded-xl bg-navy-50 p-3 text-sm">{task.description}</p>}
+        {task.plannedFor && <p className="text-xs text-navy-600">تاريخ التخطيط: <span className="ltr-nums">{task.plannedFor}</span>{task.dueAt ? <> — موعد الاستحقاق: <span className="ltr-nums">{fmtDate(task.dueAt)}</span></> : null}</p>}
+
+        {/* التحرير الإداري — لمن يملك canManage (صاحبها أو الإدارة المخولة) */}
+        {detail.permissions.canManage && !editOpen && (
+          <button onClick={() => { setEditOpen(true); setEditTitle(task.title); setEditPriority(task.priority); setEditDueAt(task.dueAt ? task.dueAt.slice(0, 16) : ""); setEditPlannedFor(task.plannedFor ?? ""); setEditAssignee(task.assigneeStaffId ? String(task.assigneeStaffId) : ""); }}
+            className="justify-self-start rounded-xl bg-navy-100 px-4 py-2 text-xs font-semibold text-navy-800">
+            تعديل العنوان والأولوية والمواعيد…
+          </button>
+        )}
+        {detail.permissions.canManage && editOpen && (
+          <div role="form" aria-label="تعديل بيانات المهمة" className="grid gap-2 rounded-xl border border-navy-100 p-3">
+            <label className="grid gap-1 text-sm font-semibold text-navy-800">
+              العنوان
+              <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={200}
+                className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal" />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="grid gap-1 text-sm font-semibold text-navy-800">
+                الأولوية
+                <select value={editPriority} onChange={(event) => setEditPriority(event.target.value as TaskPriority)}
+                  className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
+                  {(Object.keys(TASK_PRIORITY_LABEL) as TaskPriority[]).map((p) => (
+                    <option key={p} value={p}>{TASK_PRIORITY_LABEL[p]}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-semibold text-navy-800">
+                تاريخ التخطيط
+                <input type="date" value={editPlannedFor} onChange={(event) => setEditPlannedFor(event.target.value)}
+                  className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
+              </label>
+              <label className="grid gap-1 text-sm font-semibold text-navy-800">
+                موعد الاستحقاق
+                <input type="datetime-local" value={editDueAt} onChange={(event) => setEditDueAt(event.target.value)}
+                  className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
+              </label>
+              {oversight && !task.isPrivate && (
+                <label className="grid gap-1 text-sm font-semibold text-navy-800">
+                  المسؤول
+                  <select value={editAssignee} onChange={(event) => setEditAssignee(event.target.value)}
+                    className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
+                    <option value="">— بلا إسناد —</option>
+                    {directory.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.fullName}{entry.jobTitle ? ` — ${entry.jobTitle}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button disabled={busy || !editTitle.trim()} onClick={() => void submitManagementEdit()}
+                className="rounded-xl bg-accent-500 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                {busy ? "جارٍ الحفظ…" : "حفظ التعديل"}
+              </button>
+              <button onClick={() => setEditOpen(false)} className="rounded-xl bg-white px-4 py-1.5 text-xs font-semibold text-navy-800">تراجع</button>
+            </div>
+          </div>
+        )}
 
         {/* شريط الحالة — لمن يعمل في المهمة */}
         {detail.permissions.canWork && (
@@ -542,7 +653,10 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
             <form className="flex gap-2" onSubmit={(event) => {
               event.preventDefault();
               if (!checklistLabel.trim()) return;
-              void post("checklist", { op: "add", label: checklistLabel.trim() }).then(() => setChecklistLabel(""));
+              // المسودة تبقى حتى ينجح الحفظ — وفشله يظهر سببه، وفقدان الرد
+              // ثم إعادة الإرسال بنفس المفتاح لا يكرّر البند.
+              void post("checklist", { op: "add", label: checklistLabel.trim(), clientRequestId: newRequestId() })
+                .then((ok) => { if (ok) setChecklistLabel(""); });
             }}>
               <input value={checklistLabel} onChange={(event) => setChecklistLabel(event.target.value)} maxLength={300}
                 placeholder="بند جديد…" className="flex-1 rounded-xl border border-navy-200 px-3 py-2 text-sm" />
@@ -571,7 +685,8 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
             <form className="flex gap-2" onSubmit={(event) => {
               event.preventDefault();
               if (!comment.trim()) return;
-              void post("comments", { body: comment.trim() }).then(() => setComment(""));
+              void post("comments", { body: comment.trim(), clientRequestId: newRequestId() })
+                .then((ok) => { if (ok) setComment(""); });
             }}>
               <input value={comment} onChange={(event) => setComment(event.target.value)} maxLength={2000}
                 placeholder="اكتب تعليقًا — يُسجَّل باسمك" className="flex-1 rounded-xl border border-navy-200 px-3 py-2 text-sm" />
@@ -600,7 +715,8 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
           </ul>
           {detail.permissions.canManage && (
             <p className="text-xs text-navy-500">
-              الربط بمريضٍ أو مختبرٍ أو مخزون يجري من شاشة السجل نفسه: وصولك إلى السجل يُفحص عند الربط وعند كل قراءة، وإكمال المهمة لا يغيّر السجل أبدًا.
+              فكّ الربط يتم من هنا. أما إضافة الربط من شاشة السجل نفسه (المريض/المختبر/المخزون) فتُستكمل في مرحلة قادمة —
+              ووصولك إلى السجل المرتبط يُفحص عند كل قراءة، وإكمال المهمة لا يغيّر السجل أبدًا.
             </p>
           )}
         </section>
@@ -609,13 +725,22 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
         <section aria-label="سجل التغييرات" className="grid gap-1">
           <h3 className="text-sm font-bold text-navy-900">سجل التغييرات</h3>
           <ul className="grid max-h-56 gap-1 overflow-y-auto text-xs">
-            {detail.events.map((event) => (
-              <li key={event.id} className="rounded-lg bg-navy-50 px-3 py-1.5 text-navy-800">
-                <span className="font-semibold">{event.actorDisplayName}</span> — {EVENT_LABEL[event.action] ?? event.action}
-                {event.field && event.newValue ? `: ${event.field} → ${event.newValue}` : ""}
-                <span className="ms-2 text-navy-500">{fmtDate(event.createdAt)}</span>
-              </li>
-            ))}
+            {detail.events.map((event) => {
+              const isLinkEvent = event.action === "link" || event.action === "unlink";
+              const kindLabel = isLinkEvent && event.field && event.field in TASK_LINK_KIND_LABEL
+                ? TASK_LINK_KIND_LABEL[event.field as TaskLinkKind]
+                : null;
+              // أحداث الربط بقيمٍ محجوبة: لا يظهر وسم السجل لمن لا يملك صلاحيته.
+              const valuesHidden = isLinkEvent && event.newValue === null && event.oldValue === null;
+              return (
+                <li key={event.id} className="rounded-lg bg-navy-50 px-3 py-1.5 text-navy-800">
+                  <span className="font-semibold">{event.actorDisplayName}</span> — {EVENT_LABEL[event.action] ?? event.action}
+                  {kindLabel ? ` بسجل ${kindLabel}` : event.field && event.newValue ? `: ${event.field} → ${event.newValue}` : ""}
+                  {valuesHidden ? " — القيم محجوبة عنك (لا صلاحية لك بالسجل المرتبط)" : ""}
+                  <span className="ms-2 text-navy-500">{fmtDate(event.createdAt)}</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
 

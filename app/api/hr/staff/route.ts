@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createStaff, isHrContractKind, isHrDepartment, listStaff, validatePayTermsInput, type CreateStaffInput } from "@/lib/hr";
+import { createStaff, isHrContractKind, isHrDepartment, isHrWorkStatus, listStaff, validatePayTermsInput, type CreateStaffInput } from "@/lib/hr";
 import { canManageStaff } from "@/lib/hr";
 import { cleanDate, cleanOptionalText } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
@@ -62,6 +62,15 @@ export async function POST(request: Request) {
   if (hireDate === undefined) {
     return NextResponse.json({ message: "تاريخ الالتحاق بصيغة YYYY-MM-DD." }, { status: 400 });
   }
+  // الحالة التي اختارها المستخدم تُحفظ كما هي — لا «نشط» مفروض من الخادم.
+  const workStatus = isHrWorkStatus(source.workStatus) ? source.workStatus : "active";
+  const endDate = cleanDate(source.endDate);
+  if (endDate === undefined) {
+    return NextResponse.json({ message: "تاريخ انتهاء الخدمة بصيغة YYYY-MM-DD." }, { status: 400 });
+  }
+  if (endDate !== null && endDate < (hireDate ?? "")) {
+    return NextResponse.json({ message: "تاريخ انتهاء الخدمة لا يسبق تاريخ الالتحاق." }, { status: 400 });
+  }
   if (!isHrContractKind(source.contractKind)) {
     return NextResponse.json({ message: "اختر نوع التعاقد: نسبة أو راتب أو راتب ونسبة." }, { status: 400 });
   }
@@ -96,7 +105,7 @@ export async function POST(request: Request) {
 
   const input: CreateStaffInput = {
     fullName, jobTitle: jobTitle ?? "", department: source.department, hireDate: hireDate ?? null,
-    contractKind, payTerms, phone: phone ?? null, note: note ?? null,
+    workStatus, endDate, contractKind, payTerms, phone: phone ?? null, note: note ?? null,
   };
   try {
     const staff = await createStaff(input, session);

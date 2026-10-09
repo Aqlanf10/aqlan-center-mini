@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
 import { canManageStaff, listStaff } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
 import { getSettingsSafe } from "@/lib/db";
+import { dbTodayISO } from "@/lib/reports";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { HR_CONTRACT_KIND_LABEL, HR_DEPARTMENT_LABEL, HR_SALARY_PERIOD_LABEL, HR_WORK_STATUS_LABEL } from "@/lib/hr";
+import { isCurrency, formatAmount, CURRENCY_SHORT } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +40,18 @@ export default async function HrStaffPrintPage({
   const settings = await getSettingsSafe();
 
   // مجموع لكل عملة على حدة — لا يجتمع الريال بالدولار أبدًا في سطر واحد.
+  // «الجاري» يُحسم بتاريخ التقرير **كما تراه القاعدة بتوقيت المركز** (dbTodayISO
+  // لا حساب UTC): شروطٌ بتاريخ سريانٍ لاحقٍ عليه لا تدخل الإجمالي — تظهر في
+  // صفوفها بأثناءها فقط.
+  const reportAsOf = await dbTodayISO();
   const salaryTotalsByCurrency = new Map<string, number>();
   for (const member of staff) {
-    if (member.payTerms && member.workStatus !== "ended" && member.payTerms.period === "monthly") {
+    if (
+      member.payTerms
+      && member.workStatus !== "ended"
+      && member.payTerms.period === "monthly"
+      && member.payTerms.effectiveOn <= reportAsOf
+    ) {
       salaryTotalsByCurrency.set(
         member.payTerms.currency,
         (salaryTotalsByCurrency.get(member.payTerms.currency) ?? 0) + member.payTerms.amountMinor,
@@ -87,8 +97,8 @@ export default async function HrStaffPrintPage({
               <td className="num">{member.hireDate ?? "—"}</td>
               <td className="num">{member.endDate ?? "—"}</td>
               <td>{HR_CONTRACT_KIND_LABEL[member.contractKind]}</td>
-              <td className="num">{member.payTerms ? member.payTerms.amountMinor.toLocaleString("en") : "—"}</td>
-              <td className="num">{member.payTerms?.currency ?? "—"}</td>
+              <td className="num">{member.payTerms ? formatAmount(member.payTerms.amountMinor, isCurrency(member.payTerms.currency) ? member.payTerms.currency : "YER") : "—"}</td>
+              <td className="num">{member.payTerms ? `${member.payTerms.currency}${isCurrency(member.payTerms.currency) ? ` (${CURRENCY_SHORT[member.payTerms.currency]})` : ""}` : "—"}</td>
               <td>{member.payTerms ? HR_SALARY_PERIOD_LABEL[member.payTerms.period] : "—"}</td>
               <td className="num">{member.payTerms?.effectiveOn ?? "—"}</td>
               <td>{member.userId !== null ? "مرتبط" : "بلا حساب"}</td>
@@ -102,14 +112,15 @@ export default async function HrStaffPrintPage({
 
       {salaryTotalsByCurrency.size > 0 && (
         <section className="hr-salary-summary">
-          <h3>إجمالي الرواتب الشهرية الجارية — كل عملةٍ بمجموعها</h3>
+          <h3>إجمالي الرواتب الشهرية الجارية حتى تاريخ التقرير ({reportAsOf}) — كل عملةٍ بمجموعها</h3>
           <ul>
             {[...salaryTotalsByCurrency.entries()].map(([currency, totalMinor]) => (
               <li key={currency}>
-                <span className="num">{totalMinor.toLocaleString("en")}</span> {currency}
+                <span className="num">{formatAmount(totalMinor, isCurrency(currency) ? currency : "YER")}</span> {currency}
               </li>
             ))}
           </ul>
+          <p className="hr-note">لا يدخل الإجمالي شرطُ راتبٍ بتاريخ سريانٍ لاحقٍ على تاريخ التقرير.</p>
         </section>
       )}
       <p className="hr-note">تعاقدات «النسبة» للطبيبين تُقرأ من مصدر العمولات الحالي في الجهات ولا تظهر هنا كمبالغ راتب.</p>
