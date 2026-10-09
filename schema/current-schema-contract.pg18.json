@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.4",
   "counts": {
-    "tables": 93,
-    "columns": 1192,
-    "constraints": 1124,
-    "indexes": 288,
-    "triggers": 28
+    "tables": 95,
+    "columns": 1236,
+    "constraints": 1176,
+    "indexes": 298,
+    "triggers": 30
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1477,6 +1477,14 @@
           "type": "int4",
           "nullable": false
         },
+        "origin": {
+          "type": "text",
+          "nullable": true
+        },
+        "origin_invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "ortho_case_id": {
           "type": "int4",
           "nullable": true
@@ -1529,11 +1537,21 @@
       "checks": [
         "clinical_cases_check",
         "clinical_cases_check1",
+        "clinical_cases_origin_check",
         "clinical_cases_specialty_check",
         "clinical_cases_status_check",
         "clinical_cases_title_check"
       ],
       "foreignKeys": [
+        {
+          "columns": [
+            "origin_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
         {
           "columns": [
             "ortho_case_id"
@@ -3903,6 +3921,10 @@
           "type": "int4",
           "nullable": false
         },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "quantity": {
           "type": "int4",
           "nullable": false
@@ -3954,6 +3976,15 @@
         },
         {
           "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "service_id"
           ],
           "refTable": "services",
@@ -3980,6 +4011,12 @@
             "id"
           ],
           "unique": true
+        },
+        "invoice_items_plan_item_idx": {
+          "columns": [
+            "plan_item_id"
+          ],
+          "unique": false
         },
         "invoice_items_source_uniq": {
           "columns": [
@@ -4012,6 +4049,14 @@
         "id": {
           "type": "int4",
           "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": true
+        },
+        "idempotency_request_hash": {
+          "type": "text",
+          "nullable": true
         },
         "invoice_number": {
           "type": "text",
@@ -4076,6 +4121,12 @@
             "created_at"
           ],
           "unique": false
+        },
+        "invoices_idempotency_key_uniq": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
         },
         "invoices_invoice_number_key": {
           "columns": [
@@ -4982,6 +5033,326 @@
         }
       },
       "triggers": {}
+    },
+    "legacy_treatment_agreements": {
+      "columns": {
+        "agreed_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "case_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "historical_as_of": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": true
+        },
+        "idempotency_request_hash": {
+          "type": "text",
+          "nullable": true
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "opening_effect": {
+          "type": "text",
+          "nullable": false
+        },
+        "opening_history_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "previously_paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "remaining_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "service_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "service_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "specialty": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "tooth_code": {
+          "type": "int2",
+          "nullable": true
+        },
+        "void_opening_history_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "void_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "voided_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "voided_by": {
+          "type": "text",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "legacy_treatment_agreements_agreed_minor_check",
+        "legacy_treatment_agreements_amounts_check",
+        "legacy_treatment_agreements_currency_check",
+        "legacy_treatment_agreements_opening_check",
+        "legacy_treatment_agreements_opening_effect_check",
+        "legacy_treatment_agreements_previously_paid_minor_check",
+        "legacy_treatment_agreements_remaining_minor_check",
+        "legacy_treatment_agreements_status_check",
+        "legacy_treatment_agreements_void_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "case_id"
+          ],
+          "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "opening_history_id"
+          ],
+          "refTable": "patient_opening_balance_history",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "void_opening_history_id"
+          ],
+          "refTable": "patient_opening_balance_history",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "legacy_treatment_agreements_case_idx": {
+          "columns": [
+            "case_id"
+          ],
+          "unique": false
+        },
+        "legacy_treatment_agreements_idempotency_uniq": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_agreements_live_item_uniq": {
+          "columns": [
+            "plan_item_id"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_agreements_live_scope_uniq": {
+          "columns": [
+            "patient_id",
+            "service_id"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_agreements_patient_idx": {
+          "columns": [
+            "patient_id",
+            "id"
+          ],
+          "unique": false
+        },
+        "legacy_treatment_agreements_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "legacy_treatment_agreements_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "legacy_treatment_coverage_snapshots": {
+      "columns": {
+        "agreement_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "anchor_tooth_code": {
+          "type": "int2",
+          "nullable": true
+        },
+        "format_version": {
+          "type": "int2",
+          "nullable": false
+        },
+        "recorded_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "service_category": {
+          "type": "text",
+          "nullable": false
+        },
+        "service_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "snapshot_mode": {
+          "type": "text",
+          "nullable": false
+        },
+        "snapshot_scope": {
+          "type": "text",
+          "nullable": true
+        },
+        "snapshot_surfaces": {
+          "type": "text",
+          "nullable": true
+        },
+        "snapshot_tooth_codes": {
+          "type": "_int2",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "agreement_id"
+      ],
+      "unique": [],
+      "checks": [
+        "legacy_treatment_coverage_site_check",
+        "legacy_treatment_coverage_snapshots_format_version_check",
+        "legacy_treatment_coverage_snapshots_recorded_at_check",
+        "legacy_treatment_coverage_snapshots_recorded_by_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "agreement_id"
+          ],
+          "refTable": "legacy_treatment_agreements",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "service_id"
+          ],
+          "refTable": "services",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "legacy_treatment_coverage_snapshots_pkey": {
+          "columns": [
+            "agreement_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "legacy_treatment_coverage_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "legacy_treatments": {
       "columns": {
@@ -8147,6 +8518,10 @@
     },
     "plan_items": {
       "columns": {
+        "billed_invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
         "billing_rule": {
           "type": "text",
           "nullable": false
@@ -8181,6 +8556,14 @@
         },
         "note": {
           "type": "text",
+          "nullable": true
+        },
+        "origin": {
+          "type": "text",
+          "nullable": true
+        },
+        "origin_invoice_id": {
+          "type": "int4",
           "nullable": true
         },
         "plan_id": {
@@ -8248,13 +8631,33 @@
         "id"
       ],
       "unique": [],
-      "checks": [],
+      "checks": [
+        "plan_items_origin_check"
+      ],
       "foreignKeys": [
         {
           "columns": [
             "case_id"
           ],
           "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "billed_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "origin_invoice_id"
+          ],
+          "refTable": "invoices",
           "refColumns": [
             "id"
           ]
@@ -8297,6 +8700,12 @@
         }
       ],
       "indexes": {
+        "plan_items_billed_invoice_idx": {
+          "columns": [
+            "billed_invoice_id"
+          ],
+          "unique": false
+        },
         "plan_items_case_idx": {
           "columns": [
             "case_id"

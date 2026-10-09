@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createInvoice, getSettings, listParties, listPatientInvoices, listServices, recordAudit } from "@/lib/db";
-import { checkInvoiceAuthority, formatPriceOverrides, type InvoiceLineAuthorityInput } from "@/lib/invoice-pricing";
+import { getSettings, listParties, listPatientInvoices, listServices } from "@/lib/db";
+import { createLinkedInvoice } from "@/lib/invoice-linkage-db";
+import {
+  INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, linkageRefusalStatus,
+} from "@/lib/invoice-clinical-linkage";
+import { effectiveTemplates } from "@/lib/specialty-templates";
+import { checkInvoiceAuthority, formatPriceOverrides } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
-import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
+import { parseInvoiceInput } from "@/lib/invoice-input";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -43,100 +48,11 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  const patientId = Number(source.patientId);
-  if (!Number.isInteger(patientId) || patientId <= 0) {
-    return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
-  }
-
-  /* (TD-05) عملة الفاتورة من الطلب — YER/SAR/USD بحسب اتفاق المريض،
-     والافتراضي هو العملة الأساسية. وعملةٌ غير معروفة تُرفض لا تُبدَّل بصمت. */
-  if (source.currency !== undefined && source.currency !== null
-    && String(source.currency).trim() !== "" && !isCurrency(source.currency)) {
-    return NextResponse.json({ message: "عملة الفاتورة يجب أن تكون YER أو SAR أو USD." }, { status: 400 });
-  }
-  const base = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
-
-  const rawItems = Array.isArray(source.items) ? source.items : [];
-  if (rawItems.length === 0 || rawItems.length > 40) {
-    return NextResponse.json({ message: "أضف بندًا واحدًا على الأقل." }, { status: 400 });
-  }
-
-  // الأسعار تُقرأ من قائمة الأسعار حين يُختار منها بند، ومن الطلب حين يُكتب مبلغ
-  // يدويًا. والوصف يُؤخذ من الخدمة نفسها لا من الواجهة، فلا تُطبع فاتورة باسم خدمة
-  // وسعرِ أخرى.
   const services = new Map((await listServices(true)).map((service) => [service.id, service]));
-
-  // الأطباء المسجّلون: بندٌ يشير إلى جهةٍ ليست طبيبًا يُرفض، وإلا نُسبت عمولة إلى
-  // مختبر أو مورّد.
   const doctors = new Set((await listParties("doctor")).map((party) => party.id));
-
-  const items: {
-    serviceId: number | null; doctorId: number | null;
-    description: string; quantity: number; unitPriceMinor: number;
-  }[] = [];
-  /* (FIN-4) ما تحتاجه سلطة السعر لكل بند: خدمة الدليل، وهل كُتب السعر، وسببه. */
-  const authorityLines: InvoiceLineAuthorityInput[] = [];
-  for (const raw of rawItems as Record<string, unknown>[]) {
-    const quantity = Math.max(1, Math.round(Number(raw.quantity ?? 1)));
-    if (!Number.isFinite(quantity) || quantity > 999) {
-      return NextResponse.json({ message: "الكمية غير منطقية." }, { status: 400 });
-    }
-
-    const serviceId = Number(raw.serviceId);
-    const service = Number.isInteger(serviceId) ? services.get(serviceId) : undefined;
-
-    const description = service
-      ? service.name
-      : typeof raw.description === "string" ? raw.description.trim().slice(0, 160) : "";
-    if (!description) {
-      return NextResponse.json({ message: "اكتب وصف البند." }, { status: 400 });
-    }
-
-    const priceRaw = raw.price;
-    let unitPriceMinor: number | null;
-    if (priceRaw === undefined || String(priceRaw).trim() === "") {
-      /* (TD-05 owner review — Finding 3) سقوط سعر الدليل مسموحٌ للفاتورة
-       * الأساسية وحدها — فاتورةُ عملة اتفاق (SAR/USD) بلا سعرٍ صريحٍ بعملتها
-       * تُرفض بوضوح: سعر الدليل يمنيّ، ونسخه إليها فسادٌ مالي صامت. الحماية
-       * في الخادم لا في الواجهة — فالمسار المباشر لا يمرّ بواجهة أصلًا. */
-      if (base !== CLINIC_BASE_CURRENCY) {
-        return NextResponse.json(
-          {
-            message: `سعر البند «${description}» بعملة الفاتورة (${base}) إلزامي — سعر الدليل بالعملة الأساسية لا يدخل فاتورةً بعملة اتفاق.`,
-          },
-          { status: 400 },
-        );
-      }
-      unitPriceMinor = service ? service.priceMinor : null;
-    } else {
-      unitPriceMinor = parseAmount(String(priceRaw), base);
-    }
-    if (unitPriceMinor === null) {
-      return NextResponse.json({ message: `اكتب سعرًا صحيحًا لبند «${description}».` }, { status: 400 });
-    }
-
-    const doctorIdRaw = Number(raw.doctorId);
-    const doctorId = Number.isInteger(doctorIdRaw) && doctors.has(doctorIdRaw) ? doctorIdRaw : null;
-    if (raw.doctorId !== undefined && String(raw.doctorId).trim() !== "" && doctorId === null) {
-      return NextResponse.json({ message: "الطبيب المختار غير مسجّل." }, { status: 400 });
-    }
-
-    items.push({ serviceId: service ? service.id : null, doctorId, description, quantity, unitPriceMinor });
-    authorityLines.push({
-      description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
-      explicit: !(priceRaw === undefined || String(priceRaw).trim() === ""),
-      reason: typeof raw.priceReason === "string" ? raw.priceReason : null,
-    });
-  }
-
-  const discountMinor = source.discount === undefined || String(source.discount).trim() === ""
-    ? 0 : parseAmount(String(source.discount), base);
-  if (discountMinor === null) {
-    return NextResponse.json({ message: "اكتب خصمًا صحيحًا." }, { status: 400 });
-  }
-
-  const note = typeof source.note === "string" && source.note.trim()
-    ? source.note.trim().slice(0, 300) : null;
+  const parsed = parseInvoiceInput(source, services, doctors);
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
+  const { patientId, baseCurrency: base, items, authorityLines, discountMinor, note, idempotencyKey } = parsed;
 
   /* (FIN-4) حدّ الخصم نفسه الذي يحكم الزيارة: سعر خدمة الدليل المكتوب أقل، والخصم على
      الفاتورة — بسببٍ مكتوب، ولغير المدير حتى `billing.max_discount_percent`. */
@@ -156,26 +72,27 @@ export async function POST(request: Request) {
   }
 
   try {
-    const invoice = await createInvoice({
-      patientId, baseCurrency: base, discountMinor, note,
-      createdBy: session.username, items,
-    });
-    if (!invoice) return NextResponse.json({ message: "تعذّر إنشاء الفاتورة." }, { status: 500 });
-    await recordAudit({
-      action: "invoice.create",
-      entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoiceNumber,
-      details: {
-        المريض: patientId, الإجمالي: invoice.totalMinor, الخصم: invoice.discountMinor,
-        عدد_البنود: invoice.items.length,
+    const result = await createLinkedInvoice({
+      patientId, baseCurrency: base, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
+      idempotencyKey,
+      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, note, items }) : null,
+      auditDetails: {
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
-        ...(authority.overrides.length ? {
-          أسعار_معدلة: formatPriceOverrides(authority.overrides),
-        } : {}),
+        ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
       },
-      actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(invoice, { status: 201 });
+    if (!result.ok) {
+      if (result.reason === "no_patient") return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
+      const prefix = result.line !== null ? `البند ${result.line + 1}: ` : "";
+      const status = linkageRefusalStatus(result.reason);
+      return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
+    }
+    return NextResponse.json(
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links }, replayed: result.replayed },
+      { status: result.replayed ? 200 : 201 },
+    );
   } catch {
-    return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. تأكد من المريض." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. أعد المحاولة." }, { status: 500 });
   }
 }

@@ -48,6 +48,8 @@ export type AuditAction =
   | "plan.price_override"
   | "opening_balance.set" | "opening_balance.clear"
   | "legacy_balance_arrangement.create" | "legacy_balance_arrangement.cancel"
+  /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وإبطاله. */
+  | "legacy_treatment.create" | "legacy_treatment.void"
   | "fx.revalue"
   | "journal.manual"
   | "settings.update"
@@ -194,6 +196,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "opening_balance.clear": "حذف رصيد افتتاحي",
   "legacy_balance_arrangement.create": "ترتيب تحصيل رصيد سابق",
   "legacy_balance_arrangement.cancel": "إلغاء ترتيب تحصيل رصيد سابق",
+  "legacy_treatment.create": "تسجيل علاج بدأ قبل النظام (اتفاق تاريخي)",
+  "legacy_treatment.void": "إبطال اتفاق علاج بدأ قبل النظام",
   "fx.revalue": "إعادة تقييم عملة",
   "journal.manual": "قيد يدوي",
   "settings.update": "تغيير إعداد",
@@ -361,6 +365,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "patient.import", "legacy.import",
   "invoice.cancel", "invoice.correct", "invoice.status", "plan.status",
   "party_opening.create", "party_opening.adjust", "party_advance.create", "party_advance.void", "payment.refund", "payment.correct", "expense.void", "expense.rate_override", "expense.prepayment", "opening_balance.set", "opening_balance.clear",
+  "legacy_treatment.create", "legacy_treatment.void",
   "journal.manual", "fx.revalue", "settings.update", "user.create", "user.update",
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",

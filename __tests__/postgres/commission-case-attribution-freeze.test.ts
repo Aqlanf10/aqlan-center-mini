@@ -266,16 +266,18 @@ describe("historical commission case attribution", () => {
 /** An independent observer proves actual lock contention, rather than assuming
  * a race from Promise.all or sleep. Triggers gate canonical transactions only in
  * this isolated test schema; every gate is released in finally. */
-async function waitForLock(witness: Client, pattern: string) {
+async function waitForLock(witness: Client, pattern: string, blockerPid: number): Promise<number> {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    const { rows } = await witness.query<{ found: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
-        AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query ~ $1) AS found`, [pattern]);
-    if (rows[0].found) return;
+    const { rows } = await witness.query<{ pid: number }>(
+      `SELECT pid FROM pg_stat_activity WHERE datname = current_database()
+        AND pid <> pg_backend_pid() AND pid <> $2 AND state = 'active'
+        AND wait_event_type = 'Lock' AND query ~ $1
+        AND $2::int = ANY(pg_blocking_pids(pid))`, [pattern, blockerPid]);
+    if (rows[0]) return rows[0].pid;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
-  throw new Error(`Expected actual PostgreSQL lock waiter: ${pattern}`);
+  throw new Error(`Expected actual PostgreSQL lock waiter blocked by PID ${blockerPid}: ${pattern}`);
 }
 async function gatedRace(s: Scenario, first: "sign" | "relink") {
   const gate = new Client({ connectionString: process.env.DATABASE_URL!, ssl: false });
@@ -287,6 +289,8 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
   await gate.connect();
   await witness.connect();
   try {
+    const { rows: [gateBackend] } = await gate.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [witnessBackend] } = await witness.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     await q(`CREATE FUNCTION case_freeze_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN PERFORM pg_advisory_xact_lock(194280, 1); RETURN NEW; END $$`);
     await q(`CREATE TRIGGER case_freeze_test_gate BEFORE UPDATE OF ${column} ON ${table}
@@ -296,10 +300,17 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
     await gate.query("SELECT pg_advisory_xact_lock(194280, 1)");
     const firstOperation = first === "sign" ? sign(s) : relink(s, s.caseB);
     pending = [firstOperation];
-    await waitForLock(witness, first === "sign" ? "UPDATE visits SET signed_at" : "UPDATE plan_items SET case_id");
+    const firstPid = await waitForLock(
+      witness, first === "sign" ? "UPDATE visits SET signed_at" : "UPDATE plan_items SET case_id", gateBackend.pid,
+    );
     const secondOperation = first === "sign" ? relink(s, s.caseB) : sign(s);
     pending.push(secondOperation);
-    await waitForLock(witness, first === "sign" ? "SELECT[\\s\\S]*FROM plan_items[\\s\\S]*FOR UPDATE" : "SELECT id FROM plan_items[\\s\\S]*FOR UPDATE");
+    // Both services lock the patient before the visit/plan item. Prove the
+    // second backend waits on the first, which still waits on our trigger gate.
+    const secondPid = await waitForLock(
+      witness, "^SELECT id FROM patients WHERE id = \\$1 FOR NO KEY UPDATE$", firstPid,
+    );
+    expect(new Set([gateBackend.pid, witnessBackend.pid, firstPid, secondPid]).size).toBe(4);
     await gate.query("COMMIT");
     const outcomes = await Promise.all(pending);
     return first === "sign" ? { signed: outcomes[0], linked: outcomes[1] } : { signed: outcomes[1], linked: outcomes[0] };
@@ -313,7 +324,7 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
   }
 }
 
-describe("case edit versus signing uses the existing canonical item lock", () => {
+describe("case edit versus signing uses the canonical patient-first lock order", () => {
   it("rejects an edit that waited behind signature and its newly committed invoice", async () => {
     const s = await scenario();
     const result = await gatedRace(s, "sign");

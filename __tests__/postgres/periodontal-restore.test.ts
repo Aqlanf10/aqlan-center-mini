@@ -18,9 +18,10 @@ import { readTarGzEntries, type ParsedArchive } from "../../lib/restore/archive"
 import { stagedRestore, type StagedRestoreResult } from "../../lib/restore/staging";
 import { validateBackupArchive } from "../../lib/restore/validate";
 import { tarEnd, tarHeader, tarPadding } from "../../lib/tar";
-import { openPeriodontalFixture } from "./_periodontal-fixture";
+import { openPeriodontalFixture, periodontalCandidateMigrationVersion } from "./_periodontal-fixture";
 
-// Candidate compatibility only. Production still has numbered migrations 0001–0040.
+// Candidate compatibility only: reviewed 0001–0040, invoice0041, optional legacy0042, and immutable-coverage0043 chains.
+// All candidate numbering is test-only; no shipped migration or runtime activation changes.
 // Replace ONLY the filesystem selection imported by stagedRestore. migrate,
 // migrationStatus, archive validation, replay, PostgreSQL and transactions are real.
 const selection = vi.hoisted(() => ({ directory: "" }));
@@ -40,6 +41,8 @@ let fixture: Awaited<ReturnType<typeof openPeriodontalFixture>> | undefined;
 let directory: string | undefined;
 let archivePath: string, stagingDir: string;
 let candidateFiles: Awaited<ReturnType<typeof readMigrationFiles>>;
+let shippedCount = 0;
+let shippedFiles: Awaited<ReturnType<typeof readMigrationFiles>>;
 let sourceState: Awaited<ReturnType<typeof state>>;
 let restored: StagedRestoreResult;
 let patientA: number, patientB: number;
@@ -127,16 +130,22 @@ beforeAll(async () => {
   selection.directory = path.join(directory, "candidate-migrations");
   await mkdir(selection.directory);
   const shipped = await readMigrationFiles();
+  shippedFiles = shipped;
+  const candidateVersion = periodontalCandidateMigrationVersion(shipped);
+  // Only exact reviewed baselines are accepted: 0001–0040, أو 0041–0043 بعد دمج الفواتير،
+  // أو 0045–0046 (لاحقة هذه المرحلة) — والمرشّح يأخذ الفجوة المعلنة 0044 في الاختبار.
+  shippedCount = shipped.length;
   expect(shipped.map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
-  await copyFile(candidatePath, path.join(selection.directory, "0041_periodontal_candidate.sql"));
+  await copyFile(candidatePath, path.join(selection.directory, `${candidateVersion}_periodontal_candidate.sql`));
   candidateFiles = await readMigrationFiles(selection.directory);
-  // السلسلة المنسّقة فيها 0044/0045 بعد 0040، ومرشّح 0041 يُدرَج بينهما ترتيبًا —
-  // فالمقارنة بالمجموعة (بالترتيب بعد استبعاد المرشّح) لا بالموضع.
-  expect(candidateFiles.filter((file) => file.version !== "0041")).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
-  expect(candidateFiles.find((file) => file.version === "0041")!.sql).toBe(PERIODONTAL_SQL);
+  // المرشّح قد يقع في منتصف السلسلة (فجوة 0044 المعلنة بين 0043 و0045) —
+  // فالمقارنة بالمجموعة المرتبة بعد استبعاد المرشّح لا بالموضع.
+  expect(candidateFiles.filter((file) => file.version !== candidateVersion)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
+  expect(candidateFiles).toHaveLength(shippedCount + 1);
+  expect(candidateFiles.find((file) => file.version === candidateVersion)!.sql).toBe(PERIODONTAL_SQL);
 
   fixture = await openPeriodontalFixture(originalEnvironment);
   const { rows: patients } = await pool().query<{ id: number }>(`INSERT INTO patients (patient_number,full_name)
@@ -221,6 +230,7 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     expect((await migrationStatus(pool(), candidateFiles)).consistent).toBe(true);
     expect((await readMigrationFiles()).map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
+    expect(await readMigrationFiles()).toEqual(shippedFiles); // Exact original SQL and checksums remain unchanged.
   });
   it("preserves exact IDs, patients, teeth, predecessors, authors, request fingerprints, values and audits", async () => {
     const actual = await state();

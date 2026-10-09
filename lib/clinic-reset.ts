@@ -86,6 +86,9 @@ export const RESET_WIPE_TABLES = [
   "plan_installments",
   // (COMM-DETAIL-1) النسبة الخاصة بالحالة — تُمسح مع حالاتها وخططها (TRUNCATE لا يطلق حارس الصفوف)
   "commission_case_overrides",
+  // (INV-LEGACY) الاتفاقات التاريخية لعلاجٍ بدأ قبل النظام — تُمسح مع بنودها وحالاتها ومرضاها (TRUNCATE لا يطلق حارسها)
+  "legacy_treatment_coverage_snapshots",
+  "legacy_treatment_agreements",
   "plan_items",
   "clinical_cases",
   "treatment_plans",

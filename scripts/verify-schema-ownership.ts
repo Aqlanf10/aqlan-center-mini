@@ -204,7 +204,16 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
   const expected = COORDINATED_MIGRATION_VERSIONS;
   const actual = files.map((file) => file.version);
-  if (actual.join(",") !== expected.join(",")) {
+  // لاحقة المراجعة خارج قاعدة 0001–0040: فواتير 0041–0043 المدمجة، ثم لاحقة هذه
+  // المرحلة 0045–0046 — والفجوة 0044 معلنة (مرشّح فواتير مفتوح #301 لا يُشحن هنا).
+  const reviewedSuffixes = [
+    "0041_invoice_clinical_linkage.sql",
+    "0042_legacy_treatment_agreements.sql",
+    "0043_legacy_treatment_coverage.sql",
+    "0045_hr_staff.sql",
+    "0046_hr_tasks.sql",
+  ];
+  if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
 }

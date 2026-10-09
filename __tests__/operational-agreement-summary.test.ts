@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SummaryTab } from "../components/patient/SummaryTab";
 import { formatMoney } from "../lib/money";
+import { readWorkflowCases } from "../lib/patient-workflow-cases";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 
 vi.stubEnv("USE_LOCAL_DB", "true");
@@ -35,8 +36,11 @@ it("300 SAR agreement: paid 100 then 40 leaves 200 then 160 while current invoic
   expect(first.financial?.byCurrency.SAR).toMatchObject({ agreedMinor: 30_000,
     agreementPaidMinor: 10_000, agreementRemainingMinor: 20_000, balanceMinor: 0 });
   expect(first.financial?.byCurrency.YER.agreementRemainingMinor).toBe(0);
+  // Match the patient page: validate case ownership before rendering its summary.
+  const cases = readWorkflowCases(first, patient.id, true);
+  if (!cases) throw new Error("Invalid patient workflow case projections");
   const html = renderToStaticMarkup(createElement(SummaryTab, {
-    summary: { ...first, canSeeFinancial: true }, patientId: patient.id,
+    summary: { ...first, ...cases, canSeeFinancial: true }, patientId: patient.id,
     patientName: "مريض تجريبي", patientNumber: "OP-SAR-1", patientPhone: null, base: "YER",
     onVisitStarted: () => {}, onChanged: () => {}, onGoToTab: () => {},
   }));

@@ -304,13 +304,20 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
             {data.cases.map((item) => (
               <li key={item.id ?? `ortho-${item.orthoCaseId}`} className="rounded-xl border border-slate-200 p-2.5 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span className="font-extrabold text-navy-900">{item.title}{item.site ? ` · ${item.site}` : ""}</span>
+                  <span className="font-extrabold text-navy-900">{item.title}{item.site ? ` · ${item.site}` : ""}
+                    {item.legacy ? (
+                      <span data-testid="legacy-case-badge" className="ms-1.5 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">حالة بدأت قبل النظام</span>
+                    ) : null}
+                  </span>
                   <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${STATUS_TONE[item.status]}`}>{CASE_STATUS_LABEL[item.status]}</span>
                 </div>
                 <p className="mt-1 text-xs text-slate-600">
                   {specialtyLabel(item.specialty)} · المسؤول: {item.responsibleName ?? "—"}
-                  {item.itemsTotal > 0 ? ` · البنود ${item.itemsDone}/${item.itemsTotal}` : ""}
+                  {item.itemsTotal > 0 ? ` · ${item.legacy ? "البنود المسجّلة داخل النظام" : "البنود"} ${item.itemsDone}/${item.itemsTotal}` : ""}
                 </p>
+                {item.legacy ? <p className="mt-1 text-xs text-indigo-900">
+                  التقدّم السابق غير معلوم من التسجيل المالي. يلزم التقييم والموافقة الفعلية والتحقق من التغطية قبل التوقيع؛ حفظ المسودة متاح.
+                </p> : null}
                 {item.waitingOn?.length ? (
                   <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
                     بانتظار: {item.waitingOn.join("، ")}

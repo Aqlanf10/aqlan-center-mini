@@ -1,0 +1,75 @@
+{
+  "source": "GitHub Actions job log, decoded from SYNTHETIC_PRINT_EVIDENCE_V1 records (scope legacy-treatment-journey)",
+  "runId": "37837236454",
+  "runAttempt": "1",
+  "ref": "refs/heads/feat/invoice-first-legacy",
+  "githubSha": "ede1a66e785798353333b52823b8c6a275d04a50",
+  "checkoutSha": "ede1a66e785798353333b52823b8c6a275d04a50",
+  "checkoutParents": [],
+  "prHeadSha": "ede1a66e785798353333b52823b8c6a275d04a50",
+  "acceptance": true,
+  "synthetic": true,
+  "note": "Every member matched the byte count and SHA-256 of its BEGIN/END record. These are this run's own outputs, distinct from older committed screenshots. checkoutParents is empty when CI uses a shallow checkout.",
+  "members": [
+    {
+      "file": "legacy-treatment-form-1280.png",
+      "mime": "image/png",
+      "bytes": 198560,
+      "sha256": "01177e558fa3abebe7227cedfaa43ed9eb5a85d4f773720cf2a19b9345960306"
+    },
+    {
+      "file": "legacy-treatment-saved-1280.png",
+      "mime": "image/png",
+      "bytes": 210024,
+      "sha256": "03ed29e350c9a5d0f267aff4f1a7d659705684630b6c9990d74d811a1a5a5535"
+    },
+    {
+      "file": "legacy-treatment-case-1280.png",
+      "mime": "image/png",
+      "bytes": 104780,
+      "sha256": "643b7bb7550b8c17d0f63a7fd8639350566d64f20ca16be5e68a88b7fa6e40a2"
+    },
+    {
+      "file": "legacy-treatment-account-1280.png",
+      "mime": "image/png",
+      "bytes": 203577,
+      "sha256": "f0e33f6dda64688a0cc0c9a9fd847312bcae66f93497d249ed2e5c723d04d0b1"
+    },
+    {
+      "file": "legacy-treatment-plan-print.pdf",
+      "mime": "application/pdf",
+      "bytes": 301243,
+      "sha256": "1d466c067a41c0aea03d67bee18ff7487d133edbc5a741acb2aff985441f3b8a"
+    },
+    {
+      "file": "legacy-treatment-statement-print.pdf",
+      "mime": "application/pdf",
+      "bytes": 303951,
+      "sha256": "220b1ac32963d9ec6ad6d460479593ea6dec42a417d547d82d999762f68f0934"
+    },
+    {
+      "file": "legacy-treatment-form-390.png",
+      "mime": "image/png",
+      "bytes": 157949,
+      "sha256": "7a1755b5ab13107cc82a3b825df86918bf275f8b77b9d7ad09babe651e44e7b2"
+    },
+    {
+      "file": "legacy-treatment-saved-390.png",
+      "mime": "image/png",
+      "bytes": 170183,
+      "sha256": "b3ac99acbe821d06d0f237ea0701a98d5efdca94376275d45a56608aee79e14f"
+    },
+    {
+      "file": "legacy-treatment-case-390.png",
+      "mime": "image/png",
+      "bytes": 62847,
+      "sha256": "8ace964638f8899e9a684b422573994d5ddd2462755b34ca766eaf07c3626f23"
+    },
+    {
+      "file": "legacy-treatment-account-390.png",
+      "mime": "image/png",
+      "bytes": 163047,
+      "sha256": "c92d2c15f2c1ba7e495b25888fa3210b41a64a9e34b4503d185450312545ca2a"
+    }
+  ]
+}
