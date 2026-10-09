@@ -93,6 +93,12 @@ describe("patient context navigation on the built application", () => {
         expect(await page.locator("h1:visible").count()).toBe(1);
         expect(await page.getByTestId("patient-primary-action").count()).toBe(1);
         expect(await page.getByTestId("patient-medical-alert-banner").innerText()).toContain(warning);
+        expect(await page.getByTestId("patient-context-strip").innerText()).toContain("العلامات الحيوية في تنبيه الملف: غير مسجلة");
+        await page.getByTestId("patient-details-toggle").click();
+        expect(await page.locator("h1:visible").count()).toBe(1);
+        expect(await page.getByRole("button", { name: "+ تسجيل العلامات الحيوية وفصيلة الدم", exact: true }).count()).toBe(0);
+        expect(await page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true }).isVisible()).toBe(true);
+        await page.getByTestId("patient-details-toggle").click();
         await page.getByRole("region", { name: "التاريخ الطبي", exact: true }).waitFor();
         expect(await page.getByRole("region", { name: "ما قاله المريض عن صحته", exact: true }).isVisible()).toBe(true);
         const details = page.getByTestId("summary-administrative-details");
@@ -106,7 +112,9 @@ describe("patient context navigation on the built application", () => {
         expect(order).toBe(true);
         const toggle = details.locator(":scope > summary");
         await toggle.focus(); await page.keyboard.press("Enter");
-        const email = details.getByRole("textbox", { name: "البريد الإلكتروني", exact: true });
+        // The existing label gains a Save button while dirty; target its single
+        // email input so the assertion does not depend on that changing label text.
+        const email = details.locator('input[type="email"]');
         await expect.poll(() => email.isEnabled()).toBe(true);
         await email.fill("unsaved-synthetic@example.test");
         await toggle.click(); expect(await email.isVisible()).toBe(false);

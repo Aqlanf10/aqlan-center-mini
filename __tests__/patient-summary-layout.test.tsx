@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { SummaryTab, type WorkflowSummary } from "../components/patient/SummaryTab";
+import { PatientCockpit } from "../components/patient/PatientCockpit";
 import { formatMoney } from "../lib/money";
 
 // Test the real Summary markup while keeping network-owning leaves out of SSR.
@@ -10,6 +11,15 @@ vi.mock("../components/ReceiptCorrectionLauncher", () => ({ ReceiptCorrectionLau
 vi.mock("../components/PortalInviteRow", () => ({ PortalInviteRow: () => createElement("div", { "data-testid": "portal-invite" }) }));
 vi.mock("../components/patient/PatientTimeline", () => ({ PatientTimeline: () => createElement("div", { "data-testid": "timeline" }) }));
 vi.mock("../components/patient/PatientIntakeHistory", () => ({ PatientIntakeHistory: () => createElement("section", { "data-testid": "intake-history" }, "Self-reported medical information") }));
+vi.mock("../components/SettingsProvider", () => ({ useChairCount: () => 3 }));
+const cockpit = vi.hoisted(() => ({ unavailable: false }));
+vi.mock("../components/patient/usePatientCockpitReadiness", () => ({ usePatientCockpitReadiness: () => ({
+  visit: null, alerts: ["تحذير طبي ظاهر"], readiness: cockpit.unavailable ? "unavailable" : "ready",
+  chairsState: cockpit.unavailable ? "unavailable" : "ready", coherent: !cockpit.unavailable,
+  canOperate: true, active: false, freeChairs: [1], selectedChair: 1, busy: false, message: null,
+  canEnterChair: !cockpit.unavailable, setChair: () => undefined, reload: () => undefined,
+  clear: () => undefined, enterChair: () => undefined,
+}) }));
 
 const noop = () => undefined;
 const summary: WorkflowSummary = {
@@ -32,6 +42,30 @@ function before(html: string, first: string, second: string) {
 }
 
 describe("task-first Summary presentation", () => {
+  it("groups one identity and primary task while retaining subordinate chair controls and unknown-state feedback", () => {
+    const props = {
+      patientId: 91, patientName: "مريض اصطناعي", patientPhone: null, fallbackAlert: null,
+      summary: null, onOpenTab: noop, onChanged: noop, compact: true,
+      identity: createElement("h1", null, "مريض اصطناعي"),
+      primaryAction: createElement("button", { "data-testid": "synthetic-primary" }, "المهمة الحالية"),
+      secondaryActions: createElement("button", null, "المزيد"),
+    };
+    cockpit.unavailable = false;
+    const html = renderToStaticMarkup(createElement(PatientCockpit, props));
+    expect(html.match(/<h1>/g)).toHaveLength(1);
+    expect(html.match(/data-testid="synthetic-primary"/g)).toHaveLength(1);
+    expect(html).toContain("إجراءات الزيارة");
+    expect(html).toContain("إدخال إلى الكرسي");
+    expect(html).not.toContain("bg-brand-orange");
+    expect(html).toContain("تحذير طبي ظاهر");
+    cockpit.unavailable = true;
+    const unavailable = renderToStaticMarkup(createElement(PatientCockpit, props));
+    expect(unavailable).toContain("تعذّر التحقق من الزيارة؛ إدخال الكرسي متوقف حتى التحديث.");
+    expect(unavailable).toContain("إعادة التحقق");
+    expect(unavailable).toContain("تحذير طبي ظاهر");
+    cockpit.unavailable = false;
+  });
+
   it("keeps safety, shortcuts and planned work before secondary administration", () => {
     const html = render();
     before(html, "تحذير يحتاج المراجعة", 'data-testid="summary-current-work"');
