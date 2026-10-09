@@ -373,3 +373,151 @@ describe("full settlement with odd minor units ends exactly at the reduced accru
     await statementMatchesReport([a, b]);
   });
 });
+
+/** Everything a refused change must leave untouched. */
+async function financialState(patientId: number) {
+  const q = async (sql: string) => (await getPool().query(sql, [patientId])).rows;
+  return {
+    invoices: await q(`SELECT id, status, total_minor::text, discount_minor::text FROM invoices WHERE patient_id = $1 ORDER BY id`),
+    items: await q(`SELECT it.id, it.invoice_id, it.total_minor::text FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id WHERE i.patient_id = $1 ORDER BY it.id`),
+    adminRows: await q(`SELECT l.id, l.invoice_id, l.invoice_item_id, l.amount_minor::text, l.discounted_at::text FROM invoice_admin_discount_lines l
+      JOIN invoices i ON i.id = l.invoice_id WHERE i.patient_id = $1 ORDER BY l.id`),
+    audits: await q(`SELECT COUNT(*)::int AS n FROM audit_log a JOIN invoices i ON a.entity = 'invoice' AND a.entity_id = i.id::text WHERE i.patient_id = $1`),
+  };
+}
+const payout = async (doctorId: number, amountMinor: number) => {
+  const result = await recordExpense({ category: "commission", partyId: doctorId, payeeText: null, amountMinor, currency: "YER",
+    baseCurrency: "YER", exchangeRate: 1, payableId: null, note: null, createdBy: "cashier" });
+  expect(result.expense).not.toBeNull();
+};
+const itemOf = async (invoiceId: number, doctorId: number) => (await getPool().query<{ id: number }>(
+  `SELECT id FROM invoice_items WHERE invoice_id = $1 AND doctor_id = $2`, [invoiceId, doctorId])).rows[0].id;
+
+describe("protected earned prefix above the new target is refused, paid or not (review 5464662510)", () => {
+  async function setup() {
+    const d = await doctor(50);
+    const patientId = await patient();
+    const id = await bill(patientId, [[d, 100000]]);
+    const { rows: [visit] } = await getPool().query<{ id: number }>(
+      `INSERT INTO visits (patient_name, patient_id, doctor_id, invoice_id) VALUES ('مريض خصم اصطناعي', $1, $2, $3) RETURNING id`, [patientId, d, id]);
+    await getPool().query(`INSERT INTO lab_orders (patient_id, lab_name, work_type, sent_date, due_date, status, visit_id, doctor_id, cost_minor, cost_currency)
+      VALUES ($1, 'مختبر', 'تاج', CURRENT_DATE, CURRENT_DATE, 'delivered', $2, $3, 20000, 'YER')`, [patientId, visit.id, d]);
+    await pay(patientId, id, 30000);
+    expect(row(await commissionReport("2000-01-01", today()), d)).toEqual({ accrued: 40000, earned: 12000 });
+    return { d, patientId, id };
+  }
+
+  it("unpaid prefix: a discount to net 30,000 (target 5,000 < earned 12,000) is refused for an owner decision, nothing written", async () => {
+    const { d, patientId, id } = await setup();
+    const before = await financialState(patientId);
+    const refused = await discount(id, 70000);
+    expect(refused).toMatchObject({ ok: false, reason: "commission_review" });
+    if (!refused.ok) expect(refused.message).toMatch(/قرارٌ للمالك/);
+    expect(await financialState(patientId)).toEqual(before);
+    expect(row(await commissionReport("2000-01-01", today()), d)).toEqual({ accrued: 40000, earned: 12000 });
+    // A decision that keeps the target at or above what was earned is still accepted.
+    expect(await discount(id, 50000)).toMatchObject({ ok: true });
+    expect(row(await commissionReport("2000-01-01", today()), d)).toEqual({ accrued: 15000, earned: 12000 });
+  });
+
+  it("paid prefix: with the 12,000 already paid, the same discount is refused for an administrative settlement, nothing written", async () => {
+    const { d, patientId, id } = await setup();
+    await payout(d, 12000);
+    const before = await financialState(patientId);
+    const refused = await discount(id, 70000);
+    expect(refused).toMatchObject({ ok: false, reason: "commission_paid" });
+    if (!refused.ok) expect(refused.message).toMatch(/تسوية إدارية/);
+    expect(await financialState(patientId)).toEqual(before);
+  });
+});
+
+describe("correction of an admin-discounted invoice is guarded (review 5464653525)", () => {
+  it("invoiced basis: invoice → payout → discount → correction below the paid amount is refused with no partial mutation", async () => {
+    const d = await doctor(50, { basis: "invoiced" });
+    const patientId = await patient();
+    const id = await bill(patientId, [[d, 100000]]);
+    await payout(d, 45000);
+    expect(await discount(id, 10000)).toMatchObject({ ok: true }); // earned 45,000 = paid 45,000
+    const before = await financialState(patientId);
+    const refused = await correctInvoice({ invoiceId: id, lines: [{ itemId: await itemOf(id, d), quantity: 1, unitPriceMinor: 90000 }],
+      reason: "تصحيح السعر", actor: "admin1", actorRole: "admin" });
+    expect(refused).toMatchObject({ ok: false, reason: "commission_paid" });
+    if (!refused.ok) expect(refused.message).toMatch(/تسوية إدارية/);
+    expect(await financialState(patientId)).toEqual(before); // original still open, no replacement, rows and audits unchanged
+  });
+
+  it("a safe correction (removed line of another doctor) is accepted; a repeated correction of the replacement is guarded again", async () => {
+    const a = await doctor(50, { basis: "invoiced" });
+    const b = await doctor(30);
+    const patientId = await patient();
+    const id = await bill(patientId, [[a, 60000], [b, 40000]]);
+    expect(await discount(id, 10000)).toMatchObject({ ok: true }); // A: 54,000 × 50% = 27,000
+    await payout(a, 27000);
+    const first = await correctInvoice({ invoiceId: id, lines: [{ itemId: await itemOf(id, a), quantity: 1, unitPriceMinor: 60000 }],
+      reason: "بند لم يُعمل", actor: "admin1", actorRole: "admin" });
+    if (!first.ok) throw new Error(first.message);
+    const next = first.corrected.id;
+    expect(row(await commissionReport("2000-01-01", today()), a)).toEqual({ accrued: 27000, earned: 27000 });
+    const before = await financialState(patientId);
+    const second = await correctInvoice({ invoiceId: next, lines: [{ itemId: await itemOf(next, a), quantity: 1, unitPriceMinor: 50000 }],
+      reason: "تصحيح ثانٍ", actor: "admin1", actorRole: "admin" });
+    expect(second).toMatchObject({ ok: false, reason: "commission_paid" });
+    expect(await financialState(patientId)).toEqual(before);
+  });
+
+  it("a commission payout racing a guarded correction queues instead of deadlocking, and both complete consistently", async () => {
+    // The correction is held on its invoice row while it already holds its locks; the payout (party FOR UPDATE → shift) starts
+    // then. Taking the shift before the doctor's party row would close a cycle once the replacement lines take KEY SHARE on it.
+    const d = await doctor(50, { basis: "invoiced" });
+    const patientId = await patient();
+    const id = await bill(patientId, [[d, 100000]]);
+    expect(await discount(id, 10000)).toMatchObject({ ok: true }); // accrued 45,000
+    const { Client } = await import("pg");
+    const hold = new Client({ connectionString: process.env.DATABASE_URL });
+    await hold.connect();
+    await hold.query("BEGIN");
+    await hold.query(`SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, [id]);
+    const waiting = async (fragment: string) => Number((await getPool().query(`SELECT COUNT(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE $1`, [`%${fragment}%`])).rows[0].n);
+    const until = async (check: () => Promise<boolean>) => {
+      for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
+      throw new Error("condition not reached");
+    };
+    const correcting = correctInvoice({ invoiceId: id, lines: [{ itemId: await itemOf(id, d), quantity: 1, unitPriceMinor: 95000 }],
+      reason: "تصحيح السعر", actor: "admin1", actorRole: "admin" });
+    await until(async () => await waiting("FROM invoices WHERE id = $1 FOR UPDATE") >= 1);
+    const paying = recordExpense({ category: "commission", partyId: d, payeeText: null, amountMinor: 45000, currency: "YER",
+      baseCurrency: "YER", exchangeRate: 1, payableId: null, note: null, createdBy: "cashier" });
+    await until(async () => await waiting("FROM parties WHERE id = $1 FOR UPDATE") >= 1); // the payout queues behind the correction
+    await hold.query("COMMIT");
+    await hold.end();
+    const [corrected, paid] = await Promise.all([correcting, paying]);
+    expect(corrected.ok).toBe(true); // decided on paid 0: (95,000 − 10,000) × 50% = 42,500
+    expect(paid.expense).not.toBeNull(); // then 45,000 paid against 42,500: shown as it is, nothing hidden
+    const report = (await commissionReport("2000-01-01", today())).find((one) => one.doctorId === d && one.currency === "YER")!;
+    expect(report).toMatchObject({ accruedMinor: 42500, earnedMinor: 42500, paidMinor: 45000, dueMinor: -2500 });
+  });
+});
+
+describe("decision timestamps are database-owned at full precision (review 5464679755)", () => {
+  it("rows carry the transaction's now() exactly (same as the audit row), and a correction copies them exactly", async () => {
+    const d = await doctor(50);
+    const patientId = await patient();
+    const id = await bill(patientId, [[d, 60000], [d, 40000]]);
+    expect(await discount(id, 10000)).toMatchObject({ ok: true });
+    const { rows: stamps } = await getPool().query<{ row_at: string; audit_at: string }>(
+      `SELECT l.discounted_at::text AS row_at, (SELECT a.created_at::text FROM audit_log a WHERE a.action = 'invoice.discount' AND a.entity_id = l.invoice_id::text) AS audit_at
+         FROM invoice_admin_discount_lines l WHERE l.invoice_id = $1`, [id]);
+    expect(stamps).toHaveLength(2);
+    for (const stamp of stamps) expect(stamp.row_at).toBe(stamp.audit_at);
+    const items = (await getPool().query<{ id: number }>(`SELECT id FROM invoice_items WHERE invoice_id = $1 ORDER BY id`, [id])).rows;
+    const corrected = await correctInvoice({ invoiceId: id, lines: items.map((item) => ({ itemId: item.id, quantity: 1, unitPriceMinor: 30000 })),
+      reason: "تصحيح", actor: "admin1", actorRole: "admin" });
+    if (!corrected.ok) throw new Error(corrected.message);
+    const { rows: carried } = await getPool().query<{ same: boolean }>(
+      `SELECT c.discounted_at = o.discounted_at AS same FROM invoice_admin_discount_lines c
+         JOIN invoice_admin_discount_lines o ON o.id = c.carried_from_id WHERE c.invoice_id = $1`, [corrected.corrected.id]);
+    expect(carried.length).toBeGreaterThan(0);
+    expect(carried.every((one) => one.same)).toBe(true);
+  });
+});

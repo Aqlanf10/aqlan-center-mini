@@ -74,7 +74,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       invoiceId: id, lines, reason, actor: session.username, actorRole: session.role,
     });
     if (!result.ok) {
-      const status = result.reason === "not_found" ? 404 : result.reason === "cancelled" ? 409 : 400;
+      const status = result.reason === "not_found" ? 404 : result.reason === "invalid" ? 400 : 409;
       return NextResponse.json({ message: result.message }, { status });
     }
     return NextResponse.json({ original: result.original, corrected: result.corrected }, { status: 201 });

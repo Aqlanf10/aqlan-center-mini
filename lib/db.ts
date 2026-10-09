@@ -17,6 +17,7 @@ import {
   SETTINGS_AUDIT_ENTITY, SETTINGS_AUDIT_RESET, SETTINGS_AUDIT_UPDATE, settingAuditDetails,
 } from "./settings-audit";
 import fs from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { withTransaction } from "./transactions";
@@ -166,6 +167,22 @@ export interface DbPool {
 let pool: DbPool | null = null;
 let pgliteInstance: PGlite | null = null;
 
+/**
+ * (FIN-DISC, review 5464675830) Reads that must run on a caller's open transaction — the admin-discount and correction
+ * guards read the canonical commission report while holding the shift and invoice locks. Inside `readOnTransaction`,
+ * `getPool().query` goes to that transaction's client (same snapshot, own uncommitted rows, no second pooled connection),
+ * and `connect()` is refused: nothing in that scope may take another pooled connection while the locks are held. Outside
+ * the scope `getPool()` is unchanged.
+ */
+const transactionReads = new AsyncLocalStorage<DbPool>();
+export function readOnTransaction<T>(client: DbClient, fn: () => Promise<T>): Promise<T> {
+  const scoped: DbPool = {
+    query: (sql, values) => client.query(sql, values),
+    connect: () => Promise.reject(new Error("readOnTransaction: no pooled connection may be taken while the transaction holds its locks")),
+  };
+  return transactionReads.run(scoped, fn);
+}
+
 function getPgliteInstance(): PGlite {
   if (!pgliteInstance) {
     pgliteInstance = new PGlite();
@@ -283,6 +300,8 @@ export function connectionStringFromEnv(): string | null {
 }
 
 export function getPool(): DbPool {
+  const scoped = transactionReads.getStore();
+  if (scoped) return scoped;
   if (pool) return pool;
 
   assertCorrectDatabaseProject();
@@ -9270,14 +9289,19 @@ export async function applyAdminInvoiceDiscount(input: {
         const atIso = commissionTimestampIso(invoice.now, invoice.now_us);
         const doctors = new Set(lines.filter((line) => allocation.has(line.id) && line.doctor_id !== null).map((line) => line.doctor_id!));
         if (doctors.size > 0) {
-          const conflict = await adminDiscountCommissionConflict({ invoiceId: invoice.id, currency, atIso, lines: allocation, doctors });
-          if (conflict) return { ok: false as const, reason: "commission_paid" as const };
+          const toDate = new Intl.DateTimeFormat("en-CA", { timeZone: CLINIC_TIME_ZONE }).format(invoice.now);
+          const before = await commissionSnapshotInTx(client, toDate);
+          const after = await commissionSnapshotInTx(client, toDate, { invoiceId: invoice.id, atIso, lines: allocation });
+          const conflict = commissionConflict(before, after, doctors, currency, new Set([invoice.id]));
+          if (conflict) return { ok: false as const, reason: conflict };
         }
 
+        // The decision time is the transaction's own now(), written by the database at full precision (review 5464679755):
+        // the same instant the guard above used (`now_us`), never a JS Date truncated to milliseconds.
         for (const [itemId, amountMinor] of allocation) {
           await client.query(
             `INSERT INTO invoice_admin_discount_lines (invoice_id, invoice_item_id, amount_minor, discounted_at, created_by)
-             VALUES ($1, $2, $3, $4, $5)`, [invoice.id, itemId, amountMinor, invoice.now, input.actor]);
+             VALUES ($1, $2, $3, now(), $4)`, [invoice.id, itemId, amountMinor, input.actor]);
         }
         await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
         const lineById = new Map(lines.map((line) => [line.id, line]));
@@ -9386,31 +9410,63 @@ async function fifoCoverageInTx(client: DbClient, patientId: number, invoiceId: 
 }
 
 /**
- * (FIN-DISC, owner decision: option 2) Would this pending decision take any affected doctor's computed commission below what
- * was already paid to them (in the invoice currency)? The all-time commission report is read as committed now and again with
- * the pending rows overlaid. The caller holds the open shift FOR UPDATE, so no payout or receipt can commit in between.
- * Collected basis: earned before the decision is kept exactly, so this cannot trigger; invoiced basis: the accrual drops.
+ * (FIN-DISC, owner decision: option 2; reviews 5464662510, 5464675830, 5464653525) The canonical all-time commission report
+ * read on the caller's transaction (its snapshot, its own uncommitted rows, no second pooled connection), with an optional
+ * pending admin decision overlaid. The caller holds the open shift, so no payout or receipt can commit in between.
  */
-async function adminDiscountCommissionConflict(pending: {
-  invoiceId: number; currency: Currency; atIso: string; lines: ReadonlyMap<number, number>; doctors: ReadonlySet<number>;
-}): Promise<boolean> {
-  const to = new Intl.DateTimeFormat("en-CA", { timeZone: CLINIC_TIME_ZONE }).format(new Date(pending.atIso));
-  const from = "1900-01-01";
-  const [before, after] = await Promise.all([
-    commissionReport(from, to),
-    commissionReport(from, to, undefined, { invoiceId: pending.invoiceId, atIso: pending.atIso, lines: pending.lines }),
-  ]);
-  const due = (rows: CommissionRow[], doctorId: number) =>
-    rows.find((row) => row.doctorId === doctorId && row.currency === pending.currency)?.dueMinor ?? 0;
-  return [...pending.doctors].some((doctorId) => {
-    const next = due(after, doctorId);
-    return next < 0 && next < due(before, doctorId);
+async function commissionSnapshotInTx(client: DbClient, toDate: string,
+  pending?: { invoiceId: number; atIso: string; lines: ReadonlyMap<number, number> }) {
+  return readOnTransaction(client, async () => {
+    const collector: CommissionDetailCollector = { lines: [], unallocatedMaterials: [], serviceRateFindings: [], invoiceClinicDate: new Map() };
+    const rows = await commissionReport("1900-01-01", toDate, collector, pending);
+    return { rows, lines: collector.lines };
   });
+}
+
+/**
+ * Does a change (a pending admin decision, or a correction already written in this transaction) conflict with commission
+ * already earned or paid? Per affected doctor and currency:
+ *  - `commission_paid`: measured against the reduced target (a line's earned above its accrual counts only up to the
+ *    accrual), the doctor's due would fall below zero and below what it was — commission already paid exceeds it. Owner
+ *    decision: refuse and require an administrative settlement.
+ *  - `commission_review`: a line of the changed invoice(s) would keep earned above its reduced accrual (collections before
+ *    the change earned more than the new target), without a paid conflict. Refused as well: how to treat earned-but-unpaid
+ *    commission above the new target is an owner decision, not chosen here.
+ * Nothing is reversed or hidden; the caller rolls back on either answer.
+ */
+type CommissionConflict = "commission_paid" | "commission_review" | null;
+function commissionConflict(
+  before: Awaited<ReturnType<typeof commissionSnapshotInTx>>, after: Awaited<ReturnType<typeof commissionSnapshotInTx>>,
+  doctors: ReadonlySet<number>, currency: Currency, invoiceIds: ReadonlySet<number>,
+): CommissionConflict {
+  const due = (rows: CommissionRow[], doctorId: number) =>
+    rows.find((row) => row.doctorId === doctorId && row.currency === currency)?.dueMinor ?? 0;
+  let review = false;
+  for (const doctorId of doctors) {
+    const excess = after.lines
+      .filter((line) => line.doctorId === doctorId && line.currency === currency && invoiceIds.has(line.invoiceId))
+      .reduce((sum, line) => sum + Math.max(0, line.earnedMinor - line.accruedMinor), 0);
+    const atTarget = due(after.rows, doctorId) - excess;
+    if (atTarget < 0 && atTarget < due(before.rows, doctorId)) return "commission_paid";
+    if (excess > 0) review = true;
+  }
+  return review ? "commission_review" : null;
 }
 
 export type InvoiceCorrectionResult =
   | { ok: true; original: Invoice; corrected: Invoice }
-  | { ok: false; reason: "not_found" | "cancelled" | "invalid"; message: string };
+  | { ok: false; reason: "not_found" | "cancelled" | "invalid" | "no_shift" | "stale" | "commission_paid" | "commission_review"; message: string };
+
+/** Rolls the correction transaction back when the commission guard refuses it after the writes. */
+class CorrectionCommissionRefusal extends Error {
+  constructor(readonly reason: "commission_paid" | "commission_review") { super(reason); }
+}
+const CORRECTION_GUARD_MESSAGE = {
+  no_shift: "افتح وردية الصندوق أولًا؛ تصحيح فاتورةٍ عليها خصمٌ إداري يُسجَّل والوردية مفتوحة.",
+  stale: "تغيّرت الفاتورة أثناء التصحيح (سُجّل عليها خصم إداري). أعد فتحها وحاول مجددًا.",
+  commission_paid: "هذا التصحيح يُنزل عمولة طبيبٍ تحت ما صُرف له فعلًا. لم يتغيّر شيء؛ يلزم تسوية إدارية لعمولة الطبيب قبل التصحيح.",
+  commission_review: "هذا التصحيح يجعل عمولة طبيبٍ المحسوبة أقل مما اكتسبه فعلًا من تحصيلٍ سابق. لم يتغيّر شيء؛ معالجة هذا الفرق قرارٌ للمالك.",
+} as const;
 
 /**
  * (FIN-2) تصحيح فاتورةٍ بمبلغٍ زائد: تُلغى وتصدر بدلها فاتورةٌ مصحَّحة — معاملةٌ واحدة.
@@ -9432,7 +9488,24 @@ export async function correctInvoice(input: {
   actorRole: string | null;
 }): Promise<InvoiceCorrectionResult> {
   await ensureSchema();
-  const outcome = await withTransaction(getPool(), async (client) => {
+  /* (FIN-DISC, review 5464653525) A correction of an invoice that carries admin-discount rows moves those decisions to the
+     replacement, so it is guarded like the decision itself: the open shift first (fences receipts and commission payouts),
+     then the canonical commission report before and after the writes on this transaction; a paid or protected-earned
+     conflict rolls everything back. Corrections of invoices without admin rows are unchanged. */
+  const { rows: [{ guarded }] } = await getPool().query<{ guarded: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM invoice_admin_discount_lines WHERE invoice_id = $1) AS guarded`, [input.invoiceId]);
+  let outcome;
+  try {
+  outcome = await withTransaction(getPool(), async (client) => {
+    if (guarded) {
+      /* Lock order of a commission payout is party (FOR UPDATE) → shift; the replacement lines below take KEY SHARE on the
+         same doctors through their foreign key. Take those doctors first (by id) and the shift after them, so a payout and
+         this correction queue instead of closing a cycle. */
+      await client.query(`SELECT id FROM parties WHERE id IN (SELECT doctor_id FROM invoice_items WHERE invoice_id = $1)
+        ORDER BY id FOR KEY SHARE`, [input.invoiceId]);
+      const { rows: [shift] } = await client.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR NO KEY UPDATE`);
+      if (!shift) return { ok: false as const, reason: "no_shift" as const, message: CORRECTION_GUARD_MESSAGE.no_shift };
+    }
     await lockPlanItemsBilledBy(client, input.invoiceId);
     const { rows: [original] } = await client.query<{
       id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
@@ -9443,6 +9516,10 @@ export async function correctInvoice(input: {
       [input.invoiceId],
     );
     if (!original) return { ok: false as const, reason: "not_found" as const, message: "الفاتورة غير موجودة." };
+    // A decision committed between the unlocked check and the invoice lock: start again under the shift lock.
+    if (!guarded && (await client.query(`SELECT 1 FROM invoice_admin_discount_lines WHERE invoice_id = $1 LIMIT 1`, [original.id])).rows.length > 0) {
+      return { ok: false as const, reason: "stale" as const, message: CORRECTION_GUARD_MESSAGE.stale };
+    }
     if (original.status === "cancelled") {
       return { ok: false as const, reason: "cancelled" as const, message: "الفاتورة ملغاة — لا تُصحَّح." };
     }
@@ -9458,9 +9535,12 @@ export async function correctInvoice(input: {
        their original decision time (capped at the new line total, oldest first), so the commission engine sees the same
        decisions once — the cancelled original is out of every report. A removed line's admin part goes with the line. The
        creation discount keeps today's rule (unchanged, capped at the new total net of the carried admin part). */
-    const { rows: adminRows } = await client.query<{ id: number; invoice_item_id: number; amount_minor: string; discounted_at: Date }>(
-      `SELECT id, invoice_item_id, amount_minor, discounted_at FROM invoice_admin_discount_lines
+    const { rows: adminRows } = await client.query<{ id: number; invoice_item_id: number; amount_minor: string }>(
+      `SELECT id, invoice_item_id, amount_minor FROM invoice_admin_discount_lines
         WHERE invoice_id = $1 ORDER BY discounted_at, id`, [input.invoiceId]);
+    const clinicToday = new Intl.DateTimeFormat("en-CA", { timeZone: CLINIC_TIME_ZONE }).format(new Date());
+    const guardDoctors = new Set(items.filter((item) => item.doctor_id !== null).map((item) => item.doctor_id!));
+    const commissionBefore = guarded && guardDoctors.size > 0 ? await commissionSnapshotInTx(client, clinicToday) : null;
     const adminTotal = adminRows.reduce((sum, row) => sum + toMinor(row.amount_minor), 0);
     const plan = planInvoiceCorrection(
       items.map((item) => ({ id: item.id, quantity: item.quantity, unitPriceMinor: toMinor(item.unit_price_minor) })),
@@ -9468,13 +9548,13 @@ export async function correctInvoice(input: {
       Math.max(0, toMinor(original.discount_minor) - adminTotal),
     );
     if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
-    const carried: { fromId: number; itemId: number; amountMinor: number; at: Date }[] = [];
+    const carried: { fromId: number; itemId: number; amountMinor: number }[] = [];
     for (const line of plan.lines) {
       let room = line.totalMinor;
       for (const row of adminRows) {
         if (row.invoice_item_id !== line.itemId || room <= 0) continue;
         const amountMinor = Math.min(room, toMinor(row.amount_minor));
-        carried.push({ fromId: row.id, itemId: line.itemId, amountMinor, at: row.discounted_at });
+        carried.push({ fromId: row.id, itemId: line.itemId, amountMinor });
         room -= amountMinor;
       }
     }
@@ -9510,11 +9590,12 @@ export async function correctInvoice(input: {
       );
       replacementOf.set(line.itemId, inserted.id);
     }
+    // The original decision time is copied by the database at full precision (review 5464679755), never through a JS Date.
     for (const row of carried) {
       await client.query(
         `INSERT INTO invoice_admin_discount_lines (invoice_id, invoice_item_id, amount_minor, discounted_at, carried_from_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [created.id, replacementOf.get(row.itemId)!, row.amountMinor, row.at, row.fromId, input.actor]);
+         SELECT $1, $2, $3, discounted_at, id, $5 FROM invoice_admin_discount_lines WHERE id = $4`,
+        [created.id, replacementOf.get(row.itemId)!, row.amountMinor, row.fromId, input.actor]);
     }
     const { rowCount: relinked } = await client.query(
       `UPDATE visits SET invoice_id = $2 WHERE invoice_id = $1`, [original.id, created.id],
@@ -9566,8 +9647,19 @@ export async function correctInvoice(input: {
       },
       actor: input.actor, actorRole: input.actorRole,
     });
+    if (commissionBefore) {
+      const after = await commissionSnapshotInTx(client, clinicToday);
+      const conflict = commissionConflict(commissionBefore, after, guardDoctors, currency, new Set([created.id]));
+      if (conflict) throw new CorrectionCommissionRefusal(conflict);
+    }
     return { ok: true as const, originalId: original.id, correctedId: created.id };
   });
+  } catch (error) {
+    if (error instanceof CorrectionCommissionRefusal) {
+      return { ok: false, reason: error.reason, message: CORRECTION_GUARD_MESSAGE[error.reason] };
+    }
+    throw error;
+  }
   if (!outcome.ok) return outcome;
   const [original, corrected] = await Promise.all([getInvoice(outcome.originalId), getInvoice(outcome.correctedId)]);
   return { ok: true, original: original!, corrected: corrected! };

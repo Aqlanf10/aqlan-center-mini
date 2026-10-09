@@ -115,6 +115,62 @@ describe("event-time commission after an admin discount", () => {
     expect(one(run(tiny, [{ invoiceId: 1, amount: 1, sourceTime: T1 }]))).toEqual({ accruedMinor: 1, earnedMinor: 1 });
   });
 
+  it("review 5464670357: the symmetric underpayment — at 25% the same flow ends at the reduced accrual 1, not 0", () => {
+    const tiny = base({ netMinor: 2, adminDiscounts: [{ atIso: T2, amountMinor: 1 }],
+      doctorShares: [{ doctorId: 1, amountMinor: 3, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 1 }] }] });
+    const chunks = [{ invoiceId: 1, amount: 1, sourceTime: T1 }, { invoiceId: 1, amount: 1, sourceTime: T3 }];
+    expect(one(run(tiny, chunks, policy(25)))).toEqual({ accruedMinor: 1, earnedMinor: 1 });
+    expect(one(run(tiny, chunks, policy(50)))).toEqual({ accruedMinor: 1, earnedMinor: 1 });
+  });
+
+  it("review 5464703830: a decision alone never changes earned — no post-decision receipt (3 at 25%)", () => {
+    const tiny = base({ netMinor: 2, adminDiscounts: [{ atIso: T2, amountMinor: 1 }],
+      doctorShares: [{ doctorId: 1, amountMinor: 3, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 1 }] }] });
+    // Historical prefix round(round(3×25%)×1/3) = 0 stays 0 after the decision, with no new collection.
+    expect(one(run(tiny, [{ invoiceId: 1, amount: 1, sourceTime: T1 }], policy(25)))).toEqual({ accruedMinor: 1, earnedMinor: 0 });
+  });
+
+  it("review 5464703830: repeated decisions keep the earned amount exactly (7 at 25%), and full settlement ends at the target", () => {
+    const TD1 = "2026-09-01T09:00:00.000000Z";
+    const two = (net: number, decisions: { atIso: string; amountMinor: number }[]) => base({ netMinor: net, adminDiscounts: decisions,
+      doctorShares: [{ doctorId: 1, amountMinor: 7, currency: "YER", adminDiscounts: decisions }] });
+    const first = [{ atIso: TD1, amountMinor: 1 }];
+    const both = [{ atIso: TD1, amountMinor: 1 }, { atIso: T2, amountMinor: 1 }];
+    // Discount 1 before receipts: net 6, accrued 2; collect 2 → earned round(2×2/6) = 1.
+    expect(one(run(two(6, first), [{ invoiceId: 1, amount: 2, sourceTime: T1 }], policy(25)))).toEqual({ accruedMinor: 2, earnedMinor: 1 });
+    // Second discount 1 (net 5, accrued 1) with no new receipt: earned stays 1.
+    expect(one(run(two(5, both), [{ invoiceId: 1, amount: 2, sourceTime: T1 }], policy(25)))).toEqual({ accruedMinor: 1, earnedMinor: 1 });
+    // Full settlement afterwards: still 1 = the target.
+    expect(one(run(two(5, both), [{ invoiceId: 1, amount: 2, sourceTime: T1 }, { invoiceId: 1, amount: 3, sourceTime: T3 }], policy(25))))
+      .toEqual({ accruedMinor: 1, earnedMinor: 1 });
+  });
+
+  it("odd amounts and rates: a decision alone never moves earned; full settlement ends at the target whenever the target is not below what was earned", () => {
+    for (const gross of [3, 5, 7, 11, 101, 99999]) for (const pct of [25, 33, 50, 67]) for (const paidFirst of [1, 2]) for (const cut of [1, 2]) {
+      if (cut >= gross || paidFirst > gross - cut) continue;
+      const plain = base({ netMinor: gross, doctorShares: [{ doctorId: 1, amountMinor: gross, currency: "YER" }] });
+      const cutInvoice = base({ netMinor: gross - cut, adminDiscounts: [{ atIso: T2, amountMinor: cut }],
+        doctorShares: [{ doctorId: 1, amountMinor: gross, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: cut }] }] });
+      const prefix = [{ invoiceId: 1, amount: paidFirst, sourceTime: T1 }];
+      const label = `gross ${gross} pct ${pct} first ${paidFirst} cut ${cut}`;
+      const before = one(run(plain, prefix, policy(pct))).earnedMinor;
+      expect(one(run(cutInvoice, prefix, policy(pct))).earnedMinor, label).toBe(before);
+      const full = one(run(cutInvoice, [...prefix, { invoiceId: 1, amount: gross - cut - paidFirst, sourceTime: T3 }].filter((c) => c.amount > 0), policy(pct)));
+      expect(full.earnedMinor, label).toBe(Math.max(before, full.accruedMinor));
+    }
+  });
+
+  it("review 5464679755: a receipt microseconds before a decision in the same millisecond belongs to the protected prefix", () => {
+    const receipt = "2026-09-02T08:00:00.123400Z";
+    const decision = "2026-09-02T08:00:00.123900Z";
+    const invoice = (at: string) => base({ netMinor: 50000, adminDiscounts: [{ atIso: at, amountMinor: 50000 }],
+      doctorShares: [{ doctorId: 1, amountMinor: 100000, currency: "YER", labCostMinor: 20000, adminDiscounts: [{ atIso: at, amountMinor: 50000 }] }] });
+    // Prefix: base 80,000 × 50% × 30,000/100,000 = 12,000. Read after the decision it would be 9,000.
+    expect(one(run(invoice(decision), [{ invoiceId: 1, amount: 30000, sourceTime: receipt }])).earnedMinor).toBe(12000);
+    // A decision truncated to the millisecond (.123000) would wrongly precede the receipt.
+    expect(one(run(invoice("2026-09-02T08:00:00.123000Z"), [{ invoiceId: 1, amount: 30000, sourceTime: receipt }])).earnedMinor).toBe(9000);
+  });
+
   it("full settlement with odd amounts, several doctors and rates: each doctor ends exactly at their reduced accrual", () => {
     for (const [a, b, cut, first] of [[3, 3, 1, 1], [7, 5, 3, 2], [100001, 33333, 7777, 33333], [5, 1, 2, 1], [99, 2, 50, 30]]) {
       const allocation = new Map([[1, Math.floor((cut * a) / (a + b))], [2, cut - Math.floor((cut * a) / (a + b))]]);
