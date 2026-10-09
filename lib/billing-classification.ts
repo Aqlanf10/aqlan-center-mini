@@ -25,7 +25,10 @@ export function classifyOrthoAdjustment(input: {
   financialMode: LegacyFinancialMode | null;
   openingCurrencies: readonly string[];
   fundedPlan: boolean;
+  /** (INV-LEGACY) اتفاقٌ تاريخي حيّ (علاجٌ بدأ قبل النظام) يغطّي بند التقويم: الشدّة مشمولة بالعلاج السابق. */
+  legacyAgreement?: boolean;
 }): BillingClassification {
+  if (input.legacyAgreement) return "LEGACY_INCLUDED";
   /* (P1-B) حالة تقويم جديدة باتفاق أقساط (باقة): الأقساط هي الفاتورة، والشدّات — بلا عدد محدد — مشمولة. */
   if (!input.legacy) return input.fundedPlan ? "INCLUDED" : "OUTSIDE_CONTRACT";
   if (input.financialMode === "prepaid_included") return "LEGACY_INCLUDED";

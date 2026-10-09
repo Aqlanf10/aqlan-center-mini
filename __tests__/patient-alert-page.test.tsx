@@ -135,8 +135,12 @@ beforeEach(async () => {
   hooks.username = "synthetic";
   hooks.canEditPlans = true;
   vi.clearAllMocks(); confirm.mockReturnValue(false);
-  vi.stubGlobal("window", { get location() { return url; }, history: { replaceState }, confirm });
+  vi.stubGlobal("window", Object.defineProperties(new EventTarget(), {
+    location: { get: () => url }, history: { value: { replaceState } }, confirm: { value: confirm },
+  }));
+  vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
   vi.stubGlobal("fetch", vi.fn(async (input: string) => ({ ok: true, json: async () => input.endsWith("/workflow") ? {
+    patient: { id: Number(hooks.patientId) }, assessmentCases: [], legacyCases: [],
     openVisit: { id: 21, status: "in_chair", chair: 1, arrivedAt: "2026-10-03T00:00:00Z", plannedTitle: null },
     lastVisit: null, nextAppointment: null, activePlans: [], plannedVisits: [], alerts: [], financial: null,
     counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false }, canSeeFinancial: false,

@@ -165,7 +165,7 @@ beforeEach(() => {
       if (body.action === "sign") {
         stored = { ...stored, status: "signed", signedAt: "2026-10-04T10:00:00Z", signedBy: "Synthetic signer",
           ortho: { ...(stored.ortho as object), visitAdjustmentId: 95002 } };
-        return response(200, { invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
+        return response(200, { patientId: 92001, invoiceId: null, invoiceCurrency: "YER", duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null });
       }
       stored = { ...stored, ...body };
       return response(200, { ok: true });
@@ -587,3 +587,4 @@ describe("lazy case diagnosis reference in explicit orthodontic follow-up", () =
     expect(writes()).toHaveLength(0);
   });
 });
+

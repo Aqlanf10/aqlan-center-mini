@@ -34,6 +34,8 @@ const SAR_PLAN_TITLE = "اتفاق سعودي — رحلة المراجعة";
 let usdPlanId = 0;
 let sarPlanId = 0;
 let serviceId = 0;
+let invoicePatientId = 0;
+let invoiceServiceId = 0;
 let signVisitId = 0;
 let signInvoiceId = 0;
 let browserVisitId = 0;
@@ -64,6 +66,20 @@ beforeAll(async () => {
      VALUES ('تنظيف رحلة المراجعة', 15000, TRUE) RETURNING id`,
   );
   serviceId = service.id;
+
+  // Currency-only invoices need their own financial-only identity. The clinical
+  // fixture below intentionally has cleaning plan work under a null-category
+  // catalogue service, which the financial-review guard must keep protecting.
+  const { rows: [invoicePatient] } = await db.query<{ id: number }>(
+    `INSERT INTO patients (patient_number, full_name)
+     VALUES ('TD05-CURRENCY-INVOICE', 'SYNTHETIC currency-only invoice patient') RETURNING id`,
+  );
+  invoicePatientId = invoicePatient.id;
+  const { rows: [invoiceService] } = await db.query<{ id: number }>(
+    `INSERT INTO services (name, category, price_minor, is_active)
+     VALUES ('SYNTHETIC currency-only financial service', NULL, 15000, TRUE) RETURNING id`,
+  );
+  invoiceServiceId = invoiceService.id;
 
   const { rows: [usdPlan] } = await db.query<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date, consent_at)
@@ -139,8 +155,8 @@ afterAll(async () => {
 describe("مسار HTTP المباشر: فاتورة أجنبية بلا سعر صريح", () => {
   it("فاتورة USD ببند خدمةٍ بلا سعر ⇒ 400 — لا استيراد لسعر الدليل اليمني", async () => {
     const response = await authedJson("/api/invoices", {
-      patientId: h.seeded.patientAId, currency: "USD",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: invoicePatientId, currency: "USD",
+      items: [{ serviceId: invoiceServiceId, quantity: 1, price: "" }],
     });
     expect(response.status).toBe(400);
     const payload = await response.json();
@@ -149,14 +165,14 @@ describe("مسار HTTP المباشر: فاتورة أجنبية بلا سعر 
 
   it("فاتورة SAR بلا سعر ⇒ 400، وبسعرٍ صريح تُخزَّن بعملتها", async () => {
     const rejected = await authedJson("/api/invoices", {
-      patientId: h.seeded.patientAId, currency: "SAR",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: invoicePatientId, currency: "SAR",
+      items: [{ serviceId: invoiceServiceId, quantity: 1, price: "" }],
     });
     expect(rejected.status).toBe(400);
 
     const accepted = await authedJson("/api/invoices", {
-      patientId: h.seeded.patientAId, currency: "SAR",
-      items: [{ serviceId, quantity: 1, price: "80" }],
+      patientId: invoicePatientId, currency: "SAR",
+      items: [{ serviceId: invoiceServiceId, quantity: 1, price: "80" }],
     });
     expect(accepted.status).toBe(201);
     const invoice = await accepted.json();
@@ -166,8 +182,8 @@ describe("مسار HTTP المباشر: فاتورة أجنبية بلا سعر 
 
   it("فاتورة YER بلا سعر تسقط لسعر الدليل — السلوك القائم لا يمس", async () => {
     const response = await authedJson("/api/invoices", {
-      patientId: h.seeded.patientAId, currency: "YER",
-      items: [{ serviceId, quantity: 1, price: "" }],
+      patientId: invoicePatientId, currency: "YER",
+      items: [{ serviceId: invoiceServiceId, quantity: 1, price: "" }],
     });
     expect(response.status).toBe(201);
     const invoice = await response.json();

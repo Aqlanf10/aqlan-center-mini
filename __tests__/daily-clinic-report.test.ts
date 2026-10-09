@@ -10,7 +10,7 @@ function visit(id = 1, patientId: number | null = 1): DailyClinicSourceVisit {
     billingCurrency: "YER", treatmentDone: "علاج موثق", doctorName: "طبيب تجريبي", plannedPlanId: null };
 }
 function plan(id = 1, currency = "YER", totalMinor = 1000): DailyClinicSourcePlan {
-  return { id, patientId: 1, title: `اتفاق ${id}`, status: "active", consentAt: "2026-10-01T09:00:00Z", currency, totalMinor, funded: true };
+  return { id, patientId: 1, title: `اتفاق ${id}`, status: "active", consentAt: "2026-10-01T09:00:00Z", currency, totalMinor, funded: true, invoiceLinked: false };
 }
 function payment(overrides: Partial<DailyClinicSourcePayment> = {}): DailyClinicSourcePayment {
   return { id: 1, patientId: 1, patientName: "مريض تجريبي 1", receiptNumber: "R1", invoiceId: null,
@@ -20,7 +20,7 @@ function payment(overrides: Partial<DailyClinicSourcePayment> = {}): DailyClinic
 }
 function fixture(overrides: Partial<DailyClinicSource> = {}): DailyClinicSource {
   return { date, clinicTimeZone: "Asia/Aden", generatedAt: "2026-10-07T20:00:00.000Z", selectedDayCutoff: "2026-10-07T21:00:00.000Z",
-    visits: [visit()], plans: [], items: [], work: [], invoices: [], payments: [], openings: [], additionalPlanLinks: [],
+    visits: [visit()], plans: [], items: [], work: [], invoices: [], invoiceLines: [], invoiceCorrections: [], legacyAgreements: [], payments: [], openings: [], additionalPlanLinks: [],
     expenses: buildDailyClinicExpenseReport([], { date, timeZone: "Asia/Aden" }), ...overrides };
 }
 
@@ -36,7 +36,7 @@ describe("daily clinic report: arrival cohort and distinct money meanings", () =
 
   it("counts one shared agreement and patient debt only once across multiple visits", () => {
     const report = buildDailyClinicReport(fixture({ visits: [{ ...visit(), plannedPlanId: 1 }, { ...visit(2), plannedPlanId: 1 }],
-      plans: [plan()], invoices: [{ id: 10, patientId: 1, currency: "YER", totalMinor: 400, discountMinor: 0, status: "open", planId: 1 }],
+      plans: [plan()], invoices: [{ id: 10, patientId: 1, currency: "YER", totalMinor: 400, discountMinor: 0, status: "open", planId: 1, invoiceNumber: "INV-1", createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" }],
       payments: [payment({ planId: 1, invoiceId: 10 })], openings: [{ patientId: 1, currency: "YER", amountMinor: 300 }] }));
     expect(report.attendees).toHaveLength(1);
     expect(report.attendees[0].visitsCount).toBe(2);
@@ -174,7 +174,7 @@ describe("daily clinic report: fail closed", () => {
     expect(isDailyClinicReportDate("2025-02-29")).toBe(false);
   });
   it("rejects cross-patient invoice and plan references", () => {
-    expect(() => buildDailyClinicReport(fixture({ invoices: [{ id: 10, patientId: 2, currency: "YER", totalMinor: 1000, discountMinor: 0, status: "open", planId: null }], payments: [payment({ invoiceId: 10 })] }))).toThrow();
+    expect(() => buildDailyClinicReport(fixture({ invoices: [{ id: 10, patientId: 2, currency: "YER", totalMinor: 1000, discountMinor: 0, status: "open", planId: null, invoiceNumber: "INV-2", createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" }], payments: [payment({ invoiceId: 10 })] }))).toThrow();
     expect(() => buildDailyClinicReport(fixture({ plans: [{ ...plan(), patientId: 2 }], payments: [payment({ planId: 1 })] }))).toThrow();
   });
   it("does not expose an untrusted foreign plan-item title or substitute a visit doctor", () => {
@@ -189,11 +189,11 @@ describe("daily clinic report: fail closed", () => {
     expect(buildDailyClinicReport(own).work[0].doctorName).toBeNull();
   });
   it("rejects conflicting dual targets and unsupported foreign-to-foreign settlement", () => {
-    expect(() => buildDailyClinicReport(fixture({ plans: [plan(), plan(2)], invoices: [{ id: 10, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 0, status: "open", planId: 2 }], payments: [payment({ invoiceId: 10, planId: 1 })] }))).toThrow();
+    expect(() => buildDailyClinicReport(fixture({ plans: [plan(), plan(2)], invoices: [{ id: 10, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 0, status: "open", planId: 2, invoiceNumber: "INV-3", createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" }], payments: [payment({ invoiceId: 10, planId: 1 })] }))).toThrow();
     expect(() => buildDailyClinicReport(fixture({ plans: [plan(1, "SAR")], payments: [payment({ planId: 1, currency: "USD" })] }))).toThrow();
   });
   it("validates invoice status before canonical arithmetic and preserves cancelled invoice semantics", () => {
-    const invoice = { id: 4, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 100, planId: null };
+    const invoice = { id: 4, patientId: 1, currency: "YER", totalMinor: 1000, discountMinor: 100, planId: null, invoiceNumber: "INV-4", createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" };
     expect(() => buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "unknown" }] }))).toThrow("Unknown invoice status");
     expect(buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "paid" }] })).currentAccounts[0].byCurrency.YER.billedMinor).toBe(900);
     expect(buildDailyClinicReport(fixture({ invoices: [{ ...invoice, status: "cancelled" }] })).currentAccounts[0].byCurrency.YER.billedMinor).toBe(0);
@@ -214,7 +214,7 @@ describe("daily clinic report: fail closed", () => {
   it("rejects opening plus billed overflow before a large settlement can conceal lost precision", () => {
     expect(() => buildDailyClinicReport(fixture({
       openings: [{ patientId: 1, currency: "YER", amountMinor: Number.MAX_SAFE_INTEGER }],
-      invoices: [{ id: 4, patientId: 1, currency: "YER", totalMinor: 2, discountMinor: 0, status: "open", planId: null }],
+      invoices: [{ id: 4, patientId: 1, currency: "YER", totalMinor: 2, discountMinor: 0, status: "open", planId: null, invoiceNumber: "INV-4", createdAt: "2026-09-01T08:00:00.000Z", clinicDate: "2026-09-01" }],
       payments: [payment({ amountMinor: Number.MAX_SAFE_INTEGER, baseAmountMinor: Number.MAX_SAFE_INTEGER,
         createdAt: "2026-10-01T10:00:00Z", clinicDate: "2026-10-01" })],
     }))).toThrow("opening plus billed");

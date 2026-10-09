@@ -53,7 +53,8 @@ function patient(id: number): Patient {
     medicalAlert: null, note: null, createdAt: "2026-01-01T09:00:00.000Z", photoDocumentId: null, flags: [],
   };
 }
-const workflow = () => ({
+const workflow = (patientId: number) => ({
+  patient: patient(patientId), assessmentCases: [], legacyCases: [],
   openVisit: null, lastVisit: null, nextAppointment: null, activePlans: [], plannedVisits: [],
   counts: { visits: 0, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: null, alerts: [], canSeeFinancial: true,
@@ -131,10 +132,12 @@ async function fixture(width: number) {
     for (const id of ids) {
       const prefix = `/api/patients/${id}`;
       if (target === prefix) { await json(route, { patient: patient(id), visits: [], appointments: [] }); return; }
-      if (target === prefix + "/workflow") { await json(route, workflow()); return; }
+      if (target === prefix + "/workflow") { await json(route, workflow(id)); return; }
       if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
       // The existing Account sibling performs this read, independently of the preview.
       if (target === prefix + "/legacy") { await json(route, { treatments: [], orphanPayments: [] }); return; }
+      // (INV-LEGACY) The historical-agreement panel is another independent Account sibling read.
+      if (target === prefix + "/legacy-treatments") { await json(route, { agreements: [], access: { add: false, edit: false, void: false } }); return; }
       if (target === prefix + "/documents") { await json(route, { documents: [], storageReady: false, storageMessage: null }); return; }
       if (target === `/api/visits/readiness?patientId=${id}`) { await json(route, { visit: null }); return; }
     }

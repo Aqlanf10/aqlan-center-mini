@@ -4,7 +4,7 @@ import {
   type Currency, type DocumentCurrencyRef,
 } from "./money";
 import type {
-  DailyClinicAgreement, DailyClinicAttendee, DailyClinicReport, DailyClinicSource,
+  DailyClinicAgreement, DailyClinicAttendee, DailyClinicInvoice, DailyClinicLegacyAgreement, DailyClinicReport, DailyClinicSource,
   DailyClinicSourcePlan, DailyClinicWork, DailyCurrencyAmounts,
 } from "./daily-clinic-report-types";
 
@@ -184,7 +184,11 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
       remainingMinor: included ? Math.max(0, money(plan.totalMinor - paid, "agreement remaining")) : null,
       excessSettlementMinor: included ? Math.max(0, money(paid - plan.totalMinor, "agreement excess")) : 0,
       includedInTotals: included,
-      excludedReason: included ? null : plan.consentAt === null ? "خطة بلا موافقة موثقة" : "اتفاق ملغى أو حالة غير مدعومة",
+      excludedReason: included ? null : plan.consentAt === null
+        // (INV-LINK REPORT) A financial agreement made by invoice is shown, not hidden: its money is in the invoices section.
+        ? plan.invoiceLinked ? "اتفاق مالي بفاتورة والموافقة السريرية لم تُسجَّل بعد — المبلغ ظاهر في قسم الفواتير ولا يُجمع هنا مرتين"
+          : "خطة بلا موافقة موثقة"
+        : "اتفاق ملغى أو حالة غير مدعومة",
       linkedVisitIds: [...visitIds].sort((a, b) => a - b), paymentIds: payments.map((payment) => payment.source.id),
     };
     agreements.push(agreement);
@@ -315,6 +319,110 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
       invoiceId: payment.source.invoiceId, planId: payment.source.planId, openingCurrency: payment.openingCurrency,
       settlementCurrency: payment.settlementCurrency, signedSettlementMinor: payment.signedMinor,
       recordedBaseMinor: payment.source.baseAmountMinor, exchangeRate: payment.source.exchangeRate }));
+  // ── (INV-LINK REPORT) Invoices: each once, explicit receipts only, stored corrections only ──
+  const dayAgreementPlanIds = new Set(links.keys());
+  const linesByInvoice = new Map<number, DailyClinicSource["invoiceLines"]>();
+  for (const line of source.invoiceLines) {
+    const invoice = invoiceById.get(line.invoiceId);
+    if (!invoice) throw new DailyClinicReportIntegrityError("Invoice line outside loaded invoices");
+    money(line.totalMinor, "invoice line total", true);
+    if (line.planId !== null) {
+      const plan = checkedPlan(line.planId, invoice.patientId);
+      // Same patient is not enough: a line must not tie an invoice to a plan in another currency.
+      if (plan.currency !== invoice.currency) throw new DailyClinicReportIntegrityError("Invoice line plan currency conflict");
+    }
+    // A visit-procedure source must belong to the invoice's own patient.
+    if (line.sourceVisitId != null && line.sourceVisitPatientId !== invoice.patientId) {
+      throw new DailyClinicReportIntegrityError("Cross-patient invoice line source");
+    }
+    const list = linesByInvoice.get(line.invoiceId) ?? []; list.push(line); linesByInvoice.set(line.invoiceId, list);
+  }
+  const dayReceiptInvoiceIds = new Set(resolvedPayments
+    .filter((payment) => payment.source.clinicDate === source.date && instant(payment.source.createdAt) < cutoff
+      && payment.source.invoiceId !== null).map((payment) => payment.source.invoiceId!));
+  // Recorded visit → invoice links of the selected day's visits (visits.invoice_id), validated per patient.
+  const selectedVisitIds = new Set(source.visits.map((visit) => visit.id));
+  const dayVisitInvoiceIds = new Set<number>();
+  for (const visit of source.visits) {
+    if (visit.invoiceId == null) continue;
+    const invoice = invoiceById.get(visit.invoiceId);
+    if (!invoice || invoice.patientId !== visit.patientId) throw new DailyClinicReportIntegrityError("Unresolved or cross-patient visit invoice");
+    dayVisitInvoiceIds.add(visit.invoiceId);
+  }
+  const invoices: DailyClinicInvoice[] = [];
+  for (const invoice of source.invoices) {
+    const lines = linesByInvoice.get(invoice.id) ?? [];
+    const issuedToday = invoice.clinicDate === source.date && instant(invoice.createdAt) < cutoff;
+    const reasons: DailyClinicInvoice["reasons"] = [];
+    if (issuedToday) reasons.push("issued_today");
+    if (dayReceiptInvoiceIds.has(invoice.id)) reasons.push("receipt_today");
+    if (lines.some((line) => line.planId !== null && dayAgreementPlanIds.has(line.planId))) reasons.push("linked_to_day_agreement");
+    if (dayVisitInvoiceIds.has(invoice.id)) reasons.push("attached_to_day_visit");
+    if (lines.some((line) => line.sourceVisitId != null && selectedVisitIds.has(line.sourceVisitId))) reasons.push("line_from_day_visit");
+    if (reasons.length === 0) continue;
+    const currency = invoiceRefs.get(invoice.id)!.currency;
+    const status = invoiceStatus(invoice.status);
+    const explicit = resolvedPayments.filter((payment) => payment.source.invoiceId === invoice.id);
+    for (const payment of explicit) {
+      if (payment.settlementCurrency !== currency) throw new DailyClinicReportIntegrityError("Invoice settlement currency conflict");
+    }
+    const settled = money(explicit.reduce((sum, payment) => money(sum + payment.signedMinor, "invoice settled"), 0), "invoice settled");
+    const net = invoiceNet({ totalMinor: invoice.totalMinor, discountMinor: invoice.discountMinor, status });
+    const planItems = new Set(lines.flatMap((line) => line.planItemId === null ? [] : [line.planItemId]));
+    const cases = new Set(lines.flatMap((line) => line.caseId === null ? [] : [line.caseId]));
+    const unlinked = lines.some((line) => line.planItemId === null);
+    // A line without a plan item still bills clinical work when it is sourced from a recorded visit procedure.
+    const procedureVisit = (line: (typeof lines)[number]) =>
+      line.planItemId === null && line.sourceType === "visit_procedure" && line.sourceVisitId != null ? line.sourceVisitId : null;
+    const procedureLines = lines.filter((line) => procedureVisit(line) !== null).length;
+    const linkage: DailyClinicInvoice["linkage"] = planItems.size === 0
+      ? (procedureLines > 0 ? (procedureLines === lines.length ? "visit_procedures" : "mixed")
+        : invoice.planId !== null ? "plan_installment" : "financial_only")
+      : unlinked || cases.size > 1 || (cases.size === 0 && planItems.size > 1) ? "mixed"
+        : planItems.size === 1 ? "single_plan_item" : "single_case";
+    invoices.push({
+      id: invoice.id, invoiceNumber: invoice.invoiceNumber, patientId: invoice.patientId,
+      patientName: patientNames.get(invoice.patientId) ?? resolvedPayments.find((payment) => payment.source.patientId === invoice.patientId)?.source.patientName ?? "",
+      status, currency, totalMinor: invoice.totalMinor, discountMinor: invoice.discountMinor, netMinor: net,
+      originalNetMinor: Math.max(0, money(invoice.totalMinor - invoice.discountMinor, "invoice original net")),
+      excessSettledMinor: Math.max(0, money(settled - net, "invoice excess settlement")),
+      issuedAt: invoice.createdAt, issuedClinicDate: invoice.clinicDate, issuedOnReportDay: issuedToday, reasons, linkage,
+      lines: lines.map((line) => ({ id: line.id, description: line.description, totalMinor: line.totalMinor,
+        planItemId: line.planItemId, planId: line.planId, caseId: line.caseId, toothCode: line.toothCode,
+        sourceVisitId: procedureVisit(line) })),
+      explicitPaymentIds: explicit.map((payment) => payment.source.id), explicitlySettledMinor: settled,
+      remainingMinor: status === "cancelled" ? 0 : Math.max(0, money(net - settled, "invoice remaining")),
+      corrections: source.invoiceCorrections.filter((row) => row.originalInvoiceId === invoice.id).map((row) => ({
+        originalInvoiceId: row.originalInvoiceId, originalInvoiceNumber: invoice.invoiceNumber,
+        correctedInvoiceNumber: row.correctedInvoiceNumber, reason: row.reason, at: row.at, actor: row.actor })),
+      correctsInvoiceNumbers: source.invoiceCorrections.filter((row) => row.correctedInvoiceNumber === invoice.invoiceNumber)
+        .map((row) => invoiceById.get(row.originalInvoiceId)?.invoiceNumber ?? null)
+        .filter((value): value is string => value !== null),
+    });
+  }
+
+  // ── (INV-LINK REPORT) Pre-system treatment: historical facts only, never today's collection or a second debt ──
+  const legacyAgreements: DailyClinicLegacyAgreement[] = source.legacyAgreements
+    .filter((row) => patientNames.has(row.patientId))
+    .map((row) => {
+      const currency = requireCurrency(row.currency, "اتفاق تاريخي", row.id);
+      money(row.agreedMinor, "legacy agreed", true); money(row.previouslyPaidMinor, "legacy paid", true);
+      money(row.remainingMinor, "legacy remaining", true);
+      if (row.previouslyPaidMinor + row.remainingMinor !== row.agreedMinor) throw new DailyClinicReportIntegrityError("Legacy agreement arithmetic");
+      if (row.status !== "live" && row.status !== "void") throw new DailyClinicReportIntegrityError("Unknown legacy status");
+      const openingEffect = row.openingEffect ?? (row.remainingMinor > 0 ? "created" : "none");
+      if ((openingEffect === "none") !== (row.remainingMinor === 0)) throw new DailyClinicReportIntegrityError("Legacy opening effect conflict");
+      // The void writer removes the remaining from the opening and keeps the historical amounts: say which applies today.
+      const currentOpeningEffect = openingEffect === "none" ? "none" : row.status === "live" ? "in_opening" : "removed_by_void";
+      return { id: row.id, patientId: row.patientId, patientName: patientNames.get(row.patientId)!, serviceName: row.serviceName,
+        specialty: row.specialty, toothCode: row.toothCode, coverageTeeth: row.coverageTeeth, coverageScope: row.coverageScope,
+        coverageRecorded: row.coverageRecorded, coverageState: row.coverageState ?? (row.coverageRecorded ? "verified" : "unknown"),
+        coverageLabel: row.coverageLabel ?? null, openingEffect, currentOpeningEffect,
+        currency, agreedMinor: row.agreedMinor, previouslyPaidMinor: row.previouslyPaidMinor,
+        remainingAtStartMinor: row.remainingMinor, historicalAsOf: row.historicalAsOf, status: row.status,
+        voidReason: row.voidReason, planItemId: row.planItemId, caseId: row.caseId };
+    });
+
   const attendeeRows = [...attendees.values()];
   const totals: DailyClinicReport["totals"] = {
     attendeesCount: attendeeRows.length, visitsCount: source.visits.length, signedVisitsCount: signedVisits.size,
@@ -326,7 +434,11 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     currentReceivable: dailyCurrencyZero(), currentCredit: dailyCurrencyZero(),
     nativeReceipts: dailyCurrencyZero(), nativeReversals: dailyCurrencyZero(), nativeNetRecorded: dailyCurrencyZero(),
     nativeCashNetRecorded: dailyCurrencyZero(), nativeTransferNetRecorded: dailyCurrencyZero(),
+    invoicesIssuedNet: dailyCurrencyZero(),
+    invoicesIssuedCount: invoices.filter((row) => row.issuedOnReportDay && row.status !== "cancelled").length,
+    cancelledInvoicesCount: invoices.filter((row) => row.status === "cancelled").length,
   };
+  for (const row of invoices) if (row.issuedOnReportDay) plus(totals.invoicesIssuedNet, row.currency, row.netMinor);
   for (const row of attendeeRows) for (const currency of CURRENCIES) {
     plus(totals.agreement, currency, row.agreement[currency]);
     plus(totals.explicitlySettled, currency, row.explicitlySettled[currency]);
@@ -348,7 +460,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     date: source.date, clinicTimeZone: source.clinicTimeZone, generatedAt: source.generatedAt,
     selectedDayCutoff: source.selectedDayCutoff,
     basis: { cohort: "arrival_day", account: "current_at_generation", work: "signed_by_cutoff", receipts: "clinicwide_recorded_day" },
-    attendees: attendeeRows, agreements, work, currentAccounts, receipts, expenses: source.expenses, totals,
+    attendees: attendeeRows, agreements, work, currentAccounts, receipts, invoices, legacyAgreements, expenses: source.expenses, totals,
     warnings: [
       "الاتفاقات والمدفوع المربوط بها وأرصدة المرضى هي الحالة الحالية لحظة إعداد التقرير، وليست أرصدة تاريخية مجمدة.",
       "تفصيل العمل يقرأ السجلات الحالية للزيارات الموقعة قبل حد اليوم. أسماء الخدمات والجهات والروابط ليست لقطات تاريخية مجمدة؛ وقد تصف سطور الإجراء والتوثيق التخصصي العمل نفسه، فلا تجمع كعدد إجراءات مستقلة.",
@@ -356,6 +468,8 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
       "قيمة العمل مجموع القيم المسجلة المعروفة فقط: سعر الإجراء قبل خصم الفاتورة، أو قيمة بند خطة اكتمل بكامله. ليست إيرادًا محاسبيًا ولا تقييمًا نسبيًا للجلسات.",
       "الحركات المالية تشمل كل سندات اليوم في المركز، بما فيها من لم يحضر؛ الاستردادات قد تشمل تصحيح التسجيل وليست جميعها ردًا نقديًا فعليًا.",
       ...(agreements.some((row) => !row.includedInTotals) ? ["خطط غير معتمدة أو ملغاة مستبعدة من إجماليات الاتفاقات؛ تفاصيلها ظاهرة للمراجعة."] : []),
+      ...(invoices.some((row) => row.linkage === "mixed") ? ["فاتورة مختلطة تجمع أكثر من حالة أو بنودًا غير مرتبطة؛ دفعاتها تظهر على الفاتورة كاملة ولا توزع تقديريًا على الحالات."] : []),
+      ...(legacyAgreements.length > 0 ? ["العلاج السابق للنظام يظهر بحقائقه التاريخية: المدفوع قبل النظام ليس تحصيل اليوم. متبقي الاتفاق القائم داخل الرصيد الافتتاحي ولا يضاف مرة أخرى إلى الدين؛ ومتبقي الاتفاق المُبطل أُزيل من الرصيد عند الإبطال ويبقى رقمًا تاريخيًا فقط. الدين الحالي هو رصيد الحساب كاملًا، ولا توزع تحصيلات الرصيد الافتتاحي على الاتفاقات."] : []),
       ...(totals.lateSignedVisitsCount > 0 ? ["توجد زيارات وثقت بعد اليوم المختار؛ لا تدخل ضمن الأعمال الموثقة عند نهايته."] : []),
       ...(receipts.some((row) => !["cash", "transfer"].includes(row.method)) ? ["توجد طريقة دفع غير معروفة؛ تظهر ضمن الحركات الكلية ولا تنسب إلى النقد أو الحوالة."] : []),
     ],

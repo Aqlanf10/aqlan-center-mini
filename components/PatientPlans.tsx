@@ -30,6 +30,8 @@ import { QuickPlanForm } from "./QuickPlanForm";
 import { QuickAgreementPlanForm } from "./QuickAgreementPlanForm";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
+import { hasLegacyHistory, legacyCoverageIsLive, ordinaryPlanProgress, planConsentIsCurrent, type HistoricalPlanItem } from "./legacy-treatment-view";
+import { LegacyPlanHistory } from "./LegacyPlanHistory";
 
 /**
  * خطط علاج المريض — زرٌّ واحد، والتعقيد خيارٌ داخل النموذج (المواصفة §٧).
@@ -46,7 +48,7 @@ import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
 interface Doctor { id: number; name: string }
 
-interface PlanItem {
+interface PlanItem extends HistoricalPlanItem {
   id: number; serviceId: number | null; serviceName: string; toothCode: number | null; surfaces: string | null;
   quantity: number; unitPriceMinor: number; totalMinor: number;
   status: PlanItemStatus; visitId: number | null;
@@ -54,6 +56,9 @@ interface PlanItem {
   plannedVisitNumber?: number; billingRule?: BillingRule;
   billingStatus?: BillingStatus; sessionCount?: number;
   sessionsCompleted?: number; doctorId?: number | null; doctorName?: string | null;
+  /** Historical identity persists after void; it does not establish progress or consent. */
+  legacyAgreementId?: number;
+  legacyAgreementStatus?: "live" | "void";
 }
 interface Plan {
   id: number; title: string; totalMinor: number; baseCurrency: Currency;
@@ -325,15 +330,20 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         </p>
       ) : (
         <ul className="space-y-3">
-          {plans.map((plan) => (
+          {plans.map((plan) => {
+            const hasHistory = plan.items.some(hasLegacyHistory);
+            const currentConsent = planConsentIsCurrent(plan);
+            const coverageVerified = plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive);
+            const ordinaryProgress = hasHistory ? ordinaryPlanProgress(plan.items) : plan.itemsProgress;
+            return (
             <li key={plan.id} className={`rounded-2xl border p-4 ${
               plan.status === "active" ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
             }`}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-base font-extrabold">{plan.title}</span>
                 <span className="flex items-center gap-1.5">
-                  {!plan.consentAt ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">موافقة العلاج لم تُسجّل</span>
+                  {!currentConsent ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">{plan.consentAt ? "الموافقة الحالية غير متحققة" : "موافقة العلاج لم تُسجّل"}</span>
                   ) : null}
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
                     {PLAN_STATUS_LABEL[plan.status]}
@@ -345,7 +355,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
                   <p className="text-[11px] text-slate-500">
-                    {plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
+                    {hasHistory ? "قيمة الخطة المتضمنة للتاريخ (ليست دَينًا)" : plan.installments.length > 0 ? "الإجمالي" : "المتفق عليه"}
                   </p>
                 </div>
                 {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
@@ -362,16 +372,23 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                 ) : (
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
-                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(plan.itemsProgress.doneMinor, plan.baseCurrency)}</p>
-                      <p className="text-[11px] text-emerald-700">أُنجز</p>
+                      <p className="text-sm font-extrabold text-emerald-800">{formatMoney(ordinaryProgress.doneMinor, plan.baseCurrency)}</p>
+                      <p className="text-[11px] text-emerald-700">{hasHistory ? "أُنجز من البنود الأخرى" : "أُنجز"}</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2">
-                      <p className="text-sm font-bold">{formatMoney(plan.itemsProgress.remainingMinor, plan.baseCurrency)}</p>
-                      <p className="text-[11px] text-slate-500">باقي العلاج</p>
+                      <p className="text-sm font-bold">{formatMoney(ordinaryProgress.remainingMinor, plan.baseCurrency)}</p>
+                      <p className="text-[11px] text-slate-500">{hasHistory ? "باقي البنود الأخرى" : "باقي العلاج"}</p>
                     </div>
                   </>
                 )}
               </div>
+
+              {hasHistory ? (
+                <p role="status" data-testid="plan-legacy-progress-unknown" className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-950">
+                  المنجَز قبل النظام وباقي العلاج التاريخي غير معلومين من مبلغ الاتفاق. تقدّم البنود الأخرى معروض منفصلًا؛ المستحق المالي يؤخذ من الحساب فقط.
+                  {!currentConsent ? " يلزم تسجيل موافقة المريض الفعلية قبل توقيع الزيارة؛ حفظ المسودة متاح." : ""}
+                </p>
+              ) : null}
 
               {plan.installments.length > 0 && canSeeFinancial && plan.progress ? (
                 <>
@@ -397,7 +414,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                 </p>
               ) : null}
 
-              {canSeeFinancial && plan.progress && plan.status === "active" && plan.installments.length > 0 ? (
+              {!hasHistory && canSeeFinancial && plan.progress && plan.status === "active" && plan.installments.length > 0 ? (
                 payFor === plan.id ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="mb-2 flex flex-wrap gap-2">
@@ -453,10 +470,10 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-navy-800 hover:bg-slate-50 inline-flex items-center gap-1"
-                      title="طباعة اتفاقية وجدول الأقساط"
+                      title={hasHistory ? "طباعة مرجع الخطة التاريخي" : "طباعة اتفاقية وجدول الأقساط"}
                     >
                       <span>📄</span>
-                      <span>طباعة العقد</span>
+                      <span>{hasHistory ? "طباعة المرجع" : "طباعة العقد"}</span>
                     </a>
                   </div>
                 )
@@ -467,7 +484,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
-              {plan.status === "active" && !plan.consentAt && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
+              {plan.status === "active" && !plan.consentAt && coverageVerified && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
                 consentFor === plan.id ? (
                   <ConsentForm plan={plan}
                     scheduleExists={loading || readUnavailable ? null : canSeeFinancial ? plan.installments.length > 0
@@ -483,7 +500,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
 
               {plan.consentAt ? (
                 <p className="mt-2 text-[10px] font-semibold text-slate-400">
-                  وافق المريض في {friendlyDateLong(plan.consentAt.slice(0, 10))}
+                  {currentConsent ? "وافق المريض في " : "تاريخ موافقة محفوظ غير متحقق للموافقة الحالية: "}{friendlyDateLong(plan.consentAt.slice(0, 10))}
                   {plan.consentBy ? ` · سجّلها ${plan.consentBy}` : ""}
                   {plan.consentNote ? ` · ${plan.consentNote}` : ""}
                 </p>
@@ -506,7 +523,8 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
               </details>
               ) : null}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 
@@ -966,7 +984,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
   const [itemPriceReason, setItemPriceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
-  const visitGroups = groupItemsByVisit(plan.items);
+  const historicalItems = plan.items.filter(hasLegacyHistory);
+  const ordinaryProgress = historicalItems.length > 0 ? ordinaryPlanProgress(plan.items) : plan.itemsProgress;
+  const visitGroups = groupItemsByVisit(plan.items.filter((item) => !hasLegacyHistory(item)));
 
   useEffect(() => {
     if (locked) return;
@@ -1045,14 +1065,16 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-bold text-slate-500">
           بنود الخطة {locked ? "— موافَقٌ عليها فلا تُعدَّل" : "— الإجمالي يُحسب منها"}
+          {historicalItems.length > 0 ? " · السجل التاريخي محفوظ منفصلًا عن الجلسات المخططة" : ""}
         </p>
         <span className="text-[10px] font-bold text-slate-400">
           {visitGroups.length > 0 ? `${visitGroups.length} جلسات مخططة` : ""}
         </span>
       </div>
 
+      <LegacyPlanHistory items={historicalItems} currency={base} canSeeFinancial={canSeeFinancial} consented={planConsentIsCurrent(plan)} />
       {visitGroups.length === 0 ? (
-        <p className="text-xs text-slate-400">لا بنود بعد.</p>
+        <p className="text-xs text-slate-400">{historicalItems.length > 0 ? "لا بنود أخرى مخططة هنا." : "لا بنود بعد."}</p>
       ) : (
         <div className="mb-2 space-y-2">
           {visitGroups.map((group) => {
@@ -1099,7 +1121,12 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                         {(item.sessionCount ?? 1) > 1 ? (
                           <span className="shrink-0 text-slate-400">· جلسة {item.sessionsCompleted ?? 0}/{item.sessionCount ?? 1}</span>
                         ) : null}
-                        {item.billingStatus === "billed" ? (
+                        {item.billingStatus === "needs_financial_review" ? (
+                          <span role="status" data-testid={`plan-item-financial-review-${item.id}`}
+                            className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">
+                            يحتاج مراجعة مالية — لا تُنشأ فاتورة جديدة لهذا البند
+                          </span>
+                        ) : item.billingStatus === "billed" ? (
                           <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">مفوتر</span>
                         ) : item.billingStatus === "included_in_package" ? (
                           <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">ضمن الباقة</span>
@@ -1128,10 +1155,10 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       )}
 
       {locked ? (
-        plan.itemsProgress.count > 0 ? (
+        ordinaryProgress.count > 0 ? (
           <p className="text-[11px] font-bold text-slate-500">
-            أُنجز {plan.itemsProgress.doneCount} من {plan.itemsProgress.count} بنود ·{" "}
-            {formatMoney(plan.itemsProgress.doneMinor, base)} من {formatMoney(plan.itemsProgress.totalMinor, base)}
+            {historicalItems.length > 0 ? "البنود الأخرى: " : ""}أُنجز {ordinaryProgress.doneCount} من {ordinaryProgress.count} بنود ·{" "}
+            {formatMoney(ordinaryProgress.doneMinor, base)} من {formatMoney(ordinaryProgress.totalMinor, base)}
           </p>
         ) : null
       ) : (
@@ -1243,8 +1270,9 @@ function ConsentForm({ plan, scheduleExists, onDone, onError }: {
 }) {
   // (TD-05) الموافقة على مبلغ الخطة بعملة اتفاقها.
   const base: Currency = plan.baseCurrency;
+  const hasHistory = plan.items.some(hasLegacyHistory);
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
-  const [note, setNote] = useState("توقيع ورقي محفوظ بالملف");
+  const [note, setNote] = useState(hasHistory ? "" : "توقيع ورقي محفوظ بالملف");
   const [split, setSplit] = useState(false);
   const [count, setCount] = useState("6");
   const [everyDays, setEveryDays] = useState("30");
@@ -1252,7 +1280,7 @@ function ConsentForm({ plan, scheduleExists, onDone, onError }: {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (busy || (split && scheduleExists !== false)) return;
+    if (busy || !plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive) || (hasHistory && note.trim().length < 3) || (split && (hasHistory || scheduleExists !== false))) return;
     setBusy(true);
     onError(null);
     try {
@@ -1281,11 +1309,16 @@ function ConsentForm({ plan, scheduleExists, onDone, onError }: {
           ? `موافقة المريض على اتفاق بمبلغ ${formatMoney(plan.totalMinor, base)} — اتفاقٌ ماليّ بلا بنود علاجية محدّدة؛ بعدها لا يتغيّر المبلغ ولا تُضاف إليه بنود (يُوثَّق المستجدّ باتفاق جديد).`
           : `موافقة المريض على ${formatMoney(plan.totalMinor, base)} — وبعدها تُقفل البنود.`}
       </p>
+      {hasHistory ? <p className="mb-2 text-xs text-indigo-900">
+        سجّل فقط الموافقة الفعلية التي حصلت عليها ووثّق مصدرها. مبلغ الخطة يتضمن اتفاقًا تاريخيًّا؛ الموافقة لا تُنشئ دَينًا جديدًا أو جلسات سابقة.
+      </p> : null}
       <input value={note} onChange={(event) => setNote(event.target.value)}
         aria-label="كيف وُثّقت الموافقة"
         className="mb-2 w-full rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs" />
 
-      {scheduleExists === false ? (
+      {hasHistory ? (
+        <p className="mb-2 text-[11px] font-bold text-indigo-900">لا يُنشأ جدول أقساط جديد لقيمة الخطة التي تتضمن علاجًا تاريخيًّا؛ التحصيل من الرصيد السابق أو الفواتير المثبتة.</p>
+      ) : scheduleExists === false ? (
         <label className="mb-2 flex items-center gap-2 text-xs font-bold text-emerald-900">
           <input type="checkbox" checked={split} onChange={(event) => setSplit(event.target.checked)} />
           قسّطها
@@ -1296,7 +1329,7 @@ function ConsentForm({ plan, scheduleExists, onDone, onError }: {
         <p role="status" className="mb-2 text-[11px] font-bold text-slate-500">وجود جدول الأقساط غير متحقق — لا يُنشأ جدول جديد حتى يكتمل التحقق.</p>
       )}
 
-      {split && scheduleExists === false ? (
+      {split && !hasHistory && scheduleExists === false ? (
         <div className="mb-2 flex flex-wrap gap-2">
           <input value={count} onChange={(event) => setCount(event.target.value)}
             aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
@@ -1310,7 +1343,7 @@ function ConsentForm({ plan, scheduleExists, onDone, onError }: {
         </div>
       ) : null}
 
-      <button onClick={() => void submit()} disabled={busy || plan.totalMinor <= 0 || (split && scheduleExists !== false)}
+      <button onClick={() => void submit()} disabled={busy || !plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive) || plan.totalMinor <= 0 || (hasHistory && note.trim().length < 3) || (split && (hasHistory || scheduleExists !== false))}
         className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-extrabold text-white disabled:opacity-40">
         سجّل الموافقة
       </button>

@@ -28,6 +28,7 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
   const [walkout, settings] = await Promise.all([visitWalkout(id), getSettingsSafe()]);
   if (!walkout) notFound();
   const day = clinicDateString(new Date(walkout.arrivedAt), CLINIC_TIME_ZONE);
+  const financialReviewRequired = walkout.lines.some((line) => line.financialReviewRequired);
 
   return (
     <>
@@ -53,11 +54,16 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
               <tr key={index}>
                 <td>{line.description}{line.toothCode ? ` — سن ${line.toothCode}` : ""}</td>
                 <td className="num" dir="ltr">{line.quantity}</td>
-                <td className="num">{line.included ? "مشمول بالخطة" : formatMoney(line.unitPriceMinor * line.quantity, line.currency)}</td>
+                <td className="num">{line.financialReviewRequired ? "يحتاج مراجعة مالية — التغطية غير محسومة"
+                  : line.included ? "مشمول بالخطة" : formatMoney(line.unitPriceMinor * line.quantity, line.currency)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        {financialReviewRequired ? <p data-testid="walkout-print-financial-review" className="footer-note">
+          توجد بنود تحتاج مراجعة مالية؛ لا يثبت هذا الملخص أنها مجانية أو مشمولة أو مستحقة للتحصيل.
+          الفواتير والمدفوعات والأرصدة المثبتة أدناه حقائق مالية مستقلة عن هذه المراجعة.
+        </p> : null}
         {walkout.treatmentDone ? <p className="footer-note">{walkout.treatmentDone}</p> : null}
 
         <div className="rule-light" />
@@ -66,7 +72,7 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
             <span>فاتورة اليوم ({walkout.invoice.number})</span>
             <span className="num">{formatMoney(walkout.invoice.netMinor, walkout.invoice.currency)}</span>
           </div>
-        ) : <div className="line"><span>فاتورة اليوم</span><span>لا رسوم على هذه الزيارة</span></div>}
+        ) : <div className="line"><span>فاتورة اليوم</span><span>{financialReviewRequired ? "لا فاتورة جديدة للزيارة؛ توجد بنود تحتاج مراجعة مالية" : "لا رسوم على هذه الزيارة"}</span></div>}
         {walkout.payments.map((payment) => (
           <div className="line" key={payment.receiptNumber}>
             <span>{payment.kind === "refund" ? "مردود" : "مدفوع"} — سند {payment.receiptNumber}</span>
