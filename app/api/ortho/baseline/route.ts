@@ -50,6 +50,7 @@ export async function POST(request: Request) {
         open_case: ["للمريض حالة تقويم مفتوحة سلفًا — اللقطة السابقة تُسجَّل لمريضٍ بلا حالة جارية.", 409],
         bad_doctor: ["الطبيب المسؤول يجب أن يكون طبيبًا مسجّلًا نشطًا.", 400],
         bad_plan: ["الخطة لا تخص هذا المريض.", 400],
+        bridge_conflict: ["للمريض حالة تقويم أولية (فاتورة أو علاج بدأ قبل النظام) بموضعٍ مختلف أو متعدّدة — راجعها قبل تسجيل اللقطة السابقة.", 409],
       } as const;
       const [message, status] = messages[result.reason];
       return json(message, status);
