@@ -31,6 +31,26 @@ beforeEach(() => {
 const render = async () => renderToStaticMarkup(await WalkoutPage({ params: Promise.resolve({ id: "10" }) }));
 
 describe("printed walkout uses canonical financial-review evidence", () => {
+  it.each(["INCLUDED", "LEGACY_INCLUDED"] as const)("prints adjustment-only %s without invented work or an invoice", async (billingClass) => {
+    state.walkout!.lines = [];
+    state.walkout!.orthoAdjustment = { id: 30, billingClass, decision: null, pendingDecision: false };
+    state.walkout!.balances = [{ currency: "YER", balanceMinor: 180000 }];
+    const html = await render();
+    expect(html).toContain("شدّة تقويم");
+    expect(html).toContain(billingClass === "INCLUDED" ? "مشمول بالاتفاق" : "مشمول بالعلاج السابق");
+    expect(html).not.toContain("كشف ومتابعة");
+    expect(html).toContain(formatMoney(180000, "YER"));
+    expect(state.walkout!.invoice).toBeNull();
+  });
+  it("does not print a pending outside-contract adjustment as free", async () => {
+    state.walkout!.lines = [];
+    state.walkout!.orthoAdjustment = { id: 30, billingClass: "OUTSIDE_CONTRACT", decision: null, pendingDecision: true };
+    const html = await render();
+    expect(html).toContain("خارج العقد — قرار فوترة معلّق");
+    expect(html).not.toContain("لا رسوم على هذه الزيارة");
+    expect(html).not.toContain("كشف ومتابعة");
+  });
+
   it("never prints unresolved work as free/included/collectible while retaining known account balances", async () => {
     const html = await render();
     expect(html).toContain("يحتاج مراجعة مالية — التغطية غير محسومة");
