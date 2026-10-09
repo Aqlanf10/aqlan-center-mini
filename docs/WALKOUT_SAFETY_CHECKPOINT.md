@@ -50,3 +50,16 @@ Local execution transport disconnected during setup, so subsequent source change
 are saved via GitHub. Do not depend on the laptop working tree. CI results must be checked on
 the final remote SHA. No merge/deploy/force-push; no CI/deployment edits; #312/#313 untouched.
 This is one safety slice of the larger patient-file redesign, not its replacement.
+
+## Independent review follow-up
+
+Review regressions committed first at 3ae4bca37f6369b779ef6acba0d2436d9131ba3d:
+unsigned/cancelled-invoice print must not infer free care, and a fully paid visit invoice
+must not remain the preset target while other ledger debt exists. The prepared fix uses
+neutral absent-invoice text, presets only an unpaid visit invoice, exposes the existing
+account tab for explicit target selection, and retains payment retry/idempotency behavior.
+Foreign-only SAR/USD debt opens the existing account tab for an explicit opening/invoice target,
+never an automatic YER collection. The browser selects the existing opening-currency target
+for both SAR and USD and verifies the request currency/openingCurrency and absent invoiceId.
+The built-browser test intercepts the planned synthetic payment POST, verifies no settled
+invoiceId is sent, and verifies the retry body/key are unchanged. No real payment is sent.

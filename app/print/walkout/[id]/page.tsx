@@ -78,7 +78,7 @@ export default async function WalkoutPage({ params }: { params: Promise<{ id: st
             <span>فاتورة اليوم ({walkout.invoice.number})</span>
             <span className="num">{formatMoney(walkout.invoice.netMinor, walkout.invoice.currency)}</span>
           </div>
-        ) : <div className="line"><span>فاتورة اليوم</span><span>{financialReviewRequired ? "لا فاتورة جديدة للزيارة؛ توجد بنود تحتاج مراجعة مالية" : "لا رسوم على هذه الزيارة"}</span></div>}
+        ) : <div className="line"><span>فاتورة اليوم</span><span>{financialReviewRequired ? "لا فاتورة جديدة للزيارة؛ توجد بنود تحتاج مراجعة مالية" : "لا فاتورة جديدة مثبتة لهذه الزيارة"}</span></div>}
         {walkout.payments.map((payment) => (
           <div className="line" key={payment.receiptNumber}>
             <span>{payment.kind === "refund" ? "مردود" : "مدفوع"} — سند {payment.receiptNumber}</span>

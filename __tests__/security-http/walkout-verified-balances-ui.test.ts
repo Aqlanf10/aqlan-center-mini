@@ -42,6 +42,7 @@ describe("built patient walkout verifies balances for reception", () => {
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const unexpected: string[] = [], errors: string[] = [], writes: string[] = [];
     let paidInvoice = false;
+    let foreignCurrency: "SAR" | "USD" | null = null;
     const paymentAttempts: { body: Record<string, unknown>; key: string | undefined }[] = [];
     let fault: "none" | "http500" | "json" | "null" | "empty" | "missing" | "amount" | "foreign" = "none";
     const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async (route) => {
@@ -53,7 +54,28 @@ describe("built patient walkout verifies balances for reception", () => {
         return; // Synthetic fulfillment; no payment request reaches the application server.
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { writes.push(`${method} ${path}`); await json(route, {}, 409); return; }
-      if (path === `/api/patients/${patientId}/workflow`) await json(route, workflow());
+      if (path === `/api/patients/${patientId}/workflow`) {
+        const body = workflow();
+        if (foreignCurrency) {
+          body.financial = { ...money(0), byCurrency: { YER: money(0), SAR: money(0), USD: money(0) } };
+          body.financial.byCurrency[foreignCurrency] = money(2300);
+        }
+        await json(route, body);
+      }
+      else if (path === `/api/patients/${patientId}/ledger` && foreignCurrency) {
+        const balance = (dueMinor: number) => ({ billedMinor: 0, collectedMinor: 0, openingMinor: dueMinor, dueMinor });
+        const balances = { YER: balance(0), SAR: balance(0), USD: balance(0) };
+        balances[foreignCurrency] = balance(2300);
+        await json(route, {
+          invoices: [{ id: 98784, invoiceNumber: "SYN-PAID", status: "paid", patientId, totalMinor: 5000, discountMinor: 0,
+            baseCurrency: "SAR", note: null, createdAt: "2026-10-09T09:00:00Z", items: [] }],
+          payments: [], plans: [], opening: null, baseCurrency: "YER",
+          balance: balance(0), balances, openings: [{ patientId, currency: foreignCurrency, amountMinor: 2300, asOfDate: "2026-10-09", note: null }],
+          openingAccess: { add: false, edit: false }, legacyBalanceArrangements: [], legacyOpeningPositions: [], legacyArrangementAccess: { manage: false } });
+      }
+      else if (path === `/api/patients/${patientId}/legacy`) await json(route, { treatments: [], orphanPayments: [] });
+      else if (path === `/api/patients/${patientId}/legacy-treatments`) await json(route, { agreements: [], canVoid: false });
+      else if (path === "/api/services") await json(route, []);
       else if (path === `/api/patients/${patientId}`) await json(route, { patient, visits: [], appointments: [] });
       else if (path === `/api/visits/${visitId}/walkout`) {
         if (fault === "http500") { await json(route, {}, 500); return; }
@@ -63,6 +85,13 @@ describe("built patient walkout verifies balances for reception", () => {
         if (paidInvoice) {
           (body as { invoice: unknown }).invoice = { id: 98784, number: "SYN-PAID", netMinor: 5000, currency: "SAR" };
           body.checkout.invoicePaidMinor = 5000;
+        }
+        if (foreignCurrency) {
+          body.balances = [{ currency: foreignCurrency, balanceMinor: 2300 }];
+          body.checkout.previous = { YER: 0, SAR: 0, USD: 0 };
+          body.checkout.current = { YER: 0, SAR: 0, USD: 0 };
+          body.checkout.previous[foreignCurrency] = 2300;
+          body.checkout.current[foreignCurrency] = 2300;
         }
         if (fault === "empty") body.checkout.current = {} as typeof body.checkout.current;
         if (fault === "missing") delete (body.checkout.current as Partial<typeof body.checkout.current>).USD;
@@ -126,6 +155,25 @@ describe("built patient walkout verifies balances for reception", () => {
       expect(paymentAttempts[0].body).not.toHaveProperty("planId");
       expect(paymentAttempts[0].key).toBeTruthy();
       expect(paymentAttempts[1]).toEqual(paymentAttempts[0]);
+      for (const currency of ["SAR", "USD"] as const) {
+        foreignCurrency = currency;
+        await page.goto(`${baseUrl}/patients/${patientId}?tab=today`, { waitUntil: "domcontentloaded" });
+        await expect.poll(() => checkout.innerText()).toContain("يوجد رصيد بعملة أخرى");
+        expect(await checkout.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+        const account = checkout.getByRole("link", { name: "اختيار هدف التحصيل من الحساب", exact: true });
+        expect(await account.getAttribute("href")).toBe(`/patients/${patientId}?tab=account`);
+        await account.click();
+        await page.getByRole("button", { name: "قبض دفعة", exact: true }).click();
+        const foreignDialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
+        await foreignDialog.getByLabel("رصيد سابق", { exact: true }).selectOption(currency);
+        expect(await foreignDialog.getByLabel("العملة", { exact: true }).inputValue()).toBe(currency);
+        await foreignDialog.getByLabel("المبلغ", { exact: true }).fill("10");
+        await foreignDialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
+        await foreignDialog.waitFor({ state: "detached" });
+        expect(paymentAttempts.at(-1)?.body).toMatchObject({ patientId, amount: "10", currency, openingCurrency: currency });
+        expect(paymentAttempts.at(-1)?.body).not.toHaveProperty("invoiceId");
+        expect(paymentAttempts.at(-1)?.body).not.toHaveProperty("planId");
+      }
       verify();
     }, verify);
   });

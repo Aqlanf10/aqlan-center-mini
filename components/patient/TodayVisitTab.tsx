@@ -244,12 +244,12 @@ function OwnedTodayVisitTab({
   const totalDueInInvoiceCurrency = financialRead === "verified"
     ? currentBalances?.find((row) => row.currency === invoiceCurrency)?.balanceMinor ?? 0 : null;
 
-  /* فاتورة اليوم المستهدفة — التحصيل يفتح عليها بعملتها لا على الحساب. */
+  // Preset only an unpaid visit invoice; other debt uses an explicit existing account target.
   const presetInvoice = useMemo(
-    () => checkout?.invoiceId
+    () => checkout?.invoiceId && checkout.remainingMinor > 0
       ? { id: checkout.invoiceId, baseCurrency: invoiceCurrency }
       : null,
-    [checkout?.invoiceId, invoiceCurrency],
+    [checkout?.invoiceId, checkout?.remainingMinor, invoiceCurrency],
   );
   const todayInvoice = presetInvoice && checkout ? [{
     id: checkout.invoiceId as number,
@@ -476,7 +476,7 @@ function OwnedTodayVisitTab({
               <span className="flex-[2] rounded-xl bg-emerald-600 px-4 py-2.5 text-center text-sm font-extrabold text-white">
                 تم التحصيل — سند الاستحقاق سُجّل
               </span>
-            ) : checkout.remainingMinor > 0 || currentBalances?.some((row) => row.balanceMinor > 0) ? (
+            ) : checkout.remainingMinor > 0 || currentBalances?.some((row) => row.currency === "YER" && row.balanceMinor > 0) ? (
               <button
                 type="button"
                 onClick={() => setCollectOpen(true)}
@@ -484,9 +484,16 @@ function OwnedTodayVisitTab({
               >
                 تحصيل وطباعة السند
               </button>
-            ) : checkoutNeedsFinanceAttention
+            ) : currentBalances?.some((row) => row.balanceMinor > 0)
+              ? <span className="font-bold text-amber-900">يوجد رصيد بعملة أخرى؛ اختر هدف تحصيله من الحساب</span>
+              : checkoutNeedsFinanceAttention
               ? <span className="font-bold text-amber-900">لا مبلغ مثبت للتحصيل الآن؛ التحقق من تغطية العمل ما زال مطلوبًا</span>
               : <span className="font-bold text-emerald-800">لا مبلغ مطلوب لهذه الزيارة</span>}
+            {!presetInvoice && financialRead === "verified" && currentBalances?.some((row) => row.balanceMinor > 0) ? (
+              <a href={`/patients/${patientId}?tab=account`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-navy-800">
+                اختيار هدف التحصيل من الحساب
+              </a>
+            ) : null}
             {checkout.invoiceId ? (
               <a
                 href={`/print/invoice/${checkout.invoiceId}`}
@@ -578,8 +585,7 @@ function OwnedTodayVisitTab({
         </details>
       ) : null}
 
-      {/* (TD-05 owner review) التحصيل يستهدف فاتورة اليوم نفسها بعملتها — لا
-          دفعةً «على الحساب» أساسية لفاتورةٍ بعملة اتفاق. */}
+      {/* Preserve the shared payment modal and its idempotent attempt lifecycle. */}
       <CollectPaymentModal
         patientId={patientId}
         patientName={patientName}
@@ -594,13 +600,13 @@ function OwnedTodayVisitTab({
           void loadCurrentBalances();
         }}
         suggestedMinor={checkout && checkout.remainingMinor > 0 ? checkout.remainingMinor : null}
-        suggestedCurrency={checkout ? invoiceCurrency : null}
+        suggestedCurrency={presetInvoice ? invoiceCurrency : null}
         invoices={todayInvoice}
         presetInvoice={presetInvoice}
         contextLabel={
-          checkout
+          presetInvoice && checkout
             ? `استحقاق اليوم: ${formatMoney(checkout.duesMinor, invoiceCurrency)}${sameCurrencyBefore && sameCurrencyBefore.balanceMinor > 0 ? ` · رصيد سابق ${formatMoney(sameCurrencyBefore.balanceMinor, invoiceCurrency)}` : ""}`
-            : null
+            : "دفعة على الحساب بالريال اليمني؛ لا تستهدف فاتورة الزيارة المسددة. لتسوية فاتورة أخرى أو رصيد سابق بعملته، افتح تبويب الحساب واختر الهدف."
         }
       />
     </div>
