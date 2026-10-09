@@ -91,7 +91,12 @@ describe("DOT-PF-01 correction reconciliation", () => {
       // The canonical read includes only positive remaining amounts (HAVING > 0).
       expect(ledger.receiptRemaining).toBeTypeOf("object");
       expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
-      const originalRow = payments.locator("li").filter({ has: tab.locator(`a[href="/print/receipt/${wrongId}"]`) });
+      // Provenance also links to the original receipt from its replacement.
+      // Select the row's own print link, not a provenance reference to it.
+      const originalPrint = tab.getByRole("link", { name: "السند", exact: true })
+        .and(tab.locator(`a[href="/print/receipt/${wrongId}"]`));
+      const originalRow = payments.locator("li").filter({ has: originalPrint });
+      await expect.poll(() => originalRow.count()).toBe(1);
       await originalRow.getByRole("button", { name: "تصحيح السند" }).click();
       await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
       await tab.getByText(/وصدر بدله/).first().waitFor();
