@@ -53,7 +53,7 @@ const newPatient = async (label: string) => (await q<{ id: number }>(
 
 async function approvedStudy(patientId: number, over: {
   orthoCaseId: number | null; phase: "pretreatment" | "during" | "posttreatment" | "followup";
-  xrayDate: string | null; device: string | null;
+  xrayDate: string | null; device: string | null; refSet?: string;
 }) {
   const [document] = await q<{ id: number }>(
     `INSERT INTO patient_documents (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
@@ -61,7 +61,7 @@ async function approvedStudy(patientId: number, over: {
     [patientId, `sha-${fixture}-${over.phase}`, `synthetic/${fixture}-${over.phase}.jpg`]);
   const created = await createCephAnalysis({
     patientId, documentId: document.id, createdBy: "ortho-id-test", orthoCaseId: over.orthoCaseId,
-    phase: over.phase, xrayDate: over.xrayDate, device: over.device, refSet: "builtin_default",
+    phase: over.phase, xrayDate: over.xrayDate, device: over.device, refSet: over.refSet ?? "builtin_default",
   });
   if (!created.ok) throw new Error(created.message);
   const calibrated = await updateCephCalibration(created.id, { x1: 0, y1: 0, x2: 100, y2: 0, mm: 50 }, "ortho-id-test");
@@ -111,6 +111,42 @@ describe("(ORTHO-ID) Ceph correction lineage", () => {
     });
     // The approved original is untouched and keeps its own certificate.
     expect(await readStudyRow(original.id)).toEqual(before);
+  });
+});
+
+describe("(ORTHO-ID) Ceph correction from an older case or a local reference set", () => {
+  it("a correction of a study on a closed older case stays on that case while the patient has another active case", async () => {
+    const patientId = await newPatient("ceph older case");
+    const make = async (startDate: string) => {
+      const created = await createOrthoCase({
+        patientId, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null, startDate,
+        plannedMonths: 12, planId: null, note: null, createdBy: "ortho-id-test",
+      });
+      if (!created.ok) throw new Error(created.message);
+      return created.id;
+    };
+    const older = await make("2024-01-10");
+    const study = await approvedStudy(patientId, { orthoCaseId: older, phase: "posttreatment", xrayDate: "2025-02-01", device: null });
+    await q(`UPDATE ortho_cases SET status = 'completed', closed_at = NOW() WHERE id = $1`, [older]);
+    const active = await make("2026-01-10");
+
+    const copy = await duplicateCephAnalysis(study.id, "ortho-id-test");
+    if (!copy.ok) throw new Error(copy.message);
+    const row = await readStudyRow(copy.id);
+    expect(row.ortho_case_id).toBe(older);
+    expect(row.ortho_case_id).not.toBe(active);
+    expect(row.phase).toBe("posttreatment");
+  });
+
+  it("a non-default reference set survives the correction", async () => {
+    await q(`INSERT INTO ceph_reference_sets (key, name, created_by) VALUES ('synthetic_local', 'Synthetic local set', 'ortho-id-test')
+             ON CONFLICT (key) DO NOTHING`);
+    const patientId = await newPatient("ceph local ref");
+    const study = await approvedStudy(patientId, { orthoCaseId: null, phase: "during", xrayDate: "2026-05-05", device: null, refSet: "synthetic_local" });
+    const copy = await duplicateCephAnalysis(study.id, "ortho-id-test");
+    if (!copy.ok) throw new Error(copy.message);
+    expect((await readStudyRow(copy.id)).ref_set).toBe("synthetic_local");
+    expect((await readStudyRow(study.id)).ref_set).toBe("synthetic_local");
   });
 });
 
@@ -242,5 +278,75 @@ describe("(ORTHO-ID) jaw scope is one value in the general bridge and the ortho 
     const rows = await q<{ id: number; ortho_case_id: number | null }>(
       `SELECT id, ortho_case_id FROM clinical_cases WHERE patient_id = $1 AND specialty = 'orthodontics' ORDER BY id`, [patientId]);
     expect(rows).toEqual([{ id: bridged.case.id, ortho_case_id: ortho.id }]);
+  });
+});
+
+describe("(ORTHO-ID) bridge failures write nothing", () => {
+  const shell = (patientId: number, title: string) => q<{ id: number }>(
+    `INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by, origin)
+     VALUES ($1, 'orthodontics', $2, 'الفكّان', 'ortho-id-test', 'invoice') RETURNING id`, [patientId, title]);
+
+  it("several eligible public shells are ambiguous: baseline and the doctor's entry both refuse and leave every row as it was", async () => {
+    const patientId = await newPatient("two shells");
+    await shell(patientId, "Synthetic shell 1");
+    const second = await shell(patientId, "Synthetic shell 2").catch((error: Error) => error);
+    if (second instanceof Error) {
+      // The database itself forbids a second open orthodontic shell: the ambiguity cannot occur, which is the stronger guarantee.
+      expect(second.message).toMatch(/duplicate key|unique/i);
+      return;
+    }
+    const before = await footprint(patientId);
+    expect(await baseline(patientId, "both")).toEqual({ ok: false, reason: "bridge_conflict" });
+    const entry = await createOrthoCase({
+      patientId, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null, startDate: "2026-01-10",
+      plannedMonths: 12, planId: null, note: null, createdBy: "ortho-id-test",
+    });
+    expect(entry.ok).toBe(false);
+    expect(await footprint(patientId)).toEqual(before);
+    expect(await q(`SELECT 1 FROM clinical_cases WHERE patient_id = $1 AND ortho_case_id IS NOT NULL`, [patientId])).toHaveLength(0);
+  });
+
+  it("an audit failure after the bridge rolls back the case, the bridge and the bridge audit row", async () => {
+    const patientId = await newPatient("audit failure");
+    const first = await legacy(patientId, "both", "ortho-id:audit-failure");
+    if (!first.ok) throw new Error(first.reason);
+    const before = await footprint(patientId);
+    await q(`CREATE OR REPLACE FUNCTION ortho_id_fail_baseline_audit() RETURNS TRIGGER AS $f$
+             BEGIN IF NEW.action = 'ortho.baseline' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $f$ LANGUAGE plpgsql`);
+    await q(`CREATE TRIGGER ortho_id_fail_baseline_audit BEFORE INSERT ON audit_log
+             FOR EACH ROW EXECUTE FUNCTION ortho_id_fail_baseline_audit()`);
+    try {
+      await expect(baseline(patientId, "both")).rejects.toThrow(/synthetic audit failure/);
+    } finally {
+      await q(`DROP TRIGGER ortho_id_fail_baseline_audit ON audit_log`);
+      await q(`DROP FUNCTION ortho_id_fail_baseline_audit()`);
+    }
+    expect(await footprint(patientId)).toEqual(before);
+    expect(await q(`SELECT 1 FROM clinical_cases WHERE patient_id = $1 AND ortho_case_id IS NOT NULL`, [patientId])).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1::text`, [patientId])).toHaveLength(0);
+    // The write path is healthy again once the failing trigger is gone.
+    expect((await baseline(patientId, "both")).ok).toBe(true);
+  });
+
+  it("a baseline racing a legacy agreement for the same patient never leaves two orthodontic contexts", async () => {
+    for (let round = 0; round < 4; round += 1) {
+      const patientId = await newPatient(`race ${round}`);
+      const [agreement, recorded] = await Promise.all([
+        legacy(patientId, "both", `ortho-id:race-${round}`), baseline(patientId, "both"),
+      ]);
+      const state = await footprint(patientId);
+      expect(state.ortho).toBe(recorded.ok ? 1 : 0);
+      expect(state.agreements).toBe(agreement.ok ? 1 : 0);
+      expect(state.opening).toBe(agreement.ok ? "180000" : "0");
+      expect(state.invoices).toBe(0);
+      expect(state.payments).toBe(0);
+      const cases = await q<{ ortho_case_id: number | null }>(
+        `SELECT ortho_case_id FROM clinical_cases WHERE patient_id = $1 AND specialty = 'orthodontics'`, [patientId]);
+      expect(cases.length).toBeLessThanOrEqual(1);
+      if (agreement.ok && recorded.ok) {
+        expect(cases).toHaveLength(1);
+        expect(cases[0].ortho_case_id).not.toBeNull();
+      }
+    }
   });
 });
