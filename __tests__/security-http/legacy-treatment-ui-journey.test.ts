@@ -120,6 +120,9 @@ describe("pre-system treatment through the built form", () => {
       JOIN plan_items i ON i.plan_id = t.id WHERE i.id = $1`, [agreements[0].plan_item_id]);
     expect(plan.consent_at).toBeNull();
     expect(agreements[0].case_id).not.toBeNull();
+    // DOT-PF14: intake records history, not default clinical visits or sessions.
+    expect((await db.query("SELECT 1 FROM planned_visits WHERE patient_id = $1", [patientId])).rows).toEqual([]);
+    expect((await db.query("SELECT 1 FROM treatment_sessions WHERE plan_item_id = $1", [agreements[0].plan_item_id])).rows).toEqual([]);
 
     // A second tooth inside the recorded bridge cannot be billed again through the invoice preview.
     const preview = await fetch(`${baseUrl}/api/invoices/clinical-preview`, { method: "POST",
@@ -143,6 +146,13 @@ describe("pre-system treatment through the built form", () => {
       const account = await open(patientId, width, "?tab=account");
       try {
         await account.getByTestId("legacy-agreements").waitFor();
+        const header = account.locator("header").filter({ has: account.getByTestId("historical-clinical-note") });
+        const headerHistory = header.getByTestId("historical-clinical-note");
+        await headerHistory.waitFor();
+        expect(await headerHistory.count()).toBe(1);
+        expect(await headerHistory.innerText()).toContain("الباقي السريري غير معلومين");
+        expect(await header.innerText()).not.toContain("باقي علاج (غير مستحق): 300,000");
+        expect(await header.innerText()).toContain("180,000");
         expect(await account.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
         await account.screenshot({ path: `${SHOTS}/legacy-treatment-account-${width}.png`, fullPage: true });
       } finally { await account.context().close(); }

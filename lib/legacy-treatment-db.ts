@@ -439,6 +439,8 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
         serviceId: service.id, serviceName: service.name, category: service.category, toothCode: site.toothCode,
         surfaces: site.surfaces, quantity: 1, unitPriceMinor: request.agreedMinor, billingRule: "on_completion" as const,
         sessionCount: sessionsFor(service.category, request.sessions, input.templates),
+        // Only an explicitly supplied remaining-session count authorizes future work.
+        scheduleSessions: request.sessions !== null,
         note: scopeNote(site) ?? (site.episodeTeeth && site.episodeTeeth.length > 1 ? `الأسنان: ${site.episodeTeeth.join("، ")}` : null),
       }],
       installments: [],
