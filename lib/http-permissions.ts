@@ -107,6 +107,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/inventory/patient-cost": { GET: CLINIC },
   "/api/inventory/value": { GET: ADMIN },
   "/api/invoices": { GET: ["admin", "reception", "cashier", "accountant"], POST: FRONT_DESK },
+  "/api/invoices/clinical-preview": { POST: FRONT_DESK },
   "/api/invoices/[id]": { GET: ["admin", "reception", "cashier", "accountant"], PATCH: FRONT_DESK },
   "/api/invoices/[id]/correct": { POST: ADMIN },
   "/api/lab": { GET: CLINIC, POST: CLINIC },
@@ -152,6 +153,9 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/legacy": { GET: CLINIC },
   "/api/patients/[id]/legacy-balance-arrangement": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: FRONT_DESK, PATCH: FRONT_DESK },
   "/api/patients/[id]/legacy-onboarding": { GET: CLINIC },
+  "/api/patients/[id]/legacy-treatments": { GET: CLINIC, POST: FRONT_DESK },
+  "/api/patients/[id]/legacy-treatments/preview": { POST: FRONT_DESK },
+  "/api/patients/[id]/legacy-treatments/[agreementId]/void": { GET: ADMIN, POST: ADMIN },
   "/api/patients/[id]/materials": { GET: CLINIC },
   "/api/patients/[id]/medical-history": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/merge": { POST: ADMIN },
@@ -199,6 +203,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/referrals/mine": { GET: CLINICAL },
   "/api/report": { GET: CLINIC },
   "/api/reports": { GET: ["admin", "accountant"] },
+  "/api/reports/daily-clinic": { GET: ADMIN },
   "/api/reports/saved": { GET: ["admin", "reception", "doctor", "accountant"], POST: CLINIC, PATCH: CLINIC, DELETE: CLINIC },
   "/api/service-materials": { GET: CLINIC, POST: FRONT_DESK, DELETE: FRONT_DESK },
   "/api/services": { GET: ["admin", "reception", "doctor", "accountant"], POST: ADMIN },
@@ -341,3 +346,4 @@ export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): R
 
 export const API_ROUTE_UNKNOWN_MESSAGE = "هذا المسار غير موجود.";
 export const API_METHOD_NOT_ALLOWED_MESSAGE = "هذه العملية غير مدعومة على هذا المسار.";
+

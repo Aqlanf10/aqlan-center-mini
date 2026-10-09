@@ -174,7 +174,8 @@ describe("ملخّص العيادة — كل بطاقة تساوي تقريره�
     expect(kpi(overview, "visits")?.count).toBe(kpi(visits, "visits")?.count);
     expect(kpi(overview, "visits")?.count).toBe(3);
     expect(kpi(overview, "new")?.count).toBe(kpi(patients, "new")?.count);
-    expect(kpi(overview, "collected")?.minor).toBe(kpi(collections, "total")?.minor);
+    // This fixture contains YER tender only. Mixed-tender account settlements are a different measure.
+    expect(kpi(overview, "collected")?.minor).toBe(kpi(collections, "cur-YER")?.minor);
     expect(kpi(overview, "collected")?.minor).toBe(15000);
     expect(kpi(overview, "outstanding")?.minor).toBe(kpi(debt, "total")?.minor);
     expect(kpi(overview, "outstanding")?.minor).toBe(5000);

@@ -13,6 +13,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 import { listLegacyBalanceArrangements, listLegacyOpeningPositions } from "@/lib/legacy-balance-arrangements-db";
+import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     );
     // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
     const balance = balances[CLINIC_BASE_CURRENCY];
+    // Display metadata only, after patient authorization and the canonical read.
+    const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
       // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
       invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
@@ -97,6 +100,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       plans: plans.map(planLedgerSummary),
       // (DAY1) من يضيف/يعدّل الرصيد السابق — الشاشة تُظهر ما يُسمح به فقط، والخادم يفرضه.
       ...(receiptRemaining ? { receiptRemaining } : {}),
+      receiptProvenance,
       openingAccess: openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true"),
       legacyBalanceArrangements,
       legacyOpeningPositions,

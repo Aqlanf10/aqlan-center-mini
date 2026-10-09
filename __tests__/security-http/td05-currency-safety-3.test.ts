@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Response as BrowserResponse } from "playwright";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { baseUrl, harness } from "./_server";
 
@@ -400,9 +403,65 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
     /* ── (OP-03) إعادة التحميل بعد التحصيل الجزئي: الشبّاك يُستعاد من الخادم بالمتبقي نفسه —
        بلا سندٍ ولا فاتورةٍ جديدة، وزرّ تحصيل المتبقي ما زال متاحًا. */
     const paymentsBeforeReload = await paymentCount();
-    await page.reload();
     const restored = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await restored.waitFor({ timeout: 60_000 });
+    const restoreResponses: { path: string; status: number; body: unknown }[] = [];
+    const pendingBodies: Promise<void>[] = [];
+    const pageErrors: string[] = [];
+    const observeResponse = (response: BrowserResponse) => {
+      const path = new URL(response.url()).pathname;
+      if (path !== `/api/patients/${privatePatientId}/workflow`
+        && path !== `/api/visits/${visitA}/walkout`) return;
+      if (pendingBodies.length >= 12) return;
+      pendingBodies.push(response.text().then(body => {
+        restoreResponses.push({ path, status: response.status(), body: {
+          text: body.slice(0, 16_000), totalCharacters: body.length, truncated: body.length > 16_000,
+        } });
+      }, error => {
+        restoreResponses.push({ path, status: response.status(), body: { unreadable: String(error) } });
+      }));
+    };
+    const observeError = (error: Error) => { pageErrors.push(error.message); };
+    page.on("response", observeResponse);
+    page.on("pageerror", observeError);
+    try {
+      await page.reload();
+      await restored.waitFor({ timeout: 60_000 });
+    } catch (error) {
+      try {
+        // Preserve the original failure, with synthetic browser/DB evidence for
+        // separating refused/malformed reads, owner changes and render failures.
+        await Promise.allSettled(pendingBodies);
+        const { rows: visits } = await db.query(
+          `SELECT id, patient_id, status, arrived_at, signed_at, invoice_id
+             FROM visits WHERE patient_id = $1 ORDER BY id`, [privatePatientId],
+        );
+        const evidence = { visitA, url: page.url(), responses: restoreResponses, pageErrors, visits,
+          visibleText: (await page.locator("body").innerText().catch(() => "<body unavailable>")).slice(0, 12_000) };
+        console.error("[td05-checkout-reload]", JSON.stringify(evidence));
+        const artifacts = join(process.cwd(), ".settings-ui-artifacts");
+        await mkdir(artifacts, { recursive: true });
+        await writeFile(join(artifacts, "td05-checkout-reload-failure.json"), JSON.stringify(evidence, null, 2));
+        const screenshot = await page.screenshot({ path: join(artifacts, "td05-checkout-reload-failure.png"), fullPage: false });
+        // The unchanged generic artifact upload excludes this hidden directory.
+        // Keep bounded PNG chunks in the job log so the failure remains inspectable.
+        if (screenshot.byteLength <= 192 * 1024) {
+          const encoded = screenshot.toString("base64");
+          const chunkSize = 24_000;
+          const chunks = Math.ceil(encoded.length / chunkSize);
+          for (let index = 0; index < chunks; index += 1) {
+            console.error(`[td05-checkout-reload-png ${index + 1}/${chunks}]`, encoded.slice(index * chunkSize, (index + 1) * chunkSize));
+          }
+        } else {
+          console.error("[td05-checkout-reload-png-omitted] size limit:", screenshot.byteLength);
+        }
+      } catch (diagnosticError) {
+        console.error("[td05-checkout-reload-capture-error]", String(diagnosticError));
+      }
+      throw error;
+    } finally {
+      page.off("response", observeResponse);
+      page.off("pageerror", observeError);
+    }
     const restoredRow = restored.locator("div", { hasText: "الرصيد الحالي" }).last();
     await expect.poll(async () => restoredRow.textContent(), { timeout: 30_000 }).toContain("1,000");
     await restored.getByRole("button", { name: /تحصيل وطباعة السند/ }).waitFor({ timeout: 30_000 });

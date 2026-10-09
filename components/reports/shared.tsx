@@ -11,6 +11,7 @@ import {
   type ReportOptions, type PeriodPreset, type DebtMode, type CompareMode,
 } from "@/lib/reports-types";
 import { DEBT_MODES } from "@/lib/reports-types";
+import { formatReportGeneratedAt } from "@/lib/report-generated-time";
 
 /**
  * أدوات عرض التقارير المشتركة — كل تقرير يُصيَّر بنفس اللبنات: بطاقات أرقام،
@@ -50,6 +51,14 @@ function currencyTotalsText(
   return [...totals.entries()]
     .map(([currency, total]) => moneyText(total, currency))
     .join(" · ");
+}
+
+function currencyTotalsContent(rows: ReportRow[], column: ReportColumn, base: Currency) {
+  const text = currencyTotalsText(rows, column, base);
+  if (!column.stackCurrencyTotals || text === "") return text;
+  return text.split(" · ").map((part, index) => (
+    <span key={index} data-report-currency-total="" className="block whitespace-nowrap">{part}</span>
+  ));
 }
 
 const TONE_STYLES: Record<string, string> = {
@@ -291,7 +300,7 @@ export function DataTable({
                     <td className="px-2.5 py-1.5">مجموع {segment.label}</td>
                     {columns.slice(1).map((column) => (
                       <td key={column.key} className="px-2.5 py-1.5 font-mono tabular-nums">
-                        {column.type === "money" ? currencyTotalsText(segment.rows, column, base) : ""}
+                        {column.type === "money" ? currencyTotalsContent(segment.rows, column, base) : ""}
                       </td>
                     ))}
                   </tr>
@@ -305,7 +314,7 @@ export function DataTable({
                 <td className="px-2.5 py-2.5">الإجمالي ({filtered.length} صفًا)</td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className="px-2.5 py-2.5 font-mono tabular-nums">
-                    {column.type === "money" ? currencyTotalsText(filtered, column, base) : ""}
+                    {column.type === "money" ? currencyTotalsContent(filtered, column, base) : ""}
                   </td>
                 ))}
               </tr>
@@ -393,7 +402,7 @@ export function BarsChart({ bars, base }: { bars: { label: string; minor: number
 export function PrintFrame({ result, clinicName, generated }: {
   result: ReportResult;
   clinicName: string;
-  generated: { at: string; by: string };
+  generated: { at: string; by: string; clinicTimeZone?: unknown };
 }) {
   // الهوية من الإعدادات مباشرة: التقرير المعروض على الشاشة قد يُطبع بعد شهور،
   // والطبيب والعنوان والهاتف يومها قد يكونان تغيّرا — فتُقرأ وقت الطباعة.
@@ -458,7 +467,7 @@ export function PrintFrame({ result, clinicName, generated }: {
         }
       `}</style>
       <div className="report-print-footer">
-        <span>أُنشئ في {generated.at.slice(0, 16).replace("T", " ")} بواسطة {generated.by}</span>
+        <span>أُنشئ في {formatReportGeneratedAt(generated.at, generated.clinicTimeZone)} بواسطة {generated.by}</span>
         <span>{clinicName}</span>
       </div>
     </div>

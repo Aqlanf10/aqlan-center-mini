@@ -51,6 +51,8 @@ interface Feed {
     count: number;
   };
   payments: PaymentItem[];
+  /** Separate display-only metadata; canonical payments/totals remain unchanged. */
+  receiptProvenance?: unknown;
   expenses: ExpenseItem[];
   recent: ShiftData[];
   /** (P1-3) الدرج بالقاعدة الواحدة — نقدٌ فقط؛ التحويل لا يدخل المتوقَّع. */
@@ -694,6 +696,7 @@ export default function FinancePage() {
               canShift={canShift}
               shift={feed?.open ?? null}
               payments={feed?.payments ?? []}
+              receiptProvenance={feed?.receiptProvenance}
               expenses={feed?.expenses ?? []}
               recentShifts={feed?.recent ?? []}
               expectedInBox={expected}
