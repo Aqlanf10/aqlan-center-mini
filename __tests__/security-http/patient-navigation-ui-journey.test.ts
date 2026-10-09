@@ -209,7 +209,7 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
         const more = page.getByTestId("patient-more-actions");
         await more.locator("summary").click();
         await more.getByRole("button", { name: "✏️ تعديل بيانات الملف", exact: true }).click();
-        await more.locator("summary").click();
+        await expect.poll(() => more.getAttribute("open")).toBeNull();
         const editor = page.getByRole("region", { name: "تعديل البيانات", exact: true });
         await editor.getByRole("textbox", { name: /تنبيه طبي/ }).fill(alert);
         await editor.getByRole("button", { name: "حفظ التغييرات", exact: true }).click();

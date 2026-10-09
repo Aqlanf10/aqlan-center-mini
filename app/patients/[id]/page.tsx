@@ -52,6 +52,7 @@ import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
+import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
@@ -138,6 +139,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenu = useDismissibleDetails(moreOpen, setMoreOpen);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
   const alertScope = patientAlertScope(Number(id), session);
   const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
@@ -814,11 +816,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
-              <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+            <details ref={moreMenu.ref} className="relative" open={moreOpen} onKeyDown={moreMenu.onKeyDown} data-testid="patient-more-actions">
+              <summary onClick={moreMenu.onSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
+                className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
-              <div className="absolute left-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div id="patient-more-actions-panel" onClick={moreMenu.onActionClick}
+                className="absolute end-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">

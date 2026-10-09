@@ -121,7 +121,13 @@ function control(testId: string) {
 }
 function more() { return render().find((element) => element.type === "details" && text(element.props.children as ReactNode).includes("المزيد ⋯"))!; }
 function click(testId: string) { (control(testId).props.onClick as () => void)(); }
-function openMore() { (more().props.onToggle as (event: unknown) => void)({ currentTarget: { open: true } }); expect(more().props.open).toBe(true); }
+function openMore() {
+  const summary = nodes(more()).find(element => element.type === "summary")!;
+  const preventDefault = vi.fn();
+  (summary.props.onClick as (event: unknown) => void)({ preventDefault });
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(more().props.open).toBe(true);
+}
 function endo() { return render().find((element) => element.type === PatientEndo)!; }
 function clearHooks() {
   hooks.effects.forEach((effect) => effect.cleanup?.());
@@ -189,7 +195,7 @@ describe("patient disclosure lifecycle", () => {
     expect(more().props.open).toBe(false);
   });
 
-  it("preserves the visible menu when dirty ENDO rejects canonical navigation", () => {
+  it("preserves More when programmatic navigation is rejected without an outside interaction", () => {
     click("patient-details-toggle"); openMore();
     (endo().props.onDraftChange as (dirty: boolean) => void)(true);
     const before = url.href;
