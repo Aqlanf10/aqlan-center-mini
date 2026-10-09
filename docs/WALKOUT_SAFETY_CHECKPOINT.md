@@ -4,6 +4,9 @@ Base: main 9e8f496f0ee55dce3396e60e023487a9bc975dfd.
 Branch: hardening/walkout-verified-balances.
 Draft PR: https://github.com/Aqlanf10/aqlan-center-mini/pull/316.
 Red test commit: a562f3935ea0d885a1625cdf5ad55a5b8793fcaf.
+CI run 37981393395 confirmed exactly the 3 new print regressions failed; 8322 tests passed.
+Implementation commit: 12f60f4e26ceb616ccab074a50502147b3ec8967; typecheck passed.
+Follow-up: invalidate child checkout suggestions with the parent financial read, including partial collection.
 
 ## Verified cause and bounded repair
 

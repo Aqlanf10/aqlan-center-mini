@@ -71,6 +71,8 @@ export function WalkoutLineBilling({ line }: { line: WalkoutLine }) {
 interface CheckoutExtrasProps {
   visitId: number;
   expectedPatientId?: number;
+  financialVerified?: boolean;
+  financialRevision?: number;
   collected: boolean;
   suggestedDate: string | null;
   durationMinutes: number | null;
@@ -85,7 +87,7 @@ export function CheckoutExtras(props: CheckoutExtrasProps) {
   const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
   return <OwnedCheckoutExtras key={owner} {...props} />;
 }
-function OwnedCheckoutExtras({ visitId, expectedPatientId, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
@@ -125,7 +127,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, collected, suggestedD
   useEffect(() => {
     const first = setTimeout(() => { void load(); }, 0);
     return () => { clearTimeout(first); readRequest.current?.abort(); };
-  }, [load, collected]);
+  }, [load, collected, financialRevision]);
 
   const defer = async () => {
     if (busy || command.current || !mounted.current || !walkout) return;
@@ -181,7 +183,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, collected, suggestedD
   };
 
   const deferred = walkout?.deferred === true;
-  const summary = walkout?.summary ?? [];
+  const summary = financialVerified ? walkout?.summary ?? [] : [];
 
   return (
     <div className="mt-3 space-y-2">
@@ -281,7 +283,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, collected, suggestedD
       ) : null}
       {walkout && !financialReviewRequired ? <p className="text-[10px] text-slate-400">بلا رسوم؟ يُعدَّل سعر الإجراء قبل التوقيع إلى صفر بسببٍ مكتوب.</p> : null}
 
-      {collectLegacy && walkout?.patientId ? (
+      {financialVerified && collectLegacy && walkout?.patientId ? (
         <CollectPaymentModal
           patientId={walkout.patientId}
           patientName={walkout.patientName}

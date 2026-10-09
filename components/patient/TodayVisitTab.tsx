@@ -86,6 +86,7 @@ function OwnedTodayVisitTab({
   const checkoutNeedsFinanceAttention = checkout?.financialReviewRequired === true || checkout?.financialReviewRequired === null;
 
   const [financialRead, setFinancialRead] = useState<FinancialReadState>("loading");
+  const [financialRevision, setFinancialRevision] = useState(0);
   const requestRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const checkoutVisitRef = useRef<number | null>(null);
@@ -102,6 +103,7 @@ function OwnedTodayVisitTab({
     setCurrentBalances(null);
     setPreviousBalances(null);
     setFinancialRead("loading");
+    setFinancialRevision((revision) => revision + 1);
     if (!canCollect) return;
     try {
       const response = await fetch(visitId === null
@@ -329,7 +331,7 @@ function OwnedTodayVisitTab({
             autoReview={autoReview}
             onSigned={(result) => {
               if (!mounted.current || activeVisitRef.current?.id !== openVisit.id) return;
-                    checkoutVisitRef.current = openVisit.id;
+              checkoutVisitRef.current = openVisit.id;
               setCheckout({
                 visitId: openVisit.id,
                 financialReviewRequired: null,
@@ -501,6 +503,8 @@ function OwnedTodayVisitTab({
           <CheckoutExtras
             visitId={checkout.visitId}
             expectedPatientId={patientId}
+            financialVerified={financialRead === "verified"}
+            financialRevision={financialRevision}
             collected={collected}
             suggestedDate={checkout.nextPlannedVisit?.suggestedDate ?? null}
             durationMinutes={checkout.nextPlannedVisit?.durationMinutes ?? null}
