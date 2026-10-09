@@ -160,6 +160,37 @@ describe("event-time commission after an admin discount", () => {
     }
   });
 
+  it("review 5465105806: a rate change between collections never reallocates base already earned (25% → 50%, and 50% → 25%)", () => {
+    const RATE = "2026-09-03T12:00:00.000000Z"; // after the decision (T2), before the later receipt (T3)
+    const invoice = base({ netMinor: 80, adminDiscounts: [{ atIso: T2, amountMinor: 20 }],
+      doctorShares: [{ doctorId: 1, amountMinor: 100, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 20 }] }] });
+    const chunks = [{ invoiceId: 1, amount: 40, sourceTime: T1 }, { invoiceId: 1, amount: 40, sourceTime: T3 }];
+    const rising = ((_: number, at: string) => ({ percent: at < RATE ? 25 : 50, config: null })) as Parameters<typeof commissionForPatientAtEventTime>[2];
+    const falling = ((_: number, at: string) => ({ percent: at < RATE ? 50 : 25, config: null })) as Parameters<typeof commissionForPatientAtEventTime>[2];
+    // 40 of net 100 at 25% = 10; the remaining 40 of net 80 (base 40) at 50% = 20 → 30 (event-rate earned, not invoice-date accrual).
+    expect(one(run(invoice, [chunks[0]], rising)).earnedMinor).toBe(10);
+    expect(one(run(invoice, chunks, rising)).earnedMinor).toBe(30);
+    // Control: 40 at 50% = 20, then the remaining base 40 at 25% = 10 → 30.
+    expect(one(run(invoice, chunks, falling)).earnedMinor).toBe(30);
+    // No rate change: the single-group path ends exactly at the reduced accrual (80 × 25% = 20).
+    expect(one(run(invoice, chunks, policy(25)))).toEqual({ accruedMinor: 20, earnedMinor: 20 });
+  });
+
+  it("review 5465105806: the same holds per doctor with two doctors on one invoice", () => {
+    const RATE = "2026-09-03T12:00:00.000000Z";
+    const invoice: CommissionInvoice = { id: 1, netMinor: 160, currency: "YER", createdAt: T0, adminDiscounts: [{ atIso: T2, amountMinor: 40 }],
+      doctorShares: [
+        { doctorId: 1, amountMinor: 100, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 20 }] },
+        { doctorId: 2, amountMinor: 100, currency: "YER", adminDiscounts: [{ atIso: T2, amountMinor: 20 }] },
+      ] };
+    const at = ((doctorId: number, iso: string) => ({ percent: doctorId === 1 ? (iso < RATE ? 25 : 50) : 30, config: null })) as Parameters<typeof commissionForPatientAtEventTime>[2];
+    const result = commissionForPatientAtEventTime([invoice], [
+      { invoiceId: 1, amount: 80, sourceTime: T1 }, { invoiceId: 1, amount: 80, sourceTime: T3 },
+    ], at);
+    expect(result.get(1)!.YER.earnedMinor).toBe(30); // 40 base at 25% + 40 base at 50%
+    expect(result.get(2)!.YER).toEqual({ accruedMinor: 24, earnedMinor: 24 }); // unchanged rate: ends at 80 × 30%
+  });
+
   it("review 5464679755: a receipt microseconds before a decision in the same millisecond belongs to the protected prefix", () => {
     const receipt = "2026-09-02T08:00:00.123400Z";
     const decision = "2026-09-02T08:00:00.123900Z";

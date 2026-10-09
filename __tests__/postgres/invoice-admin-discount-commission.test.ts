@@ -18,7 +18,7 @@ stubPostgresEnv();
 const db = await import("../../lib/db");
 const { getPool, resetPoolForTesting, ensureSchema, createInvoice, recordPayment, applyAdminInvoiceDiscount,
   commissionReport, commissionDetailReport, computeDebtRows, correctInvoice, recordExpense, createStaffUser, updateUser,
-  CLINIC_TIME_ZONE } = db;
+  updateParty, CLINIC_TIME_ZONE } = db;
 
 let doctorA = 0;
 let doctorB = 0;
@@ -520,4 +520,26 @@ describe("decision timestamps are database-owned at full precision (review 54646
     expect(carried.length).toBeGreaterThan(0);
     expect(carried.every((one) => one.same)).toBe(true);
   });
+});
+
+describe("a rate change between collections never reallocates base already earned (review 5465105806)", () => {
+  it.each([[25, 50, 10, 30], [50, 25, 20, 30]] as const)(
+    "%i%% → %i%%: receipt 40, discount 20, prospective rate change, receipt 40 — first part %i, total %i; a second doctor is unaffected",
+    async (fromRate, toRate, firstPart, total) => {
+      const d = await doctor(fromRate);
+      const other = await doctor(30);
+      const patientId = await patient();
+      const id = await bill(patientId, [[d, 100], [other, 100]]);
+      await pay(patientId, id, 80);
+      expect(row(await commissionReport("2000-01-01", today()), d).earned).toBe(firstPart);
+      expect(await discount(id, 40)).toMatchObject({ ok: true }); // 20 per line
+      expect(row(await commissionReport("2000-01-01", today()), d).earned).toBe(firstPart); // a decision alone moves nothing
+      expect(await updateParty(d, { commissionPercent: toRate })).not.toBeNull(); // the real rate-history writer, from now on
+      await pay(patientId, id, 80);
+      const report = await commissionReport("2000-01-01", today());
+      expect(row(report, d).earned).toBe(total); // 40 base at the first rate + 40 base at the second, each once
+      expect(row(report, other)).toEqual({ accrued: 24, earned: 24 }); // 80 × 30%, unchanged rate ends at its target
+      expect(await dueOf(patientId)).toBe(0);
+      await statementMatchesReport([d, other]);
+    });
 });

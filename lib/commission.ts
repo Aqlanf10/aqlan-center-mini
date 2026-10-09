@@ -619,22 +619,29 @@ export function commissionForPatientAtEventTime(
             const groupAccrued = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
             part = Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
           } else {
-            /* (Reviews 5464652001, 5464670357, 5464703830) Segments between decisions. Earned is frozen exactly at every
-               decision — a decision alone never moves it, up or down. Within a segment, this group's receipts take the
-               remaining integer budget (its accrual at that point − earned so far, never negative) over the remaining net
-               at the segment start, rounded once cumulatively. Before the first decision this is the classic formula itself
-               (budget = accrual, remaining net = net then); a full settlement in any segment ends exactly at the target
-               whenever the target is not below what was already earned. A target below it is refused by the writers
-               (commission_review / commission_paid), never clawed back here. */
+            /* (Reviews 5464652001, 5464670357, 5464703830, 5465105806) Segments between decisions, base accounted once.
+               - Earned is frozen exactly at every decision: a decision alone never moves it, up or down.
+               - Every collection consumes base (this group's base rules) at the remaining base over the remaining net of
+                 its segment, whatever policy group it belongs to; base consumed by another group (a collection under an
+                 earlier or later rate) is spent and never re-earned here.
+               - Within a segment, this group's collections take its budget = round((base − base consumed by other
+                 groups) × rate) − earned so far (never negative), over the remaining net, rounded once cumulatively.
+               Before the first decision this is the classic formula; with one rate a full settlement ends exactly at the
+               target whenever the target is not below what was earned (a target below it is refused by the writers). */
             const boundaries = [...new Set(invoiceEvents.map((event) => event.atIso))].sort();
-            const accrualAt = (iso: string) => Math.round((shareBase({ ...share, amountMinor: shareAt(iso) }, group.policy) * group.policy.percent) / 100);
+            const baseAt = (iso: string) => shareBase({ ...share, amountMinor: shareAt(iso) }, group.policy);
+            const rate = group.policy.percent / 100;
             let segment = 0;
-            let earnedAtStart = 0;
-            let earnedNow = 0;
-            let budget = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
+            let baseNow = shareBase(share, group.policy);
             let remainingNet = netAt("");
+            let remainingBase = baseNow;
+            let consumedAll = 0;
+            let consumedMine = 0;
             let coveredAll = 0;
             let coveredInSegment = 0;
+            let earnedAtStart = 0;
+            let earnedNow = 0;
+            let budget = Math.round(baseNow * rate);
             covering.forEach((chunk, index) => {
               // A decision at the very instant of a receipt applies before it (as shareAt/netAt read it).
               let target = 0;
@@ -642,13 +649,18 @@ export function commissionForPatientAtEventTime(
               while (segment < target) {
                 const at = boundaries[segment];
                 segment += 1;
-                earnedAtStart = earnedNow;
-                budget = Math.max(0, accrualAt(at) - earnedAtStart);
+                baseNow = baseAt(at);
                 remainingNet = netAt(at) - coveredAll;
+                remainingBase = Math.max(0, baseNow - consumedAll);
+                earnedAtStart = earnedNow;
+                budget = Math.max(0, Math.round(Math.max(0, baseNow - (consumedAll - consumedMine)) * rate) - earnedAtStart);
                 coveredInSegment = 0;
               }
+              const consumed = remainingNet > 0 ? Math.min(remainingBase, (remainingBase * chunk.amount) / remainingNet) : 0;
+              consumedAll += consumed;
               coveredAll += chunk.amount;
               if (chunkKeys[index] !== groupKey) return;
+              consumedMine += consumed;
               coveredInSegment += chunk.amount;
               earnedNow = earnedAtStart + (remainingNet > 0 ? Math.round(budget * Math.min(1, coveredInSegment / remainingNet)) : 0);
             });
