@@ -4,8 +4,8 @@
 
 - الفرع: `claude/ortho-case-identity-lineage`
 - base SHA: `e19aa30f4d67f65a5890d2db149abb86895b4187` (main، بعد دمج #294)
-- head SHA: انظر أعلى الـPR / `git rev-parse origin/claude/ortho-case-identity-lineage`
-- PR: (يُملأ أدناه)
+- head SHA: `c5259e203b850c2319780ce10cb63c3d395cfef2` (commit الشفرة؛ يليه commit يحدّث هذا الملف فقط)
+- PR: https://github.com/Aqlanf10/aqlan-center-mini/pull/314 (Draft)
 
 ## ما أُنجز (مثبت بإخفاق على main قبل الإصلاح)
 `__tests__/postgres/ortho-case-identity.test.ts` (11 اختبارًا؛ 9 فشلت على main النظيف، والباقيان ضابطان):
