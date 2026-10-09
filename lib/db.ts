@@ -8247,7 +8247,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
 import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
-import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN, planAdminDiscount, type AdminDiscountExpectation, type AdminDiscountRefusal } from "./invoice-discount";
+import { ADMIN_DISCOUNT_MESSAGE, ADMIN_DISCOUNT_REASON_MAX, ADMIN_DISCOUNT_REASON_MIN, allocateAdminDiscount, fifoCoverageOfInvoice, planAdminDiscount, type AdminDiscountExpectation, type AdminDiscountRefusal } from "./invoice-discount";
 import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
@@ -9206,13 +9206,24 @@ export async function applyAdminInvoiceDiscount(input: {
     let outcome: { ok: true; afterDiscountMinor: number; remainingAfterMinor: number } | { ok: false; reason: AdminDiscountRefusal };
     try {
       outcome = await (async () => {
+        /* (FIN-DISC, option 2) Canonical money order: the open shift first, FOR UPDATE — as every receipt, refund and receipt
+           correction takes it — so no receipt (on this invoice or on account) and no commission payout (expenses take it
+           FOR SHARE) can commit while the ceiling and the commission check below are decided. Then the opening balances
+           (SHARE, as receipt recovery does) and the patient's invoices by id: no correction or cancellation of another
+           invoice can move the FIFO coverage meanwhile. */
+        const { rows: [shift] } = await client.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+        if (!shift) return { ok: false as const, reason: "no_shift" as const };
+        const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM invoices WHERE id = $1`, [input.invoiceId]);
+        if (!owner) return { ok: false as const, reason: "not_found" as const };
+        await client.query(`LOCK TABLE patient_opening_balances IN SHARE MODE`);
+        await client.query(`SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [owner.patient_id]);
         const { rows: [invoice] } = await client.query<{
           id: number; invoice_number: string; patient_id: number; status: string; total_minor: string; discount_minor: string;
-          base_currency: string; clinic_date: string;
+          base_currency: string; clinic_date: string; now: Date; now_us: string;
         }>(
           `SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency,
-                  (created_at AT TIME ZONE $2)::date::text AS clinic_date
-             FROM invoices WHERE id = $1 FOR UPDATE`, [input.invoiceId, CLINIC_TIME_ZONE],
+                  (created_at AT TIME ZONE $2)::date::text AS clinic_date, now() AS now, to_char(now(), 'US') AS now_us
+             FROM invoices WHERE id = $1 AND patient_id = $3 FOR UPDATE`, [input.invoiceId, CLINIC_TIME_ZONE, owner.patient_id],
         );
         if (!invoice) return { ok: false as const, reason: "not_found" as const };
         // Join the settings writers' protocol (saveSettingsAudited takes this key's advisory lock exclusively, then the row):
@@ -9237,7 +9248,37 @@ export async function applyAdminInvoiceDiscount(input: {
         const plan = planAdminDiscount({ status: invoice.status, totalMinor: toMinor(invoice.total_minor),
           discountMinor: toMinor(invoice.discount_minor), settledMinor }, input.additionalMinor, input.expected);
         if (!plan.ok) return plan;
+
+        // Ceiling: never below what the commission FIFO already covers (on-account money included), or collected money
+        // would move to later invoices and change their earned commission after the fact (review 5461894751).
+        const coveredMinor = await fifoCoverageInTx(client, invoice.patient_id, invoice.id, currency);
+        if (plan.afterNetMinor < coveredMinor) return { ok: false as const, reason: "covered_on_account" as const };
+
+        // Exact allocation across the lines, in proportion to what each line still carries after earlier admin parts.
+        const { rows: lines } = await client.query<{ id: number; doctor_id: number | null; description: string; total_minor: string; allocated: string }>(
+          `SELECT it.id, it.doctor_id, it.description, it.total_minor,
+                  COALESCE((SELECT SUM(l.amount_minor) FROM invoice_admin_discount_lines l WHERE l.invoice_item_id = it.id), 0) AS allocated
+             FROM invoice_items it WHERE it.invoice_id = $1 ORDER BY it.id`, [invoice.id]);
+        const allocation = allocateAdminDiscount(lines.map((line) => ({ id: line.id, totalMinor: toMinor(line.total_minor),
+          allocatedMinor: toMinor(line.allocated) })), input.additionalMinor);
+        if (!allocation) return { ok: false as const, reason: "exceeds_remaining" as const };
+
+        // Paid commission is a fact: a decision that would take a doctor's computed commission below what was already paid
+        // to them is refused for an administrative settlement — never reversed or hidden automatically.
+        const atIso = commissionTimestampIso(invoice.now, invoice.now_us);
+        const doctors = new Set(lines.filter((line) => allocation.has(line.id) && line.doctor_id !== null).map((line) => line.doctor_id!));
+        if (doctors.size > 0) {
+          const conflict = await adminDiscountCommissionConflict({ invoiceId: invoice.id, currency, atIso, lines: allocation, doctors });
+          if (conflict) return { ok: false as const, reason: "commission_paid" as const };
+        }
+
+        for (const [itemId, amountMinor] of allocation) {
+          await client.query(
+            `INSERT INTO invoice_admin_discount_lines (invoice_id, invoice_item_id, amount_minor, discounted_at, created_by)
+             VALUES ($1, $2, $3, $4, $5)`, [invoice.id, itemId, amountMinor, invoice.now, input.actor]);
+        }
         await client.query(`UPDATE invoices SET discount_minor = $2 WHERE id = $1`, [invoice.id, plan.afterDiscountMinor]);
+        const lineById = new Map(lines.map((line) => [line.id, line]));
         await insertAuditRow(client, {
           action: "invoice.discount", entity: "invoice", entityId: invoice.id, entityLabel: invoice.invoice_number,
           details: {
@@ -9248,6 +9289,8 @@ export async function applyAdminInvoiceDiscount(input: {
             الصافي_قبل: formatMoney(plan.beforeNetMinor, currency),
             الصافي_بعد: formatMoney(plan.afterNetMinor, currency),
             المتبقي_بعد: formatMoney(plan.remainingAfterMinor, currency),
+            التوزيع_على_البنود: [...allocation].map(([itemId, amountMinor]) =>
+              `بند #${itemId} (${lineById.get(itemId)!.description}): ${formatMoney(amountMinor, currency)}`).join("؛ "),
             السبب: reason,
           },
           actor: input.actor, actorRole: input.actorRole,
@@ -9289,6 +9332,78 @@ export async function applyAdminInvoiceDiscount(input: {
   let invoice: Invoice | null = null;
   try { invoice = await (input.readBack ?? getInvoice)(input.invoiceId); } catch { invoice = null; }
   return { ok: true, invoice, afterDiscountMinor: applied.afterDiscountMinor, remainingAfterMinor: applied.remainingAfterMinor };
+}
+
+/**
+ * (FIN-DISC) How much of one invoice the commission FIFO covers now, read inside the caller's transaction with the
+ * canonical bucket rule (`patientBalancesByCurrency`): the bucket's collected amount fills the opening balance first, then the
+ * bucket's invoices oldest first, whatever invoice a receipt named.
+ */
+async function fifoCoverageInTx(client: DbClient, patientId: number, invoiceId: number, currency: Currency): Promise<number> {
+  const { rows: invoices } = await client.query<{ id: number; net_minor: string; base_currency: string; status: string }>(
+    `SELECT id, GREATEST(0, total_minor - discount_minor) AS net_minor, base_currency, status
+       FROM invoices WHERE patient_id = $1 ORDER BY created_at, id`, [patientId]);
+  const { rows: plans } = await client.query<{ id: number; base_currency: string }>(
+    `SELECT id, base_currency FROM treatment_plans WHERE patient_id = $1`, [patientId]);
+  const { rows: openings } = await client.query<{ currency: string; amount_minor: string }>(
+    `SELECT currency, amount_minor FROM patient_opening_balances WHERE patient_id = $1`, [patientId]);
+  const { rows: payments } = await client.query<{
+    id: number; invoice_id: number | null; plan_id: number | null; opening_currency: string | null; kind: string;
+    amount_minor: string; currency: string; exchange_rate: string; base_amount_minor: string;
+  }>(
+    `SELECT id, invoice_id, plan_id, opening_currency, kind, amount_minor, currency, exchange_rate, base_amount_minor
+       FROM payments WHERE patient_id = $1 ORDER BY created_at, id`, [patientId]);
+  const invoiceCurrencyById = new Map<number, DocumentCurrencyRef>(invoices.map((row) =>
+    [row.id, { patientId, currency: requireCurrency(row.base_currency, "فاتورة", row.id) }]));
+  const planCurrencyById = new Map<number, DocumentCurrencyRef>(plans.map((row) =>
+    [row.id, { patientId, currency: requireCurrency(row.base_currency, "خطة علاج", row.id) }]));
+  const opening: OpeningByCurrency = {};
+  for (const row of openings) {
+    const at = requireCurrency(row.currency, "رصيد افتتاحي", patientId);
+    opening[at] = (opening[at] ?? 0) + toMinor(row.amount_minor);
+  }
+  const live = invoices.filter((row) => row.status !== "cancelled");
+  const balances = patientBalancesByCurrency(
+    live.map((row) => ({ totalMinor: toMinor(row.net_minor), discountMinor: 0, status: "open" as const,
+      baseCurrency: requireCurrency(row.base_currency, "فاتورة", row.id) })),
+    toCurrencyPaymentLikes(patientId, payments.map((row) => ({
+      id: row.id, amountMinor: toMinor(row.amount_minor), currency: requireCurrency(row.currency, "دفعة", row.id),
+      exchangeRate: Number(row.exchange_rate), baseAmountMinor: toMinor(row.base_amount_minor),
+      kind: row.kind === "refund" ? "refund" as const : "payment" as const, invoiceId: row.invoice_id, planId: row.plan_id,
+      openingCurrency: row.opening_currency === null ? null : requireCurrency(row.opening_currency, "دفعة رصيد سابق", row.id),
+    })), invoiceCurrencyById, planCurrencyById),
+    opening,
+  );
+  const bucket = balances[currency];
+  return fifoCoverageOfInvoice({
+    openingMinor: bucket.openingMinor, collectedMinor: bucket.collectedMinor,
+    // SQL order (created_at, id) is the FIFO order; the index keeps it exactly.
+    invoices: live.filter((row) => row.base_currency === currency)
+      .map((row, index) => ({ id: row.id, netMinor: toMinor(row.net_minor), createdAt: String(index).padStart(12, "0") })),
+  }, invoiceId);
+}
+
+/**
+ * (FIN-DISC, owner decision: option 2) Would this pending decision take any affected doctor's computed commission below what
+ * was already paid to them (in the invoice currency)? The all-time commission report is read as committed now and again with
+ * the pending rows overlaid. The caller holds the open shift FOR UPDATE, so no payout or receipt can commit in between.
+ * Collected basis: earned before the decision is kept exactly, so this cannot trigger; invoiced basis: the accrual drops.
+ */
+async function adminDiscountCommissionConflict(pending: {
+  invoiceId: number; currency: Currency; atIso: string; lines: ReadonlyMap<number, number>; doctors: ReadonlySet<number>;
+}): Promise<boolean> {
+  const to = new Intl.DateTimeFormat("en-CA", { timeZone: CLINIC_TIME_ZONE }).format(new Date(pending.atIso));
+  const from = "1900-01-01";
+  const [before, after] = await Promise.all([
+    commissionReport(from, to),
+    commissionReport(from, to, undefined, { invoiceId: pending.invoiceId, atIso: pending.atIso, lines: pending.lines }),
+  ]);
+  const due = (rows: CommissionRow[], doctorId: number) =>
+    rows.find((row) => row.doctorId === doctorId && row.currency === pending.currency)?.dueMinor ?? 0;
+  return [...pending.doctors].some((doctorId) => {
+    const next = due(after, doctorId);
+    return next < 0 && next < due(before, doctorId);
+  });
 }
 
 export type InvoiceCorrectionResult =
@@ -9337,12 +9452,32 @@ export async function correctInvoice(input: {
          FROM invoice_items WHERE invoice_id = $1 ORDER BY id`,
       [input.invoiceId],
     );
+    /* (FIN-DISC, option 2) Admin-discount rows of the original's lines. A kept line carries its rows to its replacement at
+       their original decision time (capped at the new line total, oldest first), so the commission engine sees the same
+       decisions once — the cancelled original is out of every report. A removed line's admin part goes with the line. The
+       creation discount keeps today's rule (unchanged, capped at the new total net of the carried admin part). */
+    const { rows: adminRows } = await client.query<{ id: number; invoice_item_id: number; amount_minor: string; discounted_at: Date }>(
+      `SELECT id, invoice_item_id, amount_minor, discounted_at FROM invoice_admin_discount_lines
+        WHERE invoice_id = $1 ORDER BY discounted_at, id`, [input.invoiceId]);
+    const adminTotal = adminRows.reduce((sum, row) => sum + toMinor(row.amount_minor), 0);
     const plan = planInvoiceCorrection(
       items.map((item) => ({ id: item.id, quantity: item.quantity, unitPriceMinor: toMinor(item.unit_price_minor) })),
       input.lines,
-      toMinor(original.discount_minor),
+      Math.max(0, toMinor(original.discount_minor) - adminTotal),
     );
     if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
+    const carried: { fromId: number; itemId: number; amountMinor: number; at: Date }[] = [];
+    for (const line of plan.lines) {
+      let room = line.totalMinor;
+      for (const row of adminRows) {
+        if (row.invoice_item_id !== line.itemId || room <= 0) continue;
+        const amountMinor = Math.min(room, toMinor(row.amount_minor));
+        carried.push({ fromId: row.id, itemId: line.itemId, amountMinor, at: row.discounted_at });
+        room -= amountMinor;
+      }
+    }
+    const carriedTotal = carried.reduce((sum, row) => sum + row.amountMinor, 0);
+    plan.discountMinor = Math.min(plan.discountMinor, plan.totalMinor - carriedTotal) + carriedTotal;
 
     await client.query(`UPDATE invoices SET status = 'cancelled' WHERE id = $1`, [original.id]);
     /* (P1-C) الفاتورة المصحَّحة لم تعد سند «فوتِرت»: تعود الشدّة معلّقة لتُربط بالفاتورة البديلة صراحةً. */
@@ -9361,15 +9496,23 @@ export async function correctInvoice(input: {
       ],
     );
     const itemById = new Map(items.map((item) => [item.id, item]));
+    const replacementOf = new Map<number, number>();
     for (const line of plan.lines) {
       const item = itemById.get(line.itemId)!;
-      await client.query(
+      const { rows: [inserted] } = await client.query<{ id: number }>(
         `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
                                     plan_item_id)
-         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int)`,
+         VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int) RETURNING id`,
         [created.id, item.service_id, item.doctor_id, item.description, line.quantity, line.unitPriceMinor, line.totalMinor,
           item.plan_item_id],
       );
+      replacementOf.set(line.itemId, inserted.id);
+    }
+    for (const row of carried) {
+      await client.query(
+        `INSERT INTO invoice_admin_discount_lines (invoice_id, invoice_item_id, amount_minor, discounted_at, carried_from_id, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [created.id, replacementOf.get(row.itemId)!, row.amountMinor, row.at, row.fromId, input.actor]);
     }
     const { rowCount: relinked } = await client.query(
       `UPDATE visits SET invoice_id = $2 WHERE invoice_id = $1`, [original.id, created.id],
@@ -9414,6 +9557,10 @@ export async function correctInvoice(input: {
             `${item.description}: ${item.quantity}×${formatMoney(toMinor(item.unit_price_minor), currency)} ← ${line.quantity}×${formatMoney(line.unitPriceMinor, currency)}`).join("؛ "),
         } : {}),
         ...(relinked ? { زيارات_أعيد_ربطها: relinked } : {}),
+        ...(adminTotal > 0 ? {
+          خصم_إداري_منقول: formatMoney(carriedTotal, currency),
+          ...(adminTotal > carriedTotal ? { خصم_إداري_سقط_مع_البنود: formatMoney(adminTotal - carriedTotal, currency) } : {}),
+        } : {}),
       },
       actor: input.actor, actorRole: input.actorRole,
     });
@@ -12707,6 +12854,8 @@ export async function commissionReport(
   to: string,
   /** (COMM-DETAIL-1) مجمِّع التفصيل — اختياري؛ لا يغيّر أي رقم من المجاميع. */
   detail?: CommissionDetailCollector,
+  /** (FIN-DISC) A not-yet-committed admin decision (line → amount at `atIso`), for the writer's paid-commission check. */
+  pendingAdminDiscount?: { invoiceId: number; atIso: string; lines: ReadonlyMap<number, number> },
 ): Promise<CommissionRow[]> {
   await ensureSchema();
   const pool = getPool();
@@ -12832,6 +12981,17 @@ export async function commissionReport(
         const shareEvents = share.adminDiscounts ?? (share.adminDiscounts = []);
         const lastShare = shareEvents[shareEvents.length - 1];
         if (lastShare && lastShare.atIso === atIso) lastShare.amountMinor += amount; else shareEvents.push({ atIso, amountMinor: amount });
+      }
+    }
+    const pendingInvoice = pendingAdminDiscount ? invoiceById.get(pendingAdminDiscount.invoiceId) : undefined;
+    if (pendingAdminDiscount && pendingInvoice) {
+      const { atIso, lines } = pendingAdminDiscount;
+      const total = [...lines.values()].reduce((sum, amount) => sum + amount, 0);
+      pendingInvoice.netMinor -= total;
+      (pendingInvoice.adminDiscounts ?? (pendingInvoice.adminDiscounts = [])).push({ atIso, amountMinor: total });
+      for (const [itemId, amount] of lines) {
+        const share = shareByItem.get(itemId);
+        if (share) (share.adminDiscounts ?? (share.adminDiscounts = [])).push({ atIso, amountMinor: amount });
       }
     }
   }

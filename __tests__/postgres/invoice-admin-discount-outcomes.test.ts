@@ -73,7 +73,9 @@ describe("lock order with the real payment writers (no deadlock)", () => {
   /*
    * The dangerous order: the discount queues for the invoice first, then a receipt correction locks the payment and the
    * shift and queues for the same invoice. Released together, the old discount took the invoice and then asked for the
-   * payment row the correction held — a cycle (40P01). The discount now never waits on a payment or shift row.
+   * payment row the correction held — a cycle (40P01). The discount now never waits on a payment row, and takes the open
+   * shift FOR UPDATE before any invoice, as every receipt writer does (option 2: it fences receipts and commission payouts
+   * while it decides the ceiling and the commission check). A writer that holds a payment row waits for the shift behind it.
    */
   it("a receipt correction queued behind the discount completes, and so does the discount", async () => {
     const id = await invoice();
@@ -81,10 +83,10 @@ describe("lock order with the real payment writers (no deadlock)", () => {
     const hold = await barrier(id);
     const expected = { discountMinor: 0, settledMinor: 30000 };
     const discounting = applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: 10000, reason: "قرار الإدارة", actor: "admin1", actorRole: "admin", expected });
-    await until(async () => await waitingOn("FROM invoices WHERE id = $1 FOR UPDATE") >= 1);
+    await until(async () => await waitingOn("FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE") >= 1);
     const correcting = correctPayment({ paymentId: receipt.id, reason: "مبلغ خطأ", actor: "admin",
       replacement: { amountMinor: 30000, currency: "YER", exchangeRate: 1, method: "cash", target: { kind: "original" as const } } });
-    await until(async () => await waitingOn("FROM invoices") >= 2);
+    await until(async () => await waitingOn("FROM cashier_shifts") >= 1);
     await hold.release();
     const [discounted, corrected] = await Promise.all([discounting, correcting]);
     expect(discounted).toMatchObject({ ok: true, afterDiscountMinor: 10000 });
@@ -99,10 +101,10 @@ describe("lock order with the real payment writers (no deadlock)", () => {
     const hold = await barrier(id);
     const discounting = applyAdminInvoiceDiscount({ invoiceId: id, additionalMinor: 10000, reason: "قرار الإدارة", actor: "admin1", actorRole: "admin",
       expected: { discountMinor: 0, settledMinor: 30000 } });
-    await until(async () => await waitingOn("FROM invoices WHERE id = $1 FOR UPDATE") >= 1);
+    await until(async () => await waitingOn("FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE") >= 1);
     const refunding = recordPayment({ patientId, invoiceId: null, kind: "refund", amountMinor: 5000, currency: "YER", baseCurrency: "YER",
       exchangeRate: 1, method: "cash", note: null, createdBy: "admin", reversalOfId: receipt.id, openingCurrency: null });
-    await until(async () => await waitingOn("FROM invoices") >= 2);
+    await until(async () => await waitingOn("FROM cashier_shifts") >= 1);
     await hold.release();
     const [discounted, refunded] = await Promise.all([discounting, refunding]);
     expect(discounted).toMatchObject({ ok: true });
@@ -156,7 +158,7 @@ describe("first close of the books with no settings row (review 5462657687)", ()
     const id = await invoice();
     const hold = await barrier(id);
     const discounting = discount(id, 1000);
-    await until(async () => await waitingOn("FROM invoices WHERE id = $1 FOR UPDATE") >= 1);
+    await until(async () => await waitingOn("FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE") >= 1);
     expect(await saveSettingsAudited({ values: { "finance.locked_before": "2099-01-01" }, actor: "admin1", actorRole: "admin" }))
       .toMatchObject({ ok: true });
     await hold.release();

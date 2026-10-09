@@ -50,7 +50,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       reason, actor: session.username, actorRole: session.role });
     if (!result.ok) {
       const status = result.reason === "not_found" ? 404
-        : result.reason === "cancelled" || result.reason === "paid" || result.reason === "stale" || result.reason === "period_locked" ? 409
+        : result.reason === "cancelled" || result.reason === "paid" || result.reason === "stale" || result.reason === "period_locked"
+          || result.reason === "no_shift" || result.reason === "commission_paid" ? 409
           : result.reason === "failed" ? 500 : result.reason === "uncertain" ? 503 : 400;
       return NextResponse.json({ message: result.message }, { status });
     }

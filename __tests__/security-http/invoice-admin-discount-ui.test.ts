@@ -23,6 +23,9 @@ beforeAll(async () => {
     "INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض خصم الإدارة الاصطناعي') RETURNING id", [`DISC-${stamp}`]));
   ({ rows: [{ id: shiftId }] } = await db.query<{ id: number }>(
     "INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd, status) VALUES ('disc-ui', 0, 0, 0, 'closed') RETURNING id"));
+  // (option 2) The discount is decided under the open cashbox shift, as receipts and commission payouts are.
+  await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
+    SELECT 'disc-ui', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);
   mkdirSync(SHOTS, { recursive: true });
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });

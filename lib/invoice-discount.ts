@@ -11,7 +11,7 @@ export const ADMIN_DISCOUNT_REASON_MAX = 300;
 
 export type AdminDiscountRefusal =
   | "not_found" | "cancelled" | "paid" | "stale" | "invalid_amount" | "exceeds_remaining" | "reason"
-  | "period_locked" | "failed" | "uncertain" | "covered_on_account";
+  | "period_locked" | "failed" | "uncertain" | "covered_on_account" | "no_shift" | "commission_paid";
 
 export const ADMIN_DISCOUNT_MESSAGE: Record<AdminDiscountRefusal, string> = {
   not_found: "الفاتورة غير موجودة.",
@@ -23,6 +23,8 @@ export const ADMIN_DISCOUNT_MESSAGE: Record<AdminDiscountRefusal, string> = {
   reason: `اكتب سبب الخصم (من ${ADMIN_DISCOUNT_REASON_MIN} إلى ${ADMIN_DISCOUNT_REASON_MAX} حرفًا).`,
   period_locked: "الفاتورة في فترة مقفلة. سجّل الخصم بقيدٍ في الفترة المفتوحة.",
   covered_on_account: "هذا الجزء من الفاتورة مغطّى بدفعاتٍ على حساب المريض؛ الخصم عليه يكون باسترداد أو تصحيح، لا بخصم إداري.",
+  no_shift: "افتح وردية الصندوق أولًا؛ الخصم الإداري يُسجَّل والوردية مفتوحة كي لا يتقاطع مع قبضٍ أو صرف عمولة.",
+  commission_paid: "هذا الخصم يُنزل عمولة طبيبٍ تحت ما صُرف له فعلًا. لم يُسجَّل شيء؛ يلزم تسوية إدارية لعمولة الطبيب قبل الخصم.",
   failed: "تعذّر تسجيل الخصم. لم يتغيّر شيء؛ أعد المحاولة.",
   // A lost connection at COMMIT: the outcome is unknown. A blind retry is refused anyway (the expected discount changed if it
   // was saved), but the manager must look first.

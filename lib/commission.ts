@@ -41,6 +41,11 @@ export interface DoctorShareItem {
   caseId?: number;
   /** (COMM-DETAIL-1) خطة العلاج التي جاء منها العمل — مشتقة بالطريق نفسه. */
   planId?: number;
+  /**
+   * (FIN-DISC, owner decision: option 2) Admin-discount parts allocated to this share's lines, each at its decision time
+   * (only decisions up to the report cutoff). The commission base is the share after them.
+   */
+  adminDiscounts?: { atIso: string; amountMinor: number }[];
 }
 
 export interface CommissionInvoice {
@@ -52,6 +57,11 @@ export interface CommissionInvoice {
   createdAt: string;
   /** حصة كل طبيب من بنود هذه الفاتورة مع تفاصيل الخدمة والخصومات إن وجدت. */
   doctorShares: DoctorShareItem[];
+  /**
+   * (FIN-DISC) Admin-discount decisions on this invoice up to the report cutoff, at their time. `netMinor` is the net after
+   * them. Collections before a decision keep their commission; see `commissionForPatientAtEventTime`.
+   */
+  adminDiscounts?: { atIso: string; amountMinor: number }[];
 }
 
 export interface DoctorCommission {
@@ -471,6 +481,8 @@ export interface CommissionDetailLine {
   planId: number | null;
   /** حصة الطبيب من البند قبل أي خصم. */
   amountMinor: number;
+  /** (FIN-DISC) Admin discount allocated to this share up to the cutoff (0 when none). */
+  adminDiscountMinor: number;
   labCostMinor: number;
   materialCostMinor: number;
   labDeducted: boolean;
@@ -560,7 +572,22 @@ export function commissionForPatientAtEventTime(
       const atInvoice = resolvePolicyForShare(
         invoicePolicy, invoice.createdAt, share, overrideFor(share.doctorId, share, invoice.createdAt),
       );
-      const accrued = Math.round((shareBase(share, atInvoice) * atInvoice.percent) / 100);
+      /*
+       * (FIN-DISC, owner decision: option 2) An admin discount lowers the commission base of the lines it was allocated to,
+       * from its decision time on. Collections before a decision keep exactly what they earned (the classic proportion);
+       * later collections earn from the remaining base over the remaining net, so a fully collected invoice ends at the
+       * reduced accrual. Invoices without admin discounts take the unchanged path below.
+       */
+      const invoiceEvents = invoice.adminDiscounts ?? [];
+      const shareEvents = share.adminDiscounts ?? [];
+      const timed = invoiceEvents.length > 0;
+      const shareDiscountMinor = shareEvents.reduce((sum, event) => sum + event.amountMinor, 0);
+      const shareAt = (iso: string) => share.amountMinor
+        - shareEvents.filter((event) => event.atIso <= iso).reduce((sum, event) => sum + event.amountMinor, 0);
+      const netAt = (iso: string) => invoice.netMinor
+        + invoiceEvents.filter((event) => event.atIso > iso).reduce((sum, event) => sum + event.amountMinor, 0);
+      const current: DoctorShareItem = timed ? { ...share, amountMinor: share.amountMinor - shareDiscountMinor } : share;
+      const accrued = Math.round((shareBase(current, atInvoice) * atInvoice.percent) / 100);
 
       let earned = 0;
       const parts: CommissionEarnedPart[] = [];
@@ -570,23 +597,53 @@ export function commissionForPatientAtEventTime(
         /* الأجزاء تُجمع بحسب السياسة التي سرت عند دفعتها — فكل مجموعةٍ تُحسب
            بصيغتها الأصلية على ما غطّته هي وحدها. */
         const groups = new Map<string, { policy: ResolvedPolicy; covered: number; sources: Set<CommissionRuleSource>; overrides: Set<number> }>();
+        const chunkKeys: (string | null)[] = [];
         for (const chunk of covering) {
           const policy = policyAt(share.doctorId, chunk.sourceTime);
-          if (!policy) continue;
+          if (!policy) { chunkKeys.push(null); continue; }
           const resolved = resolvePolicyForShare(
             policy, chunk.sourceTime, share, overrideFor(share.doctorId, share, chunk.sourceTime),
           );
           const key = `${resolved.percent}|${resolved.deductLab}|${resolved.deductMaterials}`;
+          chunkKeys.push(key);
           const group = groups.get(key) ?? { policy: resolved, covered: 0, sources: new Set(), overrides: new Set() };
           group.covered += chunk.amount;
           group.sources.add(resolved.ruleSource);
           if (resolved.overrideId !== undefined) group.overrides.add(resolved.overrideId);
           groups.set(key, group);
         }
-        for (const group of groups.values()) {
+        for (const [groupKey, group] of groups) {
           if (group.policy.percent <= 0) continue;
-          const groupAccrued = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
-          const part = Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
+          let part: number;
+          if (!timed) {
+            const groupAccrued = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
+            part = Math.round(groupAccrued * Math.min(1, group.covered / invoice.netMinor));
+          } else {
+            /* Collections before the first decision earn exactly the classic amount (same formula, same rounding, on the
+               net as it stood then), so a decision can never lower what was already earned — or paid out. Collections
+               from a decision on earn the remaining base over the remaining net, in collection order, with this group's
+               base rules; added once and rounded once. */
+            const firstEventIso = invoiceEvents.reduce((min, event) => (event.atIso < min ? event.atIso : min), invoiceEvents[0].atIso);
+            const netBefore = netAt("");
+            let preCovered = 0;
+            let consumed = 0;
+            let coveredSoFar = 0;
+            let laterMine = 0;
+            covering.forEach((chunk, index) => {
+              const base = shareBase({ ...share, amountMinor: shareAt(chunk.sourceTime) }, group.policy);
+              const remainingBase = Math.max(0, base - consumed);
+              const remainingNet = netAt(chunk.sourceTime) - coveredSoFar;
+              const portion = remainingNet > 0 ? Math.min(remainingBase, (remainingBase * chunk.amount) / remainingNet) : 0;
+              consumed += portion;
+              coveredSoFar += chunk.amount;
+              if (chunkKeys[index] !== groupKey) return;
+              if (chunk.sourceTime < firstEventIso) preCovered += chunk.amount;
+              else laterMine += portion;
+            });
+            const accruedBefore = Math.round((shareBase(share, group.policy) * group.policy.percent) / 100);
+            const prePart = preCovered > 0 && netBefore > 0 ? Math.round(accruedBefore * Math.min(1, preCovered / netBefore)) : 0;
+            part = prePart + Math.round((laterMine * group.policy.percent) / 100);
+          }
           earned += part;
           parts.push({
             percent: group.policy.percent,
@@ -611,11 +668,12 @@ export function commissionForPatientAtEventTime(
           caseId: share.caseId ?? null,
           planId: share.planId ?? null,
           amountMinor: share.amountMinor,
+          adminDiscountMinor: timed ? shareDiscountMinor : 0,
           labCostMinor: share.labCostMinor ?? 0,
           materialCostMinor: share.materialCostMinor ?? 0,
           labDeducted: atInvoice.deductLab && Boolean(share.labCostMinor),
           materialDeducted: atInvoice.deductMaterials && Boolean(share.materialCostMinor),
-          baseMinor: shareBase(share, atInvoice),
+          baseMinor: shareBase(current, atInvoice),
           percent: atInvoice.percent,
           ruleSource: atInvoice.ruleSource,
           overrideId: atInvoice.overrideId ?? null,
