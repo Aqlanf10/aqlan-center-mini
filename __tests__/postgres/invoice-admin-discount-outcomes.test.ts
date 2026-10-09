@@ -112,6 +112,28 @@ describe("lock order with the real payment writers (no deadlock)", () => {
     expect(await settledOf(id)).toBe(25000);
   });
 
+  it("a row that only references the invoice and then the shift by foreign key (KEY SHARE) cannot close a cycle with the discount", async () => {
+    // The discount holds the shift and waits for the invoice row this transaction already references; when the same
+    // transaction then references the shift, FOR UPDATE on the shift would deadlock (seen in CI-like runs). FOR NO KEY UPDATE
+    // does not conflict with a foreign-key check, so the row commits and the discount follows.
+    const id = await invoice();
+    const { rows: [{ id: shift }] } = await getPool().query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open'`);
+    const other = new Client({ connectionString: url });
+    await other.connect();
+    await other.query("BEGIN");
+    await other.query(`INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor) VALUES ($1, 'مرجع', 1, 0, 0)`, [id]);
+    const discounting = discount(id, 1000);
+    await until(async () => await waitingOn("FROM invoices WHERE patient_id = $1 ORDER BY id FOR UPDATE") >= 1);
+    await other.query(`INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency, exchange_rate,
+      base_amount_minor, base_currency, method, created_by) VALUES ($1, $2, NULL, $3, 'payment', 1, 'YER', 1, 1, 'YER', 'cash', 'raw')`,
+    [`DISC-O-FK-${seq}`, patientId, shift]);
+    await other.query("COMMIT");
+    await other.end();
+    // The receipt it did not see changed nothing on this invoice (on account, 1): the discount still decides consistently.
+    expect(await discounting).toMatchObject({ ok: true });
+    expect(await discountOf(id)).toBe(1000);
+  });
+
   it("a receipt that commits first makes the discount stale (the settled amount it saw changed)", async () => {
     const id = await invoice();
     await pay(id, 30000);

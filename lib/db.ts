@@ -9206,12 +9206,14 @@ export async function applyAdminInvoiceDiscount(input: {
     let outcome: { ok: true; afterDiscountMinor: number; remainingAfterMinor: number } | { ok: false; reason: AdminDiscountRefusal };
     try {
       outcome = await (async () => {
-        /* (FIN-DISC, option 2) Canonical money order: the open shift first, FOR UPDATE — as every receipt, refund and receipt
-           correction takes it — so no receipt (on this invoice or on account) and no commission payout (expenses take it
-           FOR SHARE) can commit while the ceiling and the commission check below are decided. Then the opening balances
-           (SHARE, as receipt recovery does) and the patient's invoices by id: no correction or cancellation of another
+        /* (FIN-DISC, option 2) Canonical money order: the open shift first, so no receipt (on this invoice or on account:
+           receipts, refunds and receipt corrections take it FOR UPDATE) and no commission payout (expenses take it FOR SHARE)
+           can commit while the ceiling and the commission check below are decided. FOR NO KEY UPDATE conflicts with both and
+           with the shift close, but not with a plain foreign-key check (KEY SHARE) of a row that merely references the shift —
+           such a row may already hold its invoice reference, and FOR UPDATE here would close a cycle with it. Then the opening
+           balances (SHARE, as receipt recovery does) and the patient's invoices by id: no correction or cancellation of another
            invoice can move the FIFO coverage meanwhile. */
-        const { rows: [shift] } = await client.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR UPDATE`);
+        const { rows: [shift] } = await client.query<{ id: number }>(`SELECT id FROM cashier_shifts WHERE status = 'open' FOR NO KEY UPDATE`);
         if (!shift) return { ok: false as const, reason: "no_shift" as const };
         const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM invoices WHERE id = $1`, [input.invoiceId]);
         if (!owner) return { ok: false as const, reason: "not_found" as const };
