@@ -23068,11 +23068,17 @@ export async function duplicateCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    /* ترتيب دمج/حذف المرضى: المريض أولًا (FOR KEY SHARE) ثم الدراسة. الإدراج أدناه يطلب قفل المريض ضمنيًا بالمفتاح
+       الأجنبي؛ لو أخذنا الدراسة قبله لتشابكنا مع دمجٍ يقفل المريض ثم يعدّل الدراسة. */
+    const { rows: [head] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ceph_analyses WHERE id = $1`, [id]);
+    if (!head) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    const { rows: [lockedPatient] } = await client.query<{ id: number }>(`SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [head.patient_id]);
+    if (!lockedPatient) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
     const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
       `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
     const source = rows[0];
-    if (!source) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
+    if (!source || source.patient_id !== head.patient_id) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
     if (source.status !== "completed") {
       await client.query("ROLLBACK");
       return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
@@ -23161,9 +23167,16 @@ export async function linkCephStudyToCase(input: {
   await ensureSchema();
   const missing: CephLinkResult = { ok: false, status: 404, message: "الدراسة أو الحالة غير موجودة لهذا المريض." };
   return withTransaction(getPool(), async (client): Promise<CephLinkResult> => {
+    /* ترتيب الأقفال = ترتيب دمج/حذف المرضى: **المريض أولًا بـFOR KEY SHARE** (يتعارض مع قفل الدمج FOR UPDATE ولا يعطّل
+       التعديلات العادية) ثم الحساب وشهود الملكية (داخل authorize) ثم الدراسة ثم الحالة. الدمج يقفل الملفين ثم ينقل صفوف
+       التوابع (الدراسة قبل الزيارة…)؛ ولو أخذنا شاهد الزيارة قبل الدراسة لتشابك الطلبان في دورة. دمجٌ سبقنا يحذف صف المصدر
+       فنُجيب كالمفقود (لا ربط على دراسةٍ انتقلت). */
     const { rows: [owner] } = await client.query<{ patient_id: number }>(
       `SELECT patient_id FROM ceph_analyses WHERE id = $1`, [input.analysisId]);
     if (!owner) return missing;
+    const { rows: [lockedPatient] } = await client.query<{ id: number }>(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [owner.patient_id]);
+    if (!lockedPatient) return missing;
     if (!(await input.authorize(client, owner.patient_id))) {
       return { ok: false, status: 403, message: "لم تعد تملك صلاحية ربط هذه الدراسة." };
     }
@@ -23172,7 +23185,7 @@ export async function linkCephStudyToCase(input: {
     }>(
       `SELECT patient_id, status, phase, xray_date::text AS xray_date_text, ortho_case_id
          FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [input.analysisId]);
-    if (!study) return missing;
+    if (!study || study.patient_id !== owner.patient_id) return missing;
     const { rows: [target] } = await client.query<{ patient_id: number; status: string }>(
       `SELECT patient_id, status FROM ortho_cases WHERE id = $1 FOR SHARE`, [input.orthoCaseId]);
     if (!target || target.patient_id !== study.patient_id) return missing;

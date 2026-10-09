@@ -13,12 +13,15 @@ import { REQUIRED_LANDMARKS } from "../../lib/ceph";
 
 assertRealPostgresUrl();
 stubPostgresEnv();
+// The concurrency cases below hold several connections at once (blockers + the writers under test).
+process.env.DB_POOL_MAX = "8";
 
 const db = await import("../../lib/db");
 const { cephLinkAuthorizer } = await import("../../lib/ceph-link-authority");
+const { sessionCredentialVersion } = await import("../../lib/auth");
 const {
   ensureSchema, getPool, resetPoolForTesting, createOrthoCase, createCephAnalysis, updateCephCalibration,
-  completeCephAnalysis, linkCephStudyToCase,
+  completeCephAnalysis, linkCephStudyToCase, duplicateCephAnalysis, mergeDuplicatePatient,
 } = db;
 
 async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -32,6 +35,9 @@ beforeAll(async () => {
   doctorParty = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'Synthetic Doctor') RETURNING id`))[0].id;
   await createUser("link-admin", "admin", null, null);
   await createUser("link-doctor", "doctor", { canUploadXrays: true, canViewXrays: true }, doctorParty);
+  for (const row of await q<{ id: number; username: string; password_hash: string }>(`SELECT id, username, password_hash FROM users`)) {
+    accounts.set(row.username, { id: row.id, hash: row.password_hash });
+  }
   admin = sessionOf("link-admin", "admin");
   actor = actorOf(admin);
 }, 180_000);
@@ -80,8 +86,13 @@ const linkAudits = async (analysisId: number) => q(
   `SELECT actor, details FROM audit_log WHERE action = 'ceph.link' AND entity_id = $1::text`, [analysisId]);
 const expected = (phase: string, xrayDate: string | null, status: string) => ({ phase, xrayDate, status });
 const FAR_FUTURE = 4_102_444_800_000;
-type Who = { username: string; role: string; expiresAt: number; userId: number };
-const sessionOf = (username: string, role: string, expiresAt = FAR_FUTURE): Who => ({ username, role, expiresAt, userId: 1 });
+type Who = { username: string; role: string; expiresAt: number; userId: number; credentialVersion: string };
+// Real account identity and credential version, exactly as the signed session carries them (requireSession compares both).
+const accounts = new Map<string, { id: number; hash: string }>();
+const sessionOf = (username: string, role: string, expiresAt = FAR_FUTURE): Who => {
+  const account = accounts.get(username);
+  return { username, role, expiresAt, userId: account?.id ?? 999_999, credentialVersion: sessionCredentialVersion(account?.hash ?? "unknown") };
+};
 const actorOf = (who: Who) => ({ actor: who.username, actorRole: who.role, authorize: cephLinkAuthorizer(who) });
 // The admin account and the doctor who owns the patients below (real rows, so the live in-transaction checks run).
 let admin: Who;
@@ -289,7 +300,7 @@ describe("(ORTHO-ID-2) authority is re-checked inside the saving transaction", (
     };
   };
   const reset = async () => {
-    await q(`UPDATE users SET permissions = $1, is_active = TRUE, role = 'doctor' WHERE username = 'link-doctor'`, [JSON.stringify({ canUploadXrays: true, canViewXrays: true })]);
+    await q(`UPDATE users SET permissions = $1, is_active = TRUE, role = 'doctor', password_hash = 'x' WHERE username = 'link-doctor'`, [JSON.stringify({ canUploadXrays: true, canViewXrays: true })]);
   };
 
   it("a doctor with the permission who owns the patient may link", async () => {
@@ -357,5 +368,131 @@ describe("(ORTHO-ID-2) authority is re-checked inside the saving transaction", (
       await revocation;
       expect((await studyRow(older)).ortho_case_id).toBe(caseId);
     } finally { await revoker.end(); await reset(); }
+  });
+});
+
+describe("(ORTHO-ID-2) the approved credential version is re-checked inside the saving transaction", () => {
+  const doctor = () => sessionOf("link-doctor", "doctor");
+  const ctx = () => expected("pretreatment", "2025-11-20", "draft");
+  const prepare = async (label: string) => {
+    const patientId = await owned(label);
+    const older = await study(patientId, { phase: "pretreatment", xrayDate: "2025-11-20", approve: false });
+    return { older, caseId: await newCase(patientId) };
+  };
+  const restore = () => q(`UPDATE users SET password_hash = 'x', is_active = TRUE, role = 'doctor' WHERE username = 'link-doctor'`);
+
+  it("a password change that commits while the request waits makes the session stale — refused, nothing written", async () => {
+    const { older, caseId } = await prepare("password changed while waiting");
+    const session = doctor(); // signed before the change: carries the old credential version
+    const changer = await getPool().connect();
+    await changer.query("BEGIN");
+    await changer.query(`UPDATE users SET password_hash = 'changed-after-login' WHERE username = 'link-doctor'`);
+    const pid = (await changer.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    try {
+      const pending = linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(session) });
+      await waitUntilBlocked(pid);
+      await changer.query("COMMIT");
+      expect(await pending).toMatchObject({ ok: false, status: 403, message: expect.stringMatching(/[\u0600-\u06FF]/) });
+    } finally { changer.release(); await restore(); }
+    expect((await studyRow(older)).ortho_case_id).toBeNull();
+    expect(await linkAudits(older)).toHaveLength(0);
+    // The same account with a session signed after the change (new credential version) is accepted again.
+    accounts.set("link-doctor", { id: accounts.get("link-doctor")!.id, hash: "x" });
+    expect(await linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(doctor()) })).toEqual({ ok: true, changed: true });
+  });
+
+  it("a stale session already presented (password changed before the call) is refused without waiting", async () => {
+    const { older, caseId } = await prepare("password already changed");
+    const stale = doctor();
+    await q(`UPDATE users SET password_hash = 'changed-before' WHERE username = 'link-doctor'`);
+    try {
+      expect(await linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: ctx(), ...actorOf(stale) })).toMatchObject({ ok: false, status: 403 });
+    } finally { await restore(); }
+    expect((await studyRow(older)).ortho_case_id).toBeNull();
+  });
+});
+
+describe("(ORTHO-ID-2) patient and dependent-row locks follow the patient-merge order", () => {
+  const mergeCtx = { actor: "link-admin", actorRole: "admin", reason: "synthetic lock-order test" };
+  const settled = async (...promises: Promise<unknown>[]) => {
+    const result = await Promise.race([
+      Promise.allSettled(promises),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 20_000)),
+    ]);
+    if (result === "timeout") throw new Error("lock cycle: the writers did not finish");
+    return result;
+  };
+  /** يقف حتى ينتظر عدد من الاتصالات قفلًا (بلا افتراض لمن). */
+  async function waitForLockWaiters(count: number) {
+    await expect.poll(async () => (await probe.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)).rows[0].n,
+    { timeout: 10_000, interval: 25 }).toBeGreaterThanOrEqual(count);
+  }
+  const hold = async (sql: string, params: unknown[] = []) => {
+    const client = await getPool().connect();
+    await client.query("BEGIN");
+    await client.query(sql, params);
+    return { release: async (action: "COMMIT" | "ROLLBACK") => { await client.query(action); client.release(); } };
+  };
+  /** مريضا دمج بلا أثر مالي؛ والطبيب «مالك» المصدر بشاهد زيارة (الشاهد الذي يأخذه الحارس قبل قفل الدراسة). */
+  const pair = async (label: string) => {
+    const source = await newPatient(`${label} source`);
+    const target = await newPatient(`${label} target`);
+    await q(`INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('Synthetic', $1, $2, 'done')`, [source, doctorParty]);
+    return { source, target };
+  };
+
+  it("link vs merge: a link waiting behind a merge is answered as missing — no deadlock, nothing linked", async () => {
+    const { source, target } = await pair("link vs merge");
+    const older = await study(source, { phase: "pretreatment", xrayDate: "2025-11-20", approve: false });
+    const caseId = await newCase(source);
+    // The study row is held, so the merge (patients FOR UPDATE, then dependent rows) parks on it after taking the patient.
+    const holder = await hold(`SELECT id FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [older]);
+    const merge = mergeDuplicatePatient(source, target, mergeCtx);
+    await waitForLockWaiters(1);
+    // The link takes the ownership witness (a visit of the patient) — in the old order it then waited for the study,
+    // while the merge, once released, needed that very visit row: a cycle.
+    const link = linkCephStudyToCase({ analysisId: older, orthoCaseId: caseId, expected: expected("pretreatment", "2025-11-20", "draft"), ...actorOf(sessionOf("link-doctor", "doctor")) });
+    await waitForLockWaiters(2);
+    await holder.release("ROLLBACK");
+
+    const [mergeResult, linkResult] = await settled(merge, link) as PromiseSettledResult<unknown>[];
+    expect(mergeResult).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(linkResult).toMatchObject({ status: "fulfilled", value: { ok: false, status: 404 } });
+    expect((await q<{ patient_id: number; ortho_case_id: number | null }>(`SELECT patient_id, ortho_case_id FROM ceph_analyses WHERE id = $1`, [older]))[0])
+      .toMatchObject({ patient_id: target, ortho_case_id: null });
+    expect(await linkAudits(older)).toHaveLength(0);
+  });
+
+  it("correction vs merge: a correction mid-insert and a merge both finish — the copy follows the merged patient", async () => {
+    const { source, target } = await pair("correction vs merge");
+    const origin = await study(source, { phase: "posttreatment", xrayDate: "2026-02-02", approve: true });
+    // An uncommitted draft of the same patient parks the correction's INSERT after it has locked the study.
+    const parked = await hold(`INSERT INTO ceph_analyses (patient_id, document_id, status, created_by)
+      SELECT patient_id, document_id, 'draft', 'synthetic' FROM ceph_analyses WHERE id = $1`, [origin]);
+    const correction = duplicateCephAnalysis(origin, "dr-lineage");
+    await waitForLockWaiters(1);
+    const merge = mergeDuplicatePatient(source, target, mergeCtx);
+    await waitForLockWaiters(2);
+    await parked.release("ROLLBACK");
+
+    const [correctionResult, mergeResult] = await settled(correction, merge) as PromiseSettledResult<unknown>[];
+    expect(correctionResult).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(mergeResult).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    const copyId = (correctionResult as PromiseFulfilledResult<{ id: number }>).value.id;
+    expect((await q<{ patient_id: number; corrects: number }>(`SELECT patient_id, corrects_analysis_id::int AS corrects FROM ceph_analyses WHERE id = $1`, [copyId]))[0])
+      .toEqual({ patient_id: target, corrects: Number(origin) });
+    expect((await q<{ patient_id: number }>(`SELECT patient_id FROM ceph_analyses WHERE id = $1`, [origin]))[0].patient_id).toBe(target);
+  });
+
+  it("merging a patient whose studies form a correction chain keeps the same-patient origin link valid", async () => {
+    const { source, target } = await pair("chain merge");
+    const origin = await study(source, { phase: "posttreatment", xrayDate: "2026-02-02", approve: true });
+    const copy = await duplicateCephAnalysis(origin, "dr-lineage");
+    if (!copy.ok) throw new Error(copy.message);
+    expect(await mergeDuplicatePatient(source, target, mergeCtx)).toMatchObject({ ok: true });
+    const rows = await q<{ id: number; patient_id: number; corrects: number | null }>(
+      `SELECT id::int AS id, patient_id, corrects_analysis_id::int AS corrects FROM ceph_analyses WHERE id IN ($1, $2) ORDER BY id`, [origin, copy.id]);
+    expect(rows).toEqual([{ id: Number(origin), patient_id: target, corrects: null }, { id: copy.id, patient_id: target, corrects: Number(origin) }]);
   });
 });

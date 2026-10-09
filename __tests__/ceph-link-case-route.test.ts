@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/session", () => ({ requireSession: vi.fn() }));
+vi.mock("@/lib/session", () => ({ requireSession: vi.fn(), revalidateSessionInTransaction: vi.fn() }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: vi.fn() }));
-vi.mock("@/lib/db", () => ({ getCephStudy: vi.fn(), linkCephStudyToCase: vi.fn(), findUserByUsername: vi.fn() }));
+vi.mock("@/lib/db", () => ({ getCephStudy: vi.fn(), linkCephStudyToCase: vi.fn() }));
 
 import { POST } from "@/app/api/ceph/[id]/link-case/route";
-import { requireSession } from "@/lib/session";
+import { requireSession, revalidateSessionInTransaction } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
-import { findUserByUsername, getCephStudy, linkCephStudyToCase } from "@/lib/db";
+import { getCephStudy, linkCephStudyToCase } from "@/lib/db";
 
 const arabic = /[؀-ۿ]/;
 const good = { orthoCaseId: 4, confirm: true, expected: { phase: "pretreatment", xrayDate: "2025-11-20", status: "completed" } };
@@ -87,21 +87,24 @@ describe("POST /api/ceph/[id]/link-case — explicit, confirmed, clinician-only"
     expect(linkCephStudyToCase).not.toHaveBeenCalled();
   });
 
-  it("the in-transaction authorizer re-checks the live account (role + patient scope) on the transaction client", async () => {
+  it("the in-transaction authorizer re-validates the approved session (identity + credential version) on the transaction client", async () => {
     await call(good);
     const { authorize } = vi.mocked(linkCephStudyToCase).mock.calls[0][0];
     const client = { query: vi.fn(), release: vi.fn() } as never;
-    vi.mocked(findUserByUsername).mockResolvedValue({ role: "doctor" } as never);
+    const live = { userId: 7, username: "synthetic-doctor", role: "doctor", expiresAt: 4_102_444_800_000 };
+    vi.mocked(revalidateSessionInTransaction).mockResolvedValue(live as never);
     vi.mocked(canAccessPatient).mockResolvedValue(true);
     expect(await authorize(client, 101)).toBe(true);
-    expect(canAccessPatient).toHaveBeenLastCalledWith(expect.objectContaining({ role: "doctor" }), 101, "canUploadXrays", client);
-    expect(findUserByUsername).toHaveBeenLastCalledWith("synthetic-doctor", client);
-    vi.mocked(findUserByUsername).mockResolvedValue(null as never); // account deactivated / removed
+    expect(revalidateSessionInTransaction).toHaveBeenLastCalledWith(expect.objectContaining({ username: "synthetic-doctor", role: "doctor" }), client);
+    expect(canAccessPatient).toHaveBeenLastCalledWith(live, 101, "canUploadXrays", client);
+    // Password changed / account deactivated / role changed since the session was signed ⇒ the shared validator returns null.
+    vi.mocked(revalidateSessionInTransaction).mockResolvedValue(null);
+    vi.mocked(canAccessPatient).mockClear();
     expect(await authorize(client, 101)).toBe(false);
-    vi.mocked(findUserByUsername).mockResolvedValue({ role: "reception" } as never); // role changed since the session
-    expect(await authorize(client, 101)).toBe(false);
-    vi.mocked(findUserByUsername).mockResolvedValue({ role: "doctor" } as never);
-    vi.mocked(canAccessPatient).mockResolvedValue(false); // permission withdrawn / patient no longer theirs
+    expect(canAccessPatient).not.toHaveBeenCalled();
+    // Still the same session, but the permission was withdrawn or the patient is no longer the doctor's.
+    vi.mocked(revalidateSessionInTransaction).mockResolvedValue(live as never);
+    vi.mocked(canAccessPatient).mockResolvedValue(false);
     expect(await authorize(client, 101)).toBe(false);
   });
 
