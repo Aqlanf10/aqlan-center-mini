@@ -13,7 +13,8 @@ import { baseUrl, harness } from "./_server";
  *
  * المطابقة بالفرق (قبل البذر وبعده): جولة الاختبارات قاعدةٌ مشتركة، فقد يخلّف
  * ملفٌّ سابقٌ بذره؛ الفرق عن خط الأساس يُثبت إسهام بذرتنا وحده بدل الرقم
- * المطلق الذي قد يمازجه إسهام غيرنا.
+ * المطلق الذي قد يمازجه إسهام غيرنا. للتقرير نافذة تاريخ مستقلة أيضًا لأن
+ * قائمة الخدمات تُرجع أعلى عشرة داخل كل عملة، ولا تضمن ظهور بذرة يوم مشترك.
  */
 
 let db: Client;
@@ -21,6 +22,12 @@ let h: Awaited<ReturnType<typeof harness>>;
 let patientId = 0;
 
 const SERVICE_DESCRIPTION = "تنظيف P-01";
+// financeSummary deliberately returns only ten services per currency. Today's
+// shared-harness invoices can displace a small YER fixture from that top ten.
+// Own a quiet historical report window instead of weakening currency coverage
+// or increasing the amounts merely to win an unrelated ranking competition.
+const REPORT_DATE = "2001-01-17";
+const INVOICE_CREATED_AT = `${REPORT_DATE}T12:00:00Z`;
 
 interface FinanceReportPayload {
   invoicedByCurrency?: Record<string, number>;
@@ -39,7 +46,7 @@ interface DebtsPayload {
 }
 
 function reportSnapshot(): Promise<Response> {
-  return fetch(`${baseUrl}/api/finance/report`, {
+  return fetch(`${baseUrl}/api/finance/report?from=${REPORT_DATE}&to=${REPORT_DATE}`, {
     headers: { Cookie: h.sessions.admin.cookie },
     redirect: "manual",
   });
@@ -74,6 +81,8 @@ describe("P-01 على HTTP: /api/finance/report بكل عملة على حدة", 
     const before = await reportSnapshot();
     expect(before.status).toBe(200);
     baseline = await before.json();
+    expect(baseline.invoiceCount, "P-01 owns an empty isolated report date").toBe(0);
+    expect(baseline.topServices).toEqual([]);
 
     const { rows: [patient] } = await db.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name) VALUES ('P01-HTTP-1', 'مريض P-01 HTTP') RETURNING id`,
@@ -88,8 +97,8 @@ describe("P-01 على HTTP: /api/finance/report بكل عملة على حدة", 
     for (const seed of seeds) {
       const { rows: [invoice] } = await db.query<{ id: number }>(
         `INSERT INTO invoices (invoice_number, patient_id, status, total_minor, discount_minor, base_currency, created_at)
-         VALUES ($1, $2, 'open', $3, 0, $4, NOW()) RETURNING id`,
-        [seed.number, patientId, seed.totalMinor, seed.currency],
+         VALUES ($1, $2, 'open', $3, 0, $4, $5::timestamptz) RETURNING id`,
+        [seed.number, patientId, seed.totalMinor, seed.currency, INVOICE_CREATED_AT],
       );
       await db.query(
         `INSERT INTO invoice_items (invoice_id, service_id, description, quantity, unit_price_minor, total_minor)

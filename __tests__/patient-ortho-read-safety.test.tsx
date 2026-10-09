@@ -507,11 +507,57 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
       visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
     render(); const current = pair(); respond(current.ortho, { cases: [row] }); respond(current.patient, contact()); await flush();
     const oldSign = button("وقّع الزيارة وأرسله للاستقبال"); const captured = oldSign.props.onClick as () => void;
-    captured(); expect(writes()).toHaveLength(1); respond(writes()[0], {}); await drain();
+    captured(); expect(writes()).toHaveLength(1); respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await drain();
     // The completion flag must be read from the live draft before a render too.
     captured(); await flush(); expect(writes()).toHaveLength(1);
     expect(text(render())).toContain("وُقّعت زيارة اليوم");
+    hidden("loading");
     captured(); await flush(); expect(writes()).toHaveLength(1);
+    const pending = pair(); respond(pending.patient, contact()); respond(pending.ortho, {}, 503); await flush();
+    hidden("error"); expect(text(render())).toContain("وُقّعت زيارة اليوم");
+    click(control("إعادة تحميل كابينة التقويم"));
+    const recovered = pair(); respond(recovered.patient, contact()); respond(recovered.ortho, { cases: [row] }); await flush();
+    expect(workspace().props["data-read-state"]).toBe("ready");
+    expect(text(render())).toContain("وُقّعت زيارة اليوم");
+    expect(elements(render()).some((node) => node.type === "button" && text(node).includes("وقّع الزيارة وأرسله للاستقبال"))).toBe(false);
+    captured(); await flush(); expect(writes()).toHaveLength(1);
+  });
+
+  it.each(["denial", "patient", "principal"] as const)("retires the successful-sign receipt on %s", async (replacement) => {
+    const prior = fixture(); const row = fixture(19, { adjustments: [{ ...prior.adjustments[0],
+      visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
+    render(); const initial = pair(); respond(initial.ortho, { cases: [row] }); respond(initial.patient, contact()); await flush();
+    const sign = button("وقّع الزيارة وأرسله للاستقبال"); const captured = sign.props.onClick as () => void;
+    captured(); respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
+    expect(text(render())).toContain("وُقّعت زيارة اليوم");
+    if (replacement === "denial") { pair().patient.headers(403); await flush(); hidden("denied"); }
+    else {
+      if (replacement === "patient") patientId = 20;
+      else hooks.session = { ...principalA(), username: "synthetic-ortho-b" };
+      render(); hidden("loading");
+    }
+    expect(text(render())).not.toContain("وُقّعت زيارة اليوم");
+    captured(); await flush(); expect(writes()).toHaveLength(1);
+  });
+
+  it.each([null, {}])("does not publish or replay a malformed successful sign %j", async (payload) => {
+    const prior = fixture(); const row = fixture(19, { adjustments: [{ ...prior.adjustments[0],
+      visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
+    render(); const initial = pair(); respond(initial.ortho, { cases: [row] }); respond(initial.patient, contact()); await flush();
+    const captured = button("وقّع الزيارة وأرسله للاستقبال").props.onClick as () => void;
+    captured(); const stale = refresh(); respond(writes()[0], payload); await flush();
+    hidden("error"); expect(text(render())).toContain("تعذّر تأكيد نتيجة التوقيع");
+    expect(text(render())).not.toContain("وُقّعت زيارة اليوم");
+    expect(stale.ortho.init?.signal?.aborted).toBe(true);
+    expect(stale.patient.init?.signal?.aborted).toBe(true);
+    respond(stale.ortho, { cases: [row] }); respond(stale.patient, contact()); await flush(); hidden("error");
+    captured(); await flush(); expect(writes()).toHaveLength(1);
+    click(control("إعادة تحميل كابينة التقويم"));
+    const current = pair(); respond(current.patient, contact()); respond(current.ortho, { cases: [{ ...row,
+      adjustments: [{ ...row.adjustments[0], visitSigned: true }] }] }); await flush();
+    expect(workspace().props["data-read-state"]).toBe("ready");
+    captured(); await flush(); expect(writes()).toHaveLength(1);
+    expect(elements(render()).some((node) => node.type === "button" && text(node).includes("وقّع الزيارة وأرسله للاستقبال"))).toBe(false);
   });
 
   it("a captured booking submit cannot replay after confirmed success before or after rendering", async () => {

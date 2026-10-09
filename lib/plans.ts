@@ -1,3 +1,5 @@
+import { caseSiteOverlaps, type LineSite } from "./invoice-clinical-linkage";
+import { legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { addDays } from "./schedule";
 
 /**
@@ -44,13 +46,14 @@ export const BILLING_RULE_LABEL: Record<BillingRule, string> = {
   package: "مشمول ضمن باقة الخطة / الأقساط",
 };
 
-export type BillingStatus = "unbilled" | "billed" | "included_in_package" | "waived";
+export type BillingStatus = "unbilled" | "billed" | "included_in_package" | "waived" | "needs_financial_review";
 
 export const BILLING_STATUS_LABEL: Record<BillingStatus, string> = {
   unbilled: "غير مفوتر بعد",
   billed: "مفوتر",
   included_in_package: "مشمول في الباقة",
   waived: "معفى / ترويجي",
+  needs_financial_review: "يحتاج مراجعة مالية",
 };
 
 export interface Installment {
@@ -239,6 +242,13 @@ export interface PlanItemLike {
   doctorId?: number | null;
   doctorName?: string | null;
   note?: string | null;
+  /** (INV-LEGACY) هوية اتفاق تاريخي للبند، باقية بعد الإبطال — «حالة بدأت قبل النظام». */
+  legacyAgreementId?: number;
+  /** Historical identity remains after void; only live coverage may include new work. */
+  legacyAgreementStatus?: "live" | "void";
+  legacyCoverageState?: "verified" | "unknown" | "conflict";
+  legacyCoverageSite?: LineSite | null;
+  legacyCurrentConsentRequired?: boolean;
 }
 
 export interface PlannedVisitGroup<T extends PlanItemLike = PlanItemLike> {
@@ -378,6 +388,11 @@ export interface PlanLedgerSummary {
   baseCurrency: import("./money").Currency;
   /** هل وافق المريض؟ المسوّدة ليست اتفاقًا بعد. */
   consented: boolean;
+  /** (INV-LEGACY) خطة اتفاقٍ تاريخي لعلاجٍ بدأ قبل النظام — مالها في الرصيد السابق. */
+  legacy?: boolean;
+  /** Historical items are not evidence of previously completed or remaining clinical work. */
+  legacyItemCount?: number;
+  ordinaryItemsProgress?: { count: number; doneCount: number; doneMinor: number; remainingMinor: number } | null;
   /** خطة الأقساط: قصتها المالية. null لخطة البنود. */
   installments: {
     paidMinor: number;
@@ -407,16 +422,35 @@ export function planLedgerSummary(plan: {
   installments: { number: number }[];
   progress: PlanProgress;
   itemsProgress: PlanItemsProgress;
+  items?: readonly (Partial<PlanItemLike> & { legacyAgreementId?: number; legacyAgreementStatus?: "live" | "void" })[];
 }): PlanLedgerSummary {
   const hasInstallments = plan.installments.length > 0;
+  // Provenance survives void. Preserve the original total/items projection for compatibility,
+  // but expose ordinary work separately so history cannot become invented remaining work.
+  const historical = (item: { legacyAgreementId?: number }) => Number.isSafeInteger(item.legacyAgreementId) && Number(item.legacyAgreementId) > 0;
+  const legacyItemCount = plan.items?.filter(historical).length ?? 0;
+  const legacy = legacyItemCount > 0;
+  const ordinaryItems = plan.items?.filter((item) => !historical(item)) ?? [];
+  const completeOrdinaryItems = ordinaryItems.every((item) =>
+    ["planned", "in_progress", "done", "cancelled"].includes(String(item.status))
+    && Number.isSafeInteger(item.quantity) && Number(item.quantity) > 0
+    && Number.isSafeInteger(item.unitPriceMinor) && Number(item.unitPriceMinor) >= 0);
+  const ordinaryProgress = legacy && completeOrdinaryItems ? planItemsProgress(ordinaryItems as PlanItemLike[]) : null;
   return {
+    ...(legacy ? { legacy: true, legacyItemCount,
+      ordinaryItemsProgress: ordinaryProgress ? {
+        count: ordinaryProgress.count, doneCount: ordinaryProgress.doneCount,
+        doneMinor: ordinaryProgress.doneMinor, remainingMinor: ordinaryProgress.remainingMinor,
+      } : null } : {}),
     id: plan.id,
     title: plan.title,
     status: plan.status,
     totalMinor: plan.totalMinor,
     // (TD-05) عملة الاتفاق مع القصة المالية — تُعرض بها أرقامها.
     baseCurrency: plan.baseCurrency ?? "YER",
-    consented: plan.consentAt !== null,
+    consented: plan.consentAt !== null && (plan.items?.filter(historical).every((item) =>
+      item.legacyAgreementStatus === "live" && item.billingStatus === "included_in_package"
+      && item.legacyCoverageState === "verified" && item.legacyCurrentConsentRequired === false) ?? true),
     installments: hasInstallments ? {
       paidMinor: plan.progress.paidMinor,
       remainingMinor: plan.progress.remainingMinor,
@@ -485,6 +519,11 @@ export interface SessionPlanItem {
   status: string;
   sessionCount: number;
   doneSessions: number;
+  billingStatus?: BillingStatus;
+  hasInvoiceLineage?: boolean;
+  hasLegacyLineage?: boolean;
+  legacyCoverage?: LegacyCoverageState;
+  caseSite?: string | null;
 }
 
 export function unlinkedSessionConflicts(
@@ -493,9 +532,23 @@ export function unlinkedSessionConflicts(
 ): string[] {
   const conflicts: string[] = [];
   const seen = new Set<number>();
-  const sameKey = (one: SessionPlanItem, procedure: { serviceId: number; toothCode: number | null }) =>
-    one.serviceId === procedure.serviceId && (one.toothCode ?? null) === (procedure.toothCode ?? null);
+  const sameKey = (one: SessionPlanItem, procedure: { serviceId: number; toothCode: number | null }) => {
+    if (one.serviceId !== procedure.serviceId) return false;
+    if (one.hasLegacyLineage) return legacyCoverageOverlaps(one.legacyCoverage ?? legacyCoverageStateFromContext(null), {
+      mode: "region", toothCode: procedure.toothCode, surfaces: null, episodeTeeth: null, scope: null,
+    });
+    return (one.toothCode ?? null) === (procedure.toothCode ?? null)
+      || ((one.toothCode === null || procedure.toothCode === null) && one.hasInvoiceLineage === true && caseSiteOverlaps(one.caseSite ?? (one.toothCode === null ? null : String(one.toothCode)), {
+        mode: "region", toothCode: procedure.toothCode, surfaces: null, episodeTeeth: null, scope: null,
+      }));
+  };
   for (const procedure of unlinked) {
+    const protectedItem = items.find((one) => sameKey(one, procedure)
+      && (one.hasInvoiceLineage || one.hasLegacyLineage || one.billingStatus === "billed" || one.billingStatus === "needs_financial_review"));
+    if (protectedItem) {
+      conflicts.push(`«${protectedItem.serviceName}» له سجل مالي قائم — اربط العمل ببنده الأصلي وراجع حالته المالية؛ لا يُفوتر كإجراء جديد.`);
+      continue;
+    }
     /* بندٌ مخطَّط أحادي الجلسة بنفس الخدمة والسن يأخذ الإجراء أولًا (المطابقة القديمة) — فلا تعارض. */
     const single = items.find((one) => !seen.has(one.id) && sameKey(one, procedure)
       && one.status === "planned" && one.sessionCount <= 1);
