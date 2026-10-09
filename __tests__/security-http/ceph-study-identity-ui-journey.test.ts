@@ -41,6 +41,9 @@ async function seed(label: string): Promise<Fixture> {
     `INSERT INTO ortho_cases (patient_id, status, phase, bracket_system, created_by) VALUES ($1, 'active', 'aligning', $2, 'synthetic-ceph-id') RETURNING id`,
     [patientId, `${MARKER}-${label}`])).rows[0].id;
   const onCase = await study(await document(3), "posttreatment", "2026-08-02", caseId);
+  // 22:30Z is already the next calendar day in Asia/Aden: a date printed with the server's zone instead of the clinic's
+  // zone would differ between server render and browser hydration (React #418) at any hour, not only late at night.
+  await db.query(`UPDATE ceph_analyses SET completed_at = '2026-08-02T22:30:00Z' WHERE id = $1`, [onCase]);
   await db.query(`INSERT INTO ceph_measurements (analysis_id, code, value) VALUES ($1, 'SNA', 82.5), ($1, 'SNB', 79.1)`, [onCase]);
   await db.query(`INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by) VALUES ($1, 'S', 100, 100, 'manual', 'synthetic')`, [onCase]);
   return { patientId, caseId, oldT1, undated, onCase };

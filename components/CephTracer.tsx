@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -1849,7 +1850,7 @@ export function CephTracer({
                     {diagnosis.softTissue && <p><b className="text-slate-500">أنسجة رخوة: </b>{diagnosis.softTissue}</p>}
                     <p><b className="text-slate-500">الاستنتاج: </b>{diagnosis.finalDx}</p>
                     {diagnosis.note && <p><b className="text-slate-500">ملاحظات: </b>{diagnosis.note}</p>}
-                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar")}</p>
+                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}</p>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
@@ -1917,7 +1918,7 @@ export function CephTracer({
             )}
             {completed && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar")}
+                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}
                 {analysis.note ? ` — ${analysis.note}` : ""}
               </div>
             )}
