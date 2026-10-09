@@ -73,8 +73,8 @@ export async function POST(request: Request) {
 
   const dueDate = typeof source.dueDate === "string" && DATE_PATTERN.test(source.dueDate)
     ? source.dueDate : null;
-  const category = typeof source.category === "string" && source.category.trim()
-    ? source.category.trim().slice(0, 40) : "supplier";
+  const requestedCategory = typeof source.category === "string" && source.category.trim()
+    ? source.category.trim().slice(0, 40) : null;
 
   const settings = await getSettings();
   // (TD-05) الأساس دستوري من الكود — والإعدادات تبقى لأسعار الصرف.
@@ -85,6 +85,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    const party = await getParty(partyId);
+    if (!party) return NextResponse.json({ message: "الجهة غير موجودة." }, { status: 404 });
+    // The manual form omits category. Resolve its default from the stored party,
+    // while retaining explicit categories and the existing non-lab fallback.
+    const category = requestedCategory ?? (party.kind === "lab" ? "lab" : "supplier");
     const payable = await createPayable({
       partyId, category, description, amountMinor, currency,
       baseCurrency: base, exchangeRate, labOrderId: null, dueDate,

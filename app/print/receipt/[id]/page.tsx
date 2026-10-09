@@ -6,6 +6,9 @@ import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { readReceiptProvenance } from "@/lib/receipt-provenance-db";
+import { receiptDocumentTitle } from "@/lib/receipt-provenance";
+import { ReceiptProvenance } from "@/components/ReceiptProvenance";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +35,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   const [payment, settings] = await Promise.all([getPayment(id), getSettingsSafe()]);
   const printed = await printCount("receipt", id);
   if (!payment) notFound();
+  const provenance = (await readReceiptProvenance([payment.id]))[payment.id];
 
   // (TD-05) الأساس دستوري من الكود.
   const base = CLINIC_BASE_CURRENCY;
@@ -44,7 +48,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       <PrintButton docType="receipt" docId={id} />
       <ReprintMark printed={printed > 0} />
       <div className="sheet sheet-a6">
-        <PrintHeader settings={settings} title={isRefund ? "سند صرف" : "سند قبض"} compact />
+        <PrintHeader settings={settings} title={receiptDocumentTitle(payment.kind, provenance)} compact />
 
         <div className="line">
           <span>رقم السند</span>
@@ -57,7 +61,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         <div className="rule-light" />
 
         <div className="line">
-          <span>{isRefund ? "صُرف إلى" : "استلمنا من"}</span>
+          <span>{isRefund ? "المريض" : "استلمنا من"}</span>
           <span style={{ fontWeight: 700 }}>{payment.patientName}</span>
         </div>
         {payment.invoiceId ? (
@@ -82,7 +86,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
               <span>{CURRENCY_LABEL[payment.currency]}</span>
             </div>
             <div className="line">
-              <span>سعر الصرف يوم الدفع</span>
+              <span>{isRefund ? "سعر الصرف المسجّل" : "سعر الصرف يوم الدفع"}</span>
               <span className="num" dir="ltr">{payment.exchangeRate}</span>
             </div>
             <div className="line line-strong">
@@ -92,6 +96,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           </>
         ) : null}
 
+        <ReceiptProvenance paymentId={payment.id} currency={payment.currency} provenance={provenance} compact />
+
         {payment.note ? (
           <>
             <div className="rule-light" />
@@ -100,7 +106,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         ) : null}
 
         <div className="sign-row">
-          <span>المستلم: {payment.createdBy ?? "—"}</span>
+          <span>{isRefund ? "سجّله" : "المستلم"}: {payment.createdBy ?? "—"}</span>
           <span>التوقيع: ................</span>
         </div>
 

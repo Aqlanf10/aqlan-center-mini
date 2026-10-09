@@ -10,6 +10,8 @@ import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
 import { ReceiptCorrection } from "./ReceiptCorrection";
+import { ReceiptProvenance } from "./ReceiptProvenance";
+import { receiptProvenanceFor } from "@/lib/receipt-provenance";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
@@ -60,6 +62,8 @@ interface Ledger {
   balances?: Record<Currency, Balance>;
   /** (RC-1) المتبقي غير المعكوس من كل سند قبض — يصل للمدير وحده. */
   receiptRemaining?: Record<string, number>;
+  /** Display evidence is validated independently and never controls collection. */
+  receiptProvenance?: unknown;
   /** (P0-C) ترتيب تحصيل الرصيد القديم — ميتاداتا فقط، بلا principal جديد. */
   legacyBalanceArrangements?: LegacyArrangementView[];
   legacyOpeningPositions?: LegacyOpeningPosition[];
@@ -682,9 +686,8 @@ function PatientLedgerContent({ patientId }: { patientId: number }) {
                     السند
                   </a>
                 </span>
-                {payment.note && (payment.note.startsWith("تصحيح السند") || payment.note.startsWith("بدل السند")) ? (
-                  <p className="w-full text-[11px] font-bold text-amber-800">{payment.note}</p>
-                ) : null}
+                <ReceiptProvenance paymentId={payment.id} currency={payment.currency}
+                  provenance={receiptProvenanceFor(ledger.receiptProvenance, payment.id, payment.amountMinor, payment.kind, payment.receiptNumber)} />
                 {correctingReceipt === payment.id ? (
                   <ReceiptCorrection
                     receipt={payment}

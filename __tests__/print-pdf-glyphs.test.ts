@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, matchesPrintPdfWord, type PrintPdfPage } from "./helpers/print-pdf-glyphs";
+import { assertPrintPdfHeader, assertPrintPdfSignature, assertPrintPdfWatermark, assertReceiptPrintPdfSignature, matchesPrintPdfWord, type PrintPdfPage } from "./helpers/print-pdf-glyphs";
 
 // Actual synthetic failed PDF from CI37709082384, SHA-256
 // d93af041b99a8b493f54df253efa0fd80b7c336cad3fde654de4480cace09756.
@@ -315,5 +315,99 @@ describe("region-bound print PDF glyph calibration", () => {
     const parts = scrambled.words.filter(word => word.yMax - word.yMin >= 28).sort((a, b) => b.xMin - a.xMin);
     [parts[0].text, parts[1].text] = [parts[1].text, parts[0].text];
     expect(() => assertPrintPdfWatermark(scrambled, true)).toThrow(/PDF watermark/);
+  });
+});
+
+// Exact native A6 signature boxes from CI37834754641, reversal diagnostic PDF,
+// 267180 bytes, SHA-256 8acbb0ad010ea856084d66d69755f95947b4e9acd96d44b59f4610e031df7446.
+// The source document and all other native-PDF oracles remain unchanged.
+const receiptSignature = "سجّله: secadmin\nالتوقيع: ................";
+const observedReceipt: PrintPdfPage = {
+  width: 298.079990, height: 420.000000,
+  words: [
+    { text: "جّس", xMin: 262.769864, xMax: 274.683447, yMin: 359.080087, yMax: 369.107012 },
+    { text: ":هل", xMin: 253.077708, xMax: 262.417691, yMin: 359.263023, yMax: 368.168511 },
+    { text: "secadmin", xMin: 216.757963, xMax: 250.863168, yMin: 359.263023, yMax: 368.168511 },
+    { text: ":عيقوتلا", xMin: 59.620948, xMax: 83.491865, yMin: 359.263023, yMax: 368.168511 },
+    { text: "................", xMin: 21.984374, xMax: 57.407811, yMin: 359.263023, yMax: 368.168511 },
+  ],
+};
+const freshReceipt = (): PrintPdfPage => structuredClone(observedReceipt);
+const receiptCorruptions: [string, (page: PrintPdfPage) => void][] = [
+  ["missing right fragment", page => { page.words.splice(0, 1); }],
+  ["missing left fragment", page => { page.words.splice(1, 1); }],
+  ["separated fragments", page => { page.words[1].xMin -= 1; page.words[1].xMax -= 1; }],
+  ["different-line fragments", page => { page.words[1].yMin -= 3; page.words[1].yMax -= 3; }],
+  ["overlapping fragments", page => { page.words[1].xMax = page.words[0].xMin + 0.1; }],
+  ["swapped fragment positions", page => {
+    const right = page.words[0], left = page.words[1];
+    [right.xMin, left.xMin] = [left.xMin, right.xMin];
+    [right.xMax, left.xMax] = [left.xMax, right.xMax];
+  }],
+  ["out-of-region fragment", page => { page.words[1].yMin = 20; page.words[1].yMax = 29; }],
+  ["out-of-page fragment", page => { page.words[1].xMin = -1; }],
+  ["non-finite fragment", page => { page.words[1].xMin = Number.NaN; }],
+  ["oversized merged box", page => { page.words[1].yMax = page.words[0].yMin + 16.1; }],
+  ["duplicate fragment", page => { page.words.push({ ...page.words[0] }); }],
+  ["duplicate out-of-region fragment", page => {
+    page.words.push({ ...page.words[0], yMin: 20, yMax: 30 });
+  }],
+  ["duplicate fragmented anchor", page => {
+    page.words.push(...page.words.slice(0, 2).map(word => ({ ...word, yMin: word.yMin - 20, yMax: word.yMax - 20 })));
+  }],
+  ["duplicate logical anchor", page => { page.words.push({ ...page.words[0], text: "سجّله:" }); }],
+  ["duplicate visual anchor", page => { page.words.push({ ...page.words[0], text: ":هلجّس" }); }],
+  ["missing shadda", page => { page.words[0].text = "جس"; }],
+  ["lost colon", page => { page.words[1].text = "هل"; }],
+  ["changed glyph", page => { page.words[0].text = "جّش"; }],
+  ["scrambled glyphs", page => { page.words[0].text = "سجّ"; }],
+  ["changed signer", page => { page.words[2].text = "otheradmin"; }],
+  ["missing signer", page => { page.words.splice(2, 1); }],
+  ["missing signature label", page => { page.words.splice(3, 1); }],
+  ["missing entire signature", page => { page.words = []; }],
+  ["extra word on signature row", page => {
+    page.words.push({ text: "extra", xMin: 150, xMax: 170, yMin: 359.263023, yMax: 368.168511 });
+  }],
+];
+
+describe("receipt-only marked signature fragment calibration", () => {
+  it("accepts the observed adjacent fragments without changing the shared oracle or input", () => {
+    const paper = freshReceipt(), before = structuredClone(paper);
+    for (const word of paper.words) Object.freeze(word);
+    Object.freeze(paper.words); Object.freeze(paper);
+    expect(() => assertPrintPdfSignature(paper, receiptSignature)).toThrow(/PDF signature/);
+    expect(() => assertReceiptPrintPdfSignature(paper, receiptSignature)).not.toThrow();
+    expect(paper).toEqual(before);
+  });
+  it.each(receiptCorruptions)("rejects %s without changing its input", (_name, corrupt) => {
+    const paper = freshReceipt();
+    corrupt(paper);
+    const before = structuredClone(paper);
+    expect(() => assertReceiptPrintPdfSignature(paper, receiptSignature)).toThrow(/PDF signature/);
+    expect(paper).toEqual(before);
+  });
+  it("never combines fragments across native PDF pages", () => {
+    const firstPage = freshReceipt(), secondPage = freshReceipt();
+    firstPage.words.splice(1, 1);
+    secondPage.words = [secondPage.words[1]];
+    for (const paper of [firstPage, secondPage]) {
+      const before = structuredClone(paper);
+      expect(() => assertReceiptPrintPdfSignature(paper, receiptSignature)).toThrow(/PDF signature/);
+      expect(paper).toEqual(before);
+    }
+  });
+  it("does not reconstruct the pair for any other expected label", () => {
+    const paper = freshReceipt(), before = structuredClone(paper);
+    for (const label of ["المستلم:", "المحاسب:", "سجله:"]) {
+      expect(() => assertReceiptPrintPdfSignature(paper, `${label} secadmin\nالتوقيع: ................`)).toThrow(/PDF signature/);
+    }
+    expect(paper).toEqual(before);
+  });
+  it("delegates unfragmented signatures to the unchanged shared oracle", () => {
+    const expected = "المحاسب: ................\nالمريض: ................";
+    expect(() => assertReceiptPrintPdfSignature(observed, expected)).not.toThrow();
+    const missing = fresh();
+    missing.words = missing.words.filter(word => word.text !== ":بساحملا");
+    expect(() => assertReceiptPrintPdfSignature(missing, expected)).toThrow(/PDF signature/);
   });
 });
