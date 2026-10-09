@@ -4,7 +4,7 @@ import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { formatMoney } from "../../lib/money";
 
-/** Actual built patient page. Synthetic read transport only; writes and unknown routes remain blocked.
+/** Actual built patient page. Synthetic transport only; unknown routes and all unplanned writes remain blocked.
  * Persistence/signing is tested separately in postgres/legacy-ortho-billing.test.ts.
  */
 let browser: Browser;
@@ -41,10 +41,17 @@ describe("built patient walkout verifies balances for reception", () => {
     const [name, ...value] = h.sessions.reception.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const unexpected: string[] = [], errors: string[] = [], writes: string[] = [];
+    let paidInvoice = false;
+    const paymentAttempts: { body: Record<string, unknown>; key: string | undefined }[] = [];
     let fault: "none" | "http500" | "json" | "null" | "empty" | "missing" | "amount" | "foreign" = "none";
     const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async (route) => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${path}`); await route.abort(); return; }
+      if (method === "POST" && path === "/api/payments" && paidInvoice) {
+        paymentAttempts.push({ body: request.postDataJSON() as Record<string, unknown>, key: request.headers()["idempotency-key"] });
+        await json(route, paymentAttempts.length === 1 ? { message: "Synthetic retry" } : { id: 98785 }, paymentAttempts.length === 1 ? 500 : 200);
+        return; // Synthetic fulfillment; no payment request reaches the application server.
+      }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { writes.push(`${method} ${path}`); await json(route, {}, 409); return; }
       if (path === `/api/patients/${patientId}/workflow`) await json(route, workflow());
       else if (path === `/api/patients/${patientId}`) await json(route, { patient, visits: [], appointments: [] });
@@ -53,6 +60,10 @@ describe("built patient walkout verifies balances for reception", () => {
         if (fault === "json") { await route.fulfill({ status: 200, contentType: "application/json", body: "{" }); return; }
         if (fault === "null") { await json(route, null); return; }
         const body = walkout();
+        if (paidInvoice) {
+          (body as { invoice: unknown }).invoice = { id: 98784, number: "SYN-PAID", netMinor: 5000, currency: "SAR" };
+          body.checkout.invoicePaidMinor = 5000;
+        }
         if (fault === "empty") body.checkout.current = {} as typeof body.checkout.current;
         if (fault === "missing") delete (body.checkout.current as Partial<typeof body.checkout.current>).USD;
         if (fault === "amount") (body.checkout.current as { YER: unknown }).YER = "0";
@@ -95,6 +106,26 @@ describe("built patient walkout verifies balances for reception", () => {
         await state.getByRole("button", { name: "إعادة التحقق من الأرصدة" }).click();
         await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
       }
+      paidInvoice = true;
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
+      await checkout.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
+      await dialog.waitFor();
+      expect(await dialog.getByLabel("العملة", { exact: true }).inputValue()).toBe("YER");
+      expect(await dialog.getByLabel("فاتورة الهدف", { exact: true }).count()).toBe(0);
+      expect(await dialog.innerText()).toContain("دفعة على الحساب بالريال اليمني");
+      await dialog.getByLabel("المبلغ", { exact: true }).fill("1000");
+      await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
+      await dialog.getByText("Synthetic retry", { exact: true }).waitFor();
+      await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+      expect(paymentAttempts).toHaveLength(2);
+      expect(paymentAttempts[0].body).toMatchObject({ patientId, amount: "1000", currency: "YER", kind: "payment" });
+      expect(paymentAttempts[0].body).not.toHaveProperty("invoiceId");
+      expect(paymentAttempts[0].body).not.toHaveProperty("planId");
+      expect(paymentAttempts[0].key).toBeTruthy();
+      expect(paymentAttempts[1]).toEqual(paymentAttempts[0]);
       verify();
     }, verify);
   });

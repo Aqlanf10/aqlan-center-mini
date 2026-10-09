@@ -31,6 +31,17 @@ beforeEach(() => {
 const render = async () => renderToStaticMarkup(await WalkoutPage({ params: Promise.resolve({ id: "10" }) }));
 
 describe("printed walkout uses canonical financial-review evidence", () => {
+  it.each([null, "2026-10-07T09:00:00Z"])("does not infer free care for unsigned or cancelled-invoice walkout (signedAt=%s)", async (signedAt) => {
+    // visitWalkout projects a cancelled invoice as null, just like an absent invoice.
+    state.walkout!.signedAt = signedAt;
+    state.walkout!.invoice = null;
+    state.walkout!.lines = [{ ...state.walkout!.lines[0], financialReviewRequired: false }];
+    const html = await render();
+    expect(html).toContain("لا فاتورة جديدة مثبتة لهذه الزيارة");
+    expect(html).not.toContain("لا رسوم على هذه الزيارة");
+    expect(html).toContain(formatMoney(432100, "YER"));
+  });
+
   it.each(["INCLUDED", "LEGACY_INCLUDED"] as const)("prints adjustment-only %s without invented work or an invoice", async (billingClass) => {
     state.walkout!.lines = [];
     state.walkout!.orthoAdjustment = { id: 30, billingClass, decision: null, pendingDecision: false };
