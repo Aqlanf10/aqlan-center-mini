@@ -59,6 +59,7 @@ const financial = {
   treatmentDoneMinor: 0, remainingTreatmentMinor: 0, byCurrency: {},
 };
 const workflow = (id: number) => ({
+  patient, assessmentCases: [], legacyCases: [],
   openVisit: {
     id, status: "in_chair", chair: 1,
     // B deliberately represents an older unsigned visit returned after A.
@@ -87,7 +88,7 @@ async function selected(page: Page, tab: "today" | "summary") {
   await expect.poll(() => page.getByTestId(`patient-tab-${tab}`).getAttribute("aria-current")).toBe("page");
 }
 
-async function fixture(options: { holdInitialA?: boolean; holdB?: boolean } = {}) {
+async function fixture(options: { holdInitialA?: boolean; holdB?: boolean; holdRefreshA?: boolean } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 1100 }, locale: "ar-YE", serviceWorkers: "block",
   });
@@ -145,7 +146,8 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean } = {}
       const read = { route, visitId: clinicalOwner };
       reads.push(read);
       if ((clinicalOwner === visitA && options.holdInitialA && reads.filter((item) => item.visitId === visitA).length === 1)
-        || (clinicalOwner === visitB && options.holdB && reads.filter((item) => item.visitId === visitB).length === 1)) heldReads.push(read);
+        || (clinicalOwner === visitB && options.holdB && reads.filter((item) => item.visitId === visitB).length === 1)
+        || (clinicalOwner === visitA && options.holdRefreshA && reads.filter((item) => item.visitId === visitA).length > 1)) heldReads.push(read);
       else await json(route, snapshots.get(clinicalOwner));
     } else if (path === patientPath) await json(route, { patient, visits: [], appointments: [] });
     else if (path === `${patientPath}/workflow`) { workflowReads += 1; await json(route, workflow(activeVisit)); }
@@ -232,11 +234,11 @@ async function fixture(options: { holdInitialA?: boolean; holdB?: boolean } = {}
         await expect.poll(() => reads.filter((item) => item.visitId === id).length).toBeGreaterThan(0);
         await selected(page, "today");
       },
-      finishRead: async (id: number, status = 200) => {
+      finishRead: async (id: number, status = 200, body?: unknown) => {
         const index = heldReads.findIndex((item) => item.visitId === id);
         if (index < 0) throw new Error(`No held synthetic read for visit ${id}`);
         const [read] = heldReads.splice(index, 1);
-        await finish(read.route, status === 200 ? snapshots.get(id) : { message: "Synthetic retired read failure" }, status);
+        await finish(read.route, body ?? (status === 200 ? snapshots.get(id) : { message: "Synthetic retired read failure" }), status);
       },
       finishWrite: async (index: number, body: unknown = { ok: true }, status = 200) => {
         const write = writes[index];
@@ -401,6 +403,60 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       } finally { await f.context.close(); }
     });
 
+    it.each([1280, 390])("recovers the exact submitted draft after a failed refresh and stale retry at %ipx, then allows a verified save", async (width) => {
+      const f = await fixture({ holdRefreshA: true });
+      try {
+        await f.page.setViewportSize({ width, height: 1100 });
+        const draft = { ...notes("Synthetic retained after failed read"), treatmentDone: "" };
+        const treatingDoctor = f.page.locator("#visit-notes select");
+        await treatingDoctor.selectOption("");
+        await f.page.getByRole("radio", { name: "دولار", exact: true }).click();
+        await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("3");
+        await f.page.getByRole("textbox", { name: "السعر", exact: true }).fill("4.25");
+        // Explicitly clearing treatment after choosing procedures must survive
+        // both recovery and the later confirmed save, without auto-regeneration.
+        await fillNotes(f.page, draft);
+        expect(await readNotes(f.page)).toEqual(draft);
+        const mountedToday = await f.today.elementHandle();
+        if (!mountedToday) throw new Error("The retained Today workspace is missing");
+        await f.save.click(); await expect.poll(() => f.writes.length).toBe(1);
+        const submitted = f.writes[0].body;
+        expect(submitted).toMatchObject({ ...draft, doctorId: null, billingCurrency: "USD" });
+        expect(submitted.procedures).toMatchObject([{ quantity: 3, unitPriceMinor: 425 }]);
+        await f.finishWrite(0); await expect.poll(() => f.heldReads.length).toBe(1);
+        await f.finishRead(visitA, 503);
+        await expect.poll(() => f.page.locator("#visit-notes").count()).toBe(0);
+        expect(await f.save.count()).toBe(0);
+        expect(await f.today.textContent()).toContain("احتُفظ بمسودة الزيارة");
+        expect(await f.today.textContent()).not.toContain("Synthetic retired read failure");
+        expect(await mountedToday.evaluate((node) => node.isConnected)).toBe(true);
+        await f.page.getByRole("button", { name: "أعد تحميل الزيارة", exact: true }).click();
+        await expect.poll(() => f.heldReads.length).toBe(1);
+        await f.finishRead(visitA, 200, clinicalVisit(visitA));
+        await expect.poll(() => readNotes(f.page)).toEqual(draft);
+        expect(await treatingDoctor.inputValue()).toBe("");
+        expect(await f.page.getByRole("radio", { name: "دولار", exact: true }).getAttribute("aria-checked")).toBe("true");
+        expect(await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).inputValue()).toBe("3");
+        expect(await f.page.getByRole("textbox", { name: "السعر", exact: true }).inputValue()).toBe("4.25");
+        expect(f.writes).toHaveLength(1);
+        await withDiscard(f.page, false, () => f.page.getByTestId("patient-tab-summary").click());
+        await selected(f.page, "today");
+        const corrected = { ...draft, diagnosis: "Synthetic local correction after recovery" };
+        await noteField(f.page, "② التشخيص").fill(corrected.diagnosis);
+        await f.save.click(); await expect.poll(() => f.writes.length).toBe(2);
+        expect(f.writes[1].body).toEqual({ ...submitted, diagnosis: corrected.diagnosis });
+        await f.finishWrite(1); await expect.poll(() => f.heldReads.length).toBe(1);
+        await f.finishRead(visitA);
+        await expect.poll(() => f.save.isEnabled()).toBe(true);
+        expect(await readNotes(f.page)).toEqual(corrected);
+        let prompts = 0;
+        f.page.on("dialog", async (dialog) => { prompts += 1; await dialog.dismiss(); });
+        await f.page.getByTestId("patient-tab-summary").click();
+        await selected(f.page, "summary"); expect(prompts).toBe(0);
+        expect(f.writes).toHaveLength(2); expectSafe(f);
+      } finally { await f.context.close(); }
+    });
+
     it.each([200, 503])("ignores A's late initial read (%s) after the retained Today surface has loaded B", async (status) => {
       const f = await fixture({ holdInitialA: true });
       try {
@@ -473,3 +529,4 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
     });
   },
 );
+

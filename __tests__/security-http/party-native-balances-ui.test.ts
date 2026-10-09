@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { authedGet, baseUrl, harness } from "./_server";
+import type { PartyBalanceIdentity, PartyNativeBalance } from "@/lib/party-native-balances";
+import { emitPartyNativeBalanceEvidence, type PartyNativeBalanceEvidenceMember } from "./_party-native-balance-evidence";
 
 // Actual built page, existing isolated auth harness, intercepted synthetic DTOs.
 // No financial fixture writers, Production records, or permission changes.
-// This suite asserts rendered DOM. It adds no evidence emitter or CI uploader.
+// Existing business assertions remain DOM-based. A separate paired witness emits
+// bounded ready-state browser PNGs only after both contexts close successfully.
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
 beforeAll(async () => {
@@ -87,8 +90,34 @@ const full = {
   ],
 };
 const zero = { ...full, balancesByCurrency: [] };
+type SyntheticNativeSnapshot = {
+  view: "party-balances-v1";
+  observedAt: string;
+  partyIdentities: PartyBalanceIdentity[];
+  balancesByCurrency: (PartyNativeBalance & { partyId: number; name: string; kind: "lab" | "supplier" })[];
+};
+// Screenshot-only typed DTO. The existing business fixtures stay unchanged.
+// 123,456,789,012 cents is a long, safe integer, not an actual financial record.
+const evidenceSnapshot: SyntheticNativeSnapshot = {
+  view: "party-balances-v1", observedAt: "2026-10-09T00:00:00.000Z",
+  partyIdentities: [
+    { id: 910001, name: parties[0].name, kind: "supplier" },
+    { id: 910002, name: parties[1].name, kind: "supplier" },
+    { id: 910003, name: parties[2].name, kind: "lab" },
+    { id: 910004, name: parties[3].name, kind: "supplier" },
+    { id: 910005, name: parties[4].name, kind: "supplier" },
+  ],
+  balancesByCurrency: [
+    { partyId: 910001, name: parties[0].name, kind: "supplier", currency: "USD", dueMinor: 123456789012 },
+    { partyId: 910002, name: parties[1].name, kind: "supplier", currency: "SAR", dueMinor: -37500 },
+    { partyId: 910003, name: parties[2].name, kind: "lab", currency: "YER", dueMinor: 50000 },
+    { partyId: 910004, name: parties[3].name, kind: "supplier", currency: "USD", dueMinor: 10000 },
+    { partyId: 910004, name: parties[3].name, kind: "supplier", currency: "SAR", dueMinor: -10000 },
+    { partyId: 910004, name: parties[3].name, kind: "supplier", currency: "YER", dueMinor: 1200 },
+  ],
+};
 type Pending = {
-  url: string; cache: RequestCache | undefined; bodyStarted: boolean;
+  url: string; method: string; cache: RequestCache | undefined; bodyStarted: boolean;
   respond: (status: number) => void;
   body: (payload: unknown) => void;
   failFetch: () => void;
@@ -105,6 +134,7 @@ async function fixture(width = 1280, role: "admin" | "accountant" = "admin") {
   const page = await context.newPage();
   const unexpected: string[] = [];
   const errors: string[] = [];
+  const writes: string[] = [];
   const mutations: { method: string; path: string; body: unknown }[] = [];
   let allowPartyMutations = false;
   let currentParties = parties.map((party) => ({ ...party }));
@@ -112,10 +142,15 @@ async function fixture(width = 1280, role: "admin" | "accountant" = "admin") {
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const isRead = request.method() === "GET" || request.method() === "HEAD";
+    if (!isRead) writes.push(`${request.method()} ${url.pathname}`);
     if (url.origin !== new URL(baseUrl).origin) {
       unexpected.push(`external ${url.origin}`); await route.abort(); return;
     }
-    if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
+    if (!url.pathname.startsWith("/api/")) {
+      if (!isRead) { unexpected.push(`${request.method()} ${url.pathname}`); await route.abort(); return; }
+      await route.continue(); return;
+    }
     if (request.method() === "GET") {
       switch (url.pathname) {
         case "/api/parties": await json(route, currentParties); return;
@@ -141,8 +176,9 @@ async function fixture(width = 1280, role: "admin" | "accountant" = "admin") {
     window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       const raw = input instanceof Request ? input.url : String(input);
       const url = new URL(raw, window.location.href);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       if (url.origin !== window.location.origin || url.pathname !== "/api/payables"
-        || url.search !== "?view=party-balances-v1") return originalFetch(input, init);
+        || url.search !== "?view=party-balances-v1" || method !== "GET") return originalFetch(input, init);
       let resolveResponse!: (response: Response) => void;
       let rejectResponse!: (error: Error) => void;
       let body!: (payload: unknown) => void;
@@ -150,7 +186,7 @@ async function fixture(width = 1280, role: "admin" | "accountant" = "admin") {
       const response = new Promise<Response>((resolve, reject) => { resolveResponse = resolve; rejectResponse = reject; });
       const payload = new Promise<unknown>((resolve, reject) => { body = resolve; rejectBody = reject; });
       const record: Pending = {
-        url: url.toString(), cache: init?.cache, bodyStarted: false, body,
+        url: url.toString(), method, cache: init?.cache, bodyStarted: false, body,
         respond: (status) => resolveResponse({ ok: status >= 200 && status < 300, status,
           json: () => { record.bodyStarted = true; return payload; },
         } as Response),
@@ -170,6 +206,7 @@ async function fixture(width = 1280, role: "admin" | "accountant" = "admin") {
     setCatalog: (catalog: typeof parties) => { currentParties = catalog.map((party) => ({ ...party })); },
     enablePartyMutations: () => { allowPartyMutations = true; },
     assertIsolated: () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); },
+    assertNoWrites: () => { expect(writes).toEqual([]); expect(mutations).toEqual([]); },
   };
 }
 
@@ -206,6 +243,94 @@ async function assertUnavailable(page: Page, expectedParties = 5) {
 }
 
 describe("built party list native balances", () => {
+  it("captures paired ready native badges at 1280 and 390 only after both isolated read-only witnesses close", async () => {
+    const captures: PartyNativeBalanceEvidenceMember[] = [];
+    for (const width of [1280, 390] as const) {
+      const f = await fixture(width);
+      try {
+        // Loading and unavailable are DOM assertions, not pictured evidence.
+        await assertNoAmounts(f.page);
+        expect(await f.page.getByTestId("party-native-balances").getByText("جارٍ التحميل…", { exact: true }).count()).toBe(1);
+        await complete(f.page, 0, { message: "Synthetic unavailable before screenshot" }, 403);
+        await assertUnavailable(f.page);
+        await reload(f.page, 1);
+        expect(await f.page.getByTestId("party-native-balances").getByText("جارٍ التحميل…", { exact: true }).count()).toBe(1);
+        expect(evidenceSnapshot.balancesByCurrency.every(row => Number.isSafeInteger(row.dueMinor))).toBe(true);
+        await complete(f.page, 1, evidenceSnapshot);
+        await expect.poll(() => f.page.getByTestId("party-native-balance").count()).toBe(6);
+        await f.page.evaluate(() => document.fonts.ready.then(() => undefined));
+        expect(await f.page.getByRole("alert").count()).toBe(0);
+        expect(await f.page.getByText("الرصيد غير متاح", { exact: true }).count()).toBe(0);
+        expect(await f.page.getByTestId("party-native-balances").getByText("جارٍ التحميل…", { exact: true }).count()).toBe(0);
+        expect(await f.page.getByTestId("party-row-910001").getByTestId("party-native-balance").textContent()).toBe("علينا 1,234,567,890.12 $ (USD)");
+        expect(await f.page.getByTestId("party-row-910002").getByTestId("party-native-balance").textContent()).toBe("لنا 375.00 ر.س (SAR)");
+        expect(await f.page.getByTestId("party-row-910003").getByTestId("party-native-balance").textContent()).toBe("علينا 50,000 ر.ي (YER)");
+        expect(await f.page.getByTestId("party-row-910004").getByTestId("party-native-balance").allTextContents()).toEqual([
+          "علينا 1,200 ر.ي (YER)", "لنا 100.00 ر.س (SAR)", "علينا 100.00 $ (USD)",
+        ]);
+        expect(await f.page.getByTestId("party-row-910004").getByRole("button", { name: "تفعيل", exact: true }).count()).toBe(1);
+        expect(await f.page.getByTestId("party-row-910005").getByTestId("party-native-zero").textContent()).toBe("صافي الجهة صفر");
+        expect(await f.page.getByTestId("party-native-zero").count()).toBe(1);
+        expect(await f.page.getByTestId("party-row-910006").getByTestId("party-native-balance").count()).toBe(0);
+        expect(await f.page.getByTestId("party-row-910006").getByText("عمولة 10%", { exact: true }).count()).toBe(1);
+        const geometry = await f.page.getByTestId("party-native-balances").evaluate((main) => ({
+          viewport: window.innerWidth, left: main.getBoundingClientRect().left, right: main.getBoundingClientRect().right,
+          height: document.documentElement.scrollHeight,
+          overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          badges: [...main.querySelectorAll<HTMLElement>('[data-testid="party-native-balance"], [data-testid="party-native-zero"]')].map((badge) => {
+            const rect = badge.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(badge);
+            const style = getComputedStyle(badge);
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height,
+              visible: style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0,
+              text: [...range.getClientRects()].map(text => ({ left: text.left, right: text.right, top: text.top, bottom: text.bottom })),
+            };
+          }),
+        }));
+        expect(geometry.viewport).toBe(width);
+        expect(geometry.overflow).toBe(false);
+        expect(geometry.height).toBeLessThanOrEqual(5000);
+        expect(geometry.badges).toHaveLength(7);
+        for (const badge of geometry.badges) {
+          expect(badge.visible).toBe(true);
+          expect(badge.width).toBeGreaterThan(0);
+          expect(badge.height).toBeGreaterThan(0);
+          expect(badge.left).toBeGreaterThanOrEqual(Math.max(0, geometry.left));
+          expect(badge.right).toBeLessThanOrEqual(Math.min(geometry.right, geometry.viewport));
+          expect(badge.top).toBeGreaterThanOrEqual(0);
+          expect(badge.bottom).toBeLessThanOrEqual(geometry.height);
+          expect(badge.text.length).toBeGreaterThan(0);
+          for (const text of badge.text) {
+            expect(text.left).toBeGreaterThanOrEqual(badge.left);
+            expect(text.right).toBeLessThanOrEqual(badge.right);
+            expect(text.top).toBeGreaterThanOrEqual(badge.top);
+            expect(text.bottom).toBeLessThanOrEqual(badge.bottom);
+          }
+        }
+        expect(await f.page.evaluate(() => (window as unknown as FixtureWindow).__partyNativeReads.map(({ method, cache }) => ({ method, cache })))).toEqual([
+          { method: "GET", cache: "no-store" }, { method: "GET", cache: "no-store" },
+        ]);
+        f.assertIsolated();
+        f.assertNoWrites();
+        // Actual full-page browser return, no paths, masks, styles or image edits.
+        const bytes = await f.page.screenshot({ type: "png", fullPage: true });
+        expect(await f.page.getByTestId("party-native-balance").count()).toBe(6);
+        expect(await f.page.getByTestId("party-native-zero").count()).toBe(1);
+        f.assertIsolated();
+        f.assertNoWrites();
+        captures.push({ filename: width === 1280 ? "party-native-balances-desktop-1280.png" : "party-native-balances-mobile-390.png",
+          mime: "image/png", bytes });
+      } finally { await f.context.close(); }
+      // Include requests/errors observed during teardown in the witness gate.
+      f.assertIsolated();
+      f.assertNoWrites();
+    }
+    // Neither viewport emits on its own. Any assertion/capture/close failure
+    // above prevents this sole call; frames describe only this paired witness.
+    emitPartyNativeBalanceEvidence(captures);
+  });
+
   it.each([1280, 390])("shows USD/SAR/YER separately, including mixed signs, inactive and zero parties at width %s", async (width) => {
     const f = await fixture(width);
     try {

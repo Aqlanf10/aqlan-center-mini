@@ -20,7 +20,7 @@ export function partyBalanceIdentities(catalog: readonly PartyBalanceIdentity[])
       || (party.kind !== "lab" && party.kind !== "supplier" && party.kind !== "doctor")) {
       throw new Error("Invalid party catalog");
     }
-    identities.set(party.id, party);
+    identities.set(party.id, { id: party.id, name: party.name, kind: party.kind });
   }
   return identities;
 }

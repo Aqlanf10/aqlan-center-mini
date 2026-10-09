@@ -120,7 +120,10 @@ These checks cover existing work and sibling lines within one request.
 
 A bridged orthodontic case uses its actual orthodontic lifecycle. Closing it shares
 patient-first serialization with financial linkage. Intake bridges only one compatible
-shell; ambiguous or mismatched scope is refused. No invoice creates wires, diagnosis,
+candidate; ambiguous or mismatched scope is refused. A candidate is an unbridged running ortho
+case that an invoice opened (`origin = 'invoice'`) or an ordinary case that a non-cancelled
+invoice line reused through its plan item (verified linkage, review 5461388673). The bridge
+never rewrites the reused case's origin or title; its audit row names the source. No invoice creates wires, diagnosis,
 endodontic findings, laboratory orders, or an `ortho_cases` clinical record.
 
 An ordinary billed orthodontic item is NOT an unlimited adjustment package. Its exact
@@ -153,3 +156,14 @@ composition is reviewed, CI is green for that exact head, migration-candidate te
 are collision-free, and the nonportable tracked `node_modules` symlink is removed from
 Git. This correction does not activate legacy intake or periodontal schema, change real
 Production data, rewrite history, alter credentials, or delete backups.
+
+## Track status (2026-10-08)
+
+| Slice | PR | State |
+|---|---|---|
+| B+C linkage and sign-off containment | #274 | Done. Review 5461388673 fixed: an ordinary case reused by a live invoice line is a bridge candidate; scope stays exact |
+| D invoice UI, tooth chart, ortho bridge | #278 | Done. The original CI-only preview timeout cause is still unproven; transport is controlled and waits self-diagnose |
+| E pre-system treatment | #285 | Done. Own preview (no invoice price authority), mixed-data refusal, ortho scope check, deterministic A→B→A, retained run evidence |
+| Daily close integration | #294 | Integrated release candidate (#274+#278+#285 on current main). Release only as one unit, after exact-head CI and review |
+
+Do not deploy #274 alone. Owner's no-new-merges hold applies.

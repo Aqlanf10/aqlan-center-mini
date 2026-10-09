@@ -3,6 +3,8 @@ import { getPlan, getSettingsSafe } from "@/lib/db";
 import { formatMoney, isCurrency } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader } from "@/components/PrintHeader";
+import { LegacyPlanPrintSummary } from "@/components/LegacyPlanPrintSummary";
+import { hasLegacyHistory } from "@/components/legacy-treatment-view";
 import { PrintButton } from "@/components/PrintButton";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
@@ -31,6 +33,17 @@ export default async function PlanAgreementPage({ params }: { params: Promise<{ 
   if (!plan) notFound();
 
   const base = isCurrency(plan.baseCurrency) ? plan.baseCurrency : "YER";
+  // Historical provenance cannot become a new collectible plan contract or invented remaining work.
+  // Preserve the ordinary agreement below exactly; history prints as an explicitly read-only reference.
+  if (plan.items.some(hasLegacyHistory)) return (
+    <>
+      <PrintButton />
+      <div className="sheet sheet-a4">
+        <PrintHeader settings={settings} title="مرجع خطة تشمل علاجًا تاريخيًّا" />
+        <LegacyPlanPrintSummary plan={plan} currency={base} />
+      </div>
+    </>
+  );
   const agreement = buildInstallmentPlanAgreement({
     planId: plan.id,
     patientName: plan.patientName,
