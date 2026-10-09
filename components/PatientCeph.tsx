@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "./SessionProvider";
+import { CephUnlinkedStudiesPanel } from "./CephUnlinkedStudiesPanel";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
   CEPH_DIAGNOSTIC_STAGES,
@@ -43,6 +44,9 @@ export interface CephAnalysis {
   completedBy: string | null;
   completedAt: string | null;
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
+  /** (ORTHO-ID-2) أصل التصحيح وتصحيحاته — يُعرضان معًا ولا يُخفى التاريخ السابق. */
+  correctsAnalysisId?: number | null;
+  correctedBy?: number[];
 }
 
 interface PatientDocument {
@@ -170,6 +174,9 @@ export function PatientCeph({
   const readOwner = useMemo(createReadOwner, [patientId, authority]);
   const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
     || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
+  // ربط دراسة سابقة بحالة التقويم قرارٌ سريري: الطبيب والمدير وحدهما (والخادم يفرض الشرط نفسه).
+  const mayLink = !!session?.username?.trim() && (session.role === "admin"
+    || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
   useLayoutEffect(() => {
     owner.activate();
     return owner.retire;
@@ -280,6 +287,12 @@ export function PatientCeph({
   const latestCompleted = useMemo(() => {
     return displayedAnalyses.find((a) => a.status === "completed") ?? null;
   }, [displayedAnalyses]);
+
+  // دراسات المريض التي لا حالة لها — تُعرض للربط الصريح داخل حالة التقويم الحالية فقط.
+  const unlinkedStudies = useMemo(
+    () => (analyses ?? []).filter((a) => a.orthoCaseId == null && a.status !== "discarded"),
+    [analyses],
+  );
 
   const openStudyForm = () => {
     if (!mayCreate || !owner.open()) return;
@@ -618,6 +631,9 @@ export function PatientCeph({
             <p className="text-[11px] text-slate-500">
               سيتم فتح مساحة التتبع فوراً مع تحديد المعالم وحساب الزوايا بمحاذاة المدارس العالمية.
             </p>
+            <p className="basis-full text-[11px] text-slate-500">
+              هذه دراسة جديدة بمرحلتها وتاريخ أشعتها الفعليين. لتصحيح دراسة معتمدة افتحها واختر «تصحيح هذه الدراسة».
+            </p>
           </div>
         </div>
       )}
@@ -626,6 +642,16 @@ export function PatientCeph({
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
           {error}
         </div>
+      )}
+
+      {propOrthoCaseId && mayLink && analyses != null && (
+        <CephUnlinkedStudiesPanel
+          patientId={patientId}
+          orthoCaseId={propOrthoCaseId}
+          authority={authority}
+          studies={unlinkedStudies}
+          onLinked={() => void load(readOwner.begin())}
+        />
       )}
 
       {/* جدول وسجلات الدراسات السيفالومترية */}
@@ -730,6 +756,14 @@ export function PatientCeph({
                     </td>
                     <td className="px-3 py-2.5 font-mono font-bold text-slate-800">
                       #{a.id}
+                      {a.correctsAnalysisId != null && (
+                        <span className="mt-0.5 block font-sans text-[10px] font-bold text-sky-700">تصحيح للدراسة #{a.correctsAnalysisId}</span>
+                      )}
+                      {(a.correctedBy?.length ?? 0) > 0 && (
+                        <span className="mt-0.5 block font-sans text-[10px] font-bold text-emerald-700">
+                          لها تصحيح: {a.correctedBy!.map((id) => `#${id}`).join("، ")}
+                        </span>
+                      )}
                     </td>
 
                     <td className="px-3 py-2.5">
@@ -767,7 +801,7 @@ export function PatientCeph({
                     </td>
 
                     <td className="px-3 py-2.5 text-slate-600">
-                      {a.xrayDate ? friendlyDateLong(a.xrayDate) : "—"}
+                      {a.xrayDate ? friendlyDateLong(a.xrayDate) : <span className="text-slate-500">تاريخ غير معروف</span>}
                     </td>
 
                     <td className="px-3 py-2.5">
