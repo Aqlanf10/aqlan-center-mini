@@ -1,6 +1,8 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
+import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
+import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -956,13 +958,15 @@ function PatientFileWorkspace({ id }: { id: string }) {
           ? (summary.financial.byCurrency
               ? (Object.entries(summary.financial.byCurrency) as [Currency, {
                   balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number;
+                  clinicalProgress?: ClinicalProgressView;
                 }][]).filter(([, bucket]) =>
-                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0)
-              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0
+                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0 || (bucket.clinicalProgress?.historicalItems ?? 0) > 0)
+              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0 || (summary.financial.clinicalProgress?.historicalItems ?? 0) > 0
                 ? [[base, {
                     balanceMinor: summary.financial.balanceMinor,
                     remainingTreatmentMinor: summary.financial.remainingTreatmentMinor,
-                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number }]]
+                    clinicalProgress: summary.financial.clinicalProgress,
+                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number; clinicalProgress?: ClinicalProgressView }]]
                 : []
             ).map(([currency, bucket]) => (
               <p key={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
@@ -972,7 +976,9 @@ function PatientFileWorkspace({ id }: { id: string }) {
               }`}>
                 {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
                 {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · المتبقي من الاتفاق: ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
-                {bucket.remainingTreatmentMinor > 0
+                {bucket.clinicalProgress?.historicalItems
+                  ? <> · <HistoricalClinicalNote progress={bucket.clinicalProgress} currency={currency} /></>
+                  : bucket.remainingTreatmentMinor > 0
                   ? ` · باقي علاج (غير مستحق): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
                   : ""}
               </p>
