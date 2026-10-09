@@ -49,8 +49,9 @@ export function CephUnlinkedStudiesPanel({
   if (studies.length === 0 && !message) return null;
 
   const describe = (study: UnlinkedStudy) => {
+    // labelAr يحمل رمز المرحلة أصلًا («قبل العلاج (T1)») فلا يُكرَّر.
     const stage = CEPH_DIAGNOSTIC_STAGES[study.phase];
-    return `${stage?.tCode ?? "T"} · ${stage?.labelAr ?? study.phase} — ${study.xrayDate ? friendlyDateLong(study.xrayDate) : "تاريخ الأشعة غير معروف"} — ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
+    return `${stage?.labelAr ?? study.phase} — ${study.xrayDate ? friendlyDateLong(study.xrayDate) : "تاريخ الأشعة غير معروف"} — ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
   };
 
   const link = async (study: UnlinkedStudy) => {
@@ -127,7 +128,7 @@ export function CephUnlinkedStudiesPanel({
               {open && pending && (
                 <div className="mt-2 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
                   <p className="text-[11px] text-amber-900">
-                    ستُربط الدراسة #{studyId} ({describe(study)}) بحالة التقويم #{orthoCaseId}. لا تتغير قياساتها ولا اعتمادها.
+                    ستُربط هذه الدراسة بحالة التقويم #{orthoCaseId}. لا تتغير قياساتها ولا اعتمادها ولا تاريخها.
                   </p>
                   <label className="flex items-start gap-2 text-[11px] font-bold text-slate-800">
                     <input type="checkbox" className="mt-0.5 h-4 w-4 accent-navy-800" checked={pending.confirmed} disabled={pending.saving}

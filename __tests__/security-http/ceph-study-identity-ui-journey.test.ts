@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright";
 import { Client } from "pg";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { authedMutation, baseUrl, harness } from "./_server";
 
 /**
@@ -63,6 +65,14 @@ async function open(who: "admin" | "doctorA" | "doctorB", width: number): Promis
   page.on("pageerror", (error) => errors.push(error.message));
   return { context, page, errors };
 }
+const SHOTS = process.env.CEPH_ID_SCREENSHOT_DIR;
+async function shot(page: Page, name: string, target?: Locator) {
+  if (!SHOTS) return;
+  await mkdir(SHOTS, { recursive: true });
+  await page.evaluate(async () => { await document.fonts.ready; });
+  if (target) await target.screenshot({ path: join(SHOTS, `${name}.png`) });
+  else await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: true });
+}
 const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
 async function openRecords(page: Page, patientId: number, label: string) {
   await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=ortho`, { waitUntil: "domcontentloaded" });
@@ -98,11 +108,13 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 explicit T1 link �
       const confirm = row.getByRole("button", { name: "تأكيد الربط" });
       expect(await confirm.isDisabled()).toBe(true); // explicit confirmation required
       await row.getByRole("checkbox").check();
+      await shot(page, `link-confirm-${width}`, panel);
 
       const requests: string[] = [];
       page.on("request", (request) => { if (request.url().includes("/link-case")) requests.push(request.url()); });
       await confirm.dblclick(); // double click
       await page.getByText(`تم ربط الدراسة #${f.oldT1} بحالة التقويم #${f.caseId}.`).waitFor();
+      await shot(page, `link-done-${width}`, panel);
       expect(requests).toHaveLength(1);
 
       const after = await state(f.oldT1);
@@ -178,10 +190,11 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 correct this study 
       await page.waitForURL((url) => /\/ceph\/\d+$/.test(url.pathname) && !url.pathname.endsWith(`/${f.onCase}`));
       const draftId = Number(new URL(page.url()).pathname.split("/").pop());
       await page.getByTestId("ceph-lineage").waitFor();
+      await shot(page, `correction-draft-${width}`, page.getByTestId("ceph-lineage"));
       expect(await page.getByTestId("ceph-lineage").innerText()).toContain(`تصحيح للدراسة المعتمدة #${f.onCase}`);
 
       const draft = (await db.query(`SELECT corrects_analysis_id::int AS corrects, ortho_case_id, phase, xray_date::text AS xray, status FROM ceph_analyses WHERE id = $1`, [draftId])).rows[0];
-      expect(draft).toEqual({ corrects: f.onCase, ortho_case_id: f.caseId, phase: "posttreatment", xray: "2026-08-02", status: "draft" });
+      expect(draft).toEqual({ corrects: Number(f.onCase), ortho_case_id: Number(f.caseId), phase: "posttreatment", xray: "2026-08-02", status: "draft" });
       expect(await state(f.onCase)).toEqual(before);
       expect((await db.query(`SELECT code, value FROM ceph_measurements WHERE analysis_id = $1 ORDER BY code`, [f.onCase])).rows).toEqual(measurements);
 
@@ -212,6 +225,7 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 correct this study 
       await card.getByRole("button", { name: /السجلات/ }).click();
       await card.getByText(`تصحيح للدراسة #${f.onCase}`).waitFor();
       await card.getByText(`لها تصحيح: #${draftId}`).waitFor();
+      await shot(page, `study-table-${width}`);
       expect(errors).toEqual([]);
     } finally { await context.close(); }
   });
