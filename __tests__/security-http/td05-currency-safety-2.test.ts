@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
 import { baseUrl, harness } from "./_server";
 
 /**
@@ -9,8 +9,8 @@ import { baseUrl, harness } from "./_server";
  * الاستنتاج ٦ — الشبّاك يستعمل رصيد ما قبل التوقيع الحقيقي:
  *  الرصيد السابق كان يُعاد قراءته بعد توليد فاتورة اليوم فيحسبها مرتين
  *  (سابق ٥٠٠ دولار + فاتورة اليوم ١٥٠٠ = ٣٥٠٠ بدل ٢٠٠٠). هنا يُثبَت أن الشبّاك
- *  يجمّد لقطة ما قبل التوقيع، ولا يعرض أبدًا مجموعًا مزدوجًا، وبعد التحصيل
- *  يتحدّث الرصيد الحالي وحده دون مسح اللقطة المجمَّدة.
+ *  يحتفظ بالرصيد المرجعي من المحرك (باستثناء فاتورة الزيارة ودفعات يومها)،
+ *  ويقرأ الدين الحالي مستقلاً دون جمعه ثانيةً مع فاتورة اليوم.
  *
  * الاستنتاج ٧ — المبالغ الأجنبية بعملة الاتفاق من الحمولة نفسها عند أول تحميل:
  *  ١٥٠٠٠٠ وحدة صغرى دولارية تُعرض «1500.00» لا «150000»، وتصمد بعد إعادة تحميل
@@ -152,7 +152,23 @@ afterAll(async () => {
   }
 });
 
-/* ══════════════ الاستنتاج ٦: الشبّاك برصيد ما قبل التوقيع ══════════════ */
+// Positive readiness evidence: absence of an error banner is not verified money.
+async function verifiedCheckout(checkout: Locator): Promise<void> {
+  await checkout.waitFor({ timeout: 60_000 });
+  await expect.poll(() => checkout.getAttribute("data-financial-state"), { timeout: 30_000 }).toBe("verified");
+}
+function moneyRow(checkout: Locator, kind: "previous-balance" | "current-balance" | "visit-invoice", currency: "YER" | "SAR" | "USD") {
+  return checkout.locator(`[data-testid="checkout-${kind}"][data-currency="${currency}"]`);
+}
+async function exactMoney(checkout: Locator, kind: "previous-balance" | "current-balance" | "visit-invoice", currency: "YER" | "SAR" | "USD", displayed: string) {
+  const row = moneyRow(checkout, kind, currency);
+  await expect.poll(() => row.count(), { timeout: 30_000 }).toBe(1);
+  await expect.poll(async () => (await row.textContent())?.match(/-?\d[\d,]*(?:\.\d+)?/g), { timeout: 30_000 }).toEqual([displayed]);
+  const symbol = currency === "USD" ? "$" : currency === "SAR" ? "ر.س" : "ر.ي";
+  expect(await row.textContent()).toContain(symbol);
+}
+
+/* Same canonical prior/current basis as immediate sign, reopen and print. */
 
 describe("المراجعة الثانية ٦: شبّاك الدولار — سابق ٥٠٠ + اليوم ١٥٠٠ = ٢٠٠٠ لا ٣٥٠٠", () => {
   it("التوقيع ⇒ السابق ٥٠٠ واليوم ١٥٠٠ والإجمالي ٢٠٠٠ — والرقم ٣٥٠٠ لا وجود له", async () => {
@@ -160,21 +176,21 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     await signVisit(usdCheckoutVisitId);
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
-    /* الرصيد السابق = ما قبل التوقيع: ٥٠٠ دولار وحدها — لا تشمل فاتورة اليوم. */
-    const previousRow = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
+    /* المرجع باستثناء فاتورة هذه الزيارة ودفعات يومها: ٥٠٠ دولار. */
+    const previousRow = moneyRow(checkout, "previous-balance", "USD");
     await expect.poll(async () => previousRow.textContent(), { timeout: 20_000 }).toContain("500.00");
     expect(await previousRow.textContent()).toContain("$");
     expect(await previousRow.textContent()).not.toContain("2,000");
     expect(await previousRow.textContent()).not.toContain("1,500");
 
     /* استحقاق اليوم بعملة فاتورتها: ١٥٠٠ دولار. */
-    const todayRow = checkout.locator("div", { hasText: "استحقاق اليوم" }).last();
+    const todayRow = moneyRow(checkout, "visit-invoice", "USD");
     await expect.poll(async () => todayRow.textContent(), { timeout: 20_000 }).toContain("1,500.00");
 
     /* الإجمالي مجموعٌ داخل الدولار وحده: ٢٠٠٠ لا ٣٥٠٠ أبدًا. */
-    const totalRow = checkout.locator("div", { hasText: "الإجمالي المستحق (دولار)" }).last();
+    const totalRow = moneyRow(checkout, "current-balance", "USD");
     await totalRow.waitFor({ timeout: 20_000 });
     const totalText = await totalRow.textContent();
     expect(totalText).toContain("2,000.00");
@@ -185,7 +201,7 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     expect(allText).not.toContain("3,500");
   }, 300_000);
 
-  it("بعد التحصيل: الرصيد الحالي يتحدّث، واللقطة المجمَّدة تبقى ٥٠٠ والرقم ٣٥٠٠ مستحيل", async () => {
+  it("بعد التحصيل: السابق المرجعي ٥٠٠ والحالي صفر دولار والرقم ٣٥٠٠ مستحيل", async () => {
     /* تُستأنف الرحلة من زيارة الاختبار السابق — فاتورتها سُجلت وفحصت هناك. */
     const { rows: [todayInvoice] } = await db.query<{ invoice_id: number }>(
       `SELECT invoice_id FROM visits WHERE patient_id = $1 AND invoice_id IS NOT NULL
@@ -223,21 +239,16 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
       return payment ? `${payment.amountMinor}:${payment.currency}` : null;
     }, { timeout: 60_000 }).toBe("200000:USD");
 
-    /* الشبّاك يبقى: اللقطة المجمَّدة (٥٠٠) لم تُمسح، والإجمالي ما زال ٢٠٠٠. */
-    const previousRow = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
+    /* Previous reference remains 500; canonical current USD debt is now zero, not frozen 2000. */
+    await verifiedCheckout(checkout);
+    const previousRow = moneyRow(checkout, "previous-balance", "USD");
     await expect.poll(async () => previousRow.textContent(), { timeout: 30_000 }).toContain("500.00");
-    const totalText = await checkout.locator("div", { hasText: "الإجمالي المستحق (دولار)" }).last().textContent();
-    expect(totalText).toContain("2,000.00");
+    await exactMoney(checkout, "current-balance", "USD", "0.00");
+    expect(await moneyRow(checkout, "current-balance", "USD").textContent()).not.toContain("2,000.00");
 
-    /* والرصيد الحالي يتحدّث وحده: الدولار سُدِّد كاملًا فلا سطر دولار فيه —
-       وبقية العملات (اليمني والسعودي من استحقاقاتها السابقة) كلٌّ بعملتها. */
-    const currentRow = checkout.locator("div", { hasText: "الرصيد الحالي" }).last();
-    await expect.poll(async () => {
-      const text = await currentRow.textContent();
-      if (!text?.includes("ر.ي")) return "waiting";
-      if (text.includes("$") || text.includes("500")) return "stale";
-      return "settled";
-    }, { timeout: 30_000 }).toBe("settled");
+    // The USD payment cannot settle the independent YER/SAR fixture debts.
+    await exactMoney(checkout, "current-balance", "YER", "25,000");
+    await exactMoney(checkout, "current-balance", "SAR", "300.00");
 
     /* ولا يزال ٣٥٠٠ مستحيلًا في الشبّاك كله. */
     const allText = await checkout.locator("dl").textContent();
@@ -251,13 +262,13 @@ describe("المراجعة الثانية ٦: شبّاك السعودي — سا
     await signVisit(sarCheckoutVisitId);
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
-    const previousRow = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
+    const previousRow = moneyRow(checkout, "previous-balance", "SAR");
     await expect.poll(async () => previousRow.textContent(), { timeout: 20_000 }).toContain("300.00");
     expect(await previousRow.textContent()).toContain("ر.س");
 
-    const totalRow = checkout.locator("div", { hasText: "الإجمالي المستحق (ريال سعودي)" }).last();
+    const totalRow = moneyRow(checkout, "current-balance", "SAR");
     await totalRow.waitFor({ timeout: 20_000 });
     const totalText = await totalRow.textContent();
     expect(totalText).toContain("1,800.00");
@@ -271,20 +282,25 @@ describe("المراجعة الثانية ٦: سابق يمني + اليوم د�
     await signVisit(yerUsdCheckoutVisitId);
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
     /* الرصيد السابق باليمني وحده — لا يُحوَّل ولا يُجمع مع الدولار. */
-    const previousRow = checkout.locator("div", { hasText: "الرصيد السابق" }).last();
+    const previousRow = moneyRow(checkout, "previous-balance", "YER");
     await expect.poll(async () => previousRow.textContent(), { timeout: 20_000 }).toContain("25,000");
     expect(await previousRow.textContent()).toContain("ر.ي");
 
     /* استحقاق اليوم بالدولار. */
-    const todayRow = checkout.locator("div", { hasText: "استحقاق اليوم" }).last();
+    const todayRow = moneyRow(checkout, "visit-invoice", "USD");
     await expect.poll(async () => todayRow.textContent(), { timeout: 20_000 }).toContain("1,500.00");
     expect(await todayRow.textContent()).toContain("$");
 
-    /* لا صف «الإجمالي المستحق» إطلاقًا — الرصيد السابق بالدولار صفر قبل التوقيع. */
-    expect(await checkout.getByText(/الإجمالي المستحق/).count()).toBe(0);
+    // Earlier USD 500 + its 1500 invoice remain in the prior reference because
+    // the canonical reader excludes all payments on this arrival day.
+    // Current debt includes the actual 2000 USD receipt: only this new 1500 remains.
+    await exactMoney(checkout, "previous-balance", "USD", "2,000.00");
+    await exactMoney(checkout, "current-balance", "USD", "1,500.00");
+    await exactMoney(checkout, "current-balance", "YER", "25,000");
+    await exactMoney(checkout, "current-balance", "SAR", "1,800.00");
 
     /* واليمني يظهر في العملات الأخرى المنفصلة لا في أي مجموع. */
     const otherCurrencies = checkout.getByText(/أرصدة بعملات أخرى/);
@@ -330,7 +346,7 @@ describe("المراجعة الثانية ٧: مزيج بندٍ أجنبي مر�
     const mixedPreviewVisitId = await linkedVisit(MIXED_PREVIEW_PLAN, true);
     await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${mixedPreviewVisitId}`);
 
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
     await procedures.waitFor({ timeout: 60_000 });
 
     /* المجموعان المنفصلان: ١٥٠٠ دولار و١٥٠٠٠ يمني — كلٌّ بعملته. */
@@ -423,3 +439,4 @@ async function latestPaymentOn(invoiceId: number): Promise<{ amountMinor: number
     ? { amountMinor: Number(row.amount_minor), currency: row.currency }
     : null;
 }
+

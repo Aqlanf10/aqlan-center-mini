@@ -44,7 +44,7 @@ export function PortalInviteRow(
       <p className="text-[11px] font-extrabold text-slate-800">
         بوّابة المريض — يرى مواعيده وحسابه ويؤكّد حضوره
       </p>
-      <p className="mt-0.5 text-[11px] font-bold text-slate-600" dir="ltr">{invite.url}</p>
+      <p className="mt-0.5 [overflow-wrap:anywhere] text-[11px] font-bold text-slate-600" dir="ltr">{invite.url}</p>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {/*
           * وبلا جوالٍ لا زرَّ إرسال — ولا يُفتح واتساب بلا رقم.
@@ -79,3 +79,4 @@ export function PortalInviteRow(
     </div>
   );
 }
+

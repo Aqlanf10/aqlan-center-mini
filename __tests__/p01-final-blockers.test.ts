@@ -52,7 +52,8 @@ describe("P-01 final blockers: foreign quick collection wiring", () => {
   it("payment modal refuses foreign collection without an invoice, plan or (P1-5b) opening-balance target", () => {
     const source = readFileSync("components/CollectPaymentModal.tsx", "utf8");
     expect(source).toContain("const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;");
-    expect(source).toContain("disabled={busy || !amount.trim() || missingForeignTarget}");
+    expect(source).toContain("disabled={!formReady || busy || money.attempt !== null || !amount.trim() || missingForeignTarget}");
+    expect(source).toContain("if (busy || (!retry && (!formReady || !amount.trim()))) return;");
     expect(source).toContain("يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة");
   });
 
@@ -63,3 +64,4 @@ describe("P-01 final blockers: foreign quick collection wiring", () => {
     expect(db).toContain("settlementTargetCurrency({ kind: row.kind, currency }, null)");
   });
 });
+

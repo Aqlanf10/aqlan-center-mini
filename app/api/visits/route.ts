@@ -3,6 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { ActiveVisitExists, addVisit, listTodayVisits, recordAudit, startVisitFromPlannedVisit } from "@/lib/db";
+import { listReceptionHandoffs } from "@/lib/reception-handoff-db";
+import { canReadReceptionHandoff, isHandoffDate } from "@/lib/reception-handoff";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +13,23 @@ function failed(message: string, status = 500) {
   return NextResponse.json({ message }, { status });
 }
 
-export async function GET() {
-  if (!(await requireSession())) {
+export async function GET(request: Request) {
+  const session = await requireSession();
+  if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  const params = new URL(request.url).searchParams;
+  if (params.has("view")) {
+    if (params.getAll("view").length !== 1 || params.get("view") !== "reception-handoff") {
+      return failed("عرض الزيارات غير صالح.", 400);
+    }
+    if (!canReadReceptionHandoff(session.role)) return failed("تسليم الزيارات للاستقبال والمدير فقط.", 403);
+    const date = params.get("date");
+    if (params.getAll("date").length > 1 || (date !== null && !isHandoffDate(date))) return failed("تاريخ التوقيع غير صالح.", 400);
+    try {
+      return NextResponse.json({ ...await listReceptionHandoffs(date ?? undefined),
+        owner: { username: session.username, role: session.role } }, { headers: { "Cache-Control": "private, no-store" } });
+    } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
   }
   try {
     return NextResponse.json(await listTodayVisits());
@@ -112,3 +128,4 @@ export async function POST(request: Request) {
     return failed("تعذّر تسجيل المريض. أعد المحاولة.");
   }
 }
+

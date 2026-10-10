@@ -32,6 +32,7 @@ import {
 } from "@/lib/today-board";
 import { ReadinessChip } from "@/components/today/ReadinessChip";
 import { sendGatedMove, useChairReadiness } from "@/components/today/useChairReadiness";
+import { ReceptionHandoffs } from "@/components/today/ReceptionHandoffs";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -571,6 +572,8 @@ export default function FlowBoard() {
           </button>
         </div>
       </header>
+
+      <ReceptionHandoffs />
 
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص اليوم">
         <Stat label="ينتظرون الآن" value={summary.waiting} tone={summary.waiting > 0 ? "warn" : "calm"} />

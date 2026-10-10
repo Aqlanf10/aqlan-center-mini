@@ -124,7 +124,7 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" aria-label="الهوية والتواصل">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-black text-navy-900">🏷️ الأعلام والتواصل</h2>
         {consent ? (
           <span className="text-[11px] font-bold text-slate-500">
@@ -154,20 +154,20 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
       </div>
 
       {/* البريد والقناة المفضّلة */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
-        <label className="text-xs font-bold text-slate-600">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="min-w-0 text-xs font-bold text-slate-600">
           البريد الإلكتروني
           <div className="mt-1 flex gap-1.5">
             <input type="email" dir="ltr" value={email} disabled={!canEdit || busy} onChange={(event) => setEmail(event.target.value)}
               placeholder="name@example.com"
-              className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-brand-blue" />
+              className="min-w-0 w-full flex-1 rounded-xl border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-brand-blue" />
             {canEdit && email.trim() !== (patient.email ?? "") ? (
               <button type="button" disabled={busy} onClick={() => void patch({ email: email.trim() })}
                 className="rounded-xl bg-navy-800 px-3 text-xs font-bold text-white disabled:opacity-50">حفظ</button>
             ) : null}
           </div>
         </label>
-        <label className="text-xs font-bold text-slate-600">
+        <label className="min-w-0 text-xs font-bold text-slate-600">
           القناة المفضّلة
           <select value={patient.preferredChannel ?? ""} disabled={!canEdit || busy}
             onChange={(event) => void patch({ preferredChannel: event.target.value || null })}
@@ -244,3 +244,4 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
     </section>
   );
 }
+
