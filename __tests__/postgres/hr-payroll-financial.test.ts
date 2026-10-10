@@ -99,7 +99,7 @@ beforeAll(async () => {
       endDate: null,
       contractKind: "salary",
       payTerms: {
-        amountMinor: 10000000,
+        amountMinor: 15000000,
         currency: "YER",
         period: "monthly",
         effectiveOn: "2026-01-01",
@@ -125,7 +125,7 @@ beforeAll(async () => {
       endDate: null,
       contractKind: "salary_commission",
       payTerms: {
-        amountMinor: 15000000,
+        amountMinor: 10000000,
         currency: "YER",
         period: "monthly",
         effectiveOn: "2026-01-01",
@@ -342,7 +342,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     // 3. Self-approval refusal: the staff user cannot approve their own leave request
     await expect(
       decideLeaveRequest(leaveReq.id, "approved", "موافقة ذاتية", staffUserSession),
-    ).rejects.toThrow("لا يحق للموظف اعتماد أو رفض طلب إجازته بنفسه");
+    ).rejects.toThrow("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
 
     // 4. Manager approves leave
     const approvedLeave = await decideLeaveRequest(
