@@ -1,5 +1,5 @@
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
-import {chromium,type Browser,type BrowserContext,type Page} from "playwright";
+import {chromium,type APIResponse,type Browser,type BrowserContext,type Page} from "playwright";
 import {Pool} from "pg";
 import {mkdirSync} from "node:fs";
 import {join} from "node:path";
@@ -71,11 +71,21 @@ describe("HR contract to payroll to cash: actual API and browser",()=>{
     await row(page).getByRole("button",{name:"صرف",exact:true}).click();
     await page.locator('input[type="number"]').fill("30000");
     let sent:any;
+    let committed!: (response:APIResponse)=>void,failed!: (error:unknown)=>void;
+    const committedRequest=new Promise<APIResponse>((resolve,reject)=>{committed=resolve;failed=reject;});
     await page.route("**/api/hr/payroll/disburse",async route=>{
-      sent=route.request().postDataJSON();const response=await route.fetch();expect(response.status()).toBe(201);await route.abort("connectionfailed");
+      try{
+        sent=route.request().postDataJSON();
+        const response=await route.fetch();
+        await route.abort("connectionfailed");committed(response);
+      }catch(error){failed(error);}
     },{times:1});
     await page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).click();
-    await expect.poll(async()=>Number((await db.query("SELECT paid_minor FROM hr_payroll_items WHERE id=$1",[item.id])).rows[0].paid_minor)).toBe(30000);
+    // The server must actually finish its transaction before we inspect its durable result.
+    // A short polling deadline previously failed while the intercepted request was still running.
+    const response=await committedRequest;expect(response.status()).toBe(201);
+    expect((await response.json()).disbursement).toMatchObject({itemId:item.id,amountMinor:30000});
+    expect(Number((await db.query("SELECT paid_minor FROM hr_payroll_items WHERE id=$1",[item.id])).rows[0].paid_minor)).toBe(30000);
     await page.reload();await page.getByRole("tab",{name:"المسير والصرف"}).click();
     await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
     await row(page).getByRole("button",{name:"صرف",exact:true}).click();
@@ -88,6 +98,7 @@ describe("HR contract to payroll to cash: actual API and browser",()=>{
     const actual=(await db.query("SELECT count(*)::int AS n,sum(amount_minor)::text AS paid FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0];expect(actual).toEqual({n:1,paid:"30000"});
     expect((await api("GET",`/api/hr/payroll/disburse?clientRequestId=${sent.clientRequestId}`)).body.disbursement.amountMinor).toBe(30000);
     expect((await api("POST","/api/hr/payroll/disburse",{...sent,amountMinor:30001,components:{salaryMinor:30001,commissionMinor:0}})).status).toBe(409);
+    const report=await api("GET","/api/hr/reports");expect(report.status).toBe(200);expect(report.body.payrollSummaryByCurrency.find((row:any)=>row.currency==="YER")).toMatchObject({totalNetDue:204000,totalDisbursed:30000,totalRemainingPayable:174000});
    }finally{await page.close();await second.close();}
  },180_000);
  it("hybrid partial allocation produces salary and commission vouchers, reversal restores both",async()=>{
@@ -130,7 +141,6 @@ it("actual attendance and leave APIs preserve raw events, pending decisions and 
   const row=page.locator('section[aria-label="الدوام والحضور"] tbody tr').filter({hasText:"HR-JOURNEY-SALARY"});expect(await row.textContent()).toContain("22:00");expect(await row.textContent()).toContain("06:00");expect(await row.textContent()).toContain("8.0");
   await page.screenshot({path:join(evidence,"hr-workforce-1280.png"),fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:join(evidence,"hr-workforce-390.png"),fullPage:true});
  }finally{await page.close();}
- const report=await api("GET","/api/hr/reports");expect(report.status).toBe(200);expect(report.body.payrollSummaryByCurrency.find((row:any)=>row.currency==="YER")).toMatchObject({totalNetDue:204000,totalDisbursed:30000,totalRemainingPayable:174000});
 });
 it("a doctor sees personal tasks and leave without an unusable team attendance tab",async()=>{
  const doctor=await browser.newContext({viewport:{width:390,height:844}});
