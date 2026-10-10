@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
 import { baseUrl, harness } from "./_server";
+import { observeOwnedFinancialReads } from "../helpers/owned-financial-read-witness";
 
 /**
  * رحلات المتصفح للمراجعة الثانية للمالك TD-05 (PR #44) — الاستنتاجان ٦ و٧.
@@ -24,7 +25,11 @@ let browser: Browser;
 let context: BrowserContext;
 let page: Page;
 
-const PATIENT_B_NAME = "مريض الأمن ب";
+const PATIENT_B_NAME = "مريض المراجعة الثانية الاصطناعي";
+let privatePatientId = 0, privateDoctorId = 0, firstUsdInvoiceId = 0;
+const fixtureVisitIds = new Set<number>();
+const planVisitIds = new Map<string, number>();
+let financialWitness: ReturnType<typeof observeOwnedFinancialReads> | undefined;
 
 let usdServiceId = 0;
 /** عنوان→معرّف الخطة التي أنشأها beforeAll — الزيارات تُبنى عند الطلب أدناه. */
@@ -43,8 +48,19 @@ function sessionCookie(raw: string): { name: string; value: string } {
 
 beforeAll(async () => {
   h = await harness();
+  expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
+  expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
+  expect(["127.0.0.1", "localhost"]).toContain(new URL(h.seeded.dbUrl).hostname);
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
+  // An owned patient makes NOW() the newest visit without inventing a future arrival day.
+  privateDoctorId = (await db.query<{ id: number }>(
+    `INSERT INTO parties (name, kind, is_active) VALUES ('طبيب المراجعة الثانية الاصطناعي', 'doctor', TRUE) RETURNING id`,
+  )).rows[0].id;
+  privatePatientId = (await db.query<{ id: number }>(
+    `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
+    [`OWNREV2-${Date.now()}`, PATIENT_B_NAME, privateDoctorId],
+  )).rows[0].id;
 
   /* وردية مفتوحة وأسعار صرف — التحصيل يحتاجهما. */
   await db.query(
@@ -67,7 +83,7 @@ beforeAll(async () => {
   const { rows: [usdPrevious] } = await db.query<{ id: number }>(
     `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency)
      VALUES ('OWNREV2-PREV-USD', $1, 50000, 0, 'USD') RETURNING id`,
-    [h.seeded.patientBId],
+    [privatePatientId],
   );
   void usdPrevious;
   await db.query(
@@ -79,7 +95,7 @@ beforeAll(async () => {
   const { rows: [sarPrevious] } = await db.query<{ id: number }>(
     `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency)
      VALUES ('OWNREV2-PREV-SAR', $1, 30000, 0, 'SAR') RETURNING id`,
-    [h.seeded.patientBId],
+    [privatePatientId],
   );
   await db.query(
     `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor)
@@ -90,7 +106,7 @@ beforeAll(async () => {
   const { rows: [yerPrevious] } = await db.query<{ id: number }>(
     `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency)
      VALUES ('OWNREV2-PREV-YER', $1, 25000, 0, 'YER') RETURNING id`,
-    [h.seeded.patientBId],
+    [privatePatientId],
   );
   await db.query(
     `INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_minor, total_minor)
@@ -113,7 +129,7 @@ beforeAll(async () => {
     const { rows: [plan] } = await db.query<{ id: number }>(
       `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date, consent_at)
        VALUES ($1, $2, 150000, $3, 'active', CURRENT_DATE, NOW()) RETURNING id`,
-      [h.seeded.patientBId, planTitle, currency],
+      [privatePatientId, planTitle, currency],
     );
     const { rows: [item] } = await db.query<{ id: number }>(
       `INSERT INTO plan_items (plan_id, service_id, service_name, category, quantity, unit_price_minor, billing_rule, session_count, status)
@@ -130,23 +146,45 @@ beforeAll(async () => {
   context = await browser.newContext({ viewport: { width: 1440, height: 1050 }, locale: "ar-YE" });
   await context.addCookies([{ ...sessionCookie(h.sessions.admin.cookie), url: baseUrl }]);
   page = await context.newPage();
+  financialWitness = observeOwnedFinancialReads(page, request => {
+    const url = new URL(request.url());
+    if (url.origin !== baseUrl) return null;
+    if (request.method() === "GET" && url.pathname === `/api/patients/${privatePatientId}/workflow`) {
+      return { kind: "workflow", patientId: privatePatientId };
+    }
+    const matched = /^\/api\/visits\/(\d+)\/walkout$/.exec(url.pathname);
+    if (request.method() === "GET" && matched && fixtureVisitIds.has(Number(matched[1]))) {
+      return { kind: "walkout", patientId: privatePatientId, visitId: Number(matched[1]) };
+    }
+    if (request.method() === "POST" && url.pathname === "/api/payments") {
+      try {
+        if (request.postDataJSON()?.patientId === privatePatientId) return { kind: "payment", patientId: privatePatientId };
+      } catch { /* Non-fixture/non-JSON requests are outside this witness. */ }
+    }
+    return null;
+  });
 }, 240_000);
 
+afterEach(({ task }) => {
+  if (task.result?.state === "fail") console.info("[td05-owned-financial-read]", JSON.stringify(financialWitness?.snapshot() ?? []));
+});
+
 afterAll(async () => {
+  financialWitness?.stop();
   await browser?.close();
   if (db) {
-    await db.query(`DELETE FROM payments WHERE patient_id = $1`, [h.seeded.patientBId]).catch(() => {});
-    await db.query(`DELETE FROM invoices WHERE patient_id = $1`, [h.seeded.patientBId]).catch(() => {});
+    await db.query(`DELETE FROM payments WHERE patient_id = $1`, [privatePatientId]).catch(() => {});
+    await db.query(`DELETE FROM invoices WHERE patient_id = $1`, [privatePatientId]).catch(() => {});
     await db.query(
       `DELETE FROM visit_procedures WHERE visit_id = ANY (SELECT id FROM visits WHERE patient_id = $1)`,
-      [h.seeded.patientBId],
+      [privatePatientId],
     ).catch(() => {});
-    await db.query(`DELETE FROM visits WHERE patient_id = $1`, [h.seeded.patientBId]).catch(() => {});
+    await db.query(`DELETE FROM visits WHERE patient_id = $1`, [privatePatientId]).catch(() => {});
     await db.query(
       `DELETE FROM plan_items WHERE plan_id = ANY (SELECT id FROM treatment_plans WHERE patient_id = $1)`,
-      [h.seeded.patientBId],
+      [privatePatientId],
     ).catch(() => {});
-    await db.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [h.seeded.patientBId]).catch(() => {});
+    await db.query(`DELETE FROM treatment_plans WHERE patient_id = $1`, [privatePatientId]).catch(() => {});
     await db.query(`DELETE FROM services WHERE id = $1`, [usdServiceId]).catch(() => {});
     await db.end();
   }
@@ -205,9 +243,10 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
     /* تُستأنف الرحلة من زيارة الاختبار السابق — فاتورتها سُجلت وفحصت هناك. */
     const { rows: [todayInvoice] } = await db.query<{ invoice_id: number }>(
       `SELECT invoice_id FROM visits WHERE patient_id = $1 AND invoice_id IS NOT NULL
-        ORDER BY id DESC LIMIT 1`, [h.seeded.patientBId],
+        ORDER BY id DESC LIMIT 1`, [privatePatientId],
     );
     expect(todayInvoice?.invoice_id).toBeTruthy();
+    firstUsdInvoiceId = todayInvoice.invoice_id;
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
     await checkout.getByRole("button", { name: /تحصيل وطباعة السند/ }).click();
@@ -238,6 +277,8 @@ describe("المراجعة الثانية ٦: شبّاك الدولار — سا
       const payment = await latestPaymentOn(todayInvoice.invoice_id);
       return payment ? `${payment.amountMinor}:${payment.currency}` : null;
     }, { timeout: 60_000 }).toBe("200000:USD");
+
+    await assertReceiptArrivalDay(planVisitIds.get(USD_CHECKOUT_PLAN)!, todayInvoice.invoice_id);
 
     /* Previous reference remains 500; canonical current USD debt is now zero, not frozen 2000. */
     await verifiedCheckout(checkout);
@@ -279,6 +320,7 @@ describe("المراجعة الثانية ٦: شبّاك السعودي — سا
 describe("المراجعة الثانية ٦: سابق يمني + اليوم دولاري — عملتان منفصلتان لا مجموع واحد", () => {
   it("التوقيع ⇒ السابق باليمني سطره، واليوم بالدولار سطره، ولا إجمالي عبر العملتين", async () => {
     const yerUsdCheckoutVisitId = await linkedVisit(YER_USD_CHECKOUT_PLAN);
+    await assertReceiptArrivalDay(yerUsdCheckoutVisitId, firstUsdInvoiceId);
     await signVisit(yerUsdCheckoutVisitId);
 
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
@@ -317,7 +359,7 @@ describe("المراجعة الثانية ٦: سابق يمني + اليوم د�
 describe("المراجعة الثانية ٧: أول تحميل — ١٥٠٠٠٠ وحدة صغرى دولارية = «1500.00»", () => {
   it("حقل سعر البند المرتبط يعرض 1500.00 من الحمولة الأولى — لا 150000", async () => {
     const usdFirstLoadVisitId = await linkedVisit(USD_FIRSTLOAD_PLAN);
-    await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${usdFirstLoadVisitId}`);
+    await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${usdFirstLoadVisitId}`);
     const priceInput = page.locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 60_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
@@ -334,7 +376,7 @@ describe("المراجعة الثانية ٧: أول تحميل — ١٥٠٠٠٠
 describe("المراجعة الثانية ٧: أول تحميل بالسعودي — ١٥٠٠٠٠ وحدة صغرى = «1500.00» ر.س", () => {
   it("حقل السعر يعرض 1500.00 بعملة الاتفاق السعودي من الحمولة الأولى", async () => {
     const sarFirstLoadVisitId = await linkedVisit(SAR_FIRSTLOAD_PLAN);
-    await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${sarFirstLoadVisitId}`);
+    await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${sarFirstLoadVisitId}`);
     const priceInput = page.locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 60_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
@@ -344,7 +386,7 @@ describe("المراجعة الثانية ٧: أول تحميل بالسعودي
 describe("المراجعة الثانية ٧: مزيج بندٍ أجنبي مرتبط + بندٍ أساسي حر — لا إجمالي رقمي واحد", () => {
   it("رأس الإجراءات يعرض مجموعين منفصلين وتحذير عملتين — لا 1,650.00 مجمَّعة", async () => {
     const mixedPreviewVisitId = await linkedVisit(MIXED_PREVIEW_PLAN, true);
-    await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${mixedPreviewVisitId}`);
+    await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${mixedPreviewVisitId}`);
 
     const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
     await procedures.waitFor({ timeout: 60_000 });
@@ -376,9 +418,9 @@ async function linkedVisit(planTitle: string, extraUnlinked = false): Promise<nu
   const itemId = planIds.get(planTitle);
   if (!itemId) throw new Error(`خطة «${planTitle}» غير مهيأة`);
   const { rows: [visit] } = await db.query<{ id: number }>(
-    `INSERT INTO visits (patient_name, patient_id, status, arrived_at)
-     VALUES ($1, $2, 'waiting', NOW() + ($3 || ' seconds')::interval) RETURNING id`,
-    [PATIENT_B_NAME, h.seeded.patientBId, String(60 + Math.floor(Date.now() / 1000) % 1000)],
+    `INSERT INTO visits (patient_name, patient_id, status, arrived_at, doctor_id)
+     VALUES ($1, $2, 'waiting', NOW(), $3) RETURNING id`,
+    [PATIENT_B_NAME, privatePatientId, privateDoctorId],
   );
   await db.query(
     `INSERT INTO visit_procedures (visit_id, service_id, plan_item_id, quantity, unit_price_minor)
@@ -392,11 +434,13 @@ async function linkedVisit(planTitle: string, extraUnlinked = false): Promise<nu
       [visit.id, usdServiceId],
     );
   }
+  fixtureVisitIds.add(visit.id);
+  planVisitIds.set(planTitle, visit.id);
   return visit.id;
 }
 
 async function signVisit(visitId: number): Promise<void> {
-  await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${visitId}`);
+  await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${visitId}`);
   await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: /مراجعة وإنهاء الزيارة/ }).click();
   const confirm = page.getByRole("button", { name: /تأكيد إنهاء الزيارة|وقّع الزيارة/ });
@@ -405,6 +449,7 @@ async function signVisit(visitId: number): Promise<void> {
   const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
   try {
     await checkout.waitFor({ timeout: 25_000 });
+    await expect.poll(() => checkout.getAttribute("data-visit-id")).toBe(String(visitId));
   } catch {
     const alert = await page.locator('p[role="alert"]').allTextContents().catch(() => ["<no alert>"]);
     const { rows } = await db.query(`SELECT id, status, signed_at, invoice_id FROM visits WHERE id = $1`, [visitId]);
@@ -440,3 +485,19 @@ async function latestPaymentOn(invoiceId: number): Promise<{ amountMinor: number
     : null;
 }
 
+
+/** The expected prior excludes arrival-day receipts. Detect a natural midnight crossing
+ * explicitly; never rewrite a posted receipt date or pretend a different day is the same.
+ */
+async function assertReceiptArrivalDay(visitId: number, invoiceId: number): Promise<void> {
+  const { rows: [day] } = await db.query<{ arrival_day: string; receipt_day: string }>(
+    `SELECT (v.arrived_at AT TIME ZONE $4)::date::text AS arrival_day,
+            (p.created_at AT TIME ZONE $4)::date::text AS receipt_day
+       FROM visits v JOIN payments p ON p.patient_id = v.patient_id
+      WHERE v.id = $1 AND v.patient_id = $2 AND p.invoice_id = $3
+      ORDER BY p.id DESC LIMIT 1`,
+    [visitId, privatePatientId, invoiceId, process.env.CLINIC_TIME_ZONE || "Asia/Aden"],
+  );
+  expect(day, "owned receipt and visit must exist").toBeDefined();
+  expect(day.receipt_day, "same-clinic-day fixture premise; midnight is not an accounting failure").toBe(day.arrival_day);
+}
