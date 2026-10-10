@@ -135,7 +135,7 @@ beforeAll(async () => {
   shippedFiles = shipped;
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
   // Count is the actual file count, not the highest reserved version. The reviewed
-  // 0001–0043 + 0051 chain has 44 files and selects test-only 0052 without inventing 0044–0050.
+  // 0001–0043 + 0047 + 0051 chain has 45 files and selects test-only 0052 without inventing 0044–0046/0048–0050.
   shippedCount = shipped.length;
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");

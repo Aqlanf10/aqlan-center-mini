@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { completeCephAnalysis, getCephStudy } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +36,10 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    const done = await completeCephAnalysis(id, session.username);
+    const done = await completeCephAnalysis(id, session.username, { authorize: cephWriteAuthorizer(session) });
     if (!done.ok) {
       // الشروط ناقصة أمرٌ متوقّع لا عطل — رسالته تُعرض كما هي.
-      return NextResponse.json({ message: done.message ?? "لا يمكن الاعتماد." }, { status: 409 });
+      return NextResponse.json({ message: done.message ?? "لا يمكن الاعتماد." }, { status: done.status ?? 409 });
     }
     return NextResponse.json({
       ok: true,

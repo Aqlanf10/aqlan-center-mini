@@ -11,8 +11,9 @@ const invoice = { version: "0041", filename: "0041_invoice_clinical_linkage.sql"
 const legacy = { version: "0042", filename: "0042_legacy_treatment_agreements.sql" };
 
 const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sql" };
+const ceph = { version: "0047", filename: "0047_ceph_correction_lineage.sql" };
 const strategy = { version: "0051", filename: "0051_ortho_treatment_strategy.sql" };
-const reviewed = () => [...baseline(), invoice, legacy, coverage, strategy];
+const reviewed = () => [...baseline(), invoice, legacy, coverage, ceph, strategy];
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("keeps the pre-invoice baseline at test-only 0041", () => {
@@ -27,10 +28,10 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   it("preserves immutable coverage0043 and selects only test-only0044", () => {
     expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage])).toBe("0044");
   });
-  it("preserves the reserved-number gap and places the test-only candidate after 0051", () => {
+  it("preserves both reserved-number gaps, keeps exact Ceph 0047 and places the test-only candidate after 0051", () => {
     expect(periodontalCandidateMigrationVersion(reviewed())).toBe("0052");
-    expect(reviewed()).toHaveLength(44);
-    expect(reviewed().slice(40).map(file => file.version)).toEqual(["0041", "0042", "0043", "0051"]);
+    expect(reviewed()).toHaveLength(45);
+    expect(reviewed().slice(40).map(file => file.version)).toEqual(["0041", "0042", "0043", "0047", "0051"]);
   });
   it("does not weaken gap, ordering, suffix or future-baseline guards", () => {
     expect(() => periodontalCandidateMigrationVersion(baseline().slice(1))).toThrow();
@@ -46,8 +47,10 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   it("requires every reviewed filename and version without accepting renamed historical files", () => {
     for (let index = 0; index < reviewed().length; index += 1) {
       const files = reviewed();
-      files[index] = { ...files[index], filename: `${files[index].version}_unreviewed.sql` };
-      expect(() => periodontalCandidateMigrationVersion(files)).toThrow();
+      for (const patch of [{ filename: `${files[index].version}_unreviewed.sql` }, { version: "9999" }]) {
+        const renamed = [...files]; renamed[index] = { ...renamed[index], ...patch };
+        expect(() => periodontalCandidateMigrationVersion(renamed)).toThrow();
+      }
     }
   });
   it("rejects every missing, duplicated or reordered entry in the required latest chain", () => {
@@ -63,21 +66,25 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
       }
     }
   });
-  it("rejects invented 0044–0050 files and unreviewed or renamed later migrations", () => {
-    for (let version = 44; version <= 50; version += 1) {
+  it("rejects invented 0044–0046/0048–0050 files and unreviewed or renamed later migrations", () => {
+    for (const version of [44, 45, 46, 48, 49, 50]) {
       const identity = String(version).padStart(4, "0");
-      expect(() => periodontalCandidateMigrationVersion([
-        ...reviewed().slice(0, 43), { version: identity, filename: `${identity}_unreviewed.sql` }, strategy,
-      ])).toThrow();
+      const files = reviewed();
+      files.splice(version < 47 ? 43 : 44, 0, { version: identity, filename: `${identity}_unreviewed.sql` });
+      expect(() => periodontalCandidateMigrationVersion(files)).toThrow();
     }
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 44), { version: "0048", filename: "0048_future.sql" }])).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...reviewed(), { version: "0052", filename: "0052_future.sql" }])).toThrow();
-    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 43), { ...strategy, filename: "0051_unreviewed.sql" }])).toThrow();
-    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 42), strategy])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 43), { ...ceph, filename: "0047_unreviewed.sql" }, strategy])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 44), { ...strategy, filename: "0051_unreviewed.sql" }])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 43), strategy])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 42), ceph, strategy])).toThrow();
   });
   it("selects historical boundaries without dropping validation of the complete input", () => {
     const files = reviewed();
     expect(migrationFilesThrough(files, "0042")).toEqual(files.slice(0, 42));
     expect(migrationFilesThrough(files, "0043")).toEqual(files.slice(0, 43));
+    expect(migrationFilesThrough(files, "0047")).toEqual(files.slice(0, 44));
     expect(migrationFilesThrough(files, "0051")).toEqual(files);
     expect(() => migrationFilesThrough(files.slice(0, 42), "0043")).toThrow();
     expect(() => migrationFilesThrough(files, "0050")).toThrow();
@@ -96,7 +103,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
       expect(() => expectedMigrationRegistry([{ ...files[0], ...patch }, ...files.slice(1)])).toThrow();
     }
   });
-  it("covers every actual current migration, including 0051, with unchanged loaded SQL provenance", async () => {
+  it("covers every actual current migration, including 0047 and 0051, with unchanged loaded SQL provenance", async () => {
     const files = await loadMigrationFiles();
     assertReviewedMigrationChain(files, LATEST_REVIEWED_MIGRATION_VERSION);
     expect(files.map(file => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);

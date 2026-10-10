@@ -283,10 +283,11 @@ describe("ownership verifier reviewed migration source contract", () => {
       }
     }
 
-    for (let reserved = 44; reserved <= 50; reserved += 1) {
+    for (const reserved of [44, 45, 46, 48, 49, 50]) {
       const version = String(reserved).padStart(4, "0");
       const invented = { ...files.at(-1)!, version, name: "unreviewed", filename: `${version}_unreviewed.sql` };
-      expect(() => assertExpectedMigrationChain([...files.slice(0, -1), invented, files.at(-1)!]))
+      const insertion = reserved < 47 ? 43 : 44;
+      expect(() => assertExpectedMigrationChain([...files.slice(0, insertion), invented, ...files.slice(insertion)]))
         .toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
     }
     expect(() => assertExpectedMigrationChain([

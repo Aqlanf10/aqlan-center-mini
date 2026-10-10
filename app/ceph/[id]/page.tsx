@@ -1,6 +1,7 @@
 import { getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
 import { CephTracer } from "@/components/CephTracer";
 import { requireSession } from "@/lib/session";
+import { canAccessPatient } from "@/lib/patient-access";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,9 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
   }
 
   const study = await getCephStudy(id);
-  if (!study) {
+  // (ORTHO-ID-2) النطاق نفسه الذي يفرضه GET /api/ceph/[id] والطباعة: طبيب بلا صلاحية الأشعة أو لمريض غير مريضه لا يفتح
+  // الدراسة، والجواب نفسه للمفقودة والممنوعة فلا يُكشف وجود سجل محظور.
+  if (!study || !(await canAccessPatient(session, study.analysis.patientId, "canViewXrays").catch(() => false))) {
     return <p className="p-6 text-sm text-red-700">التحليل غير موجود أو مرفوض.</p>;
   }
   const patient = await getPatient(study.analysis.patientId);

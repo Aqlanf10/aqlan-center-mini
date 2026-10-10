@@ -2,13 +2,13 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.6",
+  "generatedOnServerVersion": "18.4",
   "counts": {
-    "tables": 89,
-    "columns": 1172,
-    "constraints": 1111,
-    "indexes": 281,
-    "triggers": 30
+    "tables": 88,
+    "columns": 1157,
+    "constraints": 1076,
+    "indexes": 277,
+    "triggers": 28
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -985,6 +985,10 @@
           "type": "text",
           "nullable": true
         },
+        "corrects_analysis_id": {
+          "type": "int8",
+          "nullable": true
+        },
         "created_at": {
           "type": "timestamptz",
           "nullable": false
@@ -1047,11 +1051,23 @@
       ],
       "unique": [],
       "checks": [
+        "ceph_analyses_corrects_older_chk",
         "ceph_analyses_kind_check",
         "ceph_analyses_phase_check",
         "ceph_analyses_status_check"
       ],
       "foreignKeys": [
+        {
+          "columns": [
+            "patient_id",
+            "corrects_analysis_id"
+          ],
+          "refTable": "ceph_analyses",
+          "refColumns": [
+            "patient_id",
+            "id"
+          ]
+        },
         {
           "columns": [
             "ortho_case_id"
@@ -1081,9 +1097,22 @@
         }
       ],
       "indexes": {
+        "ceph_analyses_corrects_idx": {
+          "columns": [
+            "corrects_analysis_id"
+          ],
+          "unique": false
+        },
         "ceph_analyses_one_draft": {
           "columns": [
             "patient_id"
+          ],
+          "unique": true
+        },
+        "ceph_analyses_patient_id_key": {
+          "columns": [
+            "patient_id",
+            "id"
           ],
           "unique": true
         },
@@ -5598,217 +5627,6 @@
         }
       },
       "triggers": {}
-    },
-    "ortho_strategy_revisions": {
-      "columns": {
-        "actor_user_id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "clinical_case_id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "command_id": {
-          "type": "text",
-          "nullable": false
-        },
-        "created_at": {
-          "type": "timestamptz",
-          "nullable": false
-        },
-        "created_by": {
-          "type": "text",
-          "nullable": false
-        },
-        "id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "ortho_case_id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "patient_id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "reason": {
-          "type": "text",
-          "nullable": false
-        },
-        "recorded_patient_id": {
-          "type": "int4",
-          "nullable": false
-        },
-        "recording_context": {
-          "type": "text",
-          "nullable": false
-        },
-        "request_fingerprint": {
-          "type": "text",
-          "nullable": false
-        },
-        "rows": {
-          "type": "jsonb",
-          "nullable": false
-        },
-        "schema_version": {
-          "type": "int2",
-          "nullable": false
-        },
-        "supersedes_revision_id": {
-          "type": "int4",
-          "nullable": true
-        },
-        "version": {
-          "type": "int4",
-          "nullable": false
-        }
-      },
-      "primaryKey": [
-        "id"
-      ],
-      "unique": [
-        [
-          "ortho_case_id",
-          "actor_user_id",
-          "command_id"
-        ],
-        [
-          "ortho_case_id",
-          "id"
-        ],
-        [
-          "ortho_case_id",
-          "version"
-        ],
-        [
-          "supersedes_revision_id"
-        ]
-      ],
-      "checks": [
-        "ortho_strategy_first_revision",
-        "ortho_strategy_not_self",
-        "ortho_strategy_revisions_command_id_check",
-        "ortho_strategy_revisions_created_by_check",
-        "ortho_strategy_revisions_reason_check",
-        "ortho_strategy_revisions_recorded_patient_id_check",
-        "ortho_strategy_revisions_recording_context_check",
-        "ortho_strategy_revisions_request_fingerprint_check",
-        "ortho_strategy_revisions_rows_check",
-        "ortho_strategy_revisions_schema_version_check",
-        "ortho_strategy_revisions_version_check"
-      ],
-      "foreignKeys": [
-        {
-          "columns": [
-            "clinical_case_id"
-          ],
-          "refTable": "clinical_cases",
-          "refColumns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "ortho_case_id"
-          ],
-          "refTable": "ortho_cases",
-          "refColumns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "ortho_case_id",
-            "supersedes_revision_id"
-          ],
-          "refTable": "ortho_strategy_revisions",
-          "refColumns": [
-            "ortho_case_id",
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "patient_id"
-          ],
-          "refTable": "patients",
-          "refColumns": [
-            "id"
-          ]
-        },
-        {
-          "columns": [
-            "actor_user_id"
-          ],
-          "refTable": "users",
-          "refColumns": [
-            "id"
-          ]
-        }
-      ],
-      "indexes": {
-        "ortho_strategy_case_identity_unique": {
-          "columns": [
-            "ortho_case_id",
-            "id"
-          ],
-          "unique": true
-        },
-        "ortho_strategy_case_version_unique": {
-          "columns": [
-            "ortho_case_id",
-            "version"
-          ],
-          "unique": true
-        },
-        "ortho_strategy_command_unique": {
-          "columns": [
-            "ortho_case_id",
-            "actor_user_id",
-            "command_id"
-          ],
-          "unique": true
-        },
-        "ortho_strategy_patient_case_version_idx": {
-          "columns": [
-            "patient_id",
-            "ortho_case_id",
-            "version"
-          ],
-          "unique": false
-        },
-        "ortho_strategy_revisions_pkey": {
-          "columns": [
-            "id"
-          ],
-          "unique": true
-        },
-        "ortho_strategy_successor_unique": {
-          "columns": [
-            "supersedes_revision_id"
-          ],
-          "unique": true
-        }
-      },
-      "triggers": {
-        "ortho_strategy_revision_final_state": {
-          "timing": "AFTER",
-          "events": [
-            "INSERT",
-            "UPDATE"
-          ]
-        },
-        "ortho_strategy_revision_immutable": {
-          "timing": "BEFORE",
-          "events": [
-            "DELETE",
-            "UPDATE"
-          ]
-        }
-      }
     },
     "parties": {
       "columns": {

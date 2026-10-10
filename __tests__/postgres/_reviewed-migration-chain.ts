@@ -1,7 +1,7 @@
 import { checksumOf, type MigrationFile } from "../../lib/migration-files";
 
 // Reviewed shipped identities, not an assumption that every reserved number exists.
-// Keep historical 0001–0043 intact. 0044–0050 are not part of this reviewed chain;
+// Keep historical 0001–0043 intact. 0044–0046 and 0048–0050 are not part of this reviewed chain;
 // 0050 remains reserved separately. Extend this list only with reviewed migration files.
 export const REVIEWED_MIGRATION_FILENAMES = [
   "0001_baseline_schema.sql",
@@ -47,6 +47,7 @@ export const REVIEWED_MIGRATION_FILENAMES = [
   "0041_invoice_clinical_linkage.sql",
   "0042_legacy_treatment_agreements.sql",
   "0043_legacy_treatment_coverage.sql",
+  "0047_ceph_correction_lineage.sql",
   "0051_ortho_treatment_strategy.sql",
 ] as const;
 export const LATEST_REVIEWED_MIGRATION_VERSION = REVIEWED_MIGRATION_FILENAMES.at(-1)!.slice(0, 4);

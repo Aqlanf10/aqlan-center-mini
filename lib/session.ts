@@ -22,6 +22,16 @@ async function currentSession(payload: SessionPayload | null, client?: DbClient)
 }
 
 /**
+ * (ORTHO-ID-2) إعادة التحقق من جلسةٍ سبق قبولها **داخل معاملة كتابة**: المستخدم نفسه (المعرّف) فعّال وبالدور نفسه،
+ * وإصدار بيانات الدخول (credentialVersion المشتق من تجزئة كلمة المرور) ما زال هو إصدار الجلسة، وإصدار الصلاحيات
+ * للأدوار المقيّدة. قراءة المستخدم تأخذ قفلًا مشتركًا على صفه، فتغيير كلمة المرور المتزامن إما يسبق هذا الفحص فيراه
+ * (⇒ null، الجلسة قديمة) أو ينتظر حتى تنتهي المعاملة. هي نفسها دالة التحقق التي يستعملها `requireSession` — لا قاعدة ثانية.
+ */
+export function revalidateSessionInTransaction(payload: SessionPayload, client: DbClient): Promise<SessionPayload | null> {
+  return currentSession(payload, client);
+}
+
+/**
  * الجلسة الموثوقة — مصادقة رقمية صارمة وموقعة بتوقيع HMAC-SHA256.
  *
  * تقرأ الكوكي الموقّعة أولاً، وتدعم ترويسة Authorization: Bearer كخيار بديل

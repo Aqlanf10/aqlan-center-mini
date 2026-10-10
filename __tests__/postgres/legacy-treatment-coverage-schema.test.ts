@@ -73,7 +73,7 @@ beforeAll(async () => {
   expect((await pool().query("SELECT to_jsonb(a) AS facts FROM legacy_treatment_agreements a WHERE id=$1", [old.id])).rows[0].facts).toEqual(oldFacts);
   expect((await pool().query("SELECT * FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1", [old.id])).rows).toHaveLength(0);
   // Latest-chain assertions include every reviewed later file, never a filtered
-  // 0043+0051 subset that could silently omit another shipped migration.
+  // 0043+0051 subset that could silently omit the shipped Ceph 0047 migration.
   expect(await migrate(pool(), { apply: true, files })).toMatchObject({
     appliedVersions: files.slice(throughCoverage.length).map(file => file.version),
   });

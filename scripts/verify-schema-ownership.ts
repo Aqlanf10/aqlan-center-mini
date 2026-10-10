@@ -204,7 +204,7 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 
 export function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
   // Exact reviewed filenames, not a contiguous range of reserved branch numbers.
-  // 0044–0050 are absent; keep 0001–0043 unchanged and append only reviewed files.
+  // 0044–0046 and 0048–0050 are absent; keep 0001–0043 unchanged and append only reviewed files.
   const expectedFilenames = [
     "0001_baseline_schema.sql",
     "0002_confirmation_claim_ttl_index.sql",
@@ -249,6 +249,7 @@ export function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof lo
     "0041_invoice_clinical_linkage.sql",
     "0042_legacy_treatment_agreements.sql",
     "0043_legacy_treatment_coverage.sql",
+    "0047_ceph_correction_lineage.sql",
     "0051_ortho_treatment_strategy.sql",
   ] as const;
   const expected = expectedFilenames.map((filename) => filename.slice(0, 4));

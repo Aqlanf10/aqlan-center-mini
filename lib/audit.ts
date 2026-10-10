@@ -73,7 +73,7 @@ export type AuditAction =
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
   | "document.upload.rejected_signature"
-  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
+  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard" | "ceph.link"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
   | "lab_order.cancel" | "lab_order.delete"
@@ -219,6 +219,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.update": "تحديث تحليل سيفالومتري",
   "ceph.complete": "اعتماد تحليل سيفالومتري",
   "ceph.discard": "رفض مسودة سيفالومتري",
+  "ceph.link": "ربط دراسة سيفالومتري بحالة التقويم",
   "inventory.item": "إدارة بند مخزون",
   "inventory.move": "حركة مخزون",
   "lab.create": "إضافة مختبر جديد",
