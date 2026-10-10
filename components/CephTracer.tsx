@@ -1,5 +1,7 @@
 "use client";
 
+import { cephReturnHref, cephStudyHref, readClinicalContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -159,6 +161,11 @@ export function CephTracer({
   refSetName: string | null;
   diagnosis: DiagnosisProp | null;
 }) {
+  const [returnSearch, setReturnSearch] = useState("");
+  useEffect(() => { setReturnSearch(window.location.search); }, []);
+  const returnHref = cephReturnHref(analysis, returnSearch);
+  const returnContext = readClinicalContext(new URL(returnHref, "https://patient.invalid").searchParams).context ?? { patientId: analysis.patientId };
+
   const completed = analysis.status === "completed";
   const [points, setPoints] = useState<LandmarkMap>(() => {
     const map: LandmarkMap = {};
@@ -228,6 +235,13 @@ export function CephTracer({
     finalDx: diagnosis?.finalDx ?? "",
   }));
   const [dxDirty, setDxDirty] = useState(false);
+  const canLeaveStudy = () => !saving && nudgeTimer.current === null
+    && (!(dxDirty || calMode) || window.confirm("هناك تشخيص أو معايرة غير محفوظين. هل تريد مغادرة الدراسة؟"));
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (saving || dxDirty || calMode || nudgeTimer.current !== null) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [saving, dxDirty, calMode]);
 
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
@@ -373,6 +387,7 @@ export function CephTracer({
     if (!completed) setResults(computeAll(next, scale ?? NaN));
     if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     nudgeTimer.current = setTimeout(() => {
+      nudgeTimer.current = null;
       const pt = next[code];
       if (pt) void savePoint(code, pt);
     }, 500);
@@ -493,7 +508,7 @@ export function CephTracer({
       const res = await fetch(`/api/ceph/${analysis.id}/complete`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        window.location.href = `/ceph/${analysis.id}`;
+        window.location.href = cephStudyHref(analysis.id, returnContext);
       } else {
         setMessage(data.message ?? "تعذّر الاعتماد.");
       }
@@ -509,7 +524,7 @@ export function CephTracer({
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) window.location.href = `/ceph/${data.id}`;
+      if (res.ok) window.location.href = cephStudyHref(data.id, returnContext);
       else setMessage(data.message ?? "تعذّر فتح النسخة.");
     } catch {
       setMessage("تعذّر الاتصال.");
@@ -526,7 +541,7 @@ export function CephTracer({
         body: JSON.stringify({ note: note || "" }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) window.location.href = `/patients/${analysis.patientId}?tab=ceph`;
+      if (res.ok) window.location.href = returnHref;
       else setMessage(data.message ?? "تعذّر الرفض.");
     } catch {
       setMessage("تعذّر الاتصال.");
@@ -696,7 +711,7 @@ export function CephTracer({
     <div className="space-y-3">
       {/* الشريط العلوي */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
-        <Link href={`/patients/${analysis.patientId}?tab=ceph`} className="text-sm text-blue-700 hover:underline">
+        <Link href={returnHref} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="text-sm text-blue-700 hover:underline">
           ← ملف {patientName}
         </Link>
         <span className={`rounded-full border px-2 py-0.5 text-xs ${completed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
@@ -782,7 +797,7 @@ export function CephTracer({
           {analysis.correctsAnalysisId != null && (
             <p>
               {completed ? "هذه نسخة" : "هذه مسودة"} تصحيح للدراسة المعتمدة{" "}
-              <Link href={`/ceph/${analysis.correctsAnalysisId}`} className="font-extrabold underline">#{analysis.correctsAnalysisId}</Link>
+              <Link href={cephStudyHref(analysis.correctsAnalysisId, returnContext)} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="font-extrabold underline">#{analysis.correctsAnalysisId}</Link>
               {" "}— الأصل يبقى كما اعتُمد بقياساته وتاريخه.
             </p>
           )}
@@ -790,7 +805,7 @@ export function CephTracer({
             <p>
               لهذه الدراسة {analysis.correctedBy!.length === 1 ? "تصحيح" : "تصحيحات"}:{" "}
               {analysis.correctedBy!.map((id, index) => (
-                <span key={id}>{index > 0 ? "، " : ""}<Link href={`/ceph/${id}`} className="font-extrabold underline">#{id}</Link></span>
+                <span key={id}>{index > 0 ? "، " : ""}<Link href={cephStudyHref(id, returnContext)} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="font-extrabold underline">#{id}</Link></span>
               ))}
             </p>
           )}
@@ -1044,7 +1059,7 @@ export function CephTracer({
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Link
-                href={`/patients/${analysis.patientId}?tab=ceph`}
+                href={returnHref} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }}
                 className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-800 transition-colors"
               >
                 استعراض مقارنة مراحل المريض الأخرى ←

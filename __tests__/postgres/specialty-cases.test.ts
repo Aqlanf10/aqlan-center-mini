@@ -43,14 +43,14 @@ beforeAll(async () => {
     `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 100000, TRUE, TRUE, $2) RETURNING id`,
     [name, category]))[0].id;
   const orthoService = await service("تقويم ثابت", "ortho");
-  const endoService = await service("علاج عصب", "endo");
+  const endoService = await service("علاج عصب", "rct");
   const crownService = await service("تاج زيركون", "crown");
   const plan = await createPlanV2({
     patientId, title: "الخطة الشاملة", specialty: null, primaryDoctorId: orthodontist, billingMode: "per_procedure",
     baseCurrency: "YER", startDate: "2026-09-01", note: null, createdBy: "admin",
     items: [
       { serviceId: orthoService, serviceName: "تقويم ثابت", category: "ortho", toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 600000, billingRule: "per_session", sessionCount: 6, note: null },
-      { serviceId: endoService, serviceName: "علاج عصب", category: "endo", toothCode: 21, surfaces: null, quantity: 1, unitPriceMinor: 80000, billingRule: "on_completion", sessionCount: 2, note: null },
+      { serviceId: endoService, serviceName: "علاج عصب", category: "rct", toothCode: 21, surfaces: null, quantity: 1, unitPriceMinor: 80000, billingRule: "on_completion", sessionCount: 2, note: null },
       { serviceId: crownService, serviceName: "تاج زيركون", category: "crown", toothCode: 21, surfaces: null, quantity: 1, unitPriceMinor: 120000, billingRule: "on_completion", sessionCount: 2, note: null },
     ],
     installments: [],
@@ -119,6 +119,11 @@ describe("(CASE-MODEL-1) one patient, one record, many specialty cases", () => {
     const endoCase = cases.find((item) => item.specialty === "endodontics")!;
     const orthoCase = cases.find((item) => item.specialty === "orthodontics")!;
     expect(await setPlanItemCase({ itemId: items.endo, caseId: endoCase.id, priority: 1, actor: "dr-mohammed" })).toEqual({ ok: true });
+    // Legacy persisted attribution remains editable as a same-case priority save.
+    // A new arch relink cannot infer scope from the target case or free-text note.
+    expect(await setPlanItemCase({ itemId: items.ortho, caseId: orthoCase.id, priority: 2, actor: "admin" }))
+      .toEqual({ ok: false, reason: "scope_unknown" });
+    await q(`UPDATE plan_items SET case_id = $2 WHERE id = $1`, [items.ortho, orthoCase.id]);
     expect(await setPlanItemCase({ itemId: items.ortho, caseId: orthoCase.id, priority: 2, actor: "admin" })).toEqual({ ok: true });
     // حالةُ مريضٍ آخر لا تُربط.
     const other = await createClinicalCase({

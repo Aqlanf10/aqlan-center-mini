@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, listParties, listServices } from "@/lib/db";
-import { previewInvoiceLinkage } from "@/lib/invoice-linkage-db";
+import { getPool, getSettings, listParties, listServices } from "@/lib/db";
+import { invoicePlanChoices, previewInvoiceLinkage } from "@/lib/invoice-linkage-db";
 import { INVOICE_LINKAGE_MESSAGE } from "@/lib/invoice-clinical-linkage";
 import { parseInvoiceInput } from "@/lib/invoice-input";
 import { checkInvoiceAuthority } from "@/lib/invoice-pricing";
@@ -33,9 +33,11 @@ export async function POST(request: Request) {
       discountMinor: parsed.discountMinor, discountReason: typeof body.discountReason === "string" ? body.discountReason : null,
     });
     if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
-    const lines = await previewInvoiceLinkage({ patientId: parsed.patientId, baseCurrency: parsed.baseCurrency, items: parsed.items });
-    return NextResponse.json({ lines: lines.map((line) => ({ ...line,
+    const lines = await previewInvoiceLinkage({ patientId: parsed.patientId, baseCurrency: parsed.baseCurrency, existingPlanId: parsed.existingPlanId, items: parsed.items });
+    const planChoices = await invoicePlanChoices(getPool(), parsed.patientId, parsed.baseCurrency);
+    return NextResponse.json({ existingPlanId: parsed.existingPlanId, planChoices, lines: lines.map((line) => ({ ...line,
       refusalMessage: line.refusal ? INVOICE_LINKAGE_MESSAGE[line.refusal] : null,
     })) }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذّرت معاينة الربط السريري." }, { status: 500 }); }
 }
+

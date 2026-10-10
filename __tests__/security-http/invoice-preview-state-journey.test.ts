@@ -70,12 +70,13 @@ async function selectFilling(page: Page, line = 0, tooth = 26) {
   await page.getByTestId("tooth-dialog").waitFor({ state: "detached" });
 }
 function success(route: Route, refusal: string | null = null) {
-  const body = route.request().postDataJSON() as { items: { serviceId: number | null }[] };
-  return { lines: body.items.map((item, line) => ({ line, kind: item.serviceId === filling ? "clinical" : "financial",
+  const body = route.request().postDataJSON() as { existingPlanId?: number | null; items: { serviceId: number | null }[] };
+  return { existingPlanId: body.existingPlanId ?? null, planChoices: [], lines: body.items.map((item, line) => ({ line, kind: item.serviceId === filling ? "clinical" : "financial",
     specialtyLabel: item.serviceId === filling ? "ترميم" : null,
     item: item.serviceId === filling ? { mode: "new", id: null } : null,
     case: item.serviceId === filling ? { mode: "none", id: null, title: null, options: [] } : null,
     refusal, refusalMessage: refusal ? "هذا العلاج مفوتر سابقًا." : null,
+    itemCandidates: [],
   })) };
 }
 const json = (route: Route, payload: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
@@ -324,3 +325,4 @@ describe("invoice form preview safety and shared chart interruption journeys", (
     } finally { await context.close(); }
   });
 });
+

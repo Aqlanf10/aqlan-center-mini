@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicalContextHref } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   friendlyDateLong, friendlyTime, reminderText, toWhatsAppNumber, unbookedFollowupText,
@@ -245,7 +247,7 @@ export default function OrthoFollowupPage() {
                       {appointment ? "واتساب تذكير" : "واتساب لترتيب متابعة"}
                     </a>
                   ) : null}
-                  <a href={`/patients/${row.patientId}?tab=treatment`}
+                  <a href={clinicalContextHref(row.patientId, { orthoCaseId: row.caseId, pillar: "wires" }, "ortho")}
                     className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600">
                     ملف التقويم
                   </a>

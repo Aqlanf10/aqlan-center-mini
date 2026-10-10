@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicalContextHref } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
@@ -1335,8 +1337,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               </p>
                 <p className="mt-1 text-[11px] text-navy-800">
                   {visit.ortho.legacyBaseline ? "متابعة على خط أساس من العلاج السابق." : "تفاصيل خط الأساس محفوظة في ملف التقويم إن كانت مسجّلة."}
-                  {visit.patientId ? <a href={`/patients/${visit.patientId}?tab=ortho`}
-                onClick={(event) => { if (!currentOwner()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
+                  {visit.patientId ? <a href={clinicalContextHref(visit.patientId, { orthoCaseId: visit.ortho.caseId, ...(visit.ortho.visitAdjustmentId !== null ? { visitId: visit.id } : {}), pillar: "wires" }, "ortho")}
+                onClick={(event) => { if (!currentOwner() || !canLeave()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
                 </p>
               </div>
             ) : null}

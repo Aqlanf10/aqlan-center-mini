@@ -5,6 +5,7 @@ import {
   CASE_STATUS_LABEL, CASE_TERMINAL, DEPENDENCY_REQUIREMENT_LABEL, PROBLEM_STATUS_LABEL, SPECIALTY_LABEL,
   type CaseStatus, type DependencyRequirement, type ProblemStatus,
 } from "@/lib/cases";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import { useSession } from "./SessionProvider";
 import { SPECIALTIES, type ServiceSpecialty } from "@/lib/appointment-services";
 import type { CasePlanItem, PatientProblem, PlanItemDependency, SpecialtyCase } from "@/lib/db";
@@ -42,7 +43,9 @@ const specialtyLabel = (value: string | null) =>
 interface PatientCasesProps {
   patientId: number;
   canWrite: boolean;
-  onOpenOrtho?: () => unknown;
+  context?: ClinicalNavigationContext;
+  onOpenOrtho?: (context: ClinicalNavigationContext) => unknown;
+  onOpenClinicalContext?: (context: ClinicalNavigationContext, target?: string) => unknown;
   /** Returns identity-bound cleanup, so an old child cannot clear a newer guard. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
 }
@@ -84,7 +87,7 @@ export function PatientCases(props: PatientCasesProps) {
   return <PatientCasesWorkspace key={scope} {...props} canRead={canRead} />;
 }
 
-function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNavigationGuardChange }:
+function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOrtho, onOpenClinicalContext, onNavigationGuardChange }:
   PatientCasesProps & { canRead: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -222,7 +225,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
     if (!owner.active || !owner.ready || owner.writes > 0 || owner.readSequence !== renderRead
       || !data?.cases.includes(row) || !linkedOrthoRow(row, patientId)) return;
     // Navigation belongs to the page; it invokes the registered Cases guard.
-    onOpenOrtho?.();
+    onOpenOrtho?.({ patientId, orthoCaseId: row.orthoCaseId!, ...(row.id !== null ? { clinicalCaseId: row.id } : {}), pillar: "wires" });
   };
 
   const itemsById = useMemo(() => new Map((data?.items ?? []).map((item) => [item.id, item])), [data]);
@@ -302,7 +305,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
         ) : (
           <ul className="grid gap-2 sm:grid-cols-2">
             {data.cases.map((item) => (
-              <li key={item.id ?? `ortho-${item.orthoCaseId}`} className="rounded-xl border border-slate-200 p-2.5 text-sm">
+              <li key={item.id ?? `ortho-${item.orthoCaseId}`} data-testid={`clinical-case-${item.id ?? `ortho-${item.orthoCaseId}`}`} aria-current={(context?.clinicalCaseId !== undefined && context.clinicalCaseId === item.id) || (context?.orthoCaseId !== undefined && context.orthoCaseId === item.orthoCaseId) ? "true" : undefined} className="rounded-xl border border-slate-200 p-2.5 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   <span className="font-extrabold text-navy-900">{item.title}{item.site ? ` · ${item.site}` : ""}
                     {item.legacy ? (
@@ -323,6 +326,10 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
                     بانتظار: {item.waitingOn.join("، ")}
                   </p>
                 ) : null}
+                {onOpenClinicalContext && item.id !== null ? <button type="button" className="min-h-11 rounded-lg border px-3 text-xs" disabled={busy || !ready}
+                  onClick={() => { if (owner.active && owner.ready && owner.writes === 0 && owner.readSequence === renderRead && data.cases.includes(item)) onOpenClinicalContext({ patientId, clinicalCaseId: item.id! }, "plans"); }}>
+                  بنود خطة هذه الحالة
+                </button> : null}
                 {item.problem ? <p className="mt-1 text-xs text-slate-500">{item.problem}</p> : null}
                 {item.outcome ? <p className="mt-1 text-xs text-slate-500">النتيجة: {item.outcome}</p> : null}
                 {item.kind === "ortho" || item.orthoCaseId !== null ? (
@@ -332,7 +339,7 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, onOpenOrtho, onNa
                       <button type="button" disabled={busy} onClick={() => openOrtho(item)}
                         data-testid={`cases-open-ortho-${item.orthoCaseId}`}
                         className="mt-1 min-h-11 max-w-full rounded-lg border border-sky-200 px-3 py-2 text-start text-xs font-bold text-sky-800 disabled:opacity-50">
-                        عرض قسم التقويم للمريض
+                        فتح حالة التقويم المحددة
                       </button>
                     ) : null}
                   </div>

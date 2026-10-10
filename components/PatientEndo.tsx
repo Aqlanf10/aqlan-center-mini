@@ -1,5 +1,7 @@
 "use client";
 
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   APICAL_DIAGNOSES, APICAL_LABEL, CROWN_STATE_LABEL, ENDO_KIND_LABEL, ENDO_STAGES, ENDO_STAGE_LABEL, ENDO_STATUS_LABEL,
@@ -204,7 +206,9 @@ interface PatientEndoProps {
   workflowReady?: boolean;
   workflowIsCurrent?: () => boolean;
   onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
-  onOpenToday?: () => void; onOpenPlans?: () => void; onOpenAccount?: () => void;
+  context?: ClinicalNavigationContext;
+  onContextChange?: (context: ClinicalNavigationContext) => unknown;
+  onOpenToday?: (context: ClinicalNavigationContext) => unknown; onOpenPlans?: (context: ClinicalNavigationContext) => unknown; onOpenAccount?: (context: ClinicalNavigationContext) => unknown;
 }
 
 export function PatientEndo(props: PatientEndoProps) {
@@ -214,7 +218,7 @@ export function PatientEndo(props: PatientEndoProps) {
   return <PatientEndoWorkspace key={JSON.stringify([props.patientId, authority, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
-function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
+function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
   const [treatments, setTreatments] = useState<EndoTreatmentView[] | null>(null);
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
@@ -293,7 +297,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
         }
         setTreatments(payload.treatments);
         // Choose once; a refresh never transfers a draft to a fallback episode.
-        setSelectedId((selected) => selected ?? payload.treatments.find((one: EndoTreatmentView) => one.status === "in_progress")?.id ?? payload.treatments[0]?.id ?? null);
+        setSelectedId((selected) => selected ?? (context?.endoTreatmentId ?? ((context?.clinicalCaseId !== undefined || context?.planId !== undefined || context?.planItemId !== undefined || context?.visitId !== undefined) ? null : payload.treatments.find((one: EndoTreatmentView) => one.status === "in_progress")?.id ?? payload.treatments[0]?.id ?? null)));
         referenceRead.current.clinical = true; setClinicalRead("ready");
       } catch (failure) {
         if (!current()) return;
@@ -328,15 +332,24 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
     // Ordinary case failures leave valid clinical documentation usable. Shared
     // patient/session denial from either read retires both grants immediately.
     await Promise.all([clinical(), caseReferences()]);
-  }, [patientId]);
+  }, [patientId, context?.endoTreatmentId, context?.clinicalCaseId, context?.planId, context?.planItemId, context?.visitId]);
 
   useEffect(() => { void load(); }, [load]);
 
   const selected = useMemo(() => {
     if (!treatments?.length) return null;
+    if (context?.endoTreatmentId !== undefined) return treatments.find((one) => one.id === context.endoTreatmentId && (context.clinicalCaseId === undefined || one.caseId === context.clinicalCaseId)) ?? null;
+    if (context?.clinicalCaseId !== undefined) {
+      const exact = treatments.filter((one) => one.caseId === context.clinicalCaseId);
+      return exact.find((one) => one.id === selectedId) ?? (exact.length === 1 ? exact[0] : null);
+    }
+    if (context?.orthoCaseId !== undefined || context?.planId !== undefined || context?.planItemId !== undefined || context?.visitId !== undefined) return null;
     if (selectedId !== null) return treatments.find((one) => one.id === selectedId) ?? null;
     return treatments.find((one) => one.status === "in_progress") ?? treatments[0];
-  }, [treatments, selectedId]);
+  }, [treatments, selectedId, context?.clinicalCaseId, context?.endoTreatmentId, context?.orthoCaseId, context?.planId, context?.planItemId, context?.visitId]);
+  const episodeContext = (treatment: EndoTreatmentView): ClinicalNavigationContext => ({
+    ...(context?.clinicalCaseId === treatment.caseId ? context : {}), patientId, clinicalCaseId: treatment.caseId, endoTreatmentId: treatment.id,
+  });
 
   const request = async (url: string, method: "POST" | "PUT" | "PATCH", body: unknown) => {
     const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -517,9 +530,9 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
           <p className="text-xs text-slate-500">لا علاج جذور مسجَّل لهذا المريض.</p>
         ) : (
           <ul className="flex flex-wrap gap-2">
-            {treatments.map((one) => (
+            {treatments.filter((one) => context?.clinicalCaseId === undefined || one.caseId === context.clinicalCaseId).map((one) => (
               <li key={one.id}>
-                <button type="button" data-testid={`endo-tooth-${one.toothCode}`} onClick={() => { if (one.id === selected?.id || !discard()) return; setSelectedId(one.id); setForm(null); setClosing(null); setAddendum(null); setCrownLink({ crown: "", rct: "" }); }}
+                <button type="button" data-testid={`endo-tooth-${one.toothCode}`} onClick={() => { if (one.id === selected?.id) return; if (onContextChange) { onContextChange({ ...episodeContext(one), visitId: undefined }); return; } if (!discard()) return; setSelectedId(one.id); setForm(null); setClosing(null); setAddendum(null); setCrownLink({ crown: "", rct: "" }); }}
                   className={`rounded-xl border px-3 py-2 text-right text-xs ${selected?.id === one.id ? "border-navy-900 bg-navy-50" : "border-slate-200 bg-white"}`}>
                   <span className="text-sm font-black text-navy-900">سنّ {one.toothCode}</span>
                   <span className={`mr-2 inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_TONE[one.status]}`}>{ENDO_STATUS_LABEL[one.status]}</span>
@@ -545,6 +558,7 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
           </div>
         </section>
       ) : null}
+      {!selected && (context?.endoTreatmentId !== undefined || context?.clinicalCaseId !== undefined || context?.planId !== undefined || context?.planItemId !== undefined || context?.visitId !== undefined) ? <p role="status" data-testid="endo-context-selection">لم تُحدَّد نوبة متاحة لهذا المرجع. اختر النوبة المطلوبة من الحالة نفسها؛ لا يتم اختيار أحدث علاج تلقائيًا.</p> : null}
       {selected ? (
         <>
           <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="ملخص علاج الجذور" data-testid="endo-strip">
@@ -650,9 +664,9 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
               {planVisible && !caseUnavailable ? <p className="mt-1 text-slate-500" data-testid="endo-plan-context">{rctCandidates.length === 0 ? "لا يوجد بند جذور مرتبط بهذه الحالة وهذا السنّ في الخطة." : rctCandidates.length === 1 ? `بند الخطة: ${rctCandidates[0].serviceName}` : `${rctCandidates.length} بنود جذور لهذا السنّ والحالة؛ اختر البند الصحيح داخل الزيارة.`}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2">
-              {onOpenToday ? <button type="button" onClick={onOpenToday} className="rounded-lg border border-navy-200 px-3 py-2 font-bold text-navy-900" data-testid="endo-open-today">إجراءات زيارة اليوم</button> : null}
-              {planVisible && onOpenPlans ? <button type="button" onClick={onOpenPlans} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-plans">الخطة</button> : null}
-              {onOpenAccount ? <button type="button" onClick={onOpenAccount} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-account">حساب المريض</button> : null}
+              {onOpenToday ? <button type="button" onClick={() => selected && onOpenToday(episodeContext(selected))} className="rounded-lg border border-navy-200 px-3 py-2 font-bold text-navy-900" data-testid="endo-open-today">إجراءات زيارة اليوم</button> : null}
+              {planVisible && onOpenPlans ? <button type="button" onClick={() => selected && onOpenPlans(episodeContext(selected))} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-plans">الخطة</button> : null}
+              {onOpenAccount ? <button type="button" onClick={() => selected && onOpenAccount(episodeContext(selected))} className="rounded-lg border border-slate-200 px-3 py-2" data-testid="endo-open-account">حساب المريض</button> : null}
             </div>
           </section>
 

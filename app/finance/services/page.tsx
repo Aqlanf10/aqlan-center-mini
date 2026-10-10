@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatAmount, formatMoney, type Currency } from "@/lib/money";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { useSession } from "@/components/SessionProvider";
@@ -245,16 +245,19 @@ export default function ServicesPage() {
             ))}
             <option value="أخرى">📦 خدمات أخرى</option>
           </select>
-          <input
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="السعر القياسي"
-            aria-label="السعر"
-            inputMode="decimal"
-            dir="ltr"
-            required
-            className="w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-800"
-          />
+          <label className="text-xs font-bold text-slate-600">
+            <span className="mb-1 block">{`السعر (${CURRENCY_LABEL[base]})`}</span>
+            <input
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="السعر القياسي"
+              aria-label={`السعر (${CURRENCY_LABEL[base]})`}
+              inputMode="decimal"
+              dir="ltr"
+              required
+              className="block w-32 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-navy-800"
+            />
+          </label>
           <button
             type="submit"
             disabled={busy || !name.trim() || !price.trim()}

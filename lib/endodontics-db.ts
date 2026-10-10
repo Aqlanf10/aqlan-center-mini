@@ -1,3 +1,5 @@
+import { clinicalCaseCompatibility } from "./clinical-case-linkage";
+import { validateLineSite } from "./invoice-clinical-linkage";
 import { IDEMPOTENCY_KEY_PATTERN } from "./idempotency-key";
 /**
  * (ENDO-2) طبقة قاعدة بيانات علاج العصب — نوبات السن وسجلات الزيارات والقنوات والملاحق.
@@ -185,8 +187,10 @@ interface Actor { actor: string; actorRole?: string | null }
 
 // ─── فتح نوبة ────────────────────────────────────────────────────────────────
 
-export type OpenEndoRefusal = "no_patient" | "bad_tooth" | "bad_case" | "case_closed" | "tooth_busy";
+export type OpenEndoRefusal = "no_patient" | "bad_tooth" | "bad_case" | "case_closed" | "tooth_busy" | "bad_site" | "scope_unknown";
 export const OPEN_ENDO_MESSAGE: Record<OpenEndoRefusal, string> = {
+  bad_site: "موضع الحالة لا يطابق سن نوبة علاج الجذور.",
+  scope_unknown: "موضع الحالة غير محدّد؛ راجع نطاقها السريري قبل فتح نوبة جديدة.",
   no_patient: "لا يوجد مريض بهذا الرقم.",
   bad_tooth: "السن غير صالح (ترقيم FDI).",
   bad_case: "الحالة المختارة ليست حالة علاج جذور لهذا المريض.",
@@ -205,10 +209,19 @@ export async function openEndoTreatment(input: Actor & {
     // قفل المريض يسلسل فتح نوبتين متزامنتين على السن نفسه (والفهرس الفريد حارسٌ أخير).
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR UPDATE`, [input.patientId]);
     if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
-    const { rows: cases } = await client.query<{ specialty: string; status: string; title: string }>(
-      `SELECT specialty, status, title FROM clinical_cases WHERE id = $1 AND patient_id = $2 FOR SHARE`, [input.caseId, input.patientId]);
+    const { rows: cases } = await client.query<{ specialty: string; status: string; title: string; site: string | null }>(
+      `SELECT specialty, status, title, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 FOR SHARE`, [input.caseId, input.patientId]);
     if (!cases[0] || cases[0].specialty !== "endodontics") { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
     if (cases[0].status !== "active" && cases[0].status !== "waiting") { await client.query("ROLLBACK"); return { ok: false, reason: "case_closed" }; }
+    const checkedSite = validateLineSite({ category: "rct", toothCode: input.toothCode });
+    const compatibility = clinicalCaseCompatibility({ patientId: input.patientId, specialty: "endodontics",
+      site: checkedSite.ok ? checkedSite.site : null,
+      target: { patientId: input.patientId, specialty: cases[0].specialty, status: cases[0].status, site: cases[0].site },
+    });
+    if (compatibility) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: compatibility === "scope_unknown" ? "scope_unknown" : "bad_site" };
+    }
     const { rows: busy } = await client.query(
       `SELECT 1 FROM endo_treatments WHERE patient_id = $1 AND tooth_code = $2 AND status = 'in_progress'`,
       [input.patientId, input.toothCode]);

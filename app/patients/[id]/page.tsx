@@ -24,6 +24,7 @@ import {
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
+import { ClinicalVisit } from "@/components/ClinicalVisit";
 import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
@@ -54,15 +55,18 @@ import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
 import { useDismissibleDetails } from "@/components/useDismissibleDetails";
-import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
+import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
 import { useSetting } from "@/components/SettingsProvider";
-import { isAdmin } from "@/lib/roles";
+import { isAdmin, canViewMoney } from "@/lib/roles";
+import TreatmentFinancialContext from "@/components/TreatmentFinancialContext";
 import {
   createPatientNavigation, patientDestination, readPatientLocation,
-  type PatientLocation, type PatientTab, type TreatmentSubTab,
+  type ClinicalNavigationContext, type PatientLocation, type PatientTab, type TreatmentSubTab,
 } from "@/lib/patient-navigation";
+
+import { useClinicalNavigationContext, readVerifiedClinicalContext } from "@/components/useClinicalNavigationContext";
 
 interface PatientFile {
   patient: Patient;
@@ -203,6 +207,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
   const [location, setLocation] = useState<PatientLocation>(() =>
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
+  const contextAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
+  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority);
+  const [contextNavigationError, setContextNavigationError] = useState<string | null>(null);
+  const contextRequest = useRef(0);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
   const compactWorkspace = tab === "today" || tab === "treatment";
@@ -210,11 +218,17 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const plansLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const orthoLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const trackCasesGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
     if (alertOwner.active) casesLeaveGuard.current = lease;
     return () => { if (casesLeaveGuard.current === lease) casesLeaveGuard.current = null; };
+  }, [alertOwner]);
+  const trackPlansGuard = useCallback((guard: () => boolean) => {
+    const lease = { guard, owner: alertOwner };
+    if (alertOwner.active) plansLeaveGuard.current = lease;
+    return () => { if (plansLeaveGuard.current === lease) plansLeaveGuard.current = null; };
   }, [alertOwner]);
   const trackOrthoGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
@@ -231,29 +245,47 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const cases = casesLeaveGuard.current;
         if (cases?.owner.active && !cases.guard()) return false;
+        const plans = plansLeaveGuard.current;
+        if (plans?.owner.active && !plans.guard()) return false;
         const ortho = orthoLeaveGuard.current;
         if (ortho?.owner.active && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
-      onChange: setLocation,
+      onChange: (next) => { ++contextRequest.current; setLocation(next); },
     });
     navigation.current = controller;
-    return () => { navigation.current = null; };
+    return () => { controller.dispose(); navigation.current = null; };
   }, []);
   const goTo = (target: string) => {
     const accepted = navigation.current?.navigate(patientDestination(target, location));
     if (accepted) setMoreOpen(false);
     return accepted;
   };
+  const openClinicalContext = async (context: ClinicalNavigationContext, target?: string) => {
+    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
+    const ticket = ++contextRequest.current;
+    const capturedOwner = alertOwner;
+    setContextNavigationError(null);
+    try {
+      const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) });
+      if (!capturedOwner.active || ticket !== contextRequest.current) return false;
+      return navigation.current?.navigate(patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context)) ?? false;
+    } catch {
+      if (capturedOwner.active && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
+      return false;
+    }
+  };
   const setTab = (next: Tab) => goTo(next);
   const setTreatmentSubTab = (next: TreatmentSubTab) => goTo(next);
   // Optional specialty callbacks open canonical workspaces only; they do not select or add work.
   const endoNavigation = {
     onNavigationGuardChange: trackEndoGuard,
-    onOpenToday: () => goTo("today"),
-    onOpenPlans: () => goTo("plans"),
-    onOpenAccount: summary?.canSeeFinancial ? () => goTo("account") : undefined,
+    context: clinicalContext.context,
+    onContextChange: (context: ClinicalNavigationContext) => openClinicalContext(context, "endo"),
+    onOpenToday: (context: ClinicalNavigationContext) => openClinicalContext(context, "today"),
+    onOpenPlans: (context: ClinicalNavigationContext) => openClinicalContext(context, "plans"),
+    onOpenAccount: summary?.canSeeFinancial ? (context: ClinicalNavigationContext) => openClinicalContext(context, "account") : undefined,
   };
   const [editing, setEditing] = useState(false);
 
@@ -994,12 +1026,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number; clinicalProgress?: ClinicalProgressView }]]
                 : []
             ).map(([currency, bucket]) => (
-              <p key={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
+              <p key={currency} data-testid="patient-account-currency-banner" data-currency={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
                 bucket.balanceMinor > 0
                   ? "border-amber-200 bg-amber-50 text-amber-800"
                   : "border-emerald-200 bg-emerald-50 text-emerald-800"
               }`}>
-                {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
+                {`رصيد الحساب (${CURRENCY_LABEL[currency]}): ${formatMoney(bucket.balanceMinor, currency)}`}
+                {bucket.balanceMinor === 0 ? " · لا مبلغ مستحق بهذه العملة" : ""}
                 {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · المتبقي من الاتفاق: ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
                 {bucket.clinicalProgress?.historicalItems
                   ? <> · <HistoricalClinicalNote progress={bucket.clinicalProgress} currency={currency} /></>
@@ -1108,7 +1141,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
       {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
-      {tab === "summary" ? (
+      {contextNavigationError ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">{contextNavigationError}</p> : null}
+      {!clinicalContext.ready && (tab === "treatment" || tab === "today") ? (
+        <div role={clinicalContext.error ? "alert" : "status"} data-testid="clinical-context-state" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
+          {clinicalContext.error ?? "جارٍ التحقق من الحالة والبند المقصودين…"}
+          {clinicalContext.error ? <button type="button" className="ms-2 min-h-11 underline" onClick={() => navigation.current?.navigate({ tab: "treatment", sub: "cases" })}>اختيار حالة من ملف المريض</button> : null}
+        </div>
+      ) : tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
@@ -1218,7 +1257,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "plans" && (
             <section aria-label="خطة العلاج">
-              <PatientPlans patientId={patient.id} />
+              <PatientPlans patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} onNavigationGuardChange={trackPlansGuard} />
             </section>
           )}
 
@@ -1227,7 +1266,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
+              <PatientOrtho patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 
@@ -1252,11 +1291,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "cases" && (
             <section aria-label="الحالات التخصصية وقائمة المشاكل">
-              <PatientCases patientId={patient.id} canWrite={session?.role === "doctor" || admin}
+              <PatientCases patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} canWrite={session?.role === "doctor" || admin}
                 onNavigationGuardChange={trackCasesGuard}
-                onOpenOrtho={() => {
+                onOpenOrtho={(context) => {
                   if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
-                  return goTo("ortho");
+                  return openClinicalContext(context, "ortho");
                 }} />
             </section>
           )}
@@ -1281,7 +1320,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           )}
         </div>
       ) : tab === "today" ? (
-        checkoutVisitRequest === "invalid" ? (
+        clinicalContext.context?.visitId !== undefined && clinicalContext.context.visitId !== summary?.openVisit?.id ? (
+          <section aria-label="الزيارة المحددة" data-testid="clinical-context-visit">
+            <p className="mb-2 text-sm font-bold">الزيارة المحددة #{clinicalContext.context.visitId}</p>
+            <ClinicalVisit visitId={clinicalContext.context.visitId} expectedPatientId={patient.id} onNavigationGuardChange={trackClinicalGuard} />
+          </section>
+        ) : checkoutVisitRequest === "invalid" ? (
           <section id="requested-visit-checkout" role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
             رابط تحصيل الزيارة غير صالح. ارجع إلى قائمة التوقيعات واختر الزيارة من جديد.
             <a href="/" className="mt-2 block underline">العودة إلى الاستقبال</a>
@@ -1307,7 +1351,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : tab === "account" ? (
         <>
-          <PatientLedger patientId={patient.id} onClinicalChange={refreshWorkflow} />
+          {clinicalContext.ready ? <TreatmentFinancialContext key={contextAuthority} authorityKey={contextAuthority} patientId={patient.id} canView={!!session && canViewMoney(session.role)}
+            planId={clinicalContext.context?.planId} planItemId={clinicalContext.context?.planItemId} clinicalCaseId={clinicalContext.context?.clinicalCaseId} orthoCaseId={clinicalContext.context?.orthoCaseId}
+            onOpenClinicalContext={openClinicalContext} /> : null}
+          <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} />
           <LegacyHistory patientId={patient.id} />
         </>
       ) : (

@@ -1,3 +1,4 @@
+import { clinicalCaseCompatibility, planItemClinicalScope, type ClinicalCaseRefusal } from "./clinical-case-linkage";
 import { caseSiteOverlaps, validateLineSite, SITE_SCOPE_LABEL, type LineSite, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
 import { historicalClinicalProgress, combineClinicalProgress, type ClinicalProgressView } from "./historical-clinical-projection";
@@ -16262,25 +16263,38 @@ async function orthoAdjustmentBillingClass(
 async function visitOrthoContext(patientId: number | null, visitId: number): Promise<VisitOrtho | null> {
   if (!patientId) return null;
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const open = await openOrthoCaseFor(patientId, today);
-  if (!open) return null;
-  const last = open.adjustments[0] ?? null;
-  const visitAdjustmentId = await orthoAdjustmentForVisit(open.id, visitId);
+  const pool = getPool();
+  const { rows: [visit] } = await pool.query<{ signed_at: Date | null; arrived_at: Date; patient_id: number | null }>(
+    "SELECT signed_at, arrived_at, patient_id FROM visits WHERE id = $1", [visitId]);
+  if (!visit || (visit.patient_id !== null && visit.patient_id !== patientId)) return null;
+  const { rows: recorded } = await pool.query<{ case_id: number }>(
+    `SELECT DISTINCT a.case_id FROM ortho_adjustments a JOIN ortho_cases c ON c.id = a.case_id
+      WHERE a.visit_id = $1 AND c.patient_id = $2 ORDER BY a.case_id`, [visitId, patientId]);
+  // Corrupt/ambiguous historical evidence is not permission to choose the latest episode.
+  if (recorded.length > 1) return null;
+  const visitDay = clinicDateString(visit.arrived_at, CLINIC_TIME_ZONE);
+  const open = recorded.length === 1 ? await getOrthoCase(recorded[0].case_id, today)
+    : !visit.signed_at && visitDay === today ? await openOrthoCaseFor(patientId, today) : null;
+  if (!open || open.patientId !== patientId || (recorded.length === 0 && open.startDate > visitDay)) return null;
+  const recordedAdjustment = recorded.length === 1 ? open.adjustments.find((entry) => entry.visitId === visitId) : undefined;
+  if (recorded.length === 1 && !recordedAdjustment) return null;
+  const last = recordedAdjustment ?? open.adjustments[0] ?? null;
+  const visitAdjustmentId = recordedAdjustment?.id ?? null;
   return {
     caseId: open.id,
     appliance: open.appliance,
-    phase: open.phase,
+    phase: recordedAdjustment?.phase ?? open.phase,
     slot: open.slot,
-    upperWire: open.upperWire,
-    lowerWire: open.lowerWire,
+    upperWire: recordedAdjustment ? recordedAdjustment.upperWire : open.upperWire,
+    lowerWire: recordedAdjustment ? recordedAdjustment.lowerWire : open.lowerWire,
     lastAdjustment: last?.doneOn ?? null,
     daysSinceLast: open.progress.daysSinceLast,
     lastDone: last?.done ?? null,
     elastics: last?.elastics ?? null,
     // حالةٌ سابقة بلا شدّة بعد: مطاطاتها من اللقطة.
     elasticNote: last ? last.elasticNote : open.elastics,
-    suggestedUpper: nextWire(open.slot, open.upperWire)?.code ?? null,
-    suggestedLower: nextWire(open.slot, open.lowerWire)?.code ?? null,
+    suggestedUpper: visit.signed_at ? null : nextWire(open.slot, open.upperWire)?.code ?? null,
+    suggestedLower: visit.signed_at ? null : nextWire(open.slot, open.lowerWire)?.code ?? null,
     visitAdjustmentId,
     legacyBaseline: open.baselineKind === "legacy",
     /* (P1-C) شدّة هذه الزيارة الموقّعة تُقرأ من لقطة توقيعها وقرارها — لا يعيد ربطُ الاتفاق
@@ -22484,6 +22498,7 @@ export interface CephDiagnosisRow {
 export interface CephAnalysisForCompare {
   id: number;
   patientId: number;
+  orthoCaseId?: number | null;
   documentId: number;
   phase: string;
   xrayDate: string | null;
@@ -22554,6 +22569,7 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
   return {
     id: row.id,
     patientId: row.patient_id,
+    orthoCaseId: row.ortho_case_id,
     documentId: row.document_id,
     phase: row.phase ?? "pretreatment",
     xrayDate: row.xray_date_text,
@@ -26455,19 +26471,23 @@ const SPECIALTY_CASE_SELECT = `
     LEFT JOIN parties d ON d.id = COALESCE(o.responsible_doctor_id, t.primary_doctor_id)
    WHERE o.patient_id = $1 AND NOT EXISTS (SELECT 1 FROM clinical_cases b WHERE b.ortho_case_id = o.id)`;
 
-export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<SpecialtyCaseRow>(
+async function listPatientCasesWithClient(client: Pick<DbClient, "query">, patientId: number): Promise<SpecialtyCase[]> {
+  const { rows } = await client.query<SpecialtyCaseRow>(
     `SELECT * FROM (${SPECIALTY_CASE_SELECT}) x
       ORDER BY (x.status IN ('active', 'waiting')) DESC, x.created_at DESC, x.id DESC NULLS LAST`,
     [patientId],
   );
-  const blockers = await referralBlockersByCase(getPool(), patientId);
+  const blockers = await referralBlockersByCase(client, patientId);
   return rows.map((row) => {
     const item = toSpecialtyCase(row);
     const waiting = item.id !== null ? blockers.get(item.id) : undefined;
     return waiting ? { ...item, waitingOn: waiting.labels } : item;
   });
+}
+
+export async function listPatientCases(patientId: number): Promise<SpecialtyCase[]> {
+  await ensureSchema();
+  return listPatientCasesWithClient(getPool(), patientId);
 }
 
 export async function getClinicalCase(id: number): Promise<SpecialtyCase | null> {
@@ -26536,15 +26556,26 @@ export async function createClinicalCase(input: CaseDraft & {
 
 /** انتقال الحالة: المسار المسموح وحده، والمنتهية لا تعود — والإلغاء بسببٍ مكتوب (قيد في القاعدة أيضًا). */
 export async function changeClinicalCaseStatus(input: {
-  id: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" }> {
+  id: number; expectedPatientId?: number; status: SpecialtyCaseStatus; outcome: string | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true; case: SpecialtyCase } | { ok: false; reason: "not_found" | "invalid_transition" | "ortho_managed" | "owner_changed" }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const { rows: [owner] } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM clinical_cases WHERE id = $1`, [input.id]);
+    if (!owner) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (input.expectedPatientId !== undefined && owner.patient_id !== input.expectedPatientId) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
+    }
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" }; }
     const { rows } = await client.query<{ patient_id: number; status: SpecialtyCaseStatus; title: string; ortho_case_id: number | null }>(
       `SELECT patient_id, status, title, ortho_case_id FROM clinical_cases WHERE id = $1 FOR UPDATE`, [input.id]);
     if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
+    if (rows[0].patient_id !== owner.patient_id) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
+    }
     // حالة التقويم المجسورة تُدار من وحدة التقويم (الإغلاق بمثبّته وملاحظته) — لا مصدران لحالتها.
     if (rows[0].ortho_case_id !== null) { await client.query("ROLLBACK"); return { ok: false, reason: "ortho_managed" }; }
     if (!canMoveCase(rows[0].status, input.status)) { await client.query("ROLLBACK"); return { ok: false, reason: "invalid_transition" }; }
@@ -26561,8 +26592,14 @@ export async function changeClinicalCaseStatus(input: {
       details: { الحالة: input.id, من: rows[0].status, إلى: input.status, النتيجة: input.outcome ?? "—" },
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
+    // Capture the existing canonical DTO while the authorized owner is still locked.
+    // A merge immediately after COMMIT must not substitute a newly owned response.
+    const snapshot = (await listPatientCasesWithClient(client, owner.patient_id)).find((item) => item.id === input.id);
+    if (!snapshot || snapshot.patientId !== owner.patient_id) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
+    }
     await client.query("COMMIT");
-    return { ok: true, case: (await getClinicalCase(input.id)) as SpecialtyCase };
+    return { ok: true, case: snapshot };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -26735,31 +26772,48 @@ export async function getPlanItemPatient(itemId: number): Promise<number | null>
 
 /** ربط بند الخطة بحالةٍ للمريض نفسه وتحديد أولويته — الربط المالي التاريخي لا يُعاد نسبه. */
 export async function setPlanItemCase(input: {
-  itemId: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
-}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" }> {
+  itemId: number; expectedPatientId?: number; caseId: number | null; priority: number | null; actor: string; actorRole?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: "not_found" | "bad_case" | "billed_case_lock" | "signed_case_lock" | "owner_changed" | ClinicalCaseRefusal }> {
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [owner] } = await client.query<{ patient_id: number }>(
-      `SELECT t.patient_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
+    const { rows: [owner] } = await client.query<{ patient_id: number; plan_id: number }>(
+      `SELECT t.patient_id, t.id AS plan_id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1`, [input.itemId]);
     if (!owner) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
-    const { rows } = await client.query<{ patient_id: number; service_name: string; case_id: number | null; priority: number | null }>(
-      `SELECT t.patient_id, i.service_name, i.case_id, i.priority
+    // The route's authorization is bound to its reviewed patient, not a later merge target.
+    if (input.expectedPatientId !== undefined && owner.patient_id !== input.expectedPatientId) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
+    }
+    const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [owner.patient_id]);
+    // A merge may delete the source while this lock waits. Never continue without
+    // a patient lock and never acquire a newly discovered owner's lock out of order.
+    if (!patient[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" }; }
+    // Canonical order: patient, plan, item, optional Ortho bridge, clinical case.
+    // Lock the plan before reading lifecycle so concurrent cancellation cannot slip through.
+    const { rows: [plan] } = await client.query<{ patient_id: number }>(
+      `SELECT patient_id FROM treatment_plans WHERE id = $1 FOR SHARE`, [owner.plan_id]);
+    if (!plan || plan.patient_id !== owner.patient_id) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
+    }
+    const { rows } = await client.query<{
+      patient_id: number; plan_id: number; service_name: string; case_id: number | null; priority: number | null;
+      service_id: number | null; category: string | null; tooth_code: number | null; surfaces: string | null;
+      status: string; plan_status: string;
+    }>(
+      `SELECT t.patient_id, i.plan_id, i.service_name, i.case_id, i.priority, i.service_id, i.category,
+              i.tooth_code, i.surfaces, i.status, t.status AS plan_status
          FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id WHERE i.id = $1 FOR UPDATE OF i`, [input.itemId]);
     if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "not_found" }; }
-    if (input.caseId !== null) {
-      const { rows: owned } = await client.query(
-        `SELECT 1 FROM clinical_cases WHERE id = $1 AND patient_id = $2`, [input.caseId, rows[0].patient_id]);
-      if (!owned[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
+    if (rows[0].patient_id !== owner.patient_id || rows[0].plan_id !== owner.plan_id) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "owner_changed" };
     }
     if (input.caseId !== rows[0].case_id) {
       // Commission reads this case through the retained invoice source. Check in
       // a fresh statement AFTER the item lock: a signature that held that lock
       // may have committed its invoice while we waited. Do not filter cancelled,
       // refunded or zero-value lines: their historical attribution is retained.
-      // An included installment session has no such source and remains editable.
+      // Financial lineage remains frozen independently of clinical signature evidence.
       const { rows: [historical] } = await client.query(
         `SELECT 1 FROM legacy_treatment_agreements WHERE plan_item_id = $1 LIMIT 1`, [input.itemId]);
       if (historical) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
@@ -26769,6 +26823,49 @@ export async function setPlanItemCase(input: {
           WHERE it.plan_item_id = $1 OR (it.source_type = 'plan_item' AND it.source_id = $1)
              OR p.plan_item_id = $1 LIMIT 1`, [input.itemId]);
       if (billed[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "billed_case_lock" }; }
+      // Read only AFTER the patient serialization lock. A signer that won first
+      // has now committed; included, waived and zero-due work is equally immutable.
+      const { rows: signed } = await client.query(
+        `SELECT 1 WHERE EXISTS (
+           SELECT 1 FROM visit_procedures p JOIN visits v ON v.id = p.visit_id
+           WHERE p.plan_item_id = $1 AND v.signed_at IS NOT NULL
+         ) OR EXISTS (
+           SELECT 1 FROM treatment_sessions ts JOIN visits v ON v.id = ts.visit_id
+           WHERE ts.plan_item_id = $1 AND v.signed_at IS NOT NULL
+         ) OR EXISTS (
+           SELECT 1 FROM plan_items i JOIN visits v ON v.id = i.visit_id
+           WHERE i.id = $1 AND v.signed_at IS NOT NULL
+         )`, [input.itemId]);
+      if (signed[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "signed_case_lock" }; }
+      if (rows[0].plan_status !== "active" || rows[0].status === "done" || rows[0].status === "cancelled") {
+        await client.query("ROLLBACK"); return { ok: false, reason: "closed" };
+      }
+      if (input.caseId !== null) {
+        // Read bridge identity without a case lock, then lock bridge before case,
+        // matching Ortho writers. Re-read identity after locking before using it.
+        const { rows: [identity] } = await client.query<{ ortho_case_id: number | null }>(
+          `SELECT ortho_case_id FROM clinical_cases WHERE id = $1 AND patient_id = $2`,
+          [input.caseId, rows[0].patient_id]);
+        if (!identity) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" }; }
+        let ortho: { patientId: number; status: string } | null | undefined;
+        if (identity.ortho_case_id !== null) {
+          const { rows: [bridge] } = await client.query<{ patient_id: number; status: string }>(
+            `SELECT patient_id, status FROM ortho_cases WHERE id = $1 FOR SHARE`, [identity.ortho_case_id]);
+          ortho = bridge ? { patientId: bridge.patient_id, status: bridge.status } : null;
+        }
+        const { rows: [target] } = await client.query<{
+          patient_id: number; specialty: string; status: string; site: string | null; ortho_case_id: number | null;
+        }>(`SELECT patient_id, specialty, status, site, ortho_case_id FROM clinical_cases WHERE id = $1 FOR SHARE`, [input.caseId]);
+        if (!target || target.patient_id !== rows[0].patient_id || target.ortho_case_id !== identity.ortho_case_id) {
+          await client.query("ROLLBACK"); return { ok: false, reason: "bad_case" };
+        }
+        const scope = planItemClinicalScope({ serviceId: rows[0].service_id, category: rows[0].category,
+          toothCode: rows[0].tooth_code, surfaces: rows[0].surfaces });
+        const refusal = scope ? clinicalCaseCompatibility({ patientId: rows[0].patient_id, ...scope,
+          target: { patientId: target.patient_id, specialty: target.specialty, status: target.status, site: target.site, ortho },
+        }) : "scope_unknown";
+        if (refusal) { await client.query("ROLLBACK"); return { ok: false, reason: refusal }; }
+      }
     }
     await client.query(`UPDATE plan_items SET case_id = $2::int, priority = $3::smallint WHERE id = $1`,
       [input.itemId, input.caseId, input.priority]);

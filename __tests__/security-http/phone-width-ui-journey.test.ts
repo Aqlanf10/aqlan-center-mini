@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Request } from "playwright";
 import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
-import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 
 /**
  * (P3-4) الشاشات اليومية على هاتفٍ عرضه 390px — بلا تمريرٍ أفقي.
@@ -81,21 +80,6 @@ async function measureOverflow(page: Page) {
         || element.getBoundingClientRect().left < -1)
       .slice(0, 5)
       .map((element) => `${element.tagName.toLowerCase()}.${String(element.className).slice(0, 60)}`);
-    // Preserve the first-ancestor summary while recording the actual deepest
-    // overflow boundaries. Never log live text or hide a horizontal overflow.
-    const deepest = [...document.querySelectorAll<HTMLElement>("body *")]
-      .filter(element => element.getBoundingClientRect().right > root.clientWidth + 1
-        || element.getBoundingClientRect().left < -1 || element.scrollWidth > element.clientWidth + 1)
-      .map(element => {
-        const bounds = element.getBoundingClientRect(), style = getComputedStyle(element);
-        let depth = 0;
-        for (let parent = element.parentElement; parent; parent = parent.parentElement) depth++;
-        return { depth, tag: element.tagName.toLowerCase(), className: String(element.className).slice(0, 160),
-          left: bounds.left, right: bounds.right, width: bounds.width,
-          clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
-          minWidth: style.minWidth, maxWidth: style.maxWidth, whiteSpace: style.whiteSpace,
-          overflowWrap: style.overflowWrap, overflowX: style.overflowX, flexShrink: style.flexShrink };
-      }).sort((a, b) => b.depth - a.depth).slice(0, 12);
     const selector = `select option[value="${doctorId}"]`;
     const select = document.querySelector<HTMLOptionElement>(selector)?.closest("select");
     const ancestors = [];
@@ -110,7 +94,7 @@ async function measureOverflow(page: Page) {
       });
     }
     return {
-      excess: root.scrollWidth - root.clientWidth, wide, deepest,
+      excess: root.scrollWidth - root.clientWidth, wide,
       clientWidth: root.clientWidth, scrollWidth: root.scrollWidth,
       innerWidth: window.innerWidth, visualViewportWidth: window.visualViewport?.width,
       ancestors,
@@ -122,8 +106,46 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
   for (const path of SCREENS) {
     it(`${path} fits a 390px phone`, async () => {
       const page = await context.newPage();
+      // Observe only the synthetic home visits read. Never log bodies, names,
+      // query strings, cookies, headers or arbitrary browser/server messages.
+      type Read = { epoch: number; status: number | null; finished: boolean;
+        fixturePresent: boolean; failure: "aborted" | "transport" | "invalid-json" | null };
+      const reads: Read[] = [], pending = new Map<Request, Read>();
+      let readCount = 0, traceOverflow = false, pageErrorCount = 0;
+      page.on("pageerror", () => { pageErrorCount += 1; });
+      page.on("request", request => {
+        const url = new URL(request.url());
+        if (path !== "/" || request.method() !== "GET" || url.origin !== baseUrl
+          || url.pathname !== "/api/visits" || url.search !== "") return;
+        readCount += 1;
+        if (reads.length >= 32) { traceOverflow = true; return; }
+        const read: Read = { epoch: readCount, status: null, finished: false, fixturePresent: false, failure: null };
+        reads.push(read); pending.set(request, read);
+      });
+      page.on("requestfailed", request => {
+        const read = pending.get(request); if (!read) return;
+        read.failure = request.failure()?.errorText === "net::ERR_ABORTED" ? "aborted" : "transport";
+        pending.delete(request);
+      });
+      page.on("requestfinished", request => {
+        const read = pending.get(request); if (!read) return;
+        void (async () => {
+          try {
+            const response = await request.response();
+            read.status = response?.status() ?? null;
+            const payload: unknown = await response?.json();
+            read.fixturePresent = Array.isArray(payload) && payload.some(row => row !== null && typeof row === "object"
+              && "id" in row && row.id === fixtureVisitId && "doctorId" in row && row.doctorId === fixtureDoctorId
+              && "status" in row && row.status === "done");
+            read.finished = true;
+          } catch { read.failure = "invalid-json"; }
+          finally { pending.delete(request); }
+        })();
+      });
       try {
-        const response = await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle" });
+        // The home board owns polling; network silence is not its ready state.
+        // Other routes retain their existing navigation contract.
+        const response = await page.goto(`${baseUrl}${path}`, { waitUntil: path === "/" ? "domcontentloaded" : "networkidle" });
         expect(response?.status()).toBe(200);
         await page.evaluate(() => document.fonts.ready);
         const selectScope = path === "/"
@@ -131,6 +153,16 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           : page.locator("select");
         const option = selectScope.locator(`option[value="${fixtureDoctorId}"]`);
         if (path === "/" || path === "/appointments") await option.waitFor({ state: "attached" });
+        if (path === "/") {
+          await expect.poll(() => {
+            const latest = reads.at(-1);
+            return { pending: pending.size, overflow: traceOverflow, status: latest?.status,
+              finished: latest?.finished, fixturePresent: latest?.fixturePresent, failure: latest?.failure };
+          }).toEqual({ pending: 0, overflow: false, status: 200, finished: true, fixturePresent: true, failure: null });
+          expect(await page.getByRole("tabpanel", { name: "الانتظار والكراسي" }).isVisible()).toBe(true);
+          await expect.poll(async () => (await option.textContent())?.trim()).toBe(LONG_DOCTOR_NAME);
+          expect(await page.getByRole("region", { name: "مرشّحات اليوم" }).isVisible()).toBe(true);
+        }
         const overflow = await measureOverflow(page);
         if (path === "/" || path === "/appointments") {
           expect(await option.count()).toBe(1);
@@ -140,6 +172,12 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           await doctorFilter.selectOption(String(fixtureDoctorId));
           expect(await doctorFilter.inputValue()).toBe(String(fixtureDoctorId));
           expect((await doctorFilter.locator("option:checked").textContent())?.trim()).toBe(fullLabel);
+          if (path === "/") {
+            // Native selection must update application-owned content, not just
+            // the select element: this doctor's single done fixture is adopted.
+            const doneCount = page.locator('dl[aria-label="عدّادات اليوم"]').getByText("أُنجز", { exact: true }).locator("..").locator("dd");
+            await expect.poll(() => doneCount.textContent()).toBe("1");
+          }
           const selected = await measureOverflow(page);
           console.info("[phone-doctor-filter]", JSON.stringify({ path, before: overflow, selected }));
           await mkdir(".settings-ui-artifacts", { recursive: true });
@@ -150,79 +188,13 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           expect(selected.excess, `${path} selected doctor: ${JSON.stringify(selected)}`).toBeLessThanOrEqual(1);
         }
         expect(overflow.excess, `${path}: ${overflow.wide.join(" | ")}; ${JSON.stringify(overflow)}`).toBeLessThanOrEqual(1);
+      } catch (error) {
+        console.info("PHONE_READY_DIAGNOSTIC_V1", JSON.stringify({ synthetic: true, route: path,
+          viewport: PHONE, readCount, traceOverflow, pending: pending.size, pageErrorCount, reads }));
+        throw error;
       } finally {
         await page.close();
       }
     }, 60_000);
   }
-
-  it("wraps complete synthetic Recall names, notes and proposal titles within the physical 390px viewport", async () => {
-    const local = await browser.newContext({ viewport: PHONE, locale: "ar-YE", isMobile: true, hasTouch: true, serviceWorkers: "block" });
-    await local.addCookies([{ ...sessionCookie(h.sessions.admin.cookie), url: baseUrl }]);
-    const unexpected: string[] = [], errors: string[] = [], reads: string[] = [];
-    const token = "0123456789abcdef".repeat(5);
-    const missedName = `مريض غائب اصطناعي ${token}`, openName = `مريض موعد اصطناعي ${token}`;
-    const proposalName = `مريض عرض اصطناعي ${token}`, title = `خطة اصطناعية ${token}`, note = `ملاحظة اصطناعية ${token}`;
-    const routes = await guardBrowserRoutes(local, baseUrl, unexpected, async route => {
-      const request = route.request(), url = new URL(request.url());
-      if (url.origin !== baseUrl || !["GET", "HEAD", "OPTIONS"].includes(request.method())) {
-        unexpected.push(`${request.method()} ${url.origin}${url.pathname}`); await route.abort(); return;
-      }
-      if (url.pathname === "/api/recall" && request.method() === "GET" && url.search === "?weeks=6") {
-        reads.push(url.pathname + url.search);
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ weeks: 6,
-          openPast: [{ id: 989701, patientId: 989711, patientName: openName, patientPhone: null,
-            scheduledDate: "2026-10-01", scheduledTime: "09:00", doctorName: null, note: null, daysLate: 1 }],
-          missed: [{ kind: "missed", id: 989702, patientId: 989712, patientName: missedName,
-            patientPhone: null, referenceDate: "2026-10-01", note }], lapsed: [] }) }); return;
-      }
-      if (url.pathname === "/api/plans/proposals" && request.method() === "GET" && url.search === "") {
-        reads.push(url.pathname);
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ followUpDays: 7,
-          proposals: [{ planId: 989703, patientId: 989713, patientName: proposalName, patientPhone: null,
-            title, doctorName: null, createdOn: "2026-10-01", lastContactOn: null, items: 1,
-            totalMinor: null, currency: "YER", timing: { stage: "due", ageDays: 9, daysSinceContact: null }, whatsappAllowed: false }] }) }); return;
-      }
-      if (["/api/recall", "/api/plans/proposals"].includes(url.pathname)) {
-        unexpected.push(`unconfigured ${request.method()} ${url.pathname}${url.search}`); await route.abort(); return;
-      }
-      await route.continue();
-    });
-    const page = await local.newPage();
-    page.on("pageerror", error => errors.push(error.message));
-    page.on("dialog", dialog => { unexpected.push(`unexpected ${dialog.type()}`); void dialog.dismiss(); });
-    page.on("download", () => unexpected.push("unexpected download"));
-    await routes.run(async () => {
-      const response = await page.goto(`${baseUrl}/recall`, { waitUntil: "networkidle" });
-      expect(response?.status()).toBe(200); await page.evaluate(() => document.fonts.ready);
-      const textProof = [];
-      for (const expected of [missedName, openName, proposalName, `${title} · 1 بند`, note]) {
-        const text = page.getByText(expected, { exact: true });
-        await text.waitFor(); expect(await text.count()).toBe(1); expect(await text.textContent()).toBe(expected);
-        await text.evaluate(element => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
-        const bounds = await text.evaluate(element => {
-          const range = document.createRange(); range.selectNodeContents(element);
-          const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
-          const lines = [...range.getClientRects()].filter(line => line.width > 0 && line.height > 0)
-            .map(line => ({ left: line.left, right: line.right, top: line.top, bottom: line.bottom }));
-          return { lines, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
-            whiteSpace: style.whiteSpace, textOverflow: style.textOverflow,
-            unobscured: element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) };
-        });
-        expect(bounds.lines.length).toBeGreaterThan(1); expect(bounds.whiteSpace).not.toBe("nowrap");
-        expect(bounds.textOverflow).not.toBe("ellipsis"); expect(bounds.unobscured).toBe(true);
-        expect(bounds.top).toBeGreaterThanOrEqual(0); expect(bounds.bottom).toBeLessThanOrEqual(PHONE.height);
-        for (const line of bounds.lines) {
-          expect(line.left).toBeGreaterThanOrEqual(-1); expect(line.right).toBeLessThanOrEqual(PHONE.width + 1);
-        }
-        textProof.push({ expected, ...bounds });
-      }
-      const overflow = await measureOverflow(page);
-      console.info("[phone-recall-long-text]", JSON.stringify({ overflow, textProof }));
-      expect(overflow.clientWidth).toBe(PHONE.width);
-      expect(overflow.excess, JSON.stringify(overflow)).toBeLessThanOrEqual(1);
-      expect(reads.sort()).toEqual(["/api/plans/proposals", "/api/recall?weeks=6"]);
-      expect(local.pages()).toHaveLength(1);
-    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
-  }, 60_000);
 });

@@ -46,10 +46,6 @@ const USD_SEQ_B_PLAN = "اتفاق دولاري — الزيارة المتتا�
 /** زيارة مزيج العملات — تُنشأ في الاختبار د ويُفحص توقيعها المرفوض بعده. */
 let mixedVisitId = 0;
 
-/** عدّادٌ تنازلي للطوابع — كل زيارةٍ تُبنى بترقيمٍ أحدث، والزيارة التي يبدؤها
-    المستخدم من الشاشة (بلا إزاحة) تصبح الأحدث جميعًا. */
-let visitClock = 0;
-
 /* مريضنا الخاص لرحلات هذا الملف وحده: قاعدة الجولة واحدة مشتركة بين ملفات
    الاختبار كلها، وسجل الدفعات append-only بمفتاح قاعدة البيانات (لا حذف
    عاديًا إطلاقًا) — فأي مريض مشترك يرث أرصدة الملفات الأدنى ترتيبًا ولا
@@ -581,14 +577,14 @@ async function linkedVisit(planTitle: string): Promise<number> {
 async function createVisit(
   procedures: { planItem: number; unitMinor: number }[],
 ): Promise<number> {
-  /* إزاحةٌ إلى الماضي تتناقص كل إنشاء — فكل زيارةٍ أحدث من سابقتها، وزيارةُ
-     الشاشة اللاحقة (بلا إزاحة) هي الأحدث جميعًا: الصفحة تفتحها. */
+  // This patient is private to this suite: actual creation order makes each visit
+  // newest. Backdating by 300 seconds can move it across clinic midnight.
   // (DOCATTR-1) التوقيع يتطلب طبيبًا معالجًا — طبيبٌ خاص بهذا الاختبار، بلا مستخدم فلا يمس عزل الأطباء.
   await db.query(`INSERT INTO parties (name, kind) SELECT 'طبيب اختبار العملة', 'doctor' WHERE NOT EXISTS (SELECT 1 FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة')`);
   const { rows: [visit] } = await db.query<{ id: number }>(
     `INSERT INTO visits (patient_name, patient_id, status, arrived_at, doctor_id)
-     VALUES ($1, $2, 'waiting', NOW() - ($3 || ' seconds')::interval, (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
-    [PRIVATE_PATIENT_NAME, privatePatientId, String(300 - ++visitClock)],
+     VALUES ($1, $2, 'waiting', NOW(), (SELECT id FROM parties WHERE kind = 'doctor' AND name = 'طبيب اختبار العملة' LIMIT 1)) RETURNING id`,
+    [PRIVATE_PATIENT_NAME, privatePatientId],
   );
   for (const line of procedures) {
     await db.query(

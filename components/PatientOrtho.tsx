@@ -20,6 +20,9 @@ import {
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
+import { canViewMoney } from "@/lib/roles";
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import { PatientCeph } from "./PatientCeph";
 import { PatientDiagnosis } from "./PatientDiagnosis";
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
@@ -361,8 +364,10 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
+  context?: ClinicalNavigationContext;
+  onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -370,9 +375,15 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
+  const childGuards = useRef(new Map<string, () => boolean>());
+  const registerChildGuard = useCallback((key: string, guard: () => boolean) => {
+    childGuards.current.set(key, guard);
+    return () => { if (childGuards.current.get(key) === guard) childGuards.current.delete(key); };
+  }, []);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   const canLeave = useCallback(() => {
     if (!owner.active) return false;
+    for (const guard of childGuards.current.values()) if (!guard()) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
     if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
     if (drafts.some((draft) => draft.uncertain)) {
@@ -386,11 +397,11 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} registerChildGuard={registerChildGuard} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, registerChildGuard, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; registerChildGuard: (key: string, guard: () => boolean) => () => void; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -415,6 +426,10 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const mayDiscard = (key: string) => { const draft = owner.drafts.get(key); return !draft?.busy && !draft?.uncertain; };
   const setPillarForCase = (caseId: number, pillar: OrthoPillar) => {
     if (!currentView()) return;
+    if (onContextChange) {
+      onContextChange({ ...(context?.orthoCaseId === caseId ? context : {}), patientId, orthoCaseId: caseId, pillar });
+      return;
+    }
     setActivePillars((prev) => ({ ...prev, [caseId]: pillar }));
   };
 
@@ -490,7 +505,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
-  const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
+  const unsignedTodayVisitId = cases.filter((row) => context?.orthoCaseId === undefined || row.id === context.orthoCaseId).flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
   const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
   const signVisitId = (savedCaseAvailable ? saved?.visitId : null) ?? unsignedTodayVisitId;
@@ -532,8 +547,24 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
     </div>;
   }
 
+  if (context?.patientId !== undefined && context.patientId !== patientId
+    || context?.orthoCaseId !== undefined && !cases.some((row) => row.id === context.orthoCaseId)
+    || context?.clinicalCaseId !== undefined && context.orthoCaseId === undefined) {
+    return <p role="alert" data-testid="ortho-context-unavailable">الحالة المطلوبة غير متاحة في كابينة التقويم. لم يتم اختيار حالة بديلة.</p>;
+  }
+  const visibleCases = context?.orthoCaseId === undefined ? cases : cases.filter((row) => row.id === context.orthoCaseId);
   return (
     <div className="space-y-4" data-testid="patient-ortho-workspace" data-read-state="ready">
+      {onContextChange && cases.length > 0 ? <label className="flex flex-wrap items-center gap-2 text-sm">حالة التقويم
+        <select aria-label="حالة التقويم المحددة" className="min-h-11 max-w-full rounded-lg border p-2" value={context?.orthoCaseId ?? ""}
+          onChange={(event) => { if (currentView()) onContextChange({ patientId, ...(event.target.value ? { orthoCaseId: Number(event.target.value), pillar: "wires" as const } : {}) }); }}>
+          <option value="">جميع الحالات، بما فيها المغلقة</option>
+          {cases.map((row) => <option key={row.id} value={row.id}>#{row.id} · {ARCHES_LABEL[row.arches]} · {CASE_STATUS_LABEL[row.status]}</option>)}
+        </select>
+      </label> : null}
+      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
+        onOpenClinicalContext={(reference) => onContextChange?.({ ...reference, pillar: context.pillar ?? "wires" })} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -642,7 +673,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                 يمكنك إجراء وتوثيق التتبع السيفالومتري لدراسة الحالة قبل تركيب الحاصرات وفتح ملف التقويم
               </p>
             </div>
-            <PatientCeph patientId={patientId} embedded={true} />
+            <PatientCeph patientId={patientId} embedded={true} onNavigationGuardChange={(guard) => registerChildGuard("ceph:unlinked", guard)} />
           </div>
         </div>
       )}
@@ -652,14 +683,15 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
       {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
       {cases.length > 0 && (
         <ul className="space-y-4">
-          {cases.map((row) => {
+          {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? "wires";
+            const currentPillar: OrthoPillar = context?.orthoCaseId === row.id && context.pillar ? context.pillar : activePillars[row.id] ?? context?.pillar ?? "wires";
 
             return (
               <li
                 key={row.id}
+                data-testid={`ortho-case-${row.id}`}
                 className={`rounded-2xl border shadow-xs overflow-hidden transition-all ${
                   live ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
                 }`}
@@ -968,6 +1000,8 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                         <PatientCeph
                           patientId={patientId}
                           orthoCaseId={row.id}
+                          navigationContext={context?.orthoCaseId === row.id ? context : { patientId, orthoCaseId: row.id }}
+                          onNavigationGuardChange={(guard) => registerChildGuard(`ceph:${row.id}`, guard)}
                           currentPhase={row.phase}
                           embedded={true}
                         />

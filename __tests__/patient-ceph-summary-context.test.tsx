@@ -98,7 +98,11 @@ const writes = () => fetchMock.mock.calls.filter(([, init]) => init?.method === 
 const summaryHref = () => nodes(summary()).find(node => typeof node.props.href === "string")?.props.href;
 const rows = () => nodes(render()).filter(node => node.type === "tbody").flatMap(node => nodes(node).filter(child => child.type === "tr"));
 function expectSummary(id: number, scope: string, source: string) {
-  expect(summary()).toBeDefined(); expect(summaryHref()).toBe(`/ceph/${id}`);
+  expect(summary()).toBeDefined();
+  const href = new URL(String(summaryHref()), "http://clinic.test");
+  expect(href.pathname).toBe(`/ceph/${id}`);
+  expect(Object.fromEntries(href.searchParams)).toEqual({ patientId: String(PATIENT),
+    ...(props.orthoCaseId != null ? { orthoCaseId: String(props.orthoCaseId) } : {}), pillar: "diagnostics" });
   expect(text(summary())).toContain(scope); expect(text(summary())).toContain(source);
 }
 beforeEach(() => {
@@ -117,9 +121,17 @@ beforeEach(() => {
       : url === `/api/ortho?patientId=${PATIENT}` ? { cases: [{ id: CASE_A }, { id: CASE_B }] }
       : { sets: [] },
   }));
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { location });
+  const host = Object.assign(new EventTarget(), { location, confirm: vi.fn(() => false) });
+  vi.spyOn(host, "addEventListener"); vi.spyOn(host, "removeEventListener");
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", host);
 });
-afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
+afterEach(() => {
+  hooks.effects.forEach(effect => effect.cleanup?.());
+  for (const [event, listener] of vi.mocked(window.addEventListener).mock.calls) {
+    if (event === "beforeunload") expect(window.removeEventListener).toHaveBeenCalledWith(event, listener);
+  }
+  vi.unstubAllGlobals();
+});
 
 describe("PatientCeph signed summary follows the displayed scope", () => {
   it.each([CASE_B, null])("does not use a newer completed study linked to %s for case A", async orthoCaseId => {
@@ -196,7 +208,7 @@ describe("PatientCeph signed summary follows the displayed scope", () => {
     await ready(); // The rendered click intentionally discards openDraft's promise.
     expect(writes()).toHaveLength(1);
     expect(JSON.parse(writes()[0][1].body)).toMatchObject({ documentId: DOC, orthoCaseId: null, phase: "pretreatment" });
-    expect(location.href).toBe("/ceph/71");
+    expect(location.href).toBe(`/ceph/71?patientId=${PATIENT}&pillar=diagnostics`);
   });
 
   it("preserves non-embedded all-patient default even when a case is supplied", async () => {
@@ -220,7 +232,7 @@ describe("PatientCeph signed summary follows the displayed scope", () => {
     };
     select(61); click(`دراسات الحالة #${CASE_A}`); select(62);
     click("كافة دراسات المريض"); expectSummary(61, caseScope(), `مرتبطة بالحالة #${CASE_A}`);
-    expect(nodes(render()).some(node => node.props.href === `/ceph/compare?first=61&second=62&patient=${PATIENT}`)).toBe(true);
+    expect(nodes(render()).some(node => node.props.href === `/ceph/compare?first=61&second=62&patient=${PATIENT}&patientId=${PATIENT}&orthoCaseId=${CASE_A}&pillar=diagnostics`)).toBe(true);
     expect(writes()).toEqual([]);
   });
 });

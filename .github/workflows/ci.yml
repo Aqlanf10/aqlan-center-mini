@@ -250,6 +250,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
 
       - name: HTTP security integration tests
+        id: linkage_http
         run: npm run test:security-http
 
       # Exact intercepted synthetic strategy scenes and measured native bounds.
@@ -1041,5 +1042,40 @@ jobs:
             .settings-ui-artifacts/lab-status-refusal-390-bounds.json
             .settings-ui-artifacts/lab-status-refusal-1280-bounds.json
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
+      # Exact synthetic fixture PNGs only. Retain partial evidence on failures;
+      # a separate gate requires every expected PNG once its suite has started.
+      - name: Verify unified linkage evidence completeness
+        if: always() && steps.linkage_http.outcome != 'skipped' && steps.linkage_http.outcome != ''
+        env:
+          LINKAGE_HTTP_OUTCOME: ${{ steps.linkage_http.outcome }}
+        run: node scripts/verify-unified-linkage-artifacts.mjs
+
+      - name: Upload unified-linkage-ui synthetic evidence
+        if: always() && hashFiles('artifacts/unified-linkage/closed-case-diagnostics-390.png', 'artifacts/unified-linkage/closed-case-diagnostics-1280.png', 'artifacts/unified-linkage/invalid-context-390.png', 'artifacts/unified-linkage/invalid-context-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-linkage-ui
+          path: |
+            artifacts/unified-linkage/closed-case-diagnostics-390.png
+            artifacts/unified-linkage/closed-case-diagnostics-1280.png
+            artifacts/unified-linkage/invalid-context-390.png
+            artifacts/unified-linkage/invalid-context-1280.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload invoice-explicit-selection-ui synthetic evidence
+        if: always() && hashFiles('artifacts/invoice-explicit-selection/fresh-plan-390.png', 'artifacts/invoice-explicit-selection/fresh-plan-1280.png', 'artifacts/invoice-explicit-selection/exact-item-390.png', 'artifacts/invoice-explicit-selection/exact-item-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-explicit-selection-ui
+          path: |
+            artifacts/invoice-explicit-selection/fresh-plan-390.png
+            artifacts/invoice-explicit-selection/fresh-plan-1280.png
+            artifacts/invoice-explicit-selection/exact-item-390.png
+            artifacts/invoice-explicit-selection/exact-item-1280.png
           if-no-files-found: error
           retention-days: 7

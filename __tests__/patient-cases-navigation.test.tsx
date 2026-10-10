@@ -255,7 +255,11 @@ describe("PatientCases orthodontic navigation containment", () => {
       await clickHandler(shortcut)();
     }
     expect(onOpenOrtho).toHaveBeenCalledTimes(3);
-    expect(onOpenOrtho.mock.calls).toEqual([[], [], []]);
+    expect(onOpenOrtho.mock.calls).toEqual([
+      [{ patientId: 91, orthoCaseId: 71, pillar: "wires" }],
+      [{ patientId: 91, clinicalCaseId: 8, orthoCaseId: 72, pillar: "wires" }],
+      [{ patientId: 91, orthoCaseId: 73, pillar: "wires" }],
+    ]);
     expect(navigate).toHaveBeenCalledTimes(3); expect(confirmMock).not.toHaveBeenCalled();
     expect(writes()).toHaveLength(0);
     expect(contents(render().tree)).toContain("Standalone orthodontic specialty");

@@ -20,9 +20,9 @@ describe("patient navigation destinations", () => {
     expect(patientDestination("account", { tab: "treatment", sub: "endo" })).toEqual({ tab: "account", sub: "endo" });
   });
   it("only changes its consumed fields, preserving unrelated context and fragments", () => {
-    const href = patientLocationHref("https://clinic.test/patients/91?tab=endo&review=1&planId=23&tag=a&tag=b#source", { tab: "treatment", sub: "plans" });
-    expect(href).toBe("/patients/91?tab=treatment&review=1&planId=23&tag=a&tag=b&sub=plans#source");
-    expect(readPatientLocation(new URL(href, "https://clinic.test").search)).toEqual({ tab: "treatment", sub: "plans" });
+    const href = patientLocationHref("https://clinic.test/patients/91?tab=endo&review=1&planId=23&tag=a&tag=b#source", { tab: "treatment", sub: "plans", context: { planId: 23 } });
+    expect(href).toBe("/patients/91?tab=treatment&review=1&tag=a&tag=b&planId=23&sub=plans#source");
+    expect(readPatientLocation(new URL(href, "https://clinic.test").search)).toEqual({ tab: "treatment", sub: "plans", context: { planId: 23 } });
   });
 });
 
@@ -85,11 +85,14 @@ describe("guarded patient URL updates without new tab history", () => {
     expect(view).toEqual({ tab: "treatment", sub: "ortho" });
     expect(b.history.replaceState).not.toHaveBeenCalled();
   });
-  it("works without Navigation API and never installs a browser traversal blocker", () => {
+  it("works without Navigation API and disposes its same-patient popstate guard", () => {
     const b = browser(); const nav = createPatientNavigation(b.host, { onChange: vi.fn(), canLeave: () => true });
     nav.navigate({ tab: "account", sub: "endo" }); nav.navigate({ tab: "summary", sub: "endo" });
     expect(b.history.replaceState).toHaveBeenCalledTimes(2); expect(b.history.length).toBe(4);
-    expect(b.host.addEventListener).not.toHaveBeenCalled(); expect(b.history.go).not.toHaveBeenCalled();
+    expect(b.host.addEventListener).toHaveBeenCalledExactlyOnceWith("popstate", expect.any(Function));
+    const listener = vi.mocked(b.host.addEventListener).mock.calls[0][1];
+    nav.dispose(); expect(b.host.removeEventListener).toHaveBeenCalledExactlyOnceWith("popstate", listener);
+    expect(b.history.go).not.toHaveBeenCalled();
   });
   it("does not update the previous patient's URL after another page owns the browser", () => {
     const b = browser(); const onChange = vi.fn(); const canLeave = vi.fn(() => false);
