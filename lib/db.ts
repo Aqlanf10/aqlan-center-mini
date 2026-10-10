@@ -11796,31 +11796,38 @@ export function ratesFromSettings(settings: SettingsMap): RateMap {
  * (P0-2) رصيد جهةٍ بدلاء عملاتها: التزاماتها − ما سُدّد منها بلقطات السندات −
  * ما دُفع لها بلا ربطٍ بالتزام (بعملته). الإبطالات صفوفٌ سالبة فتصافي وحدها.
  */
-async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBucket[]> {
-  const { rows } = await client.query<{ currency: string; net: string }>(
-    `SELECT currency, SUM(net)::text AS net FROM (
-       SELECT b.currency, ${payableAmountSql("b")} AS net FROM payables b WHERE b.party_id = $1
+// Both the payment guard and the list use these exact signed components. Each
+// caller defines party_scope(id); no per-party loop or second balance formula.
+function partyBucketEntriesSql(): string {
+  return `
+       SELECT b.party_id, b.currency, ${payableAmountSql("b")} AS net
+         FROM payables b JOIN party_scope scope ON scope.id = b.party_id
        UNION ALL
        -- (FIA-1) رصيدٌ مقدَّم سابق عند الجهة (لنا) — بعملته، يُنقص ما علينا لها.
-       SELECT o.currency, -o.amount_minor FROM party_opening_advances o
-        WHERE o.party_id = $1 AND o.voided_at IS NULL
+       SELECT o.party_id, o.currency, -o.amount_minor
+         FROM party_opening_advances o JOIN party_scope scope ON scope.id = o.party_id
+        WHERE o.voided_at IS NULL
        UNION ALL
-       SELECT p.currency, -${settledOnPayableSql("e", "p")}
+       SELECT p.party_id, p.currency, -${settledOnPayableSql("e", "p")}
          FROM expenses e JOIN payables p ON p.id = e.payable_id
-        WHERE p.party_id = $1
+         JOIN party_scope scope ON scope.id = p.party_id
        UNION ALL
-       SELECT a.payable_currency, -a.settled_minor
+       SELECT p.party_id, a.payable_currency, -a.settled_minor
          FROM expense_payable_allocations a JOIN payables p ON p.id = a.payable_id
-        WHERE p.party_id = $1
+         JOIN party_scope scope ON scope.id = p.party_id
        UNION ALL
        -- غير المرتبط: ما لم يُوزَّع منه على التزام (سند التسوية المجمّعة يُطرح منه موزَّعه).
-       SELECT e.currency,
+       SELECT e.party_id, e.currency,
               -(e.amount_minor - COALESCE((SELECT SUM(a.paid_minor) FROM expense_payable_allocations a
                                             WHERE a.expense_id = e.id), 0))
-         FROM expenses e
-        WHERE e.party_id = $1
-          AND (e.payable_id IS NULL OR NOT EXISTS (SELECT 1 FROM payables p WHERE p.id = e.payable_id))
-     ) x GROUP BY currency`,
+         FROM expenses e JOIN party_scope scope ON scope.id = e.party_id
+        WHERE e.payable_id IS NULL OR NOT EXISTS (SELECT 1 FROM payables p WHERE p.id = e.payable_id)`;
+}
+
+async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBucket[]> {
+  const { rows } = await client.query<{ currency: string; net: string }>(
+    `WITH party_scope AS (SELECT $1::int AS id)
+     SELECT currency, SUM(net)::text AS net FROM (${partyBucketEntriesSql()}) x GROUP BY currency`,
     [partyId],
   );
   return rows.map((row) => ({
@@ -13770,17 +13777,53 @@ export async function payablesByCurrency(): Promise<{ currency: Currency; dueMin
  */
 export async function partyDueByCurrency(): Promise<{ partyId: number; name: string; kind: string; currency: Currency; dueMinor: number }[]> {
   await ensureSchema();
-  const pool = getPool();
-  const { rows } = await pool.query<{ id: number; name: string; kind: string }>(
-    `SELECT id, name, kind FROM parties WHERE kind IN ('lab', 'supplier') ORDER BY kind, name`);
-  const result: { partyId: number; name: string; kind: string; currency: Currency; dueMinor: number }[] = [];
+  return loadPartyDueByCurrency(getPool());
+}
+
+/** One current native-balance read, including inactive parties. The injected
+ * query runner lets PostgreSQL fixtures verify this exact projection without
+ * initializing or writing application tables. */
+export async function loadPartyDueByCurrency(runner: Pick<DbPool, "query">): Promise<{
+  partyId: number; name: string; kind: string; currency: Currency; dueMinor: number;
+}[]> {
+  return (await loadPartyNativeBalanceSnapshot(runner)).balancesByCurrency;
+}
+
+export interface PartyNativeBalanceSnapshot {
+  partyIdentities: { id: number; name: string; kind: string }[];
+  balancesByCurrency: { partyId: number; name: string; kind: string; currency: Currency; dueMinor: number }[];
+}
+
+export async function partyNativeBalanceSnapshot(): Promise<PartyNativeBalanceSnapshot> {
+  await ensureSchema();
+  return loadPartyNativeBalanceSnapshot(getPool());
+}
+
+/** Complete identity coverage and balances share one database snapshot. A
+ * catalogue loaded separately may only interpret an absent bucket as zero
+ * after matching this complete identity set, including no-activity parties. */
+export async function loadPartyNativeBalanceSnapshot(runner: Pick<DbPool, "query">): Promise<PartyNativeBalanceSnapshot> {
+  const { rows } = await runner.query<{
+    id: number; name: string; kind: string; balance_party_id: number | null; currency: string | null; net: string | null;
+  }>(
+    `WITH party_scope AS (SELECT id, name, kind FROM parties WHERE kind IN ('lab', 'supplier')),
+          balances AS (SELECT party_id, currency, SUM(net)::text AS net
+                        FROM (${partyBucketEntriesSql()}) x GROUP BY party_id, currency)
+     SELECT p.id, p.name, p.kind, b.party_id AS balance_party_id, b.currency, b.net
+       FROM party_scope p LEFT JOIN balances b ON b.party_id = p.id
+      ORDER BY p.kind, p.name, p.id, CASE b.currency WHEN 'YER' THEN 0 WHEN 'SAR' THEN 1 WHEN 'USD' THEN 2 ELSE 3 END`);
+  const identities = new Map<number, PartyNativeBalanceSnapshot["partyIdentities"][number]>();
+  const balancesByCurrency: PartyNativeBalanceSnapshot["balancesByCurrency"] = [];
   for (const row of rows) {
-    for (const bucket of await partyBuckets(pool as unknown as DbClient, row.id)) {
-      if (bucket.netMinor === 0) continue;
-      result.push({ partyId: row.id, name: row.name, kind: row.kind, currency: bucket.currency, dueMinor: bucket.netMinor });
-    }
+    identities.set(row.id, { id: row.id, name: row.name, kind: row.kind });
+    // No-activity identity, distinguished from an invalid real currency bucket.
+    if (row.balance_party_id === null) continue;
+    // Validate even zero-net buckets before omitting them, as partyBuckets did.
+    const currency = requireCurrency(row.currency, "رصيد جهة", `#${row.id}`);
+    const dueMinor = toMinor(row.net);
+    if (dueMinor !== 0) balancesByCurrency.push({ partyId: row.id, name: row.name, kind: row.kind, currency, dueMinor });
   }
-  return result;
+  return { partyIdentities: [...identities.values()], balancesByCurrency };
 }
 
 /**
