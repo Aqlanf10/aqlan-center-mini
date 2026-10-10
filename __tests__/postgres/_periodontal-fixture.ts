@@ -13,6 +13,7 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
     "0046_hr_tasks.sql",
     "0048_hr_contracts_attendance_leaves.sql",
     "0049_hr_payroll_disbursements.sql",
+    "0050_hr_payroll_integrity.sql",
   ];
   // 0001–0043 قاعدة main المتصلة، ثم لاحقة الموارد البشرية مع الفجوتين المعلنتين:
   // الفجوة 0044 محجوزة لفواتير #301 والفجوة 0047 محجوزة لسيفالو #319.
@@ -27,7 +28,7 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
       throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
     }
   });
-  const candidate: string | undefined = ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 45: "0044", 47: "0044" } as const)[files.length];
+  const candidate: string | undefined = ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 45: "0044", 47: "0044", 48: "0044" } as const)[files.length];
   if (!candidate) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
   return candidate;
 }

@@ -58,6 +58,7 @@ beforeAll(async () => {
     "0046_hr_tasks.sql",
     "0048_hr_contracts_attendance_leaves.sql",
     "0049_hr_payroll_disbursements.sql",
+    "0050_hr_payroll_integrity.sql",
   ]);
   await migrate(pool(), { apply: true, files: files.slice(0, 42) });
   old = await seedAgreement(pool());

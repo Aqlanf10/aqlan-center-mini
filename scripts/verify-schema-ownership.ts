@@ -214,6 +214,7 @@ function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigra
     "0046_hr_tasks.sql",
     "0048_hr_contracts_attendance_leaves.sql",
     "0049_hr_payroll_disbursements.sql",
+    "0050_hr_payroll_integrity.sql",
   ];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);

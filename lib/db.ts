@@ -59,6 +59,7 @@ import { HR_STAFF_SQL } from "./hr-schema";
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
 import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
+import { HR_PAYROLL_INTEGRITY_SQL } from "./hr-payroll-integrity-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2066,6 +2067,8 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
     /* (HR-5/HR-6) المسير والمستحقات وسندات الصرف والسياسات — جسد الهجرة 0049 حرفيًّا. */
     await getPool().query(HR_PAYROLL_SQL);
+    /* (HR-INT) سلامة المسير والصرف: لقطة الشروط، التزام العمولة، أجزاء الصرف، بصمة الطلب، العكس — جسد الهجرة 0050 حرفيًّا. */
+    await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //

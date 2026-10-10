@@ -52,11 +52,12 @@ export { BASELINE_VERSION, checksumOf, defaultMigrationsDir, loadMigrationFiles,
  * 0048–0049: هذه المرحلة لحزمة الموارد البشرية المتكاملة بتخصيص dot:
  *   0048 للعقود وجداول العمل والحضور والإجازات.
  *   0049 للمسير والمستحقات والروابط المالية وسندات الصرف.
+ * 0050: سلامة المسير والصرف (HR-INT) — رقمٌ مقترح فوق 0049، إضافي خالص، ينتظر تأكيد dot.
  * الحارس يقبل السلسلة الصريحة مع الفجوتين المعلنتين (0044 و 0047).
  */
 export const COORDINATED_MIGRATION_VERSIONS: readonly string[] = [
   ...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
-  "0045", "0046", "0048", "0049",
+  "0045", "0046", "0048", "0049", "0050",
 ];
 
 export interface AppliedMigrationRow {
