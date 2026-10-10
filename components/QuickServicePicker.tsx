@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { catalogPriceFor, type CatalogPriceState } from "@/lib/service-pricing";
 
@@ -98,7 +98,8 @@ function PickerPanel({
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  // Refresh after commit without restarting the modal's focus/listener lifetime.
+  useLayoutEffect(() => { closeRef.current = onClose; }, [onClose]);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;

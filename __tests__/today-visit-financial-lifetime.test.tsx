@@ -8,7 +8,7 @@ import type { WorkflowSummary } from "../components/patient/SummaryTab";
 import { formatMoney } from "../lib/money";
 
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
-type Frame = { slots: Slot[]; cursor: number; pending: (() => void)[] };
+type Frame = { slots: Slot[]; cursor: number; pending: (() => void)[]; layout: (() => void)[] };
 const runtime = vi.hoisted(() => ({ frame: null as Frame | null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -20,6 +20,9 @@ vi.mock("react", async (original) => {
     useRef: (initial: unknown) => { const s = slot(); if (!s.value) s.value = { current: initial }; return s.value; },
     useCallback: (fn: unknown, deps: unknown[]) => { const s = slot(); if (changed(s, deps)) { s.value = fn; s.deps = deps; } return s.value; },
     useMemo: (fn: () => unknown, deps: unknown[]) => { const s = slot(); if (changed(s, deps)) { s.value = fn(); s.deps = deps; } return s.value; },
+    useLayoutEffect: (fn: () => void | (() => void), deps?: unknown[]) => {
+      const s = slot(); if (changed(s, deps)) { s.deps = deps; runtime.frame!.layout.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); }
+    },
     useEffect: (fn: () => void | (() => void), deps?: unknown[]) => {
       const s = slot(); if (changed(s, deps)) { s.deps = deps; runtime.frame!.pending.push(() => { s.cleanup?.(); s.cleanup = fn() || undefined; }); }
     },
@@ -47,14 +50,17 @@ const walkout = (balance = 180000) => ({ visitId: 10, patientId: 1, patientName:
 const response = (body: unknown, ok = true) => ({ ok, json: async () => body });
 const turns = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
 function mount(patientId = 1) {
-  const frame: Frame = { slots: [], cursor: 0, pending: [] };
+  const frame: Frame = { slots: [], cursor: 0, pending: [], layout: [] };
   let tree: ReactElement;
   const props = { patientId, patientName: "Synthetic", base: "YER" as const, canCollect: true, visits: [],
     summary: { openVisit: { id: 10, arrivedAt: "2026-10-09T09:00:00Z", status: "in_chair", chair: 1 }, lastVisit: null, plannedVisits: [] } as unknown as WorkflowSummary,
     onVisitStarted: vi.fn(), onChanged: vi.fn() };
-  const render = () => { runtime.frame = frame; frame.cursor = 0;
+  const render = (afterLayout?: (tree: ReactElement) => void) => { runtime.frame = frame; frame.cursor = 0;
     const owner = TodayVisitTab(props) as ReactElement;
     tree = (owner.type as (p: unknown) => ReactElement)(owner.props);
+    frame.layout.splice(0).forEach((fn) => fn());
+    // React commits every layout effect before any child passive visibility report.
+    afterLayout?.(tree);
     const pending = frame.pending.splice(0); pending.forEach((fn) => fn()); return tree; };
   render();
   return { render, props, text: () => renderToStaticMarkup(render()),
@@ -151,4 +157,22 @@ describe("single visible previous-visit reference", () => {
     referenceReporter(f.render())(9); expect(referenceCardCount(f.render())).toBe(0);
     f.unmount();
   });
+  it("commits a new presentation owner before a child passive report and rejects the retired report", () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response(workflow()))));
+    const f = mount(); f.props.summary.lastVisit = previous;
+    const oldReport = referenceReporter(f.render());
+    const a = f.props.summary.openVisit!;
+    f.props.summary.openVisit = { ...a, id: 11 };
+    f.render((tree) => referenceReporter(tree)(previous.id));
+    expect(referenceCardCount(f.render())).toBe(0);
+    oldReport(null);
+    expect(referenceCardCount(f.render())).toBe(0);
+    // A→B→A is a fresh token even though the visit ID repeats.
+    f.props.summary.openVisit = a;
+    f.render((tree) => referenceReporter(tree)(previous.id));
+    oldReport(null);
+    expect(referenceCardCount(f.render())).toBe(0);
+    f.unmount();
+  });
+
 });

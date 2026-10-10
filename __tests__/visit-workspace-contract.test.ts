@@ -53,3 +53,25 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     expect(source).toContain("disabled={busy || Boolean(signatureBlock)}");
   });
 });
+
+
+describe("visit picker and reference ownership lint regressions", () => {
+  it("updates the latest close callback only after commit without resetting focus lifetime", () => {
+    const picker = readFileSync("components/QuickServicePicker.tsx", "utf8");
+    expect(picker).toMatch(/useLayoutEffect\(\(\) => \{ closeRef\.current = onClose; \}, \[onClose\]\)/);
+    expect(picker.match(/closeRef\.current = onClose/g)).toHaveLength(1);
+    expect(picker).toContain("closeRef.current()");
+    // The original mount-scoped timer/listener cleanup and focus return remain.
+    expect(picker).toContain('window.clearTimeout(timer); window.removeEventListener("keydown", onKey);');
+    expect(picker).toContain("if (previous?.isConnected) previous.focus();");
+  });
+  it("gives the presentation token explicit dependencies while retaining identity-based retirement", () => {
+    const today = readFileSync("components/patient/TodayVisitTab.tsx", "utf8");
+    expect(today).toContain("visitId: openVisit?.id ?? null, requestedCheckoutVisitId,");
+    expect(today).toContain("}), [openVisit?.id, requestedCheckoutVisitId]);");
+    expect(today).toMatch(/useLayoutEffect\(\(\) => \{\s*livePreviousReferenceOwner\.current = previousReferenceOwner;\s*\}, \[previousReferenceOwner\]\)/);
+    expect(today.match(/livePreviousReferenceOwner\.current = previousReferenceOwner/g)).toHaveLength(1);
+    expect(today).toContain("livePreviousReferenceOwner.current !== previousReferenceOwner");
+    expect(today).toContain("previousReference?.owner === previousReferenceOwner");
+  });
+});

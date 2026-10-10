@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
-import { CONDITION_LABEL, isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
+import { isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
 import { LAB_STATUS_LABEL, type LabOrderStatus } from "@/lib/lab";
 import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";

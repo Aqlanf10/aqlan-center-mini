@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency,
 } from "@/lib/money";
@@ -180,9 +180,15 @@ function OwnedTodayVisitTab({
   const openVisit = summary ? summary.openVisit : retainedOpenVisit ?? null;
   // This only deduplicates a reference actually rendered by the loaded editor.
   // A new token retires late A→B→A callbacks without touching checkout ownership.
-  const previousReferenceOwner = useMemo(() => ({}), [openVisit?.id, requestedCheckoutVisitId]);
+  const previousReferenceOwner = useMemo(() => ({
+    visitId: openVisit?.id ?? null, requestedCheckoutVisitId,
+  }), [openVisit?.id, requestedCheckoutVisitId]);
   const livePreviousReferenceOwner = useRef(previousReferenceOwner);
-  livePreviousReferenceOwner.current = previousReferenceOwner;
+  // Commit the presentation owner before the child's passive visibility report.
+  // An abandoned render must not retire the currently visible owner's callback.
+  useLayoutEffect(() => {
+    livePreviousReferenceOwner.current = previousReferenceOwner;
+  }, [previousReferenceOwner]);
   const [previousReference, setPreviousReference] = useState<{ owner: typeof previousReferenceOwner; id: number } | null>(null);
   const onPreviousVisitReferenceChange = useCallback((id: number | null) => {
     if (!mounted.current || livePreviousReferenceOwner.current !== previousReferenceOwner) return;
