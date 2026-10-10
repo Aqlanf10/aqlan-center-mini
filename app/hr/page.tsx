@@ -30,7 +30,7 @@ export default function HrPage() {
     { id: "tasks" as HrTab, label: "المهام", icon: "✓", visible: true },
     { id: "staff" as HrTab, label: "الطاقم", icon: "👥", visible: admin },
     { id: "contracts" as HrTab, label: "العقود", icon: "📄", visible: admin },
-    { id: "attendance" as HrTab, label: "الدوام والحضور", icon: "⏱️", visible: true },
+    { id: "attendance" as HrTab, label: "الدوام والحضور", icon: "⏱️", visible: admin || session?.role === "reception" },
     { id: "leaves" as HrTab, label: "الإجازات", icon: "🌴", visible: true },
     { id: "payroll" as HrTab, label: "المسير والصرف", icon: "💰", visible: admin },
     { id: "reports" as HrTab, label: "التقارير", icon: "📊", visible: admin },

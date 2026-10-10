@@ -11952,6 +11952,20 @@ export async function recordExpenseInTx(
     if (hrClaim.rows.length && !hrClaim.rows.some(row=>Number(row.id)===input.hrPayrollItemId)) return {id:null,reason:"hr_payroll_settlement_required",quote:null};
   }
   if (input.category === "commission" && partyKind === "doctor" && partyId !== null) {
+    // Old approved claims have no reliable component linkage or immutable terms.
+    // Match only structural identities; historical amounts must be reconciled explicitly.
+    const legacyClaim = await client.query(`SELECT i.id
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id
+      JOIN hr_payroll_periods p ON p.id=r.period_id JOIN hr_staff s ON s.id=i.staff_id
+      LEFT JOIN users u ON u.id=s.user_id LEFT JOIN payables b ON b.id=i.payable_id
+      WHERE r.status IN ('approved','closed') AND i.currency=$2 AND i.commissions_minor>0
+        AND (i.commission_payable_id IS NULL OR COALESCE(i.pay_terms_snapshot->>'source','') NOT IN ('contract','staff_profile'))
+        AND (b.party_id=$1 OR u.party_id=$1 OR i.pay_terms_snapshot->>'doctorPartyId'=$1::text
+          OR EXISTS (SELECT 1 FROM hr_contracts c WHERE c.staff_id=i.staff_id AND c.doctor_party_id=$1
+            AND c.status IN ('approved','active','expired','terminated')
+            AND c.start_date<=p.end_date AND (c.end_date IS NULL OR c.end_date>=p.start_date)))
+      LIMIT 1`,[partyId,input.currency]);
+    if (legacyClaim.rows.length) return {id:null,reason:"hr_payroll_reconciliation_required",quote:null};
     const claims = await client.query(`SELECT i.id, (${payableAmountSql("b")}-${payableSettledTotalSql("b")}) AS remaining
       FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
       WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed')`,[partyId,input.currency]);
@@ -12150,7 +12164,7 @@ export async function voidExpense(
 }> {
   await ensureSchema();
   return withTransaction(getPool(), async (client) => {
-    const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1",[id]);
+    const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",[id]);
     if (linked.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
     return voidExpenseInTx(client,id,context);
   });

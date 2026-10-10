@@ -17,6 +17,9 @@ const denied = () =>
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "reception") {
+    return NextResponse.json({ message: "عرض الدوام والحضور وإدارته للمدير والاستقبال فقط." }, { status: 403 });
+  }
 
   const url = new URL(request.url);
   const staffIdStr = url.searchParams.get("staffId");
@@ -37,6 +40,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "reception") {
+    return NextResponse.json({ message: "عرض الدوام والحضور وإدارته للمدير والاستقبال فقط." }, { status: 403 });
+  }
 
   let body: unknown;
   try {

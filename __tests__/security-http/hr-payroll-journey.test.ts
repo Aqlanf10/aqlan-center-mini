@@ -132,3 +132,13 @@ it("actual attendance and leave APIs preserve raw events, pending decisions and 
  }finally{await page.close();}
  const report=await api("GET","/api/hr/reports");expect(report.status).toBe(200);expect(report.body.payrollSummaryByCurrency.find((row:any)=>row.currency==="YER")).toMatchObject({totalNetDue:204000,totalDisbursed:30000,totalRemainingPayable:174000});
 });
+it("a doctor sees personal tasks and leave without an unusable team attendance tab",async()=>{
+ const doctor=await browser.newContext({viewport:{width:390,height:844}});
+ const pair=h.sessions.doctorA.cookie.split(";")[0],split=pair.indexOf("=");await doctor.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
+ const page=await doctor.newPage();try{
+  await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
+  expect(await page.getByRole("tab",{name:"المهام",exact:false}).count()).toBe(1);
+  expect(await page.getByRole("tab",{name:"الدوام والحضور",exact:false}).count()).toBe(0);
+  expect(await page.getByRole("tab",{name:"المسير والصرف",exact:false}).count()).toBe(0);
+ }finally{await doctor.close();}
+});

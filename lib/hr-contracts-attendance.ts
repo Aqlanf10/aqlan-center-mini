@@ -1505,34 +1505,39 @@ export async function decideLeaveRequest(
   reason: string,
   session: SessionPayload,
 ): Promise<HrLeaveRequestView> {
+  if (!["approved","rejected","cancelled"].includes(decision)) throw new Error("قرار إجازة غير صالح.");
   const reqId = Number(requestId);
   return withTransaction(getPool(), async (client) => {
     const { rows: currRows } = await client.query(
       `SELECT lr.*, s.full_name as staff_name, s.user_id as staff_user_id
        FROM hr_leave_requests lr
        JOIN hr_staff s ON s.id = lr.staff_id
-       WHERE lr.id = $1 FOR UPDATE`,
-      [reqId],
+       WHERE lr.id = $1 AND ($2::boolean OR s.user_id=$3) FOR UPDATE`,
+      [reqId,session.role==="admin",session.userId],
     );
-    if (!currRows[0]) throw new Error("طلب الإجازة غير موجود.");
+    if (!currRows[0]) throw new Error(session.role==="admin"?"طلب الإجازة غير موجود.":"قرار الإجازة للمدير وحده.");
     const curr = currRows[0];
 
     // Serialize balance, overlap and decisions on the same staff row.
     await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[curr.staff_id]);
-    // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
-    if (curr.status === decision) {
-      return mapLeaveRequestRow(curr);
-    }
-
     // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
     if (decision === "approved" && curr.staff_user_id === session.userId) {
       throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
     }
 
     if (session.role !== "admin") throw new Error("قرار الإجازة للمدير وحده.");
+    // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
+    if (curr.status === decision) {
+      return mapLeaveRequestRow(curr);
+    }
+
+
     const year = Number((curr.start_date instanceof Date ? curr.start_date.toISOString() : String(curr.start_date)).slice(0,4));
 
     if (decision === "approved") {
+      const overlap = await client.query(`SELECT id FROM hr_leave_requests WHERE staff_id=$1 AND id<>$2
+        AND status IN ('pending','under_review','approved') AND start_date<=$4 AND end_date>=$3`,[curr.staff_id,reqId,curr.start_date,curr.end_date]);
+      if (overlap.rows.length) throw new Error("يوجد طلب إجازة متداخل؛ راجعه قبل الاعتماد.");
       const type = await client.query("SELECT is_paid FROM hr_leave_types WHERE code=$1",[curr.leave_type_code]);
       const balance = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[curr.staff_id,curr.leave_type_code,year]);
       const b = balance.rows[0];
