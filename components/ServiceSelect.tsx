@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import type { Currency } from "@/lib/money";
 import { formatMoney } from "@/lib/money";
+import { catalogPriceFor, type CatalogPriceInput } from "@/lib/service-pricing";
 
-export interface ServiceItem {
+export interface ServiceItem extends CatalogPriceInput {
   id: number;
   name: string;
   category: string | null;
@@ -107,6 +108,11 @@ interface ServiceSelectProps {
   onManualSelect?: () => void;
   showCategoryTabs?: boolean;
   ariaLabel?: string;
+  /** Opt-in visit catalogue: native grouped options, with a separate search field. */
+  searchable?: boolean;
+  /** Display only: use the server-projected catalogue price in this currency. */
+  catalogCurrency?: Currency;
+  disabled?: boolean;
 }
 
 /**
@@ -123,6 +129,9 @@ export function ServiceSelect({
   allowManual = false,
   showCategoryTabs = false,
   ariaLabel = "اختيار الخدمة",
+  searchable = false,
+  catalogCurrency,
+  disabled = false,
 }: ServiceSelectProps) {
   const [activeCat, setActiveCat] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -130,17 +139,6 @@ export function ServiceSelect({
   const activeServices = useMemo(() => {
     return services.filter((s) => s.isActive !== false);
   }, [services]);
-
-  // تجميع الخدمات حسب التصنيف
-  const grouped = useMemo(() => {
-    const map = new Map<string, ServiceItem[]>();
-    for (const service of activeServices) {
-      const cat = normalizeCategory(service.category);
-      if (!map.has(cat)) map.set(cat, []);
-      map.get(cat)!.push(service);
-    }
-    return Array.from(map.entries());
-  }, [activeServices]);
 
   // الخدمات المفلترة بالبحث أو التبويب
   const filteredServices = useMemo(() => {
@@ -151,10 +149,29 @@ export function ServiceSelect({
     });
   }, [activeServices, activeCat, search]);
 
+  // تجميع الخدمات حسب التصنيف
+  const grouped = useMemo(() => {
+    const map = new Map<string, ServiceItem[]>();
+    for (const service of (searchable ? filteredServices : activeServices)) {
+      const cat = normalizeCategory(service.category);
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(service);
+    }
+    return Array.from(map.entries());
+  }, [activeServices, filteredServices, searchable]);
+
   const selectedService = useMemo(() => {
     if (!value) return null;
     return services.find((s) => s.id === Number(value)) ?? null;
   }, [services, value]);
+
+  const priceLabel = (service: ServiceItem) => {
+    if (!catalogCurrency) return formatMoney(service.priceMinor, base);
+    const price = catalogPriceFor(service, catalogCurrency);
+    const labels = { provisional: "سعر مؤقت", unconfigured: "غير مُسعّر", no_rate: "لا سعر بهذه العملة" };
+    const amount = price.minor === null ? "—" : formatMoney(price.minor, catalogCurrency);
+    return price.state === "ok" ? amount : `${amount} · ${labels[price.state]}`;
+  };
 
   return (
     <div className="space-y-1.5">
@@ -170,7 +187,8 @@ export function ServiceSelect({
               <button
                 key={cat.key}
                 type="button"
-                onClick={() => setActiveCat(cat.key)}
+                disabled={disabled}
+                onClick={() => { if (!disabled) setActiveCat(cat.key); }}
                 className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-all ${
                   isSelected
                     ? "bg-navy-800 text-white shadow-xs"
@@ -185,10 +203,16 @@ export function ServiceSelect({
         </div>
       ) : null}
 
+      {searchable ? <input type="search" value={search} disabled={disabled}
+        onChange={(event) => { if (!disabled) setSearch(event.target.value); }}
+        aria-label="بحث في الخدمات" placeholder="ابحث باسم الخدمة…"
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-navy-900 outline-none focus:border-navy-800 disabled:bg-slate-50" /> : null}
       <div className="relative">
         <select
           value={value ? String(value) : ""}
+          disabled={disabled}
           onChange={(e) => {
+            if (disabled) return;
             const rawVal = e.target.value;
             if (!rawVal) {
               onChange(0, null);
@@ -196,6 +220,7 @@ export function ServiceSelect({
             }
             const id = Number(rawVal);
             const found = services.find((s) => s.id === id) ?? null;
+            if (searchable && (!found || !filteredServices.some((service) => service.id === id))) return;
             onChange(id, found);
           }}
           aria-label={ariaLabel}
@@ -207,7 +232,7 @@ export function ServiceSelect({
             <optgroup key={groupName} label={`❖ ${categoryDisplayName(groupName)}`}>
               {list.map((service) => (
                 <option key={service.id} value={service.id}>
-                  {service.name} · {formatMoney(service.priceMinor, base)}
+                  {service.name} · {priceLabel(service)}
                 </option>
               ))}
             </optgroup>
@@ -215,13 +240,15 @@ export function ServiceSelect({
         </select>
       </div>
 
+      {searchable && filteredServices.length === 0 ? <p role="status" className="text-xs text-slate-500">لا خدمة تطابق البحث.</p> : null}
+
       {selectedService ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
           <span className="font-semibold text-navy-800">
             {categoryDisplayName(normalizeCategory(selectedService.category))}
           </span>
           <span className="font-bold text-emerald-700">
-            السعر القياسي: {formatMoney(selectedService.priceMinor, base)}
+            السعر القياسي: {priceLabel(selectedService)}
           </span>
         </div>
       ) : null}

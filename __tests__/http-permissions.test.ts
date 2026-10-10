@@ -12,6 +12,7 @@ import {
 } from "@/lib/http-permissions";
 import { restrictedRouteAllowed } from "@/lib/role-routes";
 import { ROLES } from "@/lib/roles";
+import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 
 /**
  * (TD-04 / TD-REG-006) حارس مصفوفة صلاحيات HTTP — الجزء الثابت.
@@ -197,5 +198,26 @@ describe("TD-04: مطابِق المسارات وحكم الباب", () => {
   it("الأدوار المرفوضة دائمًا: متمّم القائمة، ولا شيء للفئات غير الطاقمية", () => {
     expect(rolesAlwaysDenied(["admin"], ROLES)).toEqual(["reception", "doctor", "cashier", "accountant", "assistant"]);
     expect(rolesAlwaysDenied("public", ROLES)).toEqual([]);
+  });
+});
+
+
+describe("reception handoff registration matches its existing authority boundary", () => {
+  const pattern = "/api/visits/[id]/reception-handoff";
+  const path = "/api/visits/17/reception-handoff";
+  it("registers only POST for exactly the canonical reception roles", () => {
+    const expected = ROLES.filter(role => canReadReceptionHandoff(role));
+    expect(expected).toEqual(["admin", "reception"]);
+    expect(HTTP_PERMISSIONS[pattern]).toEqual({ POST: expected });
+    expect(matchApiRoute(path)).toBe(pattern);
+    expect(apiRouteVerdict(path, "POST")).toEqual({ kind: "registered", pattern, access: expected });
+    expect(rolesAlwaysDenied(expected, ROLES)).toEqual(["doctor", "cashier", "accountant", "assistant"]);
+  });
+  it("does not register reads or unrelated write verbs and preserves OPTIONS behavior", () => {
+    for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE"]) {
+      expect(apiRouteVerdict(path, method)).toEqual({ kind: "method-not-allowed", pattern, allow: ["POST", "OPTIONS"] });
+    }
+    expect(apiRouteVerdict(path, "OPTIONS")).toEqual({ kind: "registered", pattern, access: null });
+    expect(matchApiRoute(`${path}/extra`)).toBeNull();
   });
 });

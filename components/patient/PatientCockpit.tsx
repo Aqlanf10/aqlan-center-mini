@@ -106,7 +106,7 @@ export function PatientCockpit({
           : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
         {alerts.length > 0 ? (
           <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {compact ? alerts.join(" • ") : alerts.length > 2 ? `${alerts.slice(0, 2).join(" • ")} …` : alerts.join(" • ")}
+            ⚠️ {alerts.join(" • ")}
           </span>
         ) : null}
         {(visit?.balances ?? []).map((line) => (
@@ -191,3 +191,5 @@ export function PatientCockpit({
     </div>
   );
 }
+
+

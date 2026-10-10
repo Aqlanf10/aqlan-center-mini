@@ -10,7 +10,8 @@ import {
   type Currency,
 } from "@/lib/money";
 import { CLINIC_BASE_CURRENCY } from "@/lib/money";
-import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { useMoneyAttempt } from "./useMoneyAttempt";
+import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
 
 /**
  * التحصيل الموحَّد — مكونٌ واحد ومسارٌ واحد (المواصفة §٢٦ و AC-09).
@@ -97,13 +98,7 @@ export function CollectPaymentModal({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /* (P1-1) لا سندان لتحصيلٍ واحد. مفتاح الإعادة يُولَّد لكل طلبٍ مختلف ويبقى
-     هو نفسه لكل إعادةٍ للطلب ذاته — نقرٌ مزدوج، أو انقطاع شبكة بعد أن سجّل الخادم
-     السند، أو «أعد المحاولة» بعد خطأ — فيعيد الخادم السند الأول (replay) بدل
-     سندٍ ثانٍ. تغيير المبلغ أو الهدف طلبٌ جديد بمفتاحٍ جديد. ويُمسح المفتاح بعد
-     النجاح وعند إغلاق النافذة. والـref (لا الحالة) يمنع إرسالين قبل إعادة الرسم. */
-  const attemptRef = useRef<{ body: string; key: string } | null>(null);
-  const inFlightRef = useRef(false);
+  // DOT-PF-01: the pending request outlives this modal; edits cannot replace it.
 
   /* (TD-05 owner review — Finding 1) فاتورةٌ مستهدفة سلفًا: العملة المقترحة
      عملتها، والمبلغ يُصاغ بها — فلا يفتح الشبّاك تحصيلًا أساسيًّا لفاتورةٍ
@@ -117,11 +112,14 @@ export function CollectPaymentModal({
      المفتاح نفسه مفتوحًا لا نلمس إدخال المستخدم مهما أعاد React الرسم. عند
      الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
   const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
+  const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey);
   const initializedSessionRef = useRef<string | null>(null);
+  const [initializedFor, setInitializedFor] = useState<string | null>(null);
+  const formReady = initializedFor === initializationKey;
   useEffect(() => {
     if (!isOpen) {
       initializedSessionRef.current = null;
-      attemptRef.current = null;
+      setInitializedFor(null);
       return;
     }
     if (initializedSessionRef.current === initializationKey) return;
@@ -134,15 +132,18 @@ export function CollectPaymentModal({
     setOpeningCurrency(!presetInvoice && !presetPlanId && presetOpeningCurrency ? presetOpeningCurrency : "");
     setNote("");
     setAmount(suggestedMinor && suggestedMinor > 0 ? formatAmount(suggestedMinor, initialCurrency) : "");
+    // Commit readiness with these fields. A reopened/new target must not submit
+    // the previous session's nonempty amount or currency before initialization.
+    setInitializedFor(initializationKey);
   }, [isOpen, initializationKey, initialCurrency, suggestedMinor, presetInvoice, presetOpeningCurrency, presetPlanId]);
 
   if (!isOpen) return null;
 
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
-  const submit = async () => {
-    if (busy || inFlightRef.current || !amount.trim()) return;
-    if (missingForeignTarget) {
+  const submit = async (retry = false) => {
+    if (busy || (!retry && (!formReady || !amount.trim()))) return;
+    if (!retry && missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
       return;
     }
@@ -157,30 +158,17 @@ export function CollectPaymentModal({
       method,
       note: note.trim() || undefined,
     });
-    if (attemptRef.current?.body !== body) {
-      attemptRef.current = { body, key: newIdempotencyKey("pay") };
-    }
-    const idempotencyKey = attemptRef.current.key;
-    inFlightRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-        body,
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(payload?.message ?? "تعذّر تسجيل الدفعة.");
-        return;
-      }
-      attemptRef.current = null;
-      onSuccess(payload.id as number);
+      const result = await money.run(retry ? undefined : { url: "/api/payments", body, operation: "payment" });
+      if (!result || result.kind === "busy") return;
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      onSuccess(result.acknowledgment.paymentId!);
+      money.consume(result.attempt);
     } catch {
       setError("تعذّر الاتصال بالخادم. أعد المحاولة — لن يُسجَّل السند مرتين.");
     } finally {
-      inFlightRef.current = false;
       setBusy(false);
     }
   };
@@ -209,6 +197,8 @@ export function CollectPaymentModal({
         </header>
 
         <CurrentCollectionGuidance />
+        <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
+        <fieldset disabled={!formReady || busy || money.attempt !== null} className="min-w-0">
 
         {contextLabel ? (
           <p className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-navy-900">
@@ -351,6 +341,7 @@ export function CollectPaymentModal({
           aria-label="ملاحظة"
           className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
         />
+        </fieldset>
 
         {error ? (
           <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
@@ -361,7 +352,7 @@ export function CollectPaymentModal({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !amount.trim() || missingForeignTarget}
+          disabled={!formReady || busy || money.attempt !== null || !amount.trim() || missingForeignTarget}
           className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           {busy ? "جارٍ التسجيل…" : "سجّل الدفعة واطبع السند"}
@@ -370,3 +361,4 @@ export function CollectPaymentModal({
     </div>
   );
 }
+

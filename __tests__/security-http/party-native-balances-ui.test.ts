@@ -235,8 +235,12 @@ async function assertNoAmounts(page: Page) {
   await expect.poll(() => page.getByTestId("party-native-balance").count()).toBe(0);
   await expect.poll(() => page.getByTestId("party-native-zero").count()).toBe(0);
 }
+// Business alerts belong to this financial region. Next 16.3.8 also renders
+// an accessibility route-announcer alert in a separate body-level shadow host.
+const partyAlerts = (page: Page) => page.getByTestId("party-native-balances").getByRole("alert");
 async function assertUnavailable(page: Page, expectedParties = 5) {
-  await expect.poll(() => page.getByRole("alert").filter({ hasText: "الأرصدة غير متاحة الآن" }).count()).toBe(1);
+  await expect.poll(() => partyAlerts(page).count()).toBe(1);
+  await expect.poll(() => partyAlerts(page).filter({ hasText: "الأرصدة غير متاحة الآن" }).count()).toBe(1);
   await assertNoAmounts(page);
   expect(await page.getByText("الرصيد غير متاح", { exact: true }).count()).toBe(expectedParties);
   expect(await page.getByRole("button", { name: "تحديث أرصدة الجهات", exact: true }).textContent()).toContain("إعادة المحاولة");
@@ -259,7 +263,12 @@ describe("built party list native balances", () => {
         await complete(f.page, 1, evidenceSnapshot);
         await expect.poll(() => f.page.getByTestId("party-native-balance").count()).toBe(6);
         await f.page.evaluate(() => document.fonts.ready.then(() => undefined));
-        expect(await f.page.getByRole("alert").count()).toBe(0);
+        // Keep the framework announcement intact while checking that this
+        // financial view has actually cleared its own failed-read alert.
+        const routeAnnouncer = f.page.locator("next-route-announcer").getByRole("alert");
+        await expect.poll(() => routeAnnouncer.count()).toBe(1);
+        expect(await f.page.getByTestId("party-native-balances").locator("next-route-announcer").count()).toBe(0);
+        expect(await partyAlerts(f.page).count()).toBe(0);
         expect(await f.page.getByText("الرصيد غير متاح", { exact: true }).count()).toBe(0);
         expect(await f.page.getByTestId("party-native-balances").getByText("جارٍ التحميل…", { exact: true }).count()).toBe(0);
         expect(await f.page.getByTestId("party-row-910001").getByTestId("party-native-balance").textContent()).toBe("علينا 1,234,567,890.12 $ (USD)");
@@ -375,7 +384,7 @@ describe("built party list native balances", () => {
       await expect.poll(() => f.page.getByTestId("party-native-zero").count()).toBe(5);
       expect(await f.page.getByTestId("party-native-balance").count()).toBe(0);
       expect(await f.page.getByRole("button", { name: /^(أضف|إيقاف|تفعيل)$/ }).count()).toBe(0);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await partyAlerts(f.page).count()).toBe(0);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -392,7 +401,7 @@ describe("built party list native balances", () => {
       await complete(f.page, 1, zero);
       await expect.poll(() => f.page.getByTestId("party-native-zero").count()).toBe(5);
       expect(await f.page.getByTestId("party-row-910005").getByTestId("party-native-zero").count()).toBe(1);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await partyAlerts(f.page).count()).toBe(0);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -410,14 +419,14 @@ describe("built party list native balances", () => {
       await reload(f.page, 2);
       await complete(f.page, 2, { ...zero, partyIdentities: zero.partyIdentities.filter((party) => party.id !== 910005) });
       await expect.poll(() => f.page.getByTestId("party-native-zero").count()).toBe(4);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await partyAlerts(f.page).count()).toBe(0);
 
       f.setCatalog([]);
       await reload(f.page, 3);
       await complete(f.page, 3, { ...zero, partyIdentities: [] });
       await expect.poll(() => f.page.getByText("لا جهات بعد. أضف مختبراتك وأطباءك أولًا.", { exact: true }).count()).toBe(1);
       await assertNoAmounts(f.page);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await partyAlerts(f.page).count()).toBe(0);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });
@@ -433,7 +442,7 @@ describe("built party list native balances", () => {
       await reload(f.page, 2);
       await complete(f.page, 2, zero);
       await expect.poll(() => f.page.getByTestId("party-native-zero").count()).toBe(5);
-      expect(await f.page.getByRole("alert").count()).toBe(0);
+      expect(await partyAlerts(f.page).count()).toBe(0);
       f.assertIsolated();
     } finally { await f.context.close(); }
   });

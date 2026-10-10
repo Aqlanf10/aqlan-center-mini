@@ -1,6 +1,7 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
+import { buildConsentNotePayload } from "@/lib/consent-record";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useState, useRef, useEffect } from "react";
 import {
@@ -159,15 +160,7 @@ export function ConsentModal({
       form.set("kind", "consent");
       form.set("title", `إقرار موافقة: ${template.procedureName}`);
       form.set("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-      const notePayload = {
-        templateId: template.id,
-        signatoryName: name,
-        signatoryRelation,
-        guardianRelation: guardianRelation || null,
-        procedureName: template.procedureName,
-        title: template.title,
-        textNote: `الموقع: ${name} (${signatoryRelation === "self" ? "المريض شخصياً" : `ولي الأمر: ${guardianRelation || "قريب"}`}) · ${template.title}`,
-      };
+      const notePayload = buildConsentNotePayload({ template, signatoryName: name, signatoryRelation, guardianRelation });
       form.set("note", JSON.stringify(notePayload));
 
       const response = await fetch(`/api/patients/${patientId}/documents`, {

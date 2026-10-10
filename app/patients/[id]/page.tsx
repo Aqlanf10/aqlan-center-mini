@@ -1,6 +1,8 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
+import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
+import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +51,9 @@ import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
+import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
+import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
@@ -105,12 +109,16 @@ export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: stri
   { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
-export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
+export default function PatientFilePage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = use(params);
-  return <PatientFileWorkspace key={id} id={id} />;
+  const query = searchParams ? use(searchParams) : undefined;
+  return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={readCheckoutVisitRequest(query?.checkoutVisit)} />;
 }
 
-function PatientFileWorkspace({ id }: { id: string }) {
+function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checkoutVisitRequest: CheckoutVisitRequest }) {
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -136,6 +144,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenu = useDismissibleDetails(moreOpen, setMoreOpen);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
   const alertScope = patientAlertScope(Number(id), session);
   const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
@@ -201,10 +210,16 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const orthoLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const trackCasesGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
     if (alertOwner.active) casesLeaveGuard.current = lease;
     return () => { if (casesLeaveGuard.current === lease) casesLeaveGuard.current = null; };
+  }, [alertOwner]);
+  const trackOrthoGuard = useCallback((guard: () => boolean) => {
+    const lease = { guard, owner: alertOwner };
+    if (alertOwner.active) orthoLeaveGuard.current = lease;
+    return () => { if (orthoLeaveGuard.current === lease) orthoLeaveGuard.current = null; };
   }, [alertOwner]);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
@@ -216,6 +231,8 @@ function PatientFileWorkspace({ id }: { id: string }) {
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const cases = casesLeaveGuard.current;
         if (cases?.owner.active && !cases.guard()) return false;
+        const ortho = orthoLeaveGuard.current;
+        if (ortho?.owner.active && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
@@ -469,6 +486,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
     .join("");
 
   const workflowAction = (() => {
+    if (tab === "today" && checkoutVisitRequest !== null) {
+      return typeof checkoutVisitRequest === "number" ? {
+        label: `عرض تحصيل الزيارة #${checkoutVisitRequest}`,
+        run: () => document.getElementById("requested-visit-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" }), primary: true,
+      } : null;
+    }
     if (!step) return null;
     switch (step.kind) {
       case "continue_visit":
@@ -502,6 +525,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const primaryAction = workflowAction ? { ...workflowAction, run: () => {
     if (workflowIsCurrent()) workflowAction.run();
   } } : null;
+  const DetailsHeading = compactWorkspace ? "h2" : "h1";
 
   // Clinical warnings remain visible independently of the optional details disclosure.
   const medicalAlertBanner = patient.medicalAlert ? (
@@ -557,7 +581,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
               className="h-8 w-8 shrink-0 rounded-lg object-cover" />
               : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
             <div className="min-w-0 flex-1">
-              <h1 className="break-words text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
+              <h1 className="break-words [overflow-wrap:anywhere] text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                 <button type="button" onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")} title="نسخ رقم الملف الطبي"
                   className="rounded bg-slate-100 px-1.5 font-bold text-navy-900">#{patient.patientNumber}</button>
@@ -585,6 +609,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         ) : undefined}
         safety={compactWorkspace ? <>
           <PatientFlagChips flags={patient.flags} />
+          {!vitals ? <span className="text-[11px] text-slate-500">العلامات الحيوية في تنبيه الملف: غير مسجلة</span> : null}
           {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
             <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
               className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
@@ -626,9 +651,9 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-black text-navy-900 leading-tight">
+                <DetailsHeading className="text-xl font-black text-navy-900 leading-tight">
                   {patient.fullName}
-                </h1>
+                </DetailsHeading>
 
                 {/* رقم الملف مع زر النسخ السريع */}
                 <button
@@ -809,11 +834,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
-              <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+            <details ref={moreMenu.ref} className="relative" open={moreOpen} onKeyDown={moreMenu.onKeyDown} data-testid="patient-more-actions">
+              <summary onClick={moreMenu.onSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
+                className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
-              <div className="absolute left-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div id="patient-more-actions-panel" onClick={moreMenu.onActionClick}
+                className="absolute end-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
@@ -956,13 +983,15 @@ function PatientFileWorkspace({ id }: { id: string }) {
           ? (summary.financial.byCurrency
               ? (Object.entries(summary.financial.byCurrency) as [Currency, {
                   balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number;
+                  clinicalProgress?: ClinicalProgressView;
                 }][]).filter(([, bucket]) =>
-                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0)
-              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0
+                  bucket.balanceMinor !== 0 || bucket.remainingTreatmentMinor > 0 || (bucket.agreementRemainingMinor ?? 0) > 0 || (bucket.clinicalProgress?.historicalItems ?? 0) > 0)
+              : summary.financial.balanceMinor !== 0 || summary.financial.remainingTreatmentMinor > 0 || (summary.financial.clinicalProgress?.historicalItems ?? 0) > 0
                 ? [[base, {
                     balanceMinor: summary.financial.balanceMinor,
                     remainingTreatmentMinor: summary.financial.remainingTreatmentMinor,
-                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number }]]
+                    clinicalProgress: summary.financial.clinicalProgress,
+                  }] as [Currency, { balanceMinor: number; remainingTreatmentMinor: number; agreementRemainingMinor?: number; clinicalProgress?: ClinicalProgressView }]]
                 : []
             ).map(([currency, bucket]) => (
               <p key={currency} className={`mt-3 rounded-xl border px-3 py-2 text-xs font-bold ${
@@ -972,7 +1001,9 @@ function PatientFileWorkspace({ id }: { id: string }) {
               }`}>
                 {bucket.balanceMinor !== 0 ? `الرصيد: ${formatMoney(bucket.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
                 {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · المتبقي من الاتفاق: ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
-                {bucket.remainingTreatmentMinor > 0
+                {bucket.clinicalProgress?.historicalItems
+                  ? <> · <HistoricalClinicalNote progress={bucket.clinicalProgress} currency={currency} /></>
+                  : bucket.remainingTreatmentMinor > 0
                   ? ` · باقي علاج (غير مستحق): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
                   : ""}
               </p>
@@ -1196,7 +1227,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} />
+              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 
@@ -1250,6 +1281,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
           )}
         </div>
       ) : tab === "today" ? (
+        checkoutVisitRequest === "invalid" ? (
+          <section id="requested-visit-checkout" role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+            رابط تحصيل الزيارة غير صالح. ارجع إلى قائمة التوقيعات واختر الزيارة من جديد.
+            <a href="/" className="mt-2 block underline">العودة إلى الاستقبال</a>
+          </section>
+        ) :
         <TodayVisitTab
           patientId={patient.id}
           patientName={patient.fullName}
@@ -1259,6 +1296,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
+          requestedCheckoutVisitId={checkoutVisitRequest}
           onNavigationGuardChange={trackClinicalGuard}
           onVisitStarted={() => {
             setSuccessMsg("بدأت الزيارة.");
@@ -1339,7 +1377,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
       <CollectPaymentModal
         patientId={patient.id}
         patientName={patient.fullName}
-        isOpen={showCollect}
+        isOpen={showCollect && !(tab === "today" && checkoutVisitRequest !== null)}
         onClose={() => setShowCollect(false)}
         onSuccess={() => {
           setShowCollect(false);
@@ -1810,3 +1848,5 @@ function Field({
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-navy-900 outline-none transition-colors focus:border-navy-800";
+
+

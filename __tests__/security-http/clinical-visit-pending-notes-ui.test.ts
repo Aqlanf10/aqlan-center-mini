@@ -132,7 +132,7 @@ async function fixture(automaticTreatment = false) {
     await page.goto(`${baseUrl}/visits/${visitId}`);
     await expect.poll(() => page.locator("#visit-notes textarea").count()).toBe(5);
     await expect.poll(() => noteField(page, "② التشخيص").inputValue()).toBe("Synthetic saved diagnosis");
-    await expect.poll(() => page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).locator("option").count()).toBe(3);
+    await expect.poll(() => page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).count()).toBe(1);
     await expect.poll(() => noteField(page, "③ ما نُفّذ").inputValue())
       .toBe(automaticTreatment ? "Synthetic filling — سن 11" : "Synthetic saved treatment");
     const save = page.getByRole("button", { name: "احفظ بلا توقيع", exact: true });
@@ -181,7 +181,7 @@ async function expectLock(f: Fixture, locked: boolean) {
     expect(await buttons.count()).toBeGreaterThan(0);
     expect(await buttons.evaluateAll((nodes, disabled) => nodes.every((node) => node.matches(":disabled") === disabled), locked)).toBe(true);
   }
-  const controls = f.page.locator('#visit-procedures button, #visit-procedures input, #visit-procedures select, [aria-label="مخطَّط لليوم"] button');
+  const controls = f.page.locator('#visit-procedures button, #visit-procedures input, #visit-procedures select');
   expect(await controls.count()).toBeGreaterThan(8);
   // :disabled detects native fieldset inheritance, including nested pickers.
   expect(await controls.evaluateAll((nodes, disabled) => nodes.every((node) => node.matches(":disabled") === disabled), locked)).toBe(true);
@@ -194,10 +194,11 @@ async function attemptPendingEdits(f: Fixture, expected: Notes) {
   }
   await expect(f.page.getByRole("combobox", { name: "أضف إجراءً", exact: true })
     .selectOption(String(services[1].id), { timeout: 150 })).rejects.toThrow();
+  await expect(f.page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true }).fill("Blocked search", { timeout: 150 })).rejects.toThrow();
   await expect(f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("9", { timeout: 150 })).rejects.toThrow();
   // Native activation must also respect the lock: no phrase append, procedure
   // addition/removal, currency change or second save can alter the draft.
-  await f.page.locator('#visit-notes [aria-label^="عبارات سريعة"] button, #visit-procedures button, [aria-label="مخطَّط لليوم"] button')
+  await f.page.locator('#visit-notes [aria-label^="عبارات سريعة"] button, #visit-procedures button')
     .evaluateAll((buttons) => buttons.forEach((button) => (button as HTMLButtonElement).click()));
   await f.save.evaluate((button) => (button as HTMLButtonElement).click());
   expect(await readNotes(f.page)).toEqual(expected);
@@ -218,7 +219,11 @@ describe("pending clinical note containment in the built visit page", () => {
       await expectLock(f, false);
       await fillNotes(f.page, makeNotes("Synthetic submitted"));
       const groups = f.page.locator('#visit-notes [aria-label^="عبارات سريعة"]');
-      for (const group of await groups.all()) await group.getByRole("button").first().click();
+      for (const group of await groups.all()) {
+        await group.getByRole("button", { name: "اختر عبارة محفوظة", exact: true }).click();
+        const search = group.getByRole("combobox");
+        await search.press("ArrowDown"); await search.press("Enter");
+      }
       await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("2");
       await f.page.getByRole("textbox", { name: "الأسطح", exact: true }).fill("MO");
       const submitted = await readNotes(f.page);
@@ -257,9 +262,12 @@ describe("pending clinical note containment in the built visit page", () => {
       for (const [key, label] of fields.filter(([key]) => key !== "treatmentDone")) {
         const phrase = f.page.locator(`[aria-label="عبارات سريعة — ${label}"]`).getByRole("button").first();
         await phrase.click();
+        const search = f.page.getByRole("combobox", { name: `بحث في العبارات — ${label}`, exact: true });
+        await search.press("ArrowDown"); await search.press("Enter");
         expect(await noteField(f.page, label).inputValue()).toContain(`${nextNotes[key]}، `);
       }
       await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("3");
+      await f.page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true }).fill(services[1].name);
       await f.page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).selectOption(String(services[1].id));
       expect(await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).count()).toBe(2);
       expect(await noteField(f.page, "③ ما نُفّذ").inputValue()).toBe(nextNotes.treatmentDone);

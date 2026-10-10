@@ -23,7 +23,7 @@ vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.sessio
 vi.mock("../components/ServiceSelect", () => ({ ServiceSelect: () => null }));
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
 vi.mock("../components/InvoiceCorrection", () => ({ InvoiceCorrection: () => null }));
-vi.mock("../components/ReceiptCorrection", () => ({ ReceiptCorrection: () => null }));
+vi.mock("../components/ReceiptCorrection", () => ({ ReceiptCorrection: () => null, ReceiptCorrectionTrigger: () => null }));
 vi.mock("../components/LegacyBalanceArrangementPanel", () => ({ LegacyBalanceArrangementPanel: () => null }));
 vi.mock("../components/LegacyMoneyGuidance", () => ({ OpeningBalanceGuidance: () => null }));
 vi.mock("react", async (original) => {

@@ -23,6 +23,7 @@ vi.mock("react", async (original) => {
     !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   return {
     ...react,
+    useId: () => "synthetic-phrase-field",
     useState: (initial: unknown) => {
       const index = slot(typeof initial === "function" ? initial() : initial);
       return [hooks.values[index], (value: unknown) => {
@@ -133,9 +134,14 @@ function enter(label: string, value: string) {
 }
 function nativeNoteControls(label: string) {
   const current = field(label);
-  // Field is a hook-free local component: inspect its actual native textarea
-  // and phrase buttons, rather than assuming a disabled prop reaches them.
-  const fieldTree = (current.type as (props: Record<string, unknown>) => ReactNode)(current.props);
+  // Inspect the actual new field textarea and trigger. Its local hooks are
+  // isolated from the parent harness; real combobox behavior has browser coverage.
+  const parent = { values: hooks.values, cursor: hooks.cursor, changed: hooks.changed,
+    effects: hooks.effects, memos: hooks.memos, pending: hooks.pending };
+  hooks.values = []; hooks.cursor = 0; hooks.effects = new Map(); hooks.memos = new Map(); hooks.pending = [];
+  let fieldTree: ReactNode;
+  try { fieldTree = (current.type as (props: Record<string, unknown>) => ReactNode)(current.props); }
+  finally { Object.assign(hooks, parent); }
   return elements(fieldTree).filter((node) => node.type === "textarea" || node.type === "button");
 }
 function expectNotesLocked(locked: boolean) {
@@ -338,7 +344,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     await settleSave();
     const phrase = nativeNoteControls("② التشخيص").find((node) => node.type === "button")!;
     expect(phrase.props.disabled).not.toBe(true);
-    (phrase.props.onClick as () => void)();
+    // A pick after the field-local search calls the same guarded narrative callback.
+    (field("② التشخيص").props.onPhrase as (value: string) => void)("Synthetic quick phrase");
     expect(field("② التشخيص").props.value).toBe("Synthetic submitted diagnosis، Synthetic quick phrase");
   });
 
@@ -367,8 +374,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     expect(group.props.disabled).toBe(true);
     const quantity = render().find((node) => node.props["aria-label"] === "الكمية");
     (quantity.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "3" } });
-    const picker = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (picker.props.onPick as (value: typeof service) => void)(service);
+    const picker = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (picker.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     expect(render().find((node) => node.props["aria-label"] === "الكمية").props.value).toBe(1);
     expect(elements(render().tree).filter((node) => node.props["aria-label"] === "الكمية")).toHaveLength(1);
     expect(field("③ ما نُفّذ").props.value).toBe(autoTreatment);
@@ -397,7 +404,7 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     const autoTreatment = field("③ ما نُفّذ").props.value;
     expect(String(autoTreatment)).toContain(service.name);
     const plannedGroup = () => {
-      const section = render().find((node) => node.props["aria-label"] === "مخطَّط لليوم");
+      const section = render().find((node) => node.props.id === "visit-procedures");
       return elements(section.props.children as ReactNode).find((node) => node.type === "fieldset")!;
     };
     const attemptPendingPlannedItem = () => {

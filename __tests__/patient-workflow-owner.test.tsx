@@ -115,6 +115,14 @@ function elements(node: ReactNode): Element[] {
 function words(node: ReactNode): string {
   if (Array.isArray(node)) return node.map(words).join(" ");
   if (typeof node === "string" || typeof node === "number") return String(node);
+  // The real cockpit renders these slots. Include them in this leaf mock so
+  // identity/retirement assertions inspect the visible context, not a duplicate
+  // heading from the old expanded details panel.
+  if (node && typeof node === "object" && "props" in node && (node as Element).type === "mock-cockpit") {
+    const props = (node as Element).props;
+    return ["identity", "primaryAction", "secondaryActions", "safety", "children"]
+      .map(key => words(props[key] as ReactNode)).join(" ");
+  }
   return node && typeof node === "object" && "props" in node ? words((node as Element).props.children as ReactNode) : "";
 }
 function child(tree: ReactNode, type: string): Element {
@@ -445,3 +453,4 @@ describe("real patient page workflow owner", () => {
     expect(child(current, "mock-endo").props.patientId).toBe(8);
   });
 });
+

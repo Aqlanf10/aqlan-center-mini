@@ -59,6 +59,66 @@ beforeAll(async () => {
   });
 }, 240_000);
 
+describe("DOT-PF-01 correction reconciliation", () => {
+  it("reopens a correction after a committed response was lost, even when remaining is zero", async () => {
+    const wrongId = await receipt(500, `RCU-LOST-${stamp()}`);
+    const { context, tab } = await openAccount(h.sessions.admin.cookie);
+    const requests: { key: string; body: string | null }[] = [];
+    await tab.route(`**/api/payments/${wrongId}/correct`, async (route) => {
+      requests.push({ key: route.request().headers()["idempotency-key"], body: route.request().postData() });
+      if (requests.length === 1) {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        await route.fulfill({ status: 201, contentType: "application/json", body: "{}" });
+      } else await route.continue();
+    });
+    try {
+      const payments = tab.getByRole("region", { name: "الدفعات" });
+      // Provenance also links to the original receipt from its replacement.
+      // Select the row's own print link, not a provenance reference to it.
+      const originalPrint = tab.getByRole("link", { name: "السند", exact: true })
+        .and(tab.locator(`a[href="/print/receipt/${wrongId}"]`));
+      const originalRow = payments.locator("li").filter({ has: originalPrint });
+      const correctionButton = originalRow.getByRole("button", { name: "تصحيح السند", exact: true });
+      await expect.poll(() => originalRow.count()).toBe(1);
+      await expect.poll(() => correctionButton.count()).toBe(1);
+      await correctionButton.click();
+      const editor = tab.getByRole("group", { name: /^تصحيح / });
+      await editor.getByLabel("المبلغ الصحيح").fill("50");
+      await editor.getByLabel("سبب تصحيح السند").fill("Synthetic correction retry");
+      await editor.getByRole("button", { name: "صحّح السند", exact: true }).click();
+      await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
+      await editor.getByRole("button", { name: "إلغاء", exact: true }).click();
+      // An ordinary ledger refresh can observe the committed reversal. Its
+      // zero-remaining receipt must retain access to the exact pending request.
+      await tab.getByRole("button", { name: /الملخص/ }).first().click();
+      const refreshed = tab.waitForResponse((response) => response.url().endsWith(`/api/patients/${patientId}/ledger`));
+      await tab.getByRole("button", { name: /الحساب/ }).first().click();
+      const ledger = await (await refreshed).json();
+      expect(ledger.payments).toContainEqual(expect.objectContaining({ id: wrongId, kind: "payment", amountMinor: 500 }));
+      // The canonical read includes only positive remaining amounts (HAVING > 0).
+      expect(ledger.receiptRemaining).toBeTypeOf("object");
+      expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
+      await expect.poll(() => originalRow.count()).toBe(1);
+      await expect.poll(() => correctionButton.count()).toBe(1);
+      await correctionButton.click();
+      await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
+      await tab.getByText(/وصدر بدله/).first().waitFor();
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual(requests[0]);
+      const { rows } = await db.query<{ kind: string; amount_minor: string; patient_id: number }>(
+        `SELECT kind, amount_minor::text, patient_id FROM payments
+         WHERE id = $1 OR reversal_of_id = $1 OR note = (SELECT 'بدل السند ' || receipt_number FROM payments WHERE id = $1)
+         ORDER BY id`, [wrongId]);
+      expect(rows).toEqual([
+        { kind: "payment", amount_minor: "500", patient_id: patientId },
+        { kind: "refund", amount_minor: "500", patient_id: patientId },
+        { kind: "payment", amount_minor: "50", patient_id: patientId },
+      ]);
+    } finally { await context.close(); }
+  }, 120_000);
+});
+
 afterAll(async () => {
   await browser?.close();
   await db?.end();

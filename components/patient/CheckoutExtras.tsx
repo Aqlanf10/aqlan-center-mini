@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
+import type { ReceptionHandoffStatus } from "@/lib/reception-handoff";
 import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
 import type { BillingClassification } from "@/lib/billing-classification";
+import { WALKOUT_CLASS_LABEL as CLASS_LABEL, adjustmentLabel, lineNeedsReview, walkoutNeedsReview } from "@/lib/walkout-presentation";
 import { useSession } from "../SessionProvider";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
@@ -12,17 +14,9 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { VisitWalkout, WalkoutLine } from "@/lib/db";
 
 /** (P0-G) ملخّص المغادرة كما يعيده الخادم مع ملخّصه المالي بكل عملة. */
-type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[] };
+type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[]; signedAt?: string | null; receptionHandoff?: { status: ReceptionHandoffStatus; handledReason: string | null } };
 
 /** تسميات التصنيف القانوني — المصدر في الخادم، والواجهة تعرضه فقط. */
-const CLASS_LABEL: Record<BillingClassification, { text: string; tone: string }> = {
-  NEW_BILLABLE: { text: "مستحق جديد", tone: "bg-amber-100 text-amber-900" },
-  INCLUDED: { text: "مشمول بالاتفاق", tone: "bg-sky-100 text-sky-900" },
-  LEGACY_INCLUDED: { text: "مشمول بالعلاج السابق", tone: "bg-violet-100 text-violet-900" },
-  OUTSIDE_CONTRACT: { text: "خارج العقد — قرار فوترة", tone: "bg-rose-100 text-rose-900" },
-  NO_CHARGE: { text: "بلا رسوم", tone: "bg-slate-100 text-slate-700" },
-};
-
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const integer = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 const positiveId = (value: unknown): value is number => integer(value) && value > 0;
@@ -40,6 +34,11 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
     || !billingClass(value.orthoAdjustment.billingClass) || typeof value.orthoAdjustment.pendingDecision !== "boolean")) return false;
   if (value.nextAppointment !== null && (!record(value.nextAppointment)
     || typeof value.nextAppointment.date !== "string" || typeof value.nextAppointment.time !== "string")) return false;
+  if (value.receptionHandoff !== undefined && (!record(value.receptionHandoff)
+    || typeof value.receptionHandoff.status !== "string"
+    || !["pending", "collected", "deferred", "handled"].includes(value.receptionHandoff.status)
+    || !(value.receptionHandoff.handledReason === null || typeof value.receptionHandoff.handledReason === "string")
+    || typeof value.signedAt !== "string" || !Number.isFinite(Date.parse(value.signedAt)))) return false;
   const fields = ["previousBalanceMinor", "newBillableMinor", "paymentsTodayMinor", "currentBalanceMinor", "todayRemainingMinor",
     "legacySuggestedMinor", "legacyRemainingMinor", "dueNowMinor"];
   return value.summary === undefined || (Array.isArray(value.summary)
@@ -48,7 +47,7 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
 
 /** Review evidence takes precedence over historical generic billing classification. */
 export function WalkoutLineBilling({ line }: { line: WalkoutLine }) {
-  if (line.financialReviewRequired) return (
+  if (lineNeedsReview(line)) return (
     <span role="status" data-testid="walkout-line-financial-review"
       className="rounded-full bg-amber-100 px-2 py-0.5 font-black text-amber-900">
       يحتاج مراجعة مالية — التغطية غير محسومة
@@ -77,6 +76,9 @@ export function WalkoutLineBilling({ line }: { line: WalkoutLine }) {
  */
 interface CheckoutExtrasProps {
   visitId: number;
+  expectedPatientId?: number;
+  financialVerified?: boolean;
+  financialRevision?: number;
   collected: boolean;
   suggestedDate: string | null;
   durationMinutes: number | null;
@@ -88,16 +90,16 @@ interface CheckoutExtrasProps {
 export function CheckoutExtras(props: CheckoutExtrasProps) {
   const session = useSession();
   if (!session) return null;
-  const owner = JSON.stringify([props.visitId, session.username, session.role, session.permissions ?? null]);
+  const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
   return <OwnedCheckoutExtras key={owner} {...props} />;
 }
-function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
   const walkout = walkoutRead?.visitId === visitId ? walkoutRead : null;
   const readRequest = useRef<AbortController | null>(null);
-  const financialReviewRequired = walkout?.lines.some((line) => line.financialReviewRequired) ?? false;
+  const financialReviewRequired = walkout ? walkoutNeedsReview(walkout) : false;
   const [collectLegacy, setCollectLegacy] = useState<CheckoutCurrencyLine | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -121,16 +123,17 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
       const response = await fetch(`/api/visits/${visitId}/walkout`, { cache: "no-store", signal: request.signal });
       const payload: unknown = await response.json().catch(() => null);
       if (!mounted.current || request.signal.aborted || readRequest.current !== request) return;
-      const verified = response.ok && isCheckoutWalkout(payload, visitId) ? payload : null;
+      const verified = response.ok && isCheckoutWalkout(payload, visitId)
+        && (expectedPatientId === undefined || payload.patientId === expectedPatientId) ? payload : null;
       setWalkout(verified);
-      onFinancialReadChange?.({ visitId, reviewRequired: verified ? verified.lines.some((line) => line.financialReviewRequired) : null });
+      onFinancialReadChange?.({ visitId, reviewRequired: verified ? walkoutNeedsReview(verified) : null });
     } catch { if (mounted.current && !request.signal.aborted && readRequest.current === request) setWalkout(null); }
-  }, [visitId, onFinancialReadChange]);
+  }, [visitId, expectedPatientId, onFinancialReadChange]);
 
   useEffect(() => {
     const first = setTimeout(() => { void load(); }, 0);
     return () => { clearTimeout(first); readRequest.current?.abort(); };
-  }, [load, collected]);
+  }, [load, collected, financialRevision]);
 
   const defer = async () => {
     if (busy || command.current || !mounted.current || !walkout) return;
@@ -185,8 +188,43 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
     }
   };
 
+  const completeHandoff = async () => {
+    if (busy || command.current || !mounted.current || !walkout?.patientId || !walkout.signedAt
+      || !financialVerified || walkout.receptionHandoff?.status !== "pending") return;
+    const reason = window.prompt("سبب إتمام معالجة الاستقبال (لا يسقط دين المريض):", "")?.trim() ?? "";
+    if (reason.length < 3 || reason.length > 300) {
+      setMessage({ tone: "error", text: "اكتب سبب المعالجة من 3 إلى 300 حرف." });
+      return;
+    }
+    command.current = true;
+    setBusy(true);
+    const expected = { visitId, patientId: walkout.patientId, signedAt: walkout.signedAt };
+    try {
+      const response = await fetch(`/api/visits/${visitId}/reception-handoff`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId: expected.patientId, signedAt: expected.signedAt, reason }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!mounted.current) return;
+      const accepted = response.ok && record(payload) && payload.ok === true && payload.visitId === expected.visitId
+        && payload.patientId === expected.patientId && payload.signedAt === expected.signedAt && payload.status === "handled";
+      setMessage({ tone: accepted ? "ok" : "error", text: accepted
+        ? "تمت المعالجة — تبقى الأرصدة والالتزامات المالية كما هي."
+        : "تعذّر تأكيد معالجة الزيارة. حدّث البيانات قبل إعادة المحاولة." });
+      await load();
+      if (accepted && mounted.current) onChanged();
+    } catch {
+      if (mounted.current) {
+        setMessage({ tone: "error", text: "لم يتأكد حفظ المعالجة؛ أعد تحميل الحالة قبل المحاولة." });
+        await load();
+      }
+    } finally {
+      if (mounted.current) { command.current = false; setBusy(false); }
+    }
+  };
+
   const deferred = walkout?.deferred === true;
-  const summary = walkout?.summary ?? [];
+  const summary = financialVerified ? walkout?.summary ?? [] : [];
 
   return (
     <div className="mt-3 space-y-2">
@@ -200,11 +238,7 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
               <li className="flex items-center justify-between gap-2">
                 <span className="font-bold text-slate-800">شدّة تقويم</span>
                 <span className={`rounded-full px-2 py-0.5 font-black ${CLASS_LABEL[walkout.orthoAdjustment.billingClass].tone}`}>
-                  {walkout.orthoAdjustment.pendingDecision
-                    ? "خارج العقد — قرار فوترة معلّق"
-                    : walkout.orthoAdjustment.billingClass === "NEW_BILLABLE"
-                      ? "فوتِرت بسطر «شدّة تقويم»"
-                      : `${CLASS_LABEL[walkout.orthoAdjustment.billingClass].text} · بلا رسوم جديدة`}
+                  {adjustmentLabel(walkout.orthoAdjustment)}
                 </span>
               </li>
             ) : null}
@@ -248,6 +282,16 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
         </section>
       ))}
       <div className="flex flex-wrap gap-2">
+        {walkout?.receptionHandoff?.status === "pending" && typeof walkout.signedAt === "string"
+          && Number.isFinite(Date.parse(walkout.signedAt)) ? (
+          <button type="button" onClick={() => void completeHandoff()} disabled={busy || !financialVerified}
+            title="إنهاء مهمة الاستقبال بسبب موثّق؛ لا يُسقط أي دين أو مراجعة مالية"
+            className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800 disabled:opacity-40">
+            تمت المعالجة
+          </button>
+        ) : walkout?.receptionHandoff?.status === "handled" ? (
+          <span className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900">تمت المعالجة — لا تعني سداد الرصيد{walkout.receptionHandoff.handledReason ? ` · ${walkout.receptionHandoff.handledReason}` : ""}</span>
+        ) : null}
         {!collected ? (
           deferred ? (
             <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">أُجِّل الدفع — الرصيد باقٍ على المريض</span>
@@ -290,7 +334,7 @@ function OwnedCheckoutExtras({ visitId, collected, suggestedDate, durationMinute
       ) : null}
       {walkout && !financialReviewRequired ? <p className="text-[10px] text-slate-400">بلا رسوم؟ يُعدَّل سعر الإجراء قبل التوقيع إلى صفر بسببٍ مكتوب.</p> : null}
 
-      {collectLegacy && walkout?.patientId ? (
+      {financialVerified && collectLegacy && walkout?.patientId ? (
         <CollectPaymentModal
           patientId={walkout.patientId}
           patientName={walkout.patientName}
