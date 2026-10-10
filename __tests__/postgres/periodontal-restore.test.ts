@@ -19,8 +19,9 @@ import { stagedRestore, type StagedRestoreResult } from "../../lib/restore/stagi
 import { validateBackupArchive } from "../../lib/restore/validate";
 import { tarEnd, tarHeader, tarPadding } from "../../lib/tar";
 import { openPeriodontalFixture, periodontalCandidateMigrationVersion } from "./_periodontal-fixture";
+import { assertReviewedMigrationChain, LATEST_REVIEWED_MIGRATION_VERSION } from "./_reviewed-migration-chain";
 
-// Candidate compatibility only: reviewed 0001–0040, invoice0041, optional legacy0042, and immutable-coverage0043 chains.
+// Candidate compatibility only: the complete reviewed shipped chain, preserving every real filename and checksum.
 // All candidate numbering is test-only; no shipped migration or runtime activation changes.
 // Replace ONLY the filesystem selection imported by stagedRestore. migrate,
 // migrationStatus, archive validation, replay, PostgreSQL and transactions are real.
@@ -130,11 +131,12 @@ beforeAll(async () => {
   selection.directory = path.join(directory, "candidate-migrations");
   await mkdir(selection.directory);
   const shipped = await readMigrationFiles();
+  assertReviewedMigrationChain(shipped, LATEST_REVIEWED_MIGRATION_VERSION);
   shippedFiles = shipped;
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
-  // Only exact reviewed 40/41/42/43 baselines are accepted; coverage0043 selects test-only0044.
+  // Count is the actual file count, not the highest reserved version. The reviewed
+  // 0001–0043 + 0051 chain has 44 files and selects test-only 0052 without inventing 0044–0050.
   shippedCount = shipped.length;
-  expect(shipped.map((file) => file.version)).toEqual(Array.from({ length: shippedCount }, (_, index) => String(index + 1).padStart(4, "0")));
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
@@ -224,6 +226,8 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect((await pool().query("SELECT last_value::int,is_called FROM periodontal_records_id_seq")).rows)
       .toEqual([{ last_value: Math.max(...sourceState.records.map((row) => row.id)), is_called: true }]);
     const registryBefore = (await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows;
+    expect(registryBefore.map(({ version, name, checksum, adopted }) => ({ version, name, checksum, adopted })))
+      .toEqual(candidateFiles.map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
     expect(await migrate(pool(), { apply: true, files: candidateFiles })).toMatchObject({ appliedVersions: [], alreadyUpToDate: true });
     expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     expect((await migrationStatus(pool(), candidateFiles)).consistent).toBe(true);

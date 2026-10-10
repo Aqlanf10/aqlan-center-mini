@@ -88,7 +88,7 @@ export type AuditAction =
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
-  | "diagnosis.create" | "ortho.book_next"
+  | "diagnosis.create" | "ortho.book_next" | "ortho.strategy_revision"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
@@ -303,6 +303,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
+  "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",

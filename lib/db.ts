@@ -45,6 +45,7 @@ import { PARTY_OPENING_SQL } from "./party-opening-schema";
 import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
 import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
+import { ORTHO_TREATMENT_STRATEGY_SQL } from "./ortho-treatment-strategy-schema";
 import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
@@ -2054,6 +2055,8 @@ export function ensureSchema(): Promise<void> {
     /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
     await getPool().query(LEGACY_TREATMENT_SQL);
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
+    // (ORTHO-STRATEGY) Append-only case planning history, shared with reserved migration0051.
+    await getPool().query(ORTHO_TREATMENT_STRATEGY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //

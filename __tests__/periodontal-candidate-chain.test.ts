@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { periodontalCandidateMigrationVersion } from "./postgres/_periodontal-fixture";
+import { checksumOf, loadMigrationFiles } from "../lib/migration-files";
+import { assertReviewedMigrationChain, expectedMigrationRegistry, LATEST_REVIEWED_MIGRATION_VERSION,
+  migrationFilesThrough, REVIEWED_MIGRATION_FILENAMES } from "./postgres/_reviewed-migration-chain";
 
-const baseline = () => Array.from({ length: 40 }, (_, index) => ({
-  version: String(index + 1).padStart(4, "0"), filename: `${String(index + 1).padStart(4, "0")}_baseline.sql`,
+const baseline = () => REVIEWED_MIGRATION_FILENAMES.slice(0, 40).map(filename => ({
+  version: filename.slice(0, 4), filename,
 }));
 const invoice = { version: "0041", filename: "0041_invoice_clinical_linkage.sql" };
 const legacy = { version: "0042", filename: "0042_legacy_treatment_agreements.sql" };
 
 const coverage = { version: "0043", filename: "0043_legacy_treatment_coverage.sql" };
+const strategy = { version: "0051", filename: "0051_ortho_treatment_strategy.sql" };
+const reviewed = () => [...baseline(), invoice, legacy, coverage, strategy];
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("keeps the pre-invoice baseline at test-only 0041", () => {
@@ -22,6 +27,11 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
   it("preserves immutable coverage0043 and selects only test-only0044", () => {
     expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage])).toBe("0044");
   });
+  it("preserves the reserved-number gap and places the test-only candidate after 0051", () => {
+    expect(periodontalCandidateMigrationVersion(reviewed())).toBe("0052");
+    expect(reviewed()).toHaveLength(44);
+    expect(reviewed().slice(40).map(file => file.version)).toEqual(["0041", "0042", "0043", "0051"]);
+  });
   it("does not weaken gap, ordering, suffix or future-baseline guards", () => {
     expect(() => periodontalCandidateMigrationVersion(baseline().slice(1))).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, coverage])).toThrow();
@@ -32,5 +42,65 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(() => periodontalCandidateMigrationVersion([...baseline(), legacy])).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...baseline(), { ...invoice, filename: "0041_unreviewed.sql" }])).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, { version: "0043", filename: "0043_future.sql" }])).toThrow();
+  });
+  it("requires every reviewed filename and version without accepting renamed historical files", () => {
+    for (let index = 0; index < reviewed().length; index += 1) {
+      const files = reviewed();
+      files[index] = { ...files[index], filename: `${files[index].version}_unreviewed.sql` };
+      expect(() => periodontalCandidateMigrationVersion(files)).toThrow();
+    }
+  });
+  it("rejects every missing, duplicated or reordered entry in the required latest chain", () => {
+    for (let index = 0; index < reviewed().length; index += 1) {
+      const missing = reviewed(); missing.splice(index, 1);
+      expect(() => assertReviewedMigrationChain(missing, LATEST_REVIEWED_MIGRATION_VERSION)).toThrow();
+      const duplicate = reviewed(); duplicate.splice(index, 0, duplicate[index]);
+      expect(() => assertReviewedMigrationChain(duplicate, LATEST_REVIEWED_MIGRATION_VERSION)).toThrow();
+      if (index > 0) {
+        const reordered = reviewed();
+        [reordered[index - 1], reordered[index]] = [reordered[index], reordered[index - 1]];
+        expect(() => assertReviewedMigrationChain(reordered, LATEST_REVIEWED_MIGRATION_VERSION)).toThrow();
+      }
+    }
+  });
+  it("rejects invented 0044–0050 files and unreviewed or renamed later migrations", () => {
+    for (let version = 44; version <= 50; version += 1) {
+      const identity = String(version).padStart(4, "0");
+      expect(() => periodontalCandidateMigrationVersion([
+        ...reviewed().slice(0, 43), { version: identity, filename: `${identity}_unreviewed.sql` }, strategy,
+      ])).toThrow();
+    }
+    expect(() => periodontalCandidateMigrationVersion([...reviewed(), { version: "0052", filename: "0052_future.sql" }])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 43), { ...strategy, filename: "0051_unreviewed.sql" }])).toThrow();
+    expect(() => periodontalCandidateMigrationVersion([...reviewed().slice(0, 42), strategy])).toThrow();
+  });
+  it("selects historical boundaries without dropping validation of the complete input", () => {
+    const files = reviewed();
+    expect(migrationFilesThrough(files, "0042")).toEqual(files.slice(0, 42));
+    expect(migrationFilesThrough(files, "0043")).toEqual(files.slice(0, 43));
+    expect(migrationFilesThrough(files, "0051")).toEqual(files);
+    expect(() => migrationFilesThrough(files.slice(0, 42), "0043")).toThrow();
+    expect(() => migrationFilesThrough(files, "0050")).toThrow();
+    expect(() => migrationFilesThrough([...files, { version: "0052", filename: "0052_unreviewed.sql" }], "0043")).toThrow();
+    expect(files).toEqual(reviewed());
+  });
+  it("keeps registry names and SQL checksums exact instead of checking only row count", () => {
+    const files = reviewed().map(file => {
+      const sql = `-- synthetic provenance for ${file.filename}\n`;
+      return { ...file, name: file.filename.slice(5, -4), sql, checksum: checksumOf(sql) };
+    });
+    expect(expectedMigrationRegistry(files)).toEqual(files.map(file => ({
+      version: file.version, name: file.name, checksum: file.checksum, adopted: false,
+    })));
+    for (const patch of [{ checksum: "0".repeat(64) }, { sql: "-- changed bytes\n" }, { name: "unreviewed" }]) {
+      expect(() => expectedMigrationRegistry([{ ...files[0], ...patch }, ...files.slice(1)])).toThrow();
+    }
+  });
+  it("covers every actual current migration, including 0051, with unchanged loaded SQL provenance", async () => {
+    const files = await loadMigrationFiles();
+    assertReviewedMigrationChain(files, LATEST_REVIEWED_MIGRATION_VERSION);
+    expect(files.map(file => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);
+    expect(expectedMigrationRegistry(files).map(row => row.version)).toEqual(files.map(file => file.version));
+    expect(periodontalCandidateMigrationVersion(files)).toBe("0052");
   });
 });

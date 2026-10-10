@@ -22,6 +22,7 @@ import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
 import { PatientDiagnosis } from "./PatientDiagnosis";
+import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -137,6 +138,8 @@ interface SavedAdjustment {
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
+  /** Strategy presentation subscriptions belong to this draft, never an old view. */
+  strategyView: { readVersion: number; listeners: Set<() => void> };
   activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
@@ -201,6 +204,7 @@ function sameDraftValue(before: unknown, after: unknown) {
 }
 function makeDraft(): Draft {
   const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
+    strategyView: { readVersion: 0, listeners: new Set() },
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
     trackEdit: (name, previous, next) => {
@@ -228,7 +232,7 @@ function disposeDraft(owner: OrthoOwner, key: string) {
   if (!draft) return;
   draft.active = false;
   for (const url of draft.urls) URL.revokeObjectURL(url);
-  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); owner.drafts.delete(key);
+  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); draft.strategyView.listeners.clear(); owner.drafts.delete(key);
 }
 function retireOwner(owner: OrthoOwner) {
   owner.active = false; owner.clinical = false; owner.contact = false;
@@ -290,6 +294,14 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
     && (caseId === undefined || owner.standalone || owner.cases.some((row) => row.id === caseId));
   return { owner, draft, session, editable, field, caseGranted,
     commit: (name: string, value: unknown) => { if (!owner.active || owner.denied || !draft.active) return; draft.values.set(name, value); redraw(); },
+    // A confirmed strategy field save/discard establishes a new clean baseline;
+    // other outstanding fields and other drafts remain untouched. A temporary
+    // pillar view may detach while its owner-bound command is still pending.
+    settle: (name: string, value: unknown) => {
+      if (!caseGranted() || !draft.active || draft.busy || draft.uncertain) return;
+      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0; redraw();
+    },
+    viewActive: () => lease.active && caseGranted(),
     begin: (allowed = true) => {
       if (!lease.active) return null;
       const operation = beginMutation(owner, draft, allowed && caseGranted());
@@ -1001,6 +1013,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                           </div>
                         )}
                       </div>
+                      <OrthoStrategyPanel patientId={patientId} caseRow={row} />
                     </div>
                   )}
 
@@ -2034,4 +2047,41 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
       </button>
     </form>
   );
+}
+
+
+/** The new planning UI shares the existing case-owner draft and mutation guard. */
+function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
+  const life = useOrthoDraft(`strategy:${caseRow.id}`, patientId, caseRow.id);
+  const [, redrawStrategy] = useState(0);
+  useLayoutEffect(() => {
+    const notify = () => { if (life.viewActive()) redrawStrategy(value => value + 1); };
+    life.draft.strategyView.listeners.add(notify);
+    return () => { life.draft.strategyView.listeners.delete(notify); };
+  }, [life]);
+  const notifyStrategy = (refresh = false) => {
+    if (!life.caseGranted() || !life.draft.active) return;
+    if (refresh) life.draft.strategyView.readVersion++;
+    for (const notify of [...life.draft.strategyView.listeners]) notify();
+  };
+  const [document, setDocument] = life.field("document", "");
+  const [problemLabel, setProblemLabel] = life.field("problemLabel", "");
+  const [problemSite, setProblemSite] = life.field("problemSite", "");
+  const lifetime: StrategyLifetime = {
+    identity: life.draft, active: life.viewActive, editable: life.editable, denied: () => life.owner.deny(),
+    busy: life.draft.busy, uncertain: life.draft.uncertain, dirty: life.draft.dirty,
+    readVersion: life.draft.strategyView.readVersion, refresh: () => notifyStrategy(true),
+    values: { document, problemLabel, problemSite },
+    change: (field, value) => ({ document: setDocument, problemLabel: setProblemLabel, problemSite: setProblemSite })[field](value),
+    settle: (field, value) => { life.settle(field, value); notifyStrategy(); },
+    begin: () => {
+      const operation = life.begin(life.session?.role === "doctor" || life.session?.role === "admin");
+      if (!operation) return null;
+      return { current: () => life.current(operation), checkHeaders: response => life.checkHeaders(response, operation),
+        markUncertain: () => { life.uncertain(); notifyStrategy(); },
+        finish: () => { life.finish(operation); notifyStrategy(); } };
+    },
+  };
+  return <OrthoTreatmentStrategy patientId={patientId} orthoCaseId={caseRow.id}
+    caseTitle={`تقويم ${APPLIANCE_LABEL[caseRow.appliance]} · ${ARCHES_LABEL[caseRow.arches]}`} lifetime={lifetime} />;
 }
