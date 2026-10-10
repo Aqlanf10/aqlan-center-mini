@@ -31,7 +31,7 @@ describe("operational handoff durable decision and receivable proof", () => {
     expectTypeOf<DbClient>().toMatchTypeOf<Parameters<typeof lockReceptionReceivable>[0]>();
     expect(AUDIT_LABEL[OPERATIONAL_HANDOFF_ACTION]).toBe("تسجيل قرار متابعة زيارة انتهى جلوسها دون توقيع سريري — دون إثبات سداد");
     expect(AUDIT_LABEL[RECEPTION_VERIFICATION_ACTION]).toBe("إعادة تحقق مالية لمتابعة استقبال سابقة — دون إثبات سداد");
-    for (const action of [OPERATIONAL_HANDOFF_ACTION, RECEPTION_VERIFICATION_ACTION]) {
+    for (const action of [OPERATIONAL_HANDOFF_ACTION, RECEPTION_VERIFICATION_ACTION] as const) {
       expect(describeAudit(action, "زيارة اصطناعية")).toBe(`${AUDIT_LABEL[action]} — زيارة اصطناعية`);
     }
   });
