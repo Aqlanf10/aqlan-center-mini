@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createPayable, getParty, getSettings, partyBalances, partyStatement, recordAudit } from "@/lib/db";
+import { createPayable, getParty, getSettings, partyBalances, partyNativeBalanceSnapshot, partyStatement, recordAudit } from "@/lib/db";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { rateFromSettings } from "@/lib/settings";
@@ -20,9 +20,21 @@ export async function GET(request: Request) {
   if (!canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
-  const partyId = Number(new URL(request.url).searchParams.get("partyId"));
+  const params = new URL(request.url).searchParams;
+  const nativeView = params.has("view");
+  if (nativeView && (params.getAll("view").length !== 1 || params.get("view") !== "party-balances-v1"
+      || [...params.keys()].some((key) => key !== "view"))) {
+    return NextResponse.json({ message: "نطاق أرصدة الجهات غير صالح." }, { status: 400, headers: { "Cache-Control": "private, no-store" } });
+  }
+  const partyId = Number(params.get("partyId"));
 
   try {
+    if (nativeView) {
+      const snapshot = await partyNativeBalanceSnapshot();
+      return NextResponse.json({ view: "party-balances-v1", partyIdentities: snapshot.partyIdentities,
+        balancesByCurrency: snapshot.balancesByCurrency,
+        observedAt: new Date().toISOString() }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     // (TD-05) العملة الأساسية دستورية من الكود.
     const baseCurrency = CLINIC_BASE_CURRENCY;
 
@@ -38,7 +50,9 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ balances: await partyBalances(), baseCurrency });
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل المستحقات." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل المستحقات." }, {
+      status: 500, ...(nativeView ? { headers: { "Cache-Control": "private, no-store" } } : {}),
+    });
   }
 }
 

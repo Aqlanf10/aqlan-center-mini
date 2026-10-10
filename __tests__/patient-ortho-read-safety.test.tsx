@@ -104,6 +104,26 @@ let executed = new Set<string>();
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<ResponseLike>>();
 const createURL = vi.fn<(file: Blob | MediaSource) => string>();
 const revokeURL = vi.fn<(url: string) => void>();
+type NavigationRegistration = { guard: () => boolean; cleanupCalls: number };
+let navigationRegistration: NavigationRegistration | null = null;
+let navigationRegistrations: NavigationRegistration[] = [];
+let delayNavigationCleanup = false;
+let delayedNavigationCleanup: Array<() => void> = [];
+const confirmLeave = vi.fn<(message: string) => boolean>();
+// Observe the component's real guard. The parent callback owns only its lease;
+// delaying its cleanup must not let an old owner withdraw a newer registration.
+function registerNavigationGuard(guard: () => boolean): () => void {
+  const registration = { guard, cleanupCalls: 0 };
+  navigationRegistration = registration; navigationRegistrations.push(registration);
+  return () => {
+    registration.cleanupCalls++;
+    const clear = () => { if (navigationRegistration === registration) navigationRegistration = null; };
+    if (delayNavigationCleanup) delayedNavigationCleanup.push(clear); else clear();
+  };
+}
+function currentNavigation() {
+  expect(navigationRegistration).not.toBeNull(); return navigationRegistration!;
+}
 function retire(scope: Scope) {
   scope.live = false; scope.effects.forEach((entry) => entry.cleanup?.()); scope.effects.clear();
 }
@@ -142,7 +162,7 @@ function render(): ReactNode {
   do {
     if (++rounds > 30) throw new Error("Orthodontic composition did not settle");
     hooks.changed = false; seen = new Set();
-    tree = expand(execute(() => PatientOrtho({ patientId }), {}, "patient-ortho"), "patient-ortho/result");
+    tree = expand(execute(() => PatientOrtho({ patientId, onNavigationGuardChange: registerNavigationGuard }), {}, "patient-ortho"), "patient-ortho/result");
     for (const [key, scope] of scopes) if (!seen.has(key)) { retire(scope); scopes.delete(key); }
     hooks.layout.splice(0).forEach((effect) => effect()); hooks.passive.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
@@ -212,6 +232,9 @@ function addPhoto(name = "synthetic.png") {
 beforeEach(() => {
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
+  navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
+  confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
+  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn() });
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
   createURL.mockImplementation(() => `blob:synthetic-ortho-${createURL.mock.calls.length}`);
   vi.spyOn(URL, "createObjectURL").mockImplementation(createURL);
@@ -236,6 +259,250 @@ afterEach(() => {
   unmount();
   try { expect(unexpected).toEqual([]); }
   finally { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); }
+});
+
+describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () => {
+  const dirtyWarning = "هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟";
+  const uncertainWarning = "نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟";
+
+  it("registers before reads complete, allows clean departure, and retires its guard on unmount", async () => {
+    render(); hidden("loading");
+    const registered = currentNavigation();
+    expect(navigationRegistrations).toHaveLength(1); expect(registered.guard()).toBe(true);
+    await grant(); expect(currentNavigation()).toBe(registered); expect(registered.guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+    unmount(); expect(registered.cleanupCalls).toBe(1); expect(navigationRegistration).toBeNull();
+    expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+  });
+
+  it.each(["patient", "principal", "permissions"] as const)("replaces the %s A→B→A guard without allowing delayed old cleanup to remove the current lease", async (kind) => {
+    await mount(); adjustment(); addPhoto();
+    const first = currentNavigation(); const original = hooks.session;
+    delayNavigationCleanup = true;
+    if (kind === "patient") patientId = 20;
+    else if (kind === "principal") hooks.session = { ...original!, username: "synthetic-ortho-b" };
+    else hooks.session = { ...original!, permissions: { ...original!.permissions!, canEditPlans: false } };
+    render(); hidden("loading");
+    const second = currentNavigation(); expect(second).not.toBe(first); expect(first.guard()).toBe(false);
+    if (kind === "patient") patientId = 19; else hooks.session = original;
+    render(); hidden("loading");
+    const third = currentNavigation(); expect(third).not.toBe(first); expect(third).not.toBe(second);
+    expect(navigationRegistrations).toHaveLength(3);
+    expect(first.cleanupCalls).toBe(1); expect(second.cleanupCalls).toBe(1);
+    expect(second.guard()).toBe(false); expect(third.guard()).toBe(true);
+    expect(delayedNavigationCleanup).toHaveLength(2);
+    delayedNavigationCleanup.splice(0).forEach((cleanup) => cleanup());
+    expect(currentNavigation()).toBe(third); expect(third.guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+    expect(revokeURL).toHaveBeenCalledExactlyOnceWith("blob:synthetic-ortho-1");
+    delayNavigationCleanup = false;
+    unmount(); expect(third.cleanupCalls).toBe(1); expect(navigationRegistration).toBeNull();
+    expect(third.guard()).toBe(false);
+  });
+
+  it("keeps the same guard and unsaved values across a display-name-only refresh", async () => {
+    await mount(); adjustment(); const registered = currentNavigation(); const before = fields();
+    const readCount = reads().length;
+    hooks.session = { ...hooks.session!, displayName: "Updated synthetic display name" }; render();
+    expect(currentNavigation()).toBe(registered); expect(navigationRegistrations).toHaveLength(1);
+    expect(registered.cleanupCalls).toBe(0); expect(reads()).toHaveLength(readCount);
+    expect(registered.guard()).toBe(false); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning);
+    expect(fields()).toEqual(before);
+  });
+
+  it.each(["new", "baseline", "adjustment"] as const)("does not treat unedited %s defaults or same-value input as unsaved work", async (kind) => {
+    await mount(kind !== "adjustment");
+    if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
+    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
+    else click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const label = kind === "new" ? "نظام البراكيت" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
+    const before = fields(); edit(label, String(control(label).props.value));
+    expect(currentNavigation().guard()).toBe(true); expect(fields()).toEqual(before);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+  });
+
+  it.each(["new", "baseline"] as const)("retains the exact edited %s fields when departure is cancelled", async (kind) => {
+    await mount(true);
+    if (kind === "new") { click(button("+ فتح حالة تقويم جديدة")); edit("نظام البراكيت", "private-draft prescription"); edit("المدة المتوقعة", "27"); }
+    else { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("الأهداف المتبقية", "private-draft objectives"); edit("النظام المالي السابق", "per_session"); }
+    const before = fields();
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning);
+    expect(fields()).toEqual(before); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
+  });
+
+  it("cancelled departure preserves adjustment values and both exact queued Files for the eventual save", async () => {
+    await mount(); adjustment(); const first = addPhoto("one.png"); const second = addPhoto("two.png");
+    edit("دور صور الجلسة", "progress"); edit("أسابيع حتى الشدّة القادمة", "5");
+    const before = fields(); const previews = elements(render()).filter((node) => node.type === "img").map((node) => node.props.src);
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning);
+    expect(fields()).toEqual(before);
+    expect(elements(render()).filter((node) => node.type === "img").map((node) => node.props.src)).toEqual(previews);
+    expect(createURL.mock.calls).toEqual([[first], [second]]); expect(revokeURL).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+    const pending = submit(); respond(writes()[0], { id: 81 }); await flush();
+    const firstUpload = writes().filter((request) => request.url.endsWith("/documents"))[0]; expect(firstUpload).toBeDefined();
+    expect((firstUpload.init!.body as FormData).get("file")).toBe(first); respond(firstUpload, {}); await flush();
+    const secondUpload = writes().filter((request) => request.url.endsWith("/documents"))[1]; expect(secondUpload).toBeDefined();
+    expect((secondUpload.init!.body as FormData).get("file")).toBe(second); respond(secondUpload, {}); await pending; await flush();
+    expect(writes()).toHaveLength(3); expect(hooks.retiredWrites).toBe(0);
+  });
+
+  it("confirmation only permits navigation; unmount then disposes the draft and makes captured setters and submit inert", async () => {
+    await mount(); const oldForm = adjustment(); const oldInput = control("ما نُفّذ في الشدّة"); const file = addPhoto();
+    const registered = currentNavigation(); const before = fields();
+    confirmLeave.mockReturnValue(true);
+    expect(registered.guard()).toBe(true); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning);
+    expect(fields()).toEqual(before); expect(currentNavigation()).toBe(registered);
+    expect(revokeURL).not.toHaveBeenCalled(); expect(createURL).toHaveBeenCalledExactlyOnceWith(file); expect(writes()).toEqual([]);
+    unmount();
+    expect(revokeURL).toHaveBeenCalledExactlyOnceWith("blob:synthetic-ortho-1");
+    expect(registered.guard()).toBe(false); expect(navigationRegistration).toBeNull();
+    (oldInput.props.onChange as (event: unknown) => void)({ target: { value: "retired-handler-change" } });
+    await submit(oldForm); await drain();
+    expect(scopes.size).toBe(0); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
+    expect(confirmLeave).toHaveBeenCalledTimes(1); expect(revokeURL).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a held save synchronously without confirmation even when its draft has only unedited defaults", async () => {
+    await mount(); click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const registered = currentNavigation(); expect(registered.guard()).toBe(true);
+    const pending = submit(); expect(writes()).toHaveLength(1);
+    // No render between the request and guard: busy ownership must be synchronous.
+    expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+    writes()[0].headers(200); await flush();
+    expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+    writes()[0].body({ id: 81 }); await pending; await flush();
+    expect(registered.guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
+  });
+
+  it("retains hidden dirty work in the guard while a clinical reread is unavailable", async () => {
+    await mount(); adjustment(); addPhoto(); const registered = currentNavigation(); const before = fields();
+    await failClinical(); hidden("error");
+    expect(currentNavigation()).toBe(registered); expect(registered.guard()).toBe(false);
+    expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning); expect(revokeURL).not.toHaveBeenCalled();
+    await retry(); expect(fields()).toEqual(before); expect(writes()).toEqual([]);
+  });
+
+  it("warns about an uncertain result without replaying the request or disposing a retained draft on confirmation", async () => {
+    await mount(); const oldForm = adjustment(); const before = fields();
+    const pending = submit(oldForm); expect(writes()).toHaveLength(1); writes()[0].fail(); await pending; await flush();
+    expect(elements(render()).some((node) => node.props["data-testid"] === "ortho-write-uncertain")).toBe(true);
+    const registered = currentNavigation();
+    expect(registered.guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(uncertainWarning);
+    expect(fields()).toEqual(before); expect(writes()).toHaveLength(1);
+    confirmLeave.mockReturnValue(true); expect(registered.guard()).toBe(true);
+    expect(confirmLeave).toHaveBeenLastCalledWith(uncertainWarning); expect(fields()).toEqual(before);
+    await submit(oldForm); await submit(); await flush();
+    expect(writes()).toHaveLength(1); expect(confirmLeave).toHaveBeenCalledTimes(2);
+    expect(elements(render()).some((node) => node.props["data-testid"] === "ortho-write-uncertain")).toBe(true);
+    unmount(); expect(registered.guard()).toBe(false); expect(hooks.retiredWrites).toBe(0);
+  });
+
+  it("does not treat a confirmed booking receipt as unsaved work after edited booking fields", async () => {
+    await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 }); await saving; await flush(); await grant();
+    expect(currentNavigation().guard()).toBe(true);
+    click(button("📅 حجز الموعد المقترح الآن")); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    confirmLeave.mockClear();
+    const booking = submit(); expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+    respond(writes()[1], {}); await booking; await flush();
+    expect(text(render())).toContain("تم حجز الجلسة القادمة بنجاح");
+    expect(currentNavigation().guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(2);
+  });
+
+  it("blocks a pending signature but lets its confirmed receipt leave without an unsaved-work prompt", async () => {
+    const prior = fixture(); const row = fixture(19, { adjustments: [{ ...prior.adjustments[0], visitId: 61, visitSigned: false, doneOn: "2026-10-04" }] });
+    render(); const initial = pair(); respond(initial.ortho, { cases: [row] }); respond(initial.patient, contact()); await flush();
+    const registered = currentNavigation(); expect(registered.guard()).toBe(true);
+    const captured = button("وقّع الزيارة وأرسله للاستقبال").props.onClick as () => void;
+    captured(); expect(registered.guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+    respond(writes()[0], { patientId: 19, invoiceId: null, invoiceCurrency: null, duesMinor: 0, sessionsCompleted: 0, nextPlannedVisit: null }); await flush();
+    expect(text(render())).toContain("وُقّعت زيارة اليوم"); expect(registered.guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); captured(); await flush(); expect(writes()).toHaveLength(1);
+  });
+});
+
+describe("PatientOrtho outstanding-change navigation guard (source gate, UNRUN)", () => {
+  const dirtyWarning = "هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟";
+
+  it("leaves clean before booking, while an untouched booking form is open, and after Back", async () => {
+    await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 }); await saving; await flush(); await grant();
+    const registered = currentNavigation(); const before = fields();
+    expect(registered.guard()).toBe(true);
+    click(button("📅 حجز الموعد المقترح الآن"));
+    expect(control("تاريخ الجلسة القادمة").props.value).toBeTypeOf("string");
+    expect(control("وقت الجلسة القادمة").props.value).toBeTypeOf("string");
+    expect(registered.guard()).toBe(true);
+    click(button("رجوع"));
+    expect(fields()).toEqual(before); expect(registered.guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
+  });
+
+  it("keeps changed booking values dirty until both original date and time are restored", async () => {
+    await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 }); await saving; await flush(); await grant();
+    click(button("📅 حجز الموعد المقترح الآن"));
+    const date = String(control("تاريخ الجلسة القادمة").props.value);
+    const time = String(control("وقت الجلسة القادمة").props.value); const before = fields();
+    edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    edit("تاريخ الجلسة القادمة", date);
+    expect(currentNavigation().guard()).toBe(false); expect(control("وقت الجلسة القادمة").props.value).toBe("17:45");
+    edit("وقت الجلسة القادمة", time); confirmLeave.mockClear();
+    expect(fields()).toEqual(before); expect(currentNavigation().guard()).toBe(true);
+    click(button("رجوع")); expect(currentNavigation().guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(1);
+  });
+
+  it.each(["new", "baseline", "adjustment"] as const)("clears reverted %s edits without clearing another field's outstanding change", async (kind) => {
+    await mount(kind !== "adjustment");
+    if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
+    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
+    else click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const label = kind === "new" ? "نظام البراكيت" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
+    const otherLabel = kind === "new" ? "المدة المتوقعة" : kind === "baseline" ? "الأشهر المتبقية" : "أسابيع حتى الشدّة القادمة";
+    const original = String(control(label).props.value); const otherOriginal = String(control(otherLabel).props.value);
+    const before = fields();
+    edit(label, `${original} synthetic changed value`); edit(otherLabel, "5");
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    edit(label, original);
+    expect(currentNavigation().guard()).toBe(false); expect(control(otherLabel).props.value).toBe("5");
+    edit(otherLabel, otherOriginal); confirmLeave.mockClear();
+    expect(fields()).toEqual(before); expect(currentNavigation().guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled();
+    // A second edit/revert cycle must establish and clear its own outstanding baseline.
+    edit(label, `${original} another value`); expect(currentNavigation().guard()).toBe(false);
+    edit(label, original); confirmLeave.mockClear();
+    expect(fields()).toEqual(before); expect(currentNavigation().guard()).toBe(true);
+    expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+  });
+
+  it("returns a photo-only draft to clean after all Files are removed and revokes each preview exactly once", async () => {
+    await mount(); click(button("⚡ سجّل شدّة وجلسة جديدة الآن")); const before = fields();
+    const registered = currentNavigation(); expect(registered.guard()).toBe(true);
+    const first = addPhoto("one.png"); const second = addPhoto("two.png");
+    expect(registered.guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    const deleteButtons = () => elements(render()).filter((node) => node.type === "button" && text(node).trim() === "حذف");
+    expect(deleteButtons()).toHaveLength(2); click(deleteButtons()[0]);
+    expect(registered.guard()).toBe(false); expect(deleteButtons()).toHaveLength(1);
+    expect(revokeURL.mock.calls).toEqual([["blob:synthetic-ortho-1"]]);
+    click(deleteButtons()[0]); confirmLeave.mockClear();
+    expect(deleteButtons()).toEqual([]); expect(fields()).toEqual(before);
+    expect(elements(render()).filter((node) => node.type === "img")).toEqual([]);
+    expect(registered.guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled();
+    expect(createURL.mock.calls).toEqual([[first], [second]]);
+    expect(revokeURL.mock.calls).toEqual([["blob:synthetic-ortho-1"], ["blob:synthetic-ortho-2"]]);
+    expect(writes()).toEqual([]); unmount();
+    expect(revokeURL).toHaveBeenCalledTimes(2); expect(hooks.retiredWrites).toBe(0);
+  });
+
+  it("removing the photo queue cannot clear a separate outstanding clinical edit", async () => {
+    await mount(); click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const original = String(control("ما نُفّذ في الشدّة").props.value);
+    edit("ما نُفّذ في الشدّة", "private-draft clinical work"); addPhoto(); click(button("حذف"));
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    expect(control("ما نُفّذ في الشدّة").props.value).toBe("private-draft clinical work");
+    edit("ما نُفّذ في الشدّة", original); confirmLeave.mockClear();
+    expect(currentNavigation().guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled();
+    expect(revokeURL).toHaveBeenCalledExactlyOnceWith("blob:synthetic-ortho-1"); expect(writes()).toEqual([]);
+  });
 });
 
 describe("PatientOrtho recorded bracket prescription truth", () => {

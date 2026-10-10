@@ -127,14 +127,57 @@ describe("رحلة واجهة الإعداد إلى المستهلك الحقي�
     const filtered = page.waitForResponse((response) => response.url().includes("/api/settings/history?")
       && response.url().includes("action=clinic_settings.update"));
     await page.getByRole("button", { name: "تطبيق الفلاتر" }).click();
-    const filteredRows = await (await filtered).json();
+    const filteredResponse = await filtered;
+    expect(filteredResponse.status()).toBe(200);
+    const filterUrl = new URL(filteredResponse.url());
+    expect(filterUrl.searchParams.get("key")).toBe("ops.follow_up_lookback_days");
+    expect(filterUrl.searchParams.get("action")).toBe("clinic_settings.update");
+    const filteredRows = await filteredResponse.json() as Array<{
+      id: string; key: string; action: string; before: string; after: string; at: string;
+    }>;
     expect(filteredRows).toHaveLength(2);
-    expect(filteredRows.every((row: { action: string }) => row.action === "clinic_settings.update")).toBe(true);
-    await page.getByRole("article").first().getByRole("button", { name: "استعادة القيمة السابقة" }).click();
+    expect(filteredRows.every((row) => row.action === "clinic_settings.update")).toBe(true);
+    expect(filteredRows).toMatchObject([
+      { key: "ops.follow_up_lookback_days", action: "clinic_settings.update", before: "10", after: "60" },
+      { key: "ops.follow_up_lookback_days", action: "clinic_settings.update", before: "30", after: "10" },
+    ]);
+    expect(BigInt(filteredRows[0].id) > BigInt(filteredRows[1].id)).toBe(true);
+    // Bind the rendered restore target to the exact verified response entry.
+    // A history response alone does not prove that React has rendered it yet.
+    const selected = page.getByRole("article", { name: "مدى متابعة المواعيد", exact: true }).filter({
+      has: page.locator(`time[datetime="${filteredRows[0].at}"]`),
+    });
+    await selected.waitFor({ state: "visible" });
+    expect(await selected.count()).toBe(1);
+    expect(await page.getByRole("article").count()).toBe(2);
+    expect(await selected.getByText("ops.follow_up_lookback_days", { exact: true }).count()).toBe(1);
+    expect(await selected.getByText("قبل", { exact: true }).locator("..").textContent()).toBe("قبل10 يوم");
+    expect(await selected.getByText("بعد", { exact: true }).locator("..").textContent()).toBe("بعد60 يوم");
+    await selected.getByRole("button", { name: "استعادة القيمة السابقة" }).click();
     const restore = page.getByRole("dialog", { name: "استعادة قيمة سابقة" });
+    await restore.waitFor({ state: "visible" });
+    expect(await restore.getByText("10 يوم", { exact: true }).count()).toBe(1);
     await restore.getByLabel(/سبب الاستعادة/).fill("إثبات الاستعادة من واجهة المالك");
+    const restoreResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/settings"
+      && response.request().method() === "PATCH");
     await restore.getByRole("button", { name: "تأكيد الاستعادة" }).click();
+    const restored = await restoreResponse;
+    expect(restored.request().postDataJSON()).toEqual({
+      "ops.follow_up_lookback_days": "10",
+      __versions: { "ops.follow_up_lookback_days": expect.any(String) },
+      __reason: "إثبات الاستعادة من واجهة المالك",
+    });
+    expect(restored.status()).toBe(200);
+    const restoredPayload = await restored.json();
+    expect(restoredPayload["ops.follow_up_lookback_days"]).toBe("10");
+    expect(restoredPayload.__changed).toEqual(["ops.follow_up_lookback_days"]);
     await restore.waitFor({ state: "hidden" });
+    const persisted = await page.evaluate(async () => {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      if (!response.ok) throw new Error(`settings HTTP ${response.status}`);
+      return response.json();
+    });
+    expect(persisted["ops.follow_up_lookback_days"]).toBe("10");
     expect(await recallIncludes(appointmentId)).toBe(false);
     const restoredHistory = await page.evaluate(async () => (await fetch(
       "/api/settings/history?key=ops.follow_up_lookback_days&limit=10",

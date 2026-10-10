@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canReadReceptionHandoff, isHandoffDate, readReceptionHandoffs, receptionCheckoutHref } from "../lib/reception-handoff";
 
 const owner = { username: "synthetic-reception", role: "reception" };
-const row = { visitId: 17, patientId: 31, patientName: "مريض اصطناعي", patientNumber: "SYN-31", signedAt: "2026-10-09T21:00:00.000Z" };
+const row = { visitId: 17, patientId: 31, patientName: "مريض اصطناعي", patientNumber: "SYN-31", signedAt: "2026-10-09T21:00:00.000Z", status: "pending", handledReason: null };
 const payload = () => ({ owner, fromDate: "2026-10-09", toDate: "2026-10-10", clinicTimeZone: "Asia/Aden", items: [row] });
 
 describe("committed-signature handoff contract", () => {
@@ -32,6 +32,14 @@ describe("committed-signature handoff contract", () => {
     expect(readReceptionHandoffs(payload(), owner, "2026-10-09")).toBeNull();
     expect(readReceptionHandoffs({ ...payload(), fromDate: "2026-10-01" }, owner, null)).toBeNull();
     expect(readReceptionHandoffs({ ...payload(), clinicTimeZone: "invalid" }, owner, null)).toBeNull();
+  });
+  it("requires an explicit valid lifecycle state and does not invent completion", () => {
+    for (const status of [undefined, null, "paid", {}, 1, ["pending"], ["handled"]]) {
+      expect(readReceptionHandoffs({ ...payload(), items: [{ ...row, status }] }, owner, null)).toBeNull();
+    }
+    for (const status of ["pending", "collected", "deferred", "handled"]) {
+      expect(readReceptionHandoffs({ ...payload(), items: [{ ...row, status, handledReason: "قرار موثّق" }] }, owner, null)?.items[0].status).toBe(status);
+    }
   });
   it("uses clinic-local midnight, not arrival time or the client's UTC calendar", () => {
     expect(readReceptionHandoffs({ ...payload(), fromDate: "2026-10-08", toDate: "2026-10-09" }, owner, null)).toBeNull();

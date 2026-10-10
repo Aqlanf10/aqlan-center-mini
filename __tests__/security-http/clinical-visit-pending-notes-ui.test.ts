@@ -132,7 +132,7 @@ async function fixture(automaticTreatment = false) {
     await page.goto(`${baseUrl}/visits/${visitId}`);
     await expect.poll(() => page.locator("#visit-notes textarea").count()).toBe(5);
     await expect.poll(() => noteField(page, "② التشخيص").inputValue()).toBe("Synthetic saved diagnosis");
-    await expect.poll(() => page.getByRole("button", { name: "أضف إجراءً", exact: true }).count()).toBe(1);
+    await expect.poll(() => page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).count()).toBe(1);
     await expect.poll(() => noteField(page, "③ ما نُفّذ").inputValue())
       .toBe(automaticTreatment ? "Synthetic filling — سن 11" : "Synthetic saved treatment");
     const save = page.getByRole("button", { name: "احفظ بلا توقيع", exact: true });
@@ -192,8 +192,9 @@ async function attemptPendingEdits(f: Fixture, expected: Notes) {
   for (const [, label] of fields) {
     await expect(noteField(f.page, label).fill("Must not replace the submitted note", { timeout: 150 })).rejects.toThrow();
   }
-  await expect(f.page.getByRole("button", { name: "أضف إجراءً", exact: true })
-    .click({ timeout: 150 })).rejects.toThrow();
+  await expect(f.page.getByRole("combobox", { name: "أضف إجراءً", exact: true })
+    .selectOption(String(services[1].id), { timeout: 150 })).rejects.toThrow();
+  await expect(f.page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true }).fill("Blocked search", { timeout: 150 })).rejects.toThrow();
   await expect(f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("9", { timeout: 150 })).rejects.toThrow();
   // Native activation must also respect the lock: no phrase append, procedure
   // addition/removal, currency change or second save can alter the draft.
@@ -266,10 +267,8 @@ describe("pending clinical note containment in the built visit page", () => {
         expect(await noteField(f.page, label).inputValue()).toContain(`${nextNotes[key]}، `);
       }
       await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).fill("3");
-      await f.page.getByRole("button", { name: "أضف إجراءً", exact: true }).click();
-      const picker = f.page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true });
-      await picker.getByRole("textbox", { name: "بحث في الخدمات" }).fill(services[1].name);
-      await picker.getByRole("button").filter({ hasText: services[1].name }).click();
+      await f.page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true }).fill(services[1].name);
+      await f.page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).selectOption(String(services[1].id));
       expect(await f.page.getByRole("spinbutton", { name: "الكمية", exact: true }).count()).toBe(2);
       expect(await noteField(f.page, "③ ما نُفّذ").inputValue()).toBe(nextNotes.treatmentDone);
       expect(f.writes).toHaveLength(1);

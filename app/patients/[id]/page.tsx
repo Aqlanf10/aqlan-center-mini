@@ -210,10 +210,16 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const orthoLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const trackCasesGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
     if (alertOwner.active) casesLeaveGuard.current = lease;
     return () => { if (casesLeaveGuard.current === lease) casesLeaveGuard.current = null; };
+  }, [alertOwner]);
+  const trackOrthoGuard = useCallback((guard: () => boolean) => {
+    const lease = { guard, owner: alertOwner };
+    if (alertOwner.active) orthoLeaveGuard.current = lease;
+    return () => { if (orthoLeaveGuard.current === lease) orthoLeaveGuard.current = null; };
   }, [alertOwner]);
   const navigation = useRef<ReturnType<typeof createPatientNavigation> | null>(null);
   const trackEndoDraft = useCallback((pending: boolean) => { endoDraft.current = pending; }, []);
@@ -225,6 +231,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const cases = casesLeaveGuard.current;
         if (cases?.owner.active && !cases.guard()) return false;
+        const ortho = orthoLeaveGuard.current;
+        if (ortho?.owner.active && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
@@ -1219,7 +1227,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} />
+              <PatientOrtho patientId={patient.id} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 

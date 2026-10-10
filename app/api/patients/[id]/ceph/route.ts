@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -108,8 +109,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       xrayDate,
       device: textOrNull(source.device, 120),
       refSet: textOrNull(source.refSet, 60),
+      authorize: cephWriteAuthorizer(session),
     });
-    if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
+    if (!created.ok) return NextResponse.json({ message: created.message }, { status: created.status ?? 409 });
     return NextResponse.json({ id: created.id, duplicateWarning }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح التحليل. تأكد من المستند." }, { status: 500 });

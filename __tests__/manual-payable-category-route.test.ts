@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
   requireSession: vi.fn(), createPayable: vi.fn(), getParty: vi.fn(), getSettings: vi.fn(),
-  partyBalances: vi.fn(), partyStatement: vi.fn(), recordAudit: vi.fn(),
+  partyBalances: vi.fn(), partyNativeBalanceSnapshot: vi.fn(), partyStatement: vi.fn(), recordAudit: vi.fn(),
 }));
 vi.mock("../lib/session", () => ({ requireSession: boundary.requireSession }));
 // Complete route DB surface: no actual pool, schema initialization or financial write.
 vi.mock("../lib/db", () => ({
   createPayable: boundary.createPayable, getParty: boundary.getParty, getSettings: boundary.getSettings,
-  partyBalances: boundary.partyBalances, partyStatement: boundary.partyStatement, recordAudit: boundary.recordAudit,
+  partyBalances: boundary.partyBalances, partyNativeBalanceSnapshot: boundary.partyNativeBalanceSnapshot,
+  partyStatement: boundary.partyStatement, recordAudit: boundary.recordAudit,
 }));
 import { POST } from "../app/api/payables/route";
 

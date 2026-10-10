@@ -134,14 +134,17 @@ describe("المهلة والرسائل", () => {
     expect(defaultDueDate("2026-08-27")).toBe("2026-09-03");
   });
 
-  it("رسالة المتابعة تحمل التفاصيل التي تمنع مكالمة ثانية", () => {
+  it("رسالة المتابعة تربط بالطلب دون هوية المريض أو التفاصيل الداخلية", () => {
     const text = labFollowUpText(
       order({ id: 1, patientName: "عبدالله سالم", dueDate: "2026-08-20", details: "6 علوي يمين" }),
       TODAY,
       "مركز الدكتور عقلان الكامل",
     );
-    expect(text).toContain("عبدالله سالم");
-    expect(text).toContain("تاج — 6 علوي يمين");
+    expect(text).not.toContain("عبدالله سالم");
+    expect(text).toContain("RX-1");
+    expect(text).toContain("العمل: تاج");
+    expect(text).not.toContain("6 علوي يمين");
+    expect(text).toContain("الملاحظات الداخلية");
     expect(text).toContain("2026-08-20");
     expect(text).toContain("7 أيام");
   });
@@ -192,7 +195,13 @@ describe("المهلة والرسائل", () => {
     );
 
     expect(doc).toContain("طلب عمل مخبري سني (LAB PRESCRIPTION)");
-    expect(doc).toContain("سامي عبدالكريم");
+    expect(doc).not.toContain("سامي عبدالكريم");
+    expect(doc).not.toContain("P-1002");
+    expect(doc).not.toContain("777000111");
+    expect(doc).not.toContain("حواف زيركون مشطوبة بدقة عالية");
+    expect(doc).not.toContain("يرجى مراعاة الإطباق الخلفي");
+    expect(doc).toContain("RX-101");
+    expect(doc).toContain("مراجعة فنية مطلوبة");
     expect(doc).toContain("تاج زيركون كامل");
     expect(doc).toContain("11, 21");
     expect(doc).toContain("A2");

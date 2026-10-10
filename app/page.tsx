@@ -573,7 +573,7 @@ export default function FlowBoard() {
         </div>
       </header>
 
-      <ReceptionHandoffs />
+      <ReceptionHandoffs>
 
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص اليوم">
         <Stat label="ينتظرون الآن" value={summary.waiting} tone={summary.waiting > 0 ? "warn" : "calm"} />
@@ -1153,6 +1153,7 @@ export default function FlowBoard() {
       <p className="mt-6 text-center text-[11px] text-slate-400">
         {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · أُنجز اليوم: {summary.done}
       </p>
+      </ReceptionHandoffs>
       {arrivalPatient !== null ? (
         <ArrivalPanel patientId={arrivalPatient} onClose={() => { setArrivalPatient(null); void load(false); }} />
       ) : null}

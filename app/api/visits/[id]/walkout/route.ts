@@ -5,6 +5,8 @@ import { visitCheckoutSummary } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
 import { canSeeWalkout } from "@/lib/walkout-access";
+import { canReadReceptionHandoff } from "@/lib/reception-handoff";
+import { readReceptionHandoff } from "@/lib/reception-handoff-db";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +37,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // (OP-03) «وُقِّعت اليوم» بتوقيت العيادة المضبوط في الخادم لا بافتراض العميل — لاستعادة الشبّاك.
     const signedToday = walkout.signedAt !== null
       && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === clinicDateString(new Date(), CLINIC_TIME_ZONE);
-    return NextResponse.json({ ...walkout, summary, signedToday });
+    const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
+      ? await readReceptionHandoff(id, walkout) : null;
+    return NextResponse.json({ ...walkout, summary, signedToday,
+      ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });
   }
 }
+

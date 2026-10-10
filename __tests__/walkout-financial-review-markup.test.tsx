@@ -47,3 +47,14 @@ it("rejects malformed or incomplete walkout financial evidence before publishing
   expect(isCheckoutWalkout({ ...read, summary: [{}] }, 10)).toBe(false);
   expect(isCheckoutWalkout(read, 11)).toBe(false);
 });
+
+it("rejects coerced reception lifecycle states and unverified signature metadata", () => {
+  const read = { visitId: 10, patientId: 1, patientName: "Synthetic", deferred: false,
+    lines: [], orthoAdjustment: null, nextAppointment: null, summary: [], signedAt: "2026-10-10T09:00:00.000Z",
+    receptionHandoff: { status: "pending", handledReason: null } };
+  expect(isCheckoutWalkout(read, 10)).toBe(true);
+  for (const status of [["pending"], ["handled"], undefined, null, "paid", {}, 1]) {
+    expect(isCheckoutWalkout({ ...read, receptionHandoff: { status, handledReason: null } }, 10)).toBe(false);
+  }
+  expect(isCheckoutWalkout({ ...read, signedAt: null }, 10)).toBe(false);
+});

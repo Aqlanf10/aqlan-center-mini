@@ -136,8 +136,8 @@ interface SavedAdjustment {
 
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
-type Draft = { values: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean;
-  activate: () => void; markUncertain: () => void;
+type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
+  activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
 type OrthoOwner = {
@@ -195,10 +195,22 @@ function makeOwner(standalone = false): OrthoOwner {
   };
   return owner;
 }
+function sameDraftValue(before: unknown, after: unknown) {
+  return Object.is(before, after) || (Array.isArray(before) && Array.isArray(after)
+    && before.length === after.length && before.every((value, index) => Object.is(value, after[index])));
+}
 function makeDraft(): Draft {
-  const draft: Draft = { values: new Map(), urls: new Set(), active: true, busy: false, uncertain: false,
+  const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
+    trackEdit: (name, previous, next) => {
+      // Opening/closing the booking form changes presentation, not its data.
+      if (name === "booking") return;
+      const baseline = draft.edits.has(name) ? draft.edits.get(name) : previous;
+      if (sameDraftValue(baseline, next)) draft.edits.delete(name);
+      else draft.edits.set(name, baseline);
+      draft.dirty = draft.edits.size > 0;
+    },
   };
   return draft;
 }
@@ -216,7 +228,7 @@ function disposeDraft(owner: OrthoOwner, key: string) {
   if (!draft) return;
   draft.active = false;
   for (const url of draft.urls) URL.revokeObjectURL(url);
-  draft.urls.clear(); draft.values.clear(); owner.drafts.delete(key);
+  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); owner.drafts.delete(key);
 }
 function retireOwner(owner: OrthoOwner) {
   owner.active = false; owner.clinical = false; owner.contact = false;
@@ -267,7 +279,10 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
     if (!draft.values.has(name)) draft.values.set(name, typeof initial === "function" ? (initial as () => T)() : initial);
     return [draft.values.get(name) as T, (update) => {
       if (!editable()) return;
-      draft.values.set(name, typeof update === "function" ? (update as (before: T) => T)(draft.values.get(name) as T) : update);
+      const previous = draft.values.get(name) as T;
+      const next = typeof update === "function" ? (update as (before: T) => T)(previous) : update;
+      draft.trackEdit(name, previous, next);
+      draft.values.set(name, next);
       redraw();
     }];
   };
@@ -319,11 +334,30 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardChange }: {
+  patientId: number;
+  onClinicalChange?: () => void;
+  /** The page owns navigation; cleanup retires only this exact registration. */
+  onNavigationGuardChange?: (guard: () => boolean) => () => void;
+}) {
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
+  const canLeave = useCallback(() => {
+    if (!owner.active) return false;
+    const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
+    if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
+    if (drafts.some((draft) => draft.uncertain)) {
+      return window.confirm("نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟");
+    }
+    // A confirmed booking is retained for its receipt, not an unsaved form.
+    // Initial field defaults never mark a draft dirty. Confirming departure
+    // only permits navigation; the existing owner cleanup disposes the draft.
+    return !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
+      || window.confirm("هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟");
+  }, [owner]);
+  useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
     <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
