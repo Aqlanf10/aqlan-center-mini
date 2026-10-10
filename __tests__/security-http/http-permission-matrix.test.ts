@@ -169,3 +169,29 @@ describe("TD-04: الباب مغلقٌ على ما لم يُسجَّل", () => {
     expect(response.status).toBe(200);
   });
 });
+
+
+describe("reception completion reaches its guarded handler without financial writes", () => {
+  it("admits admin/reception to the route's invalid-id guard instead of a registry 404", async () => {
+    for (const role of ["admin", "reception"] as const) {
+      // Zero is rejected before ownership/body parsing or any audit/financial writer.
+      const response = await fetch(`${baseUrl}/api/visits/0/reception-handoff`, {
+        method: "POST", headers: { Cookie: sessions[role], Origin: baseUrl, "Content-Type": "application/json" },
+        body: "{}", redirect: "manual",
+      });
+      expect({ role, status: response.status }).toEqual({ role, status: 400 });
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(await response.json()).toEqual({ message: "رقم الزيارة غير صالح." });
+    }
+  });
+  it("keeps the registered completion endpoint POST-only at the proxy", async () => {
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      const response = await fetch(`${baseUrl}/api/visits/0/reception-handoff`, {
+        method, headers: { Cookie: sessions.admin, Origin: baseUrl }, redirect: "manual",
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST, OPTIONS");
+      expect(await response.json()).toEqual({ message: API_METHOD_NOT_ALLOWED_MESSAGE });
+    }
+  });
+});

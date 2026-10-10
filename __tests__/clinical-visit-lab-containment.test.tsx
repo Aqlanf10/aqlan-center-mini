@@ -144,8 +144,8 @@ const labWrites = () => writes().filter(([url]) => url === "/api/lab");
 const procedureSection = () => render().find((node) => node.props.id === "visit-procedures");
 const rowCount = () => elements(procedureSection()).filter((node) => node.props["aria-label"] === "الكمية").length;
 const pick = (service = crown) => {
-  const selector = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-  (selector.props.onPick as (item: typeof crown) => void)(service);
+  const selector = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+  (selector.props.onChange as (id: number, item: typeof crown) => void)(service.id, service);
   render();
 };
 const signButton = () => render().find((node) => node.type === "button" && /وقّع|تأكيد إنهاء/.test(contents(node)));

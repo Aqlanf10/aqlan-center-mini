@@ -46,10 +46,21 @@ describe("exact reception checkout on the built patient workspace", () => {
     const unexpected: string[] = [], errors: string[] = [], reads: number[] = [], writes: { body: unknown; key: string | undefined }[] = [];
     let mode: "ready" | "missing" | "unsigned" | "foreign" | "denied" | "malformed" | "failed" = "ready";
     let collected = false, permitPayment = false, holdNext = false, nextYer = 180000;
+    let handled = false, permitHandoff = false, handoffWrites = 0;
+    let handoffMode: "success" | "lost" | "held" = "success";
+    const handoffReleases: Array<() => void> = [];
     const held: Array<{ release: () => void; done: Promise<void> }> = [];
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${path}`); await route.abort(); return; }
+      if (method === "POST" && path === `/api/visits/${firstId}/reception-handoff` && permitHandoff) {
+        permitHandoff = false; handoffWrites++;
+        expect(request.postDataJSON()).toEqual({ patientId, signedAt: "2026-09-01T09:00:00Z", reason: "معالجة موثقة مع بقاء الدين" });
+        if (handoffMode === "lost") { mode = "failed"; await route.abort(); return; }
+        if (handoffMode === "held") { await new Promise<void>(resolve => { handoffReleases.push(resolve); }); }
+        else handled = true;
+        await json(route, { ok: true, visitId: firstId, patientId, signedAt: "2026-09-01T09:00:00Z", status: "handled", handledReason: "معالجة موثقة مع بقاء الدين" }); return;
+      }
       if (method === "POST" && path === "/api/payments" && permitPayment) {
         permitPayment = false;
         const body: unknown = request.postDataJSON();
@@ -67,7 +78,7 @@ describe("exact reception checkout on the built patient workspace", () => {
       if (visit) {
         const id = Number(visit[1]); reads.push(id);
         if (![firstId, secondId].includes(id)) { unexpected.push(`${method} ${path}`); await route.abort(); return; }
-        const body = walkout(id, collected, nextYer), thisMode = mode;
+        const body = { ...walkout(id, collected, nextYer), receptionHandoff: { status: handled ? "handled" : collected ? "collected" : "pending", handledReason: handled ? "معالجة موثقة مع بقاء الدين" : null } }, thisMode = mode;
         if (thisMode === "foreign") body.patientId++;
         if (thisMode === "unsigned") (body as { signedAt: unknown }).signedAt = null;
         if (thisMode === "malformed") delete (body.checkout.current as Partial<typeof body.checkout.current>).USD;
@@ -107,6 +118,46 @@ describe("exact reception checkout on the built patient workspace", () => {
           expect(await checkout(page).locator(`[data-testid="checkout-current-balance"][data-currency="${currency}"]`).innerText()).toContain(formatMoney(amount, currency));
         }
         expect(await checkout(page).innerText()).not.toContain(formatMoney(187300, "YER"));
+        // An explicit operational decision resolves this visit, never the patient's three debts.
+        await expect.poll(() => checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(1);
+        expect(handoffWrites).toBe(0); // Opening/reviewing alone has no acknowledgement side effect.
+        // Failed/lost command plus failed read must not create a local success or leave an active acknowledgement.
+        handoffMode = "lost";
+        page.once("dialog", dialog => { void dialog.accept("معالجة موثقة مع بقاء الدين"); });
+        permitHandoff = true;
+        await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).click();
+        await expect.poll(() => checkout(page).innerText()).toContain("لم يتأكد حفظ المعالجة");
+        await expect.poll(() => checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(0);
+        expect(await checkout(page).innerText()).not.toContain("تمت المعالجة — لا تعني سداد الرصيد");
+        mode = "ready";
+        await page.reload({ waitUntil: "domcontentloaded" }); await verified();
+        await expect.poll(() => checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(1);
+        // A held command is locked against duplicate clicks and retires with its visit owner.
+        handoffMode = "held";
+        page.once("dialog", dialog => { void dialog.accept("معالجة موثقة مع بقاء الدين"); });
+        permitHandoff = true;
+        await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).click();
+        await expect.poll(() => handoffReleases.length > 0).toBe(true);
+        expect(await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).isDisabled()).toBe(true);
+        await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).evaluate(button => (button as HTMLButtonElement).click());
+        expect(handoffWrites).toBe(2);
+        await page.goto(urlFor(secondId), { waitUntil: "domcontentloaded" }); await verified(secondId);
+        handoffReleases.shift()!();
+        await expect.poll(() => checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(1);
+        expect(await checkout(page).innerText()).not.toContain("تمت المعالجة — لا تعني سداد الرصيد");
+        await page.goto(urlFor(firstId), { waitUntil: "domcontentloaded" }); await verified();
+        handoffMode = "success";
+        page.once("dialog", dialog => { void dialog.accept("معالجة موثقة مع بقاء الدين"); });
+        permitHandoff = true;
+        await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).click();
+        await expect.poll(() => checkout(page).innerText()).toContain("تمت المعالجة — لا تعني سداد الرصيد");
+        expect(handoffWrites).toBe(3);
+        await page.reload({ waitUntil: "domcontentloaded" }); await verified();
+        await expect.poll(() => checkout(page).innerText()).toContain("معالجة موثقة مع بقاء الدين");
+        expect(await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(0);
+        for (const [currency, amount] of [["YER", 180000], ["SAR", 5000], ["USD", 2300]] as const) {
+          expect(await checkout(page).locator(`[data-testid="checkout-current-balance"][data-currency="${currency}"]`).innerText()).toContain(formatMoney(amount, currency));
+        }
         // Header action stays within selected checkout rather than collecting another workflow target.
         expect(await page.getByTestId("patient-primary-action").innerText()).toContain(`#${firstId}`);
         await page.getByTestId("patient-primary-action").click();
@@ -169,7 +220,7 @@ describe("exact reception checkout on the built patient workspace", () => {
         expect(await checkout(page).getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
         expect(await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).count()).toBe(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-      } finally { for (const pending of held) pending.release(); }
-    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); expect(permitPayment).toBe(false); });
+      } finally { for (const release of handoffReleases.splice(0)) release(); for (const pending of held) pending.release(); }
+    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); expect(permitPayment).toBe(false); expect(permitHandoff).toBe(false); expect(handoffWrites).toBe(3); });
   }, 120_000);
 });
