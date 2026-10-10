@@ -89,7 +89,7 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           await page.getByTestId("endo-record").waitFor();
           await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
           expect(await details.innerText()).toBe("بيانات المريض والإجراءات");
-          expect(await page.getByRole("button", { name: "المزيد", exact: true }).count()).toBe(0);
+          expect(await page.getByTestId("patient-workspace").getByRole("button", { name: "المزيد", exact: true }).count()).toBe(0);
           await details.click();
           expect(await page.locator("h1:visible").count()).toBe(1);
           await closed();

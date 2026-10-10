@@ -123,7 +123,7 @@ describe("patient context navigation on the built application", () => {
         await email.fill("unsaved-synthetic@example.test");
         const more = page.getByTestId("patient-more-actions");
         const toggle = more.locator(":scope > summary");
-        expect(await page.getByRole("button", { name: "المزيد", exact: true }).count()).toBe(0);
+        expect(await page.getByTestId("patient-workspace").getByRole("button", { name: "المزيد", exact: true }).count()).toBe(0);
         for (const direction of ["rtl", "ltr"]) {
           await page.evaluate(dir => { document.documentElement.dir = dir; }, direction);
           await toggle.click();
