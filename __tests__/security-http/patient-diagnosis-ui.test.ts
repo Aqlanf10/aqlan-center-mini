@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { Client } from "pg";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { authedMutation, baseUrl, harness, TEST_USERS, type Session } from "./_server";
 
 // Remote CI built-app acceptance only. The existing harness owns its isolated
@@ -129,6 +129,24 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
       expect(menuBounds.height).toBeLessThanOrEqual(menuBounds.viewportLimit + 1);
       expect(menuBounds.height).toBeLessThanOrEqual(menuBounds.remLimit + 1);
       expect(menuBounds.overflowY).toBe("auto");
+      // Retain the actual editor with its searchable choices and free-text
+      // footer open, rather than only the saved history later in this journey.
+      const popup = dentalChoices.list.locator("..");
+      await popup.scrollIntoViewIfNeeded();
+      expect(await dentalChoices.list.isVisible()).toBe(true);
+      expect(await dentalChoices.search.getAttribute("aria-expanded")).toBe("true");
+      expect(await popup.getByRole("button", { name: "أخرى — اكتب بحرية", exact: true }).isVisible()).toBe(true);
+      const popupBounds = await popup.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom,
+          width: window.innerWidth, height: window.innerHeight };
+      });
+      expect(popupBounds.left).toBeGreaterThanOrEqual(-1);
+      expect(popupBounds.right).toBeLessThanOrEqual(popupBounds.width + 1);
+      expect(popupBounds.top).toBeGreaterThanOrEqual(-1);
+      expect(popupBounds.bottom).toBeLessThanOrEqual(popupBounds.height + 1);
+      const editorPopupPng = await f.page.screenshot({ type: "png", fullPage: false });
+      expect(editorPopupPng.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
       await dentalChoices.search.fill(" DIV 2 ");
       expect(await dentalChoices.list.getByRole("option").allTextContents()).toEqual(["Class II Div 2"]);
       await dentalChoices.search.press("ArrowDown");
@@ -201,7 +219,8 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
       expect(await panel.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
       expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       await mkdir(".settings-ui-artifacts", { recursive: true });
-      await f.page.screenshot({ path: `.settings-ui-artifacts/ortho-diagnosis-case-${width}.png` });
+      // Preserve the existing uploader's exact allowlisted filenames.
+      await writeFile(`.settings-ui-artifacts/ortho-diagnosis-case-${width}.png`, editorPopupPng);
       expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
     } finally { await f.context.close(); }
   });

@@ -272,6 +272,10 @@ describe("actual visit workspace choices and review", () => {
       await page.getByTestId("planned-item-98400").getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
       const planned = page.getByTestId("visit-work-recorded").filter({ hasText: "من الخطة — سعرها من قاعدة البند" });
       const plannedPrice = planned.getByRole("textbox", { name: "السعر", exact: true });
+      // Staging a plan before any free row adopts the plan currency, SAR.
+      // Re-selecting that currency is a no-op, not permission to erase a price.
+      const sar = page.getByRole("radio", { name: "ريال سعودي", exact: true });
+      expect(await sar.getAttribute("aria-checked")).toBe("true");
       await add.selectOption(String(services[0].id));
       const free = page.getByTestId("visit-work-recorded").filter({ hasText: "إجراء من الدليل" });
       const freePrice = free.getByRole("textbox", { name: "السعر", exact: true });
@@ -282,10 +286,26 @@ describe("actual visit workspace choices and review", () => {
       expect(await plannedPrice.inputValue()).toBe("10.00");
       expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
       expect(f.writes).toHaveLength(0);
+      await sar.click();
+      expect(await freePrice.inputValue()).toBe("123");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await plannedPrice.isDisabled()).toBe(true);
+      expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(2500, "SAR"));
+      expect(await page.locator("#visit-procedures").textContent()).toContain(formatMoney(13300, "SAR"));
+      expect(f.writes).toHaveLength(0);
+      // Exercise real currency changes below. The existing explicit change
+      // handler reprices free drafts; it never reprices the linked plan row.
+      await page.getByRole("radio", { name: "ريال يمني", exact: true }).click();
+      expect(await freePrice.inputValue()).toBe("100");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(100, "YER"));
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+      expect(f.writes).toHaveLength(0);
       for (const [currency, label, minor, amount] of [
         ["SAR", "ريال سعودي", 2500, "25.00"], ["USD", "دولار", 700, "7.00"], ["YER", "ريال يمني", 100, "100"],
       ] as const) {
         await page.getByRole("radio", { name: label, exact: true }).click();
+        expect(await page.getByRole("radio", { name: label, exact: true }).getAttribute("aria-checked")).toBe("true");
         expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(minor, currency));
         expect(await freePrice.inputValue()).toBe(amount);
         expect(await plannedPrice.inputValue()).toBe("10.00");
@@ -297,6 +317,7 @@ describe("actual visit workspace choices and review", () => {
           expect(await page.locator("#visit-procedures").textContent()).toContain(formatMoney(3500, "SAR"));
         } else {
           expect(await page.getByTestId("currency-subtotals").textContent()).toContain(formatMoney(1000, "SAR"));
+          expect(await page.getByTestId("currency-subtotals").textContent()).toContain(formatMoney(minor, currency));
         }
         if (currency !== "YER") expect(await add.locator(`option[value="${services[2].id}"]`).textContent()).toContain("لا سعر بهذه العملة");
         expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
