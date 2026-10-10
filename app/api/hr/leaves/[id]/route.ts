@@ -23,7 +23,7 @@ export async function GET(
   const { id } = await params;
   try {
     const list = await listLeaveRequests({});
-    const found = list.find((item) => item.id === id);
+    const found = list.find((item) => item.id === Number(id));
     if (!found) {
       return NextResponse.json({ message: "طلب الإجازة غير موجود." }, { status: 404 });
     }
@@ -52,7 +52,7 @@ export async function PATCH(
   }
 
   const payload = (body ?? {}) as {
-    status?: HrLeaveStatus;
+    status?: "approved" | "rejected" | "cancelled";
     decisionNotes?: string;
   };
 
@@ -62,9 +62,9 @@ export async function PATCH(
 
   try {
     const updated = await decideLeaveRequest(
-      id,
+      Number(id),
       payload.status,
-      payload.decisionNotes || null,
+      payload.decisionNotes || "تحديث حالة الإجازة",
       session
     );
     return NextResponse.json(updated);

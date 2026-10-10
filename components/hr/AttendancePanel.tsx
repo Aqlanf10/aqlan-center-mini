@@ -598,7 +598,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Manual Punch Modal */}
       {punchModalOpen && (
-        <Modal open={punchModalOpen} onClose={() => setPunchModalOpen(false)}>
+        <Modal onClose={() => setPunchModalOpen(false)}>
           <form onSubmit={handlePunch} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">تسجيل بصمة يدوية</h3>
             <div>
@@ -671,7 +671,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Request Correction Modal */}
       {correctionModalOpen && selectedRecordForCorrection && (
-        <Modal open={correctionModalOpen} onClose={() => setCorrectionModalOpen(false)}>
+        <Modal onClose={() => setCorrectionModalOpen(false)}>
           <form onSubmit={handleRequestCorrection} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">طلب تصحيح بصمة الحضور</h3>
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
@@ -731,7 +731,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Create Schedule Modal */}
       {scheduleModalOpen && (
-        <Modal open={scheduleModalOpen} onClose={() => setScheduleModalOpen(false)}>
+        <Modal onClose={() => setScheduleModalOpen(false)}>
           <form onSubmit={handleCreateSchedule} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">إنشاء جدول عمل وردية</h3>
             <div>

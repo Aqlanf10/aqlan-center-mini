@@ -464,7 +464,7 @@ export function HrContractsPanel() {
 
       {/* Create Contract Modal */}
       {createModalOpen && (
-        <Modal open={createModalOpen} onClose={() => setCreateModalOpen(false)}>
+        <Modal onClose={() => setCreateModalOpen(false)}>
           <form onSubmit={handleCreateContract} className="space-y-4">
             <h3 className="text-lg font-bold text-navy-900">إنشاء عقد وظيفي جديد</h3>
 
@@ -673,7 +673,7 @@ export function HrContractsPanel() {
 
       {/* Contract Details & Addenda Modal */}
       {selectedContract && contractDetails && (
-        <Modal open={Boolean(selectedContract)} onClose={() => setSelectedContract(null)}>
+        <Modal onClose={() => setSelectedContract(null)}>
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-navy-100 pb-3">
               <div>
@@ -796,7 +796,7 @@ export function HrContractsPanel() {
 
       {/* Add Addendum Modal */}
       {addendumModalOpen && (
-        <Modal open={addendumModalOpen} onClose={() => setAddendumModalOpen(false)}>
+        <Modal onClose={() => setAddendumModalOpen(false)}>
           <form onSubmit={handleAddAddendum} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">إضافة ملحق للعقد</h3>
             <div>
@@ -852,7 +852,7 @@ export function HrContractsPanel() {
 
       {/* Status Transition Modal */}
       {statusModalOpen && selectedContract && (
-        <Modal open={statusModalOpen} onClose={() => setStatusModalOpen(false)}>
+        <Modal onClose={() => setStatusModalOpen(false)}>
           <div className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">تغيير حالة العقد</h3>
             <div>

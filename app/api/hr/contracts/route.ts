@@ -23,12 +23,13 @@ export async function GET(request: Request) {
   if (!canManageStaff(session.role)) return forbidden();
 
   const url = new URL(request.url);
-  const staffId = url.searchParams.get("staffId") || undefined;
+  const staffIdStr = url.searchParams.get("staffId");
+  const staffId = staffIdStr ? parseInt(staffIdStr, 10) : undefined;
   const status = (url.searchParams.get("status") as HrContractStatus) || undefined;
-  const contractKind = (url.searchParams.get("contractKind") as HrContractKind) || undefined;
+  const templateKind = (url.searchParams.get("contractKind") || url.searchParams.get("templateKind")) as any || undefined;
 
   try {
-    const contracts = await listContracts({ staffId, status, contractKind });
+    const contracts = await listContracts({ staffId, status, templateKind });
     return NextResponse.json(contracts);
   } catch (error) {
     console.error("Failed to list contracts:", error);
@@ -50,16 +51,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const payload = (body ?? {}) as Partial<CreateContractInput>;
-  if (!payload.staffId || !payload.contractNumber || !payload.title || !payload.startDate || !payload.currency) {
+  const payload = (body ?? {}) as Record<string, any>;
+  if (!payload.staffId || !payload.title || !payload.startDate) {
     return NextResponse.json(
-      { message: "يرجى تعبئة الحقول الإلزامية: الموظف، رقم العقد، المسمى، تاريخ البدء، والعملة." },
+      { message: "يرجى تعبئة الحقول الإلزامية: الموظف، المسمى، وتاريخ البدء." },
       { status: 400 }
     );
   }
 
   try {
-    const contract = await createContract(payload as CreateContractInput, session);
+    const input: CreateContractInput = {
+      staffId: Number(payload.staffId),
+      templateKind: payload.templateKind || payload.contractKind || "support_staff",
+      title: String(payload.title),
+      startDate: String(payload.startDate),
+      endDate: payload.endDate || null,
+      probationEndDate: payload.probationEndDate || null,
+      noticePeriodDays: payload.noticePeriodDays ? Number(payload.noticePeriodDays) : 30,
+      termsPayload: payload.termsPayload || {},
+      compensationKind: payload.compensationKind || "salary",
+      baseSalaryMinor: payload.baseSalaryMinor ? Number(payload.baseSalaryMinor) : null,
+      salaryCurrency: payload.salaryCurrency || payload.currency || null,
+      salaryPeriod: payload.salaryPeriod || "monthly",
+      commissionRatePercent: payload.commissionRatePercent ? Number(payload.commissionRatePercent) : null,
+      doctorPartyId: payload.doctorPartyId ? Number(payload.doctorPartyId) : null,
+      notes: payload.notes || null,
+    };
+    const contract = await createContract(input, session);
     return NextResponse.json(contract, { status: 201 });
   } catch (error: any) {
     console.error("Failed to create contract:", error);

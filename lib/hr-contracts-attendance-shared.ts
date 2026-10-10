@@ -13,7 +13,12 @@ export type HrContractTemplateKind =
   | "doctor_percentage"
   | "doctor_salary"
   | "doctor_hybrid"
-  | "support_staff";
+  | "support_staff"
+  | "fixed_salary"
+  | "percentage"
+  | "hybrid"
+  | "probation"
+  | "fixed";
 
 export type HrContractStatus =
   | "draft"
@@ -28,6 +33,11 @@ export const HR_CONTRACT_TEMPLATE_LABEL: Record<HrContractTemplateKind, string> 
   doctor_salary: "طبيب براتب ثابت",
   doctor_hybrid: "طبيب بنظام مختلط (راتب ونسبة)",
   support_staff: "موظف مساند (استقبال، سكرتارية، حراسة، تمريض، تنسيق، حسابات)",
+  fixed_salary: "عقد براتب ثابت",
+  percentage: "عقد بنسبة عمولة",
+  hybrid: "عقد مختلط (راتب ونسبة)",
+  probation: "عقد تحت التجربة",
+  fixed: "عقد محدد المدة",
 };
 
 export const HR_CONTRACT_STATUS_LABEL: Record<HrContractStatus, string> = {
@@ -318,8 +328,8 @@ export function calculateShiftAttendance(params: {
   const inM = params.checkIn.getMinutes();
   const actualInMin = inH * 60 + inM;
 
-  let outH = params.checkOut.getHours();
-  let outM = params.checkOut.getMinutes();
+  const outH = params.checkOut.getHours();
+  const outM = params.checkOut.getMinutes();
   let actualOutMin = outH * 60 + outM;
 
   if (params.crossesMidnight && actualOutMin < actualInMin) {
@@ -362,3 +372,11 @@ export function calculateShiftAttendance(params: {
     status,
   };
 }
+
+/* ── تسميات متوافقة مع واجهات العرض السابقة ─────────────────────────────── */
+export const HR_CONTRACT_STATUS_LABELS = HR_CONTRACT_STATUS_LABEL;
+export const HR_CONTRACT_KIND_LABELS = HR_CONTRACT_TEMPLATE_LABEL;
+export type HrContractKind = HrContractTemplateKind;
+export const HR_ATTENDANCE_STATUS_LABELS = HR_ATTENDANCE_STATUS_LABEL;
+export const HR_LEAVE_STATUS_LABELS = HR_LEAVE_STATUS_LABEL;
+export type HrLeaveStatus = HrLeaveRequestStatus;

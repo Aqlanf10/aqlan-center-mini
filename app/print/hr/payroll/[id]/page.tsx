@@ -4,9 +4,12 @@ import { requireSession } from "@/lib/session";
 import { getSettingsSafe } from "@/lib/db";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
-import { getPayrollRunById } from "@/lib/hr-payroll";
+import { getPayrollRunById, listPayrollItems } from "@/lib/hr-payroll";
 import { formatAmount, CURRENCY_SHORT, type Currency } from "@/lib/money";
-import { HR_PAYROLL_RUN_STATUS_LABELS } from "@/lib/hr-payroll-shared";
+import {
+  HR_PAYROLL_RUN_STATUS_LABELS,
+  type HrPayrollItemView,
+} from "@/lib/hr-payroll-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +29,10 @@ export default async function PayrollPrintPage({
     notFound();
   }
 
+  const items = await listPayrollItems(id);
   const settings = await getSettingsSafe();
   const currency = run.currency as Currency;
+  const toMajor = (minor: number) => (minor || 0) / 100;
 
   return (
     <div className="mx-auto max-w-5xl p-6 print:p-0">
@@ -47,8 +52,12 @@ export default async function PayrollPrintPage({
             </span>
           </div>
           <div>
+            <span className="font-semibold text-gray-600">الفترة: </span>
+            <span className="font-bold">{run.periodName || run.periodKey || `دورة #${run.id}`}</span>
+          </div>
+          <div>
             <span className="font-semibold text-gray-600">الحالة: </span>
-            <span className="font-bold">{HR_PAYROLL_RUN_STATUS_LABELS[run.status]}</span>
+            <span className="font-bold">{HR_PAYROLL_RUN_STATUS_LABELS[run.status] || run.status}</span>
           </div>
           <div>
             <span className="font-semibold text-gray-600">تاريخ الاعتماد: </span>
@@ -67,7 +76,6 @@ export default async function PayrollPrintPage({
                 <th className="p-2 border">الراتب الأساسي</th>
                 <th className="p-2 border">البدلات</th>
                 <th className="p-2 border">نسب الأطباء</th>
-                <th className="p-2 border">الإضافي</th>
                 <th className="p-2 border">الخصميات والغياب</th>
                 <th className="p-2 border">صافي المستحق</th>
                 <th className="p-2 border">المصروف</th>
@@ -75,24 +83,21 @@ export default async function PayrollPrintPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 font-mono">
-              {run.items?.map((item, idx) => (
+              {items.map((item: HrPayrollItemView, idx: number) => (
                 <tr key={item.id} className="border-b">
                   <td className="p-2 border text-center font-sans">{idx + 1}</td>
                   <td className="p-2 border font-sans font-bold">{item.staffName || `موظف #${item.staffId}`}</td>
-                  <td className="p-2 border font-sans text-gray-600">{item.jobTitle || "—"}</td>
-                  <td className="p-2 border">{formatAmount(item.baseSalary, currency)}</td>
-                  <td className="p-2 border">{formatAmount(item.allowances, currency)}</td>
+                  <td className="p-2 border font-sans text-gray-600">{item.staffJobTitle || "—"}</td>
+                  <td className="p-2 border">{formatAmount(toMajor(item.baseSalaryMinor), currency)}</td>
+                  <td className="p-2 border">{formatAmount(toMajor(item.allowancesMinor), currency)}</td>
                   <td className="p-2 border font-bold text-emerald-800">
-                    {item.commissionAmount > 0 ? formatAmount(item.commissionAmount, currency) : "—"}
-                  </td>
-                  <td className="p-2 border">
-                    {item.overtimeAmount > 0 ? formatAmount(item.overtimeAmount, currency) : "—"}
+                    {item.commissionsMinor > 0 ? formatAmount(toMajor(item.commissionsMinor), currency) : "—"}
                   </td>
                   <td className="p-2 border text-rose-800">
-                    {item.deductions > 0 ? `-${formatAmount(item.deductions, currency)}` : "—"}
+                    {item.deductionsMinor > 0 ? `-${formatAmount(toMajor(item.deductionsMinor), currency)}` : "—"}
                   </td>
-                  <td className="p-2 border font-bold text-black">{formatAmount(item.netSalary, currency)}</td>
-                  <td className="p-2 border text-emerald-900">{formatAmount(item.disbursedAmount, currency)}</td>
+                  <td className="p-2 border font-bold text-black">{formatAmount(toMajor(item.netDueMinor), currency)}</td>
+                  <td className="p-2 border text-emerald-900">{formatAmount(toMajor(item.paidMinor), currency)}</td>
                   <td className="p-2 border font-sans text-center text-gray-400">....................</td>
                 </tr>
               ))}
@@ -103,13 +108,13 @@ export default async function PayrollPrintPage({
                 <td colSpan={3} className="p-2 border font-sans text-center">
                   الإجماليات الكلية ({run.currency}):
                 </td>
-                <td className="p-2 border">{formatAmount(run.totalBase, currency)}</td>
-                <td className="p-2 border">{formatAmount(run.totalAllowances, currency)}</td>
-                <td className="p-2 border text-emerald-800">{formatAmount(run.totalCommissions, currency)}</td>
-                <td className="p-2 border">{formatAmount(run.totalOvertime, currency)}</td>
-                <td className="p-2 border text-rose-800">-{formatAmount(run.totalDeductions, currency)}</td>
-                <td className="p-2 border font-bold text-black">{formatAmount(run.totalNet, currency)}</td>
-                <td className="p-2 border" colSpan={2}></td>
+                <td className="p-2 border">{formatAmount(toMajor(run.totalBaseSalaryMinor), currency)}</td>
+                <td className="p-2 border">{formatAmount(toMajor(run.totalAllowancesMinor), currency)}</td>
+                <td className="p-2 border text-emerald-800">{formatAmount(toMajor(run.totalCommissionsMinor), currency)}</td>
+                <td className="p-2 border text-rose-800">-{formatAmount(toMajor(run.totalDeductionsMinor), currency)}</td>
+                <td className="p-2 border font-bold text-black">{formatAmount(toMajor(run.totalNetDueMinor), currency)}</td>
+                <td className="p-2 border text-emerald-900">{formatAmount(toMajor(run.totalPaidMinor), currency)}</td>
+                <td className="p-2 border"></td>
               </tr>
             </tfoot>
           </table>

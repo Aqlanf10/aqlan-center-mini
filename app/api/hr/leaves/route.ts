@@ -21,8 +21,9 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const includeTypes = url.searchParams.get("types") === "true";
-  const staffId = url.searchParams.get("staffId") || undefined;
-  const status = (url.searchParams.get("status") as HrLeaveStatus) || undefined;
+  const staffIdStr = url.searchParams.get("staffId");
+  const staffId = staffIdStr ? parseInt(staffIdStr, 10) : undefined;
+  const status = (url.searchParams.get("status") as any) || undefined;
   const startDate = url.searchParams.get("startDate") || undefined;
   const endDate = url.searchParams.get("endDate") || undefined;
 
@@ -52,8 +53,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const payload = (body ?? {}) as Partial<CreateLeaveRequestInput>;
-  if (!payload.staffId || !payload.leaveTypeId || !payload.startDate || !payload.endDate) {
+  const payload = (body ?? {}) as Record<string, any>;
+  const leaveTypeCode = payload.leaveTypeCode || payload.leaveTypeId;
+  if (!payload.staffId || !leaveTypeCode || !payload.startDate || !payload.endDate) {
     return NextResponse.json(
       { message: "يرجى تحديد الموظف ونوع الإجازة وتاريخ البدء والانتهاء." },
       { status: 400 }
@@ -61,7 +63,23 @@ export async function POST(request: Request) {
   }
 
   try {
-    const leave = await createLeaveRequest(payload as CreateLeaveRequestInput, session);
+    const start = new Date(payload.startDate);
+    const end = new Date(payload.endDate);
+    const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const daysCount = payload.daysCount ? Number(payload.daysCount) : diffDays;
+
+    const input: CreateLeaveRequestInput = {
+      staffId: Number(payload.staffId),
+      leaveTypeCode,
+      startDate: String(payload.startDate),
+      endDate: String(payload.endDate),
+      daysCount,
+      reason: String(payload.reason || "طلب إجازة"),
+      isPartialDay: Boolean(payload.isPartialDay),
+      partialHours: payload.partialHours ? Number(payload.partialHours) : null,
+      attachmentRefs: payload.attachmentRefs || [],
+    };
+    const leave = await createLeaveRequest(input, session);
     return NextResponse.json(leave, { status: 201 });
   } catch (error: any) {
     console.error("Failed to create leave request:", error);

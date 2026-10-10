@@ -50,7 +50,7 @@ export function StaffProfileModal({ staffId, open, onClose }: StaffProfileModalP
   const activeContract = contracts.find((c) => c.status === "active") || contracts[0];
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal onClose={onClose}>
       <div className="space-y-4">
         {loading ? (
           <div className="py-16 text-center text-sm text-navy-500">جاري تحميل الملف الشامل للموظف...</div>

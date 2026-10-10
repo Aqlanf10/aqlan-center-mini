@@ -11886,7 +11886,7 @@ export interface RecordExpenseResult {
  * المجمّعة). ترتيب الأقفال ثابت: الجهة ثم الالتزام — فلا يتزاحم سندان على رصيدٍ
  * واحد ولا يتقاطعان في قفل.
  */
-async function recordExpenseInTx(
+export async function recordExpenseInTx(
   client: DbClient,
   input: RecordExpenseInput,
   settingsRates: RateMap,
@@ -25940,6 +25940,7 @@ export async function resetClinicData<F>(
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
+      await client.query(`UPDATE hr_leave_balances SET used_days = 0, pending_days = 0`);
       await client.query(
         `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
          VALUES ('system.reset', 'system', NULL, $1, $2::jsonb, $3, $4::text, $5::text, $6::text)`,

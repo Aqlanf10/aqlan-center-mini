@@ -48,16 +48,55 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const payload = (body ?? {}) as Partial<CreateScheduleInput>;
-  if (!payload.name || !payload.shiftPattern || !payload.workDays) {
+  const raw = (body ?? {}) as {
+    staffId?: string | number | null;
+    department?: string | null;
+    name?: string;
+    scheduleType?: string;
+    shiftPattern?: string;
+    effectiveFrom?: string;
+    effectiveTo?: string | null;
+    workingDays?: number[];
+    workDays?: number[];
+    shiftStartTime?: string;
+    shiftEndTime?: string;
+    secondShiftStart?: string | null;
+    secondShiftEnd?: string | null;
+    gracePeriodMins?: number;
+    expectedDailyHours?: number;
+    crossesMidnight?: boolean;
+  };
+
+  if (!raw.name) {
     return NextResponse.json(
-      { message: "يرجى تحديد مسمى الجدول ونمط الوردية وأيام العمل." },
+      { message: "يرجى تحديد مسمى الجدول." },
       { status: 400 }
     );
   }
 
+  const scheduleInput: CreateScheduleInput = {
+    staffId: raw.staffId ? Number(raw.staffId) : null,
+    department: raw.department || null,
+    name: String(raw.name).trim(),
+    scheduleType: (raw.scheduleType || raw.shiftPattern || "morning") as any,
+    effectiveFrom: raw.effectiveFrom || new Date().toISOString().slice(0, 10),
+    effectiveTo: raw.effectiveTo || null,
+    workingDays: Array.isArray(raw.workingDays)
+      ? raw.workingDays
+      : Array.isArray(raw.workDays)
+      ? raw.workDays
+      : [0, 1, 2, 3, 4, 6],
+    shiftStartTime: raw.shiftStartTime || "09:00",
+    shiftEndTime: raw.shiftEndTime || "17:00",
+    secondShiftStart: raw.secondShiftStart || null,
+    secondShiftEnd: raw.secondShiftEnd || null,
+    gracePeriodMins: raw.gracePeriodMins !== undefined ? Number(raw.gracePeriodMins) : 15,
+    expectedDailyHours: raw.expectedDailyHours !== undefined ? Number(raw.expectedDailyHours) : 8,
+    crossesMidnight: Boolean(raw.crossesMidnight),
+  };
+
   try {
-    const schedule = await createWorkSchedule(payload as CreateScheduleInput, session);
+    const schedule = await createWorkSchedule(scheduleInput, session);
     return NextResponse.json(schedule, { status: 201 });
   } catch (error: any) {
     console.error("Failed to create work schedule:", error);

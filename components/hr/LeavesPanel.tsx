@@ -391,7 +391,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Request Leave Modal */}
       {requestModalOpen && (
-        <Modal open={requestModalOpen} onClose={() => setRequestModalOpen(false)}>
+        <Modal onClose={() => setRequestModalOpen(false)}>
           <form onSubmit={handleCreateRequest} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">طلب إجازة جديدة</h3>
             <div>
@@ -481,7 +481,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Adjust Balance Modal */}
       {adjustModalOpen && (
-        <Modal open={adjustModalOpen} onClose={() => setAdjustModalOpen(false)}>
+        <Modal onClose={() => setAdjustModalOpen(false)}>
           <form onSubmit={handleAdjustBalance} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">تعديل رصيد إجازة لموظف</h3>
             <div>

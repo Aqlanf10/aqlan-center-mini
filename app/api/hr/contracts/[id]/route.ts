@@ -69,7 +69,7 @@ export async function PATCH(
       if (!status) {
         return NextResponse.json({ message: "يرجى تحديد الحالة الجديدة." }, { status: 400 });
       }
-      const updated = await transitionContractStatus(id, status, reason ?? null, session);
+      const updated = await transitionContractStatus(id, status, reason || "تحديث حالة العقد", session);
       return NextResponse.json(updated);
     } else {
       const updated = await updateContract(id, payload as UpdateContractInput, session);
@@ -102,20 +102,27 @@ export async function POST(
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const payload = (body ?? {}) as Partial<CreateAddendumInput>;
-  if (!payload.title || !payload.effectiveDate || !payload.content) {
+  const payload = (body ?? {}) as Record<string, any>;
+  if (!payload.title || !payload.startDate || (!payload.addendumReason && !payload.reason)) {
     return NextResponse.json(
-      { message: "يرجى تعبئة عنوان الملحق وتاريخ السريان والنص." },
+      { message: "يرجى تعبئة عنوان الملحق وتاريخ السريان وسبب التعديل." },
       { status: 400 }
     );
   }
 
   try {
-    const addendum = await createContractAddendum(
-      id,
-      payload as CreateAddendumInput,
-      session
-    );
+    const input: CreateAddendumInput = {
+      title: String(payload.title),
+      startDate: String(payload.startDate || payload.effectiveDate),
+      endDate: payload.endDate || null,
+      addendumReason: String(payload.addendumReason || payload.reason || "تعديل بنود العقد"),
+      termsPayload: payload.termsPayload || {},
+      baseSalaryMinor: payload.baseSalaryMinor ? Number(payload.baseSalaryMinor) : null,
+      salaryCurrency: payload.salaryCurrency || null,
+      commissionRatePercent: payload.commissionRatePercent ? Number(payload.commissionRatePercent) : null,
+      notes: payload.notes || null,
+    };
+    const addendum = await createContractAddendum(id, input, session);
     return NextResponse.json(addendum, { status: 201 });
   } catch (error: any) {
     console.error("Failed to create contract addendum:", error);

@@ -177,3 +177,9 @@ export function calculateItemNetDue(item: {
 export function isAllowedHrCurrency(currency: string): currency is Currency {
   return (CURRENCIES as readonly string[]).includes(currency);
 }
+
+/* ── تسميات متوافقة مع واجهات العرض السابقة ─────────────────────────────── */
+export const HR_PAYROLL_RUN_STATUS_LABELS = HR_PAYROLL_RUN_STATUS_LABEL;
+export const HR_PAYROLL_ITEM_STATUS_LABELS = HR_PAYROLL_ITEM_STATUS_LABEL;
+export type HrCurrency = Currency;
+export type HrSettings = HrSettingsPayload;

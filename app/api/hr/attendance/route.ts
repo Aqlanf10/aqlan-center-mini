@@ -19,7 +19,8 @@ export async function GET(request: Request) {
   if (!session) return denied();
 
   const url = new URL(request.url);
-  const staffId = url.searchParams.get("staffId") || undefined;
+  const staffIdStr = url.searchParams.get("staffId");
+  const staffId = staffIdStr ? parseInt(staffIdStr, 10) : undefined;
   const startDate = url.searchParams.get("startDate") || undefined;
   const endDate = url.searchParams.get("endDate") || undefined;
   const status = (url.searchParams.get("status") as HrAttendanceStatus) || undefined;

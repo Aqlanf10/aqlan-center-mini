@@ -6,8 +6,9 @@ import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { getContractById, listContractAddenda } from "@/lib/hr-contracts-attendance";
 import {
-  HR_CONTRACT_KIND_LABELS,
-  HR_CONTRACT_STATUS_LABELS,
+  HR_CONTRACT_TEMPLATE_LABEL,
+  HR_CONTRACT_STATUS_LABEL,
+  type HrContractView,
 } from "@/lib/hr-contracts-attendance-shared";
 import { formatAmount, CURRENCY_SHORT, type Currency } from "@/lib/money";
 
@@ -32,8 +33,12 @@ export default async function ContractPrintPage({
   const addenda = await listContractAddenda(id);
   const settings = await getSettingsSafe();
 
-  const clinicName = settings.name || "مركز عقلان لطب وجراحة الأسنان";
-  const currency = contract.currency as Currency;
+  const clinicName = settings["clinic.name"] || "مركز عقلان لطب وجراحة الأسنان";
+  const currency = (contract.salaryCurrency || "YER") as Currency;
+  const baseSalary = contract.baseSalaryMinor ? contract.baseSalaryMinor / 100 : 0;
+  const commissionRate = contract.commissionRatePercent || 0;
+  const jobTitle = contract.termsPayload?.jobDescription || contract.title;
+  const clauses = contract.termsPayload?.clauses?.join("\n") || contract.notes;
 
   return (
     <div className="mx-auto max-w-4xl p-6 print:p-0">
@@ -56,7 +61,7 @@ export default async function ContractPrintPage({
           </div>
           <div>
             <span className="font-semibold text-gray-600">الحالة: </span>
-            <span className="font-bold">{HR_CONTRACT_STATUS_LABELS[contract.status]}</span>
+            <span className="font-bold">{HR_CONTRACT_STATUS_LABEL[contract.status] || contract.status}</span>
           </div>
         </div>
 
@@ -71,7 +76,7 @@ export default async function ContractPrintPage({
             <p>
               <span className="font-bold">الطرف الثاني: </span>
               الأخ/الأخت: <span className="font-bold text-base">{contract.staffName}</span>
-              {contract.jobTitle && <span> — المسمى الوظيفي: {contract.jobTitle}</span>}.
+              {jobTitle && <span> — المسمى الوظيفي: {jobTitle}</span>}.
             </p>
           </div>
         </div>
@@ -81,7 +86,7 @@ export default async function ContractPrintPage({
           <h3 className="font-bold text-base border-b pb-1">أولاً: نطاق ونوع التعاقد</h3>
           <p>
             اتفق الطرفان على أن يعمل الطرف الثاني لدى الطرف الأول بموجب (
-            <span className="font-bold">{HR_CONTRACT_KIND_LABELS[contract.contractKind]}</span>)، وتحت إشراف وإدارة الطرف الأول.
+            <span className="font-bold">{HR_CONTRACT_TEMPLATE_LABEL[contract.templateKind] || contract.templateKind}</span>)، وتحت إشراف وإدارة الطرف الأول.
           </p>
 
           <h3 className="font-bold text-base border-b pb-1 pt-2">ثانياً: مدة العقد وفترة التجربة</h3>
@@ -99,33 +104,30 @@ export default async function ContractPrintPage({
 
           <h3 className="font-bold text-base border-b pb-1 pt-2">ثالثاً: المقابل المالي والأجر</h3>
           <div className="space-y-1">
-            {contract.baseSalary > 0 && (
+            {baseSalary > 0 && (
               <p>
                 - الراتب الأساسي الشهري:{" "}
                 <span className="font-bold font-mono">
-                  {formatAmount(contract.baseSalary, currency)} {CURRENCY_SHORT[currency] || contract.currency}
+                  {formatAmount(baseSalary, currency)} {CURRENCY_SHORT[currency] || currency}
                 </span>
                 .
               </p>
             )}
-            {contract.commissionRate > 0 && (
+            {commissionRate > 0 && (
               <p>
                 - نسبة الإنجاز المالي للأطباء:{" "}
-                <span className="font-bold text-emerald-800">{contract.commissionRate}%</span> من صافي دخل العمليات المنجزة وفق سجلات النظام الآلي للمركز.
+                <span className="font-bold text-emerald-800">{commissionRate}%</span> من صافي دخل العمليات المنجزة وفق سجلات النظام الآلي للمركز.
               </p>
             )}
-            {contract.hourlyRate > 0 && (
-              <p>
-                - أجر الساعة: <span className="font-bold font-mono">{contract.hourlyRate}</span> {CURRENCY_SHORT[currency] || contract.currency}.
-              </p>
+            {contract.termsPayload?.workingHoursSummary && (
+              <p>- ساعات العمل: {contract.termsPayload.workingHoursSummary}</p>
             )}
-            <p>- ساعات العمل الأسبوعية: {contract.workingHoursPerWeek} ساعة وفق جدول الدوام المعتمد.</p>
           </div>
 
-          {contract.clauses && (
+          {clauses && (
             <>
               <h3 className="font-bold text-base border-b pb-1 pt-2">رابعاً: البنود والشروط العامة</h3>
-              <div className="whitespace-pre-wrap leading-relaxed">{contract.clauses}</div>
+              <div className="whitespace-pre-wrap leading-relaxed">{clauses}</div>
             </>
           )}
 
@@ -134,12 +136,14 @@ export default async function ContractPrintPage({
             <>
               <h3 className="font-bold text-base border-b pb-1 pt-2">الملاحق الملحقة بهذا العقد</h3>
               <div className="space-y-3">
-                {addenda.map((ad) => (
+                {addenda.map((ad: HrContractView) => (
                   <div key={ad.id} className="rounded-lg border p-3 bg-gray-50">
                     <div className="font-bold">
-                      {ad.title} ({ad.addendumNumber}) — ساري من: {ad.effectiveDate}
+                      {ad.title} ({ad.contractNumber}) — ساري من: {ad.startDate}
                     </div>
-                    <div className="mt-1 whitespace-pre-wrap text-xs text-gray-700">{ad.content}</div>
+                    <div className="mt-1 whitespace-pre-wrap text-xs text-gray-700">
+                      {ad.addendumReason || ad.notes || "—"}
+                    </div>
                   </div>
                 ))}
               </div>

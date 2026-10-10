@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
-  HR_PAYROLL_RUN_STATUS_LABELS,
   HR_PAYROLL_ITEM_STATUS_LABELS,
   type HrCurrency,
   type HrPayrollRunStatus,
@@ -444,7 +443,7 @@ export function HrPayrollPanel() {
                             : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {HR_PAYROLL_ITEM_STATUS_LABELS[item.status as any] || item.status}
+                        {(HR_PAYROLL_ITEM_STATUS_LABELS as Record<string, string>)[item.status] || item.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-sans text-center">
@@ -469,7 +468,7 @@ export function HrPayrollPanel() {
 
       {/* Open Period Modal */}
       {periodModalOpen && (
-        <Modal open={periodModalOpen} onClose={() => setPeriodModalOpen(false)}>
+        <Modal onClose={() => setPeriodModalOpen(false)}>
           <form onSubmit={handleOpenPeriod} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">فتح فترة مسير رواتب جديدة</h3>
             <div>
@@ -504,7 +503,7 @@ export function HrPayrollPanel() {
 
       {/* Disburse Modal */}
       {disburseModalOpen && disburseItem && activeRun && (
-        <Modal open={disburseModalOpen} onClose={() => setDisburseModalOpen(false)}>
+        <Modal onClose={() => setDisburseModalOpen(false)}>
           <form onSubmit={handleDisburse} className="space-y-3">
             <h3 className="text-base font-bold text-navy-900">صرف مستحق راتب</h3>
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
