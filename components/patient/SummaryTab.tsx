@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
+import { HistoricalClinicalNote } from "../HistoricalClinicalNote";
 import type { AssessmentCase, LegacyCase } from "@/lib/patient-workflow-cases";
 import { ReceiptCorrectionLauncher } from "@/components/ReceiptCorrectionLauncher";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
@@ -34,6 +36,7 @@ export interface WorkflowSummary {
     nextDueDate: string | null; overdueMinor: number;
     /* (TD-05) عملة اتفاق الخطة. */
     baseCurrency?: "YER" | "SAR" | "USD";
+    clinicalProgress?: ClinicalProgressView;
   }[];
   plannedVisits: {
     id: number; planTitle: string | null; sequence: number; title: string;
@@ -47,11 +50,13 @@ export interface WorkflowSummary {
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    clinicalProgress?: ClinicalProgressView;
     agreementPaidMinor?: number; agreementRemainingMinor?: number;
     /* (TD-05) نفس الحقول لكل عملةٍ ذات نشاط — المفرد هو دلو العملة الأساسية. */
     byCurrency?: Record<"YER" | "SAR" | "USD", {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
       agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+      clinicalProgress?: ClinicalProgressView;
       agreementPaidMinor?: number; agreementRemainingMinor?: number;
     }>;
   } | null;
@@ -212,7 +217,7 @@ export function SummaryTab({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2" data-testid="summary-current-work">
         {/* الموعد القادم */}
         <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
@@ -256,6 +261,9 @@ export function SummaryTab({
           </p>
           {primaryPlan ? (
             <>
+              {primaryPlan.clinicalProgress?.historicalItems ? (
+                <p className="mt-2 text-[11px] text-slate-600"><HistoricalClinicalNote progress={primaryPlan.clinicalProgress} currency={primaryPlan.baseCurrency ?? base} /></p>
+              ) : <>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full bg-emerald-500"
@@ -267,6 +275,7 @@ export function SummaryTab({
                 باقي علاج {formatMoney(primaryPlan.remainingMinor, primaryPlan.baseCurrency ?? base)}
                 {primaryPlan.specialty ? ` · ${primaryPlan.specialty}` : ""}
               </p>
+              </>}
             </>
           ) : (
             <p className="mt-0.5 text-[11px] text-slate-500">أنشئ خطة من تبويب العلاج</p>
@@ -384,7 +393,7 @@ export function SummaryTab({
 
           {CURRENCIES.filter((currency) => {
             const row = financial.byCurrency?.[currency] ?? (currency === base ? financial : null);
-            return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || currency === base && !financial.byCurrency);
+            return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || (row.clinicalProgress?.historicalItems ?? 0) > 0 || currency === base && !financial.byCurrency);
           }).map((currency) => {
             const row = financial.byCurrency?.[currency] ?? financial;
             return <div key={currency} className="mt-3 rounded-xl border border-slate-200 p-3">
@@ -398,8 +407,8 @@ export function SummaryTab({
                   ["قيمة العلاج المتفق عليه", row.agreedMinor],
                   ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
                   ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
-                  ["تم تنفيذ علاج", row.treatmentDoneMinor],
-                  ["علاج غير منفّذ", row.remainingTreatmentMinor],
+                  [row.clinicalProgress?.historicalItems ? "تم تنفيذ علاج معروف خارج التاريخي" : "تم تنفيذ علاج", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownDoneMinor : row.treatmentDoneMinor],
+                  [row.clinicalProgress?.historicalItems ? "باقي علاج معروف خارج التاريخي" : "علاج غير منفّذ", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownRemainingMinor : row.remainingTreatmentMinor],
                   ["تم فوترة", row.invoicedMinor],
                   ["تم دفع", row.paidMinor],
                   ["المديونية الحالية", row.balanceMinor],
@@ -408,9 +417,10 @@ export function SummaryTab({
                   <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value as number, currency)}</dd>
                 </div>)}
               </dl>
+              {row.clinicalProgress?.historicalItems ? <p className="mt-2 text-xs text-slate-600"><HistoricalClinicalNote progress={row.clinicalProgress} currency={currency} /></p> : null}
             </div>;
           })}
-          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
+          {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => typeof value === "number" && value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
         </section>
       ) : null}
 
@@ -457,3 +467,5 @@ export function SummaryTab({
     </div>
   );
 }
+
+

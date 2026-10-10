@@ -82,7 +82,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
      والعزل يبقى قائمًا حتى على من أُذن له بالعرض — الرؤية شيء والكتابة شيء. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canEditPatient === false) {
+    if (!user) return denied();
+    if (user.permissions && user.permissions.canEditPatient === false) {
       return NextResponse.json(
         { message: "تعديل بيانات المرضى مخفي عنك بحسب صلاحياتك." },
         { status: 403 },

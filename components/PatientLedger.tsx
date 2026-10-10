@@ -9,7 +9,7 @@ import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
 import { CollectPaymentModal } from "./CollectPaymentModal";
 import { InvoiceCorrection } from "./InvoiceCorrection";
-import { ReceiptCorrection } from "./ReceiptCorrection";
+import { ReceiptCorrection, ReceiptCorrectionTrigger } from "./ReceiptCorrection";
 import { ReceiptProvenance } from "./ReceiptProvenance";
 import { receiptProvenanceFor } from "@/lib/receipt-provenance";
 import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyOpeningPosition } from "./LegacyBalanceArrangementPanel";
@@ -762,12 +762,11 @@ function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: numb
                   </p>
                 </div>
                 <span className="flex gap-2">
-                  {admin && payment.kind === "payment" && (ledger.receiptRemaining?.[payment.id] ?? 0) > 0
+                  {admin && payment.kind === "payment"
                     && correctingReceipt !== payment.id ? (
-                    <button type="button" onClick={() => { setCorrectingReceipt(payment.id); setNotice(null); }}
-                      className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
-                      تصحيح السند
-                    </button>
+                    <ReceiptCorrectionTrigger paymentId={payment.id} remainingMinor={ledger.receiptRemaining?.[payment.id] ?? 0}
+                      onClick={() => { setCorrectingReceipt(payment.id); setNotice(null); }}
+                      className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800" />
                   ) : null}
                   <a href={`/print/receipt/${payment.id}`} target="_blank" rel="noopener"
                     className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">

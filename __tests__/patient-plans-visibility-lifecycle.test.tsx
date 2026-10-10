@@ -39,6 +39,7 @@ vi.mock("react", async (original) => {
       }];
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
+    useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
     useMemo: memo, useEffect: effect, useLayoutEffect: effect,
   };

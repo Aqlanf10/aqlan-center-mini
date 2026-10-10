@@ -1,5 +1,6 @@
 import { caseSiteOverlaps, validateLineSite, SITE_SCOPE_LABEL, type LineSite, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
+import { historicalClinicalProgress, combineClinicalProgress, type ClinicalProgressView } from "./historical-clinical-projection";
 import { normalizeClinicalProcedureId } from "./clinical-procedure-id";
 import { readRecoveryDocumentStates, publicRecoveryRead, hasInstallmentReversalSignal, type PatientInstallmentRecoveryRead } from "./reversed-installment-recovery-db";
 import {
@@ -15897,6 +15898,7 @@ export interface ClinicalVisit {
   activeCases: {
     id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
     responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+    historicalProgressUnknown?: boolean;
   }[];
   /** الجلسات المفتوحة المتبقّية من الخطط الجارية — «العلاج المتبقّي». */
   outstanding: {
@@ -16469,16 +16471,26 @@ async function visitWorkflowContext(
     ? { text: diagnosisRow.diagnosis, date: clinicDateString(diagnosisRow.arrived_at, CLINIC_TIME_ZONE) }
     : null;
   const [cases, caseItems] = await Promise.all([listPatientCases(patientId), listCasePlanItems(patientId)]);
+  // Historical identity (including void) is not a next clinical step. Retain all saved open sessions.
+  const { rows: historicalItems } = await pool.query<{ plan_item_id: number; open_session: boolean }>(
+    `SELECT la.plan_item_id, EXISTS (SELECT 1 FROM treatment_sessions s
+       WHERE s.plan_item_id = la.plan_item_id AND s.status IN ('planned', 'in_progress')) AS open_session
+       FROM legacy_treatment_agreements la WHERE la.patient_id = $1`, [patientId]);
+  const historicalIds = new Set(historicalItems.map((item) => item.plan_item_id));
+  const historicalWithoutFuture = new Set(historicalItems.filter((item) => !item.open_session).map((item) => item.plan_item_id));
   const activeCases = cases
     .filter((one) => one.status === "active" || one.status === "waiting")
     .map((one) => {
       const items = one.id === null ? [] : caseItems.items.filter((item) => item.caseId === one.id);
-      const next = items.find((item) => item.status === "in_progress") ?? items.find((item) => item.status === "planned");
+      const knownItems = items.filter((item) => !historicalIds.has(item.id));
+      const futureItems = items.filter((item) => !historicalWithoutFuture.has(item.id));
+      const next = futureItems.find((item) => item.status === "in_progress") ?? futureItems.find((item) => item.status === "planned");
       return {
         id: one.id, kind: one.kind, title: one.title, specialty: one.specialty, status: one.status,
         responsibleName: one.responsibleName,
-        doneSteps: items.filter((item) => item.status === "done").length,
-        totalSteps: items.filter((item) => item.status !== "cancelled").length,
+        historicalProgressUnknown: items.some((item) => historicalIds.has(item.id)),
+        doneSteps: knownItems.filter((item) => item.status === "done").length,
+        totalSteps: knownItems.filter((item) => item.status !== "cancelled").length,
         nextStep: next ? `${next.serviceName}${next.toothCode ? ` — سن ${next.toothCode}` : ""}` : null,
       };
     });
@@ -16518,7 +16530,7 @@ async function visitWorkflowContext(
     }
   }
   const unmetByItem = await unmetPlanItemRequirements(pool, itemRows.map((item) => item.id));
-  const outstanding = itemRows.map((item) => ({
+  const outstanding = itemRows.filter((item) => !historicalWithoutFuture.has(item.id)).map((item) => ({
     planItemId: item.id,
     serviceId: item.service_id,
     planTitle: item.plan_title,
@@ -19850,6 +19862,8 @@ export interface PlanItemDraft {
    * الجلسة نفسها من الخطوة نفسها لعدة أسنان تُجمع في زيارةٍ واحدة. بغيابه السلوك القائم.
    */
   sessionPlan?: { title: string; minutes: number; afterDays?: number; visitKey: string; visitTitle: string }[];
+  /** Historical agreement alone supplies no clinical schedule. Explicit future work keeps the default. */
+  scheduleSessions?: boolean;
 }
 
 export type PlanBillingMode = "per_procedure" | "installments" | "custom_schedule";
@@ -19932,6 +19946,7 @@ export async function insertPlanV2InTx(client: DbClient, input: PlanV2Input, exi
      جلساتها. البند بلا خطة جلسات يبقى على «زيارةٍ لكل بند» كما كان. */
   const templateVisits = new Map<string, { title: string; minutes: number; afterDays: number | null; id: number }>();
   for (const draft of input.items) {
+    if (draft.scheduleSessions === false) continue;
     for (const plan of draft.sessionPlan ?? []) {
       const existing = templateVisits.get(plan.visitKey);
       if (existing) existing.minutes += plan.minutes;
@@ -19979,6 +19994,9 @@ export async function insertPlanV2InTx(client: DbClient, input: PlanV2Input, exi
     );
     const itemId = itemRows[0].id;
     itemIds.push(itemId);
+
+    // Preserve the financial item; do not invent visits or sessions from historical money.
+    if (draft.scheduleSessions === false) continue;
 
     if (draft.sessionPlan && draft.sessionPlan.length > 0) {
       for (let index = 0; index < draft.sessionPlan.length; index += 1) {
@@ -20356,6 +20374,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     consentAt: string | null; itemsCount: number; doneItems: number;
     totalMinor: number; doneMinor: number; remainingMinor: number;
     baseCurrency: Currency;
+    clinicalProgress?: ClinicalProgressView;
     nextDueDate: string | null; overdueMinor: number;
   }[];
   plannedVisits: PlannedVisitView[];
@@ -20363,10 +20382,12 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   financial: {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    clinicalProgress?: ClinicalProgressView;
     agreementPaidMinor: number; agreementRemainingMinor: number;
     byCurrency: Record<Currency, {
       balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
       agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+      clinicalProgress?: ClinicalProgressView;
       agreementPaidMinor: number; agreementRemainingMinor: number;
     }>;
   } | null;
@@ -20495,6 +20516,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     nextDueDate: plan.progress.nextDueDate, overdueMinor: plan.progress.overdueMinor,
     // (TD-05) عملة الاتفاق مع الخطة — تعرض بها أرقامها ولا تُحوَّل.
     baseCurrency: plan.baseCurrency,
+    clinicalProgress: historicalClinicalProgress(plan.items),
   }));
 
   /*
@@ -20533,6 +20555,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
   const byCurrency = {} as Record<Currency, {
     balanceMinor: number; invoicedMinor: number; paidMinor: number; openingMinor: number;
     agreedMinor: number; treatmentDoneMinor: number; remainingTreatmentMinor: number;
+    clinicalProgress: ClinicalProgressView;
     agreementPaidMinor: number; agreementRemainingMinor: number;
   }>;
   for (const currency of CURRENCIES) {
@@ -20552,6 +20575,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
       agreedMinor, agreementPaidMinor, agreementRemainingMinor,
       treatmentDoneMinor,
       remainingTreatmentMinor: Math.max(0, agreedMinor - treatmentDoneMinor),
+      clinicalProgress: combineClinicalProgress(currencyPlans.map((plan) => historicalClinicalProgress(plan.items))),
     };
   }
   const baseView = byCurrency[CLINIC_BASE_CURRENCY];
@@ -20565,6 +20589,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
     agreementRemainingMinor: baseView.agreementRemainingMinor,
     treatmentDoneMinor: baseView.treatmentDoneMinor,
     remainingTreatmentMinor: baseView.remainingTreatmentMinor,
+    clinicalProgress: baseView.clinicalProgress,
     byCurrency,
   };
 
@@ -21414,6 +21439,51 @@ const CASE_HAS_LIVE_INVOICE_WORK_SQL = `EXISTS (
       AND work_invoice.patient_id = clinical_cases.patient_id AND work_invoice.status <> 'cancelled'
    WHERE work_item.case_id = clinical_cases.id)`;
 
+/**
+ * (ORTHO-ID) نطاق الفك لحالة تقويم بنصّ الجسر العام — المصدر الوحيد `ortho_cases.arches`.
+ * الجسر العام وحالة التقويم لا يحملان قيمتين لنطاقٍ واحد مهما اختلف مسار إنشاء أيٍّ منهما.
+ */
+const orthoArchesSiteText = (arches: string | null): string | null =>
+  arches === "upper" || arches === "lower" || arches === "both" ? SITE_SCOPE_LABEL[arches] : null;
+
+/**
+ * (INV-LINK D / ORTHO-ID) حالة التقويم الأولية التي فتحتها فاتورة أو اتفاق تاريخي («تحتاج تقييمًا سريريًّا»)
+ * تُجسَر إلى حالة التقويم الحقيقية في المعاملة نفسها — فلا يبقى للمريض سياقان للتقويم، مع الحفاظ على نطاقها.
+ * يستعملها كل مسار ينشئ `ortho_cases` (مدخل الطبيب واللقطة السابقة baseline) لتبقى القاعدة واحدة.
+ * تمويل الجلسات يتبع بندها الصريح. واحدةٌ فقط تُجسَر؛ أكثر منها أو نطاقٌ مختلف يرفض دون كتابة (المستدعي يتراجع).
+ */
+async function bridgeOrthoShell(client: DbClient, input: {
+  patientId: number; orthoCaseId: number; arches: Arches; actor: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { rows: shells } = await client.query<{ id: number; site: string | null; origin: string; legacy: boolean }>(
+    `SELECT id, site, origin,
+            id IN (SELECT case_id FROM legacy_treatment_agreements WHERE patient_id = $1 AND status = 'live') AS legacy
+       FROM clinical_cases
+      WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL
+        AND (origin = 'invoice' OR ${CASE_HAS_LIVE_INVOICE_WORK_SQL}
+             OR id IN (SELECT case_id FROM legacy_treatment_agreements WHERE patient_id = $1 AND status = 'live'))
+        AND status IN ('active', 'waiting')
+      ORDER BY id FOR UPDATE`, [input.patientId]);
+  const expectedSite = orthoArchesSiteText(input.arches);
+  if (shells.length > 1 || (shells.length === 1 && shells[0].site !== expectedSite && shells[0].site !== input.arches)) {
+    return { ok: false, message: "راجع حالة التقويم الأولية وموضعها؛ لا تُنشأ حالة أخرى أو تُجسَر بنطاق مختلف." };
+  }
+  if (shells.length === 1) {
+    // Only an intake shell gets the ortho title; a reused ordinary case keeps its own title and origin.
+    await client.query(
+      `UPDATE clinical_cases SET ortho_case_id = $2, title = CASE WHEN origin = 'invoice' THEN 'تقويم الأسنان' ELSE title END
+        WHERE id = $1`, [shells[0].id, input.orthoCaseId]);
+    await insertAuditRow(client, {
+      action: "ortho.plan_link", entity: "patient", entityId: input.patientId, entityLabel: "تقويم الأسنان",
+      details: { الحالة_التخصصية: shells[0].id, حالة_التقويم: input.orthoCaseId,
+        المصدر: shells[0].origin === "invoice" ? "تقييم حالة فتحتها فاتورة"
+          : shells[0].legacy ? "حالة علاج بدأ قبل النظام" : "حالة قائمة أعادت الفاتورة استخدامها" },
+      actor: input.actor, actorRole: null,
+    });
+  }
+  return { ok: true };
+}
+
 export async function createOrthoCase(input: {
   patientId: number;
   appliance: Appliance;
@@ -21452,35 +21522,10 @@ export async function createOrthoCase(input: {
         input.planId, input.note?.trim() || null, input.createdBy,
       ],
     );
-    /* (INV-LINK D) حالة التقويم الأولية التي فتحتها فاتورة («تحتاج تقييمًا سريريًّا») تُجسَر إلى الحالة الحقيقية
-       في المعاملة نفسها — فلا يبقى للمريض سياقان للتقويم، مع الحفاظ على نطاقها؛ تمويل الجلسات يتبع بندها الصريح. واحدةٌ فقط تُجسَر. */
-    const { rows: shells } = await client.query<{ id: number; site: string | null; origin: string; legacy: boolean }>(
-      `SELECT id, site, origin,
-              id IN (SELECT case_id FROM legacy_treatment_agreements WHERE patient_id = $1 AND status = 'live') AS legacy
-         FROM clinical_cases
-        WHERE patient_id = $1 AND specialty = 'orthodontics' AND ortho_case_id IS NULL
-          AND (origin = 'invoice' OR ${CASE_HAS_LIVE_INVOICE_WORK_SQL}
-               OR id IN (SELECT case_id FROM legacy_treatment_agreements WHERE patient_id = $1 AND status = 'live'))
-          AND status IN ('active', 'waiting')
-        ORDER BY id FOR UPDATE`, [input.patientId]);
-    const expectedSite = input.arches === "upper" ? "الفك العلوي" : input.arches === "lower" ? "الفك السفلي" : "الفكّان";
-    if (shells.length > 1 || (shells.length === 1 && shells[0].site !== expectedSite && shells[0].site !== input.arches)) {
-      await client.query("ROLLBACK");
-      return { ok: false, message: "راجع حالة التقويم الأولية وموضعها؛ لا تُنشأ حالة أخرى أو تُجسَر بنطاق مختلف." };
-    }
-    if (shells.length === 1) {
-      // Only an intake shell gets the ortho title; a reused ordinary case keeps its own title and origin.
-      await client.query(
-        `UPDATE clinical_cases SET ortho_case_id = $2, title = CASE WHEN origin = 'invoice' THEN 'تقويم الأسنان' ELSE title END
-          WHERE id = $1`, [shells[0].id, rows[0].id]);
-      await insertAuditRow(client, {
-        action: "ortho.plan_link", entity: "patient", entityId: input.patientId, entityLabel: "تقويم الأسنان",
-        details: { الحالة_التخصصية: shells[0].id, حالة_التقويم: rows[0].id,
-          المصدر: shells[0].origin === "invoice" ? "تقييم حالة فتحتها فاتورة"
-            : shells[0].legacy ? "حالة علاج بدأ قبل النظام" : "حالة قائمة أعادت الفاتورة استخدامها" },
-        actor: input.createdBy, actorRole: null,
-      });
-    }
+    const bridge = await bridgeOrthoShell(client, {
+      patientId: input.patientId, orthoCaseId: rows[0].id, arches: input.arches, actor: input.createdBy,
+    });
+    if (!bridge.ok) { await client.query("ROLLBACK"); return { ok: false, message: bridge.message }; }
     await client.query("COMMIT");
     return { ok: true, id: rows[0].id };
   } catch (error) {
@@ -23006,8 +23051,9 @@ export async function duplicateCephAnalysis(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query<CephAnalysisDbRow>(
-      `SELECT * FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
+    // DATE يُقرأ نصًّا: Date المحلي يُزيح اليوم إن أُعيد تسلسله (انظر CephAnalysisReadRow).
+    const { rows } = await client.query<CephAnalysisReadRow & { study_kind: string }>(
+      `SELECT *, xray_date::text AS xray_date_text FROM ceph_analyses WHERE id = $1 FOR UPDATE`, [id],
     );
     const source = rows[0];
     if (!source) { await client.query("ROLLBACK"); return { ok: false, message: "التحليل غير موجود." }; }
@@ -23027,15 +23073,17 @@ export async function duplicateCephAnalysis(
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO ceph_analyses
          (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
-          mm_per_pixel, note, created_by)
+          mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind)
        VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8,
-         $9::text, $10) RETURNING id`,
+         $9::text, $10, $11::int, $12, $13::date, $14::text, $15, $16) RETURNING id`,
       [
         source.patient_id, source.document_id,
         source.cal_x1, source.cal_y1, source.cal_x2, source.cal_y2, source.cal_mm,
         source.mm_per_pixel,
         `نسخة تصحيح عن التحليل #${id} (المعتمد ${source.completed_at ? new Date(source.completed_at).toISOString().slice(0, 10) : ""})`,
         by,
+        // (ORTHO-ID) التصحيح دراسةٌ بهوية المعتمد نفسها — الحالة والمرحلة والتاريخ والجهاز والمرجع — فلا يعود T2/T3 إلى T1.
+        source.ortho_case_id, source.phase, source.xray_date_text, source.device, source.ref_set, source.study_kind,
       ],
     );
     const newId = created[0].id;
@@ -26217,10 +26265,13 @@ export async function createClinicalCase(input: CaseDraft & {
     /* الجسر يبدأ بحالة التقويم نفسها (منتهيةً إن كانت منتهية) — فلا تظهر حالةٌ مغلقة «جارية». */
     let bridgeStatus: SpecialtyCaseStatus = "active";
     let bridgeClosedAt: Date | null = null;
+    let bridgeSite: string | null = input.site;
     if (input.orthoCaseId !== null) {
-      const { rows } = await client.query<{ status: string; closed_at: Date | null }>(
-        `SELECT status, closed_at FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
+      const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
+        `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
+      /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
+      bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
       bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
         : rows[0].status === "completed" ? "completed" : "closed";
       if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
@@ -26231,12 +26282,12 @@ export async function createClinicalCase(input: CaseDraft & {
     const { rows: [created] } = await client.query<{ id: number }>(
       `INSERT INTO clinical_cases (patient_id, specialty, title, site, problem, responsible_party_id, ortho_case_id, created_by, status, completed_at)
        VALUES ($1, $2, $3, $4::text, $5::text, $6::int, $7::int, $8, $9, $10::timestamptz) RETURNING id`,
-      [input.patientId, specialty, input.title, input.site, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
+      [input.patientId, specialty, input.title, bridgeSite, input.problem, input.responsiblePartyId, input.orthoCaseId, input.actor,
         bridgeStatus, bridgeClosedAt],
     );
     await insertAuditRow(client, {
       action: "case.create", entity: "patient", entityId: input.patientId, entityLabel: input.title,
-      details: { الحالة: created.id, التخصص: specialty, الموضع: input.site ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
+      details: { الحالة: created.id, التخصص: specialty, الموضع: bridgeSite ?? "—", الطبيب_المسؤول: input.responsiblePartyId ?? "—", جسر_التقويم: input.orthoCaseId ?? "—" },
       actor: input.actor, actorRole: input.actorRole ?? null,
     });
     await client.query("COMMIT");
@@ -27388,7 +27439,7 @@ async function writeOrthoSessionInTx(
   return { ok: true, id: rows[0].id, created: true };
 }
 
-export type OrthoBaselineRefusal = "no_patient" | "open_case" | "bad_doctor" | "bad_plan";
+export type OrthoBaselineRefusal = "no_patient" | "open_case" | "bad_doctor" | "bad_plan" | "bridge_conflict";
 
 /**
  * (CASE-1) يسجّل حالة تقويمٍ سابقة (قبل النظام) — لقطةً لا تاريخًا مُعادًا.
@@ -27406,8 +27457,9 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // يُقفل صفّ المريض كما في createOrthoCase: التجسير بالاتفاق التاريخي لا يتسابق مع كاتبٍ آخر لسياق التقويم.
     const { rows: patients } = await client.query<{ full_name: string }>(
-      `SELECT full_name FROM patients WHERE id = $1`, [input.patientId]);
+      `SELECT full_name FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
     if (!patients[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "no_patient" }; }
 
     if (input.responsibleDoctorId !== null) {
@@ -27447,6 +27499,13 @@ export async function recordOrthoBaseline(input: BaselineDraft & {
       }
       throw error;
     }
+
+    /* (ORTHO-ID) اللقطة السابقة تلتقي بحالة التقويم الأولية (فاتورة أو اتفاق تاريخي) في سياقٍ واحد — لا اتفاق
+       ولا رصيد ولا حالة عامة ثانية؛ نطاقٌ مختلف أو أكثر من حالة أولية يرفض ولا يكتب شيئًا. */
+    const bridge = await bridgeOrthoShell(client, {
+      patientId: input.patientId, orthoCaseId: caseId, arches: input.arches, actor: input.actor,
+    });
+    if (!bridge.ok) { await client.query("ROLLBACK"); return { ok: false, reason: "bridge_conflict" }; }
 
     await insertAuditRow(client, {
       action: "ortho.baseline", entity: "patient", entityId: input.patientId, entityLabel: patients[0].full_name,
