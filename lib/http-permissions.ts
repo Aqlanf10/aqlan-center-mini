@@ -115,7 +115,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/hr/attendance/corrections": { GET: ADMIN, POST: ADMIN },
   // (HR-4) الإجازات والأرصدة:
   "/api/hr/leaves": { GET: CLINIC, POST: CLINIC },
-  "/api/hr/leaves/[id]": { GET: CLINIC, PATCH: FRONT_DESK },
+  "/api/hr/leaves/[id]": { GET: CLINIC, PATCH: ADMIN },
   "/api/hr/leaves/balances": { GET: CLINIC, POST: ADMIN },
   // (HR-5) المسير والصرف والسياسات: للمدير وحده.
   "/api/hr/payroll/periods": { GET: ADMIN, POST: ADMIN },

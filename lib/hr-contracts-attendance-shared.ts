@@ -204,8 +204,10 @@ export interface HrAttendanceCorrectionView {
   newStatus: string | null;
   reason: string;
   requestedBy: string;
-  approvedBy: string;
-  approvedAt: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  status: "pending" | "approved" | "rejected";
+  decisionReason: string | null;
   createdAt: string;
 }
 
@@ -302,6 +304,7 @@ export function calculateShiftAttendance(params: {
   scheduledEnd: string;   // "HH:MM"
   graceMins: number;
   crossesMidnight: boolean;
+  timeZone?: string;
 }): ShiftCalculation {
   if (!params.checkIn || !params.checkOut) {
     return {
@@ -309,8 +312,8 @@ export function calculateShiftAttendance(params: {
       lateMinutes: 0,
       earlyExitMinutes: 0,
       overtimeMinutes: 0,
-      isIncomplete: Boolean(params.checkIn && !params.checkOut),
-      status: params.checkIn && !params.checkOut ? "incomplete" : "absent",
+      isIncomplete: Boolean(params.checkIn || params.checkOut),
+      status: params.checkIn || params.checkOut ? "incomplete" : "absent",
     };
   }
 
@@ -324,19 +327,14 @@ export function calculateShiftAttendance(params: {
     schedEndMin += 24 * 60; // اليوم التالي
   }
 
-  const inH = params.checkIn.getHours();
-  const inM = params.checkIn.getMinutes();
-  const actualInMin = inH * 60 + inM;
-
-  const outH = params.checkOut.getHours();
-  const outM = params.checkOut.getMinutes();
-  let actualOutMin = outH * 60 + outM;
-
-  if (params.crossesMidnight && actualOutMin < actualInMin) {
-    actualOutMin += 24 * 60;
-  }
-
-  const workMinutes = Math.max(0, actualOutMin - actualInMin);
+  const minutes = (date: Date) => {
+    if (!params.timeZone) return date.getHours()*60+date.getMinutes();
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en",{timeZone:params.timeZone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date).map(p=>[p.type,p.value]));
+    return Number(p.hour)*60+Number(p.minute);
+  };
+  const actualInMin = minutes(params.checkIn);
+  const workMinutes = Math.max(0, Math.round((params.checkOut.getTime()-params.checkIn.getTime())/60000));
+  const actualOutMin = actualInMin + workMinutes;
 
   // حساب التأخير (مع فترة السماح)
   let lateMinutes = 0;

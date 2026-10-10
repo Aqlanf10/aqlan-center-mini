@@ -4,10 +4,10 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 108,
-    "columns": 1437,
-    "constraints": 1449,
-    "indexes": 342,
+    "tables": 109,
+    "columns": 1448,
+    "constraints": 1461,
+    "indexes": 344,
     "triggers": 30
   },
   "tables": {
@@ -2942,11 +2942,11 @@
       "columns": {
         "approved_at": {
           "type": "timestamptz",
-          "nullable": false
+          "nullable": true
         },
         "approved_by": {
           "type": "text",
-          "nullable": false
+          "nullable": true
         },
         "attendance_id": {
           "type": "int4",
@@ -2955,6 +2955,10 @@
         "created_at": {
           "type": "timestamptz",
           "nullable": false
+        },
+        "decision_reason": {
+          "type": "text",
+          "nullable": true
         },
         "field_corrected": {
           "type": "text",
@@ -2999,6 +3003,10 @@
         "staff_id": {
           "type": "int4",
           "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
         }
       },
       "primaryKey": [
@@ -3007,7 +3015,8 @@
       "unique": [],
       "checks": [
         "hr_attendance_corrections_field_corrected_check",
-        "hr_attendance_corrections_reason_check"
+        "hr_attendance_corrections_reason_check",
+        "hr_attendance_corrections_status_check"
       ],
       "foreignKeys": [
         {
@@ -3037,6 +3046,88 @@
           "unique": false
         },
         "hr_attendance_corrections_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_attendance_punch_events": {
+      "columns": {
+        "attendance_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "punch_type": {
+          "type": "text",
+          "nullable": false
+        },
+        "punched_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_attendance_punch_events_punch_type_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "attendance_id"
+          ],
+          "refTable": "hr_attendance_records",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_attendance_punch_events_attendance_idx": {
+          "columns": [
+            "attendance_id"
+          ],
+          "unique": false
+        },
+        "hr_attendance_punch_events_pkey": {
           "columns": [
             "id"
           ],

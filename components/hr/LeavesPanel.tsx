@@ -9,41 +9,9 @@ import {
   type HrLeaveStatus,
 } from "@/lib/hr-contracts-attendance-shared";
 
-interface LeaveRequestItem {
-  id: string;
-  staffId: string;
-  staffName?: string;
-  jobTitle?: string;
-  leaveTypeId: string;
-  leaveTypeName?: string;
-  startDate: string;
-  endDate: string;
-  daysCount: number;
-  reason: string;
-  status: HrLeaveStatus;
-  approvedBy: string | null;
-  decisionNotes: string | null;
-  createdAt: string;
-}
-
-interface LeaveTypeItem {
-  id: string;
-  name: string;
-  code: string;
-  isPaid: boolean;
-  defaultDaysPerYear: number;
-}
-
-interface LeaveBalanceItem {
-  id: string;
-  staffId: string;
-  leaveTypeId: string;
-  leaveTypeName: string;
-  year: number;
-  allocatedDays: number;
-  usedDays: number;
-  remainingDays: number;
-}
+type LeaveRequestItem = import("@/lib/hr-contracts-attendance-shared").HrLeaveRequestView;
+type LeaveBalanceItem = import("@/lib/hr-contracts-attendance-shared").HrLeaveBalanceView;
+interface LeaveTypeItem { id: number; nameAr: string; code: string; isPaid: boolean; defaultDaysPerYear: number; }
 
 interface StaffOption {
   id: number;
@@ -76,7 +44,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   // Balance Adjust Form
   const [adjStaffId, setAdjStaffId] = useState("");
   const [adjTypeId, setAdjTypeId] = useState("");
-  const [adjDays, setAdjDays] = useState("30");
+  const [adjDays, setAdjDays] = useState("");
   const [adjReason, setAdjReason] = useState("تخصيص رصيد سنوي");
 
   const loadLeaves = useCallback(async () => {
@@ -90,6 +58,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       const data = await res.json();
       setRequests(data.requests || []);
       setLeaveTypes(data.types || []);
+      setStaffOptions(data.staff || []);
       setError(null);
     } catch (err: any) {
       setError(err?.message || "حدث خطأ أثناء تحميل الإجازات.");
@@ -97,18 +66,6 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       setLoading(false);
     }
   }, [statusFilter]);
-
-  const loadStaff = useCallback(async () => {
-    try {
-      const res = await fetch("/api/hr/directory", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setStaffOptions(data);
-      }
-    } catch {
-      // Ignored
-    }
-  }, []);
 
   const loadBalances = useCallback(async (staffId: string) => {
     if (!staffId) return;
@@ -125,8 +82,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
   useEffect(() => {
     void loadLeaves();
-    void loadStaff();
-  }, [loadLeaves, loadStaff]);
+  }, [loadLeaves]);
 
   useEffect(() => {
     if (selectedStaffForBalance) {
@@ -147,7 +103,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           staffId: reqStaffId,
-          leaveTypeId: reqTypeId,
+          leaveTypeCode: reqTypeId,
           startDate: reqStartDate,
           endDate: reqEndDate,
           reason: reqReason,
@@ -172,7 +128,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
     }
   };
 
-  const handleDecideRequest = async (id: string, status: "approved" | "rejected") => {
+  const handleDecideRequest = async (id: number, status: "approved" | "rejected" | "cancelled") => {
     const notes = prompt(status === "approved" ? "ملاحظة الاعتماد (اختياري):" : "سبب رفض الإجازة:") || "";
     try {
       const res = await fetch(`/api/hr/leaves/${id}`, {
@@ -278,7 +234,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
             <div key={b.id} className="rounded-2xl border border-navy-100 bg-white p-3 shadow-sm">
               <div className="text-xs font-semibold text-navy-500">{b.leaveTypeName}</div>
               <div className="mt-1 flex items-baseline justify-between">
-                <span className="text-xl font-bold text-navy-900">{b.remainingDays} يوم</span>
+                <span className="text-xl font-bold text-navy-900">{b.availableDays} يوم</span>
                 <span className="text-xs text-navy-400">مستخدم: {b.usedDays} / {b.allocatedDays}</span>
               </div>
             </div>
@@ -334,7 +290,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 <tr key={r.id} className="transition hover:bg-navy-50/40">
                   <td className="px-4 py-3 font-semibold text-navy-900">
                     <div>{r.staffName || `موظف #${r.staffId}`}</div>
-                    {r.jobTitle && <div className="text-xs text-navy-500">{r.jobTitle}</div>}
+                    {r.staffJobTitle && <div className="text-xs text-navy-500">{r.staffJobTitle}</div>}
                   </td>
                   <td className="px-4 py-3">
                     <span className="rounded-lg bg-navy-100 px-2 py-0.5 text-xs font-semibold text-navy-700">
@@ -363,7 +319,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {r.status === "pending" ? (
+                    {isAdmin && r.status === "pending" ? (
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           type="button"
@@ -381,7 +337,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                         </button>
                       </div>
                     ) : (
-                      <span className="text-xs text-navy-400">مكتمل</span>
+                      isAdmin && r.status === "approved" ? <button type="button" onClick={() => void handleDecideRequest(r.id,"cancelled")} className="rounded-lg bg-rose-600 px-2.5 py-1 text-white">إلغاء الإجازة وعكس الرصيد</button> : <span className="text-xs text-navy-400">مكتمل</span>
                     )}
                   </td>
                 </tr>
@@ -422,8 +378,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
               >
                 <option value="">اختر نوع الإجازة...</option>
                 {leaveTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} {t.isPaid ? "(مدفوعة)" : "(غير مدفوعة)"}
+                  <option key={t.id} value={t.code}>
+                    {t.nameAr} {t.isPaid ? "(مدفوعة)" : "(غير مدفوعة)"}
                   </option>
                 ))}
               </select>
@@ -512,8 +468,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
               >
                 <option value="">اختر النوع...</option>
                 {leaveTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
+                  <option key={t.id} value={t.code}>
+                    {t.nameAr}
                   </option>
                 ))}
               </select>

@@ -35,4 +35,25 @@ CREATE TABLE IF NOT EXISTS hr_payroll_disbursement_parts (
   payable_id       INTEGER     REFERENCES payables(id) ON DELETE SET NULL,
   UNIQUE (disbursement_id, component)
 );
-CREATE INDEX IF NOT EXISTS hr_payroll_disb_parts_expense_idx ON hr_payroll_disbursement_parts (expense_id);`;
+CREATE INDEX IF NOT EXISTS hr_payroll_disb_parts_expense_idx ON hr_payroll_disbursement_parts (expense_id);
+
+-- Preserve raw punches independently of the daily projection and approval decisions.
+CREATE TABLE IF NOT EXISTS hr_attendance_punch_events (
+  id SERIAL PRIMARY KEY,
+  attendance_id INTEGER NOT NULL REFERENCES hr_attendance_records(id),
+  staff_id INTEGER NOT NULL REFERENCES hr_staff(id),
+  punch_type TEXT NOT NULL CHECK (punch_type IN ('check_in','check_out')),
+  punched_at TIMESTAMPTZ NOT NULL,
+  source TEXT NOT NULL,
+  note TEXT,
+  recorded_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS hr_attendance_punch_events_attendance_idx ON hr_attendance_punch_events(attendance_id);
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_by DROP NOT NULL;
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_at DROP NOT NULL;
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_at DROP DEFAULT;
+-- Existing corrections were applied immediately by 0048 code; keep that historical truth.
+ALTER TABLE hr_attendance_corrections ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('pending','approved','rejected'));
+ALTER TABLE hr_attendance_corrections ADD COLUMN IF NOT EXISTS decision_reason TEXT;
+`;

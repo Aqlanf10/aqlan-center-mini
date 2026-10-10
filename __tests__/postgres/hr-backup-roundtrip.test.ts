@@ -22,7 +22,10 @@ beforeAll(async()=>{
     INSERT INTO hr_leave_types(id,code,name_ar,default_days_per_year,allow_negative) VALUES (141,'annual','إجازة مخصصة',17.5,true);
     INSERT INTO hr_leave_balances(id,staff_id,leave_type_code,year,allocated_days,effective_from,effective_to) VALUES (161,71,'annual',2026,17.5,'2026-01-01','2026-12-31');
     INSERT INTO hr_leave_requests(id,staff_id,leave_type_code,start_date,end_date,days_count,reason,created_by) VALUES (181,71,'annual','2026-10-01','2026-10-02',2,'طلب مستعاد','test');
-    INSERT INTO hr_settings(id,key,value,updated_by) VALUES (201,'leave_policy','{"annualDefaultDays":17.5,"approved":true}','test');`);
+    INSERT INTO hr_settings(id,key,value,updated_by) VALUES (201,'leave_policy','{"annualDefaultDays":17.5,"approved":true}','test');
+    INSERT INTO hr_attendance_records(id,staff_id,attendance_date,status,check_in_raw,check_in_actual,created_by) VALUES(211,71,'2026-10-03','incomplete','2026-10-03 08:00+03','2026-10-03 08:00+03','test');
+    INSERT INTO hr_attendance_punch_events(id,attendance_id,staff_id,punch_type,punched_at,source,recorded_by) VALUES(221,211,71,'check_in','2026-10-03 08:00+03','manual','test');
+    INSERT INTO hr_attendance_corrections(id,attendance_id,staff_id,field_corrected,reason,requested_by,approved_by,approved_at,status) VALUES(231,211,71,'check_in','Pending restored correction','test',NULL,NULL,'pending');`);
 });
 afterAll(async()=>{await db.resetPoolForTesting();await fixture?.close();});
 async function initializeTarget(target:typeof fixture.sqlTarget){
@@ -46,6 +49,8 @@ describe("HR backup restores custom keys, relations and sequences without seed c
     expect((await fixture.sqlTarget.query("SELECT id,code,name_ar,default_days_per_year,allow_negative FROM hr_leave_types")).rows).toEqual((await fixture.source.query("SELECT id,code,name_ar,default_days_per_year,allow_negative FROM hr_leave_types")).rows);
     expect((await fixture.sqlTarget.query("SELECT id,key,value FROM hr_settings")).rows).toEqual((await fixture.source.query("SELECT id,key,value FROM hr_settings")).rows);
     expect((await fixture.sqlTarget.query("SELECT r.staff_id,r.leave_type_code,t.id AS type_id,b.allocated_days FROM hr_leave_requests r JOIN hr_leave_types t ON t.code=r.leave_type_code JOIN hr_leave_balances b ON b.staff_id=r.staff_id AND b.leave_type_code=r.leave_type_code")).rows).toEqual([{staff_id:71,leave_type_code:"annual",type_id:141,allocated_days:"17.50"}]);
+    expect((await fixture.sqlTarget.query("SELECT e.id,e.attendance_id,e.staff_id,c.id AS correction_id,c.status,c.approved_by FROM hr_attendance_punch_events e JOIN hr_attendance_corrections c ON c.attendance_id=e.attendance_id")).rows).toEqual([{id:221,attendance_id:211,staff_id:71,correction_id:231,status:"pending",approved_by:null}]);
+    expect((await fixture.sqlTarget.query("INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,recorded_by) VALUES(211,71,'check_out','2026-10-03 16:00+03','manual','test') RETURNING id")).rows[0].id).toBeGreaterThan(221);
     const next=await fixture.sqlTarget.query("INSERT INTO hr_leave_types(code,name_ar) VALUES ('sick','جديد') RETURNING id");expect(next.rows[0].id).toBeGreaterThan(141);
     expect((await fixture.sqlTarget.query("INSERT INTO hr_settings(key,value,updated_by) VALUES ('new_policy','{}','test') RETURNING id")).rows[0].id).toBeGreaterThan(201);
     expect((await fixture.sqlTarget.query("INSERT INTO hr_staff(full_name,created_by) VALUES ('موظف جديد','test') RETURNING id")).rows[0].id).toBeGreaterThan(71);

@@ -1,52 +1,42 @@
-# HANDOFF_TO_DOT — ORTHO-ID: Ceph correction lineage + ortho bridge identity
+# HR integration handoff — PR #308
 
-**الحالة: Draft — غير جاهز للدمج.** لم تنتهِ CI على الـhead الحالي (انظر الجدول). المجموعة الكاملة PostgreSQL والبناء نجحا محليًا. لا دمج ولا نشر ولا Railway.
+Status: implementation and validation in progress; **not ready for merge or deployment**. No production or staging migration/data change was performed.
 
-- الفرع: `claude/ortho-case-identity-lineage`
-- base SHA: `e19aa30f4d67f65a5890d2db149abb86895b4187` (main، بعد دمج #294)
-- head SHA: `c5259e203b850c2319780ce10cb63c3d395cfef2` (commit الشفرة؛ يليه commit يحدّث هذا الملف فقط)
-- PR: https://github.com/Aqlanf10/aqlan-center-mini/pull/314 (Draft)
+Branch: `feat/hr-staff-tasks-phase1`. Received remote head: `e5c4e4ae748b4ad2e08ee70d5794b71018038f8b` (newer than the prompt's reviewed `895500c9`). Main integrated with ordinary merges; current integrated base: `f1164bbecc0bbf9f4a12855aa54827c3d8b44a60`. Implementation checkpoints: `b92edb39` and merge/pushed `3f0e8fb3a8bb8546c43ba7ab67e2a30c92986206`. The delivery head for this checkpoint is the commit containing this file, obtainable with `git rev-parse HEAD`; validation is ongoing and will be recorded against the final head.
 
-## ما أُنجز (مثبت بإخفاق على main قبل الإصلاح)
-`__tests__/postgres/ortho-case-identity.test.ts` (11 اختبارًا؛ 9 فشلت على main النظيف، والباقيان ضابطان):
-1. **تصحيح دراسة Ceph** (`duplicateCephAnalysis`، `lib/db.ts`): كان يُسقط `ortho_case_id` و`phase` و`xray_date` و`device` و`ref_set` و`study_kind` فتعود T2/T3 إلى `pretreatment` بلا حالة. الآن تُنسخ كلها (DATE يُقرأ نصًا لتفادي إزاحة اليوم). المعتمد الأصلي لم يتغير (مثبت).
-2. **baseline بعد اتفاق تاريخي** (`recordOrthoBaseline`): كان يترك حالتين (shell الاتفاق + ortho غير مجسورة) ويقبل نطاق فك مختلفًا. الآن يستعمل دالة التجسير نفسها `bridgeOrthoShell` (استُخرجت من `createOrthoCase` دون تغيير سلوكه)، ويقفل صف المريض، ويرفض بـ`bridge_conflict` (409 عربي، يتراجع كل شيء) عند نطاق مختلف/أكثر من shell.
-3. **نطاق الفك في الجسر العام**: `createClinicalCase` مع `orthoCaseId` يشتق `site` من `ortho_cases.arches` بدل `null`/نص حر.
-- ضوابط خضراء: baseline ثم legacy، سباق baseline مزدوج، فاتورة تقويم بعد جسر (لا حالة ثانية على main أيضًا — لم يثبت عيب هناك).
+## Migration reservation and external histories
 
-## ما لم يُنجز / يحتاج قرارًا
-- **مؤشر الأصل (supersedes) لدراسة Ceph**: لا عمود بنيوي اليوم (النص في `note` فقط). يحتاج هجرة → **رقم هجرة محجوز من dot**. لم أخمّن رقمًا. ملاحظة: **0044 محجوز مرتين** في PRs مفتوحة (#301 `0044_invoice_admin_discount_lines`، #308 `0044_hr_staff`).
-- ربط T1 السابقة للحالة باختيار صريح (لا endpoint اليوم؛ المعتمد غير قابل للتعديل — يحتاج تصميمًا: عمود null→case مرة واحدة مع تدقيق أو جدول ربط).
-- التحقق الخادمي من (الصورة/الدراسة/الزيارة) وقيود idempotency للنسخ (النسخ المزدوج محمي حاليًا بفهرس المسودة الواحدة).
-- لم أبدأ: رحلة الحالة، المثبّت، snapshot/PPTX/PDF. لم أرسل خطة الملفات لـdot (لا جلسة dot متاحة من هذه الجلسة) — الملفات المشتركة التي لمستها: `lib/db.ts` (ثلاث مناطق ضيقة: `bridgeOrthoShell`/`createOrthoCase`، `recordOrthoBaseline`، `createClinicalCase`، `duplicateCephAnalysis`) و`app/api/ortho/baseline/route.ts` (سطر رسالة).
-- PRs المفتوحة وقت الفحص: #311 #310 #309 #308 #302 #301 #291 #285 #278 #47 (كلها Draft عدا #285/#278). حالة التحقق منها: قرأتها من GitHub فقط، لم أفحص كودها. #294 مدمج (HEAD = e19aa30).
+The user relayed dot's approval reserving **0050** for HR integration in PR #308 after open-branch number checks. This approves the number in source only. 0045, 0046, 0048 and 0049 were not rewritten. Current production/staging sources do not contain 0048/0049, but external manual database histories remain unverified; do not infer they were never applied. All corrections are additive in `0050_hr_payroll_integrity.sql`, byte-equal to `HR_PAYROLL_INTEGRITY_SQL`. Do not apply externally or merge this branch.
 
-## الملفات
-`lib/db.ts`، `app/api/ortho/baseline/route.ts`، `__tests__/postgres/ortho-case-identity.test.ts`، `__tests__/ortho-baseline-route.test.ts`، هذا الملف. **لا هجرات، لا تغيير مخطط، لا أثر مالي** (الاختبارات تتحقق أن فواتير/دفعات/رصيد افتتاحي لا تتغير بالتجسير).
+0050 adds payroll pay-term snapshots/blockers, independent commission payable and component vouchers, immutable request fingerprints and reversal metadata; it also adds raw attendance events and pending/approved/rejected correction decisions. Existing corrections were already applied by old code and retain historical approved status. Schema contracts/disclosure are generated through the official PG18 path, not manually combined fingerprints.
 
-## الاختبارات (محلي، PostgreSQL 18.4 اصطناعي معزول على 127.0.0.1:54329، لا Railway)
-أُضيف بطلب dot: تصحيح من حالة قديمة مغلقة مع حالة نشطة أخرى؛ مرجع Ceph غير افتراضي؛ تعدد shells (الاختبار يقبل أن تمنعه القاعدة نفسها)؛ تراجع كامل عند فشل التدقيق بعد الربط (مُشغّل اصطناعي يُزال بعدها)؛ سباق baseline مع الاتفاق التاريخي (4 جولات)؛ واختبار المسار `__tests__/ortho-baseline-route.test.ts` (401/403/409/500/201، رسائل عربية بلا تسريب).
+## Proven defects and fixes
 
-| الأمر | النتيجة |
-|---|---|
-| `tsc --noEmit` | نظيف |
-| `eslint` للملفات المغيَّرة/الجديدة | 0 أخطاء (تحذيرات قديمة فقط) |
-| `npx vitest run` (وحدات) على 2c99bc1 | 465 ملفًا / 8309 ناجحة. ثم أُضيف ملف المسار (8 ناجحة)؛ لم أعد تشغيل الوحدات كاملة بعد الإضافة |
-| `test:postgres` كاملة على 2c99bc1 (بلا SESSION_SECRET) | 161 ملفًا ناجحة؛ فشل `messaging-channels` (2) لغياب `SESSION_SECRET` عندي فقط، و4 ملفات ترفض قاعدة فيها مخطط بحكم الحارس |
-| `messaging-channels` + `ortho-case-identity` (الموسَّع، 24 اختبارًا) بـ`SESSION_SECRET`/`CLINIC_TIME_ZONE` كـCI | ناجحة |
-| الملفات الأربعة (expense-category-history-containment 48، expense-void-close-race 8، manual-cash-containment 20، payment-shift-admission 18) كلٌّ على قاعدة `aqlan_p1_test` فارغة جديدة | ناجحة 94/94 |
-| `scan:money`، `ci:scan:body` | ناجحان |
-| `verify:ci` | 7/20 نجحت و13 تُخطّيت (تحتاج قاعدة فعلية) |
-| `npm run build` | ناجح |
-| `ortho-case-identity` على main قبل الإصلاح | 9 من 11 فشلت (إثبات) |
-| **لم تُشغَّل:** `test:security-http`، `schema:ownership:verify`، `db:baseline:manifest*`، `ci:audit`، `build:preflight`، `verify-braces-runtime` | CI فقط |
-| CI على 2c99bc1 | كان `in_progress` وقت الرفع؛ أُلغي بـ push هذا الـcommit (concurrency). نتيجته غير معلومة. CI على الـhead الجديد يجب أن يُنتظر |
+- Original merged branch: **27 failed / 3 passed** financial integrity cases (`/tmp/hr-baseline-integrity.log`). Authoritative effective contracts now govern calculations; profile fallback is explicit and only when no governing contract exists. Profile synchronization and addenda preserve historic approved snapshots. Unsupported proration/employment changes or engine policy conflicts block approval rather than invent policy.
+- Hybrid cash payments now generate salary and commission vouchers linked to their respective existing payables, using the existing commission/expense engine. Derived balances replace the nonexistent `payables.balance_minor` assertion. Payroll and doctor payout entrypoints share party locks and engine due checks. Outstanding HR claims require the atomic HR settlement path; unlinked direct vouchers cannot leave a parallel outstanding payroll claim. Direct payments before approval force draft revalidation/recalculation.
+- UI persists the exact payload and request key across reload, response loss, double click and tabs; server fingerprints, request/row locks and uniqueness reject key reuse with different content. A real COMMIT-success/response-error test verifies lookup of the committed result. Reversals call the existing accounting reversal inside the same audited transaction.
+- Old print pages lost two decimal places: **6 failed / 1 passed** against the original pages, **7 passed** after the fix (`/tmp/hr-print-red.log`, `/tmp/hr-print-green.log`), including YER/SAR/USD and every print row.
+- Attendance/leave regressions: **5 failed / 1 passed** before repair (`/tmp/hr-workforce-red2.log`): correction requests applied before review, night checkout split onto the next day, checkout-only treated as complete, paid leave approved without owner allocation, and leave overwrote existing attendance. New event log preserves raw punches; independent approval applies actual corrections; clinic-zone night shifts stay on the starting date; missing punches remain incomplete. Paid leave requires an explicit adequate allocation and cannot replace attendance. Leave creation serializes overlapping requests on staff.
+- Separate leave privacy regression failed against the real PG database (`/tmp/hr-workforce-privacy-red.log`); session-scoped reads now protect reasons/balances and staff-id tampering. Admin alone allocates balances and decides leave. Corrected panels consume actual shared DTOs and leave codes, and offer approved-leave cancellation.
+- New unlinked commission regression failed against the real expense engine (`/tmp/hr-unlinked-commission-red.log`), proving a separate voucher could leave HR payable outstanding; repaired by requiring the HR atomic settlement context.
+- Reset classification now includes both new child tables; normal main merges preserved lab accounting changes. Main-file LF normalization removes earlier whole-file CRLF review noise without changing unrelated behavior.
 
-## الخطوة التالية الدقيقة
-1. شغّل CI على الـhead وPG الكاملة؛ راجع أن `ortho.plan_link` الجديد من baseline مقبول (يُدقَّق بنفس إجراء createOrthoCase).
-2. احجز رقم هجرة ثم أضف `corrects_analysis_id` (إضافي، nullable) إلى `ceph_analyses` واملأه في `duplicateCephAnalysis` وأضف اختبار المؤشر.
-3. قرّر تصميم ربط T1 السابقة.
-4. إن أردت PR أصغر: افصل إصلاح Ceph (دالة واحدة + أول اختبار) عن التجسير.
+## Validation checkpoints (final reruns pending)
 
-## قيود البيئة
-PG 18.4 من حزمة `@embedded-postgres/linux-x64` مثبّتة خارج المستودع (`/opt/pg18`)؛ لا شيء منها في الشجرة. لا أسرار ولا بيانات مرضى في الأدلة.
+- Frozen `npm ci` succeeded; package lock unchanged.
+- PostgreSQL 18.6 isolated local server. Earlier financial scope: **40 / 40** (`/tmp/hr-all-financial-final.log`); latest 37 integrity cases + finance/workforce/schema/reset/backup are running in `/tmp/hr-integration-final.log`.
+- Workforce including privacy: **7 / 7** (`/tmp/hr-workforce-final.log`), before latest allocation hardening; final rerun pending.
+- Actual HTTP/browser payroll journey: **3 / 3** (`/tmp/hr-http-payroll5.log`), including salary/percentage/hybrid, desktop1280/mobile390, complete print PDF, partial split, reversal, response loss/reload/double click/two tabs and permission checks. Artifacts: `/tmp/hr-evidence/hr-payroll-1280.png`, `hr-payroll-390.png`, `hr-payroll-all-rows.pdf`. Actual existing HR UI journey: **10 / 10** before latest attendance/leave fixes; final built-app rerun pending.
+- Backup/restore: **2 / 2** before attendance additions (`/tmp/hr-backup-roundtrip.log`), custom identifiers/relations/sequences, SKIP_SEED and old no-HR backups; final rerun pending.
+- Official current schema generation now: **109 tables, 1448 columns, 1461 constraints, 344 indexes, 30 triggers** (`/tmp/hr-schema-generation-final.log`). Independent source verification rerun pending. Earlier verifier reported zero unexpected differences and 16 already-declared convergence findings; no ownership/diagnostic guard was weakened.
+- Latest typecheck checkpoint passed (`/tmp/hr-typecheck-final.log`); new settlement-context typecheck and lint running. Raw-body scanner and money guard passed earlier.
+- Production build passed at 3f0. Final source rebuild/security/browser suite pending.
+- Dependency audit passes using npm11.15 metadata and Node22 `--use-env-proxy` with existing strict scoped advisory verification (`/tmp/hr-audit-proxy.log`): six existing dev findings explicitly scoped by the unchanged guard; production audit zero moderate-or-higher. npm11.21 in this local environment returns empty advisory ranges and is rejected by the guard; no suppression was added. Runtime artifact proof remains required after final build.
+- Full local unit run: 8504 passed, 3 timed out tests + one timed out suite. Two affected guards subsequently passed; runtime-tracing/saved-reports still timed out under concurrent work. **CI at 3f0 passed all unit tests, typecheck, lint and money guard**, then failed PG on schema-count/reset defects subsequently corrected. Logs download from the Actions result host was forbidden; job/step statuses are accessible.
+- CI 3f0: https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38026854993 and https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38026853229. These are checkpoint runs, not final delivery evidence.
+
+## Remaining work at this checkpoint
+
+Finish targeted integration checks, fresh schema verification, final lint/typecheck/build and runtime dependency proof; run final full unit/PG with the real CI fixture flags, operational verification and complete HTTP/browser suite. Push final commits normally to this same branch and update this file and PR description with exact head/CI links/results. Do not declare ready until final-head CI and actual journeys pass. Dot owns final review, merge and deployment.
+
+All local source changes in this checkpoint are included in its commit; environment tooling/logs/screenshots remain local ignored artifacts. Do not publish protected environment configuration or secrets. This handoff supersedes `HANDOFF_HR_INTEGRITY_WIP.md`.

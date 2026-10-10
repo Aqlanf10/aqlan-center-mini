@@ -26,7 +26,7 @@ beforeAll(async()=>{
  mkdirSync(evidence,{recursive:true});
  const shift=(await db.query("SELECT id FROM cashier_shifts WHERE status='open' LIMIT 1")).rows[0] ?? (await db.query("INSERT INTO cashier_shifts(opened_by) VALUES ('secadmin') RETURNING id")).rows[0];
  for(const [name,kind,salary] of [["SALARY","salary",80000],["PERCENT","commission",0],["HYBRID","salary_commission",100000]] as const){
-   const staff=await api("POST","/api/hr/staff",{fullName:`HR-JOURNEY-${name}`,department:kind==="salary"?"secretariat":"doctors",jobTitle:"اختبار رحلة",hireDate:"2026-01-01",workStatus:"active",contractKind:kind,payTerms:salary?{amountMinor:salary,currency:"YER",period:"monthly",effectiveOn:"2026-01-01"}:null});expect(staff.status).toBe(201);
+   const staff=await api("POST","/api/hr/staff",{fullName:`HR-JOURNEY-${name}`,department:kind==="salary"?"secretariat":"doctors",jobTitle:"اختبار رحلة",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:kind,...(salary?{salaryAmountMinor:salary,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"}:{})});expect(staff.status,JSON.stringify(staff.body)).toBe(201);
    const staffId=staff.body.staff?.id ?? staff.body.id;
    let partyId:number|undefined;
    if(kind!=="salary"){
@@ -37,7 +37,7 @@ beforeAll(async()=>{
      await db.query("INSERT INTO visits(patient_name,patient_id,doctor_id,status,invoice_id,arrived_at,signed_at,signed_by) VALUES ('اختبار',$1,$2,'done',$3,'2026-08-02 10:00+03','2026-08-02 10:00+03','secadmin')",[patient.id,partyId,invoice.id]);
      await db.query("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,created_at) VALUES ($1,$2,$3,$4,'payment',40000,'YER',1,40000,'YER','cash','secadmin','2026-08-02 10:00+03')",[`HR-J-R-${name}`,patient.id,invoice.id,shift.id]);
    }
-   const contract=await api("POST","/api/hr/contracts",{staffId,title:`HR-JOURNEY-${name}`,templateKind:kind==="salary"?"support_staff":kind==="commission"?"doctor_percentage":"doctor_hybrid",startDate:"2026-01-01",compensationKind:kind,baseSalaryMinor:salary || null,salaryCurrency:salary?"YER":null,salaryPeriod:salary?"monthly":null,doctorPartyId:partyId,commissionRatePercent:partyId?30:null});expect(contract.status).toBe(201);
+   const contract=await api("POST","/api/hr/contracts",{staffId,title:`HR-JOURNEY-${name}`,templateKind:kind==="salary"?"support_staff":kind==="commission"?"doctor_percentage":"doctor_hybrid",startDate:"2026-01-01",endDate:null,compensationKind:kind,baseSalaryMinor:salary || null,salaryCurrency:salary?"YER":null,salaryPeriod:salary?"monthly":null,doctorPartyId:partyId,commissionRatePercent:partyId?30:null});expect(contract.status).toBe(201);
    expect((await api("PATCH",`/api/hr/contracts/${contract.body.id}`,{action:"transition",status:"active",reason:"اعتماد رحلة معزولة"})).status).toBe(200);
  }
  const period=await api("POST","/api/hr/payroll/periods",{periodMonth});expect(period.status).toBe(201);

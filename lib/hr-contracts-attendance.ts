@@ -10,6 +10,7 @@
  */
 
 import { getPool, insertAuditRow, type DbClient } from "./db";
+import { clinicDateString } from "./schedule";
 import { withTransaction } from "./transactions";
 import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
@@ -811,17 +812,21 @@ export async function recordAttendance(
   },
   session: SessionPayload,
 ): Promise<HrAttendanceRecordView> {
-  const staffId = Number(input.staffId);
-  return withTransaction(getPool(), async (client) => {
+  return withTransaction(getPool(), client => recordAttendanceInTx(client, input, session));
+}
+
+async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload): Promise<HrAttendanceRecordView> {
+    const staffId = Number(input.staffId);
     // جلب جدول العمل الساري للموظف أو لقسمه لاحتساب التأخير والساعات بدقة
     const schedRes = await client.query(
       `SELECT ws.* FROM hr_work_schedules ws
        JOIN hr_staff s ON s.id = $1
        WHERE ws.is_active = true
+         AND ws.effective_from <= $2 AND (ws.effective_to IS NULL OR ws.effective_to >= $2)
          AND (ws.staff_id = $1 OR (ws.staff_id IS NULL AND ws.department = s.department))
        ORDER BY ws.staff_id NULLS LAST, ws.effective_from DESC
        LIMIT 1`,
-      [staffId],
+      [staffId, input.attendanceDate],
     );
 
     const schedule = schedRes.rows[0] ?? null;
@@ -832,7 +837,7 @@ export async function recordAttendance(
     let calculatedStatus = input.status ?? "present";
     let isIncomplete = false;
 
-    if (input.checkIn && !input.checkOut) {
+    if (Boolean(input.checkIn) !== Boolean(input.checkOut)) {
       isIncomplete = true;
       calculatedStatus = "incomplete";
     } else if (input.checkIn && input.checkOut && schedule) {
@@ -843,6 +848,7 @@ export async function recordAttendance(
         scheduledEnd: schedule.shift_end_time,
         graceMins: schedule.grace_period_mins ?? 15,
         crossesMidnight: schedule.crosses_midnight ?? false,
+        timeZone: CLINIC_TIME_ZONE,
       });
       workMins = calc.workMinutes;
       lateMins = calc.lateMinutes;
@@ -851,6 +857,7 @@ export async function recordAttendance(
       if (!input.status) calculatedStatus = calc.status;
     }
 
+    if (input.checkIn && input.checkOut && !schedule) workMins = Math.max(0,Math.round((Date.parse(input.checkOut)-Date.parse(input.checkIn))/60000));
     const { rows } = await client.query(
       `INSERT INTO hr_attendance_records (
         staff_id, schedule_id, attendance_date, status, check_in_raw, check_out_raw,
@@ -858,7 +865,8 @@ export async function recordAttendance(
         overtime_minutes, is_incomplete, source, notes, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $5, $6, $7, $8, $9, $10, $11, 'manual', $12, $13)
       ON CONFLICT (staff_id, attendance_date) DO UPDATE
-      SET check_out_raw = COALESCE(EXCLUDED.check_out_raw, hr_attendance_records.check_out_raw),
+      SET check_out_raw = COALESCE(hr_attendance_records.check_out_raw, EXCLUDED.check_out_raw),
+          check_in_raw = COALESCE(hr_attendance_records.check_in_raw, EXCLUDED.check_in_raw),
           check_in_actual = COALESCE(EXCLUDED.check_in_actual, hr_attendance_records.check_in_actual),
           check_out_actual = COALESCE(EXCLUDED.check_out_actual, hr_attendance_records.check_out_actual),
           status = EXCLUDED.status,
@@ -906,48 +914,37 @@ export async function recordAttendance(
       { status: record.status, workMinutes: record.workMinutes },
     );
     return record;
-  });
 }
 
 export async function recordAttendancePunch(
   input: AttendancePunchInput,
   session: SessionPayload,
 ): Promise<HrAttendanceRecordView> {
+  if (input.punchType !== "check_in" && input.punchType !== "check_out") throw new Error("نوع البصمة غير صالح.");
   const staffId = Number(input.staffId);
-  const punchIso = input.punchTime || new Date().toISOString();
-  const dateStr = punchIso.slice(0, 10);
-
-  if (input.punchType === "check_in") {
-    return recordAttendance(
-      {
-        staffId,
-        attendanceDate: dateStr,
-        checkIn: punchIso,
-        notes: input.note,
-      },
-      session,
-    );
-  }
-
-  // punchType === "check_out"
-  const pool = getPool();
-  const existing = await pool.query(
-    `SELECT * FROM hr_attendance_records WHERE staff_id = $1 AND attendance_date = $2`,
-    [staffId, dateStr],
-  );
-
-  const checkIn = existing.rows[0]?.check_in_actual ? new Date(existing.rows[0].check_in_actual).toISOString() : null;
-
-  return recordAttendance(
-    {
-      staffId,
-      attendanceDate: dateStr,
-      checkIn,
-      checkOut: punchIso,
-      notes: input.note,
-    },
-    session,
-  );
+  const instant = new Date(input.punchTime || new Date().toISOString());
+  if (!Number.isFinite(instant.getTime()) || !Number.isSafeInteger(staffId) || staffId<1) throw new Error("بصمة غير صالحة.");
+  const punchIso = instant.toISOString();
+  const dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
+  return withTransaction(getPool(), async client => {
+    const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
+    if (!staff.rows[0]) throw new Error("الموظف غير موجود.");
+    // A checkout can complete a scheduled night shift from the prior clinic date.
+    const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
+      WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
+        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND ar.check_out_actual IS NULL))
+      ORDER BY ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType]);
+    const row = prior.rows[0];
+    if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");
+    const attendanceDate = row?.attendance_date instanceof Date ? row.attendance_date.toISOString().slice(0,10) : row?.attendance_date ?? dateStr;
+    const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType==='check_in' ? punchIso : null;
+    const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType==='check_out' ? punchIso : null;
+    if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
+    const record = await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session);
+    await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,[record.id,staffId,input.punchType,punchIso,input.source || 'manual',input.note ?? null,session.username]);
+    return record;
+  });
 }
 
 export async function correctAttendanceRecord(
@@ -1032,6 +1029,8 @@ export async function requestAttendanceCorrection(
   input: RequestCorrectionInput,
   session: SessionPayload,
 ): Promise<HrAttendanceCorrectionView> {
+  if (session.role !== "admin") throw new Error("طلب التصحيح للمدير وحده.");
+  if (!input.reason?.trim() || input.reason.length>500 || !["check_in","check_out","all","status","overtime"].includes(input.fieldCorrected)) throw new Error("طلب تصحيح غير صالح.");
   const attId = Number(input.attendanceRecordId);
   return withTransaction(getPool(), async (client) => {
     const { rows: currRows } = await client.query(
@@ -1051,8 +1050,8 @@ export async function requestAttendanceCorrection(
       `INSERT INTO hr_attendance_corrections (
         attendance_id, staff_id, field_corrected, old_check_in, new_check_in,
         old_check_out, new_check_out, old_status, new_status, reason,
-        requested_by, approved_by, approved_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        requested_by, approved_by, approved_at, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, 'pending')
       RETURNING *`,
       [
         attId,
@@ -1066,22 +1065,8 @@ export async function requestAttendanceCorrection(
         input.newStatus ?? curr.status,
         input.reason.trim(),
         session.username,
-        session.username,
       ],
     );
-
-    // تحديث السجل الفعلي
-    if (newIn !== null || newOut !== null || input.newStatus) {
-      await client.query(
-        `UPDATE hr_attendance_records
-         SET check_in_actual = COALESCE($1, check_in_actual),
-             check_out_actual = COALESCE($2, check_out_actual),
-             status = COALESCE($3, status),
-             updated_at = NOW()
-         WHERE id = $4`,
-        [newIn, newOut, input.newStatus ?? null, attId],
-      );
-    }
 
     const corr = mapCorrectionRow({ ...rows[0], staff_name: curr.staff_name });
     await auditWithClient(
@@ -1110,6 +1095,7 @@ export async function listAttendanceCorrections(options?: {
     conditions.push(`c.staff_id = $${params.length}`);
   }
 
+  if (options?.status) { params.push(options.status); conditions.push(`c.status = $${params.length}`); }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT c.*, s.full_name as staff_name
@@ -1128,6 +1114,8 @@ export async function decideAttendanceCorrection(
   reason: string | null,
   session: SessionPayload,
 ): Promise<HrAttendanceCorrectionView> {
+  if (session.role !== "admin") throw new Error("اعتماد التصحيح للمدير وحده.");
+  if (decision !== "approved" && decision !== "rejected") throw new Error("قرار غير صالح.");
   const corrId = Number(id);
   return withTransaction(getPool(), async (client) => {
     const { rows: corrRows } = await client.query(
@@ -1140,29 +1128,31 @@ export async function decideAttendanceCorrection(
     if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
     const corr = corrRows[0];
 
+    if (corr.status !== "pending") { if (corr.status === decision) return mapCorrectionRow(corr); throw new Error("حُسم طلب التصحيح سابقًا."); }
     // منع الموافقة الذاتية
     if (decision === "approved" && (corr.requested_by === session.username || corr.staff_user_id === session.userId)) {
       throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
     }
 
     if (decision === "approved") {
-      await client.query(
-        `UPDATE hr_attendance_records
-         SET check_in_actual = COALESCE($1, check_in_actual),
-             check_out_actual = COALESCE($2, check_out_actual),
-             status = COALESCE($3, status),
-             updated_at = NOW()
-         WHERE id = $4`,
-        [corr.new_check_in, corr.new_check_out, corr.new_status, corr.attendance_id],
-      );
+      const {rows:[attendance]} = await client.query("SELECT * FROM hr_attendance_records WHERE id=$1 FOR UPDATE",[corr.attendance_id]);
+      const iso = (value: unknown) => value ? new Date(value as string).toISOString() : null;
+      if (iso(attendance.check_in_actual)!==iso(corr.old_check_in) || iso(attendance.check_out_actual)!==iso(corr.old_check_out) || attendance.status!==corr.old_status) throw new Error("تغيّر سجل الحضور؛ اطلب تصحيحًا جديدًا.");
+      const checkIn = corr.new_check_in ?? attendance.check_in_actual, checkOut = corr.new_check_out ?? attendance.check_out_actual;
+      if (checkIn && checkOut && new Date(checkOut).getTime()<new Date(checkIn).getTime()) throw new Error("وقت الخروج يسبق الدخول.");
+      const {rows:[schedule]} = await client.query("SELECT * FROM hr_work_schedules WHERE id=$1",[attendance.schedule_id]);
+      const calculated = calculateShiftAttendance({checkIn:checkIn?new Date(checkIn):null,checkOut:checkOut?new Date(checkOut):null,scheduledStart:schedule?.shift_start_time ?? "00:00",scheduledEnd:schedule?.shift_end_time ?? "23:59",graceMins:schedule?.grace_period_mins ?? 0,crossesMidnight:schedule?.crosses_midnight ?? false,timeZone:CLINIC_TIME_ZONE});
+      await client.query(`UPDATE hr_attendance_records SET check_in_actual=$1,check_out_actual=$2,status=$3,
+        work_minutes=$4,late_minutes=$5,early_exit_minutes=$6,overtime_minutes=$7,is_incomplete=$8,updated_at=NOW() WHERE id=$9`,
+        [checkIn,checkOut,corr.new_status!==corr.old_status?corr.new_status:calculated.status,calculated.workMinutes,schedule?calculated.lateMinutes:0,schedule?calculated.earlyExitMinutes:0,schedule?calculated.overtimeMinutes:0,calculated.isIncomplete,corr.attendance_id]);
     }
 
     const { rows } = await client.query(
       `UPDATE hr_attendance_corrections
-       SET approved_by = $1, approved_at = NOW()
+       SET approved_by = $1, approved_at = NOW(), status=$3, decision_reason=$4
        WHERE id = $2
        RETURNING *`,
-      [session.username, corrId],
+      [session.username, corrId, decision, reason],
     );
 
     const result = mapCorrectionRow({ ...rows[0], staff_name: corr.staff_name });
@@ -1194,8 +1184,10 @@ function mapCorrectionRow(row: Record<string, unknown>): HrAttendanceCorrectionV
     newStatus: row.new_status ? String(row.new_status) : null,
     reason: String(row.reason),
     requestedBy: String(row.requested_by),
-    approvedBy: String(row.approved_by),
-    approvedAt: new Date(row.approved_at as string).toISOString(),
+    approvedBy: row.approved_by ? String(row.approved_by) : null,
+    approvedAt: row.approved_at ? new Date(row.approved_at as string).toISOString() : null,
+    status: row.status as "pending" | "approved" | "rejected",
+    decisionReason: row.decision_reason ? String(row.decision_reason) : null,
     createdAt: new Date(row.created_at as string).toISOString(),
   };
 }
@@ -1208,7 +1200,7 @@ function mapAttendanceRow(row: Record<string, unknown>): HrAttendanceRecordView 
     staffJobTitle: String(row.staff_job_title ?? ""),
     department: row.department as any,
     scheduleId: row.schedule_id ? Number(row.schedule_id) : null,
-    attendanceDate: String(row.attendance_date),
+    attendanceDate: row.attendance_date instanceof Date ? row.attendance_date.toISOString().slice(0,10) : String(row.attendance_date),
     status: row.status as HrAttendanceStatus,
     checkInRaw: row.check_in_raw ? new Date(row.check_in_raw as string).toISOString() : null,
     checkOutRaw: row.check_out_raw ? new Date(row.check_out_raw as string).toISOString() : null,
@@ -1257,6 +1249,7 @@ export async function listLeaveTypes(): Promise<Array<{
 export async function listLeaveBalances(
   optionsOrStaffId?: number | string | { staffId?: number | string; year?: number },
   maybeYear?: number,
+  session?: SessionPayload,
 ): Promise<HrLeaveBalanceView[]> {
   const pool = getPool();
   const conditions: string[] = [];
@@ -1282,6 +1275,7 @@ export async function listLeaveBalances(
     conditions.push(`lb.year = $${params.length}`);
   }
 
+  if (session && session.role !== "admin") { params.push(session.userId); conditions.push(`s.user_id = $${params.length}`); }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `
     SELECT lb.*, s.full_name as staff_name, lt.name_ar as leave_type_name
@@ -1332,18 +1326,23 @@ export async function adjustLeaveBalance(
     sess = session!;
   }
 
+  if (sess.role!=="admin" || !Number.isSafeInteger(sId) || sId<1 || !Number.isInteger(yr) || yr<2000 || yr>9999 || !Number.isFinite(days) || days<0 || days>366) throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
   return withTransaction(getPool(), async (client) => {
+    await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[sId]);
+    const existing = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[sId,code,yr]);
+    const pending = Number((await client.query("SELECT COALESCE(SUM(days_count),0) AS days FROM hr_leave_requests WHERE staff_id=$1 AND leave_type_code=$2 AND EXTRACT(YEAR FROM start_date)=$3 AND status IN ('pending','under_review')",[sId,code,yr])).rows[0].days);
+    if (days+Number(existing.rows[0]?.carried_over_days ?? 0)<Number(existing.rows[0]?.used_days ?? 0)+pending) throw new Error("الرصيد المخصص أقل من الأيام المستخدمة والمعلقة.");
     const effFrom = `${yr}-01-01`;
     const effTo = `${yr}-12-31`;
 
     const { rows } = await client.query(
       `INSERT INTO hr_leave_balances (
-        staff_id, leave_type_code, year, allocated_days, effective_from, effective_to
-      ) VALUES ($1, $2, $3, $4, $5, $6)
+        staff_id, leave_type_code, year, allocated_days, effective_from, effective_to, pending_days
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
       ON CONFLICT (staff_id, leave_type_code, year) DO UPDATE
-      SET allocated_days = EXCLUDED.allocated_days, updated_at = NOW()
+      SET allocated_days = EXCLUDED.allocated_days, pending_days = EXCLUDED.pending_days, updated_at = NOW()
       RETURNING *`,
-      [sId, code, yr, days, effFrom, effTo],
+      [sId, code, yr, days, effFrom, effTo, pending],
     );
 
     const balanceRes = await client.query(
@@ -1374,7 +1373,7 @@ export async function listLeaveRequests(options?: {
   status?: HrLeaveRequestStatus;
   startDate?: string;
   endDate?: string;
-}): Promise<HrLeaveRequestView[]> {
+}, session?: SessionPayload): Promise<HrLeaveRequestView[]> {
   const pool = getPool();
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -1396,6 +1395,7 @@ export async function listLeaveRequests(options?: {
     conditions.push(`lr.start_date <= $${params.length}`);
   }
 
+  if (session && session.role !== "admin") { params.push(session.userId); conditions.push(`s.user_id = $${params.length}`); }
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `
     SELECT lr.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department,
@@ -1428,7 +1428,11 @@ export async function createLeaveRequest(
   session: SessionPayload,
 ): Promise<HrLeaveRequestView> {
   const staffId = Number(input.staffId);
+  const days = (Date.parse(input.endDate)-Date.parse(input.startDate))/86400000+1;
+  if (!Number.isInteger(days) || days<1 || input.startDate.slice(0,4)!==input.endDate.slice(0,4) || !input.reason.trim() || input.isPartialDay || input.daysCount!==days) throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
   return withTransaction(getPool(), async (client) => {
+    const staff = await client.query("SELECT user_id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
+    if (!staff.rows[0] || (session.role!=="admin" && staff.rows[0].user_id!==session.userId)) throw new Error("الموظف غير موجود.");
     // ١) منع التداخل مع إجازات أخرى معتمدة أو قيد المراجعة
     const overlapRes = await client.query(
       `SELECT id FROM hr_leave_requests
@@ -1513,6 +1517,8 @@ export async function decideLeaveRequest(
     if (!currRows[0]) throw new Error("طلب الإجازة غير موجود.");
     const curr = currRows[0];
 
+    // Serialize balance, overlap and decisions on the same staff row.
+    await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[curr.staff_id]);
     // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
     if (curr.status === decision) {
       return mapLeaveRequestRow(curr);
@@ -1523,9 +1529,16 @@ export async function decideLeaveRequest(
       throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");
     }
 
-    const year = new Date(curr.start_date).getFullYear();
+    if (session.role !== "admin") throw new Error("قرار الإجازة للمدير وحده.");
+    const year = Number((curr.start_date instanceof Date ? curr.start_date.toISOString() : String(curr.start_date)).slice(0,4));
 
     if (decision === "approved") {
+      const type = await client.query("SELECT is_paid FROM hr_leave_types WHERE code=$1",[curr.leave_type_code]);
+      const balance = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[curr.staff_id,curr.leave_type_code,year]);
+      const b = balance.rows[0];
+      if (type.rows[0]?.is_paid && (!b || Number(b.allocated_days)+Number(b.carried_over_days)-Number(b.used_days)-Number(b.pending_days)+(["pending","under_review"].includes(curr.status)?Number(curr.days_count):0)<Number(curr.days_count))) throw new Error("رصيد الإجازة المدفوعة يحتاج تخصيصًا معتمدًا وكافيًا.");
+      const attendance = await client.query("SELECT id FROM hr_attendance_records WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3",[curr.staff_id,curr.start_date,curr.end_date]);
+      if (attendance.rows.length) throw new Error("يوجد سجل حضور في فترة الإجازة؛ راجعه قبل الاعتماد.");
       // نقل الأيام من المعلقة إلى المستعملة
       if (curr.status === "pending" || curr.status === "under_review") {
         await client.query(
@@ -1581,7 +1594,9 @@ export async function decideLeaveRequest(
            WHERE staff_id = $1
              AND attendance_date BETWEEN $2 AND $3
              AND status = 'on_leave'
-             AND notes = $4`,
+             AND notes = $4 AND check_in_raw IS NULL AND check_out_raw IS NULL
+             AND NOT EXISTS(SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=hr_attendance_records.id)
+             AND NOT EXISTS(SELECT 1 FROM hr_attendance_corrections c WHERE c.attendance_id=hr_attendance_records.id)`,
           [curr.staff_id, curr.start_date, curr.end_date, `إجازة معتمدة رقم #${reqId}`],
         );
       } else if (curr.status === "pending" || curr.status === "under_review") {
@@ -1661,7 +1676,7 @@ function mapLeaveRequestRow(row: Record<string, unknown>): HrLeaveRequestView {
     leaveTypeCode: row.leave_type_code as HrLeaveTypeCode,
     leaveTypeName: (row.leave_type_name as string) ?? undefined,
     startDate: row.start_date instanceof Date ? row.start_date.toISOString().slice(0,10) : String(row.start_date),
-    endDate: String(row.end_date),
+    endDate: row.end_date instanceof Date ? row.end_date.toISOString().slice(0,10) : String(row.end_date),
     daysCount: Number(row.days_count),
     isPartialDay: Boolean(row.is_partial_day),
     partialHours: row.partial_hours !== null ? Number(row.partial_hours) : null,
@@ -1675,4 +1690,10 @@ function mapLeaveRequestRow(row: Record<string, unknown>): HrLeaveRequestView {
     createdAt: new Date(row.created_at as string).toISOString(),
     updatedAt: new Date(row.updated_at as string).toISOString(),
   };
+}
+
+/** Leave pickers expose only identity fields of staff whose leave the session may read. */
+export async function leaveStaffOptions(session: SessionPayload) {
+ const {rows}=await getPool().query('SELECT id,full_name AS "fullName",job_title AS "jobTitle" FROM hr_staff WHERE ($1 OR user_id=$2) ORDER BY full_name',[session.role==="admin",session.userId]);
+ return rows as Array<{id:number;fullName:string;jobTitle:string}>;
 }

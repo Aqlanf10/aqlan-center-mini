@@ -105,6 +105,7 @@ export type SupplierPaymentRefusal =
   | "zero_settlement"
   | "exceeds_payable"
   | "exceeds_party_balance"
+  | "hr_payroll_settlement_required"
   | "stale_quote";
 
 export interface SettlementQuote {
@@ -143,6 +144,8 @@ export function refusalMessage(reason: SupplierPaymentRefusal, quote?: Settlemen
   switch (reason) {
     case "no_shift":
       return "لا توجد وردية مفتوحة. افتح الوردية من شاشة الصندوق أولًا.";
+    case "hr_payroll_settlement_required":
+      return "هذا الاستحقاق مرتبط بمسير معتمد؛ اصرفه من شاشة المسير لربط السند بالالتزام ومنع تكرار الصرف.";
     case "party_not_found":
       return "الجهة غير موجودة.";
     case "payable_not_found":

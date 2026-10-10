@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const balances = await listLeaveBalances(staffId, year);
+    const balances = await listLeaveBalances(staffId, year, session);
     return NextResponse.json(balances);
   } catch (error) {
     console.error("Failed to list balances:", error);

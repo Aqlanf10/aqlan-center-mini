@@ -2173,7 +2173,7 @@ export function ensureSchema(): Promise<void> {
         const shotsPass = await hashPassword("shots-only-local-1234");
         await getPool().query(
           `INSERT INTO users (username, display_name, password_hash, role)
-           VALUES 
+           VALUES
              ('admin', 'المدير العام (د. عقلان)', $1, 'admin'),
              ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor'),
              ('reception', 'استقبال المركز', $3, 'reception'),
@@ -11866,6 +11866,8 @@ async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBuc
 }
 
 export interface RecordExpenseInput {
+  /** Internal HR settlement context; HTTP callers never populate this field. */
+  hrPayrollItemId?: number;
   category: ExpenseCategory;
   partyId: number | null;
   payeeText: string | null;
@@ -11943,16 +11945,20 @@ export async function recordExpenseInTx(
     partyKind = rows[0].kind;
   }
 
-  // HR commissions share the existing engine and the party lock with direct doctor payments.
-  // Reject an extra payout from either entry point after the entitlement has been settled.
+  // The HR payable must be settled through its atomic component payout and reversal.
+  // An unlinked expense cannot silently leave a second outstanding claim in the payroll.
+  if (input.payableId !== null) {
+    const hrClaim = await client.query(`SELECT id FROM hr_payroll_items WHERE payable_id=$1 OR commission_payable_id=$1`,[input.payableId]);
+    if (hrClaim.rows.length && !hrClaim.rows.some(row=>Number(row.id)===input.hrPayrollItemId)) return {id:null,reason:"hr_payroll_settlement_required",quote:null};
+  }
   if (input.category === "commission" && partyKind === "doctor" && partyId !== null) {
-    const claims = await client.query(`SELECT 1 FROM hr_payroll_items i
-      JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
-      WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed') LIMIT 1`, [partyId,input.currency]);
+    const claims = await client.query(`SELECT i.id, (${payableAmountSql("b")}-${payableSettledTotalSql("b")}) AS remaining
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
+      WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed')`,[partyId,input.currency]);
     if (claims.rows.length) {
-      const earned = (await commissionReport("0001-01-01","9999-12-31",undefined,client))
-        .find((row) => row.doctorId === partyId && row.currency === input.currency);
-      if (input.amountMinor > Math.max(0,earned?.dueMinor ?? 0)) return { id:null,reason:"exceeds_party_balance",quote:null };
+      const earned=(await commissionReport("0001-01-01","9999-12-31",undefined,client)).find(row=>row.doctorId===partyId && row.currency===input.currency);
+      if (input.amountMinor>Math.max(0,earned?.dueMinor ?? 0)) return {id:null,reason:"exceeds_party_balance",quote:null};
+      if (claims.rows.some(row=>Number(row.remaining)>0) && !claims.rows.some(row=>Number(row.id)===input.hrPayrollItemId)) return {id:null,reason:"hr_payroll_settlement_required",quote:null};
     }
   }
 

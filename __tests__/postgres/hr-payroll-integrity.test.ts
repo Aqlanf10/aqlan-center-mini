@@ -280,11 +280,11 @@ describe("نسبة العقد المرجعية وسياسة العمولات ا�
 });
 
 describe("٢ — صرف النظام المختلط عبر محرك العمولات والالتزامات", () => {
-  async function hybrid(salary = 100_000, collected = 40_000, percent = 30) {
+  async function hybrid(salary = 100_000, collected = 40_000, percent = 30, approveNow = true) {
     const s = await staffWith({ kind: "salary_commission", salary, percent });
     await earnCommission(s.partyId!, collected);
     const { run, items } = await approvedRun();
-    await approve(run.id);
+    if (approveNow) await approve(run.id);
     const item = (await payroll.listPayrollItems(run.id)).find((i) => i.staffId === s.staffId)!;
     return { ...s, run, item, items };
   }
@@ -368,15 +368,28 @@ describe("٢ — صرف النظام المختلط عبر محرك العمول
     expect(await cashOut()).toBe(12_000);
   });
 
+  it("عمولة مسير معتمد لا تُسدّد بسند منفصل غير مرتبط يترك الالتزام معلقًا",async()=>{
+    const h=await hybrid();
+    const result=await recordExpense({category:"commission",partyId:h.partyId,payeeText:null,amountMinor:5000,currency:"YER",baseCurrency:"YER",exchangeRate:1,payableId:null,note:"Unlinked settlement",createdBy:admin.username});
+    expect(result.expense).toBeNull();expect(result.reason).toBe("hr_payroll_settlement_required");
+    expect(await cashOut()).toBe(0);expect(await remainingOf(h.partyId!,"commission")).toBe(12000);
+  });
+
   it("صرفٌ سابق من كشف الطبيب (سند عمولة مباشر) يمنع صرف الجزء نفسه من المسير — لا ازدواج", async () => {
-    const h = await hybrid();
+    const h = await hybrid(100_000,40_000,30,false);
     const direct = await recordExpense({
       category: "commission", partyId: h.partyId, payeeText: null, amountMinor: 12_000, currency: "YER", baseCurrency: "YER",
       exchangeRate: 1, payableId: null, note: "من كشف الطبيب", createdBy: "hr-int-admin",
     });
     expect(direct.expense).not.toBeNull();
-    await expect(payroll.disbursePayrollItem(h.item.id, { components: { commissionMinor: 12_000 }, clientRequestId: "dup-guard-0001" }, admin))
-      .rejects.toThrow("كشف الطبيب");
+    await q("UPDATE expenses SET created_at='2026-10-12 10:00+03' WHERE id=$1",[direct.expense!.id]);
+    // A direct payment before approval changes the engine balance; the draft must be recalculated.
+    await expect(approve(h.run.id)).rejects.toThrow("العمولة");
+    await payroll.calculatePayrollRun(h.run.periodId,"YER",admin);
+    await approve(h.run.id);
+    const recalculated=(await payroll.listPayrollItems(h.run.id)).find(i=>i.staffId===h.staffId)!;
+    expect(recalculated.commissionsMinor).toBe(0);
+    expect(recalculated.netDueMinor).toBe(100_000);
     expect(await cashOut()).toBe(12_000); // السند المباشر وحده
   });
 

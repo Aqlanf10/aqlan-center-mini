@@ -6,6 +6,7 @@ import {
   listLeaveRequests,
   createLeaveRequest,
   listLeaveTypes,
+  leaveStaffOptions,
   type CreateLeaveRequestInput,
 } from "@/lib/hr-contracts-attendance";
 import type { HrLeaveStatus } from "@/lib/hr-contracts-attendance-shared";
@@ -28,10 +29,10 @@ export async function GET(request: Request) {
   const endDate = url.searchParams.get("endDate") || undefined;
 
   try {
-    const requests = await listLeaveRequests({ staffId, status, startDate, endDate });
+    const requests = await listLeaveRequests({ staffId, status, startDate, endDate }, session);
     if (includeTypes) {
       const types = await listLeaveTypes();
-      return NextResponse.json({ requests, types });
+      return NextResponse.json({ requests, types, staff: await leaveStaffOptions(session) });
     }
     return NextResponse.json(requests);
   } catch (error) {
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
   try {
     const start = new Date(payload.startDate);
     const end = new Date(payload.endDate);
-    const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     const daysCount = payload.daysCount ? Number(payload.daysCount) : diffDays;
 
     const input: CreateLeaveRequestInput = {

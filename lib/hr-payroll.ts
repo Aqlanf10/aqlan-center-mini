@@ -360,7 +360,7 @@ async function disburseInTx(client: DbClient, input: ReturnType<typeof normalize
   for (const [component,amount,payableId] of [["salary",components.salaryMinor,item.payable_id],["commission",components.commissionMinor,item.commission_payable_id]] as const) {
     if (!amount) continue;
     if (!payableId) fail("payable_missing", "التزام الجزء غير موجود؛ لا يُصرف بلا ربط مالي.");
-    const expense = await recordExpenseInTx(client,{ category:component,partyId:null,payeeText:item.staff_name,amountMinor:amount,
+    const expense = await recordExpenseInTx(client,{ hrPayrollItemId:Number(item.id), category:component,partyId:null,payeeText:item.staff_name,amountMinor:amount,
       currency:item.currency,baseCurrency:CLINIC_BASE_CURRENCY,exchangeRate:rate,payableId:Number(payableId),
       note:`صرف مسير ${run.period_key} — ${item.staff_name}${input.notes ? ` — ${input.notes}` : ""}`,createdBy:session.username,rates },rates);
     if (!expense.id) fail(expense.reason ?? "expense_refused",expense.reason === "no_shift" ? "لا توجد وردية صندوق مفتوحة. افتح الوردية من شاشة الصندوق أولًا." : refusalMessage(expense.reason ?? "no_shift",expense.quote));

@@ -3,64 +3,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { clinicDateString } from "@/lib/schedule";
+import { clinicDateString, clinicLocalDateTimeToIso } from "@/lib/schedule";
 import {
   HR_ATTENDANCE_STATUS_LABELS,
   type HrAttendanceStatus,
 } from "@/lib/hr-contracts-attendance-shared";
 
-interface AttendanceItem {
-  id: string;
-  staffId: string;
-  staffName?: string;
-  jobTitle?: string;
-  date: string;
-  checkIn: string | null;
-  checkOut: string | null;
-  status: HrAttendanceStatus;
-  scheduledMinutes: number;
-  actualMinutes: number;
-  lateMinutes: number;
-  earlyDepartureMinutes: number;
-  overtimeMinutes: number;
-  rawPunches: any[];
-  notes: string | null;
-}
-
-interface CorrectionItem {
-  id: string;
-  attendanceRecordId: string;
-  staffId: string;
-  staffName?: string;
-  correctionType: string;
-  originalCheckIn: string | null;
-  originalCheckOut: string | null;
-  requestedCheckIn: string | null;
-  requestedCheckOut: string | null;
-  reason: string;
-  status: "pending" | "approved" | "rejected";
-  decidedBy: string | null;
-  decisionNotes: string | null;
-  createdAt: string;
-}
-
-interface ScheduleItem {
-  id: string;
-  name: string;
-  shiftPattern: string;
-  morningStart: string | null;
-  morningEnd: string | null;
-  eveningStart: string | null;
-  eveningEnd: string | null;
-  workDays: number[];
-  isDefault: boolean;
-}
+type AttendanceItem = import("@/lib/hr-contracts-attendance-shared").HrAttendanceRecordView;
+type CorrectionItem = import("@/lib/hr-contracts-attendance-shared").HrAttendanceCorrectionView;
+type ScheduleItem = import("@/lib/hr-contracts-attendance-shared").HrWorkScheduleView;
 
 interface StaffOption {
   id: number;
   fullName: string;
   jobTitle: string;
 }
+
+const clinicClock = (instant: string) => new Intl.DateTimeFormat("en-GB", {timeZone:CLINIC_ZONE_FALLBACK,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(instant));
 
 export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [subTab, setSubTab] = useState<"records" | "corrections" | "schedules">("records");
@@ -79,7 +38,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   // Punch modal / quick punch
   const [punchModalOpen, setPunchModalOpen] = useState(false);
   const [punchStaffId, setPunchStaffId] = useState("");
-  const [punchType, setPunchType] = useState<"in" | "out">("in");
+  const [punchType, setPunchType] = useState<"check_in" | "check_out">("check_in");
   const [punchTime, setPunchTime] = useState("");
   const [punchNote, setPunchNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -94,7 +53,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   // Schedule create modal
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [schedName, setSchedName] = useState("");
-  const [schedPattern, setSchedPattern] = useState("single_shift");
+  const [schedPattern, setSchedPattern] = useState("morning");
   const [schedStart, setSchedStart] = useState("08:00");
   const [schedEnd, setSchedEnd] = useState("16:00");
 
@@ -173,7 +132,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
     setSubmitting(true);
     try {
       const stamp = punchTime
-        ? `${selectedDate}T${punchTime}:00Z`
+        ? clinicLocalDateTimeToIso(selectedDate, punchTime, CLINIC_ZONE_FALLBACK)
         : new Date().toISOString();
 
       const res = await fetch("/api/hr/attendance", {
@@ -214,8 +173,9 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
         body: JSON.stringify({
           action: "request",
           attendanceRecordId: selectedRecordForCorrection.id,
-          requestedCheckIn: reqCheckIn ? `${selectedRecordForCorrection.date}T${reqCheckIn}:00Z` : null,
-          requestedCheckOut: reqCheckOut ? `${selectedRecordForCorrection.date}T${reqCheckOut}:00Z` : null,
+          fieldCorrected: "all",
+          newCheckIn: reqCheckIn ? clinicLocalDateTimeToIso(selectedRecordForCorrection.attendanceDate, reqCheckIn, CLINIC_ZONE_FALLBACK) : null,
+          newCheckOut: reqCheckOut ? clinicLocalDateTimeToIso(selectedRecordForCorrection.attendanceDate, reqCheckOut, CLINIC_ZONE_FALLBACK) : null,
           reason: reqReason,
         }),
       });
@@ -237,7 +197,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
     }
   };
 
-  const handleDecideCorrection = async (id: string, decision: "approved" | "rejected") => {
+  const handleDecideCorrection = async (id: number, decision: "approved" | "rejected") => {
     const reason = prompt(decision === "approved" ? "ملاحظة الاعتماد (اختياري):" : "سبب الرفض:") || "";
     try {
       const res = await fetch("/api/hr/attendance/corrections", {
@@ -261,6 +221,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const handleCreateSchedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!schedName) return;
+    if (!selectedStaff) { alert("اختر الموظف من مرشح الحضور قبل إضافة جدول عمل."); return; }
     setSubmitting(true);
     try {
       const res = await fetch("/api/hr/schedules", {
@@ -268,11 +229,13 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: schedName,
-          shiftPattern: schedPattern,
-          morningStart: schedStart,
-          morningEnd: schedEnd,
-          workDays: [0, 1, 2, 3, 4, 6], // All except Friday
-          isDefault: false,
+          scheduleType: schedPattern,
+          staffId: selectedStaff ? Number(selectedStaff) : null,
+          shiftStartTime: schedStart,
+          shiftEndTime: schedEnd,
+          crossesMidnight: schedEnd <= schedStart,
+          workingDays: [0, 1, 2, 3, 4, 6], // All except Friday
+          effectiveFrom: selectedDate,
         }),
       });
       if (!res.ok) throw new Error("تعذّر حفظ جدول العمل.");
@@ -288,8 +251,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
   const openCorrectionForRecord = (record: AttendanceItem) => {
     setSelectedRecordForCorrection(record);
-    setReqCheckIn(record.checkIn ? record.checkIn.slice(11, 16) : "08:00");
-    setReqCheckOut(record.checkOut ? record.checkOut.slice(11, 16) : "16:00");
+    setReqCheckIn(record.checkInActual ? clinicClock(record.checkInActual) : "08:00");
+    setReqCheckOut(record.checkOutActual ? clinicClock(record.checkOutActual) : "16:00");
     setCorrectionModalOpen(true);
   };
 
@@ -341,9 +304,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
             type="button"
             onClick={() => {
               const now = new Date();
-              const hrs = String(now.getHours()).padStart(2, "0");
-              const mins = String(now.getMinutes()).padStart(2, "0");
-              setPunchTime(`${hrs}:${mins}`);
+              setPunchTime(clinicClock(now.toISOString()));
               setPunchModalOpen(true);
             }}
             className="flex items-center gap-2 rounded-xl bg-navy-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-navy-700"
@@ -429,19 +390,19 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                   {records.map((r) => {
                     const isIncomplete = r.status === "incomplete";
                     const isLate = r.lateMinutes > 0;
-                    const hoursWorked = (r.actualMinutes / 60).toFixed(1);
+                    const hoursWorked = (r.workMinutes / 60).toFixed(1);
 
                     return (
                       <tr key={r.id} className="transition hover:bg-navy-50/40">
                         <td className="px-4 py-3 font-semibold text-navy-900">
                           <div>{r.staffName || `موظف #${r.staffId}`}</div>
-                          {r.jobTitle && <div className="text-xs text-navy-500">{r.jobTitle}</div>}
+                          {r.staffJobTitle && <div className="text-xs text-navy-500">{r.staffJobTitle}</div>}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">
-                          {r.checkIn ? r.checkIn.slice(11, 16) : "—"}
+                          {r.checkInActual ? clinicClock(r.checkInActual) : "—"}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs">
-                          {r.checkOut ? r.checkOut.slice(11, 16) : "—"}
+                          {r.checkOutActual ? clinicClock(r.checkOutActual) : "—"}
                         </td>
                         <td className="px-4 py-3 text-xs">
                           <span className="font-semibold text-navy-800">{hoursWorked}</span> ساعة
@@ -519,8 +480,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                         السبب: <span className="font-medium text-navy-800">{c.reason}</span>
                       </div>
                       <div className="font-mono text-xs text-navy-500">
-                        المطلوب: دخول ({c.requestedCheckIn ? c.requestedCheckIn.slice(11, 16) : "—"}) | خروج (
-                        {c.requestedCheckOut ? c.requestedCheckOut.slice(11, 16) : "—"})
+                        المطلوب: دخول ({c.newCheckIn ? clinicClock(c.newCheckIn) : "—"}) | خروج (
+                        {c.newCheckOut ? clinicClock(c.newCheckOut) : "—"})
                       </div>
                     </div>
 
@@ -571,24 +532,24 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
               <div key={s.id} className="rounded-2xl border border-navy-100 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-navy-900">{s.name}</h4>
-                  {s.isDefault && (
+                  {s.isActive && (
                     <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-800">
                       افتراضي
                     </span>
                   )}
                 </div>
                 <div className="mt-2 text-xs text-navy-600">
-                  نمط الوردية: <span className="font-medium text-navy-800">{s.shiftPattern}</span>
+                  نمط الوردية: <span className="font-medium text-navy-800">{s.scheduleType}</span>
                 </div>
                 <div className="mt-1 font-mono text-xs text-navy-700">
-                  {s.morningStart && s.morningEnd && (
+                  {s.shiftStartTime && s.shiftEndTime && (
                     <div>
-                      الفترة: {s.morningStart} → {s.morningEnd}
+                      الفترة: {s.shiftStartTime} → {s.shiftEndTime}
                     </div>
                   )}
-                  {s.eveningStart && s.eveningEnd && (
+                  {s.secondShiftStart && s.secondShiftEnd && (
                     <div>
-                      المساء: {s.eveningStart} → {s.eveningEnd}
+                      المساء: {s.secondShiftStart} → {s.secondShiftEnd}
                     </div>
                   )}
                 </div>
@@ -624,11 +585,11 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 <label className="mb-1 block text-xs font-semibold text-navy-700">نوع البصمة *</label>
                 <select
                   value={punchType}
-                  onChange={(e) => setPunchType(e.target.value as "in" | "out")}
+                  onChange={(e) => setPunchType(e.target.value as "check_in" | "check_out")}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
-                  <option value="in">تسجيل حضور (دخول)</option>
-                  <option value="out">تسجيل انصراف (خروج)</option>
+                  <option value="check_in">تسجيل حضور (دخول)</option>
+                  <option value="check_out">تسجيل انصراف (خروج)</option>
                 </select>
               </div>
               <div>
@@ -678,7 +639,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
             <h3 className="text-base font-bold text-navy-900">طلب تصحيح بصمة الحضور</h3>
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
               الموظف: <span className="font-semibold">{selectedRecordForCorrection.staffName}</span> | التاريخ:{" "}
-              <span className="font-semibold">{selectedRecordForCorrection.date}</span>
+              <span className="font-semibold">{selectedRecordForCorrection.attendanceDate}</span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

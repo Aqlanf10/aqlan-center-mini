@@ -298,9 +298,9 @@ describe("PG18 schema ownership characterization", () => {
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    // 88 قاعدة main (بعد دمج سلسلة الفواتير) + 7 جداول HR-1/HR-2 + 12 جدولًا HR-3..HR-6 = 107.
-    expect(migrationApplicationTables).toHaveLength(107);
-    expect(runtimeApplicationTables).toHaveLength(107);
+    // 88 main + 7 HR-1/HR-2 + 12 HR-3..HR-6 + hr_payroll_disbursement_parts (0050) = 109 (plus raw punch events).
+    expect(migrationApplicationTables).toHaveLength(109);
+    expect(runtimeApplicationTables).toHaveLength(109);
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
     expect(report.comparison.characterizationOk).toBe(true);

@@ -71,11 +71,13 @@ export const RESET_WIPE_TABLES = [
   "hr_task_links",
   "hr_tasks",
   // (HR-3/HR-4/HR-5) الحضور والإجازات والمسير والصرف — سجلات تشغيلية تُمسح
+  "hr_payroll_disbursement_parts",
   "hr_payroll_disbursements",
   "hr_payroll_items",
   "hr_payroll_runs",
   "hr_payroll_periods",
   "hr_leave_requests",
+  "hr_attendance_punch_events",
   "hr_attendance_corrections",
   "hr_attendance_records",
   // المال

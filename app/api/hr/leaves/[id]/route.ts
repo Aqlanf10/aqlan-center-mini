@@ -22,7 +22,7 @@ export async function GET(
 
   const { id } = await params;
   try {
-    const list = await listLeaveRequests({});
+    const list = await listLeaveRequests({}, session);
     const found = list.find((item) => item.id === Number(id));
     if (!found) {
       return NextResponse.json({ message: "طلب الإجازة غير موجود." }, { status: 404 });
@@ -41,6 +41,7 @@ export async function PATCH(
   const session = await requireSession();
   if (!session) return denied();
 
+  if (session.role !== "admin") return NextResponse.json({message:"قرار الإجازة للمدير وحده."},{status:403});
   const { id } = await params;
   let body: unknown;
   try {
