@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
-import { CONDITION_LABEL, isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
+import { isValidTooth, normalizeSurfaces, toothName } from "@/lib/dental";
 import { LAB_STATUS_LABEL, type LabOrderStatus } from "@/lib/lab";
 import { ToothField } from "./ToothPicker";
 import { visitTotal, type ProcedureLine } from "@/lib/clinical";
@@ -22,10 +22,11 @@ import {
 import { isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
-import { ServiceSelect } from "./ServiceSelect";
+import { VisitPhraseField as Field } from "./VisitPhraseField";
+import { VisitPlanRequirements } from "./VisitPlanRequirements";
 import { VisitMaterials } from "./VisitMaterials";
 import { QuickServicePicker } from "./QuickServicePicker";
-import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, plannedItemBlock, visitSignatureBlock } from "./invoice-clinical-readiness";
+import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, visitSignatureBlock } from "./invoice-clinical-readiness";
 
 const orthoPhaseLabel = (phase: string): string =>
   PHASE_LABEL[phase as OrthoPhase] ?? phase;
@@ -113,6 +114,7 @@ interface Visit {
   activeCases?: {
     id: number | null; kind: "specialty" | "ortho"; title: string; specialty: string; status: string;
     responsibleName: string | null; doneSteps: number; totalSteps: number; nextStep: string | null;
+    historicalProgressUnknown?: boolean;
   }[];
   outstanding: {
     planItemId: number; serviceId: number | null; planTitle: string; serviceName: string;
@@ -223,10 +225,12 @@ interface BillingPreview {
   zeroReason: string | null;
 }
 
-export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange }: {
+export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange, onPreviousVisitReferenceChange }: {
   visitId: number;
   expectedPatientId?: number;
   onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
+  /** Presentation-only: lets the enclosing workspace omit the same visible reference. */
+  onPreviousVisitReferenceChange?: (previousVisitId: number | null) => void;
   onSigned?: (result: VisitSignResult) => void;
   /** (VISIT-2) افتح «مراجعة وإنهاء الزيارة» مباشرةً بعد التحميل — حين يصل الطبيب إلى ملف
    *  المريض الجديد الذي فُتح له للتوّ من زيارته ليكمل الإنهاء هناك. */
@@ -314,6 +318,33 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [error, setError] = useState<string | null>(null);
   const [errorOwner, setErrorOwner] = useState<typeof owner | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const reviewPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!reviewOpen || !ownsVisit || typeof document === "undefined") return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    reviewPanel.current?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, [reviewOpen, ownsVisit, owner]);
+  // Dismissing the review only closes presentation. A sent sign request keeps
+  // its command/busy ownership until its result is confirmed or retired.
+  const dismissReview = () => { if (currentOwner()) setReviewOpen(false); };
+  const handleReviewKeyDown = (event: import("react").KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismissReview();
+    }
+    if (event.key !== "Tab" || !reviewPanel.current) return;
+    const controls = Array.from(reviewPanel.current.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), textarea:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href], [tabindex="0"]',
+    ));
+    const first = controls[0]; const last = controls[controls.length - 1];
+    if (!first) { event.preventDefault(); reviewPanel.current.focus(); return; }
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === reviewPanel.current)) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === reviewPanel.current)) {
+      event.preventDefault(); first.focus();
+    }
+  };
   // Reference-only identity also retires same-visit case A→B→A and leaving
   // explicit follow-up mode. It never resets the clinical notes or adjustment.
   const referenceKey = JSON.stringify([owner.key, owner.generation,
@@ -328,6 +359,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   const [referenceOpen, setReferenceOpen] = useState<{ owner: typeof referenceOwner; open: boolean } | null>(null);
   /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
   const [pickerOpen, setPickerOpen] = useState(false);
+  const servicePickerTrigger = useRef<HTMLButtonElement>(null);
   /* (P6) استحقاق الزيارة من الخادم بقرار التوقيع نفسه — يُقرأ عند فتح المراجعة (بعد الحفظ). */
   const [billingPreview, setBillingPreview] = useState<BillingPreview | null>(null);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
@@ -749,6 +781,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     return () => window.removeEventListener("beforeunload", warn);
   }, [ownsVisit, currentOwner, owner]);
 
+  const referenceIsExpanded = referenceOwner.key === referenceKey && referenceOpen?.owner === referenceOwner && referenceOpen.open;
+  const referenceIsInDetails = Boolean(visit?.ortho && (orthoSession || visit.ortho.visitAdjustmentId != null));
+  const visiblePreviousVisitId = ownsVisit && visit?.status === "open" && (!referenceIsInDetails || referenceIsExpanded)
+    ? visit.previousVisit?.id ?? null : null;
+  useEffect(() => {
+    onPreviousVisitReferenceChange?.(visiblePreviousVisitId);
+    return () => onPreviousVisitReferenceChange?.(null);
+  }, [onPreviousVisitReferenceChange, visiblePreviousVisitId, owner]);
+
   if (!visit || !ownsVisit) {
     const ownedError = errorOwner === owner ? error : null;
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -1095,6 +1136,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               <span className="font-extrabold text-navy-900">{one.title}</span>
               {one.status === "waiting" ? <span className="text-amber-700"> · بانتظار</span> : null}
               {one.totalSteps > 0 ? <span className="text-slate-500"> · {one.doneSteps}/{one.totalSteps}</span> : null}
+              {one.historicalProgressUnknown ? <span> · تقدّم العلاج السابق غير معلوم؛ العدّ للعمل المعروف خارج البنود التاريخية</span> : null}
               {one.nextStep ? <span> · التالي: {one.nextStep}</span> : null}
               {one.responsibleName ? <span className="text-slate-500"> · {one.responsibleName}</span> : null}
             </p>
@@ -1108,10 +1150,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
         {orthoFollowUp ? (
           <>
-            <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" value={notes.chiefComplaint} disabled={busy || !canWrite}
+            <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" maxLength={500} value={notes.chiefComplaint} disabled={busy || !canWrite}
               phrases={phrases.chiefComplaint} onPhrase={(phrase) => setNote("chiefComplaint", appendPhrase(notes.chiefComplaint, phrase))}
               onChange={(value) => setNote("chiefComplaint", value)} />
-            <Field label="الخطوة القادمة" value={notes.nextPlan} disabled={busy || !canWrite}
+            <Field label="الخطوة القادمة" maxLength={500} value={notes.nextPlan} disabled={busy || !canWrite}
               auto={autoFilled.has("nextPlan")} phrases={phrases.nextPlan}
               onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
               onChange={(value) => setNote("nextPlan", value)} />
@@ -1127,7 +1169,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   phrases={phrases.diagnosis} onPhrase={(phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
                   onChange={(value) => setNote("diagnosis", value)} />
                 <Field label="توثيق عمل إضافي اليوم" value={notes.treatmentDone} disabled={busy || !canWrite}
-                  hint={notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
+                  hint={notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
                   onChange={(value) => setNote("treatmentDone", value)} />
               </div>
             </details>
@@ -1138,17 +1180,17 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           ["examination", "② الفحص", phrases.examination],
           ["diagnosis", "② التشخيص", phrases.diagnosis],
         ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
-          <Field key={key} label={label} value={notes[key]} disabled={signed || busy}
+          <Field key={key} label={label} maxLength={key === "chiefComplaint" ? 500 : 2000} value={notes[key]} disabled={signed || busy || !canWrite}
             auto={autoFilled.has(key)} phrases={signed ? [] : list}
-            onPhrase={(phrase) => setNote(key, appendPhrase(notes[key], phrase))}
+            onPhrase={signed ? undefined : (phrase) => setNote(key, appendPhrase(notes[key], phrase))}
             onChange={(value) => setNote(key, value)} />
         ))}
-        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy}
-          hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "يُكتب من الإجراءات المضافة أدناه" : undefined}
+        <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy || !canWrite}
+          hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
           onChange={(value) => setNote("treatmentDone", value)} />
-        <Field label="الخطة القادمة" value={notes.nextPlan} disabled={signed || busy}
+        <Field label="الخطة القادمة" maxLength={500} value={notes.nextPlan} disabled={signed || busy || !canWrite}
           auto={autoFilled.has("nextPlan")} phrases={signed ? [] : phrases.nextPlan}
-          onPhrase={(phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
+          onPhrase={signed ? undefined : (phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
         </>}
         <label className="block">
@@ -1202,6 +1244,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           <p className="text-sm font-bold text-navy-900">
             {signed ? "زيارة موقَّعة" : "زيارة مفتوحة"} — {visit.patientName}
           </p>
+          {!signed ? <p className="mt-1 text-[11px] text-slate-600" data-testid="visit-documentation-mode">
+            {orthoFollowUp ? "توثيق جلسة تقويم اليوم" : drafts.length > 0 ? "توثيق زيارة بإجراءات مسجلة" : "توثيق زيارة دون إجراءات مسجلة"}
+            {" · "}رقم الزيارة #{visit.id} · {dirty ? "تعديلات غير محفوظة" : "المسودة بحسب القراءة الحالية"}
+          </p> : null}
           {signed ? (
             <p className="text-[11px] font-semibold text-slate-500">
               وقّعها {visit.signedBy} · {visit.signedAt?.slice(0, 10)}
@@ -1307,65 +1353,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         </>
       ) : <>{visitReference}{visitNotes}</>}
 
-      {/* مخطَّط لليوم — من بنود الخطة، بأسعار جلساتها من الخطة */}
-      {!signed && plannedToday.length > 0 ? (
-        <section className="mb-4 rounded-2xl border border-navy-200 bg-navy-50/40 p-3" aria-label="مخطَّط لليوم">
-          <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
-          <h3 className="mb-2 text-xs font-extrabold text-navy-900">
-            مخطَّط لهذا المريض — من خطط علاجه
-          </h3>
-          <ul className="space-y-1.5">
-            {plannedToday.map((item) => {
-              const sessionIndex = item.doneSessions + 1;
-              const lineTotal = item.unitPriceMinor * item.quantity;
-              const price = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
-              return (
-                <li key={item.planItemId} data-testid={`planned-item-${item.planItemId}`}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-navy-900">
-                      {item.serviceName}
-                      {item.toothCode ? <span className="rounded-lg bg-navy-50 px-1.5 py-0.5 mr-1.5 text-[10px] font-bold text-navy-800">سن {item.toothCode}</span> : null}
-                      {item.surfaces ? <span data-testid={`planned-item-surfaces-${item.planItemId}`} className="ms-1 text-[10px]">أسطح {item.surfaces}</span> : null}
-                      {item.sessionCount > 1 ? (
-                        <span className="text-[10px] font-normal text-slate-500">
-                          {" "}· جلسة {sessionIndex} من {item.sessionCount}
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                      {hasUnresolvedClinicalFinance(item)
-                        ? "التغطية المالية غير محسومة؛ يمكن توثيق العمل كمسودة"
-                        : item.prebilled
-                        ? "مفوتر مسبقًا — لا تُنشأ فاتورة ثانية لهذا البند"
-                        : item.includedByAgreement
-                          ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
-                        : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
-                      {" · من «"}{item.planTitle}{"»"}
-                    </p>
-                    {plannedItemBlock(item) ? <p role="status" data-testid={`planned-item-blocked-${item.planItemId}`}
-                      className="text-[10px] font-bold text-amber-800">{plannedItemBlock(item)}</p> : null}
-                    {item.unmetRequirements && item.unmetRequirements.length > 0 ? (
-                      <p className="text-[10px] font-bold text-amber-800">⚠️ يتطلب أولًا: {item.unmetRequirements.join("، ")}</p>
-                    ) : null}
-                  </div>
-                  <button type="button" onClick={() => addPlannedItem(item)}
-                    className="rounded-xl border border-navy-200 bg-white px-3 py-1.5 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50">
-                    + نفّذ اليوم
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="mt-1.5 text-[10px] leading-4 text-slate-500">
-            سعر الجلسة يأتي من الخطة وفق قاعدة فوترة البند — عند البدء أو الإكمال أو
-            لكل جلسة — ولا يُكتب من الشاشة.
-          </p>
-          </fieldset>
-        </section>
-      ) : null}
-
-      <section id="visit-procedures" className="mb-4 scroll-mt-4" aria-label="الإجراءات المنفَّذة">
+      <section id="visit-procedures" className="mb-4 min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="قائمة عمل الزيارة">
         <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
@@ -1396,8 +1384,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             ))}
           </div>
         ) : null}
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-navy-900">الإجراءات المنفَّذة</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-navy-900">قائمة عمل الزيارة</h3>
+            <p className="mt-1 text-[11px] text-slate-500">{drafts.length} إجراء مسجل{!signed ? ` · ${plannedToday.length} بند متبقٍ من الخطط` : ""} · المبالغ بعملة كل بند</p>
+          </div>
           {/* (TD-05 second owner review — Finding 7) عملةٌ واحدة: الإجمالي
               المألوف. عملتان: مجموعان منفصلان موسومان + تحذير — لا رقمٌ واحد
               يجمع دولارًا بغير عملته أبدًا. */}
@@ -1417,28 +1408,50 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           )}
         </div>
 
+        {!signed && canWrite ? (
+          <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="block text-xs font-extrabold text-navy-900">إجراء إضافي من دليل المركز</span>
+              <button ref={servicePickerTrigger} type="button" onClick={() => { if (!busy && canEditWork && currentOwner()) setPickerOpen(true); }}
+                aria-label="أضف إجراءً" className="min-h-11 rounded-xl border border-navy-800 bg-white px-3 py-2 text-[11px] font-black text-navy-800">
+                ابحث وأضف إجراءً
+              </button>
+            </div>
+            <QuickServicePicker
+              open={pickerOpen && !busy && canEditWork}
+              onClose={() => { if (currentOwner()) { setPickerOpen(false); servicePickerTrigger.current?.focus(); } }}
+              currency={visitCurrency}
+              services={services}
+              allowUnpriced
+              title="أضف إجراءً للزيارة"
+              onPick={(service) => addFreeProcedure(service as Service)}
+            />
+
+          </div>
+        ) : null}
         {drafts.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs font-semibold text-slate-400">
-            لا إجراءات. الزيارة بلا إجراء تُوقَّع كشفًا بلا فاتورة.
+          <p className="mb-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
+            لا إجراءات مسجلة اليوم. يمكن توثيق الفحص والملاحظات؛ الاستحقاق والتوقيع يخضعان للتحقق في المراجعة.
           </p>
-        ) : (
-          <ul className="space-y-2">
+        ) : null}
+        <ul className="space-y-2" aria-label="بنود عمل الزيارة">
             {drafts.map((draft, index) => {
               const service = services.find((row) => row.id === draft.serviceId);
               const note = sessionNoteForDraft(draft, index);
+              const planItem = visit.outstanding.find((item) => item.planItemId === draft.planItemId);
               return (
-                <li key={index} className={`rounded-xl border p-3 ${
+                <li key={index} data-testid="visit-work-recorded" className={`min-w-0 rounded-xl border p-3 ${
                   draft.planItemId ? "border-navy-200 bg-navy-50/30" : "border-slate-200 bg-white"
                 }`}>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-navy-900">{service?.name ?? "خدمة"}</span>
+                    <span className="text-sm font-bold text-navy-900">{service?.name ?? planItem?.serviceName ?? "خدمة"}</span>
                     {draft.toothCode ? (
                       <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[11px] font-bold text-navy-800">
                         {toothName(Number(draft.toothCode))}
                       </span>
                     ) : null}
                     {draft.planItemId ? (
-                      <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+                      <span className="rounded-lg bg-navy-50 px-2 py-0.5 text-[10px] font-extrabold text-navy-800">
                         من الخطة — سعرها من قاعدة البند
                       </span>
                     ) : null}
@@ -1459,6 +1472,10 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       </span>
                     )}
                   </div>
+                  <p className="mb-2 text-[11px] text-slate-600">
+                    {signed ? "إجراء في الزيارة الموقّعة" : "مسجل في مسودة اليوم؛ لم تُوقّع الزيارة"}
+                    {planItem ? ` · الخطة: ${planItem.planTitle}${planItem.caseId ? ` · الحالة #${planItem.caseId}` : ""}${planItem.caseSite ? ` · ${planItem.caseSite}` : ""}` : draft.planItemId ? ` · بند الخطة #${draft.planItemId}` : " · إجراء من الدليل"}
+                  </p>
                   {!signed ? (
                     <div className="flex flex-wrap gap-2">
                       <ToothField value={draft.toothCode} className="w-24"
@@ -1503,11 +1520,56 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       })()}
                     </div>
                   ) : null}
+                  {draft.planItemId !== null && !signed ? <VisitPlanRequirements item={planItem} /> : null}
                 </li>
               );
             })}
-          </ul>
-        )}
+          {!signed ? <>
+            {plannedToday.map((item) => {
+              const sessionIndex = item.doneSessions + 1;
+              const lineTotal = item.unitPriceMinor * item.quantity;
+              const price = hasVerifiedClinicalCoverage(item) ? 0 : priceForSession(item.billingRule, lineTotal, item.sessionCount, sessionIndex);
+              return (
+                <li key={item.planItemId} data-testid={`planned-item-${item.planItemId}`}
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/50 px-3 py-3">
+                  <div className="min-w-0 flex-1 basis-56">
+                    <p className="text-xs font-bold text-navy-900">
+                      {item.serviceName}
+                      {item.toothCode ? <span className="rounded-lg bg-navy-50 px-1.5 py-0.5 mr-1.5 text-[10px] font-bold text-navy-800">سن {item.toothCode}</span> : null}
+                      {item.surfaces ? <span data-testid={`planned-item-surfaces-${item.planItemId}`} className="ms-1 text-[10px]">أسطح {item.surfaces}</span> : null}
+                      {item.sessionCount > 1 ? (
+                        <span className="text-[10px] font-normal text-slate-500">
+                          {" "}· جلسة {sessionIndex} من {item.sessionCount}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="mt-1 text-xs font-bold text-navy-800">
+                      سعر الجلسة من الخطة: {hasUnresolvedClinicalFinance(item) ? "غير محسوم" : formatMoney(price, item.planCurrency)}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {hasUnresolvedClinicalFinance(item)
+                        ? "التغطية المالية غير محسومة؛ يمكن توثيق العمل كمسودة"
+                        : item.prebilled
+                        ? "مفوتر مسبقًا — لا تُنشأ فاتورة ثانية لهذا البند"
+                        : item.includedByAgreement
+                          ? "مشمولة في اتفاق الأقساط — لا تُفوتر الجلسة"
+                        : <>{BILLING_RULE_LABEL[item.billingRule]}{price === 0 ? " — تُسعَّر هذه الجلسة وفق قاعدة البند" : ""}</>}
+                      {" · من «"}{item.planTitle}{"»"}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-600">
+                      لم يُضف إلى عمل اليوم{item.caseId ? ` · الحالة #${item.caseId}` : ""}{item.caseSite ? ` · ${item.caseSite}` : ""}
+                    </p>
+                    <VisitPlanRequirements item={item} />
+                  </div>
+                  <button type="button" onClick={() => addPlannedItem(item)}
+                    className="min-h-11 rounded-xl border border-navy-200 bg-white px-3 py-2 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50">
+                    + نفّذ اليوم
+                  </button>
+                </li>
+              );
+            })}
+          </> : null}
+        </ul>
 
         {labVisitIsCurrent && !signed && eligibleLabWork.length > 0 ? (
           <p role="note" data-testid="clinical-lab-sign-guidance" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
@@ -1515,37 +1577,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </p>
         ) : null}
 
-        {!signed && canWrite ? (
-          <div className="mt-3 rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="block text-xs font-extrabold text-navy-900">+ إجراء غير مخطَّط — من الدليل</span>
-              <button type="button" onClick={() => { if (currentOwner()) setPickerOpen(true); }}
-                className="rounded-xl border border-navy-800 bg-white px-3 py-1.5 text-[11px] font-black text-navy-800">
-                🔍 بحث سريع
-              </button>
-            </div>
-            <QuickServicePicker
-              open={pickerOpen}
-              onClose={() => { if (currentOwner()) setPickerOpen(false); }}
-              currency={visitCurrency}
-              services={services}
-              allowUnpriced
-              title="أضف إجراءً للزيارة"
-              onPick={(service) => addFreeProcedure(service as Service)}
-            />
-            <ServiceSelect
-              services={services}
-              value={null}
-              onChange={(id, service) => {
-                if (!service) return;
-                addFreeProcedure(service as Service);
-              }}
-              base={base}
-              placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"
-              ariaLabel="أضف إجراءً"
-            />
-          </div>
-        ) : null}
         </fieldset>
       </section>
 
@@ -1661,18 +1692,36 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       {/* شاشة المراجعة والإنهاء (المواصفة §٢١): ما نُفّذ، وما لم يُنفّذ، والاستحقاق،
           والجلسة القادمة — ثم تأكيدٌ واحد لا يفاجئ أحدًا برقم. */}
       {reviewOpen ? (
-        <div role="dialog" aria-label="مراجعة وإنهاء الزيارة"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-          onClick={() => { if (currentOwner()) setReviewOpen(false); }}>
-          <section className="w-full max-w-lg rounded-2xl border border-navy-800 bg-white p-4 shadow-xl"
+        <div role="dialog" aria-modal="true" aria-label="مراجعة وإنهاء الزيارة"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2 sm:p-4"
+          onClick={dismissReview}
+          onKeyDown={handleReviewKeyDown}>
+          <section ref={reviewPanel} tabIndex={-1} className="flex max-h-[90dvh] w-full min-w-0 max-w-xl flex-col overflow-hidden rounded-2xl border border-navy-800 bg-white shadow-xl"
             onClick={(event) => event.stopPropagation()}>
-            <header className="mb-3">
+            <header className="shrink-0 border-b border-slate-100 p-4">
               <h3 className="text-sm font-extrabold text-navy-900">مراجعة وإنهاء الزيارة</h3>
-              <p className="text-[11px] text-slate-500">{visit.patientName}</p>
+              <p className="text-[11px] text-slate-500">{visit.patientName} · زيارة #{visit.id} · راجع التوثيق والاستحقاق قبل التأكيد</p>
             </header>
 
-            {signatureBlock ? <p role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-900">{signatureBlock}</p> : null}
-            <dl className="space-y-2 text-xs">
+            <dl className="min-h-0 space-y-2 overflow-y-auto overscroll-contain p-4 text-xs" data-testid="visit-review-scroll">
+              {signatureBlock ? <div><dt className="sr-only">تنبيه التوقيع</dt><dd role="status" className="rounded-xl bg-amber-50 p-3 font-bold text-amber-900">{signatureBlock}</dd></div> : null}
+              <div className="rounded-xl border border-slate-200 p-3">
+                <dt className="font-bold text-navy-900">التوثيق السريري</dt>
+                <dd>
+                  <details>
+                    <summary className="min-h-11 cursor-pointer py-3 text-slate-700">مراجعة نص الزيارة</summary>
+                    <dl className="space-y-2 break-words whitespace-pre-wrap">
+                      {([
+                        ["الشكوى", notes.chiefComplaint], ["الفحص", notes.examination],
+                        ["التشخيص", notes.diagnosis], ["ما نُفّذ", notes.treatmentDone],
+                      ] as const).map(([label, value]) => <div key={label}>
+                        <dt className="font-bold text-slate-600">{label}</dt>
+                        <dd>{value.trim() || "لم يُكتب"}</dd>
+                      </div>)}
+                    </dl>
+                  </details>
+                </dd>
+              </div>
               {orthoSession && visit.ortho?.visitAdjustmentId === null ? (
                 <div className="rounded-xl border border-navy-200 bg-navy-50 p-3" data-testid="ortho-session-review">
                   <dt className="font-extrabold text-navy-900">شدّة التقويم اليوم</dt>
@@ -1689,15 +1738,15 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                   <dd>سُجّلت لهذه الزيارة؛ لن تُضاف مرة أخرى عند التوقيع.</dd>
                 </div>
               ) : null}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <dt className="mb-1 font-extrabold text-emerald-900">تم اليوم</dt>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <dt className="mb-1 font-extrabold text-navy-900">الإجراءات المسجلة للمراجعة</dt>
                 {doneToday.length > 0 ? (
                   <dd className="space-y-0.5">
                     {doneToday.map((draft, index) => {
                       const service = services.find((row) => row.id === draft.serviceId);
                       const amount = (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity;
                       return (
-                        <p key={index} className="flex justify-between gap-2 text-emerald-900">
+                        <p key={index} className="flex flex-wrap justify-between gap-2 text-navy-900">
                           <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""}</span>
                           <span className="font-bold">{formatMoney(amount, draft.currency)}</span>
                         </p>
@@ -1705,7 +1754,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                     })}
                   </dd>
                 ) : (
-                  <dd className="text-slate-500">لا إجراءات من الخطة — ما يلي إجراءاتٌ حرّة.</dd>
+                  <dd className="text-slate-500">{drafts.length === 0 ? "لا إجراءات مسجلة؛ راجع الملاحظات وأي جلسة موثقة، ثم الاستحقاق من الخادم." : "الإجراءات المسجلة التالية من الدليل."}</dd>
                 )}
                 {drafts.length > doneToday.length ? (
                   <dd className="mt-1 space-y-0.5">
@@ -1713,7 +1762,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
                       const service = services.find((row) => row.id === draft.serviceId);
                       const amount = (parseAmount(draft.price, draft.currency) ?? 0) * draft.quantity;
                       return (
-                        <p key={index} className="flex justify-between gap-2 text-slate-700">
+                        <p key={index} className="flex flex-wrap justify-between gap-2 text-slate-700">
                           <span>{service?.name ?? "إجراء"}{draft.toothCode ? ` — سن ${draft.toothCode}` : ""} (غير مخطَّط)</span>
                           <span className="font-bold">{formatMoney(amount, draft.currency)}</span>
                         </p>
@@ -1725,15 +1774,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
               {notDoneToday.length > 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <dt className="mb-1 font-extrabold text-slate-700">لم يُنفّذ بعد</dt>
+                  <dt className="mb-1 font-extrabold text-slate-700">بنود لم تُضف إلى هذه الزيارة</dt>
                   <dd className="space-y-0.5 text-slate-600">
-                    {notDoneToday.slice(0, 6).map((item) => (
+                    {notDoneToday.map((item) => (
                       <p key={item.planItemId}>
                         {item.serviceName}{item.toothCode ? ` — سن ${item.toothCode}` : ""}
                         {item.sessionCount > 1 ? ` (جلسة ${item.doneSessions + 1} من ${item.sessionCount})` : ""}
                       </p>
                     ))}
-                    {notDoneToday.length > 6 ? <p>و{notDoneToday.length - 6} أخرى…</p> : null}
                   </dd>
                 </div>
               ) : null}
@@ -1808,10 +1856,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               </div>
             </dl>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" onClick={() => { if (currentOwner()) setReviewOpen(false); }}
+            <div className="flex shrink-0 flex-wrap gap-2 border-t border-slate-100 bg-white p-3">
+              {busy ? <p role="status" className="w-full text-xs leading-5 text-slate-600">
+                طلب التوقيع قيد الانتظار. إغلاق المراجعة لا يلغي الطلب؛ يبقى تحرير الزيارة متوقفًا حتى تتأكد النتيجة.
+              </p> : null}
+              <button type="button" onClick={dismissReview}
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
-                رجوع — أكمل العمل
+                {busy ? "إغلاق المراجعة — التوقيع قيد الانتظار" : "رجوع — أكمل العمل"}
               </button>
               <button type="button" onClick={() => void sign()} disabled={busy || Boolean(signatureBlock)}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">
@@ -1855,41 +1906,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         patientName={visit?.patientName ?? ""}
         initialTreatmentText={notes.treatmentDone || notes.diagnosis || ""}
       />
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, disabled, auto = false, hint, phrases = [], onPhrase }: {
-  label: string; value: string; onChange: (value: string) => void; disabled: boolean;
-  /** (VISIT-1) مُلئ تلقائيًا من الموعد أو الخطة — يُوسَم حتى يعدّله الطبيب. */
-  auto?: boolean;
-  hint?: string;
-  /** (VISIT-1) عباراتٌ سريعة تُضاف بنقرة (من الإعدادات). */
-  phrases?: string[];
-  onPhrase?: (phrase: string) => void;
-}) {
-  return (
-    <div>
-      <label className="block">
-        <span className="mb-1 block text-[11px] font-bold text-slate-500">
-          {label}
-          {auto ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي — عدّله إن لزم</span> : null}
-        </span>
-        <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={2} disabled={disabled}
-          className={`w-full rounded-xl border px-3 py-2 text-sm outline-none focus:border-brand-blue disabled:bg-slate-50 disabled:text-slate-500 ${
-            auto ? "border-amber-200 bg-amber-50/40" : "border-slate-200"}`} />
-      </label>
-      {hint ? <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{hint}</p> : null}
-      {phrases.length > 0 && onPhrase ? (
-        <div className="mt-1 flex flex-wrap gap-1" aria-label={`عبارات سريعة — ${label}`}>
-          {phrases.map((phrase) => (
-            <button key={phrase} type="button" disabled={disabled} onClick={() => onPhrase(phrase)}
-              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:border-navy-800 hover:text-navy-900">
-              + {phrase}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }

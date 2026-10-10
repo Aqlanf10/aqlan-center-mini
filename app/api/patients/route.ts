@@ -82,7 +82,8 @@ export async function POST(request: Request) {
      ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (user?.permissions && user.permissions.canAddPatient === false) {
+    if (!user) return denied();
+    if (user.permissions && user.permissions.canAddPatient === false) {
       return NextResponse.json(
         { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },
         { status: 403 },

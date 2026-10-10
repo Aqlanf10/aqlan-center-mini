@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
 import { baseUrl, harness } from "./_server";
+import { formatMoney } from "../../lib/money";
 
 /**
  * رحلات أمن العملات لمراجعة المالك TD-05 (PR #44) — على HTTP حقيقي ومتصفح حقيقي.
@@ -347,8 +348,34 @@ describe("رحلة المتصفح: إضافة بندٍ لخطة دولارية",
 
 /* ══════════════ رحلة المتصفح: الشبّاك بعملة الفاتورة ══════════════ */
 
+
+// A visible checkout or absent error banner is not verified financial evidence.
+async function verifiedCheckout(checkout: Locator): Promise<void> {
+  await checkout.waitFor({ timeout: 60_000 });
+  await expect.poll(() => checkout.getAttribute("data-financial-state"), { timeout: 30_000 }).toBe("verified");
+}
+function moneyRow(checkout: Locator, kind: "previous-balance" | "current-balance" | "visit-invoice", currency: "YER" | "SAR" | "USD") {
+  return checkout.locator(`[data-testid="checkout-${kind}"][data-currency="${currency}"]`);
+}
+
+async function checkoutLedger() {
+  const response = await fetch(`${baseUrl}/api/patients/${h.seeded.patientAId}/ledger`, {
+    headers: { Cookie: h.sessions.admin.cookie }, redirect: "manual",
+  });
+  expect(response.status).toBe(200);
+  const ledger = await response.json();
+  const result = {} as Record<"YER" | "SAR" | "USD", number>;
+  for (const currency of ["YER", "SAR", "USD"] as const) {
+    const due = ledger.balances?.[currency]?.dueMinor;
+    expect(Number.isSafeInteger(due)).toBe(true);
+    result[currency] = due;
+  }
+  return result;
+}
+
 describe("رحلة المتصفح: شبّاك ما بعد الزيارة بالدولار", () => {
   it("التوقيع في الشاشة ⇒ الشبّاك بالدولار ⇒ التحصيل يفتح على فاتورة اليوم بعملتها", async () => {
+    const beforeSign = await checkoutLedger();
     await page.goto(`${baseUrl}/patients/${h.seeded.patientAId}?tab=today&visit=${browserVisitId}`);
 
     /* الزيارة القائمة (المزروعة أعلاه) تُعرض — ومنها إلى المراجعة والتوقيع. */
@@ -371,20 +398,25 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
 
     /* الشبّاك يظهر: استحقاق اليوم بالدولار لا باليمني. */
     const checkout = page.locator('[aria-label="شبّاك ما بعد الزيارة"]');
-    await checkout.waitFor({ timeout: 60_000 });
+    await verifiedCheckout(checkout);
 
     /* استحقاق اليوم بعملة الفاتورة — الدولار — لا باليمني. */
-    const todayDueRow = checkout.locator("div", { hasText: "استحقاق اليوم" }).last();
+    const todayDueRow = moneyRow(checkout, "visit-invoice", "USD");
     await expect.poll(async () => todayDueRow.textContent(), { timeout: 10_000 }).toContain("1,500");
     expect(await todayDueRow.textContent()).toContain("$");
 
-    /* الإجمالي المستحق مجموعٌ داخل عملة الفاتورة وحدها — موسومٌ بها، ولا
-       يجمع يمنيًّا مع الدولار أبدًا. */
-    const totalRow = checkout.getByText("الإجمالي المستحق (دولار)");
-    await totalRow.waitFor({ timeout: 10_000 });
-    const dl = checkout.locator("dl");
-    const totalsText = await dl.textContent();
-    expect(totalsText).toContain("الإجمالي المستحق (دولار)");
+    // The displayed current debt is the canonical ledger bucket, not a sum
+    // across currencies or previous reference plus today's invoice a second time.
+    const afterSign = await checkoutLedger();
+    expect(afterSign.USD).toBe(beforeSign.USD + 150000);
+    expect(afterSign.YER).toBe(beforeSign.YER);
+    expect(afterSign.SAR).toBe(beforeSign.SAR);
+    for (const currency of ["USD", "YER", "SAR"] as const) {
+      if (currency !== "USD" && afterSign[currency] === 0) continue;
+      const row = moneyRow(checkout, "current-balance", currency);
+      await expect.poll(() => row.count(), { timeout: 30_000 }).toBe(1);
+      await expect.poll(() => row.textContent(), { timeout: 30_000 }).toContain(formatMoney(afterSign[currency], currency));
+    }
 
     /* والرصيد السابق سطرٌ لكل عملة — والعملات الأخرى تُعرض منفصلة موسومة،
        لا تدخل أي مجموع. */
@@ -409,8 +441,7 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
     /* التسجيل: السند يرتبط بفاتورة اليوم نفسها وبالدولار. */
     const before = await paymentCountOn(browserInvoiceId);
     await page.getByRole("button", { name: /سجّل الدفعة واطبع السند/ }).click();
-    await page.locator('[aria-label="شبّاك ما بعد الزيارة"]').waitFor({ state: "detached", timeout: 60_000 })
-      .catch(() => {});
+    await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).waitFor({ state: "detached", timeout: 30_000 });
     await expect.poll(async () => paymentCountOn(browserInvoiceId), { timeout: 30_000 }).toBe(before + 1);
 
     const { rows: [last] } = await db.query<{ currency: string; invoice_id: number | null }>(
@@ -419,6 +450,13 @@ describe("رحلة المتصفح: شبّاك ما بعد الزيارة بال�
     );
     expect(last.currency).toBe("USD");
     expect(last.invoice_id).toBe(browserInvoiceId);
+    await verifiedCheckout(checkout);
+    const afterPayment = await checkoutLedger();
+    expect(afterPayment.USD).toBe(afterSign.USD - 150000);
+    expect(afterPayment.YER).toBe(afterSign.YER);
+    expect(afterPayment.SAR).toBe(afterSign.SAR);
+    await expect.poll(() => moneyRow(checkout, "current-balance", "USD").textContent(), { timeout: 30_000 })
+      .toContain(formatMoney(afterPayment.USD, "USD"));
   }, 300_000);
 });
 
@@ -471,3 +509,4 @@ async function ledgerBuckets(): Promise<{ usdCollected: number; yerCollected: nu
     yerCollected: ledger.balances.YER.collectedMinor,
   };
 }
+

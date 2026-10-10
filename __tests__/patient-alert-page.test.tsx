@@ -121,7 +121,13 @@ function control(testId: string) {
 }
 function more() { return render().find((element) => element.type === "details" && text(element.props.children as ReactNode).includes("المزيد ⋯"))!; }
 function click(testId: string) { (control(testId).props.onClick as () => void)(); }
-function openMore() { (more().props.onToggle as (event: unknown) => void)({ currentTarget: { open: true } }); expect(more().props.open).toBe(true); }
+function openMore() {
+  const summary = nodes(more()).find(element => element.type === "summary")!;
+  const preventDefault = vi.fn();
+  (summary.props.onClick as (event: unknown) => void)({ preventDefault });
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(more().props.open).toBe(true);
+}
 function endo() { return render().find((element) => element.type === PatientEndo)!; }
 function clearHooks() {
   hooks.effects.forEach((effect) => effect.cleanup?.());
@@ -151,7 +157,7 @@ beforeEach(async () => {
 afterEach(() => { clearHooks(); vi.unstubAllGlobals(); });
 
 describe("patient disclosure lifecycle", () => {
-  it("closes nested More when details hide and does not restore it in full Summary", () => {
+  it("closes nested More when details hide and restores the full Summary header without reopening More", () => {
     click("patient-details-toggle"); openMore();
     click("patient-details-toggle");
     expect(control("patient-details-panel").props.hidden).toBe(true);
@@ -159,6 +165,8 @@ describe("patient disclosure lifecycle", () => {
     click("patient-tab-summary");
     expect(url.searchParams.get("tab")).toBe("summary");
     expect(control("patient-details-panel").props.hidden).toBe(false);
+    expect(render().find((element) => element.type === PatientCockpit)?.props.compact).toBe(false);
+    expect(render().find(element => element.props["data-testid"] === "patient-details-toggle")).toBeUndefined();
     expect(more().props.open).toBe(false);
     click("patient-tab-treatment");
     expect(control("patient-details-panel").props.hidden).toBe(true);
@@ -187,7 +195,7 @@ describe("patient disclosure lifecycle", () => {
     expect(more().props.open).toBe(false);
   });
 
-  it("preserves the visible menu when dirty ENDO rejects canonical navigation", () => {
+  it("preserves More when programmatic navigation is rejected without an outside interaction", () => {
     click("patient-details-toggle"); openMore();
     (endo().props.onDraftChange as (dirty: boolean) => void)(true);
     const before = url.href;
@@ -363,3 +371,5 @@ describe("Cases navigation uses the patient-owned guarded destination", () => {
     await mount("91"); const returned = url.href; expect(open(old)).toBe(false); expect(url.href).toBe(returned);
   });
 });
+
+

@@ -494,7 +494,7 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
       } finally { await f.context.close(); }
     });
 
-    it("retires A's late sign success without its reload, onSigned checkout, or parent workflow refresh", async () => {
+    it.each(["back", "escape", "backdrop"] as const)("retires A's late sign success after %s dismissal without its reload, onSigned checkout, or parent workflow refresh", async (dismiss) => {
       const f = await fixture();
       try {
         await f.review.click();
@@ -508,10 +508,24 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
         expect(f.writes[1].body).toEqual({
           action: "sign", dependencyOverrideReason: null, outsideContractDecision: null, orthoSession: null,
         });
-        // The existing review Back control is usable while a sign is pending.
-        // Closing it does not cancel the sent POST; the fixture holds it.
-        await review.getByRole("button", { name: "رجوع — أكمل العمل", exact: true }).click();
+        // All presentation dismissals remain usable while the fixture holds the
+        // sent sign POST. They neither cancel it nor unlock another write.
+        const back = review.getByRole("button", { name: "إغلاق المراجعة — التوقيع قيد الانتظار", exact: true });
+        expect(await back.isEnabled()).toBe(true);
+        expect(await review.getByRole("button", { name: "جارٍ الإنهاء…", exact: true }).isDisabled()).toBe(true);
+        expect(await review.innerText()).toContain("إغلاق المراجعة لا يلغي الطلب");
+        if (dismiss === "back") await back.click();
+        else if (dismiss === "escape") { await back.focus(); await f.page.keyboard.press("Escape"); }
+        else await review.click({ position: { x: 2, y: 2 } });
         await review.waitFor({ state: "hidden" });
+        expect(await f.save.isDisabled()).toBe(true);
+        expect(await f.review.isDisabled()).toBe(true);
+        expect(await noteField(f.page, "② التشخيص").isDisabled()).toBe(true);
+        expect(f.writes).toHaveLength(2);
+        const urlBeforeNavigation = f.page.url();
+        await f.page.getByTestId("patient-tab-summary").click();
+        await selected(f.page, "today");
+        expect(f.page.url()).toBe(urlBeforeNavigation);
         await f.refreshTo(visitB);
         await expectOwnerB(f);
         const readsBefore = f.reads.length;
