@@ -44,6 +44,8 @@ describe("built patient walkout verifies balances for reception", () => {
     const unexpected: string[] = [], errors: string[] = [], writes: string[] = [];
     let paidInvoice = false;
     const heldWalkoutReads: Route[] = [];
+    let releaseHeldWalkoutReads!: () => void;
+    const heldWalkoutGate = new Promise<void>((resolve) => { releaseHeldWalkoutReads = resolve; });
     let foreignCurrency: "SAR" | "USD" | null = null;
     const paymentAttempts: { body: Record<string, unknown>; key: string | undefined }[] = [];
     let fault: "none" | "http500" | "json" | "null" | "empty" | "missing" | "amount" | "foreign" | "hold" = "none";
@@ -80,7 +82,13 @@ describe("built patient walkout verifies balances for reception", () => {
       else if (path === "/api/services") await json(route, []);
       else if (path === `/api/patients/${patientId}`) await json(route, { patient, visits: [], appointments: [] });
       else if (path === `/api/visits/${visitId}/walkout`) {
-        if (fault === "hold") { heldWalkoutReads.push(route); return; }
+        if (fault === "hold") {
+          heldWalkoutReads.push(route);
+          // Hold every request epoch, including a replacement after authority refresh.
+          await heldWalkoutGate;
+          await json(route, walkout());
+          return;
+        }
         if (fault === "http500") { await json(route, {}, 500); return; }
         if (fault === "json") { await route.fulfill({ status: 200, contentType: "application/json", body: "{" }); return; }
         if (fault === "null") { await json(route, null); return; }
@@ -140,18 +148,30 @@ describe("built patient walkout verifies balances for reception", () => {
       }
       // Hold the real restore read deterministically. Until its response arrives,
       // absence of verified money must not expose a payment target or infer zero.
-      fault = "hold";
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await expect.poll(() => heldWalkoutReads.length).toBe(1);
-      const delayedRead = page.getByTestId("checkout-financial-read");
-      await delayedRead.filter({ hasText: "جارٍ التحقق من الأرصدة" }).waitFor();
-      expect(await page.locator("body").innerText()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
-      expect(await page.locator("body").innerText()).not.toContain("لا رصيد سابق");
-      expect(await page.locator('[aria-label="شبّاك ما بعد الزيارة"][data-financial-state="verified"]').count()).toBe(0);
-      expect(await page.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
-      expect(await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).count()).toBe(0);
-      fault = "none";
-      await json(heldWalkoutReads.shift()!, walkout());
+      try {
+        fault = "hold";
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect.poll(() => heldWalkoutReads.length).toBeGreaterThanOrEqual(1);
+        const delayedRead = page.getByTestId("checkout-financial-read");
+        await delayedRead.filter({ hasText: "جارٍ التحقق من الأرصدة" }).waitFor();
+        expect(await page.locator("body").innerText()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+        expect(await page.locator("body").innerText()).not.toContain("لا رصيد سابق");
+        expect(await page.locator('[aria-label="شبّاك ما بعد الزيارة"][data-financial-state="verified"]').count()).toBe(0);
+        expect(await page.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+        expect(await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).count()).toBe(0);
+        // A workflow refresh retires the first read's authority and starts a new
+        // restore epoch. Both responses stay held: a FIFO-only release can strand
+        // the current request while successfully fulfilling an aborted predecessor.
+        const readsBeforeRefresh = heldWalkoutReads.length;
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect.poll(() => heldWalkoutReads.length).toBeGreaterThan(readsBeforeRefresh);
+        await delayedRead.filter({ hasText: "جارٍ التحقق من الأرصدة" }).waitFor();
+        expect(await page.locator('[aria-label="شبّاك ما بعد الزيارة"][data-financial-state="verified"]').count()).toBe(0);
+        expect(await page.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+      } finally {
+        fault = "none";
+        releaseHeldWalkoutReads();
+      }
       await expect.poll(() => checkout.getAttribute("data-financial-state")).toBe("verified");
       await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
       expect(await checkout.innerText()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
