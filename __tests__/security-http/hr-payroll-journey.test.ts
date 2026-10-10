@@ -152,3 +152,103 @@ it("a doctor sees personal tasks and leave without an unusable team attendance t
   expect(await page.getByRole("tab",{name:"المسير والصرف",exact:false}).count()).toBe(0);
  }finally{await doctor.close();}
 });
+
+
+for(const width of [390,1280]){
+ it(`explicit next-day correction and second-admin approval preserve evidence at ${width}px`,async()=>{
+  const name=`NIGHT-CORRECTION-${width}`;
+  const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"Synthetic night shift",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:1000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});expect(staff.status).toBe(201);
+  const staffId=staff.body.staff?.id ?? staff.body.id;
+  expect((await api("POST","/api/hr/schedules",{staffId,name,scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true})).status).toBe(201);
+  expect((await api("POST","/api/hr/attendance",{staffId,punchType:"check_in",punchTime:"2026-08-01T22:00:00+03:00"},h.sessions.reception.cookie)).status).toBe(201);
+  const out=await api("POST","/api/hr/attendance",{staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"},h.sessions.reception.cookie);expect(out.status).toBe(201);
+  const page=await context.newPage();await page.setViewportSize({width,height:900});
+  let reviewerContext:BrowserContext|undefined;
+  try{
+   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"الدوام والحضور"}).click();
+   await page.locator('section[aria-label="الدوام والحضور"] input[type="date"]').fill("2026-08-01");
+   const row=page.locator('section[aria-label="الدوام والحضور"] tbody tr').filter({hasText:name});await row.getByRole("button",{name:"تصحيح",exact:false}).click();
+   expect(await page.getByLabel("تاريخ الدخول الصحيح",{exact:true}).count()).toBe(1);
+   expect(await page.getByLabel("تاريخ الخروج الصحيح",{exact:true}).count()).toBe(1);
+   expect(await page.getByLabel("تاريخ الخروج الصحيح",{exact:true}).inputValue()).toBe("2026-08-02");
+   await page.getByLabel("تاريخ الدخول الصحيح",{exact:true}).fill("2026-08-01");
+   await page.getByLabel("وقت الدخول الصحيح",{exact:true}).fill("22:00");
+   await page.getByLabel("تاريخ الخروج الصحيح",{exact:true}).fill("2026-08-02");
+   await page.getByLabel("وقت الخروج الصحيح",{exact:true}).fill("06:15");
+   await page.locator("textarea").fill(`Explicit next-day synthetic ${width}`);
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+   await page.screenshot({path:join(evidence,`hr-nextday-form-${width}.png`),fullPage:true});
+   const submitted=page.waitForResponse(r=>r.url().endsWith("/api/hr/attendance/corrections")&&r.request().method()==="POST");
+   console.info(`night ${width}: submitting form`);
+   await page.getByRole("button",{name:"رفع طلب التصحيح",exact:true}).click();
+   console.info(`night ${width}: form clicked`);
+   const response=await submitted;expect(response.status()).toBe(201);
+   console.info(`night ${width}: response received`);
+   const correction=await response.json();
+   console.info(`night ${width}: submitted correction`);
+   expect(correction.newCheckOut).toBe("2026-08-02T03:15:00.000Z");
+   page.on("dialog",dialog=>dialog.type()==="prompt"?dialog.accept("Synthetic self-approval attempt"):dialog.dismiss());
+   await page.getByRole("button",{name:"طلبات التصحيح",exact:false}).click();
+   const ownCard=page.locator("div.flex.flex-wrap.items-center.justify-between").filter({hasText:`Explicit next-day synthetic ${width}`});
+   const selfDecision=page.waitForResponse(r=>r.url().endsWith("/api/hr/attendance/corrections")&&r.request().method()==="POST");
+   console.info(`night ${width}: checking self approval`);
+   await ownCard.getByRole("button",{name:"اعتماد التصحيح"}).click();expect((await selfDecision).status()).toBe(400);
+   console.info(`night ${width}: self approval denied`);
+   expect(await ownCard.textContent()).toContain("قيد المراجعة");
+   await page.screenshot({path:join(evidence,`hr-nextday-self-denied-${width}.png`),fullPage:true});
+   expect((await api("POST","/api/hr/attendance/corrections",{action:"decide",id:correction.id,decision:"approved",requestedBy:"other-admin",staffId:999})).status).toBe(400);
+   for(const cookie of [h.sessions.reception.cookie,h.sessions.doctorA.cookie]){
+    expect((await api("POST","/api/hr/attendance/corrections",{action:"decide",id:correction.id,decision:"approved"},cookie)).status).toBe(403);
+    expect((await api("POST","/api/hr/attendance/corrections",{attendanceRecordId:out.body.id,staffId,requestedBy:"secadmin",fieldCorrected:"all",newCheckIn:"2026-08-01T22:00:00+03:00",reason:"Spoofed identity"},cookie)).status).toBe(403);
+   }
+   expect((await api("POST","/api/hr/attendance",{staffId,punchType:"check_in",punchTime:"2026-08-03T22:00:00+03:00"},h.sessions.doctorA.cookie)).status).toBe(403);
+   console.info(`night ${width}: role and spoofing checks passed`);
+   // An independent real admin logs in using the fixture's existing synthetic password hash.
+   await db.query("INSERT INTO users(username,display_name,password_hash,role) SELECT $1,'Synthetic reviewer',password_hash,'admin' FROM users WHERE username='secadmin' ON CONFLICT(username) DO NOTHING",[`nightreviewer${width}`]);
+   const login=await fetch(`${baseUrl}/api/auth/login`,{method:"POST",headers:{origin:baseUrl,"content-type":"application/json"},body:JSON.stringify({username:`nightreviewer${width}`,password:"SecAdmin#Pass1"})});expect(login.status).toBe(200);
+   console.info(`night ${width}: reviewer logged in`);
+   const pair=login.headers.getSetCookie().map(c=>c.split(";")[0]).find(c=>c.startsWith("aqlan_flow_session="))!;expect(pair).toBeTruthy();
+   reviewerContext=await browser.newContext({viewport:{width,height:900}});const split=pair.indexOf("=");await reviewerContext.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
+   const reviewerPage=await reviewerContext.newPage();reviewerPage.on("dialog",dialog=>dialog.accept("Synthetic second-admin review"));
+   await reviewerPage.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await reviewerPage.getByRole("tab",{name:"الدوام والحضور"}).click();await reviewerPage.getByRole("button",{name:"طلبات التصحيح",exact:false}).click();
+   const card=reviewerPage.locator("div.flex.flex-wrap.items-center.justify-between").filter({hasText:`Explicit next-day synthetic ${width}`});
+   console.info(`night ${width}: reviewer correction card opened`);
+   const approved=reviewerPage.waitForResponse(r=>r.url().endsWith("/api/hr/attendance/corrections")&&r.request().method()==="POST");await card.getByRole("button",{name:"اعتماد التصحيح"}).click();expect((await approved).status()).toBe(200);
+   await expect.poll(async()=>await card.textContent()).toContain("معتمد");
+   expect(await reviewerPage.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+   await reviewerPage.screenshot({path:join(evidence,`hr-nextday-approved-${width}.png`),fullPage:true});
+   await reviewerPage.getByRole("button",{name:"سجل الحضور اليومي",exact:true}).click();
+   await reviewerPage.locator('section[aria-label="الدوام والحضور"] input[type="date"]').fill("2026-08-01");
+   const correctedRow=reviewerPage.locator('section[aria-label="الدوام والحضور"] tbody tr').filter({hasText:name});
+   await expect.poll(async()=>await correctedRow.textContent()).toContain("06:15");
+   expect(await correctedRow.textContent()).toContain("22:00");expect(await correctedRow.textContent()).toContain("8.3");
+   await reviewerPage.screenshot({path:join(evidence,`hr-nextday-result-${width}.png`),fullPage:true});
+   expect((await api("POST","/api/hr/attendance/corrections",{action:"decide",id:correction.id,decision:"approved"})).status).toBe(400);
+   const stored=(await db.query("SELECT * FROM hr_attendance_records WHERE id=$1",[out.body.id])).rows[0];
+   expect(new Date(stored.check_out_actual).toISOString()).toBe("2026-08-02T03:15:00.000Z");expect(new Date(stored.check_out_raw).toISOString()).toBe("2026-08-02T03:00:00.000Z");expect(stored.work_minutes).toBe(495);
+   const repeat=await api("POST","/api/hr/attendance",{staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"});expect(repeat.status).toBe(201);expect(repeat.body.id).toBe(out.body.id);expect(repeat.body.checkOutActual).toBe("2026-08-02T03:15:00.000Z");
+   const next=await api("POST","/api/hr/attendance",{staffId,punchType:"check_in",punchTime:"2026-08-02T22:00:00+03:00"});expect(next.status).toBe(201);expect(next.body.checkOutRaw).toBeNull();
+   for(const [role,session] of [["reception",h.sessions.reception],["doctor",h.sessions.doctorA]] as const){
+    const roleContext=await browser.newContext({viewport:{width,height:900}});
+    try{
+     const cookie= session.cookie.split(";")[0],separator=cookie.indexOf("=");await roleContext.addCookies([{name:cookie.slice(0,separator),value:cookie.slice(separator+1),url:baseUrl}]);
+     const rolePage=await roleContext.newPage();await rolePage.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
+     expect(await rolePage.getByRole("tab",{name:"الدوام والحضور",exact:true}).count()).toBe(role==="reception"?1:0);
+     if(role==="reception"){
+      await rolePage.getByRole("tab",{name:"الدوام والحضور"}).click();await rolePage.locator('section[aria-label="الدوام والحضور"] input[type="date"]').fill("2026-08-01");
+      await expect.poll(async()=>await rolePage.locator('section[aria-label="الدوام والحضور"] tbody').textContent()).toContain(name);
+      expect(await rolePage.getByRole("button",{name:"طلبات التصحيح",exact:false}).count()).toBe(0);
+      expect(await rolePage.getByRole("button",{name:"طلب تصحيح",exact:true}).count()).toBe(0);
+     }
+     const spoof=await rolePage.evaluate(async targetStaffId=>{
+      const response=await fetch("/api/hr/leaves",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({staffId:targetStaffId,leaveTypeCode:"annual",startDate:"2026-08-20",endDate:"2026-08-20",reason:"Synthetic browser employee spoof"})});
+      return {status:response.status,body:await response.json()};
+     },staffId);
+     expect(spoof.status).toBe(400);
+     expect(spoof.body).not.toHaveProperty("staffId");
+     await rolePage.screenshot({path:join(evidence,`hr-nextday-${role}-${width}.png`),fullPage:true});
+    }finally{await roleContext.close();}
+   }
+  }finally{await reviewerContext?.close();await page.close();}
+ });
+}

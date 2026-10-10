@@ -46,6 +46,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   // Correction request modal
   const [correctionModalOpen, setCorrectionModalOpen] = useState(false);
   const [selectedRecordForCorrection, setSelectedRecordForCorrection] = useState<AttendanceItem | null>(null);
+  const [reqCheckInDate, setReqCheckInDate] = useState("");
+  const [reqCheckOutDate, setReqCheckOutDate] = useState("");
   const [reqCheckIn, setReqCheckIn] = useState("");
   const [reqCheckOut, setReqCheckOut] = useState("");
   const [reqReason, setReqReason] = useState("");
@@ -174,16 +176,15 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
           action: "request",
           attendanceRecordId: selectedRecordForCorrection.id,
           fieldCorrected: "all",
-          newCheckIn: reqCheckIn ? clinicLocalDateTimeToIso(selectedRecordForCorrection.attendanceDate, reqCheckIn, CLINIC_ZONE_FALLBACK) : null,
-          newCheckOut: reqCheckOut ? clinicLocalDateTimeToIso(selectedRecordForCorrection.attendanceDate, reqCheckOut, CLINIC_ZONE_FALLBACK) : null,
+          newCheckIn: reqCheckIn ? clinicLocalDateTimeToIso(reqCheckInDate, reqCheckIn, CLINIC_ZONE_FALLBACK) : null,
+          newCheckOut: reqCheckOut ? clinicLocalDateTimeToIso(reqCheckOutDate, reqCheckOut, CLINIC_ZONE_FALLBACK) : null,
           reason: reqReason,
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "تعذّر رفع طلب التصحيح.");
-      }
+      const created = await res.json();
+      if (!res.ok) throw new Error(created.message || "تعذّر رفع طلب التصحيح.");
+      if (!Number.isSafeInteger(created.id) || created.status !== "pending") throw new Error("رد طلب التصحيح غير مكتمل.");
 
       setCorrectionModalOpen(false);
       setSelectedRecordForCorrection(null);
@@ -210,7 +211,9 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
           reason,
         }),
       });
-      if (!res.ok) throw new Error("تعذّر تنفيذ القرار.");
+      const decided = await res.json();
+      if (!res.ok) throw new Error(decided.message || "تعذّر تنفيذ القرار.");
+      if (decided.id !== id || decided.status !== decision) throw new Error("رد قرار التصحيح غير مكتمل.");
       void loadCorrections();
       void loadAttendance();
     } catch (err: any) {
@@ -251,8 +254,10 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
   const openCorrectionForRecord = (record: AttendanceItem) => {
     setSelectedRecordForCorrection(record);
-    setReqCheckIn(record.checkInActual ? clinicClock(record.checkInActual) : "08:00");
-    setReqCheckOut(record.checkOutActual ? clinicClock(record.checkOutActual) : "16:00");
+    setReqCheckInDate(record.checkInActual ? clinicDateString(new Date(record.checkInActual), CLINIC_ZONE_FALLBACK) : record.attendanceDate);
+    setReqCheckOutDate(record.checkOutActual ? clinicDateString(new Date(record.checkOutActual), CLINIC_ZONE_FALLBACK) : record.attendanceDate);
+    setReqCheckIn(record.checkInActual ? clinicClock(record.checkInActual) : "");
+    setReqCheckOut(record.checkOutActual ? clinicClock(record.checkOutActual) : "");
     setCorrectionModalOpen(true);
   };
 
@@ -383,7 +388,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                     <th className="px-4 py-3">ساعات العمل</th>
                     <th className="px-4 py-3">تأخير / إضافي</th>
                     <th className="px-4 py-3">الحالة</th>
-                    <th className="px-4 py-3 text-center">إجراءات</th>
+                    {isAdmin && <th className="px-4 py-3 text-center">إجراءات</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-navy-100">
@@ -431,7 +436,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                             {HR_ATTENDANCE_STATUS_LABELS[r.status] || r.status}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        {isAdmin && <td className="px-4 py-3 text-center">
                           <button
                             type="button"
                             onClick={() => openCorrectionForRecord(r)}
@@ -439,7 +444,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                           >
                             طلب تصحيح
                           </button>
-                        </td>
+                        </td>}
                       </tr>
                     );
                   })}
@@ -480,8 +485,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                         السبب: <span className="font-medium text-navy-800">{c.reason}</span>
                       </div>
                       <div className="font-mono text-xs text-navy-500">
-                        المطلوب: دخول ({c.newCheckIn ? clinicClock(c.newCheckIn) : "—"}) | خروج (
-                        {c.newCheckOut ? clinicClock(c.newCheckOut) : "—"})
+                        المطلوب: دخول ({c.newCheckIn ? `${clinicDateString(new Date(c.newCheckIn), CLINIC_ZONE_FALLBACK)} ${clinicClock(c.newCheckIn)}` : "—"}) | خروج (
+                        {c.newCheckOut ? `${clinicDateString(new Date(c.newCheckOut), CLINIC_ZONE_FALLBACK)} ${clinicClock(c.newCheckOut)}` : "—"})
                       </div>
                     </div>
 
@@ -643,8 +648,11 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-navy-700">وقت الدخول الصحيح</label>
+                <label htmlFor="correction-in-date" className="mb-1 block text-xs font-semibold text-navy-700">تاريخ الدخول الصحيح</label>
+                <input id="correction-in-date" type="date" required value={reqCheckInDate} onChange={(e) => setReqCheckInDate(e.target.value)} className="mb-2 w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none" />
+                <label htmlFor="correction-in-time" className="mb-1 block text-xs font-semibold text-navy-700">وقت الدخول الصحيح</label>
                 <input
+                  id="correction-in-time"
                   type="time"
                   value={reqCheckIn}
                   onChange={(e) => setReqCheckIn(e.target.value)}
@@ -652,8 +660,11 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-navy-700">وقت الخروج الصحيح</label>
+                <label htmlFor="correction-out-date" className="mb-1 block text-xs font-semibold text-navy-700">تاريخ الخروج الصحيح</label>
+                <input id="correction-out-date" type="date" required value={reqCheckOutDate} onChange={(e) => setReqCheckOutDate(e.target.value)} className="mb-2 w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none" />
+                <label htmlFor="correction-out-time" className="mb-1 block text-xs font-semibold text-navy-700">وقت الخروج الصحيح</label>
                 <input
+                  id="correction-out-time"
                   type="time"
                   value={reqCheckOut}
                   onChange={(e) => setReqCheckOut(e.target.value)}

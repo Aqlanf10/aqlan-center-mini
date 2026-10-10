@@ -28,6 +28,7 @@ it("a correction remains pending and leaves raw and actual punches unchanged unt
  await expect(work.decideAttendanceCorrection(correction.id,"approved",null,admin)).rejects.toThrow(/ذاتي/);
  await work.decideAttendanceCorrection(correction.id,"approved",null,reviewer);
  const approved=(await work.listAttendanceRecords({staffId}))[0];expect(approved.checkInRaw).toBe(original.checkInRaw);expect(approved.checkInActual).toBe("2026-08-01T06:00:00.000Z");
+ await expect(work.decideAttendanceCorrection(correction.id,"approved",null,admin)).rejects.toThrow(/ذاتي/);
 });
 it("a night shift checkout joins its prior clinic date and preserves both punch events",async()=>{
  await work.createSchedule({staffId,name:"Night",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true},admin);
@@ -126,4 +127,79 @@ it("an unreconciled legacy hybrid claim blocks unlinked doctor commission paymen
  expect(paid.expense).toBeNull();expect(paid.reason).toBe("hr_payroll_reconciliation_required");
  expect((await db.commissionReport("2026-08-01","2026-08-31")).find(row=>row.doctorId===party.id)?.dueMinor).toBe(12000);
  expect(Number((await pool.query("SELECT COALESCE(SUM(amount_minor),0) AS out FROM expenses WHERE shift_id=$1",[shift!.id])).rows[0].out)).toBe(0);
+});
+
+
+it("repeated completed night checkout stays on its original shift and does not block the next checkin",async()=>{
+ await work.createSchedule({staffId,name:"Night duplicate",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true},admin);
+ const first=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-01T22:00:00+03:00"},admin);
+ await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"},admin);
+ const replay=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"},admin);
+ expect(replay.id).toBe(first.id);expect(await work.listAttendanceRecords({staffId})).toHaveLength(1);
+ const next=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-02T22:00:00+03:00"},admin);
+ expect(next.attendanceDate).toBe("2026-08-02");expect(next.checkOutRaw).toBeNull();
+ expect((await db.getPool().query("SELECT count(*)::int AS n FROM hr_attendance_punch_events WHERE attendance_id=$1",[first.id])).rows[0].n).toBe(3);
+});
+for(const missing of ["check_in","check_out"] as const){
+ it(`approved missing ${missing} is never promoted to raw by replaying the opposite real punch`,async()=>{
+  const opposite=missing==="check_in"?"check_out":"check_in";
+  const stamps={check_in:"2026-08-01T08:00:00+03:00",check_out:"2026-08-01T16:00:00+03:00"};
+  const original=await work.recordAttendancePunch({staffId,punchType:opposite,punchTime:stamps[opposite]},admin);
+  const correction=await work.requestAttendanceCorrection({attendanceRecordId:original.id,fieldCorrected:missing,...(missing==="check_in"?{newCheckIn:stamps[missing]}:{newCheckOut:stamps[missing]}),reason:"Missing punch synthetic correction"},admin);
+  await work.decideAttendanceCorrection(correction.id,"approved",null,reviewer);
+  const replay=await work.recordAttendancePunch({staffId,punchType:opposite,punchTime:stamps[opposite]},admin);
+  expect(missing==="check_in"?replay.checkInRaw:replay.checkOutRaw).toBeNull();
+  expect((await db.getPool().query("SELECT count(*)::int AS n FROM hr_attendance_punch_events WHERE attendance_id=$1 AND punch_type=$2",[original.id,missing])).rows[0].n).toBe(0);
+  // The first actual evidence differs from the approved correction and must be kept verbatim.
+  const actual=await work.recordAttendancePunch({staffId,punchType:missing,punchTime:missing==="check_in"?"2026-08-01T08:05:00+03:00":"2026-08-01T16:05:00+03:00"},admin);
+  expect(missing==="check_in"?actual.checkInRaw:actual.checkOutRaw).toBe(missing==="check_in"?"2026-08-01T05:05:00.000Z":"2026-08-01T13:05:00.000Z");
+  expect(missing==="check_in"?actual.checkInActual:actual.checkOutActual).toBe(new Date(stamps[missing]).toISOString());
+ });
+}
+for(const decision of ["pending","rejected","approved"] as const){
+ it(`cancelling leave with a ${decision} correction clears operational leave and returns balance only once`,async()=>{
+  await work.adjustLeaveBalance({staffId,leaveTypeCode:"annual",year:2026,allocatedDays:10},admin);
+  const leave=await work.createLeaveRequest({staffId,leaveTypeCode:"annual",startDate:"2026-08-10",endDate:"2026-08-10",daysCount:1,reason:"Synthetic cancellation"},admin);
+  await work.decideLeaveRequest(leave.id,"approved","Approved",reviewer);
+  const record=(await work.listAttendanceRecords({staffId}))[0];
+  // Existing approved corrections also include the legacy direct writer's shape.
+  let correctionId:number;
+  if(decision==="approved"){
+   await work.correctAttendanceRecord(record.id,{fieldCorrected:"check_in",newCheckIn:"2026-08-10T08:00:00+03:00",newStatus:"on_leave",reason:"Retain approved correction history"},reviewer);
+   correctionId=(await work.listAttendanceCorrections({staffId}))[0].id;
+  }else{
+   const correction=await work.requestAttendanceCorrection({attendanceRecordId:record.id,fieldCorrected:"status",newStatus:"on_leave",reason:"Retain correction history"},admin);
+   correctionId=correction.id;
+   if(decision==="rejected")await work.decideAttendanceCorrection(correction.id,decision,null,reviewer);
+  }
+  await work.decideLeaveRequest(leave.id,"cancelled","Cancelled",reviewer);
+  await work.decideLeaveRequest(leave.id,"cancelled","Repeated cancellation",reviewer);
+  expect((await work.listAttendanceRecords({staffId}))[0].status).not.toBe("on_leave");
+  expect((await work.listLeaveBalances(staffId,2026))[0]).toMatchObject({usedDays:0,pendingDays:0,availableDays:10});
+  expect((await db.getPool().query("SELECT status FROM hr_attendance_corrections WHERE id=$1",[correctionId])).rows[0].status).toBe(decision);
+  const punched=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-10T08:00:00+03:00"},admin);
+  expect(punched.id).toBe(record.id);expect(punched.status).toBe("incomplete");expect(punched.checkInRaw).toBe("2026-08-10T05:00:00.000Z");
+ });
+}
+
+it("a completed legacy night record without event rows matches an exact stored raw checkout",async()=>{
+ await work.createSchedule({staffId,name:"Legacy night",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true},admin);
+ const old=await work.recordAttendance({staffId,attendanceDate:"2026-08-01",checkIn:"2026-08-01T22:00:00+03:00",checkOut:"2026-08-02T06:00:00+03:00"},admin);
+ const replay=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"},admin);
+ expect(replay.id).toBe(old.id);expect(replay.checkInRaw).toBe(old.checkInRaw);expect(replay.checkOutRaw).toBe(old.checkOutRaw);
+ const next=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-02T22:00:00+03:00"},admin);expect(next.checkOutActual).toBeNull();
+});
+
+it("a retained cancelled-leave record acquires its real night schedule on the first punch",async()=>{
+ await work.createSchedule({staffId,name:"Cancelled leave night",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true},admin);
+ await work.adjustLeaveBalance({staffId,leaveTypeCode:"annual",year:2026,allocatedDays:10},admin);
+ const leave=await work.createLeaveRequest({staffId,leaveTypeCode:"annual",startDate:"2026-08-10",endDate:"2026-08-10",daysCount:1,reason:"Synthetic cancelled night leave"},admin);
+ await work.decideLeaveRequest(leave.id,"approved","Approved",reviewer);
+ const placeholder=(await work.listAttendanceRecords({staffId}))[0];
+ await work.requestAttendanceCorrection({attendanceRecordId:placeholder.id,fieldCorrected:"status",newStatus:"on_leave",reason:"Keep original history"},admin);
+ await work.decideLeaveRequest(leave.id,"cancelled","Cancelled",reviewer);await work.decideLeaveRequest(leave.id,"cancelled","Replay cancellation",reviewer);
+ const incoming=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-10T22:00:00+03:00"},admin);
+ expect(incoming.id).toBe(placeholder.id);expect(incoming.scheduleId).not.toBeNull();
+ const outgoing=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-11T06:00:00+03:00"},admin);
+ expect(outgoing.id).toBe(placeholder.id);expect(outgoing.workMinutes).toBe(480);expect(outgoing.isIncomplete).toBe(false);
 });

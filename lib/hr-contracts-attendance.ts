@@ -815,7 +815,7 @@ export async function recordAttendance(
   return withTransaction(getPool(), client => recordAttendanceInTx(client, input, session));
 }
 
-async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload): Promise<HrAttendanceRecordView> {
+async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
     const staffId = Number(input.staffId);
     // جلب جدول العمل الساري للموظف أو لقسمه لاحتساب التأخير والساعات بدقة
     const schedRes = await client.query(
@@ -863,9 +863,10 @@ async function recordAttendanceInTx(client: DbClient, input: {staffId: number | 
         staff_id, schedule_id, attendance_date, status, check_in_raw, check_out_raw,
         check_in_actual, check_out_actual, work_minutes, late_minutes, early_exit_minutes,
         overtime_minutes, is_incomplete, source, notes, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $5, $6, $7, $8, $9, $10, $11, 'manual', $12, $13)
+      ) VALUES ($1, $2, $3, $4, $14, $15, $5, $6, $7, $8, $9, $10, $11, 'manual', $12, $13)
       ON CONFLICT (staff_id, attendance_date) DO UPDATE
-      SET check_out_raw = COALESCE(hr_attendance_records.check_out_raw, EXCLUDED.check_out_raw),
+      SET schedule_id = COALESCE(hr_attendance_records.schedule_id, EXCLUDED.schedule_id),
+          check_out_raw = COALESCE(hr_attendance_records.check_out_raw, EXCLUDED.check_out_raw),
           check_in_raw = COALESCE(hr_attendance_records.check_in_raw, EXCLUDED.check_in_raw),
           check_in_actual = COALESCE(EXCLUDED.check_in_actual, hr_attendance_records.check_in_actual),
           check_out_actual = COALESCE(EXCLUDED.check_out_actual, hr_attendance_records.check_out_actual),
@@ -892,6 +893,10 @@ async function recordAttendanceInTx(client: DbClient, input: {staffId: number | 
         isIncomplete,
         input.notes ?? null,
         session.username,
+        // Effective timestamps can contain approved corrections. Only the incoming
+        // physical/manual punch supplies new evidence; the opposite raw side stays null.
+        rawPunch ? (rawPunch.type === "check_in" ? new Date(rawPunch.time) : null) : (input.checkIn ? new Date(input.checkIn) : null),
+        rawPunch ? (rawPunch.type === "check_out" ? new Date(rawPunch.time) : null) : (input.checkOut ? new Date(input.checkOut) : null),
       ],
     );
 
@@ -932,15 +937,17 @@ export async function recordAttendancePunch(
     // A checkout can complete a scheduled night shift from the prior clinic date.
     const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
       WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
-        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND ar.check_out_actual IS NULL))
-      ORDER BY ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType]);
+        EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) OR
+        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND (ar.check_out_actual IS NULL OR ar.check_out_raw=$4::timestamptz)))
+      ORDER BY EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) DESC,
+        ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType,punchIso]);
     const row = prior.rows[0];
     if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");
     const attendanceDate = row?.attendance_date instanceof Date ? row.attendance_date.toISOString().slice(0,10) : row?.attendance_date ?? dateStr;
     const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType==='check_in' ? punchIso : null;
     const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType==='check_out' ? punchIso : null;
     if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
-    const record = await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session);
+    const record = await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session,{type:input.punchType,time:punchIso});
     await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
       VALUES($1,$2,$3,$4,$5,$6,$7)`,[record.id,staffId,input.punchType,punchIso,input.source || 'manual',input.note ?? null,session.username]);
     return record;
@@ -1128,11 +1135,11 @@ export async function decideAttendanceCorrection(
     if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
     const corr = corrRows[0];
 
-    if (corr.status !== "pending") { if (corr.status === decision) return mapCorrectionRow(corr); throw new Error("حُسم طلب التصحيح سابقًا."); }
     // منع الموافقة الذاتية
     if (decision === "approved" && (corr.requested_by === session.username || corr.staff_user_id === session.userId)) {
       throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
     }
+    if (corr.status !== "pending") { if (corr.status === decision) return mapCorrectionRow(corr); throw new Error("حُسم طلب التصحيح سابقًا."); }
 
     if (decision === "approved") {
       const {rows:[attendance]} = await client.query("SELECT * FROM hr_attendance_records WHERE id=$1 FOR UPDATE",[corr.attendance_id]);
@@ -1604,6 +1611,15 @@ export async function decideLeaveRequest(
              AND NOT EXISTS(SELECT 1 FROM hr_attendance_corrections c WHERE c.attendance_id=hr_attendance_records.id)`,
           [curr.staff_id, curr.start_date, curr.end_date, `إجازة معتمدة رقم #${reqId}`],
         );
+        // Retained rows carry evidence/history and must survive cancellation.
+        // Their operational status must no longer inherit the cancelled leave.
+        await client.query(`UPDATE hr_attendance_records
+          SET status=CASE WHEN check_in_actual IS NOT NULL AND check_out_actual IS NOT NULL THEN 'present'
+                          WHEN check_in_actual IS NOT NULL OR check_out_actual IS NOT NULL THEN 'incomplete'
+                          ELSE 'absent' END,
+              is_incomplete=(check_in_actual IS NULL) <> (check_out_actual IS NULL), updated_at=NOW()
+          WHERE staff_id=$1 AND attendance_date BETWEEN $2 AND $3 AND status='on_leave'`,
+          [curr.staff_id,curr.start_date,curr.end_date]);
       } else if (curr.status === "pending" || curr.status === "under_review") {
         // كانت قيد الانتظار: استرجاع الأيام المعلقة فقط
         await client.query(
