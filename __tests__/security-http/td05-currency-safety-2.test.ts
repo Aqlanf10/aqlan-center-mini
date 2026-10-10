@@ -346,7 +346,7 @@ describe("المراجعة الثانية ٧: مزيج بندٍ أجنبي مر�
     const mixedPreviewVisitId = await linkedVisit(MIXED_PREVIEW_PLAN, true);
     await page.goto(`${baseUrl}/patients/${h.seeded.patientBId}?tab=today&visit=${mixedPreviewVisitId}`);
 
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
     await procedures.waitFor({ timeout: 60_000 });
 
     /* المجموعان المنفصلان: ١٥٠٠ دولار و١٥٠٠٠ يمني — كلٌّ بعملته. */

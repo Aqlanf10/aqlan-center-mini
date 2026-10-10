@@ -325,10 +325,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     reviewPanel.current?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };
   }, [reviewOpen, ownsVisit, owner]);
+  // Dismissing the review only closes presentation. A sent sign request keeps
+  // its command/busy ownership until its result is confirmed or retired.
+  const dismissReview = () => { if (currentOwner()) setReviewOpen(false); };
   const handleReviewKeyDown = (event: import("react").KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      if (!busy && currentOwner()) setReviewOpen(false);
+      dismissReview();
     }
     if (event.key !== "Tab" || !reviewPanel.current) return;
     const controls = Array.from(reviewPanel.current.querySelectorAll<HTMLElement>(
@@ -1691,7 +1694,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       {reviewOpen ? (
         <div role="dialog" aria-modal="true" aria-label="مراجعة وإنهاء الزيارة"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-2 sm:p-4"
-          onClick={() => { if (!busy && currentOwner()) setReviewOpen(false); }}
+          onClick={dismissReview}
           onKeyDown={handleReviewKeyDown}>
           <section ref={reviewPanel} tabIndex={-1} className="flex max-h-[90dvh] w-full min-w-0 max-w-xl flex-col overflow-hidden rounded-2xl border border-navy-800 bg-white shadow-xl"
             onClick={(event) => event.stopPropagation()}>
@@ -1854,9 +1857,12 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             </dl>
 
             <div className="flex shrink-0 flex-wrap gap-2 border-t border-slate-100 bg-white p-3">
-              <button type="button" disabled={busy} onClick={() => { if (!busy && currentOwner()) setReviewOpen(false); }}
+              {busy ? <p role="status" className="w-full text-xs leading-5 text-slate-600">
+                طلب التوقيع قيد الانتظار. إغلاق المراجعة لا يلغي الطلب؛ يبقى تحرير الزيارة متوقفًا حتى تتأكد النتيجة.
+              </p> : null}
+              <button type="button" onClick={dismissReview}
                 className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600">
-                رجوع — أكمل العمل
+                {busy ? "إغلاق المراجعة — التوقيع قيد الانتظار" : "رجوع — أكمل العمل"}
               </button>
               <button type="button" onClick={() => void sign()} disabled={busy || Boolean(signatureBlock)}
                 className="flex-[2] rounded-xl bg-navy-900 py-2.5 text-sm font-extrabold text-white disabled:opacity-40">

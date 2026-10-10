@@ -175,14 +175,31 @@ describe("actual visit workspace choices and review", () => {
       expect(await staged.textContent()).toContain("قيد التنفيذ");
       expect(await staged.textContent()).not.toContain("جميع الشروط متحققة");
       expect(await staged.getByRole("textbox", { name: "السعر", exact: true }).isDisabled()).toBe(true);
-      expect(await staged.getByRole("textbox", { name: "السعر", exact: true }).inputValue()).toBe("20.00");
+      // Per-session plan total: 2000 minor × quantity 1 ÷ 2 sessions = 1000
+      // minor for this first session, displayed as SAR 10.00 (not SAR 20.00).
+      expect(await staged.getByRole("textbox", { name: "السعر", exact: true }).inputValue()).toBe("10.00");
+      expect(await staged.getByRole("spinbutton", { name: "الكمية", exact: true }).inputValue()).toBe("1");
       expect(await staged.getByRole("textbox", { name: "الأسطح", exact: true }).inputValue()).toBe("MO");
       expect(await staged.getByRole("button", { name: "رقم السن", exact: true }).textContent()).toContain("16");
       expect(await page.getByRole("radio", { name: "ريال سعودي", exact: true }).getAttribute("aria-checked")).toBe("true");
+      expect(f.writes).toHaveLength(0);
+      // Only an explicit save may send the staged session. This is a captured
+      // draft payload, not financial/clinical clearance or a sign result.
+      await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).click();
+      await expect.poll(() => f.writes.length).toBe(1);
+      expect(f.writes[0]).toEqual({
+        chiefComplaint: "نص الشكوى الأصلي", examination: "", diagnosis: "",
+        treatmentDone: "ملاحظة الطبيب الأصلية", nextPlan: "", doctorId, billingCurrency: "SAR",
+        procedures: [{ serviceId: services[0].id, toothCode: 16, surfaces: "MO", quantity: 1,
+          unitPriceMinor: 1000, priceReason: null, doctorId, planItemId: 98400 }],
+      });
+      await expect.poll(() => staged.getByRole("button", { name: "احذف", exact: true }).isEnabled()).toBe(true);
+      expect(await staged.textContent()).toContain("انتظار تقييم البند المرجعي #98502");
+      expect(await staged.textContent()).toContain("قيد التنفيذ");
       await staged.getByRole("button", { name: "احذف", exact: true }).click();
       expect(await page.getByTestId("planned-item-98400").count()).toBe(1);
       expect(await field(page, "③ ما نُفّذ").inputValue()).toBe("ملاحظة الطبيب الأصلية");
-      expect(f.writes).toHaveLength(0); f.verify();
+      expect(f.writes).toHaveLength(1); f.verify();
     } finally { await f.context.close(); }
   });
 

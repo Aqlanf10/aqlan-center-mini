@@ -52,6 +52,14 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     expect(source).toContain("disabled={draft.planItemId !== null}");
     expect(source).toContain("disabled={busy || Boolean(signatureBlock)}");
   });
+  it("dismisses review presentation without releasing a pending command or its write locks", () => {
+    expect(source).toContain("const dismissReview = () => { if (currentOwner()) setReviewOpen(false); };");
+    expect(source.match(/onClick=\{dismissReview\}/g)).toHaveLength(2);
+    expect(source).toContain("dismissReview();");
+    expect(source).toContain('busy ? "إغلاق المراجعة — التوقيع قيد الانتظار" : "رجوع — أكمل العمل"');
+    expect(source).toContain("إغلاق المراجعة لا يلغي الطلب");
+    expect(source).toContain('<button onClick={() => void send(payload())} disabled={busy}');
+  });
 });
 
 

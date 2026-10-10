@@ -202,23 +202,26 @@ describe("النهائية أ: زيارة فارغة + بند خطة دولار�
     await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${visitId}`);
 
     /* قسم «مخطَّط لهذا المريض» يعرض بند الخطة الدولارية — بند خطته هو. */
-    const planned = page.locator('section[aria-label="مخطَّط لليوم"]');
+    const planned = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]')
+      .getByTestId(`planned-item-${planItemIds.get(USD_EMPTY_PLAN)}`);
     await planned.waitFor({ timeout: 60_000 });
-    await planned.locator("li", { hasText: USD_EMPTY_PLAN }).getByRole("button", { name: /نفّذ اليوم/ }).click();
+    expect(await planned.textContent()).toContain(USD_EMPTY_PLAN);
+    await planned.getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
 
     /* حقل السعر لحظة الإضافة: ١٥٠٠ دولارًا بعملة الاتفاق — لا «150,000» بالأساس. */
-    const priceInput = page.locator('input[aria-label="السعر"]').first();
+    const priceInput = page.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 30_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
 
     /* والإجمالي بعملة البند نفسها — لا سطر يمني ولا رقمٍ خام. */
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
-    const headerTotal = procedures.locator("h3").locator("..").locator("span").filter({ hasText: /\d/ }).first();
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
+    const headerTotal = procedures.getByRole("heading", { name: "قائمة عمل الزيارة", exact: true })
+      .locator("../..").locator(":scope > span");
     await expect.poll(async () => headerTotal.textContent(), { timeout: 20_000 }).toContain("1,500.00");
     expect(await headerTotal.textContent()).toContain("$");
     /* لا تفسيرًا بالأساس أبدًا: الرقم الخام «150,000» مستحيل في قائمة
        السطور — أسعار الدليل تُعرض بالأساس دائمًا فلا تُفحص على القسم كله. */
-    expect(await procedures.locator("ul").textContent()).not.toContain("150,000");
+    expect((await procedures.getByTestId("visit-work-recorded").allTextContents()).join("\n")).not.toContain("150,000");
   }, 240_000);
 
   it("الحفظ ثم إعادة التحميل — القيمة والعملة كما هما تمامًا", async () => {
@@ -228,22 +231,23 @@ describe("النهائية أ: زيارة فارغة + بند خطة دولار�
     await saveDraftAndWait();
 
     /* الحفظ يمر بالخادم: يملك سعر السطر المرتبط من الخطة — انتظر إعادة القراءة. */
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
     await expect
-      .poll(async () => procedures.locator('input[aria-label="السعر"]').count(), { timeout: 30_000 })
+      .poll(async () => procedures.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').count(), { timeout: 30_000 })
       .toBeGreaterThanOrEqual(1);
     await expect
-      .poll(async () => procedures.locator('input[aria-label="السعر"]').first().inputValue(), { timeout: 30_000 })
+      .poll(async () => procedures.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first().inputValue(), { timeout: 30_000 })
       .toBe("1,500.00");
 
     /* إعادة التحميل الكاملة: العملة تُقرأ من بند السطر نفسه بعد الولادة من جديد. */
     await page.reload();
-    const priceInput = page.locator('input[aria-label="السعر"]').first();
+    const priceInput = page.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 60_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
-    const headerTotal = procedures.locator("h3").locator("..").locator("span").filter({ hasText: /\d/ }).first();
+    const headerTotal = procedures.getByRole("heading", { name: "قائمة عمل الزيارة", exact: true })
+      .locator("../..").locator(":scope > span");
     await expect.poll(async () => headerTotal.textContent(), { timeout: 20_000 }).toContain("1,500.00");
-    expect(await procedures.locator("ul").textContent()).not.toContain("150,000");
+    expect((await procedures.getByTestId("visit-work-recorded").allTextContents()).join("\n")).not.toContain("150,000");
 
     /* وفي القاعدة: السطر مخزَّن ببنده ووحداته الصغرى كما للخطة — لا تضخّم. */
     const { rows: [row] } = await db.query<{ unit_price_minor: string; plan_item_id: number }>(
@@ -263,30 +267,33 @@ describe("النهائية ب: زيارة فارغة + بند خطة سعودي 
     const visitId = await emptyVisit();
     await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${visitId}`);
 
-    const planned = page.locator('section[aria-label="مخطَّط لليوم"]');
+    const planned = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]')
+      .getByTestId(`planned-item-${planItemIds.get(SAR_EMPTY_PLAN)}`);
     await planned.waitFor({ timeout: 60_000 });
-    await planned.locator("li", { hasText: SAR_EMPTY_PLAN }).getByRole("button", { name: /نفّذ اليوم/ }).click();
+    expect(await planned.textContent()).toContain(SAR_EMPTY_PLAN);
+    await planned.getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
 
-    const priceInput = page.locator('input[aria-label="السعر"]').first();
+    const priceInput = page.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 30_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
 
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
-    const headerTotal = procedures.locator("h3").locator("..").locator("span").filter({ hasText: /\d/ }).first();
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
+    const headerTotal = procedures.getByRole("heading", { name: "قائمة عمل الزيارة", exact: true })
+      .locator("../..").locator(":scope > span");
     await expect.poll(async () => headerTotal.textContent(), { timeout: 20_000 }).toContain("1,500.00");
     expect(await headerTotal.textContent()).toContain("ر.س");
-    expect(await procedures.locator("ul").textContent()).not.toContain("150,000");
+    expect((await procedures.getByTestId("visit-work-recorded").allTextContents()).join("\n")).not.toContain("150,000");
 
     /* وإعادة التحميل لا تفسّر السطر السعودي بالأساس — يُحفَظ أولًا (المسوّدة
        كائنٌ في الشاشة وحدها) ثم يُعاد تحميلها من القاعدة بعملة بندها. */
     await saveDraftAndWait();
     await expect
-      .poll(async () => procedures.locator('input[aria-label="السعر"]').first().inputValue(), { timeout: 30_000 })
+      .poll(async () => procedures.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first().inputValue(), { timeout: 30_000 })
       .toBe("1,500.00");
     await page.reload();
     await priceInput.waitFor({ timeout: 60_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
-    expect(await procedures.locator("ul").textContent()).not.toContain("150,000");
+    expect((await procedures.getByTestId("visit-work-recorded").allTextContents()).join("\n")).not.toContain("150,000");
   }, 240_000);
 });
 
@@ -297,7 +304,7 @@ describe("النهائية د: بند دولاري + بند سعودي — مج�
     mixedVisitId = await mixedLinkedVisit();
     await page.goto(`${baseUrl}/patients/${privatePatientId}?tab=today&visit=${mixedVisitId}`);
 
-    const procedures = page.locator('section[aria-label="الإجراءات المنفَّذة"]');
+    const procedures = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]');
     await procedures.waitFor({ timeout: 60_000 });
 
     /* المجموعان المنفصلان: ١٥٠٠ دولارًا و٩٠٠ سعوديًا — كلٌّ بعملته. */
@@ -319,7 +326,7 @@ describe("النهائية د: بند دولاري + بند سعودي — مج�
 
     /* لا تفسيرًا بالأساس في قائمة السطور: الرقمان الخامان مستحيلان —
        وسطر الدليل الحر وحده يذكر الأساس (أسعار الدليل أساسية دائمًا). */
-    const draftsText = await procedures.locator("ul").textContent();
+    const draftsText = (await procedures.getByTestId("visit-work-recorded").allTextContents()).join("\n");
     expect(draftsText).not.toContain("150,000");
     expect(draftsText).not.toContain("90,000");
     /* ولا إجماليًّا رقميًّا واحدًا عبر العملتين في القسم كله. */
@@ -496,10 +503,12 @@ describe("النهائية أ-هـ: زيارة أ ← توقيع ← تحصيل 
       .toBe(0);
 
     /* ── ٨) تنفيذ بند ب وإضافة سطره — من «مخطَّط لليوم» بعملة بنده. */
-    const planned = page.locator('section[aria-label="مخطَّط لليوم"]');
+    const planned = page.locator('section#visit-procedures[aria-label="قائمة عمل الزيارة"]')
+      .getByTestId(`planned-item-${planItemIds.get(USD_SEQ_B_PLAN)}`);
     await planned.waitFor({ timeout: 60_000 });
-    await planned.locator("li", { hasText: USD_SEQ_B_PLAN }).getByRole("button", { name: /نفّذ اليوم/ }).click();
-    const priceInput = page.locator('input[aria-label="السعر"]').first();
+    expect(await planned.textContent()).toContain(USD_SEQ_B_PLAN);
+    await planned.getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
+    const priceInput = page.getByTestId("visit-work-recorded").locator('input[aria-label="السعر"]').first();
     await priceInput.waitFor({ timeout: 30_000 });
     await expect.poll(async () => priceInput.inputValue(), { timeout: 20_000 }).toBe("1,500.00");
 
