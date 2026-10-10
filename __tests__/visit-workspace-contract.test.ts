@@ -2,13 +2,15 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// Pinned 055c399a contract: this UX candidate cannot rewrite core mutation/read authority.
+// Core authority remains pinned to 055c399a. The load boundary differs only by
+// removing the retired catalogue modal reset after the inline ServiceSelect switch.
+// CI1768 caught that obsolete setter; all owner/read/draft guards remain unchanged.
 const baseline = [
   {
     "label": "load",
     "start": "  const load = useCallback(",
     "end": "  useEffect(() => { void load(); }",
-    "sha": "9c4c1d6146498314955b8bb563c79f54e5fec255f98c8f2386d9407de6fa93d8"
+    "sha": "4e6e0ebbf2630871c822df5a72ef321dde0ee540bdb55bff87098cddc96ff982"
   },
   {
     "label": "send",
@@ -37,14 +39,15 @@ const baseline = [
 ];
 const source = readFileSync("components/ClinicalVisit.tsx", "utf8");
 describe("actual visit workspace retains its authoritative contracts", () => {
-  it.each(baseline)("keeps $label byte-identical to reviewed 055c399a", ({ start, end, sha }) => {
+  it.each(baseline)("keeps $label byte-identical to its reviewed authority boundary", ({ start, end, sha }) => {
     const from = source.indexOf(start); expect(from).toBeGreaterThan(-1);
     const to = source.indexOf(end, from); expect(to).toBeGreaterThan(from);
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
   });
   it("uses one catalog action and one worklist, preserving tooth and plan callbacks", () => {
     expect(source.match(/<ServiceSelect/g)).toHaveLength(1);
-    expect(source).not.toContain("<QuickServicePicker");
+    // No render, import, state, or owner-reset references may survive modal removal.
+    expect(source).not.toMatch(/\b(?:QuickServicePicker|pickerOpen|setPickerOpen|servicePickerTrigger)\b/);
     expect(source.match(/aria-label="بنود عمل الزيارة"/g)).toHaveLength(1);
     expect(source).toContain("onChange={(_id, service) => { if (service) addFreeProcedure(service as Service); }}");
     expect(source).toContain("catalogCurrency={visitCurrency}");

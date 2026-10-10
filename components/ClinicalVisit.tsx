@@ -539,7 +539,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       const nextDoctors = Array.isArray(parties) ? parties : parties?.balances ?? [];
       const newOwner = lastAppliedOwner.current !== owner;
       if (newOwner) {
-        setOrthoSession(null); setAddendum(""); setReviewOpen(false); setPickerOpen(false);
+        setOrthoSession(null); setAddendum(""); setReviewOpen(false);
         setBillingPreview(null); setOverrideReason(""); setNoChargeAdjustment(false); setNoChargeReason("");
         setServerUnmet([]); setRxOpen(false); setPostOpOpen(false); setPatientContext(null);
         setBusy(false); autoReviewDone.current = false; lastAutoTreatment.current = "";
