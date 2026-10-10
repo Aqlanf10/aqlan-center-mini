@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PARTY_KIND_LABEL, type PartyKind } from "@/lib/expenses";
-import { formatMoney, isCurrency, type Currency } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
+import { PARTY_BALANCE_VIEW, partyBalanceIdentities, readPartyNativeBalances, type PartyNativeBalance } from "@/lib/party-native-balances";
 import { PageHeader } from "@/components/PageHeader";
 import { financeLinks } from "@/components/financeLinks";
 import { useSession } from "@/components/SessionProvider";
-import { canHandleMoney } from "@/lib/roles";
+import { canHandleMoney, canViewMoney } from "@/lib/roles";
 
 /**
  * الجهات: مختبرات وموردون وأطباء.
@@ -24,40 +25,73 @@ interface Party {
 const KINDS: PartyKind[] = ["lab", "supplier", "doctor"];
 
 export default function PartiesPage() {
-  const canMutate = canHandleMoney(useSession()?.role);
+  const session = useSession();
+  // Remount in the identity-changing render, before any effect can expose the
+  // previous principal's financial snapshot. Cleanup also rejects late reads.
+  return <PartyList key={JSON.stringify([session?.username, session?.role, session?.permissions ?? null])}
+    canMutate={canHandleMoney(session?.role)} canRead={canViewMoney(session?.role)} />;
+}
+
+function PartyList({ canMutate, canRead }: { canMutate: boolean; canRead: boolean }) {
   const [parties, setParties] = useState<Party[]>([]);
-  const [balances, setBalances] = useState<Map<number, number>>(new Map());
-  const [base, setBase] = useState<Currency>("YER");
+  const [balances, setBalances] = useState<Map<number, PartyNativeBalance[]> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ name: "", kind: "lab" as PartyKind, phone: "", commissionPercent: "" });
+  const mounted = useRef(false);
+  const requestId = useRef(0);
+  const controller = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (!mounted.current) return;
+    const id = ++requestId.current;
+    controller.current?.abort();
+    const active = new AbortController();
+    controller.current = active;
     setLoading(true);
-    try {
-      const [response, balancesResponse] = await Promise.all([
-        fetch("/api/parties", { cache: "no-store" }),
-        fetch("/api/payables", { cache: "no-store" }),
-      ]);
+    setBalances(null);
+    setLoadError(null);
+    const read = async (url: string): Promise<unknown> => {
+      const response = await fetch(url, { cache: "no-store", signal: active.signal });
+      if (!response.ok) throw new Error("تعذّر تحميل الأرصدة.");
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setParties(payload as Party[]);
-      if (balancesResponse.ok) {
-        const data = await balancesResponse.json();
-        setBalances(new Map((data.balances as { partyId: number; dueMinor: number }[])
-          .map((row) => [row.partyId, row.dueMinor])));
-        if (isCurrency(data.baseCurrency)) setBase(data.baseCurrency);
-      }
-      setError(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      return payload;
+    };
+    const [catalog, native] = await Promise.allSettled([
+      read("/api/parties"),
+      canRead ? read(`/api/payables?view=${PARTY_BALANCE_VIEW}`) : Promise.reject(new Error("Unavailable")),
+    ]);
+    if (!mounted.current || id !== requestId.current || active.signal.aborted) return;
+    try {
+      if (catalog.status !== "fulfilled" || !Array.isArray(catalog.value)) throw new Error("Invalid catalog");
+      const rows = catalog.value as Party[];
+      // Validate identities even when the balance read fails, so the catalog
+      // can remain visible with explicit unavailable badges and a retry.
+      partyBalanceIdentities(rows);
+      setParties(rows);
+      if (native.status !== "fulfilled") throw new Error("Unavailable");
+      // Complete native identity coverage must match this catalog before any
+      // omitted currency buckets can mean zero, including no-activity parties.
+      setBalances(readPartyNativeBalances(native.value, rows));
+    } catch {
+      setBalances(null);
+      setLoadError("الأرصدة غير متاحة الآن. أعد المحاولة؛ تعذّر تأكيد صافي الجهات.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canRead]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return () => {
+      mounted.current = false;
+      requestId.current += 1;
+      controller.current?.abort();
+    };
+  }, [load]);
 
   const send = useCallback(async (run: () => Promise<Response>) => {
     if (busy) return false;
@@ -65,15 +99,16 @@ export default function PartiesPage() {
     try {
       const response = await run();
       const payload = await response.json().catch(() => null);
+      if (!mounted.current) return false;
       if (!response.ok) { setError(payload?.message ?? "تعذّر التنفيذ."); return false; }
       setError(null);
       await load();
-      return true;
+      return mounted.current;
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      if (mounted.current) setError("تعذّر الاتصال بالخادم.");
       return false;
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }, [busy, load]);
 
@@ -88,7 +123,7 @@ export default function PartiesPage() {
   };
 
   return (
-    <main className="mx-auto max-w-3xl p-4 pb-24">
+    <main data-testid="party-native-balances" className="mx-auto max-w-3xl p-4 pb-24">
       <PageHeader
         title="الجهات"
         subtitle="المختبرات والموردون والأطباء"
@@ -98,6 +133,16 @@ export default function PartiesPage() {
       {error ? (
         <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
+
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+        <p>صافي الجهة بكل عملة على حدة، ويشمل الدفعات على الحساب غير المرتبطة بفاتورة. صافي الصفر لا يعني تسوية كل فاتورة.</p>
+        {loadError ? <p role="alert" className="mt-2 text-red-700">{loadError}</p> : null}
+        <button type="button" onClick={() => { void load(); }} disabled={busy}
+          aria-label="تحديث أرصدة الجهات"
+          className="mt-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800 disabled:opacity-40">
+          {loadError ? "إعادة المحاولة" : "تحديث الأرصدة"}
+        </button>
+      </div>
 
       {canMutate ? <form onSubmit={add} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-sm font-bold">جهة جديدة</h2>
@@ -132,7 +177,7 @@ export default function PartiesPage() {
 
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : parties.length === 0 ? (
+      ) : parties.length === 0 && loadError ? null : parties.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
           لا جهات بعد. أضف مختبراتك وأطباءك أولًا.
         </p>
@@ -145,7 +190,7 @@ export default function PartiesPage() {
               <h2 className="mb-2 text-sm font-bold">{PARTY_KIND_LABEL[kind]}</h2>
               <ul className="space-y-2">
                 {list.map((party) => (
-                  <li key={party.id} className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3 ${
+                  <li key={party.id} data-testid={`party-row-${party.id}`} className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3 ${
                     party.isActive ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-60"
                   }`}>
                     <div className="min-w-[8rem] flex-1">
@@ -162,14 +207,17 @@ export default function PartiesPage() {
                     {/* الرصيد بجانب الاسم لا في شاشة أخرى: من يفتح قائمة الجهات
                         يسأل عن المستحق، لا عن أسمائها. والأطباء مستثنون لأن
                         مستحقهم يُحسب من نسبتهم على المحصّل في تقرير العمولات. */}
-                    {kind !== "doctor" && (balances.get(party.id) ?? 0) !== 0 ? (
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                        (balances.get(party.id) ?? 0) > 0 ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"
-                      }`}>
-                        {(balances.get(party.id) ?? 0) > 0
-                          ? `علينا ${formatMoney(balances.get(party.id) ?? 0, base)}`
-                          : `زيادة ${formatMoney(-(balances.get(party.id) ?? 0), base)}`}
-                      </span>
+                    {kind !== "doctor" ? (
+                      !balances?.has(party.id) ? (
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">الرصيد غير متاح</span>
+                      ) : balances.get(party.id)!.length === 0 ? (
+                        <span data-testid="party-native-zero" className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">صافي الجهة صفر</span>
+                      ) : balances.get(party.id)!.map(({ currency, dueMinor }) => (
+                        <span key={currency} data-testid="party-native-balance" data-currency={currency}
+                          className={`rounded-full px-2.5 py-1 text-xs font-bold ${dueMinor > 0 ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600"}`}>
+                          {dueMinor > 0 ? "علينا" : "لنا"} {formatMoney(Math.abs(dueMinor), currency)} ({currency})
+                        </span>
+                      ))
                     ) : null}
                     {kind === "doctor" ? (
                       <a href="/finance/commissions" className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-navy-800">

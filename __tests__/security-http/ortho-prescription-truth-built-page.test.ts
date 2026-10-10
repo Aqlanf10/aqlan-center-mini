@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { baseUrl, harness } from "./_server";
+import { assertOrthoViewportBounds, orthoViewportProof, revealOrthoControlByWheel, settleStrategy } from "./_ortho-strategy-ui-fixture";
 
 // CI-only built Next page acceptance. All rows are isolated synthetic fixtures;
 // browser writes and external requests are blocked before reaching a server.
@@ -70,26 +71,33 @@ async function openPrescription(card: Locator) {
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
   await card.page().evaluate(async () => { await document.fonts.ready; });
-  // Keep case identity and the entire prescription panel below the fixed bar.
-  // The following strategy panel legitimately extends this case beyond one
-  // viewport; its ordinary scroll access is checked separately below.
-  await card.evaluate((element) => {
-    window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - 80), behavior: "instant" });
-  });
-  const frame = await card.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    const identifier = Array.from(element.querySelectorAll("span")).find((span) => /^#\d+$/.test(span.textContent ?? ""))!;
-    const label = identifier.getBoundingClientRect();
-    const heading = Array.from(element.querySelectorAll("h4")).find(node => node.textContent?.trim() === "وصفة الجهاز والمواصفات الميكانيكية")!;
-    const panel = heading.parentElement!.getBoundingClientRect();
-    return { scope: "case-identity-and-prescription-panel", top: rect.top, bottom: panel.bottom,
-      caseBottom: rect.bottom, viewportHeight: innerHeight, caseLabel: identifier.textContent,
-      identityExposed: identifier.contains(document.elementFromPoint(label.left + label.width / 2, label.top + label.height / 2)) };
-  });
-  expect(frame.top).toBeGreaterThanOrEqual(79);
-  expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+  const identifier = card.locator("span").filter({ hasText: /^#\d+$/ });
+  const panel = card.getByRole("heading", { name: "وصفة الجهاز والمواصفات الميكانيكية", exact: true }).locator("..");
+  expect(await identifier.count()).toBe(1); expect(await panel.count()).toBe(1);
+  const initialCard = await card.evaluate(orthoViewportProof), initialPanel = await panel.evaluate(orthoViewportProof);
+  // Only this bounded synthetic fixture must fit identity through prescription
+  // in one frame. A longer real case may need scrolling; never silently crop it
+  // and label the result a whole-panel witness. Strategy is a separate state.
+  const requiredHeight = initialPanel.bottom - initialCard.top;
+  expect(requiredHeight, "synthetic identity-and-prescription span must fit between measured shell bars")
+    .toBeLessThanOrEqual(initialCard.availableViewport.height - 4);
+  await card.evaluate((element, top) => {
+    window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - top), behavior: "instant" });
+  }, initialCard.availableViewport.top + 2);
+  await settleStrategy(card.page());
+  const cardProof = await card.evaluate(orthoViewportProof);
+  const identityProof = await identifier.evaluate(orthoViewportProof), panelProof = await panel.evaluate(orthoViewportProof);
+  assertOrthoViewportBounds(identityProof, width); assertOrthoViewportBounds(panelProof, width);
+  const frame = { scope: "case-identity-and-prescription-panel", framingMethod: "programmatic-measured-shell-insets",
+    top: cardProof.top, bottom: panelProof.bottom, requiredHeight, availableViewport: cardProof.availableViewport,
+    caseBottom: cardProof.bottom, viewportHeight: cardProof.viewportHeight, caseLabel: identityProof.label,
+    identityExposed: identityProof.unobscured, identity: identityProof, panel: panelProof };
+  expect(frame.top).toBeGreaterThanOrEqual(frame.availableViewport.top);
+  expect(frame.bottom).toBeLessThanOrEqual(frame.availableViewport.bottom);
   expect(frame.identityExposed).toBe(true);
-  const geometry = await value.evaluate((element) => {
+  const valueProof = await value.evaluate(orthoViewportProof);
+  assertOrthoViewportBounds(valueProof, width);
+  const geometry = { ...await value.evaluate((element) => {
     const box = element.getBoundingClientRect(); const cell = element.parentElement!.getBoundingClientRect();
     const range = document.createRange(); range.selectNodeContents(element); const text = range.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -97,9 +105,8 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
       cell: { left: cell.left, right: cell.right, top: cell.top, bottom: cell.bottom },
       text: { left: text.left, right: text.right, top: text.top, bottom: text.bottom },
       fontSize: style.fontSize, display: style.display, visibility: style.visibility,
-      unobscured: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
       viewportWidth: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.scrollWidth };
-  });
+  }), availableViewport: valueProof.availableViewport, hitPoints: valueProof.hitPoints, unobscured: valueProof.unobscured };
   expect(geometry.label).toBe(kind === "unrecorded" ? "غير مسجّلة" : custom);
   expect(geometry.box.width).toBeGreaterThan(0); expect(geometry.box.height).toBeGreaterThan(0);
   expect(geometry.display).not.toBe("none"); expect(geometry.visibility).toBe("visible");
@@ -110,8 +117,8 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(geometry.text.bottom).toBeLessThanOrEqual(geometry.cell.bottom + 1);
   expect(geometry.cell.left).toBeGreaterThanOrEqual(-1);
   expect(geometry.cell.right).toBeLessThanOrEqual(width + 1);
-  expect(geometry.cell.top).toBeGreaterThanOrEqual(79);
-  expect(geometry.cell.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(geometry.cell.top).toBeGreaterThanOrEqual(geometry.availableViewport.top);
+  expect(geometry.cell.bottom).toBeLessThanOrEqual(geometry.availableViewport.bottom);
   expect(geometry.unobscured).toBe(true);
   expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
   await card.page().screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png`, fullPage: false });
@@ -119,25 +126,14 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   await strategy.getByText("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.", { exact: true }).waitFor();
   const bridge = strategy.getByRole("button", { name: "ربط هذه الحالة بالمشاكل وبنود الخطة", exact: true });
   expect(await bridge.count()).toBe(1); expect(await bridge.isEnabled()).toBe(true);
-  // Exercise the real browser wheel, not a programmatic scrollIntoView witness.
-  const target = await bridge.boundingBox(); expect(target).not.toBeNull();
-  const viewport = card.page().viewportSize(); expect(viewport).not.toBeNull();
-  await card.page().mouse.move(width / 2, viewport!.height / 2);
-  await card.page().mouse.wheel(0, target!.y + target!.height / 2 - viewport!.height / 2);
-  await expect.poll(() => bridge.evaluate(element => {
-    const rect = element.getBoundingClientRect();
-    return rect.top >= 79 && rect.bottom <= innerHeight + 1
-      && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
-  })).toBe(true);
-  const strategyAccess = await bridge.evaluate(element => {
-    const rect = element.getBoundingClientRect();
-    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
-      width: rect.width, height: rect.height, viewportHeight: innerHeight,
-      unobscured: element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) };
-  });
+  // The PNG above is the prescription frame. This later native-wheel state
+  // separately proves access to the important action below that frame.
+  const strategyAccess = await revealOrthoControlByWheel(card.page(), bridge);
+  assertOrthoViewportBounds(strategyAccess, width);
   expect(strategyAccess.width).toBeGreaterThan(0); expect(strategyAccess.height).toBeGreaterThanOrEqual(44);
   expect(strategyAccess.left).toBeGreaterThanOrEqual(-1); expect(strategyAccess.right).toBeLessThanOrEqual(width + 1);
-  expect(strategyAccess.top).toBeGreaterThanOrEqual(79); expect(strategyAccess.bottom).toBeLessThanOrEqual(strategyAccess.viewportHeight + 1);
+  expect(strategyAccess.top).toBeGreaterThanOrEqual(strategyAccess.availableViewport.top);
+  expect(strategyAccess.bottom).toBeLessThanOrEqual(strategyAccess.availableViewport.bottom);
   expect(strategyAccess.unobscured).toBe(true);
   return { ...geometry, frame, strategyAccess };
 }

@@ -253,14 +253,23 @@ function StrategyWorkspace({ patientId, orthoCaseId, caseTitle, lifetime, refere
         {data.recordingContext === "retrospective" ? <p className="text-xs font-bold text-amber-900">مراجعة توثيقية لحالة سابقة. تبقى حالة العلاج كما هي.</p> : null}
         <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold">بحث في مشاكل هذه الحالة<input type="search" className={fieldClass} value={problemSearch} onChange={event => setProblemSearch(event.target.value)} /></label>
           <label className="text-xs font-bold">بحث في بنود خطة هذه الحالة<input type="search" className={fieldClass} value={itemSearch} onChange={event => setItemSearch(event.target.value)} disabled={!data.planVisible} /></label></div>
-        {draft.rows.map((row, index) => <fieldset key={row.key} disabled={strategyBlocked} data-testid="ortho-strategy-row" className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+        {draft.rows.map((row, index) => {
+          const selectedProblem = data.choices.problems.find(problem => problem.id === row.problemId);
+          const problemDetailId = `ortho-strategy-problem-${row.key}`;
+          return <fieldset key={row.key} disabled={strategyBlocked} data-testid="ortho-strategy-row" className="min-w-0 space-y-3 rounded-xl border border-slate-200 bg-white p-3">
           <legend className="px-1 text-xs font-black">سطر الخطة {index + 1}</legend>
-          <div className="grid gap-3 md:grid-cols-3"><label className="min-w-0 text-xs font-bold">المشكلة
-            <select className={`${fieldClass} max-h-40`} size={4} value={row.problemId ?? ""} onChange={event => changeRow(index, { problemId: event.target.value ? Number(event.target.value) : null })}>
+          <div className="grid gap-3 md:grid-cols-3"><div className="min-w-0"><label className="text-xs font-bold">المشكلة
+            <select aria-label="المشكلة" aria-describedby={problemDetailId} className={`${fieldClass} max-h-40`} size={4} value={row.problemId ?? ""} onChange={event => changeRow(index, { problemId: event.target.value ? Number(event.target.value) : null })}>
               <option value="" disabled>اختر مشكلة موثّقة</option>
               {row.problemId !== null && !data.choices.problems.some(problem => problem.id === row.problemId) ? <option value={row.problemId}>مرجع المشكلة #{row.problemId} غير متاح حاليًا</option> : null}
               {data.choices.problems.filter(problem => problem.id === row.problemId || `${problem.label} ${problem.site ?? ""}`.toLowerCase().includes(problemSearch.toLowerCase())).map(problem => <option key={problem.id} value={problem.id}>{problem.label}{problem.site ? ` · ${problem.site}` : ""} · {problem.status ?? "غير معروف"}</option>)}
             </select></label>
+            <p id={problemDetailId} data-testid="ortho-selected-problem" aria-live="polite"
+              className="mt-2 whitespace-pre-wrap text-xs text-slate-600 [overflow-wrap:anywhere]">
+              {row.problemId === null ? "لم تُختر مشكلة لهذا السطر بعد." : selectedProblem
+                ? <>المشكلة المختارة: {selectedProblem.label}{selectedProblem.site ? ` · الموضع: ${selectedProblem.site}` : ""} · الحالة الحالية: {selectedProblem.status ?? "غير معروفة"}</>
+                : `مرجع المشكلة #${row.problemId} غير متاح حاليًا؛ لم تُستبدل قيمته.`}
+            </p></div>
             <label className="text-xs font-bold">الهدف (نص الطبيب)<textarea aria-label="الهدف (نص الطبيب)" className={fieldClass} rows={4} maxLength={ORTHO_STRATEGY_LIMITS.objective} value={row.objective} onChange={event => changeRow(index, { objective: event.target.value })} /></label>
             <label className="text-xs font-bold">الاستراتيجية (نص الطبيب)<textarea aria-label="الاستراتيجية (نص الطبيب)" className={fieldClass} rows={4} maxLength={ORTHO_STRATEGY_LIMITS.strategy} value={row.strategy} onChange={event => changeRow(index, { strategy: event.target.value })} /></label></div>
           <label className="block text-xs font-bold">المبرر أو ملاحظة القرار (اختياري)<textarea aria-label="المبرر أو ملاحظة القرار (اختياري)" className={fieldClass} rows={2} maxLength={ORTHO_STRATEGY_LIMITS.rationale} value={row.rationale} onChange={event => changeRow(index, { rationale: event.target.value })} /></label>
@@ -275,7 +284,8 @@ function StrategyWorkspace({ patientId, orthoCaseId, caseTitle, lifetime, refere
             </div> : <p className="text-xs text-slate-500">روابط بنود الخطة محجوبة حسب الصلاحيات.</p>}
           </fieldset>
           <button type="button" className={buttonClass} disabled={strategyBlocked || draft.rows.length === 1} onClick={() => update({ ...draft, rows: draft.rows.filter((_, i) => i !== index) })}>حذف هذا السطر من المسودة</button>
-        </fieldset>)}
+        </fieldset>;
+        })}
         <button type="button" className={buttonClass} disabled={strategyBlocked || draft.rows.length >= ORTHO_STRATEGY_LIMITS.rows} onClick={() => update({ ...draft, rows: [...draft.rows, blankRow()] })}>إضافة سطر مشكلة وهدف واستراتيجية</button>
         <label className="block text-xs font-bold">سبب توثيق هذه النسخة (مطلوب)<textarea aria-label="سبب توثيق هذه النسخة (مطلوب)" className={fieldClass} rows={2} maxLength={ORTHO_STRATEGY_LIMITS.reason} value={draft.reason} disabled={strategyBlocked} onChange={event => update({ ...draft, reason: event.target.value })} /></label>
         <p className="text-xs text-slate-500">لا يُملأ هدف أو قرار تلقائيًا. الحفظ نسخة توثيقية جديدة، ولا يعني تنفيذ البنود أو تحقق شروطها.</p>

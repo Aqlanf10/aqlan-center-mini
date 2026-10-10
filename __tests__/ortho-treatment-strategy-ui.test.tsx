@@ -158,6 +158,32 @@ beforeEach(() => {
 afterEach(() => { unmount(); try { expect(unexpected).toEqual([]); expect(hooks.retiredWrites).toBe(0); } finally { vi.unstubAllGlobals(); vi.useRealTimers(); } });
 
 describe("Ortho strategy owner-bound component contract", () => {
+  it.each(["known", "unknown", "unrecorded-status", "missing"] as const)("describes the exact selected %s problem without inferring or replacing clinical values", async mode => {
+    const adapter = life(); props = { ...props, lifetime: adapter };
+    const source = emptyStrategy(PATIENT_A);
+    if (mode === "unrecorded-status") source.choices.problems[0].status = null;
+    render(); await answer(source); click("بدء خطة الحالة من نموذج فارغ");
+    const selected = () => find(node => node.type === "select" && node.props["aria-label"] === "المشكلة")[0];
+    const detail = () => find(node => node.props["data-testid"] === "ortho-selected-problem")[0];
+    expect(content(detail())).toBe("لم تُختر مشكلة لهذا السطر بعد.");
+    expect(selected().props.value).toBe("");
+    expect(selected().props["aria-describedby"]).toBe(detail().props.id);
+    const problemId = mode === "missing" ? 989999 : mode === "unknown" ? ids.otherProblemId : ids.problemId;
+    (selected().props.onChange as (event: unknown) => void)({ target: { value: String(problemId) } }); render();
+    const expected = mode === "missing" ? `مرجع المشكلة #${problemId} غير متاح حاليًا؛ لم تُستبدل قيمته.`
+      : mode === "unknown" ? `المشكلة المختارة: ${STRATEGY_TEXT.a.otherProblem} · الحالة الحالية: unknown_synthetic_status`
+        : `المشكلة المختارة: ${STRATEGY_TEXT.a.problem} · الموضع: الفك العلوي · الحالة الحالية: ${mode === "known" ? "active" : "غير معروفة"}`;
+    expect(content(detail())).toBe(expected); expect(detail().props["aria-live"]).toBe("polite");
+    expect(selected().props.value).toBe(problemId);
+    const detailId = selected().props["aria-describedby"];
+    expect(find(node => node.props.id === detailId)).toHaveLength(1);
+    const search = find(node => node.type === "input" && node.props.type === "search")[0];
+    (search.props.onChange as (event: unknown) => void)({ target: { value: "لا تطابق أي خيار" } }); render();
+    expect(content(detail())).toBe(expected); expect(selected().props.value).toBe(problemId);
+    expect(find(node => node.type === "textarea").map(node => node.props.value)).toEqual(["", "", "", ""]);
+    expect(writes()).toEqual([]);
+  });
+
   it.each(["blank", "historical"] as const)("keeps explicit textarea names stable through %s edits and frozen states", async mode => {
     const adapter = life(); props = { ...props, lifetime: adapter };
     render(); await answer(mode === "blank" ? emptyStrategy(PATIENT_A) : strategyHistory(PATIENT_A));

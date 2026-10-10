@@ -71,6 +71,7 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       expect(await editor(f.page).getByTestId("ortho-strategy-saved").count()).toBe(0);
       await begin(f.page).click();
       expect(await row(f.page).count()).toBe(1); expect(await row(f.page).locator("select").inputValue()).toBe("");
+      expect(await row(f.page).getByTestId("ortho-selected-problem").textContent()).toBe("لم تُختر مشكلة لهذا السطر بعد.");
       for (const control of [objective(f.page), strategy(f.page), rationale(f.page), reason(f.page)]) expect(await control.inputValue()).toBe("");
       await assertStableTextNames(f.page);
       expect(await row(f.page).getByRole("checkbox").isChecked()).toBe(false); expect(await save(f.page).isDisabled()).toBe(true);
@@ -85,9 +86,35 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       expect(await objective(f.page).inputValue()).toBe("هدف حر بلا اختيار مشكلة");
       expect(await strategy(f.page).inputValue()).toBe("قرار حر لا تولّده القائمة");
       await problemSearch.fill(""); await itemSearch.fill(""); await fillDraft(f.page);
+      const problem = row(f.page).getByRole("listbox", { name: "المشكلة", exact: true });
+      const detail = row(f.page).getByTestId("ortho-selected-problem");
+      expect(await problem.getAttribute("aria-describedby")).toBe(await detail.getAttribute("id"));
+      const values = await Promise.all([objective(f.page), strategy(f.page), rationale(f.page), reason(f.page)].map(control => control.inputValue()));
+      // Native keyboard choice exposes the complete raw unknown status next to
+      // the finite-width listbox; no title-only or inferred-normal fallback.
+      await problem.focus(); await problem.press("End");
+      await expect.poll(() => problem.inputValue()).toBe(String(ids.otherProblemId));
+      const selectedText = `المشكلة المختارة: ${text.otherProblem} · الحالة الحالية: unknown_synthetic_status`;
+      expect(await detail.textContent()).toBe(selectedText);
+      await problemSearch.fill("لا يوجد خيار مطابق");
+      expect(await problem.inputValue()).toBe(String(ids.otherProblemId)); expect(await detail.textContent()).toBe(selectedText);
+      expect(await Promise.all([objective(f.page), strategy(f.page), rationale(f.page), reason(f.page)].map(control => control.inputValue()))).toEqual(values);
+      await problemSearch.fill("");
       await assertStrategyControlBounds(f.page, width, "blank-explicit-draft", [problemSearch, itemSearch,
-        row(f.page).locator("select"), objective(f.page), strategy(f.page), rationale(f.page),
-        row(f.page).getByRole("checkbox"), reason(f.page), save(f.page), cancel(f.page)]);
+        problem, objective(f.page), strategy(f.page), rationale(f.page),
+        row(f.page).getByRole("checkbox"), reason(f.page), save(f.page), cancel(f.page), detail]);
+      const fullText = await detail.evaluate(element => {
+        const range = document.createRange(); range.selectNodeContents(element);
+        const parent = element.getBoundingClientRect();
+        return { box: { left: parent.left, right: parent.right, top: parent.top, bottom: parent.bottom },
+          lines: [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0)
+            .map(rect => ({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom })) };
+      });
+      expect(fullText.lines.length).toBeGreaterThan(0);
+      for (const line of fullText.lines) {
+        expect(line.left).toBeGreaterThanOrEqual(fullText.box.left - 1); expect(line.right).toBeLessThanOrEqual(fullText.box.right + 1);
+        expect(line.top).toBeGreaterThanOrEqual(fullText.box.top - 1); expect(line.bottom).toBeLessThanOrEqual(fullText.box.bottom + 1);
+      }
       expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);
     });
   });
