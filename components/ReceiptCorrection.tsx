@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 import { CORRECTION_REASON_MIN } from "@/lib/invoice-correction";
+import { useMoneyAttempt } from "./useMoneyAttempt";
+import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
 
 /**
  * (RC-1) تصحيح سند قبضٍ أُدخل خطأً — للمدير.
@@ -18,8 +20,14 @@ interface ReceiptLike {
 interface InvoiceOption { id: number; invoiceNumber: string; baseCurrency: Currency; status: string }
 interface PlanOption { id: number; title: string; baseCurrency?: Currency; status: string }
 
-function newKey(): string {
-  try { return `rc-${crypto.randomUUID()}`; } catch { return `rc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
+/** A refreshed ledger may already show zero remaining after a lost response.
+ * The pending correction must still be reachable for its original-key replay. */
+export function ReceiptCorrectionTrigger({ paymentId, remainingMinor, onClick, className }: {
+  paymentId: number; remainingMinor: number; onClick: () => void; className: string;
+}) {
+  const money = useMoneyAttempt(`correction:${paymentId}`);
+  if (remainingMinor <= 0 && !money.attempt) return null;
+  return <button type="button" onClick={onClick} className={className}>تصحيح السند</button>;
 }
 
 export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, openingCurrencies, onDone, onCancel }: {
@@ -40,8 +48,7 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /* مفتاح إعادةٍ واحد لكل فتحٍ للنافذة: انقطاع الاتصال بعد النجاح ثم إعادة النقر لا يُصدر سندين. */
-  const [key] = useState(newKey);
+  const money = useMoneyAttempt(`correction:${receipt.id}`);
 
   const amountMinor = parseAmount(amount, currency);
   const validAmount = amountMinor !== null && amountMinor > 0;
@@ -56,29 +63,27 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
     return {};
   };
 
-  const submit = async () => {
-    if (!ready) return;
+  const submit = async (retry = false) => {
+    if (busy || (!retry && !ready)) return;
     setBusy(true);
     setError(null);
     try {
       const body = mode === "void"
         ? { mode, reason }
         : { mode, reason, amount, currency, method, ...targetBody() };
-      const response = await fetch(`/api/payments/${receipt.id}/correct`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-        body: JSON.stringify(body),
+      const result = await money.run(retry ? undefined : {
+        url: `/api/payments/${receipt.id}/correct`, body: JSON.stringify(body), operation: mode,
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { setError(payload?.message ?? "تعذّر تصحيح السند."); return; }
-      const reversal = payload?.reversal as { receiptNumber: string } | null;
-      const replacement = payload?.replacement as { id: number; receiptNumber: string } | null;
+      if (!result || result.kind === "busy") return;
+      if (result.kind !== "confirmed") { setError(result.message); return; }
+      const { reversal, replacement } = result.acknowledgment;
       onDone(
         replacement
           ? `عُكس ${receipt.receiptNumber} (${reversal?.receiptNumber ?? "سند ردّ"}) وصدر بدله ${replacement.receiptNumber}.`
           : `أُبطل ${receipt.receiptNumber} بسند الردّ ${reversal?.receiptNumber ?? ""}.`,
         replacement?.id ?? null,
       );
+      money.consume(result.attempt);
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
@@ -90,6 +95,8 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
 
   return (
     <div role="group" aria-label={`تصحيح ${receipt.receiptNumber}`} className="mt-2 w-full rounded-xl border border-amber-300 bg-amber-50 p-3">
+      <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
+      <fieldset disabled={busy || money.attempt !== null} className="min-w-0">
       <p className="mb-2 text-xs font-bold text-amber-900">
         السند لا يُمسح: يُعكس {formatMoney(remainingMinor, receipt.currency)} منه بسند ردٍّ ظاهرٍ بسببه، ثم يُصدر السند الصحيح
         بدله — والدرج في الوردية المفتوحة يتحرك بالفرق فقط.
@@ -151,9 +158,10 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
       <textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={300}
         placeholder="سبب التصحيح — مثل: كُتب 50,000 والمقبوض 5,000" aria-label="سبب تصحيح السند"
         className="mt-2 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" rows={2} />
+      </fieldset>
       {error ? <p role="alert" className="mt-1 text-xs font-bold text-red-700">{error}</p> : null}
       <div className="mt-2 flex gap-2">
-        <button type="button" onClick={submit} disabled={!ready}
+        <button type="button" onClick={() => void submit()} disabled={!ready || money.attempt !== null}
           className="flex-1 rounded-lg bg-amber-600 py-2 text-xs font-extrabold text-white disabled:opacity-50">
           {mode === "void" ? "أبطل السند" : "صحّح السند"}
         </button>

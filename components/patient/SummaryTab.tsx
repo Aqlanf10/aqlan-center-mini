@@ -217,7 +217,7 @@ export function SummaryTab({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2" data-testid="summary-current-work">
         {/* الموعد القادم */}
         <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
@@ -467,3 +467,5 @@ export function SummaryTab({
     </div>
   );
 }
+
+
