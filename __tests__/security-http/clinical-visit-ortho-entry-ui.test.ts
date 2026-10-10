@@ -224,7 +224,10 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       expect(f.strategyReads).toEqual(["/api/ortho/98314/strategy"]);
       expect(await reference.getByRole("button").allTextContents()).toEqual(["تحديث سجل الخطة"]);
       expect(await reference.getByTestId("ortho-strategy-reference").getByRole("alert").count()).toBe(0);
-      expect(await reference.getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
+      const referenceUrl = new URL((await reference.getByRole("link").getAttribute("href"))!, baseUrl);
+      expect(referenceUrl.pathname).toBe(`/patients/${patientId}`);
+      expect(Object.fromEntries(referenceUrl.searchParams)).toEqual({ patientId: String(patientId), orthoCaseId: "98314",
+        pillar: "wires", tab: "treatment", sub: "ortho" });
       expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
       await reference.locator(":scope > summary").click();
       expect(await done(f.page).inputValue()).toBe("توثيق جلسة اليوم التجريبية");

@@ -61,7 +61,7 @@ vi.mock("react", async (original) => {
 
 type Element = ReactElement<Record<string, unknown>>;
 type Guard = () => boolean;
-const ACTION = "عرض قسم التقويم للمريض";
+const ACTION = "فتح حالة التقويم المحددة";
 const UNCERTAIN_WARNING = "تعذّر تأكيد نتيجة الحفظ. قد يكون الطلب نُفّذ. الكتابة متوقفة حتى إعادة تحميل السجل ومراجعته. المسودة غير المؤكدة لا تُرسل مجددًا؛ ألغها بعد المراجعة قبل بدء طلب جديد. لن يُعاد إرسال الطلب تلقائيًا.";
 const REVIEW_NOTICE = "أُعيد تحميل السجل للمراجعة فقط؛ لا يعني ذلك تأكيد نتيجة الطلب السابق. المسودة غير المؤكدة لا تُرسل مجددًا؛ ألغها بعد المراجعة وأعد فتحها لبدء طلب جديد. لم يُعد إرسال أي طلب.";
 const UNCERTAIN_LEAVE = "نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟";
@@ -244,7 +244,7 @@ beforeEach(() => {
 afterEach(() => { unmount(); vi.unstubAllGlobals(); });
 
 describe("PatientCases orthodontic navigation containment", () => {
-  it("offers the exact patient-level action only on canonical, bridged and historical linked rows", async () => {
+  it("offers the exact case-scoped action only on canonical, bridged and historical linked rows", async () => {
     await mount();
     expect(shortcuts().map((node) => node.props["data-testid"])).toEqual([
       "cases-open-ortho-71", "cases-open-ortho-72", "cases-open-ortho-73",

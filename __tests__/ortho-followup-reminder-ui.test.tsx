@@ -297,8 +297,15 @@ describe("orthodontic board follow-up message", () => {
       expect(text(visible)).toContain(service);
       expect(text(visible)).not.toContain(otherService);
       const hrefs = elements(visible).map((node) => node.props.href).filter(Boolean);
-      expect(hrefs).toContain(`/patients/${row.patientId}?tab=treatment`);
-      expect(hrefs).not.toContain(`/patients/${otherRow.patientId}?tab=treatment`);
+      const patientLinks = hrefs.filter((href): href is string => typeof href === "string" && href.startsWith("/patients/"))
+        .map(href => new URL(href, "http://synthetic.test"));
+      expect(patientLinks.every(url => url.pathname === `/patients/${row.patientId}`)).toBe(true);
+      const treatmentLinks = patientLinks.filter(url => url.searchParams.get("tab") === "treatment");
+      expect(treatmentLinks).toHaveLength(1);
+      expect(Object.fromEntries(treatmentLinks[0].searchParams)).toEqual({ patientId: String(row.patientId),
+        orthoCaseId: String(row.caseId), pillar: "wires", tab: "treatment", sub: "ortho" });
+      expect(patientLinks.some(url => url.pathname === `/patients/${otherRow.patientId}`
+        || url.searchParams.get("orthoCaseId") === String(otherRow.caseId))).toBe(false);
       expect(hrefs).toContain(`/appointments?date=${date}`);
       expect(hrefs).not.toContain(`/appointments?date=${otherDate}`);
       const whatsapp = links(visible); expect(whatsapp).toHaveLength(1);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
+import { financeAccessFor } from "@/lib/finance-permissions";
 import { canViewMoney } from "@/lib/roles";
 import { listTreatmentFinancialReferences } from "@/lib/treatment-financial-context-db";
 
@@ -10,6 +11,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canViewMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  if ((session.role === "cashier" || session.role === "accountant")
+    && !financeAccessFor(session.role, session.financeAccess).viewPatientLedger) {
+    return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حساب هذا المريض." }, { status: 403 });
+  }
   const patientId = Number((await context.params).id);
   if (!Number.isSafeInteger(patientId) || patientId <= 0) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   try {

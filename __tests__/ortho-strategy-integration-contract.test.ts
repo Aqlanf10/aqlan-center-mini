@@ -13,7 +13,8 @@ const boundaries = [
   ["Ortho owner", ortho, "function makeOwner(", "function sameDraftValue", "b8ae3da315cde570ccc2a3b4c463dfb644692725f781501bcecdd922664c157e"],
   ["Ortho retirement", ortho, "function retireOwner(", "function sessionScope", "256983951910e914e0084b53d4b1fd25a9b9efd006d5d0c8d209e97a4f3f12d1"],
   ["Ortho mutation admission", ortho, "function beginMutation(", "function endMutation", "15c0f2e29b6a017dc3f0b40c03398011f7ddad2f28fbbbf763f3758720d5b056"],
-  ["Ortho tab navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "f1440e87bd7b03908ce5d7718517c54682281e9b2d142b2d46768af4d37103c4"],
+  // Reviewed canonical-context wrapper from integrated navigation; all other5ae authority pins remain unchanged.
+  ["Ortho scoped navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "635ac672fa20149d15e44962d47e083bda130a617b4fc87caab1c3cf9280a79d"],
 ] as const;
 describe("strategy integration preserves released5ae authority boundaries", () => {
   it.each(boundaries)("keeps %s byte-identical", (_label, source, start, end, hash) => {
@@ -21,6 +22,19 @@ describe("strategy integration preserves released5ae authority boundaries", () =
     const from = source.indexOf(start), to = source.indexOf(end, from);
     expect(to).toBeGreaterThan(from);
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(hash);
+  });
+  it("forwards exact context while retaining current-owner, child, pending and uncertain navigation guards", () => {
+    const wrapper = ortho.slice(ortho.indexOf("export function PatientOrtho("), ortho.indexOf("function PatientOrthoWorkspace("));
+    expect(wrapper).toContain("context?: ClinicalNavigationContext");
+    expect(wrapper).toContain("onContextChange?: (context: ClinicalNavigationContext) => unknown");
+    expect(wrapper).toContain("context={context} onContextChange={onContextChange}");
+    expect(wrapper).toContain("if (!owner.active) return false;");
+    expect(wrapper).toContain("for (const guard of childGuards.current.values()) if (!guard()) return false;");
+    expect(wrapper).toContain("if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;");
+    expect(wrapper).toContain("if (drafts.some((draft) => draft.uncertain))");
+    expect(wrapper).toContain("onNavigationGuardChange?.(canLeave)");
+    expect(wrapper).toContain("if (childGuards.current.get(key) === guard) childGuards.current.delete(key)");
+    expect(wrapper).toContain("owner.activate(); return () => owner.retire();");
   });
   it("uses the current prescription pillar and Ortho lifetime without a new top-level tab", () => {
     expect(ortho.match(/<OrthoStrategyPanel /g)).toHaveLength(1);

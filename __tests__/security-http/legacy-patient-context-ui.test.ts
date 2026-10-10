@@ -118,7 +118,10 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
       expect(await panel.innerText()).toContain("المرحلة العاملة");
       expect(await panel.innerText()).not.toMatch(/350\.00|35,000|المدفوع|المتبقي.*350/);
       const link = panel.getByRole("link", { name: "متابعة الحالة من ملف التقويم" });
-      expect(await link.getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
+      const referenceUrl = new URL((await link.getAttribute("href"))!, baseUrl);
+      expect(referenceUrl.pathname).toBe(`/patients/${patientId}`);
+      expect(Object.fromEntries(referenceUrl.searchParams)).toEqual({ patientId: String(patientId), orthoCaseId: String(caseId),
+        pillar: "wires", tab: "treatment", sub: "ortho" });
       await f.page.getByText("لا توجد خطط علاج جديدة مسجّلة هنا", { exact: false }).waitFor();
       await fits(f.page);
       await screenshotFromTop(f.page, `.settings-ui-artifacts/legacy-patient-plan-${width}.png`);
