@@ -11,6 +11,7 @@ import {
   stubPostgresEnv,
 } from "./_setup";
 import {
+  assertExpectedMigrationChain,
   assertPostgres18VersionNum,
   initializeGeneratedRuntimeSchema,
   OPEN_FINDINGS_MANIFEST_PATH,
@@ -19,6 +20,8 @@ import {
   withGeneratedDatabasePair,
 } from "../../scripts/verify-schema-ownership";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
+import { assertReviewedMigrationChain, expectedMigrationRegistry, LATEST_REVIEWED_MIGRATION_VERSION,
+  REVIEWED_MIGRATION_FILENAMES } from "./_reviewed-migration-chain";
 import { candidateOpenFindingsManifest } from "../../lib/schema-ownership-open-findings";
 import committedContract from "../../schema/current-schema-contract.pg18.json";
 import { assertPristineDisclosureDatabase } from "../../scripts/generate-preflight-disclosure";
@@ -252,6 +255,46 @@ async function businessSequenceState(url: string): Promise<Record<string, number
   }
 }
 
+describe("ownership verifier reviewed migration source contract", () => {
+  it("accepts only the complete reviewed chain with exact filenames, versions, names and SQL checksums", async () => {
+    const files = await loadMigrationFiles();
+    expect(files.map((file) => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);
+    expect(() => assertExpectedMigrationChain(files)).not.toThrow();
+
+    for (let index = 0; index < files.length; index += 1) {
+      const missing = [...files]; missing.splice(index, 1);
+      expect(() => assertExpectedMigrationChain(missing)).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+      const duplicate = [...files]; duplicate.splice(index, 0, duplicate[index]);
+      expect(() => assertExpectedMigrationChain(duplicate)).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+      if (index > 0) {
+        const reordered = [...files];
+        [reordered[index - 1], reordered[index]] = [reordered[index], reordered[index - 1]];
+        expect(() => assertExpectedMigrationChain(reordered)).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+      }
+      for (const patch of [
+        { filename: `${files[index].version}_unreviewed.sql` }, { version: "9999" }, { name: "unreviewed" },
+      ]) {
+        const renamed = [...files]; renamed[index] = { ...renamed[index], ...patch };
+        expect(() => assertExpectedMigrationChain(renamed)).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+      }
+      for (const patch of [{ checksum: "0".repeat(64) }, { sql: `${files[index].sql}\n-- changed bytes\n` }]) {
+        const changed = [...files]; changed[index] = { ...changed[index], ...patch };
+        expect(() => assertExpectedMigrationChain(changed)).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHECKSUM/);
+      }
+    }
+
+    for (let reserved = 44; reserved <= 50; reserved += 1) {
+      const version = String(reserved).padStart(4, "0");
+      const invented = { ...files.at(-1)!, version, name: "unreviewed", filename: `${version}_unreviewed.sql` };
+      expect(() => assertExpectedMigrationChain([...files.slice(0, -1), invented, files.at(-1)!]))
+        .toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+    }
+    expect(() => assertExpectedMigrationChain([
+      ...files, { ...files.at(-1)!, version: "0052", name: "unreviewed", filename: "0052_unreviewed.sql" },
+    ])).toThrow(/SCHEMA_OWNERSHIP_MIGRATION_CHAIN/);
+  });
+});
+
 let ownershipEnvironmentValidated = false;
 
 describe("PG18 schema ownership characterization", () => {
@@ -287,21 +330,27 @@ describe("PG18 schema ownership characterization", () => {
     const report = await runSchemaOwnershipCharacterization(process.env);
 
     expect(report.postgres.major).toBe(18);
-    expect(report.migrationProvenance.map((item) => item.version)).toEqual([
-      "0001", "0002", "0003", "0004", "0005", "0006",
-      "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
-    ]);
+    const files = await loadMigrationFiles();
+    assertReviewedMigrationChain(files, LATEST_REVIEWED_MIGRATION_VERSION);
+    expect(files.map((file) => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);
+    expect(report.migrationProvenance).toEqual(files.map((file) => ({
+      version: file.version, name: file.name, filename: file.filename,
+      checksum: file.checksum, utf8Bytes: Buffer.byteLength(file.sql, "utf8"),
+    })));
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(43);
-    expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
+    expect(report.migrationRegistry.rows).toEqual(expectedMigrationRegistry(files));
 
     const migrationApplicationTables = report.migrationCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
     const runtimeApplicationTables = report.runtimeCatalog.tables
       .filter((entry) => entry.table !== "schema_migrations");
 
-    expect(migrationApplicationTables).toHaveLength(88);
-    expect(runtimeApplicationTables).toHaveLength(88);
+    for (const tables of [migrationApplicationTables, runtimeApplicationTables]) {
+      expect(tables.filter((entry) => entry.table === "ortho_strategy_revisions").map((entry) => entry.table))
+        .toEqual(["ortho_strategy_revisions"]);
+      // 0051 adds exactly this table; the prior reviewed application inventory stays at 88.
+      expect(tables.filter((entry) => entry.table !== "ortho_strategy_revisions")).toHaveLength(88);
+    }
     expect(report.runtimeCatalog.registry.present).toBe(false);
 
     expect(report.comparison.characterizationOk).toBe(true);

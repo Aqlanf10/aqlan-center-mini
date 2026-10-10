@@ -198,8 +198,8 @@ describe("strict stored revision admission before projection", () => {
     expect(projected.value).not.toHaveProperty("performed");
   });
   it("keeps original identity separate from current canonical ownership after an explicit merge", () => {
-    const saved = revision(); const clinicalBytes = JSON.stringify(saved.rows);
-    const moved = { ...saved, patientId: 9 };
+    const saved = revision(); const recordedBytes = JSON.stringify(saved);
+    const moved = { ...saved, patientId: 9 }; const movedBytes = JSON.stringify(moved);
     const current = context(); current.patientId = 9; current.orthoCase.patientId = 9;
     current.clinicalCase!.patientId = 9;
     current.problems = current.problems.map(row => ({ ...row, patientId: 9 }));
@@ -209,11 +209,15 @@ describe("strict stored revision admission before projection", () => {
     const projected = projectStrategyRevision(decoded.value, current);
     expect(projected.ok).toBe(true); if (!projected.ok) return;
     expect(projected.value).toMatchObject({ patientId: 9, recordedPatientId: 1, createdBy: saved.createdBy, reason: saved.reason });
-    expect(JSON.stringify(decoded.value.rows)).toBe(clinicalBytes);
+    // Decoder key insertion order is not clinical data. Every value and array
+    // order must match; neither the original record nor its moved view may change.
+    expect(decoded.value).toStrictEqual(moved);
     expect(errorCode(decodeStrategyRevision(moved, scope))).toBe("invalid_stored_revision");
     expect(errorCode(projectStrategyRevision(decoded.value, context()))).toBe("revision_scope_mismatch");
     current.clinicalCase!.patientId = 1;
     expect(errorCode(projectStrategyRevision(decoded.value, current))).toBe("scope_mismatch");
+    expect(JSON.stringify(saved)).toBe(recordedBytes);
+    expect(JSON.stringify(moved)).toBe(movedBytes);
   });
   it.each([undefined, null, 0, -1, "1"])("rejects invalid recording provenance %s without authorizing through it", recordedPatientId => {
     expect(errorCode(decodeStrategyRevision({ ...revision(), recordedPatientId }, scope))).toBe("invalid_stored_revision");

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PERIODONTAL_SQL } from "../lib/periodontal-schema";
+import { REVIEWED_MIGRATION_FILENAMES } from "./postgres/_reviewed-migration-chain";
 
 describe("unregistered periodontal SQL source contract (SQL never executed)", () => {
   it("adds only two measurement tables, without touching existing rows or changing ownership", () => {
@@ -11,7 +12,8 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   });
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
-    expect(readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name))).toHaveLength(43);
+    expect(readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name)).sort())
+      .toEqual(REVIEWED_MIGRATION_FILENAMES);
     expect(readdirSync("migrations").some((name) => name.includes("periodontal"))).toBe(false);
     expect(readdirSync("app/api/patients/[id]")).not.toContain("periodontal");
     expect(readFileSync("components/DentalChart.tsx", "utf8")).toContain("recordingAvailable={false}");
