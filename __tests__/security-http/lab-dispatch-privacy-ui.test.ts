@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { matchesPrintPdfWord, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
+import { matchesPrintPdfWord } from "../helpers/print-pdf-glyphs";
+import { assertLabDispatchPdfFields, type LabDispatchPdfPage } from "../helpers/lab-dispatch-pdf-fields";
 import { ageFromBirthYear, ageText } from "@/lib/patient";
 
 // Actual built patient/lab/print routes and real clipboard/PDF output. No mocked
@@ -166,7 +167,7 @@ async function inspectPdf(page: Page, filename: string, blank: boolean) {
   const metadata = execFileSync("pdfinfo", ["-meta", path], { encoding: "utf8", maxBuffer: 1024 * 1024 });
   const urls = execFileSync("pdfinfo", ["-url", path], { encoding: "utf8", maxBuffer: 1024 * 1024 });
   const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 6 * 1024 * 1024 });
-  const geometry: PrintPdfPage[] = await page.evaluate(raw => {
+  const geometry: LabDispatchPdfPage[] = await page.evaluate(raw => {
     const document = new DOMParser().parseFromString(raw, "application/xml");
     if (document.querySelector("parsererror")) throw new Error("Invalid PDF bbox output");
     return Array.from(document.getElementsByTagName("page")).map(paper => ({
@@ -174,6 +175,14 @@ async function inspectPdf(page: Page, filename: string, blank: boolean) {
       words: Array.from(paper.getElementsByTagName("word")).map(word => ({ text: word.textContent ?? "",
         xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")),
         yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")) })),
+      blocks: Array.from(paper.getElementsByTagName("block")).map(block => ({
+        xMin: Number(block.getAttribute("xMin")), xMax: Number(block.getAttribute("xMax")),
+        yMin: Number(block.getAttribute("yMin")), yMax: Number(block.getAttribute("yMax")),
+        lines: Array.from(block.getElementsByTagName("line")).map(line => Array.from(line.getElementsByTagName("word")).map(word => ({
+          text: word.textContent ?? "", xMin: Number(word.getAttribute("xMin")), xMax: Number(word.getAttribute("xMax")),
+          yMin: Number(word.getAttribute("yMin")), yMax: Number(word.getAttribute("yMax")),
+        }))),
+      })),
     }));
   }, xml);
   // pdftotext processes every page, not just the first screenshot/page.
@@ -200,7 +209,7 @@ async function inspectPdf(page: Page, filename: string, blank: boolean) {
     }));
     expect(warningVisible, "Technical review warning must be visible in actual PDF glyph geometry").toBe(true);
   }
-  return { text, pages };
+  return { text, pages, geometry };
 }
 
 async function assertActualQr(image: Locator, reference: string, width: number, color: string) {
@@ -256,7 +265,7 @@ function emitEvidence(members: Member[], facts: unknown) {
   });
   expect(total).toBeLessThanOrEqual(10 * 1024 * 1024);
   const prefix = "SYNTHETIC_LAB_DISPATCH_PRIVACY_V1";
-  const sources = ["__tests__/security-http/lab-dispatch-privacy-ui.test.ts", "lib/lab.ts", "components/LabPrescriptionModal.tsx", "app/print/lab/[id]/page.tsx"]
+  const sources = ["__tests__/security-http/lab-dispatch-privacy-ui.test.ts", "lib/lab.ts", "components/LabPrescriptionModal.tsx", "app/print/lab/[id]/page.tsx", "__tests__/helpers/lab-dispatch-pdf-fields.ts"]
     .map(path => ({ path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }));
   for (const { base64, metadata } of prepared) {
     console.log(`${prefix} BEGIN ${JSON.stringify(metadata)}`);
@@ -268,7 +277,7 @@ function emitEvidence(members: Member[], facts: unknown) {
 
 function emitDiagnosticPdf(member: DiagnosticPdf) {
   // Only native, synthetic PDFs whose privacy inspection already passed, but
-  // whose unchanged required-field assertion failed. Never acceptance evidence.
+  // whose required-field assertion failed. Never acceptance evidence.
   expect(["patient", "lab"]).toContain(member.entry);
   expect(member.filename).toBe(`${member.entry}-dispatch.pdf`);
   expect(Buffer.isBuffer(member.bytes)).toBe(true);
@@ -290,14 +299,14 @@ function emitDiagnosticPdf(member: DiagnosticPdf) {
   expect(member.expectedFields.service).toBe(serviceName);
   expect(member.expectedFields.lab).toBe(labs[member.entry === "patient" ? 0 : 1]);
   expect(member.expectedFields.shade).toBe("A2"); expect(member.expectedFields.stumpShade).toBe("ND2");
-  const sources = ["__tests__/security-http/lab-dispatch-privacy-ui.test.ts", "lib/lab.ts", "components/LabPrescriptionModal.tsx", "app/print/lab/[id]/page.tsx"]
+  const sources = ["__tests__/security-http/lab-dispatch-privacy-ui.test.ts", "lib/lab.ts", "components/LabPrescriptionModal.tsx", "app/print/lab/[id]/page.tsx", "__tests__/helpers/lab-dispatch-pdf-fields.ts"]
     .map(path => ({ path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }));
   const base64 = member.bytes.toString("base64");
   const metadata = { file: `diagnostic-${member.filename}`, mime: "application/pdf", bytes: member.bytes.length,
     sha256: createHash("sha256").update(member.bytes).digest("hex"), chunks: Math.ceil(base64.length / 4096),
     runId, runAttempt, checkoutSha, headSha, sources, synthetic: true, diagnosticOnly: true, acceptance: false,
     scope: "lab-dispatch-required-field-failure", entry: member.entry, pages: member.pages,
-    failureBoundary: "unchanged-required-field-contiguity-assertion", privacyInspectionCompleted: true,
+    failureBoundary: "required-field-text-and-geometry-assertion", privacyInspectionCompleted: true,
     contextClosed: true, isolationAfterClose: true, snapshotUnchanged: true, expectedFields: member.expectedFields };
   const prefix = "SYNTHETIC_LAB_DISPATCH_DIAGNOSTIC_PDF_V1";
   console.log(`${prefix} BEGIN ${JSON.stringify(metadata)}`);
@@ -442,7 +451,8 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
         const pdf = await printPage.pdf({ path: `${directory}/${filename}`, format: "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
         const inspected = await inspectPdf(printPage, filename, false);
         try {
-          for (const expected of [reference, serviceName, labs[orderIndex], "A2", "ND2"]) expect(compact(inspected.text)).toContain(compact(expected));
+          for (const expected of [reference, "A2", "ND2"]) expect(compact(inspected.text)).toContain(compact(expected));
+          assertLabDispatchPdfFields(inspected.geometry, { service: serviceName, lab: labs[orderIndex], labPhone: "777123456" });
         } catch (failure) {
           diagnosticPdf = { entry, filename, bytes: pdf, pages: inspected.pages, failure,
             expectedFields: { reference, service: serviceName, lab: labs[orderIndex], shade: "A2", stumpShade: "ND2" } };
