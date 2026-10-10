@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DbClient } from "../../lib/db";
 import { fullBackupBlocks } from "../../lib/fullBackup";
 import { loadMigrationFiles as readMigrationFiles, defaultMigrationsDir } from "../../lib/migration-files";
-import { loadMigrationFiles, migrate, migrationStatus } from "../../lib/migrations";
+import { COORDINATED_MIGRATION_VERSIONS, loadMigrationFiles, migrate, migrationStatus } from "../../lib/migrations";
 import { createPeriodontalDomain } from "../../lib/periodontal-db";
 import { PERIODONTAL_SQL } from "../../lib/periodontal-schema";
 import { emptyPeriodontalSites, parsePeriodontalCommand, type PeriodontalCommand } from "../../lib/periodontal";
@@ -132,18 +132,19 @@ beforeAll(async () => {
   const shipped = await readMigrationFiles();
   shippedFiles = shipped;
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
-  // Only exact reviewed 40/41/42/43 baselines are accepted; coverage0043 selects test-only0044.
+  // Only exact reviewed baselines are accepted: 0001–0040, 0041–0043 بعد دمج الفواتير، أو 0047 (أصل تصحيح السيفالو)
+  // — والمرشّح يأخذ الفجوة المعلنة 0044 في الاختبار.
   shippedCount = shipped.length;
-  expect(shipped.map((file) => file.version)).toEqual(Array.from({ length: shippedCount }, (_, index) => String(index + 1).padStart(4, "0")));
+  expect(shipped.map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
   await copyFile(candidatePath, path.join(selection.directory, `${candidateVersion}_periodontal_candidate.sql`));
   candidateFiles = await readMigrationFiles(selection.directory);
-  expect(candidateFiles.slice(0, shippedCount)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
+  // المرشّح قد يقع في منتصف السلسلة (الفجوة المعلنة 0044 بين 0043 و0047) — فالمقارنة بالمجموعة بعد استبعاده لا بالموضع.
+  expect(candidateFiles.filter((file) => file.version !== candidateVersion)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
   expect(candidateFiles).toHaveLength(shippedCount + 1);
-  expect(candidateFiles[shippedCount].version).toBe(candidateVersion);
-  expect(candidateFiles[shippedCount].sql).toBe(PERIODONTAL_SQL);
+  expect(candidateFiles.find((file) => file.version === candidateVersion)!.sql).toBe(PERIODONTAL_SQL);
 
   fixture = await openPeriodontalFixture(originalEnvironment);
   const { rows: patients } = await pool().query<{ id: number }>(`INSERT INTO patients (patient_number,full_name)
@@ -227,7 +228,7 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect(await migrate(pool(), { apply: true, files: candidateFiles })).toMatchObject({ appliedVersions: [], alreadyUpToDate: true });
     expect((await pool().query("SELECT * FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
     expect((await migrationStatus(pool(), candidateFiles)).consistent).toBe(true);
-    expect((await readMigrationFiles()).map((file) => file.version)).toHaveLength(shippedCount);
+    expect((await readMigrationFiles()).map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
     expect(await readMigrationFiles()).toEqual(shippedFiles); // Exact original SQL and checksums remain unchanged.
   });
   it("preserves exact IDs, patients, teeth, predecessors, authors, request fingerprints, values and audits", async () => {

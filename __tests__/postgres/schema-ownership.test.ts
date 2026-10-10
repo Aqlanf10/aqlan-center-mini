@@ -18,7 +18,7 @@ import {
   validateOwnershipHarnessEnvironment,
   withGeneratedDatabasePair,
 } from "../../scripts/verify-schema-ownership";
-import { loadMigrationFiles, migrate } from "../../lib/migrations";
+import { COORDINATED_MIGRATION_VERSIONS, loadMigrationFiles, migrate } from "../../lib/migrations";
 import { candidateOpenFindingsManifest } from "../../lib/schema-ownership-open-findings";
 import committedContract from "../../schema/current-schema-contract.pg18.json";
 import { assertPristineDisclosureDatabase } from "../../scripts/generate-preflight-disclosure";
@@ -287,12 +287,9 @@ describe("PG18 schema ownership characterization", () => {
     const report = await runSchemaOwnershipCharacterization(process.env);
 
     expect(report.postgres.major).toBe(18);
-    expect(report.migrationProvenance.map((item) => item.version)).toEqual([
-      "0001", "0002", "0003", "0004", "0005", "0006",
-      "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
-    ]);
+    expect(report.migrationProvenance.map((item) => item.version)).toEqual([...COORDINATED_MIGRATION_VERSIONS]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(43);
+    expect(report.migrationRegistry.rows).toHaveLength(COORDINATED_MIGRATION_VERSIONS.length);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables

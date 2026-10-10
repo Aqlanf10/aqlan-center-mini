@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -74,6 +75,8 @@ interface AnalysisProp {
   completedBy: string | null;
   completedAt: string | null;
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
+  correctsAnalysisId?: number | null;
+  correctedBy?: number[];
 }
 
 interface LandmarkProp {
@@ -502,7 +505,7 @@ export function CephTracer({
   };
 
   const duplicate = async () => {
-    if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) return;
+    if (!window.confirm("فتح مسودة تصحيح عن هذه الدراسة المعتمدة؟ الدراسة الأصلية تبقى كما اعتُمدت بقياساتها وتاريخها.")) return;
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
@@ -768,10 +771,31 @@ export function CephTracer({
             onClick={() => void duplicate()}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
-            نسخة تصحيح جديدة
+            تصحيح هذه الدراسة
           </button>
         )}
       </div>
+
+      {/* (ORTHO-ID-2) أصل التصحيح وتصحيحاته: يُعرضان معًا ولا يُخفى التاريخ السابق. */}
+      {(analysis.correctsAnalysisId != null || (analysis.correctedBy?.length ?? 0) > 0) && (
+        <div className="space-y-1 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-testid="ceph-lineage">
+          {analysis.correctsAnalysisId != null && (
+            <p>
+              {completed ? "هذه نسخة" : "هذه مسودة"} تصحيح للدراسة المعتمدة{" "}
+              <Link href={`/ceph/${analysis.correctsAnalysisId}`} className="font-extrabold underline">#{analysis.correctsAnalysisId}</Link>
+              {" "}— الأصل يبقى كما اعتُمد بقياساته وتاريخه.
+            </p>
+          )}
+          {(analysis.correctedBy?.length ?? 0) > 0 && (
+            <p>
+              لهذه الدراسة {analysis.correctedBy!.length === 1 ? "تصحيح" : "تصحيحات"}:{" "}
+              {analysis.correctedBy!.map((id, index) => (
+                <span key={id}>{index > 0 ? "، " : ""}<Link href={`/ceph/${id}`} className="font-extrabold underline">#{id}</Link></span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* شريط مسار العمل السيفالومتري كمنصة WebCeph (WebCeph 3-Stage Stepper) */}
       <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs">
@@ -1826,7 +1850,7 @@ export function CephTracer({
                     {diagnosis.softTissue && <p><b className="text-slate-500">أنسجة رخوة: </b>{diagnosis.softTissue}</p>}
                     <p><b className="text-slate-500">الاستنتاج: </b>{diagnosis.finalDx}</p>
                     {diagnosis.note && <p><b className="text-slate-500">ملاحظات: </b>{diagnosis.note}</p>}
-                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar")}</p>
+                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}</p>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
@@ -1894,7 +1918,7 @@ export function CephTracer({
             )}
             {completed && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar")}
+                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}
                 {analysis.note ? ` — ${analysis.note}` : ""}
               </div>
             )}
