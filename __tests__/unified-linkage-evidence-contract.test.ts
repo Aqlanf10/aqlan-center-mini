@@ -13,8 +13,8 @@ function step(name: string): string {
 const complete = new Set(linkageEvidence.flatMap(suite => [suite.marker, ...suite.files]));
 
 describe("synthetic linkage evidence has fail-closed bounded retention", () => {
-  it("requires both started markers and all eight PNGs after successful HTTP", () => {
-    expect(missingLinkageEvidence("success", new Set())).toHaveLength(10);
+  it("requires all three started markers and all ten PNGs after successful HTTP", () => {
+    expect(missingLinkageEvidence("success", new Set())).toHaveLength(13);
     expect(missingLinkageEvidence("success", complete)).toEqual([]);
     for (const path of complete) {
       const partial = new Set(complete); partial.delete(path);
@@ -51,7 +51,7 @@ describe("synthetic linkage evidence has fail-closed bounded retention", () => {
     expect(verify).toContain("LINKAGE_HTTP_OUTCOME: ${{ steps.linkage_http.outcome }}");
     expect(verify).toContain("run: node scripts/verify-unified-linkage-artifacts.mjs");
     expect(verify).not.toContain("continue-on-error");
-    const names = ["unified-linkage-ui", "invoice-explicit-selection-ui"];
+    const names = ["unified-linkage-ui", "invoice-explicit-selection-ui", "operational-checkout-ui"];
     for (const [index, name] of names.entries()) {
       const upload = step(`Upload ${name} synthetic evidence`);
       expect([...upload.matchAll(/^ {12}(.+)$/gm)].map(match => match[1])).toEqual(linkageEvidence[index].files);
@@ -64,12 +64,28 @@ describe("synthetic linkage evidence has fail-closed bounded retention", () => {
     }
   });
   it("writes only a fixed synthetic started marker before asynchronous fixture work", () => {
-    const paths = ["unified-linkage-context-browser.test.ts", "invoice-explicit-selection-ui-journey.test.ts"];
+    const paths = ["unified-linkage-context-browser.test.ts", "invoice-explicit-selection-ui-journey.test.ts", "operational-checkout-ui.test.ts"];
     for (const [index, path] of paths.entries()) {
       const source = readFileSync(`__tests__/security-http/${path}`, "utf8");
       const marker = source.indexOf(`await writeFile("${linkageEvidence[index].marker}", "synthetic-suite-started\\n")`);
       expect(marker).toBeGreaterThan(-1);
       expect(marker).toBeLessThan(source.indexOf("await harness()"));
     }
+  });
+  it("retains bounded operational pixels only after native action and successful cleanup", () => {
+    const source = readFileSync("__tests__/security-http/operational-checkout-ui.test.ts", "utf8");
+    const capture = source.indexOf('const bytes = await page.screenshot({ type: "png", fullPage: false })');
+    const click = source.indexOf("allowDecision = true; await handled.click()", capture);
+    const cleanup = source.indexOf("finally { await context.close(); }", click);
+    const retain = source.indexOf("await writeFile(`artifacts/operational-checkout/${filename}`, capture.bytes)", cleanup);
+    expect(capture).toBeGreaterThan(-1); expect(click).toBeGreaterThan(capture);
+    expect(cleanup).toBeGreaterThan(click); expect(retain).toBeGreaterThan(cleanup);
+    expect(source).toContain("await page.mouse.wheel(0, deltaY)");
+    expect(source).toContain("stableFrames >= 6");
+    expect(source).toContain("document.elementFromPoint(point.x, point.y)");
+    expect(source).toContain("expect(await handled.evaluate(operationalGeometry)).toEqual(finalAction)");
+    expect(source).toContain("toBeLessThanOrEqual(524_288)");
+    expect(source).toContain("toBeLessThanOrEqual(65_536)");
+    expect(source).not.toMatch(/force:\s*true|\.scrollIntoView|\.scrollTo\(|\.scrollTop\s*=/);
   });
 });

@@ -21,12 +21,19 @@ export const linkageEvidence = [
       "artifacts/invoice-explicit-selection/exact-item-1280.png",
     ],
   },
+  {
+    marker: "artifacts/operational-checkout/started.txt",
+    files: [
+      "artifacts/operational-checkout/operational-checkout-ready-390.png",
+      "artifacts/operational-checkout/operational-checkout-ready-1280.png",
+    ],
+  },
 ];
 
 export function missingLinkageEvidence(outcome, present) {
   const missing = [];
   for (const suite of linkageEvidence) {
-    // Successful full HTTP run may not silently omit either suite. Before a suite
+    // Successful full HTTP run may not silently omit any suite. Before a suite
     // starts, an earlier job failure must not manufacture a missing-PNG failure.
     const required = outcome === "success" || present.has(suite.marker);
     if (!required) continue;

@@ -1079,3 +1079,14 @@ jobs:
             artifacts/invoice-explicit-selection/exact-item-1280.png
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload operational-checkout-ui synthetic evidence
+        if: always() && hashFiles('artifacts/operational-checkout/operational-checkout-ready-390.png', 'artifacts/operational-checkout/operational-checkout-ready-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-checkout-ui
+          path: |
+            artifacts/operational-checkout/operational-checkout-ready-390.png
+            artifacts/operational-checkout/operational-checkout-ready-1280.png
+          if-no-files-found: error
+          retention-days: 7

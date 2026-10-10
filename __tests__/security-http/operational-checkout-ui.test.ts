@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
@@ -7,6 +10,8 @@ import { readOperationalCheckoutQueue } from "../../lib/operational-checkout";
 
 let h: Awaited<ReturnType<typeof harness>>, browser: Browser, db: Client;
 beforeAll(async () => {
+  await mkdir("artifacts/operational-checkout", { recursive: true });
+  await writeFile("artifacts/operational-checkout/started.txt", "synthetic-suite-started\n");
   h = await harness();
   expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
   expect(["127.0.0.1", "localhost"]).toContain(new URL(h.seeded.dbUrl).hostname);
@@ -18,6 +23,106 @@ afterAll(async () => { await browser?.close(); await db?.end(); });
 const write = (path: string, method: string, body: unknown, cookie: string) => fetch(`${baseUrl}${path}`, {
   method, headers: { Cookie: cookie, Origin: baseUrl, "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
+// Read-only DOM measurements. Nested queue clipping is distinct from fixed-shell
+// obstruction; every control must fit both before an ordinary user action.
+function operationalGeometry(node: Element) {
+  const rect = node.getBoundingClientRect();
+  const shell = Array.from(document.querySelectorAll("body *")).flatMap(element => {
+    const style = getComputedStyle(element), box = element.getBoundingClientRect();
+    if (!["fixed", "sticky"].includes(style.position) || style.visibility !== "visible"
+      || style.display === "none" || Number(style.opacity) === 0 || box.width <= 0 || box.height <= 0
+      || box.right <= rect.left || box.left >= rect.right || element.contains(node)) return [];
+    const edge = style.top !== "auto" && box.top <= 1 && box.bottom > 0 && box.bottom < innerHeight ? "top"
+      : style.bottom !== "auto" && box.bottom >= innerHeight - 1 && box.top > 0 && box.top < innerHeight ? "bottom" : null;
+    return edge ? [{ edge, top: box.top, bottom: box.bottom }] : [];
+  });
+  const shellTop = Math.max(0, ...shell.filter(box => box.edge === "top").map(box => box.bottom));
+  const shellBottom = Math.min(innerHeight, ...shell.filter(box => box.edge === "bottom").map(box => box.top));
+  let left = 0, right = innerWidth, top = shellTop, bottom = shellBottom;
+  const clipping = [];
+  for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent), box = parent.getBoundingClientRect();
+    const x = /^(auto|scroll|hidden|clip)$/.test(style.overflowX);
+    const y = /^(auto|scroll|hidden|clip)$/.test(style.overflowY);
+    if (!x && !y) continue;
+    const bounds = { left: box.left + parent.clientLeft, top: box.top + parent.clientTop,
+      right: box.left + parent.clientLeft + parent.clientWidth, bottom: box.top + parent.clientTop + parent.clientHeight };
+    if (x) { left = Math.max(left, bounds.left); right = Math.min(right, bounds.right); }
+    if (y) { top = Math.max(top, bounds.top); bottom = Math.min(bottom, bounds.bottom); }
+    clipping.push({ ...bounds, x, y, scrollTop: parent.scrollTop, scrollLeft: parent.scrollLeft });
+  }
+  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+  const ex = Math.min(2, rect.width / 4), ey = Math.min(2, rect.height / 4);
+  const kx = Math.min(8, rect.width / 4), ky = Math.min(8, rect.height / 4);
+  const hits = [
+    { name: "center", x: cx, y: cy }, { name: "top", x: cx, y: rect.top + ey },
+    { name: "right", x: rect.right - ex, y: cy }, { name: "bottom", x: cx, y: rect.bottom - ey },
+    { name: "left", x: rect.left + ex, y: cy }, { name: "top-left", x: rect.left + kx, y: rect.top + ky },
+    { name: "top-right", x: rect.right - kx, y: rect.top + ky },
+    { name: "bottom-right", x: rect.right - kx, y: rect.bottom - ky },
+    { name: "bottom-left", x: rect.left + kx, y: rect.bottom - ky },
+  ].map(point => ({ ...point, owned: node.contains(document.elementFromPoint(point.x, point.y)) }));
+  return { bounds: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+    shell: { top: shellTop, bottom: shellBottom, obstructions: shell }, usable: { left, right, top, bottom }, clipping, hits,
+    viewport: { width: innerWidth, height: innerHeight }, dir: document.documentElement.dir,
+    scrollWidth: document.documentElement.scrollWidth, scrollY,
+    fullyVisible: rect.width > 0 && rect.height > 0 && rect.left >= left && rect.right <= right && rect.top >= top && rect.bottom <= bottom,
+    unobscured: hits.every(point => point.owned) };
+}
+type OperationalGeometry = ReturnType<typeof operationalGeometry>;
+function assertOperationalGeometry(proof: OperationalGeometry, width: number, action = true) {
+  expect(proof.viewport).toEqual({ width, height: 1000 }); expect(proof.dir).toBe("rtl");
+  expect(proof.scrollWidth).toBeLessThanOrEqual(width + 1);
+  expect(proof.usable.right).toBeGreaterThan(proof.usable.left);
+  expect(proof.usable.bottom).toBeGreaterThan(proof.usable.top);
+  expect(proof.fullyVisible).toBe(true); expect(proof.unobscured).toBe(true);
+  expect(proof.hits).toHaveLength(9); for (const hit of proof.hits) expect(hit.owned, hit.name).toBe(true);
+  if (action) expect(proof.bounds.height).toBeGreaterThanOrEqual(44);
+}
+async function settleOperationalWheel(control: Locator) {
+  await control.evaluate(async node => {
+    let previous = "", stableFrames = 0;
+    for (let frame = 0; frame < 180; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const rect = node.getBoundingClientRect(), scrolls = [];
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) scrolls.push([parent.scrollTop, parent.scrollLeft]);
+      const sample = JSON.stringify([scrollX, scrollY, rect.left, rect.right, rect.top, rect.bottom, ...scrolls]);
+      stableFrames = sample === previous ? stableFrames + 1 : 1;
+      if (stableFrames >= 6) return;
+      previous = sample;
+    }
+    throw new Error("Operational target did not settle after native wheel input");
+  });
+}
+async function revealOperationalTarget(page: Page, queue: Locator, control: Locator, width: number, nested: boolean) {
+  expect(await control.count()).toBe(1);
+  const before = await control.evaluate(operationalGeometry);
+  const pointer = await queue.evaluate((node, input) => {
+    const { nested, shellTop, shellBottom } = input;
+    const box = node.getBoundingClientRect(), main = node.closest("main")?.getBoundingClientRect();
+    const x = nested ? box.left + 4 : (main?.left ?? 0) + 4;
+    const y = nested ? box.top + box.height / 2 : (shellTop + shellBottom) / 2;
+    const target = document.elementFromPoint(x, y);
+    return { x, y, exists: target !== null, inQueue: target !== null && node.contains(target),
+      nativeField: Boolean(target?.closest("input,textarea,select")) };
+  }, { nested, shellTop: before.shell.top, shellBottom: before.shell.bottom });
+  expect(pointer.exists).toBe(true); expect(pointer.nativeField).toBe(false); expect(pointer.inQueue).toBe(nested);
+  const center = (before.usable.top + before.usable.bottom) / 2;
+  const distance = before.bounds.top + before.bounds.height / 2 - center;
+  const deltaY = Math.abs(distance) < 1 ? 2 : distance;
+  await page.mouse.move(pointer.x, pointer.y); await page.mouse.wheel(0, deltaY);
+  await expect.poll(async () => {
+    const proof = await control.evaluate(operationalGeometry);
+    return proof.fullyVisible && proof.unobscured;
+  }).toBe(true);
+  await settleOperationalWheel(control);
+  const proof = await control.evaluate(operationalGeometry);
+  assertOperationalGeometry(proof, width, nested);
+  return { proof, wheel: { method: "native-mouse-wheel", nested, pointer, deltaY,
+    beforeScrollY: before.scrollY, beforeClipping: before.clipping } };
+}
+
+
 describe("finished unsigned checkout on the actual HTTP boundary", () => {
   it("manager finish enters the queue without a signature or debt; explicit reasoned handling persists and roles remain separated", async () => {
     const patientId = (await db.query(`INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض خروج اصطناعي') RETURNING id`, [`OP-HTTP-${Date.now()}`])).rows[0].id;
@@ -77,7 +182,8 @@ describe("finished unsigned checkout on the actual HTTP boundary", () => {
       unexpected.push(`${request.method()} ${url.pathname}`); await route.abort();
     });
     const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
-    await guard.run(async () => {
+    let capture: { bytes: Buffer; geometry: unknown[]; finalAction: OperationalGeometry } | undefined;
+    try { await guard.run(async () => {
       await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
       await page.getByRole("tab", { name: /التحصيل والخروج/ }).click();
       await expect.poll(() => page.locator('[data-handoff-visit="91001"]').count()).toBe(1);
@@ -99,15 +205,59 @@ describe("finished unsigned checkout on the actual HTTP boundary", () => {
       const bounds = await panel.getByRole("link").evaluate(element => ({ left: element.getBoundingClientRect().left,
         right: element.getBoundingClientRect().right, height: element.getBoundingClientRect().height, width: innerWidth }));
       expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(bounds.width); expect(bounds.height).toBeGreaterThanOrEqual(44);
-      await panel.getByRole("textbox", { name: "سبب المعالجة أو التأجيل" }).fill("مراجعة اصطناعية دون فاتورة");
-      allowDecision = true; await panel.getByRole("button", { name: "تمت مراجعة الخروج — لا يثبت السداد" }).click();
+      const reason = panel.getByRole("textbox", { name: "سبب المعالجة أو التأجيل" });
+      await reason.fill("مراجعة اصطناعية دون فاتورة");
+      await page.evaluate(async () => { await document.fonts.ready; });
+      const queue = page.getByRole("list", { name: "مهام الاستقبال المعلقة", exact: true });
+      const geometry: unknown[] = [{ target: "queue-scrollport", ...await revealOperationalTarget(page, queue, queue, width, false) }];
+      const handled = panel.getByRole("button", { name: "تمت مراجعة الخروج — لا يثبت السداد", exact: true });
+      const controls = [
+        { target: "retry", control: panel.getByRole("button", { name: "إعادة التحقق من الزيارة", exact: true }) },
+        { target: "account-link", control: panel.getByRole("link") },
+        { target: "reason", control: reason },
+        { target: "defer", control: panel.getByRole("button", { name: "تأجيل المتابعة مع بقاء الرصيد", exact: true }) },
+        { target: "handled", control: handled },
+      ];
+      for (const { target, control } of controls) {
+        expect(await control.isEnabled()).toBe(true);
+        geometry.push({ target, ...await revealOperationalTarget(page, queue, control, width, true) });
+      }
+      expect(await reason.inputValue()).toBe("مراجعة اصطناعية دون فاتورة");
+      expect(await panel.getAttribute("data-operational-state")).toBe("ready");
+      expect(await panel.getByRole("link").getAttribute("href")).toBe("/patients/31?tab=account");
+      expect(writes).toBe(0); expect(allowDecision).toBe(false);
+      const finalAction = await handled.evaluate(operationalGeometry);
+      assertOperationalGeometry(finalAction, width);
+      const bytes = await page.screenshot({ type: "png", fullPage: false });
+      expect(bytes.byteLength).toBeLessThanOrEqual(524_288);
+      expect(await handled.evaluate(operationalGeometry)).toEqual(finalAction);
+      capture = { bytes, geometry, finalAction };
+      allowDecision = true; await handled.click();
       await expect.poll(() => writes).toBe(1);
       await expect.poll(() => page.getByRole("button", { name: "سجل المعالجة (1)" }).count()).toBe(1);
       await page.getByRole("button", { name: "سجل المعالجة (1)" }).click();
       expect(await queueRow.innerText()).toContain("لا تعني سداد الرصيد");
       expect(await queueRow.getAttribute("data-handoff-eligibility")).toBe("finished_unsigned");
     }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
-    await context.close();
+    } finally { await context.close(); }
+    // Emit only after the complete native handled journey, isolation checks and
+    // context cleanup succeed. The pixels were captured while the decision was
+    // still pending; a successful screenshot alone cannot satisfy acceptance.
+    expect(capture).toBeDefined();
+    if (!capture) throw new Error("Missing operational native capture");
+    expect(writes).toBe(1); expect(decision).toBe("handled");
+    const filename = `operational-checkout-ready-${width}.png`;
+    const evidence = { protocol: 1, synthetic: true, runId: process.env.GITHUB_RUN_ID ?? null,
+      checkoutSha: process.env.GITHUB_SHA ?? null, suite: "__tests__/security-http/operational-checkout-ui.test.ts",
+      sourceSha256: createHash("sha256").update(readFileSync("__tests__/security-http/operational-checkout-ui.test.ts")).digest("hex"),
+      filename, viewport: { width, height: 1000 }, mime: "image/png", bytes: capture.bytes.byteLength,
+      sha256: createHash("sha256").update(capture.bytes).digest("hex"), geometry: capture.geometry, finalAction: capture.finalAction,
+      capturePhase: "verified-ready-before-handled", nativeHandledWrites: writes, handledInHistory: true,
+      unexpectedRequests: unexpected.length, pageErrors: errors.length, contextClosed: true };
+    const encoded = JSON.stringify(evidence);
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(65_536);
+    await writeFile(`artifacts/operational-checkout/${filename}`, capture.bytes);
+    console.info("OPERATIONAL_CHECKOUT_UI_PROOF_V1", encoded);
   }, 120_000);
 });
 

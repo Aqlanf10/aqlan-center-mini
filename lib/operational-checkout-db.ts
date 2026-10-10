@@ -1,13 +1,14 @@
-import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, type VisitActor } from "./db";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, type DbClient, type VisitActor } from "./db";
+import type { AuditAction } from "./audit";
 import { onClinicDaysSql } from "./clinic-day-sql";
 import { clinicDateString } from "./schedule";
 import { canReadReceptionHandoff, isHandoffDate } from "./reception-handoff";
 import { CLINIC_BASE_CURRENCY, isCurrency } from "./money";
 import { isFinishVersion, readVisitReceivable, receivableNotIncreased, type OperationalHandoff, type VisitReceivable } from "./operational-checkout";
 
-export const RECEPTION_VERIFICATION_ACTION = "visit.reception_handoff_verified";
+export const RECEPTION_VERIFICATION_ACTION = "visit.reception_handoff_verified" satisfies AuditAction;
 const SIGNATURE_SQL = `to_char(v.signed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-export const OPERATIONAL_HANDOFF_ACTION = "visit.operational_handoff_decided";
+export const OPERATIONAL_HANDOFF_ACTION = "visit.operational_handoff_decided" satisfies AuditAction;
 const VERSION_SQL = `(CASE WHEN v.finished_at IS NULL THEN 'arrival_fallback:' ELSE 'finished:' END)
   || to_char(COALESCE(v.finished_at, v.arrived_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 interface Row {
@@ -134,7 +135,8 @@ export async function decideOperationalHandoff(input: OperationalDecisionInput, 
   finally { client.release(); }
 }
 
-type QueryClient = Pick<import("pg").PoolClient, "query">;
+// Both supported database backends expose this adapter, not pg's stream/config overloads.
+type QueryClient = Pick<DbClient, "query">;
 async function lockReceptionRow(client: QueryClient, visitId: number): Promise<Row | null> {
   const { rows: [discovered] } = await client.query<{ invoice_id: number | null }>(
     `SELECT invoice_id FROM visits WHERE id = $1`, [visitId]);

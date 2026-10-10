@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { DbClient } from "../lib/db";
+import { AUDIT_LABEL, describeAudit } from "../lib/audit";
 const state = vi.hoisted(() => ({ query: vi.fn(), poolQuery: vi.fn(), release: vi.fn(), audit: vi.fn(), schema: vi.fn() }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", ensureSchema: state.schema, insertAuditRow: state.audit,
   getPool: () => ({ query: state.poolQuery, connect: async () => ({ query: state.query, release: state.release }) }) }));
-const { decideOperationalHandoff, readOperationalHandoff, listOperationalHandoffs, operationalDecisionForSigned, signedReceptionFinancialState, verifySignedReception } = await import("../lib/operational-checkout-db");
+const { decideOperationalHandoff, readOperationalHandoff, listOperationalHandoffs, operationalDecisionForSigned, signedReceptionFinancialState, verifySignedReception,
+  lockReceptionReceivable, OPERATIONAL_HANDOFF_ACTION, RECEPTION_VERIFICATION_ACTION } = await import("../lib/operational-checkout-db");
 const actor = { actor: "synthetic-manager", actorRole: "admin" };
 const version = "finished:2026-10-10T09:00:00.123456Z";
 const invoice = { invoiceId: 80, currency: "SAR" as const, status: "open" as const, netMinor: 10000, paidMinor: 2000 };
@@ -23,6 +26,15 @@ beforeEach(() => {
   state.audit.mockReset().mockImplementation(async (_client, entry) => { row.decision = entry.details; });
 });
 describe("operational handoff durable decision and receivable proof", () => {
+  it("uses the canonical database adapter and registers both durable follow-up actions", () => {
+    expectTypeOf<Parameters<typeof lockReceptionReceivable>[0]>().toEqualTypeOf<Pick<DbClient, "query">>();
+    expectTypeOf<DbClient>().toMatchTypeOf<Parameters<typeof lockReceptionReceivable>[0]>();
+    expect(AUDIT_LABEL[OPERATIONAL_HANDOFF_ACTION]).toBe("تسجيل قرار متابعة زيارة انتهى جلوسها دون توقيع سريري — دون إثبات سداد");
+    expect(AUDIT_LABEL[RECEPTION_VERIFICATION_ACTION]).toBe("إعادة تحقق مالية لمتابعة استقبال سابقة — دون إثبات سداد");
+    for (const action of [OPERATIONAL_HANDOFF_ACTION, RECEPTION_VERIFICATION_ACTION]) {
+      expect(describeAudit(action, "زيارة اصطناعية")).toBe(`${AUDIT_LABEL[action]} — زيارة اصطناعية`);
+    }
+  });
   it("locks invoice before visit, revalidates exact version and stores only an audited visit-scoped proof", async () => {
     expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: true, item: { status: "handled", signedAt: null } });
     const calls = state.query.mock.calls.map(([sql]) => sql as string);

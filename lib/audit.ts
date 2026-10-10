@@ -69,6 +69,7 @@ export type AuditAction =
   /* (CHAIR-1) إقرار الجاهزية للكرسي، وتجاوز الطوارئ بسببٍ مكتوب، وتأجيل الدفع عند الشبّاك. */
   | "visit.clear" | "visit.clearance_bypass" | "visit.payment_deferred"
   | "visit.reception_handoff_completed"
+  | "visit.operational_handoff_decided" | "visit.reception_handoff_verified"
   | "document.upload" | "document.remove"
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
@@ -211,6 +212,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.clearance_bypass": "إدخال طوارئ قبل إقرار الجاهزية",
   "visit.payment_deferred": "تأجيل الدفع عند الشبّاك",
   "visit.reception_handoff_completed": "إنهاء متابعة الاستقبال للزيارة — دون إثبات سداد",
+  "visit.operational_handoff_decided": "تسجيل قرار متابعة زيارة انتهى جلوسها دون توقيع سريري — دون إثبات سداد",
+  "visit.reception_handoff_verified": "إعادة تحقق مالية لمتابعة استقبال سابقة — دون إثبات سداد",
   "document.upload": "رفع مستند",
   "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
