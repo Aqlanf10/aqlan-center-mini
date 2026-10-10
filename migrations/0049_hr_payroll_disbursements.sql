@@ -98,11 +98,3 @@ CREATE TABLE IF NOT EXISTS hr_settings (
   updated_by      TEXT        NOT NULL,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
--- إدراج السياسات المبدئية بتاريخ سريان صريح (غير مجبرة كأرقام هاردكود)
-INSERT INTO hr_settings (key, value, description, effective_from, updated_by)
-VALUES
-  ('payroll_cycle', '{"default_currency":"YER","salary_day":28,"cutoff_day":25}'::jsonb, 'دورة الرواتب الشهرية ويوم الاستحقاق', CURRENT_DATE, 'system'),
-  ('attendance_policy', '{"late_grace_mins":15,"late_deduction_rate_per_hour":1.0,"overtime_rate_multiplier":1.5}'::jsonb, 'سياسة التأخير والإضافي وسماح الحضور', CURRENT_DATE, 'system'),
-  ('leave_policy', '{"annual_default_days":21,"probation_months":3}'::jsonb, 'سياسة الإجازات السنوية وفترة التجربة', CURRENT_DATE, 'system')
-ON CONFLICT (key) DO NOTHING;

@@ -8,12 +8,17 @@ import { validatePostgresTestTarget } from "./_safe-target";
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
   const invoiceSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
-  const hrSuffixes = ["0045_hr_staff.sql", "0046_hr_tasks.sql"];
-  // 0001–0043 قاعدة main المتصلة، ثم لاحقة هذه المرحلة 0045–0046 — والفجوة 0044
-  // **معلنة**: محجوزة لهجرة 0044_invoice_admin_discount_lines.sql (مرشّح فواتير مفتوح
-  // #301) لا يُشحن مع هذه الشجرة، فيأخذ المرشّح البيريودنتالي التجريبي فجوة 0044.
+  const hrSuffixes = [
+    "0045_hr_staff.sql",
+    "0046_hr_tasks.sql",
+    "0048_hr_contracts_attendance_leaves.sql",
+    "0049_hr_payroll_disbursements.sql",
+  ];
+  // 0001–0043 قاعدة main المتصلة، ثم لاحقة الموارد البشرية مع الفجوتين المعلنتين:
+  // الفجوة 0044 محجوزة لفواتير #301 والفجوة 0047 محجوزة لسيفالو #319.
+  // فيأخذ المرشّح البيريودنتالي التجريبي فجوة 0044.
   files.forEach((file, index) => {
-    const expectedVersion = String(index + 1 + (index >= 43 ? 1 : 0)).padStart(4, "0");
+    const expectedVersion = String(index + 1 + (index >= 43 ? 1 : 0) + (index >= 45 ? 1 : 0)).padStart(4, "0");
     if (file.version !== expectedVersion) throw new Error("Shipped migration chain is missing, reordered or duplicated.");
     if (index >= 40 && index < 43 && file.filename !== invoiceSuffixes[index - 40]) {
       throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
@@ -22,7 +27,7 @@ export function periodontalCandidateMigrationVersion(files: readonly { version: 
       throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
     }
   });
-  const candidate: string | undefined = ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 45: "0044" } as const)[files.length];
+  const candidate: string | undefined = ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 45: "0044", 47: "0044" } as const)[files.length];
   if (!candidate) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
   return candidate;
 }

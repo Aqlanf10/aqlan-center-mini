@@ -205,13 +205,15 @@ function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigra
   const expected = COORDINATED_MIGRATION_VERSIONS;
   const actual = files.map((file) => file.version);
   // لاحقة المراجعة خارج قاعدة 0001–0040: فواتير 0041–0043 المدمجة، ثم لاحقة هذه
-  // المرحلة 0045–0046 — والفجوة 0044 معلنة (مرشّح فواتير مفتوح #301 لا يُشحن هنا).
+  // المرحلة 0045–0049 — والفجوتان 0044 و 0047 معلنتان (مرشّحا #301 و #319).
   const reviewedSuffixes = [
     "0041_invoice_clinical_linkage.sql",
     "0042_legacy_treatment_agreements.sql",
     "0043_legacy_treatment_coverage.sql",
     "0045_hr_staff.sql",
     "0046_hr_tasks.sql",
+    "0048_hr_contracts_attendance_leaves.sql",
+    "0049_hr_payroll_disbursements.sql",
   ];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);

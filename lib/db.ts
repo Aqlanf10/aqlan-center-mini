@@ -2110,6 +2110,27 @@ export function ensureSchema(): Promise<void> {
        ON CONFLICT (id) DO NOTHING`,
     );
 
+    /* بذرُ أنواع الإجازات الافتراضية وسياسات الموارد البشرية */
+    await getPool().query(
+      `INSERT INTO hr_leave_types (code, name_ar, is_paid, default_days_per_year, allow_negative, requires_attachment)
+       VALUES
+         ('annual', 'إجازة سنوية', true, NULL, false, false),
+         ('sick', 'إجازة مرضية', true, NULL, false, true),
+         ('unpaid', 'إجازة بدون راتب', false, NULL, true, false),
+         ('emergency', 'إجازة طارئة', true, NULL, false, false),
+         ('holiday', 'عطلة رسمية', true, NULL, false, false)
+       ON CONFLICT (code) DO NOTHING`,
+    );
+
+    await getPool().query(
+      `INSERT INTO hr_settings (key, value, description, effective_from, updated_by)
+       VALUES
+         ('payroll_cycle', '{"default_currency":"YER","salary_day":28,"cutoff_day":25}'::jsonb, 'دورة الرواتب الشهرية ويوم الاستحقاق', CURRENT_DATE, 'system'),
+         ('attendance_policy', '{"late_grace_mins":15,"late_deduction_rate_per_hour":1.0,"overtime_rate_multiplier":1.5}'::jsonb, 'سياسة التأخير والإضافي وسماح الحضور', CURRENT_DATE, 'system'),
+         ('leave_policy', '{"annual_default_days":21,"probation_months":3}'::jsonb, 'سياسة الإجازات السنوية وفترة التجربة', CURRENT_DATE, 'system')
+       ON CONFLICT (key) DO NOTHING`,
+    );
+
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
     // المجموعة المدمجة إسقاطٌ لتعريفات الكود تُزامَن عند كل إقلاع (لا مسار
     // تعديلٍ لها من الواجهة)، وأي مجموعة محلية للأدمن لاحقًا صفٌّ مستقل لا يُمسّ.

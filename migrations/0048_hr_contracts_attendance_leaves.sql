@@ -170,13 +170,3 @@ CREATE TABLE IF NOT EXISTS hr_leave_requests (
 );
 CREATE INDEX IF NOT EXISTS hr_leave_requests_staff_idx ON hr_leave_requests (staff_id, status);
 CREATE INDEX IF NOT EXISTS hr_leave_requests_dates_idx ON hr_leave_requests (start_date, end_date);
-
--- إدراج الأنواع الأساسية للإجازات في حال عدم وجودها
-INSERT INTO hr_leave_types (code, name_ar, is_paid, default_days_per_year, allow_negative, requires_attachment)
-VALUES
-  ('annual', 'إجازة سنوية', true, NULL, false, false),
-  ('sick', 'إجازة مرضية', true, NULL, false, true),
-  ('unpaid', 'إجازة بدون راتب', false, NULL, true, false),
-  ('emergency', 'إجازة طارئة', true, NULL, false, false),
-  ('holiday', 'عطلة رسمية', true, NULL, false, false)
-ON CONFLICT (code) DO NOTHING;

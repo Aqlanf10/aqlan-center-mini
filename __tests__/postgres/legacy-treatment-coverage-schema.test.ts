@@ -48,11 +48,16 @@ async function insertSnapshot(client: DbPool | DbClient, agreement: Agreement, p
 beforeAll(async () => {
   fixture = await openPeriodontalFixture(process.env, { pristine: true });
   const files = await loadMigrationFiles();
-  // السلسلة المنسّقة: 0001–0043 ثم لاحقة هذه المرحلة 0045–0046 (فجوة 0044 معلنة).
+  // السلسلة المنسّقة: 0001–0043 ثم لاحقة الموارد البشرية 0045–0049 (فجوتا 0044 و 0047 معلنتان).
   expect(files.map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
   expect(files.slice(40).map((file) => file.filename)).toEqual([
-    "0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
-    "0045_hr_staff.sql", "0046_hr_tasks.sql",
+    "0041_invoice_clinical_linkage.sql",
+    "0042_legacy_treatment_agreements.sql",
+    "0043_legacy_treatment_coverage.sql",
+    "0045_hr_staff.sql",
+    "0046_hr_tasks.sql",
+    "0048_hr_contracts_attendance_leaves.sql",
+    "0049_hr_payroll_disbursements.sql",
   ]);
   await migrate(pool(), { apply: true, files: files.slice(0, 42) });
   old = await seedAgreement(pool());

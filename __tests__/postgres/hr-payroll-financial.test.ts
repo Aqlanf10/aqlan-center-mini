@@ -46,27 +46,26 @@ const {
   listPayrollItems,
 } = await import("../../lib/hr-payroll");
 
-const adminSession = {
+import type { SessionPayload } from "../../lib/auth";
+
+const adminSession: SessionPayload = {
   userId: 1,
   username: "hr-admin-finance",
   role: "admin",
-  displayName: "المدير العام",
   expiresAt: Date.now() + 3600000,
 };
 
-const managerSession = {
+const managerSession: SessionPayload = {
   userId: 2,
   username: "hr-manager-finance",
   role: "admin",
-  displayName: "مدير الموارد",
   expiresAt: Date.now() + 3600000,
 };
 
-const staffUserSession = {
+const staffUserSession: SessionPayload = {
   userId: 3,
   username: "hr-staff-finance",
   role: "reception",
-  displayName: "الموظف المشبوك",
   expiresAt: Date.now() + 3600000,
 };
 
@@ -99,10 +98,15 @@ beforeAll(async () => {
       workStatus: "active",
       endDate: null,
       contractKind: "salary",
-      payTerms: null,
+      payTerms: {
+        amountMinor: 10000000,
+        currency: "YER",
+        period: "monthly",
+        effectiveOn: "2026-01-01",
+      },
       note: null,
     },
-    adminSession as any,
+    adminSession,
   );
   supportStaffId = staffRes.id;
 
@@ -120,10 +124,15 @@ beforeAll(async () => {
       workStatus: "active",
       endDate: null,
       contractKind: "salary_commission",
-      payTerms: null,
+      payTerms: {
+        amountMinor: 15000000,
+        currency: "YER",
+        period: "monthly",
+        effectiveOn: "2026-01-01",
+      },
       note: null,
     },
-    adminSession as any,
+    adminSession,
   );
   doctorStaffId = doctorRes.id;
 
@@ -152,10 +161,10 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         salaryCurrency: "YER",
         salaryPeriod: "monthly",
       },
-      adminSession as any,
+      adminSession,
     );
     expect(c1.id).toBeDefined();
-    await transitionContractStatus(c1.id, "active", "اعتماد العقد للتشغيل", adminSession as any);
+    await transitionContractStatus(c1.id, "active", "اعتماد العقد للتشغيل", adminSession);
 
     // Contract 2: Doctor hybrid (Salary + Commission)
     const c2 = await createContract(
@@ -171,18 +180,18 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         salaryCurrency: "YER",
         salaryPeriod: "monthly",
       },
-      adminSession as any,
+      adminSession,
     );
     expect(c2.id).toBeDefined();
-    await transitionContractStatus(c2.id, "active", "اعتماد عقد الطبيب", adminSession as any);
+    await transitionContractStatus(c2.id, "active", "اعتماد عقد الطبيب", adminSession);
   });
 
   it("calculates payroll run and enforces approval immutability", async () => {
-    const period = await getOrCreatePayrollPeriod("2026-10", adminSession as any);
+    const period = await getOrCreatePayrollPeriod("2026-10", adminSession);
     expect(period.periodKey).toBe("2026-10");
 
     // Calculate payroll for period in YER
-    const run = await calculatePayrollRun(period.id, "YER", adminSession as any);
+    const run = await calculatePayrollRun(period.id, "YER", adminSession);
     expect(run.status).toBe("draft");
     expect(run.totalBaseSalaryMinor).toBe(25000000); // 150,000 + 100,000 = 250,000 YER in minor
 
@@ -197,12 +206,12 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     expect(doctorItem?.baseSalaryMinor).toBe(10000000);
 
     // Approve the payroll run
-    const approvedRun = await approvePayrollRun(run.id, adminSession as any);
+    const approvedRun = await approvePayrollRun(run.id, adminSession);
     expect(approvedRun.status).toBe("approved");
 
     // Re-calculating an approved run MUST fail to prevent duplicate payables
     await expect(
-      calculatePayrollRun(period.id, "YER", adminSession as any),
+      calculatePayrollRun(period.id, "YER", adminSession),
     ).rejects.toThrow("معتمد");
 
     // Verify payables were inserted
@@ -214,7 +223,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
   });
 
   it("refuses disbursement without an open cashier shift", async () => {
-    const period = await getOrCreatePayrollPeriod("2026-10", adminSession as any);
+    const period = await getOrCreatePayrollPeriod("2026-10", adminSession);
     const pool = getPool();
     const { rows: [run] } = await pool.query(
       `SELECT * FROM hr_payroll_runs WHERE period_id = $1 AND status = 'approved'`,
@@ -225,7 +234,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
 
     // Attempting disburse without open shift must throw
     await expect(
-      disbursePayrollItem(item.id, { amountMinor: 5000000 }, adminSession as any),
+      disbursePayrollItem(item.id, { amountMinor: 5000000 }, adminSession),
     ).rejects.toThrow("لا توجد وردية صندوق مفتوحة");
   });
 
@@ -255,7 +264,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         notes: "صرف راتب شهر أكتوبر",
         clientRequestId,
       },
-      adminSession as any,
+      adminSession,
     );
 
     expect(disbursement.amountMinor).toBe(15000000);
@@ -286,7 +295,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         paymentMethod: "cash",
         clientRequestId,
       },
-      adminSession as any,
+      adminSession,
     );
     expect(replay.id).toBe(disbursement.id);
     expect(replay.expenseId).toBe(disbursement.expenseId);
@@ -308,7 +317,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       2026,
       30,
       "الرصيد السنوي لعام 2026",
-      adminSession as any,
+      adminSession,
     );
 
     const initialBalances = await listLeaveBalances({ staffId: supportStaffId, year: 2026 });
@@ -325,14 +334,14 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         daysCount: 5,
         reason: "إجازة اعتيادية",
       },
-      staffUserSession as any,
+      staffUserSession,
     );
     expect(leaveReq.daysCount).toBe(5);
     expect(leaveReq.status).toBe("pending");
 
     // 3. Self-approval refusal: the staff user cannot approve their own leave request
     await expect(
-      decideLeaveRequest(leaveReq.id, "approved", "موافقة ذاتية", staffUserSession as any),
+      decideLeaveRequest(leaveReq.id, "approved", "موافقة ذاتية", staffUserSession),
     ).rejects.toThrow("لا يحق للموظف اعتماد أو رفض طلب إجازته بنفسه");
 
     // 4. Manager approves leave
@@ -340,7 +349,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       leaveReq.id,
       "approved",
       "معتمد من الإدارة",
-      managerSession as any,
+      managerSession,
     );
     expect(approvedLeave.status).toBe("approved");
 
@@ -365,7 +374,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       leaveReq.id,
       "cancelled",
       "إلغاء بناء على رغبة الموظف",
-      managerSession as any,
+      managerSession,
     );
     expect(cancelledLeave.status).toBe("cancelled");
 
