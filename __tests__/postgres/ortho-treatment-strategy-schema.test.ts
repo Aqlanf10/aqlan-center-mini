@@ -202,7 +202,11 @@ describe("reserved0051 append-only history on owned PostgreSQL18", () => {
     const sql = lines.join(""); const table = sql.indexOf("-- ortho_strategy_revisions (");
     expect(sql.indexOf("BEGIN;")).toBeLessThan(table); expect(sql.lastIndexOf("COMMIT;")).toBeGreaterThan(table);
     for (const owner of ["patients", "users", "ortho_cases", "clinical_cases"]) expect(sql.indexOf(`-- ${owner} (`)).toBeLessThan(table);
-    expect(sql).toContain("ortho_strategy_revisions_id_seq");
+    const reset = "SELECT setval(pg_get_serial_sequence('ortho_strategy_revisions', 'id'), COALESCE((SELECT MAX(id) FROM ortho_strategy_revisions), 1), (SELECT MAX(id) IS NOT NULL FROM ortho_strategy_revisions)) WHERE pg_get_serial_sequence('ortho_strategy_revisions', 'id') IS NOT NULL;";
+    expect(lines.filter(line => line.trimEnd() === reset)).toEqual([`${reset}\n`]);
+    const resetAt = sql.indexOf(reset);
+    expect(resetAt).toBeGreaterThan(sql.lastIndexOf("INSERT INTO ortho_strategy_revisions "));
+    expect(resetAt).toBeLessThan(sql.lastIndexOf("COMMIT;"));
     expect(sql.slice(table).split(/\n-- /)[0]).toContain("Explicit retrospective correction");
   });
   it("restores the actual backup after a merge without resurrecting the recorded source patient", async () => {
@@ -227,6 +231,19 @@ describe("reserved0051 append-only history on owned PostgreSQL18", () => {
       expect((await restored.pool.query("SELECT id FROM patients WHERE id=$1", [scope.patient])).rows).toHaveLength(0);
       expect((await restored.pool.query("SELECT patient_id,recorded_patient_id FROM ortho_strategy_revisions WHERE id=$1", [revision])).rows)
         .toEqual([{ patient_id: target.patient, recorded_patient_id: scope.patient }]);
+      // Restoring explicit IDs must reset the owned SERIAL source above every
+      // restored row, not merely print a plausible sequence-name substring.
+      const { rows: [maximum] } = await restored.pool.query<{ id: number }>(
+        "SELECT MAX(id)::int AS id FROM ortho_strategy_revisions");
+      expect(maximum.id).toBeGreaterThanOrEqual(revision);
+      const currentScope = { ...scope, patient: target.patient };
+      const beforeAppend = await facts(restored.pool, currentScope);
+      const nextRevision = await insert(restored.pool, currentScope, { version: 2, predecessor: revision });
+      expect(nextRevision).toBe(maximum.id + 1);
+      expect((await restored.pool.query("SELECT to_jsonb(r) AS history FROM ortho_strategy_revisions r WHERE id=$1", [revision])).rows).toEqual(before);
+      expect((await restored.pool.query("SELECT patient_id,recorded_patient_id,supersedes_revision_id,version FROM ortho_strategy_revisions WHERE id=$1", [nextRevision])).rows)
+        .toEqual([{ patient_id: target.patient, recorded_patient_id: target.patient, supersedes_revision_id: revision, version: 2 }]);
+      expect(await facts(restored.pool, currentScope)).toEqual(beforeAppend);
     } finally { await restored.close(); }
   });
 });

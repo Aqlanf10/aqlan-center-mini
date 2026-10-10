@@ -124,7 +124,9 @@ function validateCandidate(candidate: Awaited<ReturnType<typeof generatePrefligh
   }
 }
 
-const database = `aqlan_schema_ownership_drilldown_${randomUUID().replace(/-/g, "")}`;
+// Keep the full UUID within PostgreSQL's 63-byte identifier limit so the
+// diagnostic guard can compare current_database() with the exact fixture name.
+const database = `aqlan_schema_ownership_drill_${randomUUID().replace(/-/g, "")}`;
 let client: Client;
 let maintenance: string;
 let url: string;
@@ -133,6 +135,7 @@ let files: Awaited<ReturnType<typeof loadMigrationFiles>>;
 const inspect = (connection: ReadOnlyCatalogClient = client) => inspectSchemaReadOnly(connection, files, { fingerprintDrilldown: true });
 
 beforeAll(async () => {
+  expect(Buffer.byteLength(database, "utf8")).toBeLessThanOrEqual(63);
   const target = validateOwnershipHarnessEnvironment();
   preflightConnection({ ...process.env, DATABASE_URL: target.testUrl.toString() });
   maintenance = target.maintenanceUrl.toString();
