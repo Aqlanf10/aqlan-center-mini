@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "./SessionProvider";
+import { DiagnosisChoiceField } from "./DiagnosisChoiceField";
+import { DIAGNOSIS_CHOICE_GROUPS } from "@/lib/diagnosis-choice-options";
 
 interface DiagnosisVersionView {
   id: number;
@@ -218,47 +220,32 @@ function DiagnosisForm({ saving, onCancel, onSave }: {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
-      <div className="mb-2 grid grid-cols-2 gap-2">
+      <p className="mb-2 text-[11px] text-slate-500">اختر وصفًا بعد التقييم أو اكتب بحرية. البحث وحده لا يغيّر التشخيص؛ لا تُملأ أي قيمة تلقائيًا.</p>
+      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <DiagnosisChoiceField label="الصنف الهيكلي" value={skeletal} onChange={setSkeletal} disabled={saving}
+          groups={DIAGNOSIS_CHOICE_GROUPS.skeletal} dir="ltr" />
+        <DiagnosisChoiceField label="الصنف السني" value={dental} onChange={setDental} disabled={saving}
+          groups={DIAGNOSIS_CHOICE_GROUPS.dental} dir="ltr" />
+        <DiagnosisChoiceField label="الازدحام" value={crowding} onChange={setCrowding} disabled={saving}
+          groups={DIAGNOSIS_CHOICE_GROUPS.crowding} />
         <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف الهيكلي</span>
-          <input value={skeletal} onChange={(event) => setSkeletal(event.target.value)}
-            placeholder="Class II هيكلي" aria-label="الصنف الهيكلي"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الصنف السني</span>
-          <input value={dental} onChange={(event) => setDental(event.target.value)}
-            placeholder="Class II Div 1" aria-label="الصنف السني" dir="ltr"
+          <span className="mb-1 block text-[10px] font-bold text-slate-500">Overjet — البعد الأفقي (مم)</span>
+          <input value={overjet} disabled={saving} maxLength={200} onChange={(event) => { if (!saving) setOverjet(event.target.value); }}
+            placeholder="القياس بالمليمتر أو وصف عدم القياس" aria-label="البعد الأفقي" dir="ltr"
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
         </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الازدحام</span>
-          <input value={crowding} onChange={(event) => setCrowding(event.target.value)}
-            placeholder="علوي 5 مم" aria-label="الازدحام"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">Overjet</span>
-          <input value={overjet} onChange={(event) => setOverjet(event.target.value)}
-            placeholder="7 مم" aria-label="البعد الأفقي" dir="ltr"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-mono" />
-        </label>
-        <label>
-          <span className="mb-1 block text-[10px] font-bold text-slate-500">الإطباق</span>
-          <input value={bite} onChange={(event) => setBite(event.target.value)}
-            placeholder="عضة عميقة 60%" aria-label="الإطباق"
-            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
-        </label>
+        <DiagnosisChoiceField label="الإطباق" value={bite} onChange={setBite} disabled={saving}
+          groups={DIAGNOSIS_CHOICE_GROUPS.bite} />
         <label>
           <span className="mb-1 block text-[10px] font-bold text-slate-500">سبب التحديث</span>
-          <input value={label} onChange={(event) => setLabel(event.target.value)}
+          <input value={label} disabled={saving} maxLength={120} onChange={(event) => { if (!saving) setLabel(event.target.value); }}
             placeholder="بعد ٦ أشهر من العلاج" aria-label="سبب التحديث"
             className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
         </label>
       </div>
       <label className="mb-2 block">
         <span className="mb-1 block text-[10px] font-bold text-slate-500">ملاحظات حرة</span>
-        <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2}
+        <textarea value={note} disabled={saving} maxLength={1000} onChange={(event) => { if (!saving) setNote(event.target.value); }} rows={2}
           aria-label="ملاحظات التشخيص"
           className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
       </label>
