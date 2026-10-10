@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONSENT_TEMPLATES, getConsentTemplate } from "../lib/consent-templates";
-import { DOCUMENT_NOTE_LIMIT, buildConsentNotePayload, parseStoredConsent } from "../lib/consent-record";
+import { CONSENT_RECORD_NOTE_LIMIT, DOCUMENT_NOTE_LIMIT, buildConsentNotePayload, parseStoredConsent } from "../lib/consent-record";
 
 /**
  * سجل الإقرار المحفوظ: قراءة صارمة، ونصٌّ ناقص يبقى ناقصًا — وحمولة شاشة التوقيع الفعلية أمام حدّ ملاحظة المستند.
@@ -56,14 +56,25 @@ describe("the payload the signature screen actually saves", () => {
   });
 
   /*
-   * Known capture defect (tracked, not fixed here): the upload route keeps only the first 300 characters of the note
-   * (`rawNote.slice(0, 300)`). An ordinary payload can exceed it, the stored JSON is cut, and the strict reader then —
-   * correctly — refuses to print a signed copy. The reader stays fail-closed; the capture repair is a separate change.
+   * Why the upload route keeps a structured consent record whole (Codex P1 on #291): an ordinary payload exceeds the 300-character
+   * free-note cut, and a cut record is invalid JSON that the strict reader — correctly — refuses to print. The reader stays
+   * fail-closed; the route stores the record whole up to `CONSENT_RECORD_NOTE_LIMIT` (tested through the built app in
+   * `__tests__/security-http/consent-reprint-integrity.test.ts`).
    */
   it("an ordinary surgical extraction payload exceeds the limit, and its truncated note is refused rather than half-read", () => {
     const note = payload("surgical_extraction", "أحمد علي", "self", null);
     expect(note.length).toBeGreaterThan(DOCUMENT_NOTE_LIMIT);
     expect(parseStoredConsent(note.slice(0, DOCUMENT_NOTE_LIMIT))).toBeNull();
+  });
+
+  it("every current template's record, self and guardian with a long name, fits the stored record limit and reads back", () => {
+    const name = "عبدالرحمن محمد عبدالله أحمد الحميري";
+    for (const template of CONSENT_TEMPLATES) {
+      for (const note of [payload(template.id, name, "self", null), payload(template.id, name, "guardian", "الجد لأم")]) {
+        expect(note.length).toBeLessThanOrEqual(CONSENT_RECORD_NOTE_LIMIT);
+        expect(parseStoredConsent(note)).toMatchObject({ templateId: template.id, signatoryName: name });
+      }
+    }
   });
 
   it("states which current templates can be cut for a short self signatory and a guardian", () => {
