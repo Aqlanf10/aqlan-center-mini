@@ -25,7 +25,7 @@ import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "
 import { VisitPhraseField as Field } from "./VisitPhraseField";
 import { VisitPlanRequirements } from "./VisitPlanRequirements";
 import { VisitMaterials } from "./VisitMaterials";
-import { QuickServicePicker } from "./QuickServicePicker";
+import { ServiceSelect } from "./ServiceSelect";
 import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, visitSignatureBlock } from "./invoice-clinical-readiness";
 
 const orthoPhaseLabel = (phase: string): string =>
@@ -358,8 +358,6 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   }, [referenceOwner]);
   const [referenceOpen, setReferenceOpen] = useState<{ owner: typeof referenceOwner; open: boolean } | null>(null);
   /* (P3) منتقي الدليل السريع لإضافة إجراءٍ حرّ — نفس مسار الإضافة من القائمة. */
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const servicePickerTrigger = useRef<HTMLButtonElement>(null);
   /* (P6) استحقاق الزيارة من الخادم بقرار التوقيع نفسه — يُقرأ عند فتح المراجعة (بعد الحفظ). */
   const [billingPreview, setBillingPreview] = useState<BillingPreview | null>(null);
   /* (CASE-MODEL-1b) سبب المتابعة رغم متطلبٍ لم يكتمل — يُرسَل مع التوقيع ويُدقَّق. */
@@ -1410,23 +1408,18 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
         {!signed && canWrite ? (
           <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="block text-xs font-extrabold text-navy-900">إجراء إضافي من دليل المركز</span>
-              <button ref={servicePickerTrigger} type="button" onClick={() => { if (!busy && canEditWork && currentOwner()) setPickerOpen(true); }}
-                aria-label="أضف إجراءً" className="min-h-11 rounded-xl border border-navy-800 bg-white px-3 py-2 text-[11px] font-black text-navy-800">
-                ابحث وأضف إجراءً
-              </button>
-            </div>
-            <QuickServicePicker
-              open={pickerOpen && !busy && canEditWork}
-              onClose={() => { if (currentOwner()) { setPickerOpen(false); servicePickerTrigger.current?.focus(); } }}
-              currency={visitCurrency}
+            <span className="mb-2 block text-xs font-extrabold text-navy-900">إجراء إضافي من دليل المركز</span>
+            <ServiceSelect
               services={services}
-              allowUnpriced
-              title="أضف إجراءً للزيارة"
-              onPick={(service) => addFreeProcedure(service as Service)}
+              value={null}
+              onChange={(_id, service) => { if (service) addFreeProcedure(service as Service); }}
+              base={visitCurrency}
+              catalogCurrency={visitCurrency}
+              searchable
+              disabled={busy || !canEditWork}
+              placeholder="+ انقر لاختيار إجراء من الدليل المصنف…"
+              ariaLabel="أضف إجراءً"
             />
-
           </div>
         ) : null}
         {drafts.length === 0 ? (

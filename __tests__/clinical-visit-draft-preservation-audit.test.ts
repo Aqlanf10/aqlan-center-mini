@@ -318,8 +318,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
 
   it("preserves an explicitly blank treatment note across failed refresh, stale retry and confirmed save with procedures", async () => {
     enter("③ ما نُفّذ", "");
-    const add = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (add.props.onPick as (value: typeof service) => void)(service);
+    const add = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (add.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     expect(String(field("③ ما نُفّذ").props.value)).toContain(service.name);
     enter("③ ما نُفّذ", "");
     pendingRefresh = deferred<MockResponse>(); click("احفظ بلا توقيع");
@@ -363,8 +363,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
 
   it("pending procedure controls cannot indirectly rewrite the treatment note", async () => {
     enter("③ ما نُفّذ", "");
-    const add = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (add.props.onPick as (value: typeof service) => void)(service);
+    const add = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (add.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     const autoTreatment = field("③ ما نُفّذ").props.value;
     expect(String(autoTreatment)).toContain(service.name);
     pendingWrite = deferred<MockResponse>();
@@ -374,8 +374,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     expect(group.props.disabled).toBe(true);
     const quantity = render().find((node) => node.props["aria-label"] === "الكمية");
     (quantity.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "3" } });
-    const picker = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (picker.props.onPick as (value: typeof service) => void)(service);
+    const picker = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (picker.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     expect(render().find((node) => node.props["aria-label"] === "الكمية").props.value).toBe(1);
     expect(elements(render().tree).filter((node) => node.props["aria-label"] === "الكمية")).toHaveLength(1);
     expect(field("③ ما نُفّذ").props.value).toBe(autoTreatment);
@@ -399,8 +399,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
     click("احفظ بلا توقيع");
     await settleSave();
     enter("③ ما نُفّذ", "");
-    const add = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (add.props.onPick as (value: typeof service) => void)(service);
+    const add = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (add.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     const autoTreatment = field("③ ما نُفّذ").props.value;
     expect(String(autoTreatment)).toContain(service.name);
     const plannedGroup = () => {
@@ -478,8 +478,8 @@ describe("normal clinical visit draft preservation (isolated acceptance audit)",
 
   it("control: adding a free procedure leaves manually written notes intact", () => {
     noteLabels.forEach((label, index) => enter(label, `Synthetic manual ${noteKeys[index]}`));
-    const select = render().find((node) => node.props.title === "أضف إجراءً للزيارة");
-    (select.props.onPick as (value: typeof service) => void)(service);
+    const select = render().find((node) => node.props.ariaLabel === "أضف إجراءً");
+    (select.props.onChange as (id: number, value: typeof service) => void)(service.id, service);
     noteLabels.forEach((label, index) => expect(field(label).props.value).toBe(`Synthetic manual ${noteKeys[index]}`));
     expect(writes()).toHaveLength(0);
   });

@@ -7,8 +7,9 @@ import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 let h: Awaited<ReturnType<typeof harness>>, browser: Browser, db: Client;
 let patientId = 0, visitId = 0;
 const NAME = "مريض تسليم التوقيع الاصطناعي";
-const register = (page: Page) => page.getByRole("region", { name: "الزيارات الموقّعة للاستقبال" });
-const item = (page: Page, id: number) => register(page).locator(`[data-handoff-visit="${id}"]`);
+const register = (page: Page) => page.getByRole("region", { name: "الزيارات الموقّعة للاستقبال", includeHidden: true });
+const openCheckout = async (page: Page) => { await page.getByRole("tab", { name: /التحصيل والخروج/ }).click(); };
+const item = (page: Page, id: number) => register(page).locator(`[data-handoff-visit="${id}"]:visible`);
 async function contextFor(cookie: string, width = 1280): Promise<BrowserContext> {
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", timezoneId: "Asia/Aden", serviceWorkers: "block" });
   const [name, ...value] = cookie.split("=");
@@ -68,6 +69,8 @@ describe("reception signature discovery on the built application", () => {
       await doctorGuard.run(async () => {
         await receptionPage.clock.install();
         await receptionPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+        expect(await receptionPage.getByRole("tabpanel", { name: "الانتظار والكراسي" }).isVisible()).toBe(true);
+        await openCheckout(receptionPage);
         await expect.poll(() => register(receptionPage).innerText()).not.toContain("جارٍ تحميل");
         expect(await item(receptionPage, visitId).count()).toBe(0);
         await doctorPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -79,7 +82,10 @@ describe("reception signature discovery on the built application", () => {
         }, visitId);
         expect(signed.status).toBe(200); expect(signed.body.invoiceId).toBeNull();
         // Advance the existing polling interval, with no manual refresh/focus and no sign toast in reception.
+        await receptionPage.getByRole("tab", { name: "الانتظار والكراسي" }).click();
         await receptionPage.clock.fastForward(20_001);
+        await expect.poll(() => receptionPage.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toMatch(/\([1-9]\d*\)/);
+        await openCheckout(receptionPage);
         await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
         expect(await item(receptionPage, visitId).innerText()).toContain(NAME);
         expect(await item(receptionPage, visitId).innerText()).toContain("توقيع جديد");
@@ -92,6 +98,7 @@ describe("reception signature discovery on the built application", () => {
         })).status, visitId);
         expect(retry).toBe(409);
         await receptionPage.reload({ waitUntil: "domcontentloaded" });
+        await openCheckout(receptionPage);
         await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
         expect(await item(receptionPage, visitId).innerText()).not.toContain("توقيع جديد");
         // Another open visit must not displace this exact signed handoff.
@@ -132,7 +139,7 @@ describe("reception signature discovery on the built application", () => {
       const fromDate = new Date(Date.parse(`${toDate}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
       return { owner: { username: mode === "other-owner" ? "different-reception" : "secreception", role: "reception" },
         fromDate, toDate, clinicTimeZone: "Asia/Aden", items: [{ visitId: activeId, patientId: 31,
-          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z` }] };
+          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z`, status: "pending", handledReason: null }] };
     };
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url());
@@ -149,21 +156,23 @@ describe("reception signature discovery on the built application", () => {
     await guard.run(async () => {
       try {
         await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+        await openCheckout(page);
         await expect.poll(() => item(page, 901).count()).toBe(1);
         for (const failure of ["failed", "malformed"] as const) {
           mode = failure; await refresh();
           await expect.poll(() => register(page).innerText()).toContain("آخر قائمة غير محدثة");
           expect(await item(page, 901).count()).toBe(1);
           expect(await item(page, 901).getByRole("link").count()).toBe(0);
-          expect(await register(page).innerText()).not.toContain("لا توجد توقيعات");
+          expect(await register(page).innerText()).not.toContain("لا توجد زيارات بانتظار المعالجة");
+          await expect.poll(() => page.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toContain("(…)");
           mode = "ready"; await register(page).getByRole("button", { name: "تحديث التوقيعات" }).click();
           await expect.poll(() => item(page, 901).getByRole("link").count()).toBe(1);
         }
         // Start A, navigate to B, then A again before releasing the old A response.
         hold = true; await refresh(); await expect.poll(() => releases.length).toBe(1);
-        activeId = 902; await register(page).getByLabel("نهاية فترة التوقيع").fill("2026-10-09");
+        activeId = 902; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-09");
         await expect.poll(() => item(page, 902).count()).toBe(1);
-        activeId = 903; await register(page).getByLabel("نهاية فترة التوقيع").fill("2026-10-10");
+        activeId = 903; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-10");
         await expect.poll(() => item(page, 903).count()).toBe(1);
         releases.shift()!();
         await refresh(); await expect.poll(() => item(page, 903).count()).toBe(1);
@@ -183,4 +192,54 @@ describe("reception signature discovery on the built application", () => {
       } finally { for (const release of releases.splice(0)) release(); }
     }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
   }, 120_000);
+  it.each([1280, 390])("keeps the day clear and updates a bounded pending/history tab at %ipx", async width => {
+    const context = await contextFor(h.sessions.reception.cookie, width);
+    const unexpected: string[] = [];
+    let resolved = false;
+    const payload = () => ({ owner: { username: "secreception", role: "reception" },
+      fromDate: "2026-10-09", toDate: "2026-10-10", clinicTimeZone: "Asia/Aden",
+      items: Array.from({ length: 30 }, (_, index) => ({ visitId: 7000 + index, patientId: 31,
+        patientName: `مريض اصطناعي ${index}`, patientNumber: "SYN-31", signedAt: "2026-10-10T09:00:00Z",
+        status: resolved && index === 0 ? "deferred" : "pending", handledReason: resolved && index === 0 ? "تأجيل موثّق" : null })) });
+    const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
+      const url = new URL(route.request().url());
+      if (url.origin === baseUrl && route.request().method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "reception-handoff") {
+        await route.fulfill({ json: payload() }); return;
+      }
+      await allowBuiltBoardRead(route, unexpected);
+    });
+    const page = await context.newPage();
+    await guard.run(async () => {
+      await page.clock.install();
+      await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+      const checkoutTab = page.getByRole("tab", { name: /التحصيل والخروج/ });
+      await expect.poll(() => checkoutTab.innerText()).toContain("(30)");
+      expect(await register(page).isVisible()).toBe(false);
+      expect(await page.getByRole("region", { name: "ملخص اليوم" }).isVisible()).toBe(true);
+      await openCheckout(page);
+      expect(await page.getByRole("region", { name: "ملخص اليوم" }).isVisible()).toBe(false);
+      const list = page.getByRole("list", { name: "مهام الاستقبال المعلقة" });
+      const bounds = await list.evaluate(element => ({ height: element.getBoundingClientRect().height,
+        scroll: element.scrollHeight, viewport: innerWidth, right: element.getBoundingClientRect().right }));
+      expect(bounds.height).toBeLessThanOrEqual(257); expect(bounds.scroll).toBeGreaterThan(bounds.height);
+      expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+      await page.getByRole("tab", { name: "الانتظار والكراسي" }).click();
+      resolved = true;
+      await page.clock.fastForward(20_001);
+      await expect.poll(() => checkoutTab.innerText()).toContain("(29)");
+      await openCheckout(page);
+      expect(await item(page, 7000).count()).toBe(0);
+      await page.getByRole("button", { name: "سجل المعالجة (1)" }).click();
+      expect(await item(page, 7000).innerText()).toContain("الرصيد باقٍ");
+      expect(await item(page, 7000).getByRole("link").getAttribute("href")).toBe("/patients/31?tab=today&checkoutVisit=7000");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect.poll(() => checkoutTab.innerText()).toContain("(29)");
+      await checkoutTab.focus(); await page.keyboard.press("Home");
+      expect(await page.getByRole("tab", { name: "الانتظار والكراسي" }).getAttribute("aria-selected")).toBe("true");
+      await page.keyboard.press("End");
+      expect(await checkoutTab.getAttribute("aria-selected")).toBe("true");
+    }, () => { expect(unexpected).toEqual([]); });
+    await context.close();
+  }, 120_000);
+
 });

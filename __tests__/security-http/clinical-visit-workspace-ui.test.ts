@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
+import { formatMoney } from "../../lib/money";
 
 // Real built app + isolated HTTP harness. Synthetic intercepted browser API data;
 // no browser clinical, inventory, payment, signature or other write reaches a server.
@@ -15,7 +16,8 @@ afterAll(async () => { await browser?.close(); });
 const patientId = 98301, visitId = 98302, doctorId = 98303;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
 const services = [
-  { id: 98304, name: "خدمة حشو اصطناعية", category: "filling", priceMinor: 100, priceConfigured: true },
+  { id: 98304, name: "خدمة حشو اصطناعية", category: "filling", priceMinor: 100, priceConfigured: true,
+    priceIn: { SAR: { minor: 2500, source: "catalog" }, USD: { minor: 700, source: "converted" } } },
   { id: 98305, name: "خدمة بفئة مخصصة اصطناعية", category: "قسم مخصص", priceMinor: 0, priceConfigured: false },
   { id: 98306, name: "خدمة عامة اصطناعية", category: null, priceMinor: 200, priceConfigured: true },
   { id: 98307, name: "خدمة معطلة اصطناعية", category: "consultation", isActive: false, priceMinor: 100, priceConfigured: true },
@@ -128,37 +130,94 @@ describe("actual visit workspace choices and review", () => {
     } finally { await f.context.close(); }
   });
 
-  it("retains every active catalog category and unpriced choices through one keyboard-accessible action", async () => {
-    const f = await fixture(390);
+  it.each([390, 1280])("retains every active category in one searchable native grouped dropdown at %ipx", async (width) => {
+    const f = await fixture(width);
     try {
       const { page } = f;
-      const add = page.getByRole("button", { name: "أضف إجراءً", exact: true });
-      expect(await add.count()).toBe(1); expect(await page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).count()).toBe(0);
-      await add.click();
-      const picker = page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true });
-      for (const service of services.filter((row) => row.isActive !== false)) expect(await picker.getByText(service.name, { exact: true }).count()).toBe(1);
-      expect(await picker.getByText(services[3].name, { exact: true }).count()).toBe(0);
-      const close = picker.getByRole("button", { name: "إغلاق", exact: true });
-      const finalLink = picker.getByRole("link", { name: /إدارة الأسعار/ });
-      await page.setViewportSize({ width: 390, height: 400 });
-      const footerBox = (await finalLink.boundingBox())!;
-      expect(footerBox.y).toBeGreaterThanOrEqual(0); expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(400);
-      await finalLink.focus(); await page.keyboard.press("Tab");
-      expect(await close.evaluate((node) => document.activeElement === node)).toBe(true);
-      await page.keyboard.press("Shift+Tab");
-      expect(await finalLink.evaluate((node) => document.activeElement === node)).toBe(true);
-      expect(await picker.evaluate((node) => node.contains(document.activeElement))).toBe(true);
-      const search = picker.getByRole("textbox", { name: "بحث في الخدمات" });
+      const add = page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+      const search = page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true });
+      expect(await add.count()).toBe(1);
+      expect(await page.getByRole("button", { name: "أضف إجراءً", exact: true }).count()).toBe(0);
+      expect(await page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true }).count()).toBe(0);
+      expect(await add.evaluate((node) => node.tagName)).toBe("SELECT");
+      for (const service of services.filter((row) => row.isActive !== false)) {
+        expect(await add.locator(`option[value="${service.id}"]`).count()).toBe(1);
+      }
+      expect(await add.locator(`option[value="${services[3].id}"]`).count()).toBe(0);
+      expect(await add.locator('option[value="manual"]').count()).toBe(0);
+      expect(await add.locator('optgroup[label*="قسم مخصص"]').count()).toBe(1);
+      expect(await add.locator('optgroup[label*="عام"]').count()).toBe(1);
+      await search.fill("لا توجد خدمة بهذا الاسم");
+      expect(await add.locator("optgroup option").count()).toBe(0);
+      expect(await page.getByText("لا خدمة تطابق البحث.", { exact: true }).count()).toBe(1);
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(0);
       await search.fill(services[1].name);
-      const custom = picker.getByRole("button").filter({ hasText: services[1].name });
-      await custom.focus(); await custom.press("Enter");
-      await expect.poll(() => picker.count()).toBe(0);
-      expect(await page.getByTestId("visit-work-recorded").count()).toBe(1);
+      const choice = add.locator(`option[value="${services[1].id}"]`);
+      expect(await choice.textContent()).toContain("غير مُسعّر");
+      expect(await add.locator("optgroup option").count()).toBe(1);
+      // Native keyboard selection invokes the same callback as pointer selection.
+      await search.press("Tab");
+      expect(await add.evaluate((node) => document.activeElement === node)).toBe(true);
+      await add.press("ArrowDown");
+      await expect.poll(() => page.getByTestId("visit-work-recorded").count()).toBe(1);
       expect(await page.getByRole("textbox", { name: "السعر", exact: true }).inputValue()).toBe("0");
       expect(await field(page, "③ ما نُفّذ").inputValue()).toBe("ملاحظة الطبيب الأصلية");
-      await add.click(); await picker.getByRole("textbox", { name: "بحث في الخدمات" }).press("Escape");
-      expect(await add.evaluate((node) => document.activeElement === node)).toBe(true);
+      await search.fill("");
+      expect(await add.locator("optgroup option").count()).toBe(3);
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       expect(f.writes).toHaveLength(0); f.verify();
+    } finally { await f.context.close(); }
+  });
+
+  it.each([390, 1280])("keeps live YER/SAR/USD catalog prices and locked plan ownership at %ipx", async (width) => {
+    const f = await fixture(width);
+    try {
+      const { page } = f;
+      const add = page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+      const search = page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true });
+      await page.getByTestId("planned-item-98400").getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
+      const planned = page.getByTestId("visit-work-recorded").filter({ hasText: "من الخطة — سعرها من قاعدة البند" });
+      const plannedPrice = planned.getByRole("textbox", { name: "السعر", exact: true });
+      await add.selectOption(String(services[0].id));
+      const free = page.getByTestId("visit-work-recorded").filter({ hasText: "إجراء من الدليل" });
+      const freePrice = free.getByRole("textbox", { name: "السعر", exact: true });
+      await freePrice.fill("123");
+      await search.fill("لا توجد خدمة بهذا الاسم");
+      await search.fill("");
+      expect(await freePrice.inputValue()).toBe("123");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+      expect(f.writes).toHaveLength(0);
+      for (const [currency, label, minor, amount] of [
+        ["SAR", "ريال سعودي", 2500, "25.00"], ["USD", "دولار", 700, "7.00"], ["YER", "ريال يمني", 100, "100"],
+      ] as const) {
+        await page.getByRole("radio", { name: label, exact: true }).click();
+        expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(minor, currency));
+        expect(await freePrice.inputValue()).toBe(amount);
+        expect(await plannedPrice.inputValue()).toBe("10.00");
+        expect(await plannedPrice.isDisabled()).toBe(true);
+        expect(await planned.textContent()).toContain("الحالة #98501");
+        expect(await planned.textContent()).toContain("انتظار تقييم البند المرجعي #98502");
+        if (currency === "SAR") {
+          expect(await page.getByTestId("currency-subtotals").count()).toBe(0);
+          expect(await page.locator("#visit-procedures").textContent()).toContain(formatMoney(3500, "SAR"));
+        } else {
+          expect(await page.getByTestId("currency-subtotals").textContent()).toContain(formatMoney(1000, "SAR"));
+        }
+        if (currency !== "YER") expect(await add.locator(`option[value="${services[2].id}"]`).textContent()).toContain("لا سعر بهذه العملة");
+        expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+        expect(await field(page, "③ ما نُفّذ").inputValue()).toBe("ملاحظة الطبيب الأصلية");
+        expect(f.writes).toHaveLength(0);
+      }
+      await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).click();
+      await expect.poll(() => f.writes.length).toBe(1);
+      expect(f.writes[0].billingCurrency).toBe("YER");
+      expect(f.writes[0].procedures).toEqual([
+        expect.objectContaining({ planItemId: 98400, toothCode: 16, unitPriceMinor: 1000 }),
+        expect.objectContaining({ planItemId: null, serviceId: services[0].id, unitPriceMinor: 100 }),
+      ]);
+      f.verify();
     } finally { await f.context.close(); }
   });
 

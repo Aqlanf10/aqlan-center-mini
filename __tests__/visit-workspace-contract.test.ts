@@ -43,10 +43,12 @@ describe("actual visit workspace retains its authoritative contracts", () => {
     expect(createHash("sha256").update(source.slice(from, to)).digest("hex")).toBe(sha);
   });
   it("uses one catalog action and one worklist, preserving tooth and plan callbacks", () => {
-    expect(source.match(/<QuickServicePicker/g)).toHaveLength(1);
-    expect(source).not.toContain("<ServiceSelect");
+    expect(source.match(/<ServiceSelect/g)).toHaveLength(1);
+    expect(source).not.toContain("<QuickServicePicker");
     expect(source.match(/aria-label="بنود عمل الزيارة"/g)).toHaveLength(1);
-    expect(source).toContain("onPick={(service) => addFreeProcedure(service as Service)}");
+    expect(source).toContain("onChange={(_id, service) => { if (service) addFreeProcedure(service as Service); }}");
+    expect(source).toContain("catalogCurrency={visitCurrency}");
+    expect(source).toContain("disabled={busy || !canEditWork}");
     expect(source).toContain("onClick={() => addPlannedItem(item)}");
     expect(source).toContain("<ToothField value={draft.toothCode}");
     expect(source).toContain("disabled={draft.planItemId !== null}");

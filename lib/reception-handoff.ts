@@ -1,10 +1,13 @@
-/** Read-only discovery of committed signatures. This is not a payment/clearance queue. */
+/** Reception work status is separate from patient debt and financial clearance. */
+export type ReceptionHandoffStatus = "pending" | "collected" | "deferred" | "handled";
 export interface ReceptionHandoff {
   visitId: number;
   patientId: number;
   patientName: string;
   patientNumber: string;
   signedAt: string;
+  status: ReceptionHandoffStatus;
+  handledReason: string | null;
 }
 
 export interface ReceptionHandoffSnapshot {
@@ -49,13 +52,16 @@ export function readReceptionHandoffs(value: unknown, owner: { username: string;
       || typeof row.patientName !== "string" || !row.patientName.trim()
       || typeof row.patientNumber !== "string" || !row.patientNumber.trim()
       || typeof row.signedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(row.signedAt)
-      || !Number.isFinite(Date.parse(row.signedAt))) return null;
+      || !Number.isFinite(Date.parse(row.signedAt))
+      || typeof row.status !== "string" || !["pending", "collected", "deferred", "handled"].includes(row.status)
+      || !(row.handledReason === null || typeof row.handledReason === "string")) return null;
     const parts = day.formatToParts(new Date(row.signedAt));
     const date = ["year", "month", "day"].map(type => parts.find(part => part.type === type)?.value).join("-");
     if (date < value.fromDate || date > value.toDate) return null;
     ids.add(row.visitId);
     items.push({ visitId: row.visitId, patientId: row.patientId, patientName: row.patientName,
-      patientNumber: row.patientNumber, signedAt: row.signedAt });
+      patientNumber: row.patientNumber, signedAt: row.signedAt,
+      status: row.status as ReceptionHandoffStatus, handledReason: row.handledReason as string | null });
   }
   return { owner, fromDate: value.fromDate, toDate: value.toDate, clinicTimeZone: value.clinicTimeZone, items };
 }
