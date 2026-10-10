@@ -3,8 +3,10 @@ import {chromium,type Browser,type BrowserContext,type Page} from "playwright";
 import {Pool} from "pg";
 import {mkdirSync} from "node:fs";
 import {join} from "node:path";
-import {baseUrl,harness,type Harness} from "./_server";
+import {harness,type Harness} from "./_server";
+import {openHrJourneyServer} from "./_hr-isolated-server";
 let h:Harness,db:Pool,browser:Browser,context:BrowserContext;
+let isolated:Awaited<ReturnType<typeof openHrJourneyServer>>,baseUrl:string;
 const periodMonth="2026-08";
 const evidence=process.env.HR_EVIDENCE_DIR ?? "/tmp/hr-evidence";
 let run:any,items:any[];
@@ -19,7 +21,7 @@ async function ready(page:Page){
  await expect.poll(async()=>await page.locator("tbody").textContent()).toContain("HR-JOURNEY-HYBRID");
 }
 beforeAll(async()=>{
- h=await harness();db=new Pool({connectionString:h.seeded.dbUrl,ssl:false});
+ h=await harness();isolated=await openHrJourneyServer(h);db=isolated.db;baseUrl=isolated.baseUrl;
  browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined});
  context=await browser.newContext({viewport:{width:1280,height:900}});
  const pair=h.sessions.admin.cookie.split(";")[0];const split=pair.indexOf("=");await context.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
@@ -42,10 +44,10 @@ beforeAll(async()=>{
  }
  const period=await api("POST","/api/hr/payroll/periods",{periodMonth});expect(period.status).toBe(201);
  const calculated=await api("POST","/api/hr/payroll/runs",{action:"calculate",periodId:period.body.id,currency:"YER"});expect(calculated.status).toBe(201);run=calculated.body;
- const approved=await api("POST","/api/hr/payroll/runs",{action:"approve",runId:run.id});expect(approved.status).toBe(200);
+ const approved=await api("POST","/api/hr/payroll/runs",{action:"approve",runId:run.id});expect(approved.status,JSON.stringify(approved.body)).toBe(200);
  items=(await api("GET",`/api/hr/payroll/runs?id=${run.id}`)).body.items;
 },240_000);
-afterAll(async()=>{await context?.close();await browser?.close();await db?.end();});
+afterAll(async()=>{await context?.close();await browser?.close();await isolated?.close();});
 describe("HR contract to payroll to cash: actual API and browser",()=>{
  it("salary, percentage and hybrid show their real components, on desktop and mobile",async()=>{
    expect(items.find(i=>i.staffName==="HR-JOURNEY-SALARY")).toMatchObject({baseSalaryMinor:80000,commissionsMinor:0});
@@ -104,4 +106,29 @@ describe("HR contract to payroll to cash: actual API and browser",()=>{
    }
    expect((await api("POST","/api/hr/payroll/disburse",{...payload,itemId:999999,clientRequestId:"invalid-item-http-0001"})).status).toBe(404);
  });
+});
+
+it("actual attendance and leave APIs preserve raw events, pending decisions and private reasons",async()=>{
+ const staffId=items.find(i=>i.staffName==="HR-JOURNEY-SALARY").staffId;
+ const schedule=await api("POST","/api/hr/schedules",{staffId,name:"HTTP night",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true});expect(schedule.status).toBe(201);
+ expect((await api("POST","/api/hr/attendance",{staffId,punchType:"check_in",punchTime:"2026-08-01T22:00:00+03:00"})).status).toBe(201);
+ const out=await api("POST","/api/hr/attendance",{staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"});expect(out.status).toBe(201);expect(out.body).toMatchObject({attendanceDate:"2026-08-01",workMinutes:480,isIncomplete:false});
+ const correction=await api("POST","/api/hr/attendance/corrections",{attendanceRecordId:out.body.id,fieldCorrected:"check_in",newCheckIn:"2026-08-01T23:00:00+03:00",reason:"HTTP pending fixture"});expect(correction.status).toBe(201);expect(correction.body).toMatchObject({status:"pending",approvedBy:null});
+ expect((await api("POST","/api/hr/attendance/corrections",{action:"decide",id:correction.body.id,decision:"approved"})).status).toBe(400);
+ expect((await api("GET",`/api/hr/attendance?staffId=${staffId}`)).body[0].checkInActual).toBe(out.body.checkInActual);
+ expect((await db.query("SELECT count(*)::int AS n FROM hr_attendance_punch_events WHERE attendance_id=$1",[out.body.id])).rows[0].n).toBe(2);
+ const request=await api("POST","/api/hr/leaves",{staffId,leaveTypeCode:"annual",startDate:"2026-08-10",endDate:"2026-08-10",reason:"Private HTTP reason"});expect(request.status).toBe(201);expect(request.body.daysCount).toBe(1);
+ expect((await api("PATCH",`/api/hr/leaves/${request.body.id}`,{status:"approved"})).status).toBe(400);
+ expect((await api("GET",`/api/hr/leaves/${request.body.id}`,undefined,h.sessions.doctorA.cookie)).status).toBe(404);
+ expect((await api("GET",`/api/hr/leaves?staffId=${staffId}`,undefined,h.sessions.doctorA.cookie)).body).toEqual([]);
+ expect((await api("GET",`/api/hr/leaves/balances?staffId=${staffId}`,undefined,h.sessions.doctorA.cookie)).body).toEqual([]);
+ expect((await api("POST","/api/hr/leaves",{staffId,leaveTypeCode:"annual",startDate:"2026-08-11",endDate:"2026-08-11",reason:"tampered staff"},h.sessions.doctorA.cookie)).status).toBe(400);
+ const page=await context.newPage();try{
+  await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"الدوام والحضور"}).click();
+  await page.locator('section[aria-label="الدوام والحضور"] input[type="date"]').fill("2026-08-01");
+  await expect.poll(async()=>await page.locator('section[aria-label="الدوام والحضور"] tbody').textContent()).toContain("HR-JOURNEY-SALARY");
+  const row=page.locator('section[aria-label="الدوام والحضور"] tbody tr').filter({hasText:"HR-JOURNEY-SALARY"});expect(await row.textContent()).toContain("22:00");expect(await row.textContent()).toContain("06:00");expect(await row.textContent()).toContain("8.0");
+  await page.screenshot({path:join(evidence,"hr-workforce-1280.png"),fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);await page.screenshot({path:join(evidence,"hr-workforce-390.png"),fullPage:true});
+ }finally{await page.close();}
+ const report=await api("GET","/api/hr/reports");expect(report.status).toBe(200);expect(report.body.payrollSummaryByCurrency.find((row:any)=>row.currency==="YER")).toMatchObject({totalNetDue:204000,totalDisbursed:30000,totalRemainingPayable:174000});
 });

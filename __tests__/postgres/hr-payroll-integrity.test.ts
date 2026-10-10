@@ -384,7 +384,7 @@ describe("٢ — صرف النظام المختلط عبر محرك العمول
     expect(direct.expense).not.toBeNull();
     await q("UPDATE expenses SET created_at='2026-10-12 10:00+03' WHERE id=$1",[direct.expense!.id]);
     // A direct payment before approval changes the engine balance; the draft must be recalculated.
-    await expect(approve(h.run.id)).rejects.toThrow("العمولة");
+    await expect(approve(h.run.id)).rejects.toThrow("تغيّر مستحق كشف الطبيب");
     await payroll.calculatePayrollRun(h.run.periodId,"YER",admin);
     await approve(h.run.id);
     const recalculated=(await payroll.listPayrollItems(h.run.id)).find(i=>i.staffId===h.staffId)!;
