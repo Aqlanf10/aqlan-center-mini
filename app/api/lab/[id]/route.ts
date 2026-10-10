@@ -16,6 +16,7 @@ import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import type { LabOrderStatus } from "@/lib/lab";
+import { isLabAccountingRate } from "@/lib/lab-accounting-edit";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +100,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         const baseCurrency: Currency = CLINIC_BASE_CURRENCY;
         const rate = costCurrency === baseCurrency ? 1 : rateFromSettings(settings, costCurrency, baseCurrency);
         exchangeRate = rate != null && rate > 0 ? rate : undefined;
+        // Optional UI quote fence; unchanged-money requests omit all these fields.
+        // The server still owns the current rate and the existing writer owns money.
+        if (source.expectedExchangeRate !== undefined) {
+          if (!isLabAccountingRate(source.expectedExchangeRate)) {
+            return NextResponse.json({ code: "lab_accounting_rate_invalid", message: "سعر معاينة غير صالح. أعد تحميل المعاينة." }, { status: 400 });
+          }
+          if (!isLabAccountingRate(exchangeRate) || source.expectedExchangeRate !== exchangeRate) {
+            return NextResponse.json({ code: "lab_accounting_rate_changed", message: "تغيّر سعر الصرف أو تعذّر التحقق منه. حدّث المعاينة وراجعها قبل الحفظ." }, { status: 409 });
+          }
+        }
       } else if (source.cost === null || source.cost === "") {
         costMinor = null;
       }
