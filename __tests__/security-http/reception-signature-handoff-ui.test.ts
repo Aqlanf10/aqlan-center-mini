@@ -1,8 +1,58 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+
+const RECEPTION_EVIDENCE_MARKER = "AQLAN_RECEPTION_UI_PNG_V1";
+const RECEPTION_EVIDENCE_SUITE = "__tests__/security-http/reception-signature-handoff-ui.test.ts";
+const RECEPTION_SCENES = ["day", "pending", "history"] as const;
+type ReceptionCapture = { scene: typeof RECEPTION_SCENES[number]; png: Buffer };
+const evidenceHash = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
+
+/** Exact synthetic viewport buffers only, using the existing bounded CI-log
+ * BEGIN/CHUNK/MANIFEST transport. Emit after assertions and browser teardown;
+ * capture, validation, source-read or stdout failures fail the actual test.
+ * No filesystem image discovery, cookies, traces, environment dump or uploader change.
+ */
+async function emitReceptionEvidence(width: number, captures: readonly ReceptionCapture[]): Promise<void> {
+  const imageByteCap = 512 * 1024, totalByteCap = 1536 * 1024, chunkCharCap = 4096;
+  if (![390, 1280].includes(width) || captures.length !== RECEPTION_SCENES.length) throw new Error("Incomplete reception evidence batch");
+  const images = captures.map(({ scene, png }, index) => {
+    if (scene !== RECEPTION_SCENES[index] || !Buffer.isBuffer(png) || png.length < 45 || png.length > imageByteCap
+      || png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" || png.readUInt32BE(8) !== 13
+      || png.toString("ascii", 12, 16) !== "IHDR" || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== 1000
+      || png.subarray(-12).toString("hex") !== "0000000049454e44ae426082") throw new Error("Invalid reception evidence PNG");
+    const base64Length = 4 * Math.ceil(png.length / 3);
+    return { scene, filename: `reception-${scene}-${width}.png`, width, height: 1000, mime: "image/png", bytes: png.length,
+      sha256: evidenceHash(png), base64Length, chunks: Math.ceil(base64Length / chunkCharCap) };
+  });
+  const totalBytes = images.reduce((sum, image) => sum + image.bytes, 0);
+  if (totalBytes > totalByteCap) throw new Error("Reception evidence exceeds batch byte cap");
+  const sourceSha256 = evidenceHash(readFileSync(join(process.cwd(), RECEPTION_EVIDENCE_SUITE)));
+  const runId = /^\d{1,24}$/.test(process.env.GITHUB_RUN_ID ?? "") ? process.env.GITHUB_RUN_ID : "unavailable";
+  const checkoutSha = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(process.env.GITHUB_SHA ?? "") ? process.env.GITHUB_SHA : "unavailable";
+  const identity = { protocol: 1, suite: RECEPTION_EVIDENCE_SUITE, sourceSha256, runId, checkoutSha,
+    synthetic: true, chunkCharCap, imageByteCap, totalByteCap, totalBytes, images };
+  const batch = evidenceHash(JSON.stringify(identity));
+  const records = [`${RECEPTION_EVIDENCE_MARKER} BEGIN ${JSON.stringify({ batch, scenes: images.length })}`];
+  for (const [position, { png }] of captures.entries()) {
+    const image = images[position], data = png.toString("base64");
+    for (let index = 0; index < image.chunks; index++) records.push(`${RECEPTION_EVIDENCE_MARKER} CHUNK ${JSON.stringify({
+      batch, scene: image.scene, filename: image.filename, index: index + 1, count: image.chunks,
+      data: data.slice(index * chunkCharCap, (index + 1) * chunkCharCap),
+    })}`);
+  }
+  records.push(`${RECEPTION_EVIDENCE_MARKER} MANIFEST ${JSON.stringify({ batch, ...identity })}`);
+  if (records.some(record => Buffer.byteLength(record) > 8192)
+    || records.reduce((sum, record) => sum + Buffer.byteLength(record) + 1, 0) > 2304 * 1024) throw new Error("Reception evidence exceeds stdout cap");
+  for (const record of records) await new Promise<void>((resolve, reject) => {
+    process.stdout.write(`${record}\n`, error => error ? reject(error) : resolve());
+  });
+}
 
 let h: Awaited<ReturnType<typeof harness>>, browser: Browser, db: Client;
 let patientId = 0, visitId = 0;
@@ -195,6 +245,7 @@ describe("reception signature discovery on the built application", () => {
   it.each([1280, 390])("keeps the day clear and updates a bounded pending/history tab at %ipx", async width => {
     const context = await contextFor(h.sessions.reception.cookie, width);
     const unexpected: string[] = [];
+    const captures: ReceptionCapture[] = [];
     let resolved = false;
     const payload = () => ({ owner: { username: "secreception", role: "reception" },
       fromDate: "2026-10-09", toDate: "2026-10-10", clinicTimeZone: "Asia/Aden",
@@ -216,6 +267,7 @@ describe("reception signature discovery on the built application", () => {
       await expect.poll(() => checkoutTab.innerText()).toContain("(30)");
       expect(await register(page).isVisible()).toBe(false);
       expect(await page.getByRole("region", { name: "ملخص اليوم" }).isVisible()).toBe(true);
+      captures.push({ scene: "day", png: await page.screenshot({ type: "png", fullPage: false, animations: "disabled", caret: "hide" }) });
       await openCheckout(page);
       expect(await page.getByRole("region", { name: "ملخص اليوم" }).isVisible()).toBe(false);
       const list = page.getByRole("list", { name: "مهام الاستقبال المعلقة" });
@@ -223,6 +275,7 @@ describe("reception signature discovery on the built application", () => {
         scroll: element.scrollHeight, viewport: innerWidth, right: element.getBoundingClientRect().right }));
       expect(bounds.height).toBeLessThanOrEqual(257); expect(bounds.scroll).toBeGreaterThan(bounds.height);
       expect(bounds.right).toBeLessThanOrEqual(bounds.viewport);
+      captures.push({ scene: "pending", png: await page.screenshot({ type: "png", fullPage: false, animations: "disabled", caret: "hide" }) });
       await page.getByRole("tab", { name: "الانتظار والكراسي" }).click();
       resolved = true;
       await page.clock.fastForward(20_001);
@@ -232,6 +285,7 @@ describe("reception signature discovery on the built application", () => {
       await page.getByRole("button", { name: "سجل المعالجة (1)" }).click();
       expect(await item(page, 7000).innerText()).toContain("الرصيد باقٍ");
       expect(await item(page, 7000).getByRole("link").getAttribute("href")).toBe("/patients/31?tab=today&checkoutVisit=7000");
+      captures.push({ scene: "history", png: await page.screenshot({ type: "png", fullPage: false, animations: "disabled", caret: "hide" }) });
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect.poll(() => checkoutTab.innerText()).toContain("(29)");
       await checkoutTab.focus(); await page.keyboard.press("Home");
@@ -240,6 +294,7 @@ describe("reception signature discovery on the built application", () => {
       expect(await checkoutTab.getAttribute("aria-selected")).toBe("true");
     }, () => { expect(unexpected).toEqual([]); });
     await context.close();
+    await emitReceptionEvidence(width, captures);
   }, 120_000);
 
 });
