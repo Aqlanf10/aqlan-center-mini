@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { clinicDateString } from "@/lib/schedule";
 import {
   HR_ATTENDANCE_STATUS_LABELS,
   type HrAttendanceStatus,
@@ -70,7 +72,7 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   // Filters
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [selectedStaff, setSelectedStaff] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
@@ -744,6 +746,19 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 placeholder="مثلاً: وردية صباحية للتمريض أو دوام الأطباء"
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-navy-700">نمط الوردية</label>
+              <select
+                value={schedPattern}
+                onChange={(e) => setSchedPattern(e.target.value)}
+                className="w-full rounded-xl border border-navy-200 bg-white p-2.5 text-sm outline-none"
+              >
+                <option value="morning">وردية صباحية</option>
+                <option value="evening">وردية مسائية</option>
+                <option value="split">فترتان (صباح ومساء)</option>
+                <option value="night">وردية ليلية</option>
+              </select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

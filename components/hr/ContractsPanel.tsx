@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { clinicDateString } from "@/lib/schedule";
 import {
   HR_CONTRACT_KIND_LABELS,
   HR_CONTRACT_STATUS_LABELS,
@@ -74,7 +76,7 @@ export function HrContractsPanel() {
   const [formContractNumber, setFormContractNumber] = useState("");
   const [formTitle, setFormTitle] = useState("");
   const [formKind, setFormKind] = useState<HrContractKind>("fixed_salary");
-  const [formStartDate, setFormStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [formStartDate, setFormStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [formEndDate, setFormEndDate] = useState("");
   const [formProbationDate, setFormProbationDate] = useState("");
   const [formCurrency, setFormCurrency] = useState("YER");
@@ -87,7 +89,7 @@ export function HrContractsPanel() {
 
   // Addendum form state
   const [addendumTitle, setAddendumTitle] = useState("");
-  const [addendumEffectiveDate, setAddendumEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
+  const [addendumEffectiveDate, setAddendumEffectiveDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [addendumContent, setAddendumContent] = useState("");
 
   const loadContracts = useCallback(async () => {
@@ -163,7 +165,7 @@ export function HrContractsPanel() {
       setFormCommissionRate("0");
       const d = new Date();
       d.setMonth(d.getMonth() + 3);
-      setFormProbationDate(d.toISOString().slice(0, 10));
+      setFormProbationDate(clinicDateString(d, CLINIC_ZONE_FALLBACK));
       setFormClauses("1. فترة تجربة مدتها 3 أشهر لتقييم الكفاءة والالتزام.\n2. يحق لأي من الطرفين إنهاء العقد خلال فترة التجربة مع إشعار كتابي.");
     }
   };
@@ -625,6 +627,16 @@ export function HrContractsPanel() {
                     step="any"
                     value={formCommissionRate}
                     onChange={(e) => setFormCommissionRate(e.target.value)}
+                    className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-navy-700">أجر الساعة</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={formHourlyRate}
+                    onChange={(e) => setFormHourlyRate(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   />
                 </div>

@@ -3,6 +3,8 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { clinicDateString } from "@/lib/schedule";
 import {
   createWorkSchedule,
   listWorkSchedules,
@@ -79,7 +81,7 @@ export async function POST(request: Request) {
     department: raw.department || null,
     name: String(raw.name).trim(),
     scheduleType: (raw.scheduleType || raw.shiftPattern || "morning") as any,
-    effectiveFrom: raw.effectiveFrom || new Date().toISOString().slice(0, 10),
+    effectiveFrom: raw.effectiveFrom || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
     effectiveTo: raw.effectiveTo || null,
     workingDays: Array.isArray(raw.workingDays)
       ? raw.workingDays

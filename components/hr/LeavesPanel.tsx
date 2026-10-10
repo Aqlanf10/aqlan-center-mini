@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { clinicDateString } from "@/lib/schedule";
 import {
   HR_LEAVE_STATUS_LABELS,
   type HrLeaveStatus,
@@ -67,8 +69,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   // New Request Form
   const [reqStaffId, setReqStaffId] = useState("");
   const [reqTypeId, setReqTypeId] = useState("");
-  const [reqStartDate, setReqStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [reqEndDate, setReqEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [reqStartDate, setReqStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
+  const [reqEndDate, setReqEndDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [reqReason, setReqReason] = useState("");
 
   // Balance Adjust Form

@@ -599,7 +599,12 @@ export async function createSchedule(
   });
 }
 
-export const createWorkSchedule = createSchedule;
+export async function createWorkSchedule(
+  input: CreateScheduleInput,
+  session: SessionPayload,
+): Promise<HrWorkScheduleView> {
+  return createSchedule(input, session);
+}
 
 export async function updateWorkSchedule(
   id: number | string,

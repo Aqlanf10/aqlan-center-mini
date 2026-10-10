@@ -22,6 +22,8 @@ import { withTransaction } from "./transactions";
 import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
 import { CLINIC_BASE_CURRENCY, toBaseAmount, type Currency } from "./money";
+import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
+import { clinicDateString } from "./schedule";
 import { refusalMessage } from "./supplier-payments";
 import {
   type HrPayrollPeriodView,
@@ -1001,7 +1003,7 @@ export async function getHrReportSummary(): Promise<{
 
   const attRow = attRes.rows[0] ?? {};
   const attendanceExceptions = {
-    date: new Date().toISOString().slice(0, 10),
+    date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
     latePunchesCount: Number(attRow.late_count ?? 0),
     incompletePunchesCount: Number(attRow.incomplete_count ?? 0),
     totalOvertimeHours: Math.round(Number(attRow.total_overtime_mins ?? 0) / 60),
