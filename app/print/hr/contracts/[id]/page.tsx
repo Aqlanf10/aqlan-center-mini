@@ -35,7 +35,7 @@ export default async function ContractPrintPage({
 
   const clinicName = settings["clinic.name"] || "مركز عقلان لطب وجراحة الأسنان";
   const currency = (contract.salaryCurrency || "YER") as Currency;
-  const baseSalary = contract.baseSalaryMinor ? contract.baseSalaryMinor / 100 : 0;
+  const baseSalary = contract.baseSalaryMinor ?? 0;
   const commissionRate = contract.commissionRatePercent || 0;
   const jobTitle = contract.termsPayload?.jobDescription || contract.title;
   const clauses = contract.termsPayload?.clauses?.join("\n") || contract.notes;

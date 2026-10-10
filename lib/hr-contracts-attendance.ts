@@ -13,6 +13,8 @@ import { getPool, insertAuditRow, type DbClient } from "./db";
 import { withTransaction } from "./transactions";
 import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
+import { CLINIC_TIME_ZONE } from "./db";
+import { governingContractToday, hasSalary } from "./hr-pay-terms";
 import {
   type HrContractTemplateKind,
   type HrContractStatus,
@@ -30,6 +32,31 @@ import {
 } from "./hr-contracts-attendance-shared";
 
 export * from "./hr-contracts-attendance-shared";
+
+/** Keep the profile a current projection of the governing contract, with an atomic change history. */
+async function synchronizeContractPayTerms(client: DbClient, staffId: number, session: SessionPayload) {
+  const staff = await client.query(`SELECT * FROM hr_staff WHERE id=$1 FOR UPDATE`, [staffId]);
+  const governing = await governingContractToday(client,staffId,CLINIC_TIME_ZONE);
+  if (!governing || !staff.rows[0]) return;
+  const salary = hasSalary(governing.kind);
+  if (salary && (governing.salaryMinor === null || !governing.currency || !governing.salaryPeriod)) {
+    throw new Error("العقد يحتاج شروط أجر مكتملة قبل الاعتماد.");
+  }
+  const before = staff.rows[0];
+  const values = [governing.kind,salary ? governing.salaryMinor : null,salary ? governing.currency : null,
+    salary ? governing.salaryPeriod : null,salary ? governing.startDate : null];
+  const changed = before.contract_kind !== values[0] || Number(before.salary_amount_minor) !== Number(values[1])
+    || before.salary_currency !== values[2] || before.salary_period !== values[3]
+    || (before.salary_effective_on instanceof Date ? before.salary_effective_on.toISOString().slice(0,10) : before.salary_effective_on) !== values[4];
+  if (!changed) return;
+  await client.query(`UPDATE hr_staff SET contract_kind=$2,salary_amount_minor=$3,salary_currency=$4,
+    salary_period=$5,salary_effective_on=$6,updated_at=NOW() WHERE id=$1`, [staffId,...values]);
+  await client.query(`INSERT INTO hr_staff_changes (staff_id,actor,actor_role,action,field,old_value,new_value,reason)
+    VALUES ($1,$2,$3,'pay_terms','pay_terms',$4,$5,$6)`, [staffId,session.username,session.role,
+    JSON.stringify({kind:before.contract_kind,amountMinor:before.salary_amount_minor,currency:before.salary_currency,period:before.salary_period}),
+    JSON.stringify({contractId:governing.id,kind:governing.kind,amountMinor:values[1],currency:values[2],period:values[3],effectiveOn:values[4]}),
+    `مزامنة شروط العقد الحاكم ${governing.contractNumber}`]);
+}
 
 /* ── مساعدة التدقيق الذري مع المعاملة ─────────────────────────────────────── */
 
@@ -100,6 +127,7 @@ export interface CreateAddendumInput {
   salaryCurrency?: string | null;
   commissionRatePercent?: number | null;
   notes?: string | null;
+  salaryPeriod?: string | null;
 }
 
 export async function listContracts(options?: {
@@ -305,6 +333,7 @@ export async function approveContract(
       [session.username, cId],
     );
 
+    await synchronizeContractPayTerms(client,Number(rows[0].staff_id),session);
     const contract = mapContractRow(rows[0]);
     await auditWithClient(
       client,
@@ -344,6 +373,7 @@ export async function transitionContractStatus(
       [newStatus, cId],
     );
 
+    if (newStatus === "active") await synchronizeContractPayTerms(client,Number(rows[0].staff_id),session);
     const contract = mapContractRow(rows[0]);
     const action = newStatus === "active" ? "hr.contract.approve" : newStatus === "terminated" ? "hr.contract.terminate" : "hr.contract.update";
     await auditWithClient(
@@ -397,7 +427,7 @@ export async function createContractAddendum(
         parent.compensation_kind,
         input.baseSalaryMinor !== undefined ? input.baseSalaryMinor : parent.base_salary_minor,
         input.salaryCurrency ?? parent.salary_currency,
-        parent.salary_period,
+        input.salaryPeriod ?? parent.salary_period,
         input.commissionRatePercent !== undefined ? input.commissionRatePercent : parent.commission_rate_percent,
         parent.doctor_party_id,
         pId,
@@ -448,9 +478,9 @@ function mapContractRow(row: Record<string, unknown>): HrContractView {
     templateKind: row.template_kind as HrContractTemplateKind,
     title: String(row.title),
     status: row.status as HrContractStatus,
-    startDate: String(row.start_date),
-    endDate: row.end_date ? String(row.end_date) : null,
-    probationEndDate: row.probation_end_date ? String(row.probation_end_date) : null,
+    startDate: row.start_date instanceof Date ? row.start_date.toISOString().slice(0,10) : String(row.start_date),
+    endDate: row.end_date ? (row.end_date instanceof Date ? row.end_date.toISOString().slice(0,10) : String(row.end_date)) : null,
+    probationEndDate: row.probation_end_date ? (row.probation_end_date instanceof Date ? row.probation_end_date.toISOString().slice(0,10) : String(row.probation_end_date)) : null,
     noticePeriodDays: Number(row.notice_period_days ?? 30),
     termsPayload: (typeof row.terms_payload === "object" ? row.terms_payload : JSON.parse(String(row.terms_payload ?? "{}"))) as any,
     compensationKind: row.compensation_kind as any,
@@ -1630,7 +1660,7 @@ function mapLeaveRequestRow(row: Record<string, unknown>): HrLeaveRequestView {
     department: row.department as any,
     leaveTypeCode: row.leave_type_code as HrLeaveTypeCode,
     leaveTypeName: (row.leave_type_name as string) ?? undefined,
-    startDate: String(row.start_date),
+    startDate: row.start_date instanceof Date ? row.start_date.toISOString().slice(0,10) : String(row.start_date),
     endDate: String(row.end_date),
     daysCount: Number(row.days_count),
     isPartialDay: Boolean(row.is_partial_day),

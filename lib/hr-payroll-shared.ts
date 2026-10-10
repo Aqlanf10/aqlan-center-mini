@@ -116,6 +116,11 @@ export interface HrPayrollItemView {
   remainingMinor: number;
   status: HrPayrollItemStatus;
   payableId: number | null;
+  commissionPayableId: number | null;
+  payTermsSnapshot: Record<string, unknown>;
+  blockerCodes: string[];
+  salaryRemainingMinor: number;
+  commissionRemainingMinor: number;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -136,6 +141,11 @@ export interface HrPayrollDisbursementView {
   disbursedAt: string;
   notes: string | null;
   clientRequestId: string | null;
+  parts: Array<{ component: "salary" | "commission"; amountMinor: number; expenseId: number; payableId: number | null }>;
+  reversedAt: string | null;
+  reversedBy: string | null;
+  reversalReason: string | null;
+  replayed?: boolean;
 }
 
 export interface HrSettingsPayload {

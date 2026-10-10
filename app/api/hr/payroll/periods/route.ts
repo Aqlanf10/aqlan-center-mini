@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
 import {
   listPayrollPeriods,
+  HrPayrollError,
   getOrCreatePayrollPeriod,
   closePayrollPeriod,
 } from "@/lib/hr-payroll";
@@ -61,11 +62,12 @@ export async function POST(request: Request) {
       const period = await getOrCreatePayrollPeriod(payload.periodMonth, session);
       return NextResponse.json(period, { status: 201 });
     }
-  } catch (error: any) {
+  } catch (error) {
+    if (error instanceof HrPayrollError) return NextResponse.json({ message:error.message,code:error.code },{ status:error.status });
     console.error("Failed to handle payroll period:", error);
     return NextResponse.json(
-      { message: error?.message || "تعذّر معالجة فترة المسير." },
-      { status: 400 }
+      { message: "تعذّر معالجة فترة المسير." },
+      { status: 500 }
     );
   }
 }

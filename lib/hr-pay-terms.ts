@@ -16,6 +16,7 @@ export type PayKind = "commission" | "salary" | "salary_commission";
 export type SalaryPeriodUnit = "monthly" | "weekly" | "daily" | "per_shift";
 
 export type PayBlocker =
+  | "commission_policy_conflict"
   | "terms_conflict"
   | "terms_changed_in_period"
   | "unsupported_salary_period"
@@ -24,6 +25,7 @@ export type PayBlocker =
   | "no_pay_terms";
 
 export const PAY_BLOCKER_LABEL: Record<PayBlocker, string> = {
+  commission_policy_conflict: "نسبة العقد تختلف عن سياسة محرك العمولات السارية؛ صحّح العقد أو اعتمد السياسة عبر مسار العمولات",
   terms_conflict: "تعارض بين أجر ملف الموظف والعقد الساري",
   terms_changed_in_period: "تغيّرت شروط الأجر أثناء الفترة (تقسيمها قرار للمالك لم يُحدَّد)",
   unsupported_salary_period: "دورية الأجر غير شهرية (احتسابها قرار للمالك لم يُحدَّد)",
@@ -140,7 +142,7 @@ export function resolvePayTerms(
       if (hasSalary(terms.kind) && (terms.salaryMinor === null || terms.currency === null || terms.salaryPeriod === null)) {
         blockers.push("no_pay_terms");
       }
-      if (payTermsKey(termsOf(profile)) !== payTermsKey(terms)) blockers.push("terms_conflict");
+      if ((!profile.effectiveOn || profile.effectiveOn <= end) && payTermsKey(termsOf(profile)) !== payTermsKey(terms)) blockers.push("terms_conflict");
     }
   } else {
     terms = termsOf(profile);

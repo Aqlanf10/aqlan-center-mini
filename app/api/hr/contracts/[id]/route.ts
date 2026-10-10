@@ -117,9 +117,10 @@ export async function POST(
       endDate: payload.endDate || null,
       addendumReason: String(payload.addendumReason || payload.reason || "تعديل بنود العقد"),
       termsPayload: payload.termsPayload || {},
-      baseSalaryMinor: payload.baseSalaryMinor ? Number(payload.baseSalaryMinor) : null,
-      salaryCurrency: payload.salaryCurrency || null,
-      commissionRatePercent: payload.commissionRatePercent ? Number(payload.commissionRatePercent) : null,
+      baseSalaryMinor: payload.baseSalaryMinor !== undefined ? Number(payload.baseSalaryMinor) : undefined,
+      salaryCurrency: payload.salaryCurrency || undefined,
+      salaryPeriod: payload.salaryPeriod || undefined,
+      commissionRatePercent: payload.commissionRatePercent !== undefined ? Number(payload.commissionRatePercent) : undefined,
       notes: payload.notes || null,
     };
     const addendum = await createContractAddendum(id, input, session);

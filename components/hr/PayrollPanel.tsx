@@ -1,55 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
   HR_PAYROLL_ITEM_STATUS_LABELS,
   type HrCurrency,
-  type HrPayrollRunStatus,
+  type HrPayrollPeriodView,
+  type HrPayrollRunView,
+  type HrPayrollItemView,
 } from "@/lib/hr-payroll-shared";
-import { CURRENCIES, CURRENCY_SHORT, formatAmount, type Currency } from "@/lib/money";
+import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 
-interface PayrollPeriodItem {
-  id: string;
-  periodMonth: string;
-  startDate: string;
-  endDate: string;
-  status: "open" | "closed";
-}
-
-interface PayrollRunItem {
-  id: string;
-  periodId: string;
-  currency: HrCurrency;
-  status: HrPayrollRunStatus;
-  totalBase: number;
-  totalAllowances: number;
-  totalDeductions: number;
-  totalCommissions: number;
-  totalOvertime: number;
-  totalNet: number;
-  approvedBy: string | null;
-  approvedAt: string | null;
-  items?: PayrollItemDetail[];
-}
-
-interface PayrollItemDetail {
-  id: string;
-  payrollRunId: string;
-  staffId: string;
-  staffName?: string;
-  jobTitle?: string;
-  baseSalary: number;
-  allowances: number;
-  deductions: number;
-  commissionAmount: number;
-  overtimeAmount: number;
-  netSalary: number;
-  disbursedAmount: number;
-  remainingAmount: number;
-  status: string;
-  commissionDetails?: any;
-}
+type PayrollPeriodItem = HrPayrollPeriodView;
+type PayrollRunItem = HrPayrollRunView & { items?: HrPayrollItemView[] };
+type PayrollItemDetail = HrPayrollItemView;
+type PendingPayment = { clientRequestId: string; itemId: number; amountMinor: number; remainingBefore: number; completed?: boolean;
+  components: { salaryMinor: number; commissionMinor: number }; paymentMethod: string;
+  referenceNumber: string | null; notes: string | null };
+const pendingKey = (itemId: number) => `hr:payroll:pending:${itemId}`;
 
 export function HrPayrollPanel() {
   const [periods, setPeriods] = useState<PayrollPeriodItem[]>([]);
@@ -70,6 +38,10 @@ export function HrPayrollPanel() {
   const [disburseRef, setDisburseRef] = useState("");
   const [disburseNotes, setDisburseNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
+  const [pending, setPending] = useState<PendingPayment | null>(null);
+  const [salaryPart, setSalaryPart] = useState("");
+  const [commissionPart, setCommissionPart] = useState("");
 
   const loadPeriods = useCallback(async () => {
     try {
@@ -78,7 +50,7 @@ export function HrPayrollPanel() {
       const data = await res.json();
       setPeriods(data);
       if (data.length > 0 && !selectedPeriod) {
-        setSelectedPeriod(data[0].id);
+        setSelectedPeriod(String(data[0].id));
       }
       setError(null);
     } catch (err: any) {
@@ -197,42 +169,61 @@ export function HrPayrollPanel() {
   };
 
   const openDisburseForItem = (item: PayrollItemDetail) => {
-    setDisburseItem(item);
-    setDisburseAmount(String(item.remainingAmount || item.netSalary));
-    setDisburseModalOpen(true);
+    try {
+      const saved = localStorage.getItem(pendingKey(item.id));
+      let request: PendingPayment | null = saved ? JSON.parse(saved) : null;
+      if (request?.completed && request.remainingBefore !== item.remainingMinor) { localStorage.removeItem(pendingKey(item.id)); request = null; }
+      setPending(request);
+      setDisburseItem(item);
+      setDisburseAmount(toInputAmount(request?.amountMinor ?? item.remainingMinor, item.currency));
+      setSalaryPart(toInputAmount(request?.components.salaryMinor ?? item.salaryRemainingMinor, item.currency));
+      setCommissionPart(toInputAmount(request?.components.commissionMinor ?? item.commissionRemainingMinor, item.currency));
+      setDisburseRef(request?.referenceNumber ?? ""); setDisburseNotes(request?.notes ?? "");
+      setDisburseModalOpen(true);
+    } catch { setError("تعذّر استعادة الطلب المحفوظ؛ تحقق من الصرف السابق قبل المتابعة."); }
   };
 
   const handleDisburse = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!disburseItem) return;
-    setSubmitting(true);
+    if (!disburseItem || inFlight.current) return;
+    inFlight.current = true; setSubmitting(true);
     try {
-      const res = await fetch("/api/hr/payroll/disburse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId: disburseItem.id,
-          amount: parseFloat(disburseAmount) || 0,
-          paymentMethod: disburseMethod,
-          referenceNumber: disburseRef || null,
-          notes: disburseNotes || null,
-        }),
-      });
+      const item = disburseItem;
+      const prepare = async () => {
+        const saved = localStorage.getItem(pendingKey(item.id));
+        if (saved) {
+          const stored = JSON.parse(saved) as PendingPayment;
+          if (!stored.completed || stored.remainingBefore === item.remainingMinor) return stored;
+        }
+        const amountMinor = parseAmount(disburseAmount,item.currency) ?? NaN;
+        const hybrid = item.salaryRemainingMinor > 0 && item.commissionRemainingMinor > 0;
+        const components = hybrid ? { salaryMinor:parseAmount(salaryPart,item.currency) ?? NaN,commissionMinor:parseAmount(commissionPart,item.currency) ?? NaN }
+          : { salaryMinor:item.salaryRemainingMinor > 0 ? amountMinor : 0,commissionMinor:item.salaryRemainingMinor > 0 ? 0 : amountMinor };
+        if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0 || components.salaryMinor + components.commissionMinor !== amountMinor) throw new Error("يجب أن يساوي مجموع جزأي الراتب والعمولة مبلغ الصرف.");
+        const request: PendingPayment = { itemId:item.id,amountMinor,remainingBefore:item.remainingMinor,components,paymentMethod:disburseMethod,
+          referenceNumber:disburseRef || null,notes:disburseNotes || null,clientRequestId:crypto.randomUUID() };
+        localStorage.setItem(pendingKey(item.id),JSON.stringify(request));
+        return request;
+      };
+      // Cross-tab preparation is serialized; retries and reloads retain the exact submitted payload.
+      const request = navigator.locks ? await navigator.locks.request(pendingKey(item.id),prepare) : await prepare();
+      setPending(request);
+      const res = await fetch("/api/hr/payroll/disburse", { method:"POST",headers:{ "Content-Type":"application/json" },body:JSON.stringify(request) });
+      const result = await res.json();
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "تعذّر تنفيذ الصرف.");
+        // A definitive refusal has rolled back. An unknown outcome keeps the key and all fields frozen.
+        if (res.status >= 400 && res.status < 500 && result.code && result.code !== "key_conflict") {
+          localStorage.removeItem(pendingKey(item.id)); setPending(null);
+        }
+        throw new Error(result.message || "تعذّر تأكيد نتيجة الصرف؛ أعد الطلب نفسه.");
       }
-      setDisburseModalOpen(false);
-      setDisburseItem(null);
-      void loadRuns();
-    } catch (err: any) {
-      alert(err.message || "حدث خطأ أثناء عملية الصرف.");
-    } finally {
-      setSubmitting(false);
-    }
+      localStorage.setItem(pendingKey(item.id),JSON.stringify({ ...request,completed:true })); setPending(null);
+      setDisburseModalOpen(false); setDisburseItem(null); await loadRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : "تعذّر تأكيد الصرف؛ أعد الطلب نفسه."); }
+    finally { inFlight.current = false; setSubmitting(false); }
   };
 
-  const currentPeriodObj = periods.find((p) => p.id === selectedPeriod);
+  const currentPeriodObj = periods.find((p) => String(p.id) === selectedPeriod);
 
   return (
     <section aria-label="إدارة المسير والصرف" className="space-y-4">
@@ -249,7 +240,7 @@ export function HrPayrollPanel() {
               >
                 {periods.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.periodMonth} {p.status === "closed" ? "(مغلقة)" : "(مفتوحة)"}
+                    {p.periodKey} {p.status === "closed" ? "(مغلقة)" : "(مفتوحة)"}
                   </option>
                 ))}
               </select>
@@ -288,7 +279,7 @@ export function HrPayrollPanel() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={submitting}
+            disabled={submitting || currentPeriodObj?.status === "closed" || activeRun?.status === "approved"}
             onClick={handleCalculateRun}
             className="flex items-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-navy-700 disabled:opacity-50"
           >
@@ -299,7 +290,7 @@ export function HrPayrollPanel() {
           {activeRun && activeRun.status === "draft" && (
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || activeRun.items?.some((item) => item.blockerCodes.length > 0)}
               onClick={handleApproveRun}
               className="flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
             >
@@ -333,37 +324,37 @@ export function HrPayrollPanel() {
           <div className="rounded-2xl border border-navy-100 bg-white p-3 shadow-sm">
             <div className="text-xs font-semibold text-navy-500">الراتب الأساسي</div>
             <div className="mt-1 font-mono text-lg font-bold text-navy-900">
-              {formatAmount(activeRun.totalBase, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalBaseSalaryMinor, activeRun.currency as Currency)}
             </div>
           </div>
           <div className="rounded-2xl border border-navy-100 bg-white p-3 shadow-sm">
             <div className="text-xs font-semibold text-navy-500">البدلات</div>
             <div className="mt-1 font-mono text-lg font-bold text-navy-900">
-              {formatAmount(activeRun.totalAllowances, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalAllowancesMinor, activeRun.currency as Currency)}
             </div>
           </div>
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3 shadow-sm">
             <div className="text-xs font-semibold text-emerald-700">نسب الأطباء</div>
             <div className="mt-1 font-mono text-lg font-bold text-emerald-800">
-              {formatAmount(activeRun.totalCommissions, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalCommissionsMinor, activeRun.currency as Currency)}
             </div>
           </div>
           <div className="rounded-2xl border border-navy-100 bg-white p-3 shadow-sm">
-            <div className="text-xs font-semibold text-navy-500">الإضافي</div>
+            <div className="text-xs font-semibold text-navy-500">المدفوع</div>
             <div className="mt-1 font-mono text-lg font-bold text-navy-900">
-              {formatAmount(activeRun.totalOvertime, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalPaidMinor, activeRun.currency as Currency)}
             </div>
           </div>
           <div className="rounded-2xl border border-rose-100 bg-rose-50/50 p-3 shadow-sm">
             <div className="text-xs font-semibold text-rose-700">الخصميات والغياب</div>
             <div className="mt-1 font-mono text-lg font-bold text-rose-800">
-              {formatAmount(activeRun.totalDeductions, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalDeductionsMinor, activeRun.currency as Currency)}
             </div>
           </div>
           <div className="rounded-2xl border border-navy-800 bg-navy-800 p-3 text-white shadow-sm">
             <div className="text-xs font-semibold text-navy-200">الصافي المستحق</div>
             <div className="mt-1 font-mono text-lg font-bold text-white">
-              {formatAmount(activeRun.totalNet, activeRun.currency as Currency)}
+              {formatAmount(activeRun.totalNetDueMinor, activeRun.currency as Currency)}
             </div>
           </div>
         </div>
@@ -383,7 +374,7 @@ export function HrPayrollPanel() {
                 <th className="px-4 py-3">الأساسي</th>
                 <th className="px-4 py-3">البدلات</th>
                 <th className="px-4 py-3">نسبة طبيب</th>
-                <th className="px-4 py-3">إضافي</th>
+                <th className="px-4 py-3">المتبقي</th>
                 <th className="px-4 py-3">خصم</th>
                 <th className="px-4 py-3">الصافي</th>
                 <th className="px-4 py-3">المصروف</th>
@@ -393,52 +384,53 @@ export function HrPayrollPanel() {
             </thead>
             <tbody className="divide-y divide-navy-100 font-mono text-xs">
               {activeRun.items.map((item) => {
-                const hasCommission = item.commissionAmount > 0;
-                const isPaid = item.status === "paid";
+                const hasCommission = item.commissionsMinor > 0;
+                const isPaid = item.remainingMinor <= 0;
 
                 return (
                   <tr key={item.id} className="transition hover:bg-navy-50/40">
                     <td className="px-4 py-3 font-sans font-semibold text-navy-900">
                       <div>{item.staffName || `موظف #${item.staffId}`}</div>
-                      {item.jobTitle && <div className="text-xs text-navy-500">{item.jobTitle}</div>}
+                      {item.staffJobTitle && <div className="text-xs text-navy-500">{item.staffJobTitle}</div>}
+                      {item.blockerCodes.length > 0 && <div className="text-rose-700">يحتاج مراجعة شروط الأجر: {item.blockerCodes.join("، ")}</div>}
                     </td>
-                    <td className="px-4 py-3">{formatAmount(item.baseSalary, activeRun.currency as Currency)}</td>
-                    <td className="px-4 py-3">{formatAmount(item.allowances, activeRun.currency as Currency)}</td>
+                    <td className="px-4 py-3">{formatAmount(item.baseSalaryMinor, activeRun.currency as Currency)}</td>
+                    <td className="px-4 py-3">{formatAmount(item.allowancesMinor, activeRun.currency as Currency)}</td>
                     <td className="px-4 py-3">
                       {hasCommission ? (
                         <span className="font-bold text-emerald-700">
-                          {formatAmount(item.commissionAmount, activeRun.currency as Currency)}
+                          {formatAmount(item.commissionsMinor, activeRun.currency as Currency)}
                         </span>
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {item.overtimeAmount > 0 ? (
-                        formatAmount(item.overtimeAmount, activeRun.currency as Currency)
+                      {item.remainingMinor > 0 ? (
+                        formatAmount(item.remainingMinor, activeRun.currency as Currency)
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-4 py-3 text-rose-700">
-                      {item.deductions > 0 ? (
-                        `-${formatAmount(item.deductions, activeRun.currency as Currency)}`
+                      {item.deductionsMinor > 0 ? (
+                        `-${formatAmount(item.deductionsMinor, activeRun.currency as Currency)}`
                       ) : (
                         "—"
                       )}
                     </td>
                     <td className="px-4 py-3 font-bold text-navy-900">
-                      {formatAmount(item.netSalary, activeRun.currency as Currency)}
+                      {formatAmount(item.netDueMinor, activeRun.currency as Currency)}
                     </td>
                     <td className="px-4 py-3 text-emerald-800">
-                      {formatAmount(item.disbursedAmount, activeRun.currency as Currency)}
+                      {formatAmount(item.paidMinor, activeRun.currency as Currency)}
                     </td>
                     <td className="px-4 py-3 font-sans">
                       <span
                         className={`inline-block rounded-lg px-2 py-0.5 text-xs font-semibold ${
                           isPaid
                             ? "bg-emerald-100 text-emerald-800"
-                            : item.status === "approved"
+                            : item.status === "partially_paid"
                             ? "bg-blue-100 text-blue-800"
                             : "bg-amber-100 text-amber-800"
                         }`}
@@ -447,7 +439,7 @@ export function HrPayrollPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-sans text-center">
-                      {!isPaid && activeRun.status !== "draft" && (
+                      {!isPaid && activeRun.status === "approved" && currentPeriodObj?.status !== "closed" && (
                         <button
                           type="button"
                           onClick={() => openDisburseForItem(item)}
@@ -457,6 +449,16 @@ export function HrPayrollPanel() {
                         </button>
                       )}
                       {isPaid && <span className="text-xs text-emerald-700 font-bold">مصروف كامل</span>}
+                      {item.disbursements?.map((d) => <div key={d.id} className="mt-2">
+                        {d.parts.map((part) => <a key={part.expenseId} href={`/print/voucher/${part.expenseId}`} target="_blank" rel="noreferrer" className="block underline">سند {part.component === "salary" ? "الراتب" : "العمولة"} #{part.expenseId}</a>)}
+                        {d.reversedAt ? <span>معكوس: {d.reversalReason}</span> : <button type="button" disabled={submitting} className="text-rose-700 underline" onClick={async () => {
+                          const reason = prompt("سبب عكس الصرف"); if (!reason) return;
+                          setSubmitting(true);
+                          try { const res = await fetch("/api/hr/payroll/disburse",{ method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"reverse",disbursementId:d.id,reason}) });
+                            const body = await res.json(); if (!res.ok) throw new Error(body.message); localStorage.removeItem(pendingKey(item.id)); await loadRuns();
+                          } catch (err) { setError(err instanceof Error ? err.message : "تعذّر عكس الصرف."); } finally { setSubmitting(false); }
+                        }}>عكس الصرف #{d.id}</button>}
+                      </div>)}
                     </td>
                   </tr>
                 );
@@ -509,7 +511,7 @@ export function HrPayrollPanel() {
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
               الموظف: <span className="font-semibold">{disburseItem.staffName}</span> | المتبقي:{" "}
               <span className="font-semibold">
-                {formatAmount(disburseItem.remainingAmount || disburseItem.netSalary, activeRun.currency as Currency)}{" "}
+                {formatAmount(disburseItem.remainingMinor, activeRun.currency as Currency)}{" "}
                 {activeRun.currency}
               </span>
             </div>
@@ -519,28 +521,36 @@ export function HrPayrollPanel() {
                 required
                 type="number"
                 step="any"
+                disabled={!!pending || submitting}
                 value={disburseAmount}
                 onChange={(e) => setDisburseAmount(e.target.value)}
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none font-mono"
               />
             </div>
+            {disburseItem.salaryRemainingMinor > 0 && disburseItem.commissionRemainingMinor > 0 && (
+              <div className="grid grid-cols-2 gap-3">
+                <label>جزء الراتب ({activeRun.currency})<input aria-label="جزء الراتب" disabled={!!pending || submitting} type="number" min="0" step="any" value={salaryPart} onChange={(e) => setSalaryPart(e.target.value)} className="w-full rounded-xl border p-2" /></label>
+                <label>جزء العمولة ({activeRun.currency})<input aria-label="جزء العمولة" disabled={!!pending || submitting} type="number" min="0" step="any" value={commissionPart} onChange={(e) => setCommissionPart(e.target.value)} className="w-full rounded-xl border p-2" /></label>
+              </div>
+            )}
+            {pending && <p role="status" className="text-sm text-amber-800">طلب محفوظ: عند عدم تأكد النتيجة، أعد الصرف بنفس البيانات والمفتاح.</p>}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">طريقة الدفع</label>
                 <select
+                  disabled={!!pending || submitting}
                   value={disburseMethod}
                   onChange={(e) => setDisburseMethod(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
                   <option value="cash">نقداً (الصندوق)</option>
-                  <option value="bank_transfer">تحويل بنكي</option>
-                  <option value="cheque">شيك</option>
                 </select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">رقم السند / المرجع</label>
                 <input
                   type="text"
+                  disabled={!!pending || submitting}
                   value={disburseRef}
                   onChange={(e) => setDisburseRef(e.target.value)}
                   placeholder="مثال: سند صرف #120"
@@ -552,6 +562,7 @@ export function HrPayrollPanel() {
               <label className="mb-1 block text-xs font-semibold text-navy-700">ملاحظات الصرف</label>
               <input
                 type="text"
+                disabled={!!pending || submitting}
                 value={disburseNotes}
                 onChange={(e) => setDisburseNotes(e.target.value)}
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"

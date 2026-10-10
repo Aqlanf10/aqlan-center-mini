@@ -10679,13 +10679,13 @@ function describeCommissionSnapshot(value: CommissionSnapshotValue | null): stri
 }
 
 /** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
-export async function loadCommissionPolicyTimelines(): Promise<{
+export async function loadCommissionPolicyTimelines(queryRunner?: DbClient | DbPool): Promise<{
   timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
   names: Map<number, string>;
 }> {
   await ensureSchema();
-  const pool = getPool();
+  const pool = queryRunner ?? getPool();
   const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
     pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
       `SELECT party_id, percent, config, effective_from, to_char(effective_from, 'US') AS effective_from_us
@@ -11793,7 +11793,7 @@ function settledOnPayableSql(e: string, p: string): string {
  * (P0-2) مجموع ما سُدّد من التزامٍ بعملته: سنداته المرتبطة به مباشرةً + ما وُزّع
  * عليه من سندات التسوية المجمّعة (expense_payable_allocations). الإبطالات بالسالب.
  */
-function payableSettledTotalSql(p: string): string {
+export function payableSettledTotalSql(p: string): string {
   return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id), 0)
     + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
 }
@@ -11802,7 +11802,7 @@ function payableSettledTotalSql(p: string): string {
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
  * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
  */
-function payableAmountSql(p: string): string {
+export function payableAmountSql(p: string): string {
   return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
 }
 
@@ -11941,6 +11941,19 @@ export async function recordExpenseInTx(
     );
     if (!rows[0]) return { id: null, reason: "party_not_found", quote: null };
     partyKind = rows[0].kind;
+  }
+
+  // HR commissions share the existing engine and the party lock with direct doctor payments.
+  // Reject an extra payout from either entry point after the entitlement has been settled.
+  if (input.category === "commission" && partyKind === "doctor" && partyId !== null) {
+    const claims = await client.query(`SELECT 1 FROM hr_payroll_items i
+      JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
+      WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed') LIMIT 1`, [partyId,input.currency]);
+    if (claims.rows.length) {
+      const earned = (await commissionReport("0001-01-01","9999-12-31",undefined,client))
+        .find((row) => row.doctorId === partyId && row.currency === input.currency);
+      if (input.amountMinor > Math.max(0,earned?.dueMinor ?? 0)) return { id:null,reason:"exceeds_party_balance",quote:null };
+    }
   }
 
   const quote: SettlementQuote = {
@@ -12130,15 +12143,31 @@ export async function voidExpense(
   reopenedLabOrderIds?: number[];
 }> {
   await ensureSchema();
+  return withTransaction(getPool(), async (client) => {
+    const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1",[id]);
+    if (linked.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
+    return voidExpenseInTx(client,id,context);
+  });
+}
+
+export async function voidExpenseInTx(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{
+  ok: boolean;
+  reason?: "not_found" | "closed_shift" | "no_shift" | "already_voided" | "missing_reason";
+  voidedId?: number;
+  voidedVoucherNumber?: string;
+  /** (P0-2) أوامر المختبر التي أعادها الإبطال «غير مسدّدة». */
+  reopenedLabOrderIds?: number[];
+}> {
   const reason = context.reason?.trim() ?? "";
   if (!reason) return { ok: false, reason: "missing_reason" };
-  const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
   let created: { id: number; voucher_number: string } | null = null;
   let reopened: number[] = [];
   let supplierPayment = false;
-  try {
-    await client.query("BEGIN");
     const { rows: rowsE } = await client.query<{
       id: number; voucher_number: string; category: string; payee_text: string | null;
       amount_minor: string; currency: string; exchange_rate: string;
@@ -12165,7 +12194,6 @@ export async function voidExpense(
       [id],
     );
     if (!rowsE[0]) {
-      await client.query("ROLLBACK");
       return { ok: false, reason: "not_found" };
     }
     const current = rowsE[0];
@@ -12178,7 +12206,6 @@ export async function voidExpense(
     if (current.reversal_of_id !== null) {
       // هذا القيد نفسه إبطالٌ لسند آخر — لا يُبطَل الإبطال؛ قيد معاكس للمعاكس
       // يُعقّد الحسابات بلا داعٍ.
-      await client.query("ROLLBACK");
       return { ok: false, reason: "already_voided" };
     }
     const { rows: voidRows } = await client.query<{ n: number }>(
@@ -12186,7 +12213,6 @@ export async function voidExpense(
       [id],
     );
     if (Number(voidRows[0]?.n ?? 0) > 0) {
-      await client.query("ROLLBACK");
       return { ok: false, reason: "already_voided" };
     }
     supplierPayment = current.payable_id != null || isGuardedPartyKind(current.party_kind);
@@ -12198,8 +12224,7 @@ export async function voidExpense(
         `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE`,
       );
       if (!open[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "no_shift" };
+          return { ok: false, reason: "no_shift" };
       }
       targetShiftId = open[0].id;
     } else {
@@ -12211,8 +12236,7 @@ export async function voidExpense(
         [current.shift_id],
       );
       if (!originalShift[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "closed_shift" };
+          return { ok: false, reason: "closed_shift" };
       }
     }
     snapshot = {
@@ -12300,17 +12324,10 @@ export async function voidExpense(
         );
       }
     }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
-  await recordAudit({
+  await insertAuditRow(client, {
     action: "expense.void",
     entity: "expense",
-    entityId: id,
+    entityId: String(id),
     entityLabel: snapshot ? String((snapshot as Record<string, unknown>).voucherNumber ?? "") : `#${id}`,
     details: {
       ...snapshot,
@@ -12606,9 +12623,10 @@ export async function commissionReport(
   to: string,
   /** (COMM-DETAIL-1) مجمِّع التفصيل — اختياري؛ لا يغيّر أي رقم من المجاميع. */
   detail?: CommissionDetailCollector,
+  queryRunner?: DbClient | DbPool,
 ): Promise<CommissionRow[]> {
   await ensureSchema();
-  const pool = getPool();
+  const pool = queryRunner ?? getPool();
 
   const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
     pool.query<{ id: number; name: string; commission_percent: string }>(
@@ -12654,11 +12672,16 @@ export async function commissionReport(
     // الصرف يحمل عملته الكاملة) — لا بمكافئه الأساسي: المقارنة داخل العملة
     // الواحدة حصرًا، وما صُرف بعملةٍ أخرى لا يُطرح من دَين هذه العملة أبدًا.
     pool.query<{ party_id: number; currency: string; paid: string }>(
-      `SELECT party_id, currency, COALESCE(SUM(amount_minor), 0) AS paid
-         FROM expenses
-        WHERE category = 'commission' AND party_id IS NOT NULL
-          AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY party_id, currency`,
+      `SELECT e.party_id, e.currency, COALESCE(SUM(e.amount_minor), 0) AS paid
+         FROM expenses e
+         LEFT JOIN hr_payroll_disbursement_parts hp ON hp.expense_id = COALESCE(e.reversal_of_id,e.id) AND hp.component='commission'
+         LEFT JOIN hr_payroll_disbursements hd ON hd.id=hp.disbursement_id
+         LEFT JOIN hr_payroll_items hi ON hi.id=hd.item_id
+         LEFT JOIN hr_payroll_runs hr ON hr.id=hi.run_id
+         LEFT JOIN hr_payroll_periods period ON period.id=hr.period_id
+        WHERE e.category = 'commission' AND e.party_id IS NOT NULL
+          AND COALESCE(period.end_date,(e.created_at AT TIME ZONE $1)::date) BETWEEN $2::date AND $3::date
+        GROUP BY e.party_id, e.currency`,
       [CLINIC_TIME_ZONE, from, to],
     ),
   ]);
@@ -12868,7 +12891,7 @@ export async function commissionReport(
 
   /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
      مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
-  const policies = await loadCommissionPolicyTimelines();
+  const policies = await loadCommissionPolicyTimelines(queryRunner);
   /* (COMM-DETAIL-1 · F-5) القواعد القديمة المخزَّنة بالاسم تُحلّ إلى معرّف الخدمة مرّةً
      هنا (في الذاكرة) — والملتبس وغير المحلول يُقال في التفصيل ولا يُخمَّن. */
   const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies);

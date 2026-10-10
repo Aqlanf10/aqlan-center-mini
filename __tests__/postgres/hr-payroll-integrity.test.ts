@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -155,6 +155,9 @@ describe("١ — مصدر الأجر: العقد المعتمد والملف ل�
   it("ملف براتب ١٠٠٬٠٠٠ وعقدٌ فعّال ١٢٠٬٠٠٠ ⇒ تعارض معلن يمنع الاعتماد (لا يُصرف أيٌّ من الرقمين تخمينًا)", async () => {
     const s = await staffWith({ kind: "salary", salary: 100_000 });
     await activeContract({ staffId: s.staffId, kind: "salary", salary: 120_000 });
+    // Simulate an existing inconsistent record, bypassing the new application guard deliberately.
+    // Normal contract activation must synchronize the profile (covered separately below).
+    await q(`UPDATE hr_staff SET salary_amount_minor = 100000 WHERE id = $1`, [s.staffId]);
     const { run, items } = await approvedRun();
     const item = items.find((i) => i.staffId === s.staffId)!;
     expect(item.blockerCodes).toContain("terms_conflict");
@@ -265,6 +268,17 @@ describe("١ — مصدر الأجر: العقد المعتمد والملف ل�
   });
 });
 
+describe("نسبة العقد المرجعية وسياسة العمولات القائمة",()=>{
+  it("لا يعتمد مسيرًا عندما تختلف نسبة العقد عن سياسة المحرك السارية",async()=>{
+    const s=await staffWith({kind:"commission",percent:30});
+    await activeContract({staffId:s.staffId,kind:"commission",percent:40,partyId:s.partyId!});
+    await earnCommission(s.partyId!,40_000);
+    const {run,items}=await approvedRun();
+    expect(items[0].blockerCodes).toContain("commission_policy_conflict");
+    await expect(approve(run.id)).rejects.toThrow("العمولات");
+  });
+});
+
 describe("٢ — صرف النظام المختلط عبر محرك العمولات والالتزامات", () => {
   async function hybrid(salary = 100_000, collected = 40_000, percent = 30) {
     const s = await staffWith({ kind: "salary_commission", salary, percent });
@@ -274,6 +288,33 @@ describe("٢ — صرف النظام المختلط عبر محرك العمول
     const item = (await payroll.listPayrollItems(run.id)).find((i) => i.staffId === s.staffId)!;
     return { ...s, run, item, items };
   }
+
+  it("الصرف من HR يمنع صرف العمولة نفسها ثانية من كشف الطبيب", async () => {
+    const h = await hybrid();
+    await payroll.disbursePayrollItem(h.item.id,{amountMinor:112_000,clientRequestId:"hr-first-direct-0001"},admin);
+    const direct = await recordExpense({category:"commission",partyId:h.partyId,payeeText:null,amountMinor:12_000,currency:"YER",baseCurrency:"YER",exchangeRate:1,payableId:null,note:"محاولة مكررة",createdBy:admin.username});
+    expect(direct.expense).toBeNull();expect(direct.reason).toBe("exceeds_party_balance");
+    expect(await cashOut()).toBe(112_000);expect((await doctorRow(h.partyId!))?.dueMinor).toBe(0);
+  });
+  it("صرف عمولة أكتوبر في نوفمبر وعكسها يبقيان مرتبطين بفترة الاستحقاق الأصلية", async () => {
+    const h = await hybrid();
+    const d = await payroll.disbursePayrollItem(h.item.id,{amountMinor:112_000,clientRequestId:"later-month-0001"},admin);
+    for (const part of d.parts) await q("UPDATE expenses SET created_at='2026-11-02 10:00+03' WHERE id=$1",[part.expenseId]);
+    expect((await doctorRow(h.partyId!))?.paidMinor).toBe(12_000);
+    expect((await doctorRow(h.partyId!))?.dueMinor).toBe(0);
+    await payroll.reversePayrollDisbursement(d.id,{reason:"تصحيح الصرف المؤجل"},admin);
+    expect((await doctorRow(h.partyId!))?.dueMinor).toBe(12_000);expect(await cashOut()).toBe(0);
+  });
+  it("رفض التدقيق يتراجع عن السندين وأجزاء الصرف والذمم بالكامل", async () => {
+    const h = await hybrid();
+    await q(`CREATE FUNCTION hr_int_audit_fail() RETURNS trigger AS $$ BEGIN IF NEW.action='hr.payroll.disburse' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await q("CREATE TRIGGER hr_int_audit_fail BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION hr_int_audit_fail()");
+    try { await expect(payroll.disbursePayrollItem(h.item.id,{amountMinor:112_000,clientRequestId:"audit-rollback-001"},admin)).rejects.toThrow("synthetic audit failure"); }
+    finally { await q("DROP TRIGGER hr_int_audit_fail ON audit_log");await q("DROP FUNCTION hr_int_audit_fail()"); }
+    expect(await cashOut()).toBe(0);expect(await remainingOf(h.partyId!,"salary")).toBe(100_000);expect(await remainingOf(h.partyId!,"commission")).toBe(12_000);
+    expect(await payroll.findDisbursementByRequestId("audit-rollback-001")).toBeNull();
+    expect(await q("SELECT 1 FROM hr_payroll_disbursement_parts")).toHaveLength(0);
+  });
 
   it("الاستحقاق: التزامان — راتب (category=salary) وعمولة (category=commission) — لجهة الطبيب نفسها", async () => {
     const h = await hybrid();
@@ -415,6 +456,33 @@ describe("٣ — مفتاح الطلب: لا صرف مكرر من البداية
     const item = (await payroll.listPayrollItems(run.id))[0];
     return { ...s, run, item };
   }
+
+  it("ضياع تأكيد COMMIT بعد حفظه يستعيد العملية بنفس المفتاح ولا يصرف مجددًا", async () => {
+    const h = await simple();
+    const pool = getPool();
+    const client = await pool.connect();
+    const originalQuery = client.query.bind(client);
+    const originalRelease = client.release.bind(client);
+    client.query = (async (...args: unknown[]) => {
+      const result = await (originalQuery as (...args: unknown[])=>Promise<unknown>)(...args);
+      if(args[0]==="COMMIT") throw new Error("synthetic lost COMMIT response");
+      return result;
+    }) as typeof client.query;
+    client.release = () => { client.query=originalQuery;client.release=originalRelease;originalRelease(); };
+    const connect = vi.spyOn(pool,"connect").mockResolvedValueOnce(client as never);
+    try {
+      const d = await payroll.disbursePayrollItem(h.item.id,{amountMinor:40_000,clientRequestId:"lost-commit-00001"},admin);
+      expect(d.replayed).toBe(true);
+      expect((await payroll.findDisbursementByRequestId("lost-commit-00001"))?.id).toBe(d.id);
+      expect(await cashOut()).toBe(40_000);
+    } finally { connect.mockRestore(); }
+  });
+  it("المفتاح الجماعي الذي يحوي % أو _ لا يطابق طلبًا آخر", async () => {
+    const h = await simple();
+    const first = await payroll.disburseEntireRun(h.run.id,{clientRequestId:"batch_AX-0001"},admin);
+    await expect(payroll.disburseEntireRun(h.run.id,{clientRequestId:"batch_%X-0001"},admin)).resolves.toEqual([]);
+    expect(first).toHaveLength(1);expect(await cashOut()).toBe(100_000);
+  });
 
   it("إعادة الطلب نفسه (المفتاح والمحتوى) تعيد النتيجة الأصلية ولا تنشئ سندًا ثانيًا", async () => {
     const s = await simple();

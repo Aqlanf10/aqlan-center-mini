@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -22,6 +22,8 @@ const {
   ensureSchema,
   openShift,
   closeShift,
+  payableAmountSql,
+  payableSettledTotalSql,
 } = await import("../../lib/db");
 
 const {
@@ -73,7 +75,8 @@ let supportStaffId: number;
 let doctorStaffId: number;
 let doctorPartyId: number;
 
-beforeAll(async () => {
+beforeEach(async () => {
+  await resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
   const pool = getPool();
@@ -138,9 +141,18 @@ beforeAll(async () => {
 
   // Create doctor in parties table
   const partyRes = await pool.query(
-    `INSERT INTO parties (name, kind, phone) VALUES ('د. سامي الجراح', 'doctor', '770000002') RETURNING id`,
+    `INSERT INTO parties (name, kind, phone, commission_percent) VALUES ('د. سامي الجراح', 'doctor', '770000002', 30) RETURNING id`,
   );
   doctorPartyId = partyRes.rows[0].id;
+  // Each financial case owns its contract/doctor association and approved wage source.
+  for (const input of [
+    { staffId:supportStaffId,templateKind:"support_staff" as const,title:"عقد مستقل للاستقبال",compensationKind:"salary" as const,baseSalaryMinor:15000000 },
+    { staffId:doctorStaffId,templateKind:"doctor_hybrid" as const,title:"عقد مستقل للطبيب",compensationKind:"salary_commission" as const,baseSalaryMinor:10000000,doctorPartyId,commissionRatePercent:30 },
+  ]) {
+    const contract = await createContract({ ...input,startDate:"2026-01-01",salaryCurrency:"YER",salaryPeriod:"monthly" },adminSession);
+    await transitionContractStatus(contract.id,"active","تهيئة مستقلة للاختبار",adminSession);
+  }
+
 }, 60000);
 
 afterAll(async () => {
@@ -157,7 +169,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         title: "عقد موظف استقبال",
         startDate: "2026-01-01",
         compensationKind: "salary",
-        baseSalaryMinor: 15000000, // 150,000 YER
+        baseSalaryMinor: 15000000, // 15,000,000 YER
         salaryCurrency: "YER",
         salaryPeriod: "monthly",
       },
@@ -174,7 +186,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
         title: "عقد طبيب مختلط",
         startDate: "2026-01-01",
         compensationKind: "salary_commission",
-        baseSalaryMinor: 10000000, // 100,000 YER
+        baseSalaryMinor: 10000000, // 10,000,000 YER
         commissionRatePercent: 30, // 30%
         doctorPartyId,
         salaryCurrency: "YER",
@@ -193,7 +205,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     // Calculate payroll for period in YER
     const run = await calculatePayrollRun(period.id, "YER", adminSession);
     expect(run.status).toBe("draft");
-    expect(run.totalBaseSalaryMinor).toBe(25000000); // 150,000 + 100,000 = 250,000 YER in minor
+    expect(run.totalBaseSalaryMinor).toBe(25000000); // YER uses one minor unit per rial: 25,000,000 YER
 
     const items = await listPayrollItems(run.id);
     expect(items.length).toBe(2);
@@ -225,10 +237,8 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
   it("refuses disbursement without an open cashier shift", async () => {
     const period = await getOrCreatePayrollPeriod("2026-10", adminSession);
     const pool = getPool();
-    const { rows: [run] } = await pool.query(
-      `SELECT * FROM hr_payroll_runs WHERE period_id = $1 AND status = 'approved'`,
-      [period.id],
-    );
+    const calculated = await calculatePayrollRun(period.id,"YER",adminSession);
+    const run = await approvePayrollRun(calculated.id,adminSession);
     const items = await listPayrollItems(run.id);
     const item = items[0];
 
@@ -249,6 +259,9 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
     expect(shift).not.toBeNull();
     if (!shift) throw new Error("Could not open cashier shift");
 
+    const period = await getOrCreatePayrollPeriod("2026-10",adminSession);
+    const run = await calculatePayrollRun(period.id,"YER",adminSession);
+    await approvePayrollRun(run.id,adminSession);
     const { rows: [item] } = await pool.query(
       `SELECT * FROM hr_payroll_items WHERE staff_id = $1 ORDER BY id DESC LIMIT 1`,
       [supportStaffId],
@@ -282,10 +295,10 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
 
     // Verify payable balance reduced to 0
     const { rows: payRows } = await pool.query(
-      `SELECT * FROM payables WHERE id = $1`,
+      `SELECT (${payableAmountSql("b")}-${payableSettledTotalSql("b")})::text AS remaining FROM payables b WHERE id = $1`,
       [item.payable_id],
     );
-    expect(Number(payRows[0].balance_minor)).toBe(0);
+    expect(Number(payRows[0].remaining)).toBe(0);
 
     // 3. Idempotent replay: calling disburse again with same clientRequestId returns existing record
     const replay = await disbursePayrollItem(
@@ -293,6 +306,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       {
         amountMinor: 15000000,
         paymentMethod: "cash",
+        notes: "صرف راتب شهر أكتوبر",
         clientRequestId,
       },
       adminSession,

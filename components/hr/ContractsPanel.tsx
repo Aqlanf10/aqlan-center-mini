@@ -10,7 +10,7 @@ import {
   type HrContractKind,
   type HrContractStatus,
 } from "@/lib/hr-contracts-attendance-shared";
-import { CURRENCIES, CURRENCY_SHORT, formatAmount, type Currency } from "@/lib/money";
+import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 
 interface ContractItem {
   id: string;
@@ -19,17 +19,17 @@ interface ContractItem {
   jobTitle?: string;
   contractNumber: string;
   title: string;
-  contractKind: HrContractKind;
+  templateKind: HrContractKind;
   status: HrContractStatus;
   startDate: string;
   endDate: string | null;
   probationEndDate: string | null;
-  baseSalary: number;
-  currency: string;
-  commissionRate: number;
+  baseSalaryMinor: number;
+  salaryCurrency: Currency;
+  commissionRatePercent: number;
   hourlyRate: number;
   workingHoursPerWeek: number;
-  clauses: string | null;
+  termsPayload: { clauses?: string[] };
   approvedBy: string | null;
   approvedAt: string | null;
   addendaCount?: number;
@@ -48,8 +48,10 @@ interface AddendumItem {
   contractId: string;
   addendumNumber: string;
   title: string;
-  effectiveDate: string;
-  content: string;
+  startDate: string;
+  addendumReason: string;
+  contractNumber: string;
+  termsPayload: { clauses?: string[] };
   createdAt: string;
 }
 
@@ -73,13 +75,17 @@ export function HrContractsPanel() {
 
   // Create form state
   const [formStaffId, setFormStaffId] = useState("");
-  const [formContractNumber, setFormContractNumber] = useState("");
   const [formTitle, setFormTitle] = useState("");
   const [formKind, setFormKind] = useState<HrContractKind>("fixed_salary");
   const [formStartDate, setFormStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [formEndDate, setFormEndDate] = useState("");
   const [formProbationDate, setFormProbationDate] = useState("");
   const [formCurrency, setFormCurrency] = useState("YER");
+  const [doctorParties,setDoctorParties] = useState<Array<{id:number;name:string;commissionPercent:number}>>([]);
+  const [formDoctorPartyId,setFormDoctorPartyId] = useState("");
+  const [addendumSalary,setAddendumSalary] = useState("");
+  const [addendumCurrency,setAddendumCurrency] = useState<Currency>("YER");
+  useEffect(()=>{ void fetch("/api/parties?kind=doctor").then(async(r)=>{if(r.ok) setDoctorParties(await r.json());}).catch(()=>{}); },[]);
   const [formBaseSalary, setFormBaseSalary] = useState("0");
   const [formCommissionRate, setFormCommissionRate] = useState("0");
   const [formHourlyRate, setFormHourlyRate] = useState("0");
@@ -172,7 +178,7 @@ export function HrContractsPanel() {
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formStaffId || !formContractNumber || !formTitle) {
+    if (!formStaffId || !formTitle) {
       alert("يرجى تعبئة الحقول الإلزامية.");
       return;
     }
@@ -183,18 +189,21 @@ export function HrContractsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           staffId: formStaffId,
-          contractNumber: formContractNumber,
+
           title: formTitle,
-          contractKind: formKind,
+          templateKind: formKind,
+          compensationKind: ["doctor_percentage","percentage"].includes(formKind) ? "commission" : ["doctor_hybrid","hybrid"].includes(formKind) ? "salary_commission" : "salary",
           startDate: formStartDate,
           endDate: formEndDate || null,
           probationEndDate: formProbationDate || null,
-          currency: formCurrency,
-          baseSalary: parseFloat(formBaseSalary) || 0,
-          commissionRate: parseFloat(formCommissionRate) || 0,
+          salaryCurrency: formCurrency,
+          salaryPeriod: "monthly",
+          baseSalaryMinor: parseAmount(formBaseSalary, formCurrency as Currency),
+          commissionRatePercent: Number(formCommissionRate),
+          doctorPartyId: formDoctorPartyId ? Number(formDoctorPartyId) : null,
           hourlyRate: parseFloat(formHourlyRate) || 0,
           workingHoursPerWeek: parseInt(formHoursWeek, 10) || 48,
-          clauses: formClauses || null,
+          termsPayload: { clauses: formClauses.split("\n").filter(Boolean), workingHoursPerWeek: Number(formHoursWeek) },
         }),
       });
       if (!res.ok) {
@@ -250,8 +259,10 @@ export function HrContractsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: addendumTitle,
-          effectiveDate: addendumEffectiveDate,
-          content: addendumContent,
+          startDate: addendumEffectiveDate,
+          addendumReason: addendumContent,
+          ...(addendumSalary ? {baseSalaryMinor:parseAmount(addendumSalary,addendumCurrency),salaryCurrency:addendumCurrency,salaryPeriod:"monthly"} : {}),
+          termsPayload: { clauses: addendumContent.split("\n").filter(Boolean) },
         }),
       });
       if (!res.ok) {
@@ -303,7 +314,6 @@ export function HrContractsPanel() {
           <button
             type="button"
             onClick={() => {
-              setFormContractNumber(`CNT-${Date.now().toString().slice(-4)}`);
               setCreateModalOpen(true);
             }}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-navy-800 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-navy-700"
@@ -394,20 +404,19 @@ export function HrContractsPanel() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-block rounded-lg bg-navy-100 px-2.5 py-1 text-xs font-semibold text-navy-700">
-                        {HR_CONTRACT_KIND_LABELS[c.contractKind] || c.contractKind}
+                        {HR_CONTRACT_KIND_LABELS[c.templateKind] || c.templateKind}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
-                      {c.baseSalary > 0 && (
+                      {c.baseSalaryMinor > 0 && (
                         <div>
-                          {formatAmount(c.baseSalary, c.currency as Currency)}{" "}
-                          {CURRENCY_SHORT[c.currency as Currency] || c.currency}
+                          {formatAmount(c.baseSalaryMinor, c.salaryCurrency as Currency)}{" "}
+                          {CURRENCY_SHORT[c.salaryCurrency as Currency] || c.salaryCurrency}
                         </div>
                       )}
-                      {c.commissionRate > 0 && (
-                        <div className="text-emerald-700">نسبة: {c.commissionRate}%</div>
+                      {c.commissionRatePercent > 0 && (
+                        <div className="text-emerald-700">نسبة: {c.commissionRatePercent}%</div>
                       )}
-                      {c.hourlyRate > 0 && <div>ساعة: {c.hourlyRate}</div>}
                     </td>
                     <td className="px-4 py-3 text-xs">
                       <div>من: {c.startDate}</div>
@@ -522,18 +531,15 @@ export function HrContractsPanel() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-navy-700">رقم العقد *</label>
-                <input
-                  required
-                  type="text"
-                  value={formContractNumber}
-                  onChange={(e) => setFormContractNumber(e.target.value)}
-                  className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
-                />
-              </div>
+              <p className="text-xs text-navy-500">رقم العقد يُنشأ تلقائيًا عند الحفظ.</p>
             </div>
 
+            <label className="block text-xs font-semibold">جهة الطبيب في محرك العمولات
+              <select value={formDoctorPartyId} onChange={(e)=>{setFormDoctorPartyId(e.target.value);const doctor=doctorParties.find((d)=>String(d.id)===e.target.value);if(doctor)setFormCommissionRate(String(doctor.commissionPercent));}} required={["percentage","doctor_percentage","hybrid","doctor_hybrid"].includes(formKind)} className="w-full rounded-xl border p-2">
+                <option value="">اختر جهة الطبيب للعقد بنسبة أو مختلط</option>{doctorParties.map((d)=><option key={d.id} value={d.id}>{d.name} ({d.commissionPercent}%)</option>)}
+              </select>
+            </label>
+            <p className="text-xs text-navy-500">العمولة تُحتسب من محرك العمولات القائم. اختلاف نسبة العقد عن السياسة السارية يحجب اعتماد المسير.</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">مسمى العقد *</label>
@@ -721,17 +727,17 @@ export function HrContractsPanel() {
               <div>
                 <span className="text-navy-500">نوع العقد:</span>
                 <div className="font-semibold text-navy-800">
-                  {HR_CONTRACT_KIND_LABELS[contractDetails.contract.contractKind]}
+                  {HR_CONTRACT_KIND_LABELS[contractDetails.contract.templateKind]}
                 </div>
               </div>
               <div>
                 <span className="text-navy-500">الراتب / النسبة:</span>
                 <div className="font-semibold text-navy-800">
-                  {contractDetails.contract.baseSalary > 0
-                    ? `${contractDetails.contract.baseSalary.toLocaleString()} ${contractDetails.contract.currency}`
+                  {contractDetails.contract.baseSalaryMinor > 0
+                    ? formatAmount(contractDetails.contract.baseSalaryMinor, contractDetails.contract.salaryCurrency)
                     : ""}
-                  {contractDetails.contract.commissionRate > 0
-                    ? ` (${contractDetails.contract.commissionRate}%)`
+                  {contractDetails.contract.commissionRatePercent > 0
+                    ? ` (${contractDetails.contract.commissionRatePercent}%)`
                     : ""}
                 </div>
               </div>
@@ -744,11 +750,11 @@ export function HrContractsPanel() {
             </div>
 
             {/* Clauses */}
-            {contractDetails.contract.clauses && (
+            {contractDetails.contract.termsPayload.clauses && (
               <div>
                 <h4 className="mb-1 text-xs font-bold text-navy-700">بنود وشروط العقد:</h4>
                 <div className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-xl border border-navy-100 bg-white p-3 text-xs text-navy-800">
-                  {contractDetails.contract.clauses}
+                  {contractDetails.contract.termsPayload.clauses?.join("\n")}
                 </div>
               </div>
             )}
@@ -759,7 +765,7 @@ export function HrContractsPanel() {
                 <h4 className="text-xs font-bold text-navy-700">ملاحق العقد ({contractDetails.addenda.length}):</h4>
                 <button
                   type="button"
-                  onClick={() => setAddendumModalOpen(true)}
+                  onClick={() => { setAddendumSalary(selectedContract?.baseSalaryMinor ? toInputAmount(selectedContract.baseSalaryMinor,selectedContract.salaryCurrency) : ""); setAddendumCurrency(selectedContract?.salaryCurrency || "YER"); setAddendumModalOpen(true); }}
                   className="rounded-lg border border-navy-200 bg-white px-2.5 py-1 text-xs font-semibold text-navy-800 hover:bg-navy-50"
                 >
                   + إضافة ملحق
@@ -775,10 +781,10 @@ export function HrContractsPanel() {
                   {contractDetails.addenda.map((ad) => (
                     <div key={ad.id} className="rounded-xl border border-navy-100 bg-white p-3 text-xs">
                       <div className="flex items-center justify-between font-semibold text-navy-800">
-                        <span>{ad.title} ({ad.addendumNumber})</span>
-                        <span className="text-navy-500 font-normal">سريان: {ad.effectiveDate}</span>
+                        <span>{ad.title} ({ad.contractNumber})</span>
+                        <span className="text-navy-500 font-normal">سريان: {ad.startDate}</span>
                       </div>
-                      <div className="mt-1 whitespace-pre-wrap text-navy-600">{ad.content}</div>
+                      <div className="mt-1 whitespace-pre-wrap text-navy-600">{ad.termsPayload.clauses?.join("\n")}</div>
                     </div>
                   ))}
                 </div>
@@ -842,6 +848,11 @@ export function HrContractsPanel() {
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               />
             </div>
+            {(selectedContract?.baseSalaryMinor ?? 0) > 0 && <div className="grid grid-cols-2 gap-3">
+              <label>راتب الملحق الشهري<input type="number" min="0" step="any" value={addendumSalary} onChange={(e)=>setAddendumSalary(e.target.value)} className="w-full rounded-xl border p-2" /></label>
+              <label>عملة الملحق<select value={addendumCurrency} onChange={(e)=>setAddendumCurrency(e.target.value as Currency)} className="w-full rounded-xl border p-2">{CURRENCIES.map((c)=><option key={c} value={c}>{c}</option>)}</select></label>
+              <p className="col-span-2 text-xs">تغيير الأجر أثناء الشهر يحجب اعتماد المسير إلى أن تعتمد سياسة التقسيم.</p>
+            </div>}
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"

@@ -213,9 +213,9 @@ export function StaffProfileModal({ staffId, open, onClose }: StaffProfileModalP
                         <div>
                           <span className="text-navy-400 font-sans">الراتب الأساسي:</span>
                           <div className="font-bold text-navy-800">
-                            {c.baseSalary > 0
-                              ? `${formatAmount(c.baseSalary, c.currency as Currency)} ${
-                                  CURRENCY_SHORT[c.currency as Currency] || c.currency
+                            {c.baseSalaryMinor > 0
+                              ? `${formatAmount(c.baseSalaryMinor, c.salaryCurrency as Currency)} ${
+                                  CURRENCY_SHORT[c.salaryCurrency as Currency] || c.salaryCurrency
                                 }`
                               : "—"}
                           </div>

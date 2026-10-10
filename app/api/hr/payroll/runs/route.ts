@@ -5,6 +5,8 @@ import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
 import {
   listPayrollRuns,
+  listPayrollItems,
+  HrPayrollError,
   getPayrollRunById,
   calculatePayrollRun,
   approvePayrollRun,
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
       if (!run) {
         return NextResponse.json({ message: "المسير غير موجود." }, { status: 404 });
       }
-      return NextResponse.json(run);
+      return NextResponse.json({ ...run, items: await listPayrollItems(run.id) });
     }
 
     if (!periodId) {
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
       }
       const approved = await approvePayrollRun(payload.runId, session);
       return NextResponse.json(approved);
-    } else {
+    } else if (payload.action === "calculate") {
       // Calculate
       if (!payload.periodId || !payload.currency) {
         return NextResponse.json(
@@ -91,11 +93,13 @@ export async function POST(request: Request) {
       );
       return NextResponse.json(calculated, { status: 201 });
     }
-  } catch (error: any) {
+    return NextResponse.json({ message: "العملية غير صالحة." }, { status: 400 });
+  } catch (error) {
+    if (error instanceof HrPayrollError) return NextResponse.json({ message: error.message, code: error.code }, { status: error.status });
     console.error("Failed to process payroll run:", error);
     return NextResponse.json(
-      { message: error?.message || "تعذّر معالجة مسير الرواتب." },
-      { status: 400 }
+      { message: "تعذّر معالجة مسير الرواتب." },
+      { status: 500 }
     );
   }
 }

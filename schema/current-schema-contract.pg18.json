@@ -2,12 +2,12 @@
   "format": "aqlan-current-schema-contract",
   "formatVersion": 1,
   "generatedBy": "ensureSchema()",
-  "generatedOnServerVersion": "18.3",
+  "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 107,
-    "columns": 1423,
-    "constraints": 1433,
-    "indexes": 338,
+    "tables": 108,
+    "columns": 1437,
+    "constraints": 1449,
+    "indexes": 342,
     "triggers": 30
   },
   "tables": {
@@ -3715,6 +3715,98 @@
       },
       "triggers": {}
     },
+    "hr_payroll_disbursement_parts": {
+      "columns": {
+        "amount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "component": {
+          "type": "text",
+          "nullable": false
+        },
+        "disbursement_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "expense_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payable_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "disbursement_id",
+          "component"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_disbursement_parts_amount_minor_check",
+        "hr_payroll_disbursement_parts_component_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "disbursement_id"
+          ],
+          "refTable": "hr_payroll_disbursements",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_payroll_disb_parts_expense_idx": {
+          "columns": [
+            "expense_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_disbursement_parts_disbursement_id_component_key": {
+          "columns": [
+            "disbursement_id",
+            "component"
+          ],
+          "unique": true
+        },
+        "hr_payroll_disbursement_parts_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
     "hr_payroll_disbursements": {
       "columns": {
         "amount_minor": {
@@ -3761,6 +3853,22 @@
           "type": "text",
           "nullable": true
         },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": true
+        },
+        "reversal_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "reversed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "reversed_by": {
+          "type": "text",
+          "nullable": true
+        },
         "staff_id": {
           "type": "int4",
           "nullable": false
@@ -3780,7 +3888,8 @@
         "hr_payroll_disbursements_currency_check",
         "hr_payroll_disbursements_notes_check",
         "hr_payroll_disbursements_payment_method_check",
-        "hr_payroll_disbursements_reference_number_check"
+        "hr_payroll_disbursements_reference_number_check",
+        "hr_payroll_disbursements_reversal_reason_check"
       ],
       "foreignKeys": [
         {
@@ -3864,9 +3973,21 @@
           "type": "int8",
           "nullable": false
         },
+        "blocker_codes": {
+          "type": "_text",
+          "nullable": false
+        },
+        "commission_basis_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
         "commission_details": {
           "type": "jsonb",
           "nullable": false
+        },
+        "commission_payable_id": {
+          "type": "int4",
+          "nullable": true
         },
         "commissions_minor": {
           "type": "int8",
@@ -3902,6 +4023,10 @@
         },
         "paid_minor": {
           "type": "int8",
+          "nullable": false
+        },
+        "pay_terms_snapshot": {
+          "type": "jsonb",
           "nullable": false
         },
         "payable_id": {
@@ -3974,6 +4099,15 @@
         },
         {
           "columns": [
+            "commission_payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
             "payable_id"
           ],
           "refTable": "payables",
@@ -3983,6 +4117,12 @@
         }
       ],
       "indexes": {
+        "hr_payroll_items_comm_payable_idx": {
+          "columns": [
+            "commission_payable_id"
+          ],
+          "unique": false
+        },
         "hr_payroll_items_payable_idx": {
           "columns": [
             "payable_id"

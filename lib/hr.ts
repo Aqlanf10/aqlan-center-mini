@@ -15,6 +15,8 @@
 
 import { getPool, insertAuditRow, recordAudit, type DbClient, type DbPool } from "./db";
 import { withTransaction } from "./transactions";
+import { CLINIC_TIME_ZONE } from "./db";
+import { governingContractToday, hasSalary } from "./hr-pay-terms";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
@@ -365,6 +367,17 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
         && row.salary_period !== null && row.salary_effective_on !== null;
       if (!hasExisting) {
         return { ok: false as const, error: "نوع التعاقد براتبٍ يتطلب المبلغ والعملة والدورية وتاريخ السريان معًا.", status: 400 };
+      }
+    }
+    if (patch.contractKind !== undefined || patch.payTerms !== undefined) {
+      const contract = await governingContractToday(client,id,CLINIC_TIME_ZONE);
+      if (contract) {
+        const pay = nextPayTerms === undefined ? {
+          amountMinor: Number(row.salary_amount_minor),currency: row.salary_currency,period: row.salary_period,effectiveOn: row.salary_effective_on,
+        } : nextPayTerms;
+        const matches = nextKind === contract.kind && (!hasSalary(contract.kind) || (
+          pay && pay.amountMinor === contract.salaryMinor && pay.currency === contract.currency && pay.period === contract.salaryPeriod && pay.effectiveOn === contract.startDate));
+        if (!matches) return { ok: false as const,error: "شروط الملف تخالف العقد الساري؛ أنشئ ملحق عقد معتمد لتغيير الأجر.",status: 409 };
       }
     }
     const payChanged = nextPayTerms !== undefined && (

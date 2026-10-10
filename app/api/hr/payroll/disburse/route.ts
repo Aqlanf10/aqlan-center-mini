@@ -3,71 +3,54 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
-import {
-  disbursePayrollItem,
-  disburseEntireRun,
-  type DisburseInput,
-} from "@/lib/hr-payroll";
-
+import { disbursePayrollItem, disburseEntireRun, findDisbursementByRequestId, reversePayrollDisbursement, HrPayrollError, type DisburseInput } from "@/lib/hr-payroll";
 export const dynamic = "force-dynamic";
-
-const denied = () =>
-  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
-const forbidden = () =>
-  NextResponse.json({ message: "صرف الرواتب والمستحقات للمدير وحده." }, { status: 403 });
-
+const denied = (status: number) => NextResponse.json({ message: status === 401 ? "انتهت الجلسة. سجّل الدخول من جديد." : "صرف الرواتب والمستحقات للمدير وحده." }, { status });
+export async function GET(request: Request) {
+  const session = await requireSession();
+  if (!session) return denied(401);
+  if (!canManageStaff(session.role)) return denied(403);
+  const key = new URL(request.url).searchParams.get("clientRequestId");
+  if (!key || key.length < 8 || key.length > 100) return NextResponse.json({ message: "مفتاح الطلب غير صالح." }, { status: 400 });
+  try {
+    const disbursement = await findDisbursementByRequestId(key);
+    return NextResponse.json({ disbursement });
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من نتيجة الصرف؛ أعد المحاولة بالمفتاح نفسه." }, { status: 503 });
+  }
+}
 export async function POST(request: Request) {
   const session = await requireSession();
-  if (!session) return denied();
-  if (!canManageStaff(session.role)) return forbidden();
-
+  if (!session) return denied(401);
+  if (!canManageStaff(session.role)) return denied(403);
   let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); }
+  catch (error) { return bodyErrorResponse(error) ?? NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  const p = body as Record<string, unknown>;
   try {
-    body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES);
-  } catch (error) {
-    const bounded = bodyErrorResponse(error);
-    if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
-  }
-
-  const payload = (body ?? {}) as {
-    disburseAll?: boolean;
-    runId?: string;
-    itemId?: string;
-    amount?: number;
-    paymentMethod?: string;
-    referenceNumber?: string;
-    notes?: string;
-    safeOrBankId?: string;
-  };
-
-  const disburseInput: DisburseInput = {
-    amount: payload.amount !== undefined ? Number(payload.amount) : undefined,
-    paymentMethod: payload.paymentMethod || "cash",
-    referenceNumber: payload.referenceNumber || null,
-    notes: payload.notes || null,
-    safeOrBankId: payload.safeOrBankId || null,
-  };
-
-  try {
-    if (payload.disburseAll) {
-      if (!payload.runId) {
-        return NextResponse.json({ message: "يرجى تحديد مسير الرواتب للصرف الجماعي." }, { status: 400 });
-      }
-      const disbursements = await disburseEntireRun(payload.runId, disburseInput, session);
-      return NextResponse.json({ success: true, disbursements }, { status: 201 });
-    } else {
-      if (!payload.itemId) {
-        return NextResponse.json({ message: "يرجى تحديد بند المستحق للصرف الفردي." }, { status: 400 });
-      }
-      const disbursement = await disbursePayrollItem(payload.itemId, disburseInput, session);
-      return NextResponse.json({ success: true, disbursement }, { status: 201 });
+    if (p.action === "reverse") {
+      if (typeof p.reason !== "string" || !(typeof p.disbursementId === "string" || typeof p.disbursementId === "number")) throw new HrPayrollError("invalid_reversal",400,"حدّد حركة الصرف وسبب العكس.");
+      return NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId,{ reason:p.reason },session) });
     }
-  } catch (error: any) {
-    console.error("Failed to disburse payroll:", error);
-    return NextResponse.json(
-      { message: error?.message || "تعذّر تنفيذ عملية الصرف." },
-      { status: 400 }
-    );
+    if (p.action && p.action !== "disburse") throw new HrPayrollError("invalid_action",400,"العملية غير صالحة.");
+    if (typeof p.clientRequestId !== "string" || !p.clientRequestId.trim()) throw new HrPayrollError("request_key_required",400,"مفتاح الطلب الثابت مطلوب للصرف.");
+    for (const name of ["paymentMethod","referenceNumber","notes","safeOrBankId"]) if (p[name] != null && typeof p[name] !== "string") throw new HrPayrollError("invalid_input",400,"بيانات الصرف غير صالحة.");
+    if (p.amountMinor !== undefined && typeof p.amountMinor !== "number") throw new HrPayrollError("invalid_amount",400,"المبلغ غير صالح.");
+    if (p.components != null && (typeof p.components !== "object" || Array.isArray(p.components))) throw new HrPayrollError("invalid_components",400,"توزيع الصرف غير صالح.");
+    const input: DisburseInput = { amountMinor:p.amountMinor as number | undefined, clientRequestId:p.clientRequestId,
+      components:p.components as DisburseInput["components"], paymentMethod:p.paymentMethod as string | undefined,
+      referenceNumber:p.referenceNumber as string | null, notes:p.notes as string | null, safeOrBankId:p.safeOrBankId as string | null };
+    if (p.disburseAll === true) {
+      if (!(typeof p.runId === "number" || typeof p.runId === "string")) throw new HrPayrollError("invalid_id",400,"حدّد مسير الرواتب.");
+      return NextResponse.json({ success:true,disbursements:await disburseEntireRun(p.runId,input,session) },{ status:201 });
+    }
+    if (!(typeof p.itemId === "number" || typeof p.itemId === "string")) throw new HrPayrollError("invalid_id",400,"حدّد بند المستحق.");
+    const disbursement = await disbursePayrollItem(p.itemId,input,session);
+    return NextResponse.json({ success:true,disbursement },{ status:disbursement.replayed ? 200 : 201 });
+  } catch (error) {
+    if (error instanceof HrPayrollError) return NextResponse.json({ message:error.message,code:error.code },{ status:error.status });
+    console.error("HR disbursement unresolved",error);
+    return NextResponse.json({ message:"لم تتأكد نتيجة الصرف؛ تحقق أو أعد الطلب نفسه بالمفتاح نفسه.",code:"outcome_uncertain" },{ status:503 });
   }
 }

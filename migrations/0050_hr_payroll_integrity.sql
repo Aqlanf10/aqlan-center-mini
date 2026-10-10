@@ -1,5 +1,6 @@
 -- (HR-INT) سلامة المسير والصرف: لقطة شروط الأجر وأسباب الحجب، التزام العمولة المستقل، أجزاء الصرف، بصمة الطلب، العكس.
--- إضافية خالصة فوق 0049 (لا تعديل لهجرةٍ مطبّقة). 0050 رقمٌ مقترح — ينتظر تأكيد dot (المحجوز: 0044 خصم الفواتير، 0047 السيفالو).
+-- إضافية خالصة فوق 0049 (لا تعديل لهجرةٍ مطبّقة). 0050 محجوزة ومعتمدة من dot لإصلاح تكامل الموارد البشرية ضمن PR #308 بعد فحص الفروع المفتوحة.
+-- اعتماد الرقم في الشفرة فقط؛ لا يُفترض عدم التطبيق اليدوي لـ0048/0049 في قواعد خارجية.
 -- Body must remain byte-for-byte equal to HR_PAYROLL_INTEGRITY_SQL after these comments.
 ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS commission_payable_id INTEGER REFERENCES payables(id) ON DELETE SET NULL;
 ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS pay_terms_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;

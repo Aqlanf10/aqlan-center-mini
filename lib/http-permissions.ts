@@ -120,7 +120,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   // (HR-5) المسير والصرف والسياسات: للمدير وحده.
   "/api/hr/payroll/periods": { GET: ADMIN, POST: ADMIN },
   "/api/hr/payroll/runs": { GET: ADMIN, POST: ADMIN },
-  "/api/hr/payroll/disburse": { POST: ADMIN },
+  "/api/hr/payroll/disburse": { GET: ADMIN, POST: ADMIN },
   "/api/hr/settings": { GET: ADMIN, PATCH: ADMIN },
   "/api/hr/reports": { GET: ADMIN },
   "/api/internal/backup/run": { POST: INTERNAL },
