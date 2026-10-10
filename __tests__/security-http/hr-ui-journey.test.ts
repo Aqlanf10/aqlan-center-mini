@@ -331,9 +331,10 @@ describe("(HR) browser journey — staff files and tasks", () => {
       await doctorPage.getByRole("button", { name: "مهمة جديدة" }).click();
       await doctorPage.getByLabel("العنوان").fill("تذكير شخصي خاص بالدوام");
       await doctorPage.getByLabel(/مهمة خاصة/).check();
+      const created = doctorPage.waitForResponse(response => response.url().endsWith("/api/tasks") && response.request().method() === "POST");
       await doctorPage.getByRole("button", { name: "إنشاء" }).click();
-      await doctorPage.waitForTimeout(800);
-      expect(await doctorPage.textContent("section[aria-label='المهام']")).toContain("تذكير شخصي خاص بالدوام");
+      expect((await created).status()).toBe(201);
+      await expect.poll(async () => await doctorPage.textContent("section[aria-label='المهام']")).toContain("تذكير شخصي خاص بالدوام");
     } finally {
       await doctorPage.close();
       await doctorContext.close();

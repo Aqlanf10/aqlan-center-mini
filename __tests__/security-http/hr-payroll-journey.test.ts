@@ -225,6 +225,8 @@ for(const width of [390,1280]){
    await reviewerPage.screenshot({path:join(evidence,`hr-nextday-result-${width}.png`),fullPage:true});
    expect((await api("POST","/api/hr/attendance/corrections",{action:"decide",id:correction.id,decision:"approved"})).status).toBe(400);
    const stored=(await db.query("SELECT * FROM hr_attendance_records WHERE id=$1",[out.body.id])).rows[0];
+   expect((await db.query("SELECT requested_by,approved_by,status FROM hr_attendance_corrections WHERE id=$1",[correction.id])).rows[0]).toEqual({requested_by:"secadmin",approved_by:`nightreviewer${width}`,status:"approved"});
+   expect(new Date(stored.check_in_raw).toISOString()).toBe("2026-08-01T19:00:00.000Z");
    expect(new Date(stored.check_out_actual).toISOString()).toBe("2026-08-02T03:15:00.000Z");expect(new Date(stored.check_out_raw).toISOString()).toBe("2026-08-02T03:00:00.000Z");expect(stored.work_minutes).toBe(495);
    const repeat=await api("POST","/api/hr/attendance",{staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"});expect(repeat.status).toBe(201);expect(repeat.body.id).toBe(out.body.id);expect(repeat.body.checkOutActual).toBe("2026-08-02T03:15:00.000Z");
    const next=await api("POST","/api/hr/attendance",{staffId,punchType:"check_in",punchTime:"2026-08-02T22:00:00+03:00"});expect(next.status).toBe(201);expect(next.body.checkOutRaw).toBeNull();
@@ -233,7 +235,13 @@ for(const width of [390,1280]){
     try{
      const cookie= session.cookie.split(";")[0],separator=cookie.indexOf("=");await roleContext.addCookies([{name:cookie.slice(0,separator),value:cookie.slice(separator+1),url:baseUrl}]);
      const rolePage=await roleContext.newPage();await rolePage.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
-     expect(await rolePage.getByRole("tab",{name:"الدوام والحضور",exact:true}).count()).toBe(role==="reception"?1:0);
+     const authenticated=await rolePage.evaluate(async()=>{
+      const response=await fetch("/api/auth/me");return {status:response.status,body:await response.json()};
+     });
+     expect(authenticated.status).toBe(200);expect(authenticated.body.role).toBe(role);
+     // Authenticate the real browser session, then match the label with its decorative icon.
+     // The accessible name is "⏱️الدوام والحضور", not the bare exact text.
+     await expect.poll(async()=>await rolePage.getByRole("tab",{name:"الدوام والحضور"}).count()).toBe(role==="reception"?1:0);
      if(role==="reception"){
       await rolePage.getByRole("tab",{name:"الدوام والحضور"}).click();await rolePage.locator('section[aria-label="الدوام والحضور"] input[type="date"]').fill("2026-08-01");
       await expect.poll(async()=>await rolePage.locator('section[aria-label="الدوام والحضور"] tbody').textContent()).toContain(name);

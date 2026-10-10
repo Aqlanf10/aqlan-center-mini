@@ -938,8 +938,10 @@ export async function recordAttendancePunch(
     const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
       WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
         EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) OR
-        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND (ar.check_out_actual IS NULL OR ar.check_out_raw=$4::timestamptz)))
-      ORDER BY EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz) DESC,
+        ($3='check_out' AND ws.crosses_midnight AND ar.attendance_date=$2::date-1 AND ar.check_in_actual IS NOT NULL AND (ar.check_out_actual IS NULL OR ar.check_out_raw IS NULL OR ar.check_out_raw=$4::timestamptz)))
+      ORDER BY (EXISTS (SELECT 1 FROM hr_attendance_punch_events e WHERE e.attendance_id=ar.id AND e.punch_type=$3 AND e.punched_at=$4::timestamptz)
+          OR ($3='check_out' AND COALESCE(ar.check_out_raw=$4::timestamptz,false))) DESC,
+        (ar.attendance_date=$2::date AND ar.check_in_actual IS NOT NULL AND ar.check_in_actual<=$4::timestamptz) DESC,
         ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staffId,dateStr,input.punchType,punchIso]);
     const row = prior.rows[0];
     if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.");

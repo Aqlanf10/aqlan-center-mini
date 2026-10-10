@@ -203,3 +203,16 @@ it("a retained cancelled-leave record acquires its real night schedule on the fi
  const outgoing=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-11T06:00:00+03:00"},admin);
  expect(outgoing.id).toBe(placeholder.id);expect(outgoing.workMinutes).toBe(480);expect(outgoing.isIncomplete).toBe(false);
 });
+
+it("the first real checkout after an approved missing night checkout supplies only raw evidence to that shift",async()=>{
+ await work.createSchedule({staffId,name:"Corrected missing night exit",scheduleType:"night",effectiveFrom:"2026-01-01",workingDays:[0,1,2,3,4,5,6],shiftStartTime:"22:00",shiftEndTime:"06:00",crossesMidnight:true},admin);
+ const incoming=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-01T22:00:00+03:00"},admin);
+ const correction=await work.requestAttendanceCorrection({attendanceRecordId:incoming.id,fieldCorrected:"check_out",newCheckOut:"2026-08-02T06:15:00+03:00",reason:"Synthetic missing night exit"},admin);
+ await work.decideAttendanceCorrection(correction.id,"approved",null,reviewer);
+ const replay=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-01T22:00:00+03:00"},admin);expect(replay.checkOutRaw).toBeNull();
+ // The later shift has already completed when the old physical evidence is uploaded.
+ const next=await work.recordAttendancePunch({staffId,punchType:"check_in",punchTime:"2026-08-02T22:00:00+03:00"},admin);
+ const nextOut=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-03T06:00:00+03:00"},admin);expect(nextOut.id).toBe(next.id);expect(nextOut.workMinutes).toBe(480);
+ const physical=await work.recordAttendancePunch({staffId,punchType:"check_out",punchTime:"2026-08-02T06:00:00+03:00"},admin);
+ expect(physical.id).toBe(incoming.id);expect(physical.checkOutRaw).toBe("2026-08-02T03:00:00.000Z");expect(physical.checkOutActual).toBe("2026-08-02T03:15:00.000Z");
+});
