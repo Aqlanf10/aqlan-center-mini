@@ -13,6 +13,13 @@ const line = (billingClass: WalkoutLine["billingClass"], review: boolean): Walko
 const render = (value: WalkoutLine) => renderToStaticMarkup(createElement(WalkoutLineBilling, { line: value }));
 
 describe("walkout financial-review presentation precedence", () => {
+  it("does not infer free work from a positive-price line without an established invoice", () => {
+    const html = render(line("NO_CHARGE", false));
+    expect(html).toContain("يحتاج مراجعة مالية");
+    expect(html).not.toContain("بلا رسوم");
+    expect(html).not.toContain("1,500,000");
+  });
+
   it.each(["INCLUDED", "NO_CHARGE", "NEW_BILLABLE"] as const)("does not present unresolved %s as covered, free, or collectible", (classification) => {
     const html = render(line(classification, true));
     expect(html).toContain("يحتاج مراجعة مالية");
@@ -24,7 +31,7 @@ describe("walkout financial-review presentation precedence", () => {
   });
   it("preserves ordinary server-classified presentation when no review is required", () => {
     expect(render(line("INCLUDED", false))).toContain("مشمول بالاتفاق");
-    expect(render(line("NO_CHARGE", false))).toContain("بلا رسوم");
+    expect(render({ ...line("NO_CHARGE", false), unitPriceMinor: 0 })).toContain("بلا رسوم");
     expect(render(line("NEW_BILLABLE", false))).toContain("مستحق جديد");
   });
 });

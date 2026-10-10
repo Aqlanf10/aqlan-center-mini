@@ -31,10 +31,42 @@ beforeEach(() => {
 const render = async () => renderToStaticMarkup(await WalkoutPage({ params: Promise.resolve({ id: "10" }) }));
 
 describe("printed walkout uses canonical financial-review evidence", () => {
+  it.each([null, "2026-10-07T09:00:00Z"])("does not infer free care for unsigned or cancelled-invoice walkout (signedAt=%s)", async (signedAt) => {
+    // visitWalkout projects a cancelled invoice as null, just like an absent invoice.
+    state.walkout!.signedAt = signedAt;
+    state.walkout!.invoice = null;
+    state.walkout!.lines = [{ ...state.walkout!.lines[0], financialReviewRequired: false }];
+    const html = await render();
+    expect(html).toContain("لا فاتورة جديدة مثبتة لهذه الزيارة");
+    expect(html).not.toContain("لا رسوم على هذه الزيارة");
+    expect(html).not.toContain("بلا رسوم");
+    expect(html).toContain(formatMoney(432100, "YER"));
+  });
+
+  it.each(["INCLUDED", "LEGACY_INCLUDED"] as const)("prints adjustment-only %s without invented work or an invoice", async (billingClass) => {
+    state.walkout!.lines = [];
+    state.walkout!.orthoAdjustment = { id: 30, billingClass, decision: null, pendingDecision: false };
+    state.walkout!.balances = [{ currency: "YER", balanceMinor: 180000 }];
+    const html = await render();
+    expect(html).toContain("شدّة تقويم");
+    expect(html).toContain(billingClass === "INCLUDED" ? "مشمول بالاتفاق" : "مشمول بالعلاج السابق");
+    expect(html).not.toContain("كشف ومتابعة");
+    expect(html).toContain(formatMoney(180000, "YER"));
+    expect(state.walkout!.invoice).toBeNull();
+  });
+  it("does not print a pending outside-contract adjustment as free", async () => {
+    state.walkout!.lines = [];
+    state.walkout!.orthoAdjustment = { id: 30, billingClass: "OUTSIDE_CONTRACT", decision: null, pendingDecision: true };
+    const html = await render();
+    expect(html).toContain("خارج العقد — قرار فوترة معلّق");
+    expect(html).not.toContain("لا رسوم على هذه الزيارة");
+    expect(html).not.toContain("كشف ومتابعة");
+  });
+
   it("never prints unresolved work as free/included/collectible while retaining known account balances", async () => {
     const html = await render();
     expect(html).toContain("يحتاج مراجعة مالية — التغطية غير محسومة");
-    expect(html).toContain("لا فاتورة جديدة للزيارة؛ توجد بنود تحتاج مراجعة مالية");
+    expect(html).toContain("لا فاتورة جديدة مثبتة لهذه الزيارة؛ توجد بنود تحتاج مراجعة مالية");
     expect(html).not.toContain("لا رسوم على هذه الزيارة");
     expect(html).not.toContain("مشمول بالخطة");
     expect(html).not.toContain(formatMoney(987654, "YER"));
@@ -53,7 +85,7 @@ describe("printed walkout uses canonical financial-review evidence", () => {
   it("preserves the existing verified included rendering when review is not required", async () => {
     state.walkout!.lines[0] = { ...state.walkout!.lines[0], financialReviewRequired: false, included: true, billingClass: "INCLUDED" };
     const html = await render();
-    expect(html).toContain("مشمول بالخطة");
+    expect(html).toContain("مشمول بالاتفاق");
     expect(html).not.toContain("التغطية غير محسومة");
   });
 });

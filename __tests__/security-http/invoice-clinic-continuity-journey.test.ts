@@ -290,14 +290,16 @@ async function collectThroughUi(patientId: number, target: Invoice, loseResponse
   const submit = dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true });
   if (loseResponse) {
     await submit.click();
-    await dialog.getByText("تعذّر الاتصال بالخادم", { exact: false }).waitFor();
+    await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }).waitFor();
+    expect(await submit.isDisabled()).toBe(true);
     expect(await q(`SELECT id FROM payments WHERE patient_id = $1 AND invoice_id = $2`, [patientId, target.id])).toHaveLength(1);
   }
   const response = page.waitForResponse((candidate) => candidate.url().endsWith("/api/payments") && candidate.request().method() === "POST");
-  await submit.click();
+  await (loseResponse ? dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }) : submit).click();
   expect((await response).status()).toBe(loseResponse ? 200 : 201);
   await dialog.waitFor({ state: "hidden" });
   expect(new Set(keys).size).toBe(1);
+  expect(keys).toHaveLength(loseResponse ? 2 : 1);
   expect(keys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
   expect(await q(`SELECT invoice_id, amount_minor::int, currency FROM payments WHERE patient_id = $1 AND invoice_id = $2`, [patientId, target.id]))
     .toEqual([{ invoice_id: target.id, amount_minor: target.totalMinor - target.discountMinor, currency: "YER" }]);

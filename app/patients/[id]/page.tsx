@@ -51,7 +51,9 @@ import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
+import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
+import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
@@ -107,12 +109,16 @@ export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: stri
   { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
-export default function PatientFilePage({ params }: { params: Promise<{ id: string }> }) {
+export default function PatientFilePage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = use(params);
-  return <PatientFileWorkspace key={id} id={id} />;
+  const query = searchParams ? use(searchParams) : undefined;
+  return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={readCheckoutVisitRequest(query?.checkoutVisit)} />;
 }
 
-function PatientFileWorkspace({ id }: { id: string }) {
+function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checkoutVisitRequest: CheckoutVisitRequest }) {
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
@@ -138,6 +144,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const [showProfitability, setShowProfitability] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenu = useDismissibleDetails(moreOpen, setMoreOpen);
   const [patientDetailsOpen, setPatientDetailsOpen] = useState(false);
   const alertScope = patientAlertScope(Number(id), session);
   const alertOwner = useMemo(() => ({ scope: alertScope, active: false, revision: 0,
@@ -471,6 +478,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
     .join("");
 
   const workflowAction = (() => {
+    if (tab === "today" && checkoutVisitRequest !== null) {
+      return typeof checkoutVisitRequest === "number" ? {
+        label: `عرض تحصيل الزيارة #${checkoutVisitRequest}`,
+        run: () => document.getElementById("requested-visit-checkout")?.scrollIntoView({ behavior: "smooth", block: "start" }), primary: true,
+      } : null;
+    }
     if (!step) return null;
     switch (step.kind) {
       case "continue_visit":
@@ -504,6 +517,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
   const primaryAction = workflowAction ? { ...workflowAction, run: () => {
     if (workflowIsCurrent()) workflowAction.run();
   } } : null;
+  const DetailsHeading = compactWorkspace ? "h2" : "h1";
 
   // Clinical warnings remain visible independently of the optional details disclosure.
   const medicalAlertBanner = patient.medicalAlert ? (
@@ -559,7 +573,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
               className="h-8 w-8 shrink-0 rounded-lg object-cover" />
               : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
             <div className="min-w-0 flex-1">
-              <h1 className="break-words text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
+              <h1 className="break-words [overflow-wrap:anywhere] text-sm font-black leading-tight text-navy-900">{patient.fullName}</h1>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                 <button type="button" onClick={() => copyToClipboard(patient.patientNumber, "patientNumber")} title="نسخ رقم الملف الطبي"
                   className="rounded bg-slate-100 px-1.5 font-bold text-navy-900">#{patient.patientNumber}</button>
@@ -587,6 +601,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
         ) : undefined}
         safety={compactWorkspace ? <>
           <PatientFlagChips flags={patient.flags} />
+          {!vitals ? <span className="text-[11px] text-slate-500">العلامات الحيوية في تنبيه الملف: غير مسجلة</span> : null}
           {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
             <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
               className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
@@ -628,9 +643,9 @@ function PatientFileWorkspace({ id }: { id: string }) {
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-black text-navy-900 leading-tight">
+                <DetailsHeading className="text-xl font-black text-navy-900 leading-tight">
                   {patient.fullName}
-                </h1>
+                </DetailsHeading>
 
                 {/* رقم الملف مع زر النسخ السريع */}
                 <button
@@ -811,11 +826,13 @@ function PatientFileWorkspace({ id }: { id: string }) {
             </button>
 
             {/* القائمة المنسدلة: المزيد */}
-            <details className="relative" open={moreOpen} onToggle={(event) => setMoreOpen(event.currentTarget.open)} data-testid="patient-more-actions">
-              <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+            <details ref={moreMenu.ref} className="relative" open={moreOpen} onKeyDown={moreMenu.onKeyDown} data-testid="patient-more-actions">
+              <summary onClick={moreMenu.onSummaryClick} aria-expanded={moreOpen} aria-controls="patient-more-actions-panel"
+                className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
                 المزيد ⋯
               </summary>
-              <div className="absolute left-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div id="patient-more-actions-panel" onClick={moreMenu.onActionClick}
+                className="absolute end-0 z-20 mt-1.5 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
                 {whatsApp ? (
                   <a href={`https://wa.me/${whatsApp}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50">
@@ -1256,6 +1273,12 @@ function PatientFileWorkspace({ id }: { id: string }) {
           )}
         </div>
       ) : tab === "today" ? (
+        checkoutVisitRequest === "invalid" ? (
+          <section id="requested-visit-checkout" role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-800">
+            رابط تحصيل الزيارة غير صالح. ارجع إلى قائمة التوقيعات واختر الزيارة من جديد.
+            <a href="/" className="mt-2 block underline">العودة إلى الاستقبال</a>
+          </section>
+        ) :
         <TodayVisitTab
           patientId={patient.id}
           patientName={patient.fullName}
@@ -1265,6 +1288,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
           base={base}
           visits={file.visits}
           canCollect={summary?.canSeeFinancial ?? false}
+          requestedCheckoutVisitId={checkoutVisitRequest}
           onNavigationGuardChange={trackClinicalGuard}
           onVisitStarted={() => {
             setSuccessMsg("بدأت الزيارة.");
@@ -1345,7 +1369,7 @@ function PatientFileWorkspace({ id }: { id: string }) {
       <CollectPaymentModal
         patientId={patient.id}
         patientName={patient.fullName}
-        isOpen={showCollect}
+        isOpen={showCollect && !(tab === "today" && checkoutVisitRequest !== null)}
         onClose={() => setShowCollect(false)}
         onSuccess={() => {
           setShowCollect(false);
@@ -1816,3 +1840,5 @@ function Field({
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-navy-900 outline-none transition-colors focus:border-navy-800";
+
+

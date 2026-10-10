@@ -118,6 +118,9 @@ describe("Today readiness on the built RTL board", () => {
         return;
       }
       if (url.pathname === "/api/visits" && !url.search) { await route.fulfill({ json: visits }); return; }
+      if (url.pathname === "/api/visits" && url.search === "?view=reception-handoff") {
+        await route.fulfill({ json: { owner: { username: "secadmin", role: "admin" }, fromDate: "2026-10-08", toDate: "2026-10-09", clinicTimeZone: "Asia/Aden", items: [] } }); return;
+      }
       if (url.pathname === "/api/visits/readiness" && !url.search) {
         readinessCount++;
         const status = mode === "failed" ? 503 : mode === "denied" ? 403 : 200;
@@ -279,3 +282,4 @@ describe("Today readiness on the built RTL board", () => {
     });
   }, 120_000);
 });
+

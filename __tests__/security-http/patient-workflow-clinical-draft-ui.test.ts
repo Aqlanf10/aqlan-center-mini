@@ -27,9 +27,10 @@ const patient = { id: patientId, patientNumber: "SYNTHETIC-WORKFLOW-DRAFT-98671"
   phone: null, altPhone: null, gender: "unknown", birthYear: null, birthDate: null, address: null,
   medicalAlert: null, note: null, createdAt: "2026-10-07T08:00:00.000Z", photoDocumentId: null,
   flags: [], email: null, preferredChannel: null };
+const previousVisit = { id: 98670, date: "2026-10-06", treatmentDone: "مرجع زيارة سابقة اصطناعي موحد", proceduresSummary: null, nextPlan: null };
 const workflow = () => ({ patient,
   openVisit: { id: visitId, status: "in_chair", chair: 1, arrivedAt: "2026-10-07T09:00:00.000Z", plannedTitle: null },
-  lastVisit: null, nextAppointment: null, activePlans: [], plannedVisits: [],
+  lastVisit: previousVisit, nextAppointment: null, activePlans: [], plannedVisits: [],
   counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: null, alerts: [], canSeeFinancial: false,
   assessmentCases: [{ id: 98675, patientId, kind: "specialty", orthoCaseId: null,
@@ -38,7 +39,7 @@ const workflow = () => ({ patient,
 const clinical = () => ({ id: visitId, patientId, patientName: patient.fullName, ...notes("Synthetic saved"), doctorId,
   status: "open", signedAt: null, signedBy: null, invoiceId: null, addendum: null,
   procedures: [], totalMinor: 0, planItemsMatched: 0, planTitle: null, planWarning: null,
-  ortho: null, plannedVisit: null, previousVisit: null, latestDiagnosis: null, activeCases: [],
+  ortho: null, plannedVisit: null, previousVisit, latestDiagnosis: null, activeCases: [],
   outstanding: [], billingCurrency: "YER", sessionPricing: [], labOrders: [],
 });
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status,
@@ -127,6 +128,8 @@ async function fixture() {
         await page.locator("#visit-notes").waitFor();
         await expect.poll(() => noteField(page, "② التشخيص").inputValue()).toBe(notes("Synthetic saved").diagnosis);
         await page.getByTestId("patient-primary-action").waitFor();
+        // The real parent and loaded child share exactly one visible reference.
+        await expect.poll(() => page.getByText(previousVisit.treatmentDone, { exact: true }).count()).toBe(1);
         expect(reads.workflow).toBe(1); expect(reads.clinical).toBe(1);
         await body(); verify();
       } finally { for (const release of releases) release(); }
@@ -154,11 +157,13 @@ describe("shared workflow refresh preserves a real ClinicalVisit draft", () => {
       expect(await editor!.evaluate((node) => node.isConnected)).toBe(true);
       expect(await input!.evaluate((node) => node.isConnected)).toBe(true);
       expect(await readNotes(page)).toEqual(draft);
+      expect(await page.getByText(previousVisit.treatmentDone, { exact: true }).count()).toBe(1);
       release();
       await state.filter({ hasText: "تعذّر التحقق" }).waitFor();
       expect(await editor!.evaluate((node) => node.isConnected)).toBe(true);
       expect(await input!.evaluate((node) => node.isConnected)).toBe(true);
       expect(await readNotes(page)).toEqual(draft);
+      expect(await page.getByText(previousVisit.treatmentDone, { exact: true }).count()).toBe(1);
       expect(await page.getByText("لا زيارة قائمة اليوم", { exact: true }).count()).toBe(0);
       expect(await page.getByRole("button", { name: "🪑 بدء زيارة اليوم", exact: true }).count()).toBe(0);
       expect(await page.locator("body").innerText()).not.toContain(FOREIGN_TITLE);
