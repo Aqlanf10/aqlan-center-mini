@@ -76,8 +76,10 @@ export function LabPrescriptionModal({
   };
 
   return (
+    // A tall prescription must grow below the scroll origin. Center alignment
+    // puts its first actions above that origin, where native scrolling cannot reach them.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

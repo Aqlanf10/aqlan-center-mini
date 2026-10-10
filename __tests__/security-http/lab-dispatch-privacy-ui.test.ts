@@ -92,6 +92,65 @@ async function snapshot() {
 async function paint(page: Page) {
   await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
 }
+
+async function assertPreviewActionsInViewport(overlay: Locator) {
+  const controls = [
+    ["copy", overlay.getByRole("button", { name: "💬 نسخ لواتساب", exact: true })],
+    ["print", overlay.getByRole("link", { name: /صفحة طباعة الإرسالية/ })],
+    ["close", overlay.getByRole("button", { name: "✕", exact: true })],
+  ] as const;
+  const facts = [];
+  for (const [action, control] of controls) {
+    expect(await control.count()).toBe(1);
+    expect(await control.isEnabled()).toBe(true);
+    const geometry = await control.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+      return {
+        left: box.left, top: box.top, right: box.right, bottom: box.bottom,
+        width: box.width, height: box.height,
+        viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
+        hitTarget: hit !== null && (hit === element || element.contains(hit)),
+      };
+    });
+    expect(geometry.width, `${action} has a real rendered box`).toBeGreaterThan(0);
+    expect(geometry.height).toBeGreaterThan(0);
+    expect(geometry.left, `${action} must fit wholly inside the viewport`).toBeGreaterThanOrEqual(0);
+    expect(geometry.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
+    expect(geometry.hitTarget, `${action} must receive a native pointer action`).toBe(true);
+    facts.push({ action, ...geometry });
+  }
+  return facts;
+}
+
+async function assertLongPreviewReachable(page: Page, overlay: Locator, sheet: Locator) {
+  await paint(page);
+  const initial = await assertPreviewActionsInViewport(overlay);
+  const viewport = page.viewportSize()!;
+  const scrolling = await overlay.evaluate(element => ({
+    clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop,
+  }));
+  // Exercise the actual long prescription, not a shortened or mocked card.
+  expect(scrolling.scrollHeight).toBeGreaterThan(scrolling.clientHeight);
+  expect(scrolling.scrollTop).toBe(0);
+  await page.mouse.move(viewport.width - 12, viewport.height / 2);
+  await page.mouse.wheel(0, scrolling.scrollHeight);
+  await expect.poll(() => overlay.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  const footer = sheet.getByText("توقيع واستلام فني المعمل", { exact: true });
+  await expect.poll(async () => {
+    const box = await footer.boundingBox();
+    return box !== null && box.y >= 0 && box.y + box.height <= viewport.height;
+  }).toBe(true);
+  const bottomScrollTop = await overlay.evaluate(element => element.scrollTop);
+  await page.mouse.wheel(0, -scrolling.scrollHeight);
+  await expect.poll(() => overlay.evaluate(element => element.scrollTop)).toBe(0);
+  await paint(page);
+  const returned = await assertPreviewActionsInViewport(overlay);
+  return { viewport, ...scrolling, bottomScrollTop, footerVisible: true, initial, returned };
+}
+
 async function inspectPdf(page: Page, filename: string, blank: boolean) {
   const path = `${directory}/${filename}`;
   const text = plain(execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", maxBuffer: 6 * 1024 * 1024 }));
@@ -217,6 +276,7 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
     });
     const members: Member[] = [];
     const qrFacts: Awaited<ReturnType<typeof assertActualQr>>[] = [];
+    const reachabilityFacts: Array<{ entry: "patient" | "lab"; geometry: Awaited<ReturnType<typeof assertLongPreviewReachable>> }> = [];
     const pdfFacts: Array<{ filename: string; pages: number }> = [];
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url());
@@ -279,6 +339,30 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
         expect(await sheet.innerText()).toContain(reference);
         expect(await sheet.innerText()).toContain("توجد تعليمات داخلية غير مرفقة");
         qrFacts.push(await assertActualQr(sheet.getByRole("img", { name: `مرجع الطلب ${reference}`, exact: true }), reference, 160, "#0a192f"));
+        reachabilityFacts.push({ entry, geometry: await assertLongPreviewReachable(page, overlay, sheet) });
+        await page.setViewportSize({ width: 390, height: 844 });
+        reachabilityFacts.push({ entry, geometry: await assertLongPreviewReachable(page, overlay, sheet) });
+        await assertNoDemographicMarkup(overlay);
+        // Native clipboard setup prevents a previous successful copy from masking
+        // a failed action. The product handler is reached only by the real click.
+        await page.evaluate(() => navigator.clipboard.writeText("SYNTHETIC_DISPATCH_BEFORE_MOBILE_COPY"));
+        await overlay.getByRole("button", { name: "💬 نسخ لواتساب", exact: true }).click();
+        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(reference);
+        const mobileCopy = await page.evaluate(() => navigator.clipboard.readText());
+        assertPrivateAbsent(mobileCopy);
+        expect(mobileCopy).toContain(serviceName);
+        expect(mobileCopy).toContain("توجد تعليمات داخلية غير مرفقة");
+        await overlay.getByRole("button", { name: "✕", exact: true }).click();
+        await expect.poll(() => sheet.count()).toBe(0);
+        // Restore the original full desktop privacy/PDF/eight-artifact journey.
+        await page.setViewportSize({ width: 1280, height: 1100 });
+        await openButton.click();
+        await expect.poll(() => sheet.isVisible()).toBe(true);
+        await paint(page);
+        await assertPreviewActionsInViewport(overlay);
+        await assertNoDemographicMarkup(overlay);
+        qrFacts.push(await assertActualQr(sheet.getByRole("img", { name: `مرجع الطلب ${reference}`, exact: true }), reference, 160, "#0a192f"));
+        await page.evaluate(() => navigator.clipboard.writeText("SYNTHETIC_DISPATCH_BEFORE_DESKTOP_COPY"));
         await overlay.getByRole("button", { name: "💬 نسخ لواتساب", exact: true }).click();
         await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(reference);
         const copied = await page.evaluate(() => navigator.clipboard.readText());
@@ -324,7 +408,8 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
     expect(await snapshot()).toEqual(before);
     emitEvidence(members, { entrypoints: ["patient", "lab"], clipboard: "passed", urgencyUrl: "passed-without-navigation",
       fullPdfTextAndMetadata: "passed", parentPrintIsolation: "passed", readOnlySnapshot: "unchanged", qr: qrFacts, pdfs: pdfFacts,
+      actionReachability: reachabilityFacts, nativeClipboardViewports: [1280, 390],
       syntheticInternalDemographicWitness: observedDemographic, syntheticHistoricalAgeCanary: historicalAgeText,
-      limits: "Natural close/reopen only; no deliberately delayed encoder. Native QR pixel decoding only when reported passed; pixel equality always required. Browser print headers disabled; no user save-dialog filename claim." });
+      limits: "390px proves action geometry, native wheel recovery, copy and close; retained images and full PDF journey are 1280px only. Natural close/reopen only; no deliberately delayed encoder. Native QR pixel decoding only when reported passed; pixel equality always required. Browser print headers disabled; no user save-dialog filename claim." });
   }, 180_000);
 });
