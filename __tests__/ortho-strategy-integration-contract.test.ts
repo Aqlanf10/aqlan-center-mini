@@ -30,9 +30,27 @@ describe("strategy integration preserves released5ae authority boundaries", () =
     expect(ortho).toContain("const operation = life.begin(");
     expect(ortho).toContain("markUncertain: () => { life.uncertain(); notifyStrategy(); }");
     expect(ortho).toContain("finish: () => { life.finish(operation); notifyStrategy(); }");
-    expect(ortho).toContain("life.draft.strategyView.listeners.add(notify)");
-    expect(ortho).toContain("life.draft.strategyView.listeners.delete(notify)");
+    expect(ortho).toContain("return life.draft.strategyView.subscribe(notify)");
+    expect(ortho).toContain("life.draft.strategyView.notify(refresh)");
     expect(ortho).toContain("draft.edits.delete(name); draft.dirty = draft.edits.size > 0");
+  });
+  it("keeps mutable strategy transitions inside the draft owner rather than hook-exposed values", () => {
+    const factory = ortho.slice(ortho.indexOf("function makeDraft("), ortho.indexOf("function makeViewLease("));
+    const hook = ortho.slice(ortho.indexOf("function useOrthoDraft("), ortho.indexOf("function UncertainWrite("));
+    const panel = ortho.slice(ortho.indexOf("function OrthoStrategyPanel("));
+    expect(factory).toContain("const strategyListeners = new Set<() => void>()");
+    expect(factory).toContain("get readVersion() { return strategyReadVersion; }");
+    expect(factory).toContain("strategyListeners.add(listener); return () => { strategyListeners.delete(listener); }");
+    expect(factory).toContain("if (refresh) strategyReadVersion++;");
+    expect(factory.indexOf("if (refresh) strategyReadVersion++;")).toBeLessThan(factory.indexOf("for (const listener of [...strategyListeners]) listener();"));
+    expect(factory).toContain("draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0;");
+    expect(ortho).toContain("draft.strategyView.clear()");
+    expect(factory).toContain("clear: () => { strategyListeners.clear(); }");
+    expect(hook).toContain("if (!caseGranted() || !draft.active || draft.busy || draft.uncertain) return;\n      draft.settleField(name, value); redraw();");
+    expect(hook).not.toMatch(/draft\.dirty\s*=/);
+    expect(panel).toContain("if (!life.caseGranted() || !life.draft.active) return;\n    life.draft.strategyView.notify(refresh);");
+    expect(panel).not.toMatch(/life\.draft\.strategyView\.readVersion\s*(?:\+\+|=)/);
+    expect(ortho).not.toContain("strategyView.listeners");
   });
   it("mounts the exact-case Visit reference without any editable lifetime", () => {
     const start = visit.indexOf("<OrthoTreatmentStrategy");

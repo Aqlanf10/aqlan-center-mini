@@ -93,65 +93,64 @@ class FixtureDatabase {
   }
 
   connect(): DbClient {
-    const db = this;
     let inserts: RevisionRow[] = [];
     let audits: unknown[] = [];
     let unlock: (() => void) | undefined;
     const close = () => { unlock?.(); unlock = undefined; };
     return {
-      release() { db.releases += 1; close(); },
-      async query<T = unknown>(raw: string, values: unknown[] = []): Promise<{ rows: T[] }> {
+      release: () => { this.releases += 1; close(); },
+      query: async <T = unknown>(raw: string, values: unknown[] = []): Promise<{ rows: T[] }> => {
         const sql = raw.replace(/\s+/g, " ").trim();
-        db.queries.push({ sql, values: clone(values) });
-        db.events.push(sql);
+        this.queries.push({ sql, values: clone(values) });
+        this.events.push(sql);
         const result = (rows: unknown[] = []) => ({ rows: clone(rows) as T[] });
         if (sql === "BEGIN") return result();
         if (sql === "ROLLBACK") { inserts = []; audits = []; close(); return result(); }
         if (sql === "COMMIT") {
-          db.revisions.push(...inserts); db.audits.push(...audits); inserts = []; audits = []; close();
-          if (db.commitUncertain) { db.commitUncertain = false; throw new Error("Synthetic lost commit response"); }
+          this.revisions.push(...inserts); this.audits.push(...audits); inserts = []; audits = []; close();
+          if (this.commitUncertain) { this.commitUncertain = false; throw new Error("Synthetic lost commit response"); }
           return result();
         }
         if (sql.startsWith("SELECT id FROM patients WHERE")) {
           // Conservative fixture serialization for both SHARE and write locks.
           // Real PostgreSQL reader/writer lock semantics remain a separate gate.
-          db.beforePatientLock?.(values[0] as number);
-          unlock = await db.patientLock();
-          return result(db.patientExists && db.patients.has(values[0] as number) ? [{ id: values[0] }] : []);
+          this.beforePatientLock?.(values[0] as number);
+          unlock = await this.patientLock();
+          return result(this.patientExists && this.patients.has(values[0] as number) ? [{ id: values[0] }] : []);
         }
         if (sql.startsWith("SELECT id, patient_id, status FROM ortho_cases")) {
-          return result(db.ortho && db.ortho.id === values[0] && db.ortho.patient_id === values[1] ? [db.ortho] : []);
+          return result(this.ortho && this.ortho.id === values[0] && this.ortho.patient_id === values[1] ? [this.ortho] : []);
         }
         if (sql.startsWith("SELECT id, patient_id, ortho_case_id FROM clinical_cases")) {
-          return result(db.bridge && db.bridge.ortho_case_id === values[0] ? [db.bridge] : []);
+          return result(this.bridge && this.bridge.ortho_case_id === values[0] ? [this.bridge] : []);
         }
         if (sql.includes("FROM ortho_strategy_revisions")) {
-          if (sql.includes("actor_user_id = $2")) return result(db.revisions.filter(row => row.ortho_case_id === values[0]
+          if (sql.includes("actor_user_id = $2")) return result(this.revisions.filter(row => row.ortho_case_id === values[0]
             && row.actor_user_id === values[1] && row.command_id === values[2]));
-          if (sql.includes("AND id = $2")) return result(db.revisions.filter(row => row.ortho_case_id === values[0] && row.id === values[1]));
-          if (sql.includes("LIMIT 1")) return result(db.revisions.filter(row => row.ortho_case_id === values[0]).sort((a, b) => b.version - a.version).slice(0, 1));
-          const rows = db.revisions.filter(row => row.ortho_case_id === values[0]).sort((a, b) => b.version - a.version);
-          db.afterHistoryRead?.();
+          if (sql.includes("AND id = $2")) return result(this.revisions.filter(row => row.ortho_case_id === values[0] && row.id === values[1]));
+          if (sql.includes("LIMIT 1")) return result(this.revisions.filter(row => row.ortho_case_id === values[0]).sort((a, b) => b.version - a.version).slice(0, 1));
+          const rows = this.revisions.filter(row => row.ortho_case_id === values[0]).sort((a, b) => b.version - a.version);
+          this.afterHistoryRead?.();
           return result(rows);
         }
         if (sql.startsWith("SELECT p.id FROM patient_problems p")) {
-          db.afterProblemLock?.();
-          return result(db.problems.filter(row => row.patient_id === values[0] && (values[1] as number[]).includes(row.id)).map(row => ({ id: row.id })));
+          this.afterProblemLock?.();
+          return result(this.problems.filter(row => row.patient_id === values[0] && (values[1] as number[]).includes(row.id)).map(row => ({ id: row.id })));
         }
         if (sql.startsWith("SELECT i.id FROM plan_items i") && sql.includes("FOR UPDATE OF i")) {
-          await db.afterItemLock?.();
-          return result(db.items.filter(row => row.patient_id === values[0] && (values[1] as number[]).includes(row.id)).map(row => ({ id: row.id })));
+          await this.afterItemLock?.();
+          return result(this.items.filter(row => row.patient_id === values[0] && (values[1] as number[]).includes(row.id)).map(row => ({ id: row.id })));
         }
-        if (sql.startsWith("SELECT p.id, p.patient_id")) return result(db.problems.filter(row => row.patient_id === values[0]
+        if (sql.startsWith("SELECT p.id, p.patient_id")) return result(this.problems.filter(row => row.patient_id === values[0]
           && (row.case_id === values[1] || (values[2] as number[]).includes(row.id))));
-        if (sql.startsWith("SELECT id FROM patient_problems WHERE")) return result(db.problems.filter(row =>
+        if (sql.startsWith("SELECT id FROM patient_problems WHERE")) return result(this.problems.filter(row =>
           (values[0] as number[]).includes(row.id) && row.patient_id !== values[1]).map(row => ({ id: row.id })));
-        if (sql.startsWith("SELECT i.id, t.patient_id")) return result(db.items.filter(row => row.patient_id === values[0]
+        if (sql.startsWith("SELECT i.id, t.patient_id")) return result(this.items.filter(row => row.patient_id === values[0]
           && (row.case_id === values[1] || (values[2] as number[]).includes(row.id))));
         if (sql.startsWith("SELECT i.id FROM plan_items i") && sql.includes("t.patient_id <> $2")) {
-          return result(db.items.filter(row => (values[0] as number[]).includes(row.id) && row.patient_id !== values[1]).map(row => ({ id: row.id })));
+          return result(this.items.filter(row => (values[0] as number[]).includes(row.id) && row.patient_id !== values[1]).map(row => ({ id: row.id })));
         }
-        if (sql.startsWith("SELECT nextval")) return result([{ id: db.nextId++, created_at: new Date("2026-10-10T06:00:00.000Z") }]);
+        if (sql.startsWith("SELECT nextval")) return result([{ id: this.nextId++, created_at: new Date("2026-10-10T06:00:00.000Z") }]);
         if (sql.startsWith("INSERT INTO ortho_strategy_revisions")) {
           const [id, patient_id, recorded_patient_id, ortho_case_id, clinical_case_id, version, supersedes_revision_id, schema_version,
             actor_user_id, created_by, created_at, command_id, request_fingerprint, reason, recording_context, rows] = values;
@@ -161,8 +160,8 @@ class FixtureDatabase {
           return result();
         }
         if (sql === "INSERT INTO audit_log fixture") {
-          if (db.auditFails) throw new Error("Synthetic audit failure");
-          audits.push(values[0]); db.afterAudit?.(); return result();
+          if (this.auditFails) throw new Error("Synthetic audit failure");
+          audits.push(values[0]); this.afterAudit?.(); return result();
         }
         throw new Error(`Unrecognized fixture query: ${sql}`);
       },

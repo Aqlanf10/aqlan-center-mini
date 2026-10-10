@@ -139,7 +139,9 @@ export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
   /** Strategy presentation subscriptions belong to this draft, never an old view. */
-  strategyView: { readVersion: number; listeners: Set<() => void> };
+  strategyView: { readonly readVersion: number; subscribe: (listener: () => void) => () => void;
+    notify: (refresh?: boolean) => void; clear: () => void };
+  settleField: (name: string, value: unknown) => void;
   activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
@@ -203,8 +205,21 @@ function sameDraftValue(before: unknown, after: unknown) {
     && before.length === after.length && before.every((value, index) => Object.is(value, after[index])));
 }
 function makeDraft(): Draft {
+  const strategyListeners = new Set<() => void>();
+  let strategyReadVersion = 0;
   const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
-    strategyView: { readVersion: 0, listeners: new Set() },
+    strategyView: {
+      get readVersion() { return strategyReadVersion; },
+      subscribe: (listener) => { strategyListeners.add(listener); return () => { strategyListeners.delete(listener); }; },
+      notify: (refresh = false) => {
+        if (refresh) strategyReadVersion++;
+        for (const listener of [...strategyListeners]) listener();
+      },
+      clear: () => { strategyListeners.clear(); },
+    },
+    settleField: (name, value) => {
+      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0;
+    },
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
     trackEdit: (name, previous, next) => {
@@ -232,7 +247,7 @@ function disposeDraft(owner: OrthoOwner, key: string) {
   if (!draft) return;
   draft.active = false;
   for (const url of draft.urls) URL.revokeObjectURL(url);
-  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); draft.strategyView.listeners.clear(); owner.drafts.delete(key);
+  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); draft.strategyView.clear(); owner.drafts.delete(key);
 }
 function retireOwner(owner: OrthoOwner) {
   owner.active = false; owner.clinical = false; owner.contact = false;
@@ -299,7 +314,7 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
     // pillar view may detach while its owner-bound command is still pending.
     settle: (name: string, value: unknown) => {
       if (!caseGranted() || !draft.active || draft.busy || draft.uncertain) return;
-      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0; redraw();
+      draft.settleField(name, value); redraw();
     },
     viewActive: () => lease.active && caseGranted(),
     begin: (allowed = true) => {
@@ -2056,13 +2071,11 @@ function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow
   const [, redrawStrategy] = useState(0);
   useLayoutEffect(() => {
     const notify = () => { if (life.viewActive()) redrawStrategy(value => value + 1); };
-    life.draft.strategyView.listeners.add(notify);
-    return () => { life.draft.strategyView.listeners.delete(notify); };
+    return life.draft.strategyView.subscribe(notify);
   }, [life]);
   const notifyStrategy = (refresh = false) => {
     if (!life.caseGranted() || !life.draft.active) return;
-    if (refresh) life.draft.strategyView.readVersion++;
-    for (const notify of [...life.draft.strategyView.listeners]) notify();
+    life.draft.strategyView.notify(refresh);
   };
   const [document, setDocument] = life.field("document", "");
   const [problemLabel, setProblemLabel] = life.field("problemLabel", "");

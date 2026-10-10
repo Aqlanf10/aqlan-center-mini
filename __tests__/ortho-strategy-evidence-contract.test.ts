@@ -30,7 +30,7 @@ describe("strategy evidence retention does not mask mandatory CI failures", () =
   });
   it("uses an exact synthetic scene allowlist without traces, storage or broad uploads", () => {
     const upload = step("Upload Ortho strategy synthetic UI evidence");
-    const paths = [...upload.matchAll(/^            (.+)$/gm)].map(match => match[1]);
+    const paths = [...upload.matchAll(/^ {12}(.+)$/gm)].map(match => match[1]);
     const expected = ["blank-explicit-draft", "retrospective-revision", "bridge-prerequisite", "visit-readonly"]
       .flatMap(scene => [390, 1280].flatMap(width => ["png", "json"].map(extension =>
         `.settings-ui-artifacts/ortho-strategy-${scene}-${width}.${extension}`)));
