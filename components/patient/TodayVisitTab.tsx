@@ -178,6 +178,17 @@ function OwnedTodayVisitTab({
    * ظهورٍ بعد التحميل ليس تبديلًا (الحالة الابتدائية نظيفة سلفًا). */
   // Retain only the editor identity during an unavailable workflow, never its action authority.
   const openVisit = summary ? summary.openVisit : retainedOpenVisit ?? null;
+  // This only deduplicates a reference actually rendered by the loaded editor.
+  // A new token retires late A→B→A callbacks without touching checkout ownership.
+  const previousReferenceOwner = useMemo(() => ({}), [openVisit?.id, requestedCheckoutVisitId]);
+  const livePreviousReferenceOwner = useRef(previousReferenceOwner);
+  livePreviousReferenceOwner.current = previousReferenceOwner;
+  const [previousReference, setPreviousReference] = useState<{ owner: typeof previousReferenceOwner; id: number } | null>(null);
+  const onPreviousVisitReferenceChange = useCallback((id: number | null) => {
+    if (!mounted.current || livePreviousReferenceOwner.current !== previousReferenceOwner) return;
+    setPreviousReference((current) => id === null ? null
+      : current?.owner === previousReferenceOwner && current.id === id ? current : { owner: previousReferenceOwner, id });
+  }, [previousReferenceOwner]);
   const openVisitId = openVisit?.id ?? null;
   const openVisitArrivedAt = openVisit?.arrivedAt ?? null;
   useEffect(() => {
@@ -294,7 +305,8 @@ function OwnedTodayVisitTab({
         </div>
       ) : null}
       {/* آخر زيارة — يُقرأ لا يُخمَّن */}
-      {requestedCheckoutVisitId === null && lastVisit ? (
+      {requestedCheckoutVisitId === null && lastVisit
+        && !(openVisit && previousReference?.owner === previousReferenceOwner && previousReference.id === lastVisit.id) ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-3.5" aria-label="آخر زيارة">
           <h3 className="text-xs font-extrabold text-navy-900">
             آخر زيارة — {friendlyDateLong(lastVisit.date)}
@@ -348,6 +360,7 @@ function OwnedTodayVisitTab({
             visitId={openVisit.id}
             expectedPatientId={patientId}
             onNavigationGuardChange={onNavigationGuardChange}
+            onPreviousVisitReferenceChange={onPreviousVisitReferenceChange}
             autoReview={autoReview}
             onSigned={(result) => {
               if (!mounted.current || activeVisitRef.current?.id !== openVisit.id) return;

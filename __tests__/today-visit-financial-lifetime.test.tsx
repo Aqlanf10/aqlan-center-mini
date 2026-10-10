@@ -116,3 +116,39 @@ describe("TodayVisitTab canonical financial read lifetime", () => {
     expect(other.key).not.toBe(first.key);
   });
 });
+
+
+const referenceCardCount = (node: ReactNode) => elements(node).filter((item) => item.props["aria-label"] === "آخر زيارة").length;
+const referenceReporter = (node: ReactNode) => elements(node).find((item) => item.type === ClinicalVisit)!.props.onPreviousVisitReferenceChange as (id: number | null) => void;
+describe("single visible previous-visit reference", () => {
+  const previous = { id: 9, date: "2026-10-08", treatmentDone: "توثيق زيارة اصطناعية سابقة", proceduresSummary: null, nextPlan: null };
+  it("retains the fallback until the authorized editor reports the exact visible reference, restoring it on absence", () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response(workflow()))));
+    const f = mount(); f.props.summary.lastVisit = previous;
+    expect(referenceCardCount(f.render())).toBe(1);
+    referenceReporter(f.render())(8);
+    expect(referenceCardCount(f.render())).toBe(1);
+    referenceReporter(f.render())(9);
+    expect(referenceCardCount(f.render())).toBe(0);
+    referenceReporter(f.render())(null);
+    expect(referenceCardCount(f.render())).toBe(1);
+    f.props.summary.openVisit = null;
+    expect(referenceCardCount(f.render())).toBe(1);
+    expect(elements(f.render()).some((item) => item.type === ClinicalVisit)).toBe(false);
+    f.unmount();
+  });
+  it("rejects stale A→B→A visibility callbacks and keeps the fallback when read authority is unavailable", () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response(workflow()))));
+    const f = mount(); f.props.summary.lastVisit = previous;
+    const a = f.props.summary.openVisit!;
+    const lateA = referenceReporter(f.render());
+    lateA(9); expect(referenceCardCount(f.render())).toBe(0);
+    f.props.summary.openVisit = { ...a, id: 11 }; f.render();
+    f.props.summary.openVisit = a; f.render();
+    lateA(9); expect(referenceCardCount(f.render())).toBe(1);
+    // Failure/restricted clinical reads never emit a verified reference ID.
+    referenceReporter(f.render())(null); expect(referenceCardCount(f.render())).toBe(1);
+    referenceReporter(f.render())(9); expect(referenceCardCount(f.render())).toBe(0);
+    f.unmount();
+  });
+});
