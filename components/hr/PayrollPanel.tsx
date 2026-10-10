@@ -8,16 +8,18 @@ import {
   type HrPayrollPeriodView,
   type HrPayrollRunView,
   type HrPayrollItemView,
+  type HrPayrollDisbursementView,
 } from "@/lib/hr-payroll-shared";
 import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, type Currency } from "@/lib/money";
+import { readPendingPayrollPayment, readPayrollPaymentConfirmation, readPayrollDisbursement,
+  readPayrollReversalConfirmation, type PendingPayrollPayment } from "@/lib/hr-payroll-confirmation";
 
 type PayrollPeriodItem = HrPayrollPeriodView;
 type PayrollRunItem = HrPayrollRunView & { items?: HrPayrollItemView[] };
 type PayrollItemDetail = HrPayrollItemView;
-type PendingPayment = { clientRequestId: string; itemId: number; amountMinor: number; remainingBefore: number; completed?: boolean;
-  components: { salaryMinor: number; commissionMinor: number }; paymentMethod: string;
-  referenceNumber: string | null; notes: string | null };
+type PendingPayment = PendingPayrollPayment;
 const pendingKey = (itemId: number) => `hr:payroll:pending:${itemId}`;
+const reversalKey = (itemId: number) => `hr:payroll:pending-reversal:${itemId}`;
 
 export function HrPayrollPanel() {
   const [periods, setPeriods] = useState<PayrollPeriodItem[]>([]);
@@ -42,6 +44,8 @@ export function HrPayrollPanel() {
   const [pending, setPending] = useState<PendingPayment | null>(null);
   const [salaryPart, setSalaryPart] = useState("");
   const [commissionPart, setCommissionPart] = useState("");
+  const runRequest = useRef(0);
+  const currentRunScope = useRef(`${selectedPeriod}:${selectedCurrency}`);
 
   const loadPeriods = useCallback(async () => {
     try {
@@ -61,27 +65,31 @@ export function HrPayrollPanel() {
   }, [selectedPeriod]);
 
   const loadRuns = useCallback(async () => {
+    const scope = `${selectedPeriod}:${selectedCurrency}`;
+    if (scope !== currentRunScope.current) return;
+    const requestId = ++runRequest.current;
+    const current = () => requestId === runRequest.current && scope === currentRunScope.current;
+    setActiveRun(null); setRuns([]);
     if (!selectedPeriod) return;
     try {
       const res = await fetch(`/api/hr/payroll/runs?periodId=${selectedPeriod}`, { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setRuns(data);
-        const matching = data.find((r: PayrollRunItem) => r.currency === selectedCurrency);
-        if (matching) {
-          const detailRes = await fetch(`/api/hr/payroll/runs?id=${matching.id}`, { cache: "no-store" });
-          if (detailRes.ok) {
-            const detailData = await detailRes.json();
-            setActiveRun(detailData);
-          } else {
-            setActiveRun(matching);
-          }
-        } else {
-          setActiveRun(null);
+      if (!res.ok) throw new Error("تعذّر تحميل المسير للفترة المختارة.");
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("تعذّر التحقق من المسير للفترة المختارة.");
+      const matching = data.find((r: PayrollRunItem) => r.currency === selectedCurrency);
+      let detail: PayrollRunItem | null = null;
+      if (matching) {
+        const detailRes = await fetch(`/api/hr/payroll/runs?id=${matching.id}`, { cache: "no-store" });
+        if (!detailRes.ok) throw new Error("تعذّر تحميل تفاصيل المسير للفترة المختارة.");
+        detail = await detailRes.json();
+        if (!detail || detail.id !== matching.id || String(detail.periodId) !== selectedPeriod
+          || detail.currency !== selectedCurrency || !Array.isArray(detail.items)) {
+          throw new Error("تعذّر التحقق من هوية المسير للفترة المختارة.");
         }
       }
+      if (current()) { setRuns(data); setActiveRun(detail); }
     } catch {
-      // Ignored
+      if (current()) { setActiveRun(null); setError("تعذّر تحميل المسير الحالي؛ أعد تحميل الفترة قبل المتابعة."); }
     }
   }, [selectedPeriod, selectedCurrency]);
 
@@ -90,8 +98,10 @@ export function HrPayrollPanel() {
   }, [loadPeriods]);
 
   useEffect(() => {
+    currentRunScope.current = `${selectedPeriod}:${selectedCurrency}`;
     void loadRuns();
-  }, [loadRuns]);
+    return () => { runRequest.current += 1; currentRunScope.current = ""; };
+  }, [loadRuns, selectedPeriod, selectedCurrency]);
 
   const handleOpenPeriod = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,8 +180,12 @@ export function HrPayrollPanel() {
 
   const openDisburseForItem = (item: PayrollItemDetail) => {
     try {
+      if (localStorage.getItem(reversalKey(item.id))) {
+        setError("تحقق من عكس الصرف السابق قبل بدء صرف جديد."); return;
+      }
       const saved = localStorage.getItem(pendingKey(item.id));
-      let request: PendingPayment | null = saved ? JSON.parse(saved) : null;
+      let request = saved ? readPendingPayrollPayment(JSON.parse(saved), item.id) : null;
+      if (saved && !request) throw new Error("Saved payout identity is invalid");
       if (request?.completed && request.remainingBefore !== item.remainingMinor) { localStorage.removeItem(pendingKey(item.id)); request = null; }
       setPending(request);
       setDisburseItem(item);
@@ -190,9 +204,11 @@ export function HrPayrollPanel() {
     try {
       const item = disburseItem;
       const prepare = async () => {
+        if (localStorage.getItem(reversalKey(item.id))) throw new Error("تحقق من عكس الصرف السابق قبل بدء صرف جديد.");
         const saved = localStorage.getItem(pendingKey(item.id));
         if (saved) {
-          const stored = JSON.parse(saved) as PendingPayment;
+          const stored = readPendingPayrollPayment(JSON.parse(saved), item.id);
+          if (!stored) throw new Error("تعذّر التحقق من الطلب المحفوظ؛ تحقق من الصرف السابق قبل المتابعة.");
           if (!stored.completed || stored.remainingBefore === item.remainingMinor) return stored;
         }
         const amountMinor = parseAmount(disburseAmount,item.currency) ?? NaN;
@@ -212,14 +228,70 @@ export function HrPayrollPanel() {
       const result = await res.json();
       if (!res.ok) {
         // A definitive refusal has rolled back. An unknown outcome keeps the key and all fields frozen.
-        if (res.status >= 400 && res.status < 500 && result.code && result.code !== "key_conflict") {
+        if (res.status >= 400 && res.status < 500 && result.code
+          && !["key_conflict", "forbidden", "authority_changed", "session_expired"].includes(result.code)) {
           localStorage.removeItem(pendingKey(item.id)); setPending(null);
         }
         throw new Error(result.message || "تعذّر تأكيد نتيجة الصرف؛ أعد الطلب نفسه.");
       }
+      if (!readPayrollPaymentConfirmation(result, item, request)) {
+        throw new Error("لم تتأكد نتيجة الصرف؛ احتُفظ بالطلب نفسه. تحقق من الحركة أو أعد الطلب بالمفتاح نفسه.");
+      }
       localStorage.setItem(pendingKey(item.id),JSON.stringify({ ...request,completed:true })); setPending(null);
-      setDisburseModalOpen(false); setDisburseItem(null); await loadRuns();
+      setDisburseModalOpen(false); setDisburseItem(null); setError(null); await loadRuns();
     } catch (err) { setError(err instanceof Error ? err.message : "تعذّر تأكيد الصرف؛ أعد الطلب نفسه."); }
+    finally { inFlight.current = false; setSubmitting(false); }
+  };
+
+  const handleReverse = async (item: PayrollItemDetail, disbursement: HrPayrollDisbursementView) => {
+    if (inFlight.current) return;
+    inFlight.current = true; setSubmitting(true);
+    try {
+      const saved = localStorage.getItem(reversalKey(item.id));
+      let reason: string;
+      if (saved) {
+        const request: unknown = JSON.parse(saved);
+        if (!request || typeof request !== "object" || Array.isArray(request)
+          || !("itemId" in request) || request.itemId !== item.id
+          || !("disbursementId" in request) || request.disbursementId !== disbursement.id
+          || !("reason" in request) || typeof request.reason !== "string"
+          || request.reason.trim().length < 2 || request.reason.trim().length > 500) {
+          throw new Error("تعذّر التحقق من طلب العكس المحفوظ؛ راجع الحركة السابقة قبل المتابعة.");
+        }
+        reason = request.reason;
+      } else {
+        const entered = disbursement.reversedAt ? disbursement.reversalReason : prompt("سبب عكس الصرف");
+        if (!entered) return;
+        reason = entered.trim();
+        if (reason.length < 2 || reason.length > 500) throw new Error("سبب عكس الصرف مطلوب، بين حرفين و500 حرف.");
+        localStorage.setItem(reversalKey(item.id), JSON.stringify({itemId:item.id,disbursementId:disbursement.id,reason}));
+      }
+      const res = await fetch("/api/hr/payroll/disburse", {method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"reverse",disbursementId:disbursement.id,reason})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "تعذّر تأكيد عكس الصرف.");
+      if (!readPayrollReversalConfirmation(body, disbursement, reason)) {
+        throw new Error("لم تتأكد نتيجة عكس الصرف؛ احتُفظ بطلب العكس. تحقق أو أعد عكس الحركة نفسها.");
+      }
+      localStorage.removeItem(reversalKey(item.id)); localStorage.removeItem(pendingKey(item.id));
+      setError(null); await loadRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : "تعذّر تأكيد عكس الصرف."); }
+    finally { inFlight.current = false; setSubmitting(false); }
+  };
+
+  const verifyPendingPayment = async () => {
+    if (!pending || !disburseItem || inFlight.current) return;
+    inFlight.current = true; setSubmitting(true);
+    try {
+      const res = await fetch(`/api/hr/payroll/disburse?clientRequestId=${encodeURIComponent(pending.clientRequestId)}`, { cache: "no-store" });
+      const body: unknown = await res.json();
+      const receipt = res.ok && body !== null && typeof body === "object" && !Array.isArray(body)
+        ? readPayrollDisbursement((body as Record<string, unknown>).disbursement, disburseItem, pending) : null;
+      if (!receipt) throw new Error("لم تتأكد نتيجة الصرف؛ احتُفظ بالمفتاح نفسه، ولا تبدأ عملية أخرى قبل التحقق.");
+      if (receipt.reversedAt) localStorage.removeItem(pendingKey(disburseItem.id));
+      else localStorage.setItem(pendingKey(disburseItem.id), JSON.stringify({ ...pending, completed: true }));
+      setPending(null); setDisburseModalOpen(false); setDisburseItem(null); setError(null); await loadRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : "لم تتأكد نتيجة الصرف؛ احتُفظ بالمفتاح نفسه."); }
     finally { inFlight.current = false; setSubmitting(false); }
   };
 
@@ -235,7 +307,12 @@ export function HrPayrollPanel() {
             <div className="flex items-center gap-2">
               <select
                 value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value !== selectedPeriod) {
+                    runRequest.current += 1; currentRunScope.current = `${e.target.value}:${selectedCurrency}`;
+                    setActiveRun(null); setSelectedPeriod(e.target.value);
+                  }
+                }}
                 className="rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm font-semibold text-navy-800 outline-none"
               >
                 {periods.map((p) => (
@@ -261,7 +338,12 @@ export function HrPayrollPanel() {
                 <button
                   key={c}
                   type="button"
-                  onClick={() => setSelectedCurrency(c as HrCurrency)}
+                  onClick={() => {
+                    if (c !== selectedCurrency) {
+                      runRequest.current += 1; currentRunScope.current = `${selectedPeriod}:${c}`;
+                      setActiveRun(null); setSelectedCurrency(c as HrCurrency);
+                    }
+                  }}
                   className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
                     selectedCurrency === c
                       ? "bg-navy-800 text-white shadow-sm"
@@ -451,13 +533,11 @@ export function HrPayrollPanel() {
                       {isPaid && <span className="text-xs text-emerald-700 font-bold">مصروف كامل</span>}
                       {item.disbursements?.map((d) => <div key={d.id} className="mt-2">
                         {d.parts.map((part) => <a key={part.expenseId} href={`/print/voucher/${part.expenseId}`} target="_blank" rel="noreferrer" className="block underline">سند {part.component === "salary" ? "الراتب" : "العمولة"} #{part.expenseId}</a>)}
-                        {d.reversedAt ? <span>معكوس: {d.reversalReason}</span> : <button type="button" disabled={submitting} className="text-rose-700 underline" onClick={async () => {
-                          const reason = prompt("سبب عكس الصرف"); if (!reason) return;
-                          setSubmitting(true);
-                          try { const res = await fetch("/api/hr/payroll/disburse",{ method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"reverse",disbursementId:d.id,reason}) });
-                            const body = await res.json(); if (!res.ok) throw new Error(body.message); localStorage.removeItem(pendingKey(item.id)); await loadRuns();
-                          } catch (err) { setError(err instanceof Error ? err.message : "تعذّر عكس الصرف."); } finally { setSubmitting(false); }
-                        }}>عكس الصرف #{d.id}</button>}
+                        {d.reversedAt && <span>معكوس: {d.reversalReason}</span>}
+                        <button type="button" disabled={submitting} className="text-rose-700 underline"
+                          onClick={() => void handleReverse(item, d)}>
+                          {d.reversedAt ? "التحقق من عكس الصرف" : "عكس الصرف"} #{d.id}
+                        </button>
                       </div>)}
                     </td>
                   </tr>
@@ -533,7 +613,10 @@ export function HrPayrollPanel() {
                 <label>جزء العمولة ({activeRun.currency})<input aria-label="جزء العمولة" disabled={!!pending || submitting} type="number" min="0" step="any" value={commissionPart} onChange={(e) => setCommissionPart(e.target.value)} className="w-full rounded-xl border p-2" /></label>
               </div>
             )}
-            {pending && <p role="status" className="text-sm text-amber-800">طلب محفوظ: عند عدم تأكد النتيجة، أعد الصرف بنفس البيانات والمفتاح.</p>}
+            {pending && <div className="space-y-2">
+              <p role="status" className="text-sm text-amber-800">طلب محفوظ: عند عدم تأكد النتيجة، أعد الصرف بنفس البيانات والمفتاح.</p>
+              <button type="button" disabled={submitting} onClick={() => void verifyPendingPayment()} className="rounded-lg border px-3 py-2 text-sm">التحقق من الصرف السابق</button>
+            </div>}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">طريقة الدفع</label>

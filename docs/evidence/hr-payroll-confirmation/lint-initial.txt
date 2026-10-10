@@ -1,0 +1,622 @@
+
+> aqlan-center@0.1.0 lint
+> eslint .
+
+[BABEL] Note: The code generator has deoptimised the styling of /workspace/aqlan-center-mini/lib/db.ts as it exceeds the max of 500KB.
+
+/workspace/aqlan-center-mini/__tests__/ai-advanced-capabilities.test.ts
+  3:3  warning  'executeAiTool' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ai-api-permission-matrix.test.ts
+  17:3  warning  'AI_TOOL_ALIAS_TO_CANONICAL' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ai-confirmation-security.test.ts
+  143:11  warning  'first' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  301:11  warning  'payload' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ai-form-filling.test.ts
+  3:3  warning  'executeAiTool' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ai-provider-registry.test.ts
+  1:10  warning  'beforeAll' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/backup-hardening.test.ts
+  9:29  warning  'upsertBackupHistoryRecord' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/backup-validate.test.ts
+  69:13  warning  'tar' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ceph-ai.test.ts
+  5:8  warning  'LandmarkCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/ceph.test.ts
+  7:8  warning  'LandmarkCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/checkin.test.ts
+  4:3  warning  'CHECKIN_MEDICAL_QUESTIONS' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/client-session-hygiene.test.ts
+  37:16  warning  Unnecessary escape character: \"  no-useless-escape
+  37:31  warning  Unnecessary escape character: \"  no-useless-escape
+  64:29  warning  Unnecessary escape character: \"  no-useless-escape
+  64:47  warning  Unnecessary escape character: \"  no-useless-escape
+  64:80  warning  Unnecessary escape character: \"  no-useless-escape
+
+/workspace/aqlan-center-mini/__tests__/financial-append-only.test.ts
+  15:119  warning  'voidExpense' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+  15:132  warning  'deletePatientCascade' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/money-currency-integrity.test.ts
+  17:36  warning  'patientBalance' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/p01-currency-aggregation.test.ts
+  269:20  warning  'yerInvoice' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/payments-idempotency.test.ts
+  81:11  warning  'first' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/hr-payroll-financial.test.ts
+  239:11  warning  'pool' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/hr-staff-tasks.test.ts
+  432:11  warning  'directory' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/payment-concurrency.test.ts
+  2:51  warning  'rawPool' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/provider-block-safety.test.ts
+  35:7  warning  'actor' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/reports-visits-and-new-patients.test.ts
+  21:7  warning  'TZ' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/restore-drill.test.ts
+  2:19  warning  'mkdir' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/postgres/schema-ownership.test.ts
+  212:16  warning  'resetPublic' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/production-backup.test.ts
+  2:45  warning  'realpath' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  2:74  warning  'writeFile' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/profitability.test.ts
+  6:3  warning  'PROFITABILITY_TIER_META' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/security-http/_global-setup.ts
+  1:22  warning  'ChildProcess' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/__tests__/security-http/bodies.test.ts
+  223:58  warning  'mime' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/finance/lab-reconciliation/route.ts
+  12:3  warning  'buildBatchSettlementNote' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  14:3  warning  'reconcileLabStatement' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/finance/reconciliation/route.ts
+  7:27  warning  'req' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/hr/contracts/route.ts
+  11:15  warning  'HrContractKind' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/hr/leaves/[id]/route.ts
+  9:15  warning  'HrLeaveStatus' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/hr/leaves/route.ts
+  12:15  warning  'HrLeaveStatus' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/lab/pricing/[id]/route.ts
+  10:40  warning  'Currency' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/payables/route.ts
+  5:40  warning  'Currency' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/plans/[id]/route.ts
+  5:40  warning  'Currency' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/api/settings/backup/route.ts
+   5:61  warning  'BackupRunConfig' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  12:10  warning  'backupStateDir' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  13:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/checkin/page.tsx
+  59:25  warning  'setEmergencyName' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  60:26  warning  'setEmergencyPhone' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/display/page.tsx
+  287:16  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/app/executive/page.tsx
+  3:34  warning  'useMemo' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/finance/debts/page.tsx
+  41:10  warning  'base' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/finance/lab-accounting/page.tsx
+  160:6  warning  React Hook useMemo has a missing dependency: 'isLabChanged'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/app/finance/reconciliation/page.tsx
+  10:26  warning  'isAdmin' is defined but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+  47:10  warning  'baseCurrency' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/lab/page.tsx
+   7:60  warning  'CURRENCY_SHORT' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  12:3   warning  'LAB_STATUS_LABEL' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  29:3   warning  'summarizeLabTeeth' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/login/page.tsx
+  30:9  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/app/login/page.tsx:30:9
+  28 |       const err = params.get("error");
+  29 |       if (err === "invalid_credentials") {
+> 30 |         setError("اسم المستخدم أو كلمة المرور غير صحيحة.");
+     |         ^^^^^^^^ Avoid calling setState() directly within an effect
+  31 |       } else if (err === "missing_fields") {
+  32 |         setError("يرجى إدخال اسم المستخدم وكلمة المرور.");
+  33 |       } else if (err === "invalid_request") {  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/app/my-work/page.tsx
+  85:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/app/my-work/page.tsx:85:26
+  83 |   }, []);
+  84 |
+> 85 |   useEffect(() => { void load(); }, [load]);
+     |                          ^^^^ Avoid calling setState() directly within an effect
+  86 |
+  87 |   return (
+  88 |     <main dir="rtl" className="mx-auto max-w-4xl p-4 pb-24">  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/app/page.tsx
+  279:72  warning  React Hook useMemo has a missing dependency: 'CHAIR_COUNT'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/app/print/hr/staff/page.tsx
+  13:7  warning  'DATE_PATTERN' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/print/lab/[id]/page.tsx
+    5:10  warning  'friendlyDateLong' is defined but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+   16:8   warning  'LabToothRole' is defined but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+   18:10  warning  'toothName' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+   54:9   warning  'toothSummary' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+   82:9   warning  'clinicName' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  168:15  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/app/recall/page.tsx
+   11:3   warning  'recallText' is defined but never used. Allowed unused vars must match /^_/u                                 @typescript-eslint/no-unused-vars
+  162:65  warning  React Hook useMemo has a missing dependency: 'filterRows'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  163:65  warning  React Hook useMemo has a missing dependency: 'filterRows'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/app/settings/appointment-services/page.tsx
+  714:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/app/settings/appointment-services/page.tsx:714:26
+  712 |   }, []);
+  713 |
+> 714 |   useEffect(() => { void load(); }, [load]);
+      |                          ^^^^ Avoid calling setState() directly within an effect
+  715 |
+  716 |   const shown = useMemo(
+  717 |     () => visibleServices(services ?? [], {  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/app/settings/lab-pricing/page.tsx
+     4:8   warning  'Link' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+     6:10  warning  'Icon' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+    13:8   warning  'LabToothScope' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1504:45  warning  'idx' is defined but never used. Allowed unused args must match /^_/u            @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/settings/readiness/page.tsx
+  6:10  warning  'Icon' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/app/settings/users/page.tsx
+  4:17  warning  'ROLE_HINT' is defined but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  5:10  warning  'friendlyDateLong' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/AiStaffChatModal.tsx
+  201:3  warning  'currentUserRole' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  202:3  warning  'currentUserName' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/AppShell.tsx
+  160:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/AppShell.tsx:160:5
+  158 |   // إغلاق القوائم عند الانتقال
+  159 |   useEffect(() => {
+> 160 |     setMoreOpen(false);
+      |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  161 |     setQuickMenuOpen(false);
+  162 |   }, [pathname]);
+  163 |                                                                                                                                                                                                                                              react-hooks/set-state-in-effect
+  205:10  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/AppShell.tsx:205:10
+  203 |     // (P2-1) عدّادات الطلبات والمختبر والرسائل خارج حدود الكاشير والمحاسب.
+  204 |     if (bare || !session || restricted) return;
+> 205 |     void loadBadges();
+      |          ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  206 |     const timer = setInterval(() => { void loadBadges(); }, 60_000);
+  207 |     return () => clearInterval(timer);
+  208 |   }, [bare, session, restricted, loadBadges]);                                                      react-hooks/set-state-in-effect
+  212:57  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/AppShell.tsx:212:57
+  210 |   // عودة سلاح البانر: نزول العاجلة إلى الصفر يعني أن أحدهم فتحها وقرأها.
+  211 |   useEffect(() => {
+> 212 |     if (badges.urgentMessages === 0 && urgentDismissed) setUrgentDismissed(false);
+      |                                                         ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  213 |   }, [badges.urgentMessages, urgentDismissed]);
+  214 |
+  215 |   const showUrgentBanner = badges.urgentMessages > 0 && !urgentDismissed;  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/components/ArrivalPanel.tsx
+  49:26  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/ArrivalPanel.tsx:49:26
+  47 |   }, [patientId]);
+  48 |
+> 49 |   useEffect(() => { void load(); }, [load]);
+     |                          ^^^^ Avoid calling setState() directly within an effect
+  50 |
+  51 |   /* أهداف نافذة التحصيل (الفواتير المفتوحة وخطط الاتفاق) من كشف الحساب القائم — عند فتح التحصيل فقط. */
+  52 |   const openCollect = async (suggestion: ArrivalSuggestion | null) => {  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/components/BeforeAfterSlider.tsx
+  10:3   warning  'Check' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+  40:10  warning  'copiedLink' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  40:22  warning  'setCopiedLink' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/CephCompareView.tsx
+   73:23  warning  'setShowOverlay' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  172:18  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/components/CephTracer.tsx
+  1181:16  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+  1418:18  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/components/ChairsideTabletView.tsx
+  6:10  warning  'COMMON_MEDICAL_RISKS' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/Chat.tsx
+  352:12  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/components/ClinicalVisit.tsx
+  768:6  warning  React Hook useCallback has an unnecessary dependency: 'ownsVisit'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/components/ConsentModal.tsx
+  11:3  warning  'CheckCircle2' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  21:8  warning  'ConsentTemplate' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/DentalChart.tsx
+    8:31  warning  'PerioAssessmentSummary' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+   71:9   warning  'perioSummary' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+  634:7   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/DentalChart.tsx:634:7
+  632 |   useEffect(() => {
+  633 |     if (initialTooth) {
+> 634 |       setActiveTooth(initialTooth);
+      |       ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  635 |     }
+  636 |   }, [initialTooth]);
+  637 |  react-hooks/set-state-in-effect
+  672:40  warning  'bleeding' is defined but never used. Allowed unused args must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/ExpenseCategoriesManager.tsx
+  1141:15  warning  'setKey' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1374:3   warning  'groups' is defined but never used. Allowed unused args must match /^_/u           @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/FinanceNavigation.tsx
+  5:32  warning  'FinancePillar' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/LabAccountingAuditReportModal.tsx
+  330:20  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-center-mini/components/LabDentalChart.tsx
+   16:10  warning  'Icon' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+   34:3   warning  'compact' is assigned a value but never used. Allowed unused args must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+   63:7   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/LabDentalChart.tsx:63:7
+  61 |     if (value !== undefined) {
+  62 |       const parsed = typeof value === "string" ? parseLabTeeth(value) : value;
+> 63 |       setToothMap(parsed);
+     |       ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  64 |     }
+  65 |   }, [value]);
+  66 |  react-hooks/set-state-in-effect
+  823:9   warning  'isIncisor' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/PatientLabOrders.tsx
+   7:24  warning  'friendlyDateLong' is defined but never used. Allowed unused vars must match /^_/u                           @typescript-eslint/no-unused-vars
+  12:3   warning  'LAB_PRIORITY_LABEL' is defined but never used. Allowed unused vars must match /^_/u                         @typescript-eslint/no-unused-vars
+  77:3   warning  'patientName' is defined but never used. Allowed unused args must match /^_/u                                @typescript-eslint/no-unused-vars
+  93:97  warning  React Hook useMemo has an unnecessary dependency: 'scope'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/components/PatientOrtho.tsx
+   254:51  warning  React Hook useMemo has unnecessary dependencies: 'authority', 'caseId', and 'patientId'. Either exclude them or remove the dependency array  react-hooks/exhaustive-deps
+   257:48  warning  React Hook useMemo has unnecessary dependencies: 'draft' and 'owner'. Either exclude them or remove the dependency array                     react-hooks/exhaustive-deps
+   325:44  warning  React Hook useMemo has unnecessary dependencies: 'authority' and 'patientId'. Either exclude them or remove the dependency array             react-hooks/exhaustive-deps
+  1142:54  warning  React Hook useMemo has unnecessary dependencies: 'booking' and 'form.draft'. Either exclude them or remove the dependency array              react-hooks/exhaustive-deps
+
+/workspace/aqlan-center-mini/components/PortalInviteRow.tsx
+  33:21  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/PortalInviteRow.tsx:33:21
+  31 |   const [origin, setOrigin] = useState<string | null>(null);
+  32 |   const [copied, setCopied] = useState(false);
+> 33 |   useEffect(() => { setOrigin(window.location.origin); }, []);
+     |                     ^^^^^^^^^ Avoid calling setState() directly within an effect
+  34 |
+  35 |   const invite = portalInvite({
+  36 |     origin, clinicName: clinicName || "المركز", patientNumber,  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/components/PostOpModal.tsx
+  9:3  warning  'AlertTriangle' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/ServiceSelect.tsx
+  128:18  warning  'setSearch' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  146:9   warning  'filteredServices' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/finance/CommissionsProfitabilityTab.tsx
+  34:3  warning  'baseCurrency' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  36:3  warning  'isAdmin' is defined but never used. Allowed unused args must match /^_/u       @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/hr/AttendancePanel.tsx
+  9:8  warning  'HrAttendanceStatus' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/hr/LeavesPanel.tsx
+  9:8  warning  'HrLeaveStatus' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/hr/PayrollPanel.tsx
+  28:10  warning  'runs' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  30:10  warning  'loading' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/hr/StaffProfileModal.tsx
+  28:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/hr/StaffProfileModal.tsx:28:5
+  26 |   useEffect(() => {
+  27 |     if (!open || !staffId) return;
+> 28 |     setLoading(true);
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  29 |
+  30 |     Promise.all([
+  31 |       fetch(`/api/hr/staff/${staffId}`, { cache: "no-store" }).then((r) => r.json()).catch(() => null),  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/components/hr/TasksPanel.tsx
+  303:28  warning  'session' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/components/patient/PatientTimeline.tsx
+  90:39  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/workspace/aqlan-center-mini/components/patient/PatientTimeline.tsx:90:39
+  88 |
+  89 |   useEffect(() => {
+> 90 |     if (open && events === null) void load();
+     |                                       ^^^^ Avoid calling setState() directly within an effect
+  91 |   }, [open, events, load]);
+  92 |
+  93 |   const visible = events ? filterTimeline(events, group) : [];  react-hooks/set-state-in-effect
+
+/workspace/aqlan-center-mini/lib/ai-providers/registry.ts
+  21:15  warning  'AiChatMessage' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/action-tools.ts
+   26:3   warning  'deleteAppointment' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+   43:46  warning  'isAdmin' is defined but never used. Allowed unused vars must match /^_/u                @typescript-eslint/no-unused-vars
+  677:9   warning  'patientName' is assigned a value but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  961:9   warning  'today' is assigned a value but never used. Allowed unused vars must match /^_/u         @typescript-eslint/no-unused-vars
+  965:9   warning  'balanceMinor' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/appointment-tools.ts
+  7:77  warning  'ActionButton' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/clinical-action-tools.ts
+  14:10  warning  'POST_OP_TEMPLATES' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/finance-tools.ts
+  11:23  warning  'CLINIC_BASE_CURRENCY' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  11:50  warning  'Currency' is defined but never used. Allowed unused vars must match /^_/u              @typescript-eslint/no-unused-vars
+  13:10  warning  'getPool' is defined but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+  13:19  warning  'ensureSchema' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/form-drafting-tools.ts
+   14:38  warning  'getSettings' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   18:38  warning  'isCurrency' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  478:3   warning  'context' is defined but never used. Allowed unused args must match /^_/u      @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/inventory-tools.ts
+  6:77  warning  'ActionButton' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/lab-tools.ts
+  7:77  warning  'ActionButton' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/management-tools.ts
+  6:10  warning  'formatMoney' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  9:77  warning  'ActionButton' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/patient-tools.ts
+  13:3  warning  'listAppointmentsByDate' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/permission-matrix.ts
+  37:38  warning  'AI_TOOL_POLICIES' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ai-tools/privacy.ts
+  44:50  warning  Unnecessary escape character: \[  no-useless-escape
+  44:73  warning  Unnecessary escape character: \[  no-useless-escape
+
+/workspace/aqlan-center-mini/lib/ai-tools/types.ts
+  8:15  warning  'Currency' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/assistant-engine.ts
+   11:52  warning  'ToolExecutionResult' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  144:9   warning  'norm' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/backupEncryption.ts
+  40:7  warning  'KEY_BYTES' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/ceph.ts
+  1083:9  warning  'convAngle' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1084:9  warning  'abPlane' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  1224:9  warning  'u1Apog' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/checkin.ts
+  9:10  warning  'samePhone' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/csv.ts
+  38:11  warning  Irregular whitespace not allowed  no-irregular-whitespace
+
+/workspace/aqlan-center-mini/lib/db.ts
+     12:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     20:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     21:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+    100:35  warning  'isCephMeasurementCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  10367:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  15926:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  15926:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  15927:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/expenseBudgetExport.ts
+  44:11  warning  'rowBg' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  45:11  warning  'statusBg' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+  46:11  warning  'statusColor' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  48:11  warning  'varianceColor' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/hr-shared.ts
+  348:14  warning  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/lib/lab-reconciliation.ts
+  210:25  warning  'b' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/lab.ts
+  381:31  warning  Unnecessary escape character: \[  no-useless-escape
+
+/workspace/aqlan-center-mini/lib/medication-safety.ts
+  8:35  warning  'MedicalRiskAlert' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/messages.ts
+  278:32  warning  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/lib/messaging-suppression.ts
+  27:76  warning  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
+  40:9   warning  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/lib/patient.ts
+  214:61  warning  Unnecessary escape character: \/  no-useless-escape
+
+/workspace/aqlan-center-mini/lib/report-export.ts
+  27:46  warning  Unexpected control character(s) in regular expression: \x00, \x08, \x0b, \x0c, \x0e, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/lib/report.ts
+  1:10  warning  'minutesSince' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/reports.ts
+  26:52  warning  'ReportColumn' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/restore/staging.ts
+  1:38  warning  'rm' is defined but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+  8:38  warning  'ValidationOk' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/lib/tar.ts
+  79:16  warning  Unnecessary escape character: \/                                   no-useless-escape
+  81:14  warning  Unexpected control character(s) in regular expression: \x00, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/lib/waiting-room.ts
+  282:14  warning  Unexpected control character(s) in regular expression: \x00, \x08, \x0b, \x1f  no-control-regex
+
+/workspace/aqlan-center-mini/scripts/dental-ai-agent.ts
+   22:3   warning  'getPatient' is defined but never used. Allowed unused vars must match /^_/u              @typescript-eslint/no-unused-vars
+   30:3   warning  'listLabOrders' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+   44:3   warning  'summarize' is defined but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+   47:3   warning  'REQUIRED_LANDMARKS' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+   48:8   warning  'LandmarkCode' is defined but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+   50:21  warning  'ALL_TEETH' is defined but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+   50:37  warning  'ToothCondition' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+   58:10  warning  'isAdmin' is defined but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+  115:9   warning  'adminUser' is assigned a value but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  389:9   warning  'clinicalVisit' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-center-mini/scripts/test-ai-actions-live.ts
+  9:10  warning  'executeAiTool' is defined but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+  9:25  warning  'findToolByNameOrAlias' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 200 problems (0 errors, 200 warnings)
+  0 errors and 7 warnings potentially fixable with the `--fix` option.
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

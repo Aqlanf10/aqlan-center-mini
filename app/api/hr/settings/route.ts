@@ -3,9 +3,11 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import {
   getHrSettings,
   updateHrSettings,
+  HrPayrollError,
 } from "@/lib/hr-payroll";
 import type { HrSettings } from "@/lib/hr-payroll-shared";
 
@@ -44,16 +46,18 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const patch = (body ?? {}) as Partial<HrSettings>;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({message:"طلب غير صالح."},{status:400});
+  const patch = body as Partial<HrSettings>;
 
   try {
-    const updated = await updateHrSettings(patch, session);
+    const updated = await updateHrSettings(patch, session, hrPayrollWriteAuthorizer(session));
     return NextResponse.json(updated);
-  } catch (error: any) {
+  } catch (error) {
+    if (error instanceof HrPayrollError) return NextResponse.json({message:error.message,code:error.code},{status:error.status});
     console.error("Failed to update HR settings:", error);
     return NextResponse.json(
-      { message: error?.message || "تعذّر حفظ إعدادات الموارد البشرية." },
-      { status: 400 }
+      { message: "تعذّر حفظ إعدادات الموارد البشرية." },
+      { status: 500 }
     );
   }
 }

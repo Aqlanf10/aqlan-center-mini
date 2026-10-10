@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import { disbursePayrollItem, disburseEntireRun, findDisbursementByRequestId, reversePayrollDisbursement, HrPayrollError, type DisburseInput } from "@/lib/hr-payroll";
 export const dynamic = "force-dynamic";
 const denied = (status: number) => NextResponse.json({ message: status === 401 ? "انتهت الجلسة. سجّل الدخول من جديد." : "صرف الرواتب والمستحقات للمدير وحده." }, { status });
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
   try {
     if (p.action === "reverse") {
       if (typeof p.reason !== "string" || !(typeof p.disbursementId === "string" || typeof p.disbursementId === "number")) throw new HrPayrollError("invalid_reversal",400,"حدّد حركة الصرف وسبب العكس.");
-      return NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId,{ reason:p.reason },session) });
+      return NextResponse.json({ success: true, disbursement: await reversePayrollDisbursement(p.disbursementId,{ reason:p.reason },session,hrPayrollWriteAuthorizer(session)) });
     }
     if (p.action && p.action !== "disburse") throw new HrPayrollError("invalid_action",400,"العملية غير صالحة.");
     if (typeof p.clientRequestId !== "string" || !p.clientRequestId.trim()) throw new HrPayrollError("request_key_required",400,"مفتاح الطلب الثابت مطلوب للصرف.");
@@ -43,10 +44,10 @@ export async function POST(request: Request) {
       referenceNumber:p.referenceNumber as string | null, notes:p.notes as string | null, safeOrBankId:p.safeOrBankId as string | null };
     if (p.disburseAll === true) {
       if (!(typeof p.runId === "number" || typeof p.runId === "string")) throw new HrPayrollError("invalid_id",400,"حدّد مسير الرواتب.");
-      return NextResponse.json({ success:true,disbursements:await disburseEntireRun(p.runId,input,session) },{ status:201 });
+      return NextResponse.json({ success:true,disbursements:await disburseEntireRun(p.runId,input,session,hrPayrollWriteAuthorizer(session)) },{ status:201 });
     }
     if (!(typeof p.itemId === "number" || typeof p.itemId === "string")) throw new HrPayrollError("invalid_id",400,"حدّد بند المستحق.");
-    const disbursement = await disbursePayrollItem(p.itemId,input,session);
+    const disbursement = await disbursePayrollItem(p.itemId,input,session,hrPayrollWriteAuthorizer(session));
     return NextResponse.json({ success:true,disbursement },{ status:disbursement.replayed ? 200 : 201 });
   } catch (error) {
     if (error instanceof HrPayrollError) return NextResponse.json({ message:error.message,code:error.code },{ status:error.status });

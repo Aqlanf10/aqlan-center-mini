@@ -3,6 +3,7 @@ import {chromium,type APIResponse,type Browser,type BrowserContext,type Page} fr
 import {Pool} from "pg";
 import {mkdirSync} from "node:fs";
 import {join} from "node:path";
+import {execFileSync} from "node:child_process";
 import {harness,type Harness} from "./_server";
 import {openHrJourneyServer} from "./_hr-isolated-server";
 let h:Harness,db:Pool,browser:Browser,context:BrowserContext;
@@ -10,6 +11,23 @@ let isolated:Awaited<ReturnType<typeof openHrJourneyServer>>,baseUrl:string;
 const periodMonth="2026-08";
 const evidence=process.env.HR_EVIDENCE_DIR ?? "/tmp/hr-evidence";
 let run:any,items:any[];
+async function confirmationFixture(month:string,label:string,width:number){
+ const name=`HR-CONFIRM-${label}-${width}`;
+ const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"اختبار تأكيد صرف",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});
+ expect(staff.status).toBe(201);const staffId=staff.body.staff?.id ?? staff.body.id;
+ const contract=await api("POST","/api/hr/contracts",{staffId,title:name,templateKind:"support_staff",startDate:"2026-01-01",endDate:null,compensationKind:"salary",baseSalaryMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly"});expect(contract.status).toBe(201);
+ expect((await api("PATCH",`/api/hr/contracts/${contract.body.id}`,{action:"transition",status:"active",reason:"اعتماد اختبار تأكيد معزول"})).status).toBe(200);
+ const period=await api("POST","/api/hr/payroll/periods",{periodMonth:month});expect(period.status).toBe(201);
+ const calculated=await api("POST","/api/hr/payroll/runs",{action:"calculate",periodId:period.body.id,currency:"YER"});expect(calculated.status).toBe(201);
+ expect((await api("POST","/api/hr/payroll/runs",{action:"approve",runId:calculated.body.id})).status).toBe(200);
+ const item=(await api("GET",`/api/hr/payroll/runs?id=${calculated.body.id}`)).body.items.find((i:any)=>i.staffId===staffId);expect(item).toBeTruthy();
+ const ownContext=await browser.newContext({viewport:{width,height:width===390?844:900}});
+ const pair=h.sessions.admin.cookie.split(";")[0],split=pair.indexOf("=");await ownContext.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
+ const page=await ownContext.newPage();await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"المسير والصرف"}).click();
+ await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(period.body.id));
+ const row=page.locator("tbody tr").filter({hasText:name});await expect.poll(()=>row.count()).toBe(1);
+ return {item,page,row,periodId:period.body.id,close:()=>ownContext.close()};
+}
 async function api(method:string,path:string,body?:unknown,cookie=h.sessions.admin.cookie){
  const res=await fetch(`${baseUrl}${path}`,{method,headers:{cookie,origin:baseUrl,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
  return {status:res.status,body:await res.json()};
@@ -258,5 +276,152 @@ for(const width of [390,1280]){
     }finally{await roleContext.close();}
    }
   }finally{await reviewerContext?.close();await page.close();}
+ });
+}
+
+for(const change of ["role","credential"] as const){
+ it(`queued real payout rejects a ${change} revoked after HTTP admission`,async()=>{
+  const fixture=await confirmationFixture(change==="role"?"2026-09":"2026-01",`authority-${change}`,1280),{item}=fixture;
+  const blocker=await db.connect();let pending:ReturnType<typeof api>|undefined;
+  try{
+   await blocker.query("BEGIN");
+   const {rows:[identity]}=await blocker.query("SELECT pg_backend_pid() AS pid");
+   await blocker.query("SELECT id FROM users WHERE username='secadmin' FOR UPDATE");
+   await blocker.query("SELECT id FROM hr_payroll_items WHERE id=$1 FOR UPDATE",[item.id]);
+   pending=api("POST","/api/hr/payroll/disburse",{itemId:item.id,amountMinor:1000,components:{salaryMinor:1000,commissionMinor:0},clientRequestId:`queued-authority-${change}-0001`});
+   await expect.poll(async()=>(await db.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))",[identity.pid])).rows[0].n).toBeGreaterThan(0);
+   // Only the owned fixture's account changes. ROLLBACK/restore never touches a real environment.
+   if(change==="role") await blocker.query("UPDATE users SET role='doctor' WHERE username='secadmin'");
+   else await blocker.query("UPDATE users SET password_hash='synthetic-revoked-credential' WHERE username='secadmin'");
+   await blocker.query("COMMIT");
+   const result=await pending;expect(result.status).toBe(403);
+   expect((await db.query("SELECT count(*)::int AS n FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0].n).toBe(0);
+   expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].n).toBe(0);
+   expect((await db.query("SELECT paid_minor::text FROM hr_payroll_items WHERE id=$1",[item.id])).rows[0].paid_minor).toBe("0");
+  }finally{
+   await blocker.query("ROLLBACK");blocker.release();await pending?.catch(()=>undefined);
+   const shared=new Pool({connectionString:h.seeded.dbUrl,ssl:false});
+   try{const {rows:[original]}=await shared.query("SELECT role,password_hash FROM users WHERE username='secadmin'");await db.query("UPDATE users SET role=$1,password_hash=$2 WHERE username='secadmin'",[original.role,original.password_hash]);}finally{await shared.end();await fixture.close();}
+  }
+ });
+}
+
+for(const [index,[width,variant]] of ([[390,"missing"],[1280,"missing"],[390,"foreign"],[1280,"foreign"]] as const).entries()){
+ it(`unverified payout ${variant} body retains the exact request after actual commit at ${width}px`,async()=>{
+  const fixture=await confirmationFixture(`2026-0${7-index}`,variant,width),{page,item,row}=fixture;
+  try{
+   await row.getByRole("button",{name:"صرف",exact:true}).click();await page.locator('input[type="number"]').fill("1000");
+   let submitted:any,committedBody:any;
+   await page.route("**/api/hr/payroll/disburse",async route=>{
+    submitted=route.request().postDataJSON();const response=await route.fetch();expect(response.status()).toBe(201);committedBody=await response.json();
+    await route.fulfill({response,json:variant==="missing"?{success:true}:{...committedBody,disbursement:{...committedBody.disbursement,itemId:item.id+100000,clientRequestId:"different-operation-key"}}});
+   },{times:1});
+   await page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).click();
+   await expect.poll(()=>page.locator('section[aria-label="إدارة المسير والصرف"]').innerText()).toContain("لم تتأكد نتيجة الصرف");
+   expect(await page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).isVisible()).toBe(true);
+   const saved=await page.evaluate(id=>JSON.parse(localStorage.getItem(`hr:payroll:pending:${id}`)!),item.id);
+   expect(saved).toMatchObject({clientRequestId:submitted.clientRequestId,itemId:item.id,amountMinor:1000});expect(saved.completed).not.toBe(true);
+   expect(committedBody.disbursement).toMatchObject({itemId:item.id,amountMinor:1000});
+   expect((await db.query("SELECT count(*)::int AS n,sum(amount_minor)::text AS amount FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0]).toEqual({n:1,amount:"1000"});
+   await page.screenshot({path:join(evidence,`hr-unverified-${variant}-${width}.png`),fullPage:true});
+   await page.route("**/api/hr/payroll/disburse?clientRequestId=*",async route=>{
+    const response=await route.fetch();expect(response.status()).toBe(200);
+    await route.fulfill({response,json:{disbursement:{...committedBody.disbursement,currency:"USD"}}});
+   },{times:1});
+   await page.getByRole("button",{name:"التحقق من الصرف السابق"}).click();
+   await expect.poll(()=>page.locator('section[aria-label="إدارة المسير والصرف"]').innerText()).toContain("ولا تبدأ عملية أخرى قبل التحقق");
+   expect(await page.evaluate(id=>JSON.parse(localStorage.getItem(`hr:payroll:pending:${id}`)!).completed,item.id)).not.toBe(true);
+   const method=variant==="missing"?"POST":"GET";
+   const replay=page.waitForResponse(r=>r.url().includes("/api/hr/payroll/disburse")&&r.request().method()===method);
+   await page.getByRole("button",{name:method==="POST"?"تأكيد الصرف وتسجيل المصروف":"التحقق من الصرف السابق"}).click();const response=await replay;expect(response.status()).toBe(200);
+   expect((await response.json()).disbursement).toMatchObject({id:committedBody.disbursement.id,clientRequestId:submitted.clientRequestId,itemId:item.id});
+   await expect.poll(()=>page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).isVisible()).toBe(false);
+   expect((await db.query("SELECT count(*)::int AS n,sum(amount_minor)::text AS amount FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0]).toEqual({n:1,amount:"1000"});
+   expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].n).toBe(1);
+   await page.screenshot({path:join(evidence,`hr-verified-replay-${variant}-${width}.png`),fullPage:true});
+  }finally{await fixture.close();}
+ });
+}
+for(const width of [390,1280]){
+ it(`unverified reversal preserves the confirmed request until the original voucher is verified at ${width}px`,async()=>{
+  const fixture=await confirmationFixture(width===390?"2026-03":"2026-02","reverse",width),{page,item,row}=fixture;
+  try{
+   await row.getByRole("button",{name:"صرف",exact:true}).click();await page.locator('input[type="number"]').fill("1000");
+   const created=page.waitForResponse(r=>r.url().endsWith("/api/hr/payroll/disburse")&&r.request().method()==="POST");
+   await page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).click();const paid=(await (await created).json()).disbursement;
+   await expect.poll(()=>row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:true}).count()).toBe(1);
+   page.on("dialog",dialog=>dialog.accept("Synthetic verified reversal"));
+   await page.route("**/api/hr/payroll/disburse",async route=>{const response=await route.fetch();expect(response.status()).toBe(200);expect((await response.json()).disbursement.reversedAt).toBeTruthy();await route.fulfill({response,json:{success:true}});},{times:1});
+   await row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:true}).click();
+   await expect.poll(()=>page.locator('section[aria-label="إدارة المسير والصرف"]').innerText()).toContain("لم تتأكد نتيجة عكس الصرف");
+   expect(await page.evaluate(id=>JSON.parse(localStorage.getItem(`hr:payroll:pending:${id}`)!).clientRequestId,item.id)).toBe(paid.clientRequestId);
+   await page.screenshot({path:join(evidence,`hr-unverified-reversal-${width}.png`),fullPage:true});
+   expect(await page.evaluate(id=>JSON.parse(localStorage.getItem(`hr:payroll:pending-reversal:${id}`)!),item.id)).toEqual({itemId:item.id,disbursementId:paid.id,reason:"Synthetic verified reversal"});
+   await page.reload({waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"المسير والصرف"}).click();
+   await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(fixture.periodId));
+   await expect.poll(()=>row.innerText()).toContain("معكوس:");
+   await row.getByRole("button",{name:"صرف",exact:true}).click();
+   await expect.poll(()=>page.locator('section[aria-label="إدارة المسير والصرف"]').innerText()).toContain("تحقق من عكس الصرف السابق");
+   expect(await page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).count()).toBe(0);
+   const replay=page.waitForResponse(r=>r.url().endsWith("/api/hr/payroll/disburse")&&r.request().method()==="POST");
+   await row.getByRole("button",{name:`التحقق من عكس الصرف #${paid.id}`,exact:true}).click();const verified=await replay;expect(verified.status()).toBe(200);
+   expect(verified.request().postDataJSON()).toEqual({action:"reverse",disbursementId:paid.id,reason:"Synthetic verified reversal"});
+   await expect.poll(()=>row.innerText()).toContain("معكوس:");
+   await expect.poll(()=>page.evaluate(id=>localStorage.getItem(`hr:payroll:pending:${id}`),item.id)).toBeNull();
+   expect(await page.evaluate(id=>localStorage.getItem(`hr:payroll:pending-reversal:${id}`),item.id)).toBeNull();
+   expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE reversal_of_id=$1",[paid.expenseId])).rows[0].n).toBe(1);
+   expect((await db.query("SELECT sum(amount_minor)::text AS total FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].total).toBe("0");
+  }finally{await fixture.close();}
+ });
+}
+
+for(const width of [390,1280]){
+ it(`an older payroll fetch cannot replace the newly selected period at ${width}px`,async()=>{
+  const fixture=await confirmationFixture(width===390?"2026-10":"2026-11","race",width),{page}=fixture;
+  let release!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});
+  let arrived!:()=>void;const intercepted=new Promise<void>(resolve=>{arrived=resolve});
+  try{
+   const initial=page.waitForResponse(r=>r.url().endsWith(`/api/hr/payroll/runs?id=${run.id}`));
+   await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
+   expect((await initial).status()).toBe(200);
+   await expect.poll(()=>page.getByRole("link",{name:"طباعة الكشف"}).getAttribute("href")).toBe(`/print/hr/payroll/${run.id}`);
+   await page.route(`**/api/hr/payroll/runs?id=${run.id}`,async route=>{const response=await route.fetch();arrived();await barrier;await route.fulfill({response});},{times:1});
+   await page.getByRole("button",{name:"SAR",exact:false}).click();
+   await page.getByRole("button",{name:"YER",exact:false}).click();await intercepted;
+   const newer=page.waitForResponse(r=>r.url().endsWith(`/api/hr/payroll/runs?id=${fixture.item.runId}`));
+   await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(fixture.periodId));expect((await newer).status()).toBe(200);
+   const marker=fixture.row;await expect.poll(()=>marker.count()).toBe(1);
+   const older=page.waitForResponse(r=>r.url().endsWith(`/api/hr/payroll/runs?id=${run.id}`));release();expect((await older).status()).toBe(200);
+   // Let the response body and React update complete before asserting the selected run.
+   await page.waitForLoadState("networkidle");
+   expect(await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().inputValue()).toBe(String(fixture.periodId));
+   expect(await marker.count()).toBe(1);
+   await page.screenshot({path:join(evidence,`hr-payroll-period-race-${width}.png`),fullPage:true});
+  }finally{release();await fixture.close();}
+ });
+}
+
+for(const width of [390,1280]){
+ it(`every synthetic payroll row survives a multi-page PDF at ${width}px`,async()=>{
+  const names=Array.from({length:40},(_,i)=>`HRPRINT${width}EMP${String(i).padStart(2,"0")}`);
+  for(const name of names){
+   const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"اختبار طباعة اصطناعي",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:1200,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});
+   expect(staff.status).toBe(201);
+  }
+  const period=await api("POST","/api/hr/payroll/periods",{periodMonth:width===390?"2027-01":"2027-02"});expect(period.status).toBe(201);
+  const calculated=await api("POST","/api/hr/payroll/runs",{action:"calculate",periodId:period.body.id,currency:"YER"});expect(calculated.status).toBe(201);
+  expect((await api("POST","/api/hr/payroll/runs",{action:"approve",runId:calculated.body.id})).status).toBe(200);
+  const actual=(await api("GET",`/api/hr/payroll/runs?id=${calculated.body.id}`)).body.items;
+  expect(actual.length).toBeGreaterThanOrEqual(40);
+  const page=await context.newPage();await page.setViewportSize({width,height:width===390?844:900});
+  try{
+   await page.goto(`${baseUrl}/print/hr/payroll/${calculated.body.id}`,{waitUntil:"networkidle"});
+   const body=await page.textContent("body");for(const employee of actual)expect(body).toContain(employee.staffName);
+   const pdf=join(evidence,`hr-payroll-multipage-${width}.pdf`);await page.pdf({path:pdf,format:"A4",printBackground:true});
+   const info=execFileSync("pdfinfo",[pdf],{encoding:"utf8"});expect(Number(info.match(/^Pages:\s+(\d+)/m)?.[1])).toBeGreaterThan(1);
+   const text=execFileSync("pdftotext",[pdf,"-"],{encoding:"utf8"}).replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,"");
+   for(const name of names)expect(text).toContain(name);
+   await page.screenshot({path:join(evidence,`hr-payroll-multipage-${width}.png`),fullPage:true});
+  }finally{await page.close();}
  });
 }

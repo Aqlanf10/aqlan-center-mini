@@ -1,6 +1,30 @@
-# HR attendance follow-up — PR #308
+# Integrated HR repair handoff — PR #308
 
-The follow-up starts from the remote/reviewed head `2763bc6018dd253e604bd1b7240f1a7206662a4f`. The existing checkout was clean and GitHub reported that exact head before edits. Work remains on `feat/hr-staff-tasks-phase1`; no duplicate branch, force push, main merge or external deployment is part of this follow-up. The final literal repair SHA and exact-head CI links will be recorded in PR #308. Production source is frozen at `07f39992563255ecb329731837f0ee109d35a784`; later delivery edits are evidence/report only. Existing integrated main ancestry is `f1164bbecc0bbf9f4a12855aa54827c3d8b44a60`; this follow-up does not add a main merge.
+## Current follow-up: verified payouts, reversal recovery and transaction authority
+
+The current work starts at `cfa1dda16da25ebdd5530bfd881578455428d808`, verified against PR #308 before edits. It continues on `feat/hr-staff-tasks-phase1`. The final head and completed exact-head CI links are recorded in PR #308. This follow-up adds no migration and does not change the financial policies, financial engines, CI rules or test deadlines.
+
+- The UI verifies the actual payout identity, employee, item, request key, native currency, amount and salary/commission voucher components before marking a stored operation completed. An HTTP success with a missing or unrelated receipt keeps the original immutable request. Explicit verification uses the same key; an unrelated lookup response cannot clear the pending operation. Retrying a committed request returns its existing receipt without another expense.
+- A reversal request saves the exact original disbursement ID and reason before sending. An uncertain response preserves that request across reload, blocks a new payout, and offers verification of the same reversal. Only a complete matching receipt clears it. Verification/replay produces one reversal voucher and a zero net cash effect for the original expense.
+- Every payroll HTTP writer revalidates the signed session and current active account, role and credential version inside its transaction, with the account held `FOR SHARE` through COMMIT. The session is checked again after domain lock waits. Revocation while a request waits cannot create a payout; expiry before completion rolls back all financial writes. Uncertain COMMIT recovery rechecks authority before returning a receipt.
+- A multi-policy settings patch now runs in one audited manager-only transaction. Failure auditing its second policy rolls back the first policy as well. Unexpected database errors are not returned as raw exception messages.
+- An older payroll fetch cannot replace the newly selected period/currency or resurrect rows after loading fails. Selection immediately hides the old run and disables its actions; responses are checked against a request generation and current selection. Two real-browser delayed-response cases prove the old behavior failed at both widths.
+
+Current executable evidence, synthetic screenshots and a source-only integration/migration comparison are in [docs/evidence/hr-payroll-confirmation/](docs/evidence/hr-payroll-confirmation/). Local and CI results must be read with the limitations below; a passing HR branch is not proof of a deployed combined staging version.
+
+## Financial integration retained and checked
+
+`__tests__/postgres/hr-payroll-integrity.test.ts` uses real independent PostgreSQL cases and canonical readers/writers. It proves intentional contract/profile disagreement blocks approval without creating debt; approved wage snapshots survive later contract addenda; profile fallback records its actual source; unsupported mid-period/nonmonthly calculations remain blocked. Currency cases use YER, SAR and USD minor units without aggregating their balances.
+
+Hybrid settlement creates separate `salary` and `commission` expenses tied to their respective payables and one HR operation. Tests verify the derived payable remainder via `partyStatement`, canonical doctor commission paid/due values via `commissionReport`, real expenses and shift cash totals. Partial allocations, another commission payment engine, reversal, failed audit, concurrent same-key requests, different-key overpayment, closed periods and lost COMMIT responses are checked against those financial sources. No `payables.balance_minor` was introduced and no new commission engine was created.
+
+`__tests__/postgres/hr-backup-roundtrip.test.ts` restores nondefault leave-type/settings IDs, entitlements, relationships, raw attendance events/corrections and subsequent sequence allocation, and independently restores a pre-HR backup. Settings stored in a backup are preserved, not replaced by invented defaults.
+
+The browser journey covers salary, percentage and hybrid employees, separate vouchers, partial payout/reversal, printed payroll rows and next-day correction approval by a second synthetic manager at both 390 and 1280. The role matrix and doctor/reception restrictions remain mandatory.
+
+## Previous attendance repair and evidence retained
+
+The previous attendance follow-up started from the remote/reviewed head `2763bc6018dd253e604bd1b7240f1a7206662a4f`. The existing checkout was clean and GitHub reported that exact head before edits. Work remains on `feat/hr-staff-tasks-phase1`; no duplicate branch, force push, main merge or external deployment is part of this follow-up. The final literal repair SHA and exact-head CI links will be recorded in PR #308. Application source used for that previous proof was frozen at `07f39992563255ecb329731837f0ee109d35a784`; its later delivery edits were evidence/report only. This is an earlier build reference, not a verified Production deployment. Existing integrated main ancestry is `f1164bbecc0bbf9f4a12855aa54827c3d8b44a60`; this follow-up does not add a main merge.
 
 ## Repairs
 
@@ -12,7 +36,7 @@ The follow-up starts from the remote/reviewed head `2763bc6018dd253e604bd1b7240f
 
 Existing schema contracts/disclosures remain unchanged, including the 16 predeclared convergence findings and `applicationSchemaEqual=false`. These are not claimed resolved. Dot must regenerate/verify combined schema contracts through the official path rather than merging fingerprints by hand.
 
-Existing contract-derived wage snapshots, YER/SAR/USD minor-unit handling, commission engine linkage, separate hybrid vouchers, atomic HR settlement, durable request-key replay and audited reversal guards remain unchanged. No financial writer, payroll migration, permission matrix, timeout or CI rule was relaxed. Unsupported proration/nonmonthly pay, missing paid-leave allocations, commission-policy conflicts and legacy claims without reliable snapshots/component linkage remain explicit owner-policy blockers.
+Existing contract-derived wage snapshots, YER/SAR/USD minor-unit handling, commission engine linkage, separate hybrid vouchers, atomic HR settlement, durable request-key replay and audited reversal guards are retained; the current follow-up adds transaction authority checks and verified UI confirmation. No payroll migration, permission matrix, timeout or CI rule was relaxed. Unsupported proration/nonmonthly pay, missing paid-leave allocations, commission-policy conflicts and legacy claims without reliable snapshots/component linkage remain explicit owner-policy blockers.
 
 ## Executable evidence
 

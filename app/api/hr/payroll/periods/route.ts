@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import {
   listPayrollPeriods,
   HrPayrollError,
@@ -56,10 +57,10 @@ export async function POST(request: Request) {
 
   try {
     if (payload.action === "close") {
-      const period = await closePayrollPeriod(payload.periodMonth, session);
+      const period = await closePayrollPeriod(payload.periodMonth, session, hrPayrollWriteAuthorizer(session));
       return NextResponse.json(period);
     } else {
-      const period = await getOrCreatePayrollPeriod(payload.periodMonth, session);
+      const period = await getOrCreatePayrollPeriod(payload.periodMonth, session, hrPayrollWriteAuthorizer(session));
       return NextResponse.json(period, { status: 201 });
     }
   } catch (error) {

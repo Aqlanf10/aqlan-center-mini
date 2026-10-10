@@ -27,6 +27,22 @@ export class HrPayrollError extends Error {
   constructor(public code: string, public status: number, message: string) { super(message); this.name = "HrPayrollError"; }
 }
 const fail = (code: string, message: string, status = 409): never => { throw new HrPayrollError(code, status, message); };
+export type HrPayrollWriteAuthorizer = ((client: DbClient) => Promise<boolean>) & { isCurrent: () => boolean };
+/** HTTP callers supply the live authorizer; trusted internal writers keep their explicit actor contract. */
+async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrPayrollWriteAuthorizer | undefined,
+  work: (client: DbClient) => Promise<T>): Promise<T> {
+  manager(session);
+  return withTransaction(getPool(), async client => {
+    if (authorize && !(await authorize(client))) fail("authority_changed", "تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية.", 403);
+    if (session.expiresAt < Date.now()) fail("session_expired", "انتهت الجلسة؛ لم تُنفّذ العملية.", 401);
+    const result = await work(client);
+    // Credentials remain locked until COMMIT; time may still expire while a domain lock is awaited.
+    if (session.expiresAt < Date.now() || (authorize && !authorize.isCurrent())) {
+      fail("session_expired", "انتهت الجلسة أثناء الانتظار؛ تراجعت العملية بالكامل.", 401);
+    }
+    return result;
+  });
+}
 function manager(session: SessionPayload) {
   if (!session || session.role !== "admin") fail("forbidden", "إدارة المسير والصرف للمدير وحده.", 403);
 }
@@ -101,13 +117,13 @@ export async function listPayrollPeriods(): Promise<HrPayrollPeriodView[]> {
   const { rows } = await getPool().query(`SELECT ${periodColumns} FROM hr_payroll_periods p ORDER BY p.period_key DESC`);
   return rows.map(mapPeriodRow);
 }
-export async function createPayrollPeriod(input: { periodKey: string; name: string; startDate: string; endDate: string }, session: SessionPayload) {
+export async function createPayrollPeriod(input: { periodKey: string; name: string; startDate: string; endDate: string }, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer) {
   manager(session);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.periodKey)) fail("invalid_period", "الشهر غير صالح.", 400);
   const [y, m] = input.periodKey.split("-").map(Number);
   const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
   if (input.startDate !== `${input.periodKey}-01` || input.endDate !== last) fail("period_dates", "تواريخ فترة الشهر غير متطابقة؛ لا تُغيّر فترة قائمة.", 409);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     const created = await client.query(`INSERT INTO hr_payroll_periods (period_key, name, start_date, end_date, created_by)
       VALUES ($1,$2,$3,$4,$5) ON CONFLICT (period_key) DO NOTHING RETURNING id`,
       [input.periodKey, input.name.trim(), input.startDate, input.endDate, session.username]);
@@ -118,11 +134,11 @@ export async function createPayrollPeriod(input: { periodKey: string; name: stri
     return result;
   });
 }
-export async function getOrCreatePayrollPeriod(input: Parameters<typeof createPayrollPeriod>[0] | string, session: SessionPayload) {
-  if (typeof input !== "string") return createPayrollPeriod(input, session);
+export async function getOrCreatePayrollPeriod(input: Parameters<typeof createPayrollPeriod>[0] | string, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer) {
+  if (typeof input !== "string") return createPayrollPeriod(input, session, authorize);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input)) fail("invalid_period", "الشهر غير صالح.", 400);
   const [y, m] = input.split("-").map(Number);
-  return createPayrollPeriod({ periodKey: input, name: `مسير شهر ${input}`, startDate: `${input}-01`, endDate: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) }, session);
+  return createPayrollPeriod({ periodKey: input, name: `مسير شهر ${input}`, startDate: `${input}-01`, endDate: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) }, session, authorize);
 }
 async function lockRun(client: DbClient, runId: number): Promise<Row> {
   const head = await client.query("SELECT period_id FROM hr_payroll_runs WHERE id = $1", [runId]);
@@ -132,9 +148,9 @@ async function lockRun(client: DbClient, runId: number): Promise<Row> {
   return { ...run.rows[0], period_status: period.rows[0].status, period_key: period.rows[0].period_key,
     period_name: period.rows[0].name, start_date: period.rows[0].start_date, end_date: period.rows[0].end_date };
 }
-export async function closePayrollPeriod(idOrKey: number | string, session: SessionPayload) {
+export async function closePayrollPeriod(idOrKey: number | string, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer) {
   manager(session);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     const numeric = typeof idOrKey === "number" || /^\d+$/.test(idOrKey);
     const { rows } = await client.query(`SELECT ${periodColumns} FROM hr_payroll_periods p WHERE ${numeric ? "id" : "period_key"} = $1 FOR UPDATE`, [numeric ? idOf(idOrKey) : idOrKey]);
     if (!rows[0]) fail("period_missing", "فترة المسير غير موجودة.", 404);
@@ -173,10 +189,10 @@ async function staffResolution(client: DbClient, row: Row, period: Row) {
   }
   return resolved;
 }
-export async function calculatePayrollRun(periodId: number | string, currency: Currency, session: SessionPayload): Promise<HrPayrollRunView> {
+export async function calculatePayrollRun(periodId: number | string, currency: Currency, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollRunView> {
   manager(session);
   if (!isAllowedHrCurrency(currency)) fail("invalid_currency", "العملة غير معتمدة.", 400);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     const { rows: periods } = await client.query(`SELECT ${periodColumns} FROM hr_payroll_periods p WHERE id = $1 FOR UPDATE`, [idOf(periodId)]);
     const period = periods[0];
     if (!period) fail("period_missing", "فترة المسير غير موجودة.", 404);
@@ -226,9 +242,9 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
     return mapRunRow({ ...updated.rows[0], period_key: period.period_key, period_name: period.name });
   });
 }
-export async function approvePayrollRun(runId: number | string, session: SessionPayload): Promise<HrPayrollRunView> {
+export async function approvePayrollRun(runId: number | string, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollRunView> {
   manager(session);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     const run = await lockRun(client, idOf(runId));
     if (run.period_status === "closed") fail("closed", "الفترة مقفلة.");
     if (run.status === "approved") return mapRunRow(run);
@@ -377,23 +393,23 @@ async function disburseInTx(client: DbClient, input: ReturnType<typeof normalize
   await auditWithClient(client,"hr.payroll.disburse",session,"hr_payroll_disbursement",created.rows[0].id,item.staff_name,{ amountMinor:input.total,parts,clientRequestId:input.key });
   const view = mapDisbursementRow({ ...created.rows[0],staff_name:item.staff_name }); view.parts=parts; return view;
 }
-export async function disbursePayrollItem(idOrInput: number | string | (DisburseInput & { itemId: number | string }), inputOrSession: DisburseInput | SessionPayload, maybeSession?: SessionPayload): Promise<HrPayrollDisbursementView> {
+export async function disbursePayrollItem(idOrInput: number | string | (DisburseInput & { itemId: number | string }), inputOrSession: DisburseInput | SessionPayload, maybeSession?: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollDisbursementView> {
   const object = typeof idOrInput === "object", session = (object ? inputOrSession : maybeSession) as SessionPayload;
   const input = normalizeDisbursement(idOf(object ? idOrInput.itemId : idOrInput), (object ? idOrInput : inputOrSession) as DisburseInput, session);
-  try { return await withTransaction(getPool(), (client) => disburseInTx(client,input,session)); }
+  try { return await withPayrollTransaction(session, authorize, (client) => disburseInTx(client,input,session)); }
   catch (error) {
     // COMMIT may have reached PostgreSQL even when the response was lost. Resolve by the same key, never create another key.
     if (input.key && !(error instanceof HrPayrollError)) {
-      const existing = await replay(getPool(),input.key,input.fingerprint).catch(() => null); if (existing) return existing;
+      const existing = await withPayrollTransaction(session, authorize, client => replay(client,input.key!,input.fingerprint)).catch(() => null); if (existing) return existing;
     }
     throw error;
   }
 }
-export async function disburseEntireRun(runId: number | string, input: DisburseInput, session: SessionPayload): Promise<HrPayrollDisbursementView[]> {
+export async function disburseEntireRun(runId: number | string, input: DisburseInput, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollDisbursementView[]> {
   manager(session);
   const id = idOf(runId), key = input.clientRequestId?.trim();
   if (!key || key.length < 8 || key.length > 60) fail("batch_key", "الصرف الجماعي يتطلب مفتاح طلب ثابتًا بين 8 و60 حرف.", 400);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     // Acquire batch and child request locks before row locks, including concurrent individual retries.
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`hr:payroll:batch:${key}`]);
     const replayRows = await client.query("SELECT * FROM hr_payroll_disbursements WHERE left(client_request_id,length($1))=$1 ORDER BY id", [`${key}:item:`]);
@@ -416,11 +432,11 @@ export async function disburseEntireRun(runId: number | string, input: DisburseI
     return results;
   });
 }
-export async function reversePayrollDisbursement(disbursementId: number | string, input: { reason: string }, session: SessionPayload): Promise<HrPayrollDisbursementView> {
+export async function reversePayrollDisbursement(disbursementId: number | string, input: { reason: string }, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollDisbursementView> {
   manager(session);
   const id = idOf(disbursementId), reason = input.reason?.trim();
   if (!reason || reason.length < 2 || reason.length > 500) fail("reversal_reason", "اكتب سببًا واضحًا لعكس الصرف.", 400);
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, async (client) => {
     const head = await client.query("SELECT i.run_id FROM hr_payroll_disbursements d JOIN hr_payroll_items i ON i.id=d.item_id WHERE d.id=$1", [id]);
     if (!head.rows[0]) fail("disbursement_missing", "حركة الصرف غير موجودة.", 404);
     const run = await lockRun(client,Number(head.rows[0].run_id));
@@ -449,9 +465,8 @@ export async function reversePayrollDisbursement(disbursementId: number | string
 
 /* ── ٤. إعدادات وسياسات الموارد البشرية ───────────────────────────────────── */
 
-export async function getHrSettings(): Promise<HrSettingsPayload> {
-  const pool = getPool();
-  const { rows } = await pool.query(`SELECT key, value FROM hr_settings`);
+export async function getHrSettings(runner: QueryRunner = getPool()): Promise<HrSettingsPayload> {
+  const { rows } = await runner.query(`SELECT key, value FROM hr_settings`);
   const result: Record<string, any> = {};
   for (const r of rows) {
     result[r.key] = typeof r.value === "object" ? r.value : JSON.parse(String(r.value));
@@ -467,8 +482,12 @@ export async function updateHrSetting(
   key: string,
   value: Record<string, unknown>,
   session: SessionPayload,
+  authorize?: HrPayrollWriteAuthorizer,
 ): Promise<void> {
-  return withTransaction(getPool(), async (client) => {
+  return withPayrollTransaction(session, authorize, client => updateSettingInTx(client, key, value, session));
+}
+
+async function updateSettingInTx(client: DbClient, key: string, value: Record<string, unknown>, session: SessionPayload) {
     await client.query(
       `INSERT INTO hr_settings (key, value, updated_by, updated_at)
        VALUES ($1, $2, $3, NOW())
@@ -486,23 +505,23 @@ export async function updateHrSetting(
       `تحديث سياسة: ${key}`,
       { key, value },
     );
-  });
 }
 
 export async function updateHrSettings(
   patch: Partial<HrSettingsPayload>,
   session: SessionPayload,
+  authorize?: HrPayrollWriteAuthorizer,
 ): Promise<HrSettingsPayload> {
-  if (patch.payrollCycle) {
-    await updateHrSetting("payroll_cycle", patch.payrollCycle as any, session);
-  }
-  if (patch.attendancePolicy) {
-    await updateHrSetting("attendance_policy", patch.attendancePolicy as any, session);
-  }
-  if (patch.leavePolicy) {
-    await updateHrSetting("leave_policy", patch.leavePolicy as any, session);
-  }
-  return getHrSettings();
+  return withPayrollTransaction(session, authorize, async client => {
+    const changes = [["payroll_cycle", patch.payrollCycle], ["attendance_policy", patch.attendancePolicy], ["leave_policy", patch.leavePolicy]] as const;
+    for (const [key, value] of changes) {
+      if (value !== undefined) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) fail("invalid_setting", "صيغة سياسة الموارد البشرية غير صالحة.", 400);
+        await updateSettingInTx(client, key, value, session);
+      }
+    }
+    return getHrSettings(client);
+  });
 }
 
 /* ── ٥. تقارير الموارد البشرية التنفيذية ───────────────────────────────────── */

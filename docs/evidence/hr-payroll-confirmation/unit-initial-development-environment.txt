@@ -1,0 +1,36 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/development-runtime-tracing.test.ts (5 tests | 1 failed) 28731ms
+     × does not let runtime app, component or library imports depend on excluded development tooling 23152ms
+ ❯ __tests__/saved-reports.test.ts (9 tests | 3 skipped) 21956ms
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+ ❯ __tests__/environment-parity.test.ts (74 tests | 2 failed) 5356ms
+     × البعيد غير المصنَّف مرفوض محليًا — والمصنَّف test يمرّ 38ms
+     × البعيد غير المصنَّف مرفوض عبر كل مسار — والمصنَّف test يمر محليًّا 2ms
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -3,6 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
+import { hrPayrollWriteAuthorizer } from "@/lib/hr-payroll-authority";
 import {
   listPayrollRuns,
   listPayrollItems,
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
       if (!payload.runId) {
         return NextResponse.json({ message: "يرجى تحديد مسير الرواتب للاعتماد." }, { status: 400 });
       }
-      const approved = await approvePayrollRun(payload.runId, session);
+      const approved = await approvePayrollRun(payload.runId, session, hrPayrollWriteAuthorizer(session));
       return NextResponse.json(approved);
     } else if (payload.action === "calculate") {
       // Calculate
@@ -89,7 +90,8 @@ export async function POST(request: Request) {
       const calculated = await calculatePayrollRun(
         payload.periodId,
         payload.currency,
-        session
+        session,
+        hrPayrollWriteAuthorizer(session)
       );
       return NextResponse.json(calculated, { status: 201 });
     }

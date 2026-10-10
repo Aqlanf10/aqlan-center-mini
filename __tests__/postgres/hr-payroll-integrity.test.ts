@@ -576,3 +576,47 @@ describe("٣ — مفتاح الطلب: لا صرف مكرر من البداية
     await expect(payroll.closePayrollPeriod(s.run.periodId, admin)).rejects.toThrow("متبقٍ");
   });
 });
+
+describe("٤ — تعديل سياسات الموارد البشرية عملية واحدة مدققة", () => {
+  it("session expiry while awaiting a real payroll lock rolls back vouchers and balances", async () => {
+    const staff = await staffWith({kind:"salary"});
+    const calculated = await approvedRun(); await approve(calculated.run.id);
+    const s = {run:calculated.run,item:(await payroll.listPayrollItems(calculated.run.id)).find(item=>item.staffId===staff.staffId)!};
+    const blocker = await getPool().connect();
+    const expiring = {...admin,expiresAt:Date.now()+60_000};
+    let pending: Promise<unknown> | undefined;
+    let clock: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      const {rows:[identity]} = await blocker.query("SELECT pg_backend_pid() AS pid");
+      await blocker.query("SELECT id FROM hr_payroll_items WHERE id=$1 FOR UPDATE",[s.item.id]);
+      pending = payroll.disbursePayrollItem(s.item.id,{amountMinor:1000,clientRequestId:"expiry-while-locked-001"},expiring);
+      // Attach the rejection handler before releasing the barrier.
+      const outcome = pending.then(value=>({value,error:null}),error=>({value:null,error}));
+      await expect.poll(async()=>Number((await q<{n:number}>("SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))",[identity.pid]))[0].n)).toBeGreaterThan(0);
+      clock = vi.spyOn(Date,"now").mockReturnValue(expiring.expiresAt+1);
+      await blocker.query("COMMIT");
+      expect((await outcome).error).toMatchObject({code:"session_expired",status:401});
+      expect(await payroll.findDisbursementByRequestId("expiry-while-locked-001")).toBeNull();
+      expect(await cashOut()).toBe(0);
+      expect((await payroll.listPayrollItems(s.run.id))[0].paidMinor).toBe(0);
+    } finally {
+      clock?.mockRestore();await blocker.query("ROLLBACK");await pending?.catch(()=>{});blocker.release();
+    }
+  });
+  it("settings patch rolls back every policy if the second audit fails", async () => {
+    const before = await payroll.getHrSettings();
+    await q(`CREATE FUNCTION hr_settings_audit_fail() RETURNS trigger AS $$ BEGIN IF NEW.action='hr.settings.update' AND NEW.entity_id='leave_policy' THEN RAISE EXCEPTION 'synthetic settings audit failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await q("CREATE TRIGGER hr_settings_audit_fail BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION hr_settings_audit_fail()");
+    try {
+      await expect(payroll.updateHrSettings({payrollCycle:{defaultCurrency:"SAR",salaryDay:12,cutoffDay:8},leavePolicy:{annualDefaultDays:26,probationMonths:4}},admin)).rejects.toThrow("synthetic settings audit failure");
+      expect(await payroll.getHrSettings()).toEqual(before);
+      expect(await q("SELECT id FROM audit_log WHERE action='hr.settings.update'")).toHaveLength(0);
+    } finally { await q("DROP TRIGGER hr_settings_audit_fail ON audit_log");await q("DROP FUNCTION hr_settings_audit_fail()"); }
+  });
+  it("settings writer refuses a forged non-manager actor", async () => {
+    const before = await payroll.getHrSettings();
+    await expect(payroll.updateHrSettings({leavePolicy:{annualDefaultDays:26,probationMonths:4}},{...admin,role:"doctor"})).rejects.toMatchObject({code:"forbidden",status:403});
+    expect(await payroll.getHrSettings()).toEqual(before);
+  });
+});
