@@ -1,0 +1,45 @@
+{
+  "signedShowsSignature": true,
+  "signedShowsCurrentTemplateTerm": true,
+  "signedShowsRecordedTitle": false,
+  "signedShowsCurrentTemplateTitle": true,
+  "overrides": {
+    "templateId=root_canal": {
+      "signature": true,
+      "forgedShown": false,
+      "templateBTerm": true,
+      "year2001": false
+    },
+    "signatoryName=%D9%85%D9%88%D9%82%D9%91%D8%B9%20%D9%85%D8%B2%D9%88%D9%91%D8%B1": {
+      "signature": true,
+      "forgedShown": true,
+      "templateBTerm": false,
+      "year2001": false
+    },
+    "doctorName=%D8%B7%D8%A8%D9%8A%D8%A8%20%D9%85%D8%B2%D9%88%D9%91%D8%B1": {
+      "signature": true,
+      "forgedShown": true,
+      "templateBTerm": false,
+      "year2001": false
+    },
+    "date=2001-01-01": {
+      "signature": true,
+      "forgedShown": false,
+      "templateBTerm": false,
+      "year2001": true
+    }
+  },
+  "photoShownAsSignature": true,
+  "removedShownAsSignature": true,
+  "foreignFallsBackToTemplate": true,
+  "foreignSaysUnsigned": false,
+  "doctorWithoutXrays": {
+    "documentStatus": 403,
+    "pageStatus": 200,
+    "pageEmbedsSignature": true
+  },
+  "forgedPdfInfo": [
+    "Pages:           1",
+    "Page size:       612 x 792 pts (letter)"
+  ]
+}

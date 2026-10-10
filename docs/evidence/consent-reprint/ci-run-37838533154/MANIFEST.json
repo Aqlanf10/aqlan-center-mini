@@ -1,0 +1,69 @@
+{
+  "source": "GitHub Actions job log, decoded from SYNTHETIC_PRINT_EVIDENCE_V1 records (scope consent-reprint)",
+  "runId": "37838533154",
+  "runAttempt": "1",
+  "ref": "refs/pull/291/merge",
+  "githubSha": "a0c385c45a5ee846e516d71333c66ddc0f5c67ef",
+  "checkoutSha": "a0c385c45a5ee846e516d71333c66ddc0f5c67ef",
+  "checkoutParents": [],
+  "acceptance": true,
+  "synthetic": true,
+  "members": [
+    {
+      "file": "consent-signed-1280.png",
+      "mime": "image/png",
+      "bytes": 81425,
+      "sha256": "bbbeed243e621330fee760719eaa7e913308eb6b79b3faafb992fed6433bd7fd"
+    },
+    {
+      "file": "consent-signed-390.png",
+      "mime": "image/png",
+      "bytes": 72208,
+      "sha256": "dfbf43d47572041d1109cfe81bc15d6b47c858eda072df7636d2db332f88d6c5"
+    },
+    {
+      "file": "consent-signed.pdf",
+      "mime": "application/pdf",
+      "bytes": 357574,
+      "sha256": "a64bd0e800cf63560abf35f2c8da2d281a725cd90a09a18175589593a1ad4a57"
+    },
+    {
+      "file": "consent-blank-1280.png",
+      "mime": "image/png",
+      "bytes": 132215,
+      "sha256": "0634671b3bfd6eaea98acc312be6f2019d0b936c25dfd30619072c4b3f0eb6d3"
+    },
+    {
+      "file": "consent-blank-390.png",
+      "mime": "image/png",
+      "bytes": 122576,
+      "sha256": "da8edc678ce9f3089de67fc7db5b40a4128532614f825b70f6145fe585f6ccb3"
+    },
+    {
+      "file": "consent-blank.pdf",
+      "mime": "application/pdf",
+      "bytes": 368089,
+      "sha256": "064b7e03e0f7ce8c8d606f8d185b11b0625541e8a12f0dc210e84fb8ce0c1c52"
+    },
+    {
+      "file": "consent-refused-1280.png",
+      "mime": "image/png",
+      "bytes": 46489,
+      "sha256": "2aca6b4724b2a166e19686fc8fc35e0aa506587a80525201e44aa6ce196889ee"
+    },
+    {
+      "file": "consent-refused-390.png",
+      "mime": "image/png",
+      "bytes": 41846,
+      "sha256": "9e1807e2058a2a0a1fcda62b26be0a11e5f0a36751868fba5d9f41710d59eefa"
+    },
+    {
+      "file": "consent-refused.pdf",
+      "mime": "application/pdf",
+      "bytes": 288194,
+      "sha256": "9b8db01edc3796a75598b47e830c78ba6ed3fa456484bcd8e79ccc22cc968da0"
+    }
+  ],
+  "prHeadSha": "1d7c3e924ed096481dba0d0104a0c30a884bb2f2",
+  "note": "checkoutSha/githubSha is the pull-request merge ref the run checked out (a0c385c), whose head is the PR head 1d7c3e9 (GitHub run API). checkoutParents is empty because CI uses a shallow checkout. Decoded locally from the downloaded job log; every member matched the byte count and SHA-256 in its BEGIN/END record. These are this run's own outputs, distinct from the older committed screenshots in the parent folder."
+}
