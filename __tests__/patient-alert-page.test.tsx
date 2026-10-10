@@ -415,8 +415,8 @@ describe("Cases navigation uses the patient-owned guarded destination", () => {
 
 
 
-describe("patient header account balance currency scope", () => {
-  it("names every currency without calling the whole account settled when a historical bucket is zero", async () => {
+describe("compact patient account header and Account details", () => {
+  it("keeps signed ledger totals compact and moves agreement and historical details to Account", async () => {
     const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
       agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0,
       agreementPaidMinor: 0, agreementRemainingMinor: 0 };
@@ -434,6 +434,16 @@ describe("patient header account balance currency scope", () => {
       return Response.json({ ...await response.json(), financial, canSeeFinancial: true });
     });
     await mount();
+    await vi.waitFor(() => expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(3));
+    const totals = render().filter(element => element.props["data-testid"] === "patient-account-currency-total");
+    expect(totals).toHaveLength(3);
+    expect(text(totals.find(element => element.props["data-currency"] === "SAR"))).toContain(`إجمالي المستحق (${CURRENCY_LABEL.SAR}): ${formatMoney(2300, "SAR")}`);
+    expect(text(totals.find(element => element.props["data-currency"] === "USD"))).toContain(`رصيد دائن للمريض (${CURRENCY_LABEL.USD}): ${formatMoney(500, "USD")}`);
+    expect(text(totals.find(element => element.props["data-currency"] === "YER"))).toContain(`لا مبلغ مستحق (${CURRENCY_LABEL.YER})`);
+    expect(text(totals)).not.toContain("المتبقي من الاتفاق");
+    expect(text(totals)).not.toContain("باقي علاج");
+    expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-banner")).toHaveLength(0);
+    click("patient-tab-account");
     await vi.waitFor(() => {
       const banners = render().filter(element => element.props["data-testid"] === "patient-account-currency-banner");
       expect(banners).toHaveLength(3);
@@ -451,9 +461,24 @@ describe("patient header account balance currency scope", () => {
       .toMatchObject({ progress, currency: "YER" });
     expect(JSON.stringify(financial)).toBe(originalValue);
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+    hooks.username = "new-financial-owner";
+    expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
   });
 
   it("does not invent a zero-balance banner without verified workflow financial data", () => {
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-banner")).toHaveLength(0);
+    expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
+  });
+
+  it.each(["denied", "malformed"])("fails closed for %s financial data", async kind => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, options) => {
+      const response = await originalFetch(input, options);
+      if (!String(input).endsWith("/workflow")) return response;
+      return Response.json({ ...await response.json(), canSeeFinancial: kind !== "denied",
+        financial: { byCurrency: { YER: { balanceMinor: 500 }, SAR: { balanceMinor: 0 }, USD: { balanceMinor: kind === "malformed" ? "0" : 0 } } } });
+    });
+    await mount();
+    expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
   });
 });

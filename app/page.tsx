@@ -1127,10 +1127,11 @@ export default function FlowBoard() {
 
       {/* (LIVE-2) من أُنهي جلوسه اليوم — ومنه يُفتح التوثيق والتوقيع إن لم يُوثَّق بعد. */}
       {filter.status === "done" ? (
-        <section className="mt-5" aria-label="أُنجز اليوم">
-          <h2 className="mb-2 text-sm font-bold">أُنجز اليوم ({doneToday.length})</h2>
+        <section className="mt-5" aria-label="انتهى الجلوس اليوم">
+          <h2 className="mb-2 text-sm font-bold">انتهى الجلوس اليوم ({doneToday.length})</h2>
+          <p className="mb-2 text-xs text-slate-600">انتهاء الجلوس يحرّر الكرسي؛ حالة التوثيق والتحصيل تُراجع في تبويب التحصيل والخروج.</p>
           {doneToday.length === 0 ? (
-            <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">لا زيارات منتهية بعد.</p>
+            <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">لا زيارات انتهى جلوسها بعد.</p>
           ) : (
             <ul className="space-y-2">
               {doneToday.map((visit) => (
@@ -1139,9 +1140,9 @@ export default function FlowBoard() {
                     {visit.patientName}
                     {visit.chair ? <span className="mr-2 text-xs font-normal text-slate-500">كرسي {visit.chair}</span> : null}
                   </span>
-                  {/* (VISIT-2) بملفٍّ ⇒ «زيارة اليوم» في ملفه (التوثيق والإنهاء والشبّاك)، وبلا ملف ⇒ شاشة الزيارة. */}
-                  <a href={visitWorkspaceHref(visit)} className="rounded-xl bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
-                    التوثيق والإنهاء
+                  {/* Open this exact finished visit, never a newer patient workspace. */}
+                  <a href={`/visits/${visit.id}`} className="rounded-xl bg-navy-900 px-3 py-1.5 text-xs font-bold text-white">
+                    مراجعة توثيق هذه الزيارة
                   </a>
                 </li>
               ))}
@@ -1151,7 +1152,7 @@ export default function FlowBoard() {
       ) : null}
 
       <p className="mt-6 text-center text-[11px] text-slate-400">
-        {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · أُنجز اليوم: {summary.done}
+        {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · انتهى الجلوس اليوم: {summary.done}
       </p>
       </ReceptionHandoffs>
       {arrivalPatient !== null ? (

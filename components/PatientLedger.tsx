@@ -906,7 +906,12 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
         planItemId: isClinical(row.serviceId) ? selected.itemIds.get(row.key) ?? null : null,
         doctorId: row.doctorId ? Number(row.doctorId) : undefined, ...toothPayload(modeOf(row), row) })),
   });
-  const previewOwner = useMemo(() => ({ previewKey, authority }), [previewKey, authority]);
+  // A state-owned generation survives ordinary renders, but never revives an earlier A after A -> B -> A.
+  // React restarts this component before committing when the guarded render-time adjustment runs.
+  const [previewGeneration, setPreviewGeneration] = useState(() => ({ previewKey, authority }));
+  const previewOwner = previewGeneration.previewKey === previewKey && previewGeneration.authority === authority
+    ? previewGeneration : { previewKey, authority };
+  if (previewOwner !== previewGeneration) setPreviewGeneration(previewOwner);
   // Forget old evidence rather than reviving it if inputs later return to an earlier value.
   if (previewState && (previewState.requestKey !== previewKey || previewState.owner !== previewOwner)) setPreviewState(null);
   useEffect(() => {

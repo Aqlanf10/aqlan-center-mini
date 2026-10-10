@@ -101,6 +101,49 @@ async function waitForState(target: Locator, attribute: string, expected: string
 }
 
 describe("invoice form preview safety and shared chart interruption journeys", () => {
+  it("requires a fresh preview generation when A returns after B, without reviving the earlier ready A", async () => {
+    const { page, context, patientId } = await openInvoice();
+    const held: Route[] = [];
+    let hold = false;
+    let submissions = 0;
+    await page.route("**/api/invoices", async (route) => { submissions++; await route.abort(); });
+    await page.route("**/api/invoices/clinical-preview", async (route) => {
+      if (hold) { held.push(route); return; }
+      await json(route, success(route));
+    });
+    try {
+      await selectFilling(page);
+      await ready(page);
+      expect(await save(page).isEnabled()).toBe(true);
+      const price = page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true });
+      const originalPrice = await price.inputValue();
+      hold = true;
+      const changedPrice = originalPrice === "1600000" ? "1700000" : "1600000";
+      await price.fill(changedPrice);
+      expect(await save(page).isEnabled()).toBe(false);
+      await expect.poll(() => held.length).toBe(1);
+      await price.fill(originalPrice);
+      expect(await save(page).isEnabled()).toBe(false);
+      expect(await page.getByTestId("invoice-clinical-preview-0").getAttribute("data-preview-state")).not.toBe("ready");
+      await expect.poll(() => held.length).toBe(2);
+      expect(held[0].request().postDataJSON().items[0].price).toBe(changedPrice);
+      expect(held[1].request().postDataJSON().items[0].price).toBe(originalPrice);
+      // The retired B transport may have been aborted; it must never make the current A ready.
+      await json(held[0], success(held[0])).catch(() => undefined);
+      expect(await save(page).isEnabled()).toBe(false);
+      expect(await page.getByTestId("invoice-clinical-preview-0").getAttribute("data-preview-state")).not.toBe("ready");
+      await json(held[1], success(held[1]));
+      await ready(page);
+      expect(await save(page).isEnabled()).toBe(true);
+      expect(await price.inputValue()).toBe(originalPrice);
+      expect(submissions).toBe(0);
+      expect((await db.query("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).rows).toHaveLength(0);
+    } finally {
+      await Promise.all(held.map((route) => route.abort().catch(() => undefined)));
+      await context.close();
+    }
+  });
+
   it("invalidates prior success immediately, blocks a pending/failed save, and recovers only after an explicit successful retry", async () => {
     const { page, context, patientId } = await openInvoice();
     let held: Route | null = null;

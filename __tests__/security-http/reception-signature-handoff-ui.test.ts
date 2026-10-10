@@ -6,7 +6,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Route, typ
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { readReceptionHandoffs } from "../../lib/reception-handoff";
+import { readOperationalCheckoutQueue } from "../../lib/operational-checkout";
 
 const RECEPTION_EVIDENCE_MARKER = "AQLAN_RECEPTION_UI_PNG_V1";
 const RECEPTION_EVIDENCE_SUITE = "__tests__/security-http/reception-signature-handoff-ui.test.ts";
@@ -58,7 +58,7 @@ async function emitReceptionEvidence(width: number, captures: readonly Reception
 let h: Awaited<ReturnType<typeof harness>>, browser: Browser, db: Client;
 let patientId = 0, visitId = 0;
 const NAME = "مريض تسليم التوقيع الاصطناعي";
-const register = (page: Page) => page.getByRole("region", { name: "الزيارات الموقّعة للاستقبال", includeHidden: true });
+const register = (page: Page) => page.getByRole("region", { name: "زيارات الخروج للاستقبال", includeHidden: true });
 const openCheckout = async (page: Page) => { await page.getByRole("tab", { name: /التحصيل والخروج/ }).click(); };
 const item = (page: Page, id: number) => register(page).locator(`[data-handoff-visit="${id}"]:visible`);
 async function contextFor(cookie: string, width = 1280): Promise<BrowserContext> {
@@ -123,7 +123,7 @@ describe("reception signature discovery on the built application", () => {
     receptionPage.on("request", request => {
       const url = new URL(request.url());
       if (request.method() !== "GET" || url.origin !== baseUrl || url.pathname !== "/api/visits"
-        || url.searchParams.get("view") !== "reception-handoff" || url.searchParams.has("date")) return;
+        || url.searchParams.get("view") !== "operational-checkout" || url.searchParams.has("date")) return;
       readCount += 1;
       if (reads.length >= 32) { traceOverflow = true; return; }
       const read: Read = { epoch: readCount, clockEpoch, status: null, finished: false,
@@ -141,7 +141,7 @@ describe("reception signature discovery on the built application", () => {
         try {
           const response = await request.response();
           read.status = response?.status() ?? null;
-          const snapshot = readReceptionHandoffs(await response?.json(), { username: "secreception", role: "reception" }, null);
+          const snapshot = readOperationalCheckoutQueue(await response?.json(), { username: "secreception", role: "reception" }, null);
           read.accepted = snapshot !== null;
           read.targetCount = snapshot?.items.filter(row => row.visitId === visitId && row.patientId === patientId && row.status === "pending").length ?? 0;
           read.pendingCount = snapshot?.items.filter(row => row.status === "pending").length ?? 0;
@@ -245,12 +245,12 @@ describe("reception signature discovery on the built application", () => {
 
   it("rejects non-front-desk sessions on the real projection and keeps ordinary visits stripped", async () => {
     for (const session of [h.sessions.doctorA, h.sessions.doctorB, h.sessions.accountant, h.sessions.cashier, h.sessions.portalA]) {
-      expect([401, 403]).toContain((await authedGet("/api/visits?view=reception-handoff", session)).status);
+      expect([401, 403]).toContain((await authedGet("/api/visits?view=operational-checkout", session)).status);
     }
     const response = await authedGet("/api/visits", h.sessions.reception);
     expect(response.status).toBe(200);
     for (const row of await response.json()) { expect(row).not.toHaveProperty("signedAt"); expect(row).not.toHaveProperty("invoiceId"); }
-    const anonymous = await fetch(`${baseUrl}/api/visits?view=reception-handoff`);
+    const anonymous = await fetch(`${baseUrl}/api/visits?view=operational-checkout`);
     expect(anonymous.status).toBe(401);
   });
 
@@ -263,13 +263,13 @@ describe("reception signature discovery on the built application", () => {
     const payload = (date: string | null) => {
       const toDate = date ?? "2026-10-10";
       const fromDate = new Date(Date.parse(`${toDate}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-      return { owner: { username: mode === "other-owner" ? "different-reception" : "secreception", role: "reception" },
+      return { version: 1, operationalItems: [], owner: { username: mode === "other-owner" ? "different-reception" : "secreception", role: "reception" },
         fromDate, toDate, clinicTimeZone: "Asia/Aden", items: [{ visitId: activeId, patientId: 31,
-          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z`, status: "pending", handledReason: null }] };
+          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z`, status: "pending", handledReason: null, financialReviewRequired: false, visitInvoiceSettled: false }] };
     };
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url());
-      if (url.origin === baseUrl && request.method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "reception-handoff") {
+      if (url.origin === baseUrl && request.method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "operational-checkout") {
         const body = payload(url.searchParams.get("date")), thisMode = mode;
         if (hold) { hold = false; await new Promise<void>(resolve => releases.push(resolve)); }
         if (thisMode === "failed" || thisMode === "denied") { await route.fulfill({ status: thisMode === "denied" ? 403 : 503, json: { message: "تعذّر التحميل اصطناعياً" } }); return; }
@@ -291,14 +291,14 @@ describe("reception signature discovery on the built application", () => {
           expect(await item(page, 901).getByRole("link").count()).toBe(0);
           expect(await register(page).innerText()).not.toContain("لا توجد زيارات بانتظار المعالجة");
           await expect.poll(() => page.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toContain("(…)");
-          mode = "ready"; await register(page).getByRole("button", { name: "تحديث التوقيعات" }).click();
+          mode = "ready"; await register(page).getByRole("button", { name: "تحديث زيارات الخروج" }).click();
           await expect.poll(() => item(page, 901).getByRole("link").count()).toBe(1);
         }
         // Start A, navigate to B, then A again before releasing the old A response.
         hold = true; await refresh(); await expect.poll(() => releases.length).toBe(1);
-        activeId = 902; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-09");
+        activeId = 902; await register(page).locator('input[aria-label="نهاية فترة الخروج أو التوقيع"]:visible').fill("2026-10-09");
         await expect.poll(() => item(page, 902).count()).toBe(1);
-        activeId = 903; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-10");
+        activeId = 903; await register(page).locator('input[aria-label="نهاية فترة الخروج أو التوقيع"]:visible').fill("2026-10-10");
         await expect.poll(() => item(page, 903).count()).toBe(1);
         releases.shift()!();
         await refresh(); await expect.poll(() => item(page, 903).count()).toBe(1);
@@ -323,14 +323,14 @@ describe("reception signature discovery on the built application", () => {
     const unexpected: string[] = [];
     const captures: ReceptionCapture[] = [];
     let resolved = false;
-    const payload = () => ({ owner: { username: "secreception", role: "reception" },
+    const payload = () => ({ version: 1, operationalItems: [], owner: { username: "secreception", role: "reception" },
       fromDate: "2026-10-09", toDate: "2026-10-10", clinicTimeZone: "Asia/Aden",
       items: Array.from({ length: 30 }, (_, index) => ({ visitId: 7000 + index, patientId: 31,
         patientName: `مريض اصطناعي ${index}`, patientNumber: "SYN-31", signedAt: "2026-10-10T09:00:00Z",
-        status: resolved && index === 0 ? "deferred" : "pending", handledReason: resolved && index === 0 ? "تأجيل موثّق" : null })) });
+        financialReviewRequired: false, visitInvoiceSettled: false, status: resolved && index === 0 ? "deferred" : "pending", handledReason: resolved && index === 0 ? "تأجيل موثّق" : null })) });
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const url = new URL(route.request().url());
-      if (url.origin === baseUrl && route.request().method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "reception-handoff") {
+      if (url.origin === baseUrl && route.request().method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "operational-checkout") {
         await route.fulfill({ json: payload() }); return;
       }
       await allowBuiltBoardRead(route, unexpected);

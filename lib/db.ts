@@ -28410,7 +28410,7 @@ export function seatVisitGated(
 
 export type DeferPaymentResult =
   | { ok: true; already: boolean; invoiceId: number | null }
-  | { ok: false; reason: "not_found" | "not_signed" };
+  | { ok: false; reason: "not_found" | "not_signed" | "stale" };
 
 /**
  * (CHAIR-1 Slice 5) «تأجيل الدفع» عند الشبّاك — قرارٌ يُسجَّل لا حركةٌ مالية.
@@ -28419,7 +28419,11 @@ export type DeferPaymentResult =
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
 export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
+  // Keep invoice→visit lock ordering shared with correction and handoff decisions.
+  const { lockReceptionReceivable } = await import("./operational-checkout-db");
   return inVisitTransaction(async (client) => {
+    const financial = await lockReceptionReceivable(client, id);
+    if (!financial.ok) return { ok: false, reason: financial.reason };
     const { rows } = await client.query<ReadinessFactsRow>(
       `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
       [CLINIC_TIME_ZONE, id],
@@ -28434,6 +28438,9 @@ export async function deferVisitPayment(id: number, actor: VisitActor, reason: s
         الفاتورة: row.invoice_id,
         "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
         العملة: row.invoice_currency,
+        patientId: financial.patientId,
+        signatureVersion: financial.signatureVersion,
+        receivable: financial.receivable,
         /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
         ...(reason ? { السبب: reason } : {}),
       },
