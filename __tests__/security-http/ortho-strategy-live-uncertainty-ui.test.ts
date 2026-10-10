@@ -87,6 +87,11 @@ describe("committed live strategy save with lost browser acknowledgement", () =>
         expect(forwarded).toBe(1); expect(armed).toBe(false); expect(sent).toBeDefined(); expect(committed).toBeDefined();
         expect(await save.isDisabled()).toBe(true);
         expect(await editor.getByRole("button", { name: "إلغاء مسودة الخطة", exact: true }).isDisabled()).toBe(true);
+        for (const name of ["الهدف (نص الطبيب)", "الاستراتيجية (نص الطبيب)",
+          "المبرر أو ملاحظة القرار (اختياري)", "سبب توثيق هذه النسخة (مطلوب)"]) {
+          const control = editor.getByRole("textbox", { name, exact: true });
+          expect(await control.count()).toBe(1); expect(await control.isDisabled()).toBe(true);
+        }
         expect(await editor.getByLabel("الهدف (نص الطبيب)", { exact: true }).isDisabled()).toBe(true);
         expect(await fieldValues()).toEqual(values);
         const exact = { history: await f.history(), audit: await f.audit() };

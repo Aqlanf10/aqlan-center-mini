@@ -18,9 +18,13 @@ const idOf = (raw: string | null): number | null => {
 };
 
 async function scope(context: Context, write: boolean) {
-  // Authenticate before looking up a case. The transaction repeats current-session,
-  // patient ownership and linked-plan authority checks before any history is returned.
-  if (!(await requireSession())) return { ok: false as const, response: jsonError("انتهت الجلسة. سجّل الدخول من جديد.", 401) };
+  // Authenticate and reject non-clinical writers before disclosing case existence.
+  // Keep the canonical patient guard and transaction-time authority checks below.
+  const session = await requireSession();
+  if (!session) return { ok: false as const, response: jsonError("انتهت الجلسة. سجّل الدخول من جديد.", 401) };
+  if (write && session.role !== "doctor" && session.role !== "admin") {
+    return { ok: false as const, response: jsonError("الحالات التخصصية وقائمة المشاكل يكتبها الطبيب — الاستقبال يطّلع عليها فقط.", 403) };
+  }
   const orthoCaseId = idOf((await context.params).id);
   if (!orthoCaseId) return { ok: false as const, response: jsonError("رقم الحالة غير صالح.", 400) };
   const found = await getOrthoCase(orthoCaseId, clinicDateString(new Date(), CLINIC_TIME_ZONE));

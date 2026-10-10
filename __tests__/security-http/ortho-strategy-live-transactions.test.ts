@@ -41,6 +41,23 @@ async function closeTransaction(control: Awaited<ReturnType<typeof openStrategyC
   try { await control.query("ROLLBACK"); }
   finally { try { await control.end(); } finally { await Promise.allSettled([request]); } }
 }
+function revokePlanPermission(control: Awaited<ReturnType<typeof openStrategyControl>>, f: StrategyFixture) {
+  // Canonical users.permissions is JSON serialized into TEXT, not a jsonb column.
+  // Change only the owned account and preserve every other permission key.
+  return control.query<{ permissions: Record<string, unknown> }>(
+    `UPDATE users SET permissions=jsonb_set(permissions::jsonb,'{canEditPlans}','false'::jsonb)::text
+      WHERE id=$1 AND username=$2 RETURNING permissions::jsonb AS permissions`, [f.userId, f.username]);
+}
+async function assertOwnedPermissions(f: StrategyFixture, canEditPlans: boolean) {
+  expect((await f.db.query(
+    "SELECT pg_typeof(permissions)::text AS storage_type, permissions::jsonb AS permissions FROM users WHERE id=$1 AND username=$2",
+    [f.userId, f.username])).rows).toEqual([{ storage_type: "text", permissions: { ...f.permissions, canEditPlans } }]);
+}
+function assertPermissionRevoked(f: StrategyFixture, result: Awaited<ReturnType<typeof revokePlanPermission>>) {
+  expect(result.rowCount).toBe(1);
+  expect(result.rows).toEqual([{ permissions: { ...f.permissions, canEditPlans: false } }]);
+}
+
 const assignAway = (f: StrategyFixture) => authedMutation(`/api/plan-items/${f.itemId}/case`, f.session,
   "PUT", JSON.stringify({ caseId: null, priority: null }));
 const removeItem = (f: StrategyFixture) => authedMutation(`/api/plans/${f.planId}/items?itemId=${f.itemId}`, f.session, "DELETE");
@@ -49,6 +66,27 @@ const mergeInto = (f: StrategyFixture, target: StrategyFixture) => authedMutatio
     confirmDuplicateNumber: f.patientNumber, reason: "Synthetic strategy serialization probe" }));
 
 describe("actual strategy writer transaction serialization on disposable CI PostgreSQL", () => {
+  it("reports the exact background SQL rejection instead of an unhandled rejection or lock-poll timeout", async () => {
+    await withFixture("observer-sql-rejection", async f => {
+      const control = await openStrategyControl(f); let operation: Promise<unknown> | undefined;
+      try {
+        const pid = (await control.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        // A deliberate read-only PG error exercises the observer itself. It is
+        // not a substitute for the real writer/blocker proofs below.
+        operation = control.query("SELECT 1 / 0 AS strategy_observer_error");
+        const [observed, original] = await Promise.allSettled([
+          observeStrategyWait(f, pid, "SELECT 1 / 0 AS strategy_observer_error", operation), operation,
+        ]);
+        if (observed.status !== "rejected" || original.status !== "rejected") {
+          throw new Error("Both the SQL operation and its lock observer must reject.");
+        }
+        expect(original.reason).toMatchObject({ code: "22012" });
+        expect(observed.reason).toBe(original.reason);
+        expect(await f.counts()).toEqual({ revisions: 0, audits: 0 });
+      } finally { try { await Promise.allSettled([operation]); } finally { await control.end(); } }
+    });
+  }, 60_000);
+
   it.each(["replay", "stale", "command-conflict"] as const)("serializes two live HTTP appends: %s", async mode => {
     await withFixture(`concurrent-${mode}`, async f => {
       const before = await f.snapshot(), first = f.command();
@@ -58,9 +96,9 @@ describe("actual strategy writer transaction serialization on disposable CI Post
       const pending: Promise<Response>[] = [];
       try {
         pending.push(f.post(first));
-        const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log");
+        const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log", pending[0]);
         pending.push(f.post(second));
-        const waiter = await observeStrategyWait(f, writer.pid, "SELECT id FROM patients");
+        const waiter = await observeStrategyWait(f, writer.pid, "SELECT id FROM patients", pending[1]);
         expect(waiter.pid).not.toBe(writer.pid);
         await gate.release();
         const saved = await successful(await pending[0]); expect(saved.replayed).toBe(false);
@@ -80,10 +118,10 @@ describe("actual strategy writer transaction serialization on disposable CI Post
       const pending: Promise<Response>[] = [];
       try {
         pending.push(f.post());
-        const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log");
+        const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log", pending[0]);
         pending.push(mutation === "assignment" ? assignAway(f) : removeItem(f));
         // Both canonical paths lock the patient first (removePlanItem -> lockPlan).
-        await observeStrategyWait(f, writer.pid, "SELECT id FROM patients");
+        await observeStrategyWait(f, writer.pid, "SELECT id FROM patients", pending[1]);
         await gate.release();
         const saved = await successful(await pending[0]); expect((await pending[1]).status).toBe(200);
         await oneRevision(f, saved.revision.revisionId);
@@ -106,9 +144,9 @@ describe("actual strategy writer transaction serialization on disposable CI Post
       try {
         pending.push(mutation === "assignment" ? assignAway(f) : removeItem(f));
         const changer = await observeStrategyWait(f, gate.blockerPid,
-          mutation === "assignment" ? "UPDATE plan_items SET case_id" : "DELETE FROM plan_items");
+          mutation === "assignment" ? "UPDATE plan_items SET case_id" : "DELETE FROM plan_items", pending[0]);
         pending.push(f.post());
-        await observeStrategyWait(f, changer.pid, "SELECT id FROM patients");
+        await observeStrategyWait(f, changer.pid, "SELECT id FROM patients", pending[1]);
         await gate.release();
         expect((await pending[0]).status).toBe(200);
         await rejected(await pending[1], 409, "item_scope_mismatch");
@@ -128,7 +166,7 @@ describe("actual strategy writer transaction serialization on disposable CI Post
         else await control.query("UPDATE plan_items SET case_id=NULL WHERE id=$1 AND plan_id=$2", [f.itemId, f.planId]);
         const pid = (await control.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
         request = f.post(); await observeStrategyWait(f, pid,
-          reference === "problem" ? "SELECT p.id FROM patient_problems" : "SELECT i.id FROM plan_items");
+          reference === "problem" ? "SELECT p.id FROM patient_problems" : "SELECT i.id FROM plan_items", request);
         await control.query("COMMIT");
         await rejected(await request, 409, reference === "problem" ? "problem_scope_mismatch" : "item_scope_mismatch");
         expect(await f.counts()).toEqual({ revisions: 0, audits: 0 });
@@ -144,15 +182,18 @@ describe("actual strategy writer transaction serialization on disposable CI Post
         await control.query("BEGIN");
         // Only this test's synthetic account is changed. Outer route reads see
         // its previous committed state; the store's users FOR SHARE must wait.
-        if (kind === "permission") await control.query("UPDATE users SET permissions=jsonb_set(permissions,'{canEditPlans}','false'::jsonb) WHERE id=$1", [f.userId]);
-        else if (kind === "credential") await control.query("UPDATE users SET password_hash=password_hash || '-synthetic-revoked' WHERE id=$1", [f.userId]);
+        if (kind === "permission") {
+          await assertOwnedPermissions(f, true);
+          assertPermissionRevoked(f, await revokePlanPermission(control, f));
+        } else if (kind === "credential") await control.query("UPDATE users SET password_hash=password_hash || '-synthetic-revoked' WHERE id=$1", [f.userId]);
         else if (kind === "role") await control.query("UPDATE users SET role='reception' WHERE id=$1", [f.userId]);
         else await control.query("UPDATE users SET is_active=false WHERE id=$1", [f.userId]);
         const pid = (await control.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
         request = f.post();
-        const waiting = await observeStrategyWait(f, pid, "FROM users WHERE LOWER(username)");
+        const waiting = await observeStrategyWait(f, pid, "FROM users WHERE LOWER(username)", request);
         expect(waiting.query).toContain("FOR SHARE");
         await control.query("COMMIT");
+        if (kind === "permission") await assertOwnedPermissions(f, false);
         await rejected(await request, kind === "permission" ? 403 : 401,
           kind === "permission" ? "plan_links_unavailable" : "session_expired");
         expect(await f.counts()).toEqual({ revisions: 0, audits: 0 }); expect(await f.snapshot()).toEqual(before);
@@ -163,12 +204,15 @@ describe("actual strategy writer transaction serialization on disposable CI Post
   it("keeps its locked authority until commit and applies a waiting permission revocation to the next append", async () => {
     await withFixture("revoke-after-lock", async f => {
       const gate = await installStrategyFault(f, "strategy-audit"), control = await openStrategyControl(f);
-      let request: Promise<Response> | undefined, revoke: Promise<unknown> | undefined;
+      let request: Promise<Response> | undefined, revoke: ReturnType<typeof revokePlanPermission> | undefined;
       try {
-        request = f.post(); const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log");
-        revoke = control.query("UPDATE users SET permissions=jsonb_set(permissions,'{canEditPlans}','false'::jsonb) WHERE id=$1", [f.userId]);
-        await observeStrategyWait(f, writer.pid, "UPDATE users SET permissions");
-        await gate.release(); const saved = await successful(await request); await revoke;
+        await assertOwnedPermissions(f, true);
+        request = f.post(); const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log", request);
+        revoke = revokePlanPermission(control, f);
+        await observeStrategyWait(f, writer.pid, "UPDATE users SET permissions", revoke);
+        await assertOwnedPermissions(f, true);
+        await gate.release(); const saved = await successful(await request);
+        assertPermissionRevoked(f, await revoke); await assertOwnedPermissions(f, false);
         await rejected(await f.post(f.command({ expectedRevisionId: saved.revision.revisionId })), 403, "plan_links_unavailable");
         await oneRevision(f, saved.revision.revisionId);
       } finally { try { await closeGate(gate, [request, revoke]); } finally { await control.end(); } }
@@ -181,8 +225,8 @@ describe("actual strategy writer transaction serialization on disposable CI Post
       const gate = await installStrategyFault(f, "strategy-audit");
       const pending: Promise<Response>[] = [];
       try {
-        pending.push(f.post()); const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log");
-        pending.push(mergeInto(f, target)); await observeStrategyWait(f, writer.pid, "WHERE id = ANY");
+        pending.push(f.post()); const writer = await observeStrategyWait(f, gate.blockerPid, "INSERT INTO audit_log", pending[0]);
+        pending.push(mergeInto(f, target)); await observeStrategyWait(f, writer.pid, "WHERE id = ANY", pending[1]);
         await gate.release(); const saved = await successful(await pending[0]);
         expect((await pending[1]).status).toBe(200);
         expect(await f.counts()).toEqual({ revisions: 1, audits: 1 });
@@ -204,9 +248,9 @@ describe("actual strategy writer transaction serialization on disposable CI Post
       const pending: Promise<Response>[] = [];
       try {
         pending.push(mergeInto(f, target));
-        const merger = await observeStrategyWait(f, gate.blockerPid, "UPDATE ortho_cases SET patient_id");
+        const merger = await observeStrategyWait(f, gate.blockerPid, "UPDATE ortho_cases SET patient_id", pending[0]);
         pending.push(f.post(f.command(), h.sessions.admin));
-        await observeStrategyWait(f, merger.pid, "SELECT id FROM patients");
+        await observeStrategyWait(f, merger.pid, "SELECT id FROM patients", pending[1]);
         await gate.release(); expect((await pending[0]).status).toBe(200);
         await rejected(await pending[1], 404, "patient_not_found");
         expect(await f.counts()).toEqual({ revisions: 0, audits: 0 });

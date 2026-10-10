@@ -50,6 +50,13 @@ async function fillDraft(page: Page, owner: "a" | "b" = "a") {
   await rationale(page).fill(ownerText.rationale); await reason(page).fill(REASON);
   await row(page).getByRole("checkbox", { name: new RegExp(ownerText.service) }).check();
 }
+async function assertStableTextNames(page: Page) {
+  // These are real accessible names, not test IDs or a partial-label fallback.
+  for (const name of ["الهدف (نص الطبيب)", "الاستراتيجية (نص الطبيب)",
+    "المبرر أو ملاحظة القرار (اختياري)", "سبب توثيق هذه النسخة (مطلوب)"]) {
+    expect(await editor(page).getByRole("textbox", { name, exact: true }).count()).toBe(1);
+  }
+}
 async function retained(page: Page, url: string, length: number, snapshot: Awaited<ReturnType<typeof strategyFieldSnapshot>>) {
   await settleStrategy(page); expect(page.url()).toBe(url); expect(await page.evaluate(() => history.length)).toBe(length);
   await selectedPatientSection(page, "patient-subtab-ortho"); expect(await strategyFieldSnapshot(editor(page))).toEqual(snapshot);
@@ -65,6 +72,7 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       await begin(f.page).click();
       expect(await row(f.page).count()).toBe(1); expect(await row(f.page).locator("select").inputValue()).toBe("");
       for (const control of [objective(f.page), strategy(f.page), rationale(f.page), reason(f.page)]) expect(await control.inputValue()).toBe("");
+      await assertStableTextNames(f.page);
       expect(await row(f.page).getByRole("checkbox").isChecked()).toBe(false); expect(await save(f.page).isDisabled()).toBe(true);
       const problemSearch = field(f.page, "بحث في مشاكل هذه الحالة"), itemSearch = field(f.page, "بحث في بنود خطة هذه الحالة");
       await problemSearch.fill("لا توجد نتيجة اصطناعية");
@@ -73,6 +81,7 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       expect(await row(f.page).locator("select option").count()).toBe(2); expect(await row(f.page).locator("select").inputValue()).toBe("");
       await objective(f.page).fill("هدف حر بلا اختيار مشكلة"); await strategy(f.page).fill("قرار حر لا تولّده القائمة");
       await itemSearch.fill("لا يوجد بند مطابق"); expect(await row(f.page).getByRole("checkbox").count()).toBe(0);
+      await assertStableTextNames(f.page);
       expect(await objective(f.page).inputValue()).toBe("هدف حر بلا اختيار مشكلة");
       expect(await strategy(f.page).inputValue()).toBe("قرار حر لا تولّده القائمة");
       await problemSearch.fill(""); await itemSearch.fill(""); await fillDraft(f.page);
@@ -161,6 +170,7 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       expect(await draft(f.page).count()).toBe(0); expect(f.writes).toEqual([]);
       await history.selectOption(String(ids.revision2)); await expect.poll(() => revise(f.page).isEnabled()).toBe(true);
       await revise(f.page).click();
+      await assertStableTextNames(f.page);
       expect(await objective(f.page).inputValue()).toBe(text.objective);
       expect(await strategy(f.page).inputValue()).toBe(`${text.strategy} مراجعة صريحة`);
       expect(await reason(f.page).inputValue()).toBe(""); expect(await save(f.page).isDisabled()).toBe(true);
@@ -171,6 +181,7 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       expect(f.writes[0].body).toMatchObject({ expectedRevisionId: ids.revision2, reason: "تصحيح استعادي جديد اصطناعي" });
       expect(Object.keys(f.writes[0].body as object).sort()).toEqual(["commandId", "expectedRevisionId", "reason", "rows", "schemaVersion"]);
       await f.release(); expect(f.writes.map(one => [one.method, one.path])).toEqual([["POST", PATH]]);
+      await assertStableTextNames(f.page);
       await assertStrategyControlBounds(f.page, width, "retrospective-revision", [objective(f.page), strategy(f.page), reason(f.page), save(f.page), cancel(f.page)]);
     });
   });

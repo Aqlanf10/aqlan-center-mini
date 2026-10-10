@@ -70,9 +70,9 @@ async function openPrescription(card: Locator) {
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
   await card.page().evaluate(async () => { await document.fonts.ready; });
-  // Keep the complete case card below the app's fixed top bar. Scrolling only
-  // its prescription into view allowed the header to cover case identity/status
-  // in the first CI screenshots even though the changed value remained readable.
+  // Keep case identity and the entire prescription panel below the fixed bar.
+  // The following strategy panel legitimately extends this case beyond one
+  // viewport; its ordinary scroll access is checked separately below.
   await card.evaluate((element) => {
     window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - 80), behavior: "instant" });
   });
@@ -80,7 +80,10 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
     const rect = element.getBoundingClientRect();
     const identifier = Array.from(element.querySelectorAll("span")).find((span) => /^#\d+$/.test(span.textContent ?? ""))!;
     const label = identifier.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, viewportHeight: innerHeight, caseLabel: identifier.textContent,
+    const heading = Array.from(element.querySelectorAll("h4")).find(node => node.textContent?.trim() === "وصفة الجهاز والمواصفات الميكانيكية")!;
+    const panel = heading.parentElement!.getBoundingClientRect();
+    return { scope: "case-identity-and-prescription-panel", top: rect.top, bottom: panel.bottom,
+      caseBottom: rect.bottom, viewportHeight: innerHeight, caseLabel: identifier.textContent,
       identityExposed: identifier.contains(document.elementFromPoint(label.left + label.width / 2, label.top + label.height / 2)) };
   });
   expect(frame.top).toBeGreaterThanOrEqual(79);
@@ -94,7 +97,8 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
       cell: { left: cell.left, right: cell.right, top: cell.top, bottom: cell.bottom },
       text: { left: text.left, right: text.right, top: text.top, bottom: text.bottom },
       fontSize: style.fontSize, display: style.display, visibility: style.visibility,
-      viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth };
+      unobscured: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+      viewportWidth: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.scrollWidth };
   });
   expect(geometry.label).toBe(kind === "unrecorded" ? "غير مسجّلة" : custom);
   expect(geometry.box.width).toBeGreaterThan(0); expect(geometry.box.height).toBeGreaterThan(0);
@@ -106,9 +110,36 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(geometry.text.bottom).toBeLessThanOrEqual(geometry.cell.bottom + 1);
   expect(geometry.cell.left).toBeGreaterThanOrEqual(-1);
   expect(geometry.cell.right).toBeLessThanOrEqual(width + 1);
+  expect(geometry.cell.top).toBeGreaterThanOrEqual(79);
+  expect(geometry.cell.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(geometry.unobscured).toBe(true);
   expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
-  await card.screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png` });
-  return { ...geometry, frame };
+  await card.page().screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png`, fullPage: false });
+  const strategy = card.getByTestId("ortho-strategy-editor");
+  await strategy.getByText("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.", { exact: true }).waitFor();
+  const bridge = strategy.getByRole("button", { name: "ربط هذه الحالة بالمشاكل وبنود الخطة", exact: true });
+  expect(await bridge.count()).toBe(1); expect(await bridge.isEnabled()).toBe(true);
+  // Exercise the real browser wheel, not a programmatic scrollIntoView witness.
+  const target = await bridge.boundingBox(); expect(target).not.toBeNull();
+  const viewport = card.page().viewportSize(); expect(viewport).not.toBeNull();
+  await card.page().mouse.move(width / 2, viewport!.height / 2);
+  await card.page().mouse.wheel(0, target!.y + target!.height / 2 - viewport!.height / 2);
+  await expect.poll(() => bridge.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 79 && rect.bottom <= innerHeight + 1
+      && element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+  })).toBe(true);
+  const strategyAccess = await bridge.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+      width: rect.width, height: rect.height, viewportHeight: innerHeight,
+      unobscured: element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) };
+  });
+  expect(strategyAccess.width).toBeGreaterThan(0); expect(strategyAccess.height).toBeGreaterThanOrEqual(44);
+  expect(strategyAccess.left).toBeGreaterThanOrEqual(-1); expect(strategyAccess.right).toBeLessThanOrEqual(width + 1);
+  expect(strategyAccess.top).toBeGreaterThanOrEqual(79); expect(strategyAccess.bottom).toBeLessThanOrEqual(strategyAccess.viewportHeight + 1);
+  expect(strategyAccess.unobscured).toBe(true);
+  return { ...geometry, frame, strategyAccess };
 }
 
 describe("built orthodontic prescription truth", () => {

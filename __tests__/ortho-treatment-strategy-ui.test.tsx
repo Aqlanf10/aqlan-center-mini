@@ -158,6 +158,32 @@ beforeEach(() => {
 afterEach(() => { unmount(); try { expect(unexpected).toEqual([]); expect(hooks.retiredWrites).toBe(0); } finally { vi.unstubAllGlobals(); vi.useRealTimers(); } });
 
 describe("Ortho strategy owner-bound component contract", () => {
+  it.each(["blank", "historical"] as const)("keeps explicit textarea names stable through %s edits and frozen states", async mode => {
+    const adapter = life(); props = { ...props, lifetime: adapter };
+    render(); await answer(mode === "blank" ? emptyStrategy(PATIENT_A) : strategyHistory(PATIENT_A));
+    click(mode === "blank" ? "بدء خطة الحالة من نموذج فارغ" : "فتح مراجعة جديدة من النسخة الحالية");
+    const labels = ["الهدف (نص الطبيب)", "الاستراتيجية (نص الطبيب)",
+      "المبرر أو ملاحظة القرار (اختياري)", "سبب توثيق هذه النسخة (مطلوب)"];
+    const assertNames = () => {
+      const areas = find(node => node.type === "textarea");
+      expect(areas.map(node => node.props["aria-label"])).toEqual(labels);
+      return areas;
+    };
+    expect(assertNames().map(node => node.props.value)).toEqual(mode === "blank" ? ["", "", "", ""]
+      : [STRATEGY_TEXT.a.objective, `${STRATEGY_TEXT.a.strategy} مراجعة صريحة`, STRATEGY_TEXT.a.rationale, ""]);
+    for (const [index, label] of labels.entries()) {
+      const area = assertNames().find(node => node.props["aria-label"] === label)!;
+      (area.props.onChange as (event: unknown) => void)({ target: { value: `نص الطبيب المحفوظ ${index}` } });
+      render(); expect(assertNames()[index].props.value).toBe(`نص الطبيب المحفوظ ${index}`);
+    }
+    const document = adapter.values.document;
+    adapter.busy = true; render(); assertNames();
+    expect(find(node => node.props["data-testid"] === "ortho-strategy-row")[0].props.disabled).toBe(true);
+    adapter.busy = false; adapter.uncertain = true; render(); assertNames();
+    expect(find(node => node.props["data-testid"] === "ortho-strategy-row")[0].props.disabled).toBe(true);
+    expect(adapter.values.document).toBe(document); expect(writes()).toEqual([]);
+  });
+
   it("never shows loading/failed reads as a blank editable strategy and keeps Visit read-only", async () => {
     render(); expect(content(render())).toContain("جارٍ التحقق"); expect(writes()).toEqual([]);
     await answer(strategyHistory(PATIENT_A));

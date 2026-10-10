@@ -53,7 +53,7 @@ async function fixture(width: number) {
     else if (path === `/api/visits/${VISIT}/materials`) await json(route, { lines: [], patientId: h.seeded.patientAId });
     else if (path === `/api/visits/${VISIT}/billing-preview`) await json(route, { message: "Synthetic preview unavailable" }, 503);
     else if (path === `/api/patients/${h.seeded.patientAId}/diagnoses`) {
-      expect(url.search).toBe(`?orthoCaseId=${ids.orthoCaseId}`); await json(route, []);
+      expect(url.search).toBe(`?orthoCaseId=${ids.orthoCaseId}`); await json(route, { diagnoses: [] });
     } else if (path === "/api/services") await json(route, []);
     else if (path === "/api/parties") { expect(url.search).toBe("?kind=doctor"); await json(route, [{ id: DOCTOR, name: "طبيب اصطناعي" }]); }
     else if (path === "/api/booking-requests") await json(route, []);
@@ -73,7 +73,16 @@ async function fixture(width: number) {
   return { page, reads, setResponse: (body: unknown, status = 200) => { response = { body, status }; },
     run: (body: () => Promise<void>) => routes.run(async () => {
       const result = await page.goto(`${baseUrl}/visits/${VISIT}`, { waitUntil: "domcontentloaded" });
-      expect(result?.status()).toBe(200); await notes(page).getByRole("textbox", { name: "② الفحص", exact: true }).waitFor();
+      expect(result?.status()).toBe(200); await notes(page).getByRole("textbox", { name: "فحص اليوم (إن أُجري)", exact: true }).waitFor();
+      // This fixture is an Ortho follow-up, not an ordinary consultation.
+      // Verify all original notes before the reference can be opened.
+      for (const [label, value] of [
+        ["شكوى جديدة أو تغيّر اليوم (إن وجد)", stored.chiefComplaint],
+        ["فحص اليوم (إن أُجري)", stored.examination],
+        ["تشخيص جديد أو محدّث (إن وجد)", stored.diagnosis],
+        ["توثيق عمل إضافي اليوم", stored.treatmentDone],
+        ["الخطوة القادمة", stored.nextPlan],
+      ]) expect(await notes(page).getByRole("textbox", { name: label, exact: true }).inputValue()).toBe(value);
       await body(); expect(context.pages()).toHaveLength(1); verify();
     }, verify),
   };

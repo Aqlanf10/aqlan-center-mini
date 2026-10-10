@@ -28,12 +28,29 @@ export async function openStrategyControl(f: StrategyFixture) {
 export type LockEdge = { pid: number; query: string; blockers: number[]; wait_event_type: string; state: string };
 /** Polling delay is only backoff. Passing requires a server-observed exact
  * blocker PID edge and the actual subject statement in the same database. */
-export async function observeStrategyWait(f: StrategyFixture, blocker: number, statement: string): Promise<LockEdge> {
+export async function observeStrategyWait(
+  f: StrategyFixture, blocker: number, statement: string, pendingOperation?: Promise<unknown>,
+): Promise<LockEdge> {
+  // Attach before the first await: a rejected competing SQL/HTTP operation must
+  // fail with its original error, never become an unhandled rejection while we
+  // poll for a lock it cannot acquire. The caller still awaits/drains the same
+  // original promise after releasing its gate.
+  let operation: { state: "pending" } | { state: "fulfilled" } | { state: "rejected"; error: unknown } = { state: "pending" };
+  void pendingOperation?.then(
+    () => { operation = { state: "fulfilled" }; },
+    error => { operation = { state: "rejected", error }; },
+  );
+  const assertPending = () => {
+    if (operation.state === "rejected") throw operation.error;
+    if (operation.state === "fulfilled") throw new Error(`Operation completed before its observed lock edge for ${statement}`);
+  };
   const deadline = Date.now() + 15_000;
   do {
+    assertPending();
     const { rows } = await f.db.query<LockEdge>(`SELECT pid,query,pg_blocking_pids(pid) AS blockers,wait_event_type,state
       FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()
         AND $1=ANY(pg_blocking_pids(pid))`, [blocker]);
+    assertPending();
     const edge = rows.find(row => row.query.includes(statement));
     if (edge) {
       expect(edge.blockers).toContain(blocker); expect(edge.wait_event_type).toBe("Lock");
@@ -43,6 +60,7 @@ export async function observeStrategyWait(f: StrategyFixture, blocker: number, s
     }
     await new Promise(resolve => setTimeout(resolve, 20));
   } while (Date.now() < deadline);
+  assertPending();
   throw new Error(`No observed pg_blocking_pids edge for ${statement} behind PID ${blocker}`);
 }
 

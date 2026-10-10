@@ -309,8 +309,8 @@ export default function RecallPage() {
                     key={row.id}
                     className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-3"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-navy-900">{row.patientName}</p>
+                    <div className="min-w-0 max-w-full [overflow-wrap:anywhere]">
+                      <p className="text-sm font-bold text-navy-900">{row.patientName}</p>
                       <p className="text-xs text-slate-600">
                         {openPastText(row.daysLate)} · {row.scheduledDate} {row.scheduledTime}
                         {row.doctorName ? ` · ${row.doctorName}` : ""}
@@ -508,11 +508,11 @@ function RecallCard({
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-[10rem] flex-1">
-          <div className="flex items-center gap-2">
+        <div className="min-w-0 max-w-full flex-1 [overflow-wrap:anywhere]">
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href={`/patients/${row.patientId}`}
-              className="text-sm font-black text-navy-900 hover:underline underline-offset-4"
+              className="min-w-0 max-w-full text-sm font-black text-navy-900 hover:underline underline-offset-4"
             >
               {row.patientName}
             </a>
@@ -535,7 +535,7 @@ function RecallCard({
           </p>
 
           {row.note ? (
-            <p className="mt-1 text-[11px] text-slate-600 bg-slate-100/80 rounded-lg px-2 py-0.5 inline-block">
+            <p className="mt-1 max-w-full text-[11px] text-slate-600 bg-slate-100/80 rounded-lg px-2 py-0.5 inline-block">
               {row.note}
             </p>
           ) : null}

@@ -104,7 +104,13 @@ describe("orthodontic strategy over the built security-HTTP server", () => {
     }
     expect(await read(a, undefined, h.sessions.reception)).toMatchObject({ clinicalWritable: false, canRevise: false });
     expect(await read(a, undefined, h.sessions.admin)).toMatchObject({ clinicalWritable: true, canRevise: true });
-    await refusal(await a.post(a.command(), h.sessions.reception), 403);
+    // Denied writers must receive the same role refusal before any case lookup
+    // or ID validation, including the global matrix's nonexistent-case probe.
+    expect((await a.db.query("SELECT id FROM ortho_cases WHERE id=$1", [987654321])).rows).toEqual([]);
+    for (const path of [a.path, "/api/ortho/987654321/strategy", "/api/ortho/0/strategy"]) {
+      const denied = await refusal(await authedMutation(path, h.sessions.reception, "POST", JSON.stringify(a.command())), 403);
+      expect(denied.message).toBe("الحالات التخصصية وقائمة المشاكل يكتبها الطبيب — الاستقبال يطّلع عليها فقط.");
+    }
     await unchanged(a, before); await unchanged(b, otherBefore);
     await write(a, a.command({ expectedRevisionId: first.revision.revisionId }), 201, h.sessions.admin);
     expect(await a.snapshot()).toEqual(before.unrelated);

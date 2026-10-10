@@ -20,10 +20,43 @@ beforeEach(() => {
 });
 
 describe("case strategy route admission and exact history", () => {
-  it("authenticates before looking up any case", async () => {
+  it.each(["GET", "POST"] as const)("authenticates %s before looking up any case", async method => {
     mock.session.mockResolvedValue(null);
-    expect((await GET(new Request("https://synthetic.invalid/api/ortho/7/strategy"), context())).status).toBe(401);
-    expect(mock.getCase).not.toHaveBeenCalled(); expect(mock.read).not.toHaveBeenCalled();
+    const response = method === "GET"
+      ? await GET(new Request("https://synthetic.invalid/api/ortho/7/strategy"), context())
+      : await POST(request({}), context());
+    expect(response.status).toBe(401);
+    expect(mock.getCase).not.toHaveBeenCalled(); expect(mock.guard).not.toHaveBeenCalled();
+    expect(mock.read).not.toHaveBeenCalled(); expect(mock.append).not.toHaveBeenCalled();
+  });
+  it.each(["reception", "assistant", "cashier", "accountant"])(
+    "rejects %s writes before ID validation, case lookup or body parsing", async role => {
+      mock.session.mockResolvedValue({ ...session, role });
+      for (const id of ["7", "987654321", "0"]) {
+        mock.getCase.mockResolvedValue(id === "7" ? { id: 7, patientId: 4 } : null);
+        const incoming = request({});
+        const response = await POST(incoming, context(id));
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({ message: "الحالات التخصصية وقائمة المشاكل يكتبها الطبيب — الاستقبال يطّلع عليها فقط." });
+        expect(incoming.bodyUsed).toBe(false);
+      }
+      expect(mock.getCase).not.toHaveBeenCalled(); expect(mock.guard).not.toHaveBeenCalled();
+      expect(mock.append).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["doctor", "admin"])("keeps missing-case 404 for an admitted %s writer", async role => {
+    mock.session.mockResolvedValue({ ...session, role }); mock.getCase.mockResolvedValue(null);
+    expect((await POST(request({}), context("987654321"))).status).toBe(404);
+    expect(mock.getCase).toHaveBeenCalledTimes(1); expect(mock.guard).not.toHaveBeenCalled();
+    expect(mock.append).not.toHaveBeenCalled();
+  });
+  it("preserves reception history reads through the canonical patient guard", async () => {
+    const reception = { ...session, role: "reception" };
+    mock.session.mockResolvedValue(reception); mock.guard.mockResolvedValue({ ok: true, session: reception });
+    expect((await GET(new Request("https://synthetic.invalid/api/ortho/7/strategy"), context())).status).toBe(200);
+    expect(mock.guard).toHaveBeenCalledWith(4, false);
+    expect(mock.read).toHaveBeenCalledWith({ session: reception, patientId: 4, orthoCaseId: 7, revisionId: undefined });
+    expect(mock.append).not.toHaveBeenCalled();
   });
   it.each(["0", "-1", "1e3", "1.5", "9007199254740992"])("rejects noncanonical case ID %s", async id => {
     expect((await POST(request({}), context(id))).status).toBe(400);
