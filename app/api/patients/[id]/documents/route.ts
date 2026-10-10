@@ -12,6 +12,9 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
+import { CONSENT_RECORD_NOTE_LIMIT, DOCUMENT_NOTE_LIMIT, parseStoredConsent } from "@/lib/consent-record";
+
+const CONSENT_NOTE_INVALID_MESSAGE = "بيانات الإقرار ناقصة أو أطول من الحد المسموح، فلم يُحفظ شيء. أعد فتح نموذج الإقرار وحاول مجددًا.";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +110,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const title = (rawTitle || file.name || "مستند").slice(0, 120);
   const rawNote = typeof form.get("note") === "string" ? String(form.get("note")).trim() : "";
   const rawTaken = typeof form.get("takenOn") === "string" ? String(form.get("takenOn")) : "";
+  /* (Codex P1 on #291) A signed consent's structured note (JSON from the consent form) is its record: the reprint reads it
+     strictly (`parseStoredConsent`). It is kept whole up to a bound, never cut at 300 characters into invalid JSON, and a
+     structured record the reprint could not read is refused before anything is written. A free-text note (a scanned paper
+     consent from the generic upload) and every other document keep their 300-character note unchanged. */
+  const consentRecord = kind === "consent" && rawNote.startsWith("{");
+  if (consentRecord && (rawNote.length > CONSENT_RECORD_NOTE_LIMIT || parseStoredConsent(rawNote) === null)) {
+    return NextResponse.json({ message: CONSENT_NOTE_INVALID_MESSAGE }, { status: 400 });
+  }
+  const note = !rawNote ? null : consentRecord ? rawNote : rawNote.slice(0, DOCUMENT_NOTE_LIMIT);
   const takenOn = DATE_PATTERN.test(rawTaken) ? rawTaken : null;
   // ربط صور التقويم: الحالة والشدّة التي صُوّرت فيها ودورُها ووجهُها — وألبوم
   // الجلسة يُبنى من هذا الربط، فالصورة التي بلا ربطٍ تضيع في الشبكة كلها.
@@ -158,7 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       sizeBytes: stored.sizeBytes,
       sha256: stored.sha256,
       storageKey: stored.key,
-      note: rawNote ? rawNote.slice(0, 300) : null,
+      note,
       takenOn,
       uploadedBy: session.username,
       orthoCaseId,
