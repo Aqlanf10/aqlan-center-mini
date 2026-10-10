@@ -264,7 +264,9 @@ describe("PatientCases orthodontic navigation containment", () => {
     expect(writes()).toHaveLength(0);
     expect(contents(render().tree)).toContain("Standalone orthodontic specialty");
     const standalone = render().nodes.find((node) => node.type === "li" && contents(node.props.children as ReactNode).includes("Standalone orthodontic specialty"))!;
-    expect(elements(standalone).some((node) => node.props["data-testid"])).toBe(false);
+    expect(standalone.props["data-testid"]).toBe("clinical-case-9");
+    expect(elements(standalone).filter((node) => String(node.props["data-testid"] ?? "").startsWith("cases-open-ortho-"))).toEqual([]);
+    expect(elements(standalone).filter((node) => node.type === "button" && contents(node.props.children as ReactNode) === ACTION)).toEqual([]);
   });
 
   it.each(["completed", "closed"] as const)("keeps historical %s cases navigable for both canonical and bridged rows", async (status) => {
