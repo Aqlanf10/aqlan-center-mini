@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { LabOrder } from "@/lib/lab";
-import { MINOR_UNITS, parseAmount, toBaseAmount, formatAmount, CURRENCY_LABEL, type Currency } from "@/lib/money";
+import { MINOR_UNITS, toInputAmount, formatAmount, CURRENCY_LABEL, type Currency } from "@/lib/money";
 import { rateFromSettings, type SettingsMap } from "@/lib/settings";
 import { STANDARD_LAB_EXPENSE_ACCOUNTS, STANDARD_LAB_PAYABLE_ACCOUNTS } from "@/lib/accounting";
+import { isLabAccountingRate, labAccountingMoneyEdit, labAccountingPreviewBase } from "@/lib/lab-accounting-edit";
 
 export interface ExpenseCategoryOption {
   id: number;
@@ -36,10 +37,14 @@ export function LabOrderAccountingModal({
   const [selectedPayableAccount, setSelectedPayableAccount] = useState<string>("2101");
   const [costValue, setCostValue] = useState<string>("");
   const [currencyValue, setCurrencyValue] = useState<Currency>("YER");
-  /* سعر الصرف للمعاينة: المحفوظ مع الأمر صالح لعملته الأصلية فقط — تغيير
-     العملة في النافذة كان يعاير المبلغ بسعر العملة القديمة. */
-  const [previewRate, setPreviewRate] = useState<number>(1);
+  const [moneyTouched, setMoneyTouched] = useState(false);
+  const [moneyRevision, setMoneyRevision] = useState(0);
+  const [moneyOwner, setMoneyOwner] = useState<LabOrder | null>(null);
+  const [rateState, setRateState] = useState<{
+    key: string; status: "loading" | "ready" | "unavailable"; rate?: number;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -68,44 +73,51 @@ export function LabOrderAccountingModal({
     // Initialize cost — بالوحدات الكبرى يقرأها المستخدم، لا وحدات القاعدة.
     const initialCurrency = (order.costCurrency || baseCurrency) as Currency;
     if (order.costMinor != null && order.costMinor > 0) {
-      const major = order.costMinor / (MINOR_UNITS[initialCurrency] ?? 1);
-      setCostValue(String(Number.isInteger(major) ? major : Number(major.toFixed(2))));
+      setCostValue(toInputAmount(order.costMinor, initialCurrency));
     } else {
       setCostValue("");
     }
     setCurrencyValue(initialCurrency);
+    setMoneyTouched(false);
+    setMoneyRevision((revision) => revision + 1);
+    setMoneyOwner(order);
     setErrorMsg(null);
     setSuccessMsg(null);
   }, [order, expenseCategories, baseCurrency]);
 
-  // سعر صرف المعاينة: من الأمر إن بقيت عملته، وإلا من الإعدادات الحالية
+  const moneyEdit = order
+    ? labAccountingMoneyEdit(order, costValue, currencyValue, baseCurrency, moneyTouched)
+    : { kind: "unchanged" as const };
+  const orderId = order?.id ?? null;
+  const needsCurrentRate = moneyEdit.kind === "edited";
+  const rateKey = `${orderId}:${moneyRevision}:${currencyValue}:${baseCurrency}`;
+  // Saved money is never repriced. Intentional edits use the server's current
+  // settings policy, even when only the amount (not currency) changed.
   useEffect(() => {
-    if (!order) return;
-    const orderCurrency = (order.costCurrency || baseCurrency) as Currency;
-    if (currencyValue === orderCurrency && order.exchangeRate) {
-      setPreviewRate(order.exchangeRate);
-      return;
-    }
+    if (orderId == null || !needsCurrentRate) return;
     if (currencyValue === baseCurrency) {
-      setPreviewRate(1);
+      setRateState({ key: rateKey, status: "ready", rate: 1 });
       return;
     }
     let active = true;
+    setRateState({ key: rateKey, status: "loading" });
     void (async () => {
       try {
         const res = await fetch("/api/settings", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("settings_unavailable");
         const settings = (await res.json()) as SettingsMap;
         const rate = rateFromSettings(settings, currencyValue, baseCurrency);
-        if (active && rate != null && rate > 0) setPreviewRate(rate);
+        if (active) setRateState(isLabAccountingRate(rate)
+          ? { key: rateKey, status: "ready", rate }
+          : { key: rateKey, status: "unavailable" });
       } catch {
-        /* تُعرض المعاينة بسعرٍ تقريبي والخادم يحفظ بالسعر الصحيح */
+        if (active) setRateState({ key: rateKey, status: "unavailable" });
       }
     })();
     return () => {
       active = false;
     };
-  }, [order, currencyValue, baseCurrency]);
+  }, [orderId, needsCurrentRate, rateKey, currencyValue, baseCurrency]);
 
   if (!order) return null;
 
@@ -132,23 +144,34 @@ export function LabOrderAccountingModal({
       name: "ذمم المعامل والموردين",
     };
 
-  /* القيمة بالوحدات الكبرى كما تُقرأ — التحويل إلى وحدات القاعدة عند المعاينة
-   * وإرسالها كما هي؛ الخادم يعيدها minor عبر parseAmount. */
-  const costMajorValue = costValue !== "" && Number.isFinite(Number(costValue))
-    ? Number(costValue)
-    : (order.costMinor != null && order.costMinor > 0
-        ? order.costMinor / (MINOR_UNITS[currencyValue] ?? 1)
-        : 0);
-  const previewMinor = costMajorValue > 0
-    ? (parseAmount(String(costMajorValue), currencyValue) ?? 0)
-    : 0;
-  const baseAmount = previewMinor > 0
-    ? toBaseAmount(previewMinor, currencyValue, baseCurrency, previewRate)
-    : 0;
+  const ownedRate = rateState?.key === rateKey ? rateState : null;
+  const previewRate = moneyEdit.kind === "unchanged"
+    ? (isLabAccountingRate(order.exchangeRate) ? order.exchangeRate : null)
+    : (ownedRate?.status === "ready" ? ownedRate.rate ?? null : null);
+  const previewMinor = moneyEdit.kind === "unchanged" ? order.costMinor
+    : moneyEdit.kind === "edited" ? moneyEdit.costMinor : null;
+  const costMajorValue = previewMinor != null ? previewMinor / MINOR_UNITS[currencyValue] : null;
+  const baseAmount = moneyEdit.kind === "unchanged"
+    ? (Number.isSafeInteger(order.baseAmountMinor) && order.baseAmountMinor != null && order.baseAmountMinor >= 0
+        ? order.baseAmountMinor : null)
+    : moneyEdit.kind === "edited" && previewRate != null
+      ? labAccountingPreviewBase(moneyEdit.costMinor, currencyValue, baseCurrency, previewRate) : null;
+  const previewState = moneyEdit.kind === "unchanged" ? "saved"
+    : moneyEdit.kind === "invalid" ? "invalid"
+      : ownedRate?.status === "unavailable" || (ownedRate?.status === "ready" && baseAmount == null)
+        ? "unavailable" : baseAmount != null ? "ready" : "loading";
+  const moneyReady = moneyEdit.kind === "unchanged" || previewState === "ready";
+  const canSubmit = moneyOwner === order && !isSubmitting && moneyReady;
 
   const isAlreadyPosted = order.isPosted !== false && (order.costMinor != null && order.costMinor > 0);
 
   const handleSubmit = async (action: "post" | "unpost" | "update_accounting") => {
+    if (submittingRef.current) return;
+    if (!canSubmit) {
+      setErrorMsg(moneyEdit.kind === "invalid" ? moneyEdit.message : "انتظر معاينة سعر صرف صالحة قبل حفظ تعديل التكلفة.");
+      return;
+    }
+    submittingRef.current = true;
     setIsSubmitting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -161,10 +184,14 @@ export function LabOrderAccountingModal({
         payableAccountCode: selectedPayableAccount,
       };
 
-      /* إفراغ خانة التكلفة يمحوها فعلاً (cost: null) — إرسال لا شيء كان
-         يبقي القديمة فلا تُحذف تكلفة من هذه النافذة أبدًا. */
-      payload.cost = costValue === "" ? null : costValue;
-      payload.costCurrency = currencyValue;
+      // Omitting unchanged money is what preserves both historical snapshots.
+      if (moneyEdit.kind === "edited") {
+        // Parse the same raw text on both sides; reserializing large minor
+        // values can introduce a second floating-point rounding step.
+        payload.cost = costValue;
+        payload.costCurrency = moneyEdit.currency;
+        payload.expectedExchangeRate = previewRate;
+      }
 
       const res = await fetch(`/api/lab/${order.id}`, {
         method: "PATCH",
@@ -174,6 +201,10 @@ export function LabOrderAccountingModal({
 
       const data = await res.json();
       if (!res.ok) {
+        if (data.code === "lab_accounting_rate_changed" || data.code === "lab_accounting_rate_invalid") {
+          setRateState((current) => current?.key === rateKey
+            ? { key: rateKey, status: "unavailable" } : current);
+        }
         throw new Error(data.message || "تعذّر حفظ التعديلات المحاسبية.");
       }
 
@@ -190,6 +221,7 @@ export function LabOrderAccountingModal({
       const msg = err instanceof Error ? err.message : "حدث خطأ أثناء حفظ الربط المحاسبي.";
       setErrorMsg(msg);
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -235,7 +267,7 @@ export function LabOrderAccountingModal({
           </div>
         </div>
 
-        <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+        <div className="p-4 sm:p-6 space-y-6 max-h-[80vh] overflow-y-auto">
           {/* Messages */}
           {errorMsg && (
             <div
@@ -378,38 +410,62 @@ export function LabOrderAccountingModal({
                 <div className="flex gap-2">
                   <input
                     id="lab-accounting-cost-input"
+                    disabled={isSubmitting}
                     type="number"
                     min="0"
                     step="any"
                     value={costValue}
-                    onChange={(e) => setCostValue(e.target.value)}
+                    onChange={(e) => {
+                      setCostValue(e.target.value);
+                      setMoneyTouched(true);
+                      setMoneyRevision((revision) => revision + 1);
+                    }}
                     placeholder="التكلفة..."
-                    className="flex-1 text-xs rounded-xl border border-slate-300 p-2.5 bg-white text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="min-w-0 flex-1 text-xs rounded-xl border border-slate-300 p-2.5 bg-white text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                   <select
                     id="lab-accounting-currency-select"
+                    disabled={isSubmitting}
                     value={currencyValue}
-                    onChange={(e) => setCurrencyValue(e.target.value as Currency)}
-                    className="w-28 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onChange={(e) => {
+                      setCurrencyValue(e.target.value as Currency);
+                      setMoneyTouched(true);
+                      setMoneyRevision((revision) => revision + 1);
+                    }}
+                    className="w-28 shrink-0 text-xs rounded-xl border border-slate-300 p-2.5 bg-slate-50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="YER">ريال يمني</option>
                     <option value="SAR">ريال سعودي</option>
                     <option value="USD">دولار</option>
                   </select>
                 </div>
-                {currencyValue !== baseCurrency && (
-                  <p className="text-[11px] text-indigo-600 mt-1">
-                    المعادل بالعملة الأساسية: {" "}
-                    <span className="font-bold">{formatAmount(baseAmount, baseCurrency)} {CURRENCY_LABEL[baseCurrency]}</span> (بسعر صرف{" "}
-                    {previewRate})
-                  </p>
+                <p id="lab-accounting-money-preview" data-preview-state={previewState}
+                  data-preview-currency={currencyValue}
+                  data-preview-source={moneyEdit.kind === "unchanged" ? "saved" : "current"}
+                  className="text-[11px] text-indigo-600 mt-1" aria-live="polite">
+                  {moneyEdit.kind === "invalid" ? moneyEdit.message
+                    : previewState === "loading" ? "جارٍ تحميل سعر الصرف الحالي…"
+                      : previewState === "unavailable" ? "معاينة الصرف غير متاحة. حدّث المعاينة للمحاولة؛ لم تُحفظ تكلفة جديدة."
+                        : <>
+                          {moneyEdit.kind === "unchanged" ? "المعادل المحفوظ: " : "معاينة المعادل الحالي: "}
+                          <span className="font-bold">{baseAmount == null ? "غير مسجل" : `${formatAmount(baseAmount, baseCurrency)} ${CURRENCY_LABEL[baseCurrency]}`}</span>
+                          {previewRate != null ? ` (بسعر صرف ${previewRate})` : ""}
+                          {moneyEdit.kind === "unchanged" ? "؛ تعديل الربط وحده لا يغيّر التكلفة أو سعر الصرف." : "؛ يُرفض الحفظ إذا تغيّر السعر قبل الإرسال."}
+                        </>}
+                </p>
+                {moneyEdit.kind === "edited" && (
+                  <button id="lab-accounting-refresh-rate-btn" type="button" disabled={isSubmitting}
+                    className="mt-1 text-[11px] font-bold text-indigo-700 underline"
+                    onClick={() => { setErrorMsg(null); setMoneyRevision((revision) => revision + 1); }}>
+                    تحديث معاينة سعر الصرف
+                  </button>
                 )}
               </div>
             </div>
           </div>
 
           {/* Double-Entry Accounting Voucher / Journal Preview */}
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/60 to-slate-50 p-4 space-y-3">
+          <div className="rounded-xl border border-indigo-200 bg-gradient-to-b from-indigo-50/60 to-slate-50 p-3 sm:p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
                 <span>📋</span> معاينة القيد المحاسبي المزدوج (سند الاستحقاق قبل الترحيل)
@@ -419,48 +475,78 @@ export function LabOrderAccountingModal({
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-right border-collapse">
-                <thead>
-                  <tr className="border-b border-indigo-200/80 text-slate-500 text-[11px]">
-                    <th className="py-2 px-2">الطرف</th>
-                    <th className="py-2 px-2">رمز الحساب</th>
-                    <th className="py-2 px-2">اسم الحساب</th>
-                    <th className="py-2 px-2">بند المصروف</th>
-                    <th className="py-2 px-2 text-left">مدين</th>
-                    <th className="py-2 px-2 text-left">دائن</th>
+            <div id="lab-accounting-ledger" className="min-w-0 max-w-full overflow-x-auto">
+              {/* Keep all six fields readable on narrow screens, with table
+                  roles explicit because mobile rows use a grid layout. */}
+              <table role="table" className="block w-full text-xs text-right border-collapse sm:table">
+                <thead role="rowgroup" className="sr-only sm:not-sr-only sm:table-header-group">
+                  <tr role="row" className="border-b border-indigo-200/80 text-slate-500 text-[11px]">
+                    <th role="columnheader" scope="col" className="py-2 px-2">الطرف</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">رمز الحساب</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">اسم الحساب</th>
+                    <th role="columnheader" scope="col" className="py-2 px-2">بند المصروف</th>
+                    <th id="lab-accounting-debit-header" role="columnheader" scope="col" className="py-2 px-2 text-left">مدين</th>
+                    <th id="lab-accounting-credit-header" role="columnheader" scope="col" className="py-2 px-2 text-left">دائن</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-indigo-100/80 font-medium">
+                <tbody role="rowgroup" className="block divide-y divide-indigo-100/80 font-medium sm:table-row-group">
                   {/* Debit Line */}
-                  <tr className="bg-white/60">
-                    <td className="py-2.5 px-2 text-emerald-700 font-bold">المدين (+مصروف)</td>
-                    <td className="py-2.5 px-2 font-mono text-indigo-900">
+                  <tr role="row" className="grid grid-cols-2 bg-white/60 sm:table-row">
+                    <td role="cell" className="min-w-0 py-1 px-2 text-emerald-700 font-bold sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">الطرف: </span>
+                      المدين (+مصروف)
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 font-mono text-indigo-900 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">رمز الحساب: </span>
                       {selectedExpenseAccObj.code}
                     </td>
-                    <td className="py-2.5 px-2 text-slate-800">{selectedExpenseAccObj.name}</td>
-                    <td className="py-2.5 px-2 text-slate-600">
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-800 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">اسم الحساب: </span>
+                      {selectedExpenseAccObj.name}
+                    </td>
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-600 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">بند المصروف: </span>
                       {selectedCategory?.name || "تكاليف المعامل"}
                     </td>
-                    <td className="py-2.5 px-2 text-left font-bold text-emerald-700 font-mono">
-                      {costMajorValue.toLocaleString()} {currencyValue}
+                    <td role="cell" className="min-w-0 break-words py-1 px-2 text-left font-bold text-emerald-700 font-mono sm:py-2.5">
+                      <span id="lab-accounting-debit-label" aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">مدين</span>
+                      <span id="lab-accounting-debit-amount" className="block">
+                        {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                      </span>
                     </td>
-                    <td className="py-2.5 px-2 text-left text-slate-400 font-mono">—</td>
+                    <td role="cell" className="min-w-0 py-1 px-2 text-left text-slate-400 font-mono sm:py-2.5">
+                      <span aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">دائن</span>
+                      —
+                    </td>
                   </tr>
 
                   {/* Credit Line */}
-                  <tr className="bg-white/60">
-                    <td className="py-2.5 px-2 text-rose-700 font-bold">الدائن (+التزام)</td>
-                    <td className="py-2.5 px-2 font-mono text-indigo-900">
+                  <tr role="row" className="grid grid-cols-2 bg-white/60 sm:table-row">
+                    <td role="cell" className="min-w-0 py-1 px-2 text-rose-700 font-bold sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">الطرف: </span>
+                      الدائن (+التزام)
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 font-mono text-indigo-900 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">رمز الحساب: </span>
                       {selectedPayableAccObj.code}
                     </td>
-                    <td className="py-2.5 px-2 text-slate-800">
+                    <td role="cell" className="min-w-0 col-span-2 break-words py-1 px-2 text-slate-800 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">اسم الحساب: </span>
                       {selectedPayableAccObj.name} ({order.labName})
                     </td>
-                    <td className="py-2.5 px-2 text-slate-500">—</td>
-                    <td className="py-2.5 px-2 text-left text-slate-400 font-mono">—</td>
-                    <td className="py-2.5 px-2 text-left font-bold text-rose-700 font-mono">
-                      {costMajorValue.toLocaleString()} {currencyValue}
+                    <td role="cell" className="min-w-0 col-span-2 py-1 px-2 text-slate-500 sm:py-2.5">
+                      <span aria-hidden="true" className="text-[11px] font-normal text-slate-500 sm:hidden">بند المصروف: </span>
+                      —
+                    </td>
+                    <td role="cell" className="min-w-0 py-1 px-2 text-left text-slate-400 font-mono sm:py-2.5">
+                      <span aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">مدين</span>
+                      —
+                    </td>
+                    <td role="cell" className="min-w-0 break-words py-1 px-2 text-left font-bold text-rose-700 font-mono sm:py-2.5">
+                      <span id="lab-accounting-credit-label" aria-hidden="true" className="block text-[11px] font-normal text-slate-500 sm:hidden">دائن</span>
+                      <span id="lab-accounting-credit-amount" className="block">
+                        {costMajorValue == null ? "غير محدد" : costMajorValue.toLocaleString()} {currencyValue}
+                      </span>
                     </td>
                   </tr>
                 </tbody>
@@ -497,7 +583,7 @@ export function LabOrderAccountingModal({
                 <button
                   id="lab-accounting-unpost-btn"
                   type="button"
-                  disabled={isSubmitting}
+                  disabled={!canSubmit}
                   onClick={() => handleSubmit("unpost")}
                   className="px-3.5 py-2.5 rounded-xl border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 text-xs font-semibold transition-colors disabled:opacity-50"
                   title="إلغاء الترحيل وإعادة الفاتورة كمسودة للمراجعة"
@@ -511,7 +597,7 @@ export function LabOrderAccountingModal({
               <button
                 id="lab-accounting-save-mapping-btn"
                 type="button"
-                disabled={isSubmitting}
+                disabled={!canSubmit}
                 onClick={() => handleSubmit("update_accounting")}
                 className="px-4 py-2.5 rounded-xl border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 text-xs font-bold transition-colors disabled:opacity-50"
               >
@@ -522,7 +608,7 @@ export function LabOrderAccountingModal({
                 <button
                   id="lab-accounting-final-post-btn"
                   type="button"
-                  disabled={isSubmitting}
+                  disabled={!canSubmit}
                   onClick={() => handleSubmit("post")}
                   className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
                 >
@@ -533,7 +619,7 @@ export function LabOrderAccountingModal({
                 <button
                   id="lab-accounting-repost-btn"
                   type="button"
-                  disabled={isSubmitting}
+                  disabled={!canSubmit}
                   onClick={() => handleSubmit("post")}
                   className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
                 >
