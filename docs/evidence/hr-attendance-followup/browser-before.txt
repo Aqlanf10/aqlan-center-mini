@@ -1,0 +1,46 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-payroll-journey.test.ts -t explicit next-day
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts (7 tests | 2 failed | 5 skipped) 29758ms
+   × explicit next-day correction and second-admin approval preserve evidence at 390px 2586ms
+   × explicit next-day correction and second-admin approval preserve evidence at 1280px 2304ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > explicit next-day correction and second-admin approval preserve evidence at 390px
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > explicit next-day correction and second-admin approval preserve evidence at 1280px
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:171:78
+    169|    await page.locator('section[aria-label="الدوام والحضور"] input[type…
+    170|    const row=page.locator('section[aria-label="الدوام والحضور"] tbody …
+    171|    expect(await page.getByLabel("تاريخ الدخول الصحيح",{exact:true}).co…
+       |                                                                              ^
+    172|    expect(await page.getByLabel("تاريخ الخروج الصحيح",{exact:true}).co…
+    173|    expect(await page.getByLabel("تاريخ الخروج الصحيح",{exact:true}).in…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 skipped (7)
+   Start at  20:13:15
+   Duration  43.97s (transform 340ms, setup 0ms, import 2.32s, tests 29.76s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
