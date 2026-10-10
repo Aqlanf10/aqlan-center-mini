@@ -38,6 +38,14 @@ let observedAgeText = "";
 const FILES = ["patient-preview.png", "patient-print.png", "patient-parent-blank.pdf", "patient-dispatch.pdf",
   "lab-preview.png", "lab-print.png", "lab-parent-blank.pdf", "lab-dispatch.pdf"] as const;
 type Member = { filename: (typeof FILES)[number]; bytes: Buffer };
+type DiagnosticPdf = {
+  entry: "patient" | "lab";
+  filename: "patient-dispatch.pdf" | "lab-dispatch.pdf";
+  bytes: Buffer;
+  pages: number;
+  expectedFields: { reference: string; service: string; lab: string; shade: "A2"; stumpShade: "ND2" };
+  failure: unknown;
+};
 const plain = (text: string) => text.normalize("NFKC").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
 const compact = (text: string) => plain(text).replace(/\s+/g, "");
 function assertPrivateAbsent(text: string) {
@@ -258,10 +266,52 @@ function emitEvidence(members: Member[], facts: unknown) {
   console.log(`${prefix} MANIFEST ${JSON.stringify({ runId, checkoutSha, synthetic: true, files: prepared.map(item => item.metadata), sources, facts })}`);
 }
 
+function emitDiagnosticPdf(member: DiagnosticPdf) {
+  // Only native, synthetic PDFs whose privacy inspection already passed, but
+  // whose unchanged required-field assertion failed. Never acceptance evidence.
+  expect(["patient", "lab"]).toContain(member.entry);
+  expect(member.filename).toBe(`${member.entry}-dispatch.pdf`);
+  expect(Buffer.isBuffer(member.bytes)).toBe(true);
+  expect(member.bytes.length).toBeGreaterThan(0);
+  expect(member.bytes.length).toBeLessThanOrEqual(2 * 1024 * 1024);
+  expect(member.bytes.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  expect(member.bytes.subarray(-1024).toString("ascii")).toContain("%%EOF");
+  expect(Number.isSafeInteger(member.pages) && member.pages > 0).toBe(true);
+  const runId = process.env.GITHUB_RUN_ID ?? "", runAttempt = process.env.GITHUB_RUN_ATTEMPT ?? "";
+  const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", maxBuffer: 4096 }).trim();
+  expect(runId).toMatch(/^\d{1,24}$/); expect(runAttempt).toMatch(/^\d{1,6}$/);
+  expect(checkoutSha).toMatch(/^[a-f0-9]{40}$/); expect(checkoutSha).toBe(process.env.GITHUB_SHA);
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  expect(typeof eventPath).toBe("string");
+  const event = JSON.parse(readFileSync(eventPath!, "utf8")) as { pull_request?: { head?: { sha?: unknown } } };
+  const headSha = event.pull_request?.head?.sha;
+  expect(typeof headSha).toBe("string"); expect(headSha).toMatch(/^[a-f0-9]{40}$/);
+  expect(member.expectedFields.reference).toMatch(/^RX-[1-9][0-9]*$/);
+  expect(member.expectedFields.service).toBe(serviceName);
+  expect(member.expectedFields.lab).toBe(labs[member.entry === "patient" ? 0 : 1]);
+  expect(member.expectedFields.shade).toBe("A2"); expect(member.expectedFields.stumpShade).toBe("ND2");
+  const sources = ["__tests__/security-http/lab-dispatch-privacy-ui.test.ts", "lib/lab.ts", "components/LabPrescriptionModal.tsx", "app/print/lab/[id]/page.tsx"]
+    .map(path => ({ path, sha256: createHash("sha256").update(readFileSync(path)).digest("hex") }));
+  const base64 = member.bytes.toString("base64");
+  const metadata = { file: `diagnostic-${member.filename}`, mime: "application/pdf", bytes: member.bytes.length,
+    sha256: createHash("sha256").update(member.bytes).digest("hex"), chunks: Math.ceil(base64.length / 4096),
+    runId, runAttempt, checkoutSha, headSha, sources, synthetic: true, diagnosticOnly: true, acceptance: false,
+    scope: "lab-dispatch-required-field-failure", entry: member.entry, pages: member.pages,
+    failureBoundary: "unchanged-required-field-contiguity-assertion", privacyInspectionCompleted: true,
+    contextClosed: true, isolationAfterClose: true, snapshotUnchanged: true, expectedFields: member.expectedFields };
+  const prefix = "SYNTHETIC_LAB_DISPATCH_DIAGNOSTIC_PDF_V1";
+  console.log(`${prefix} BEGIN ${JSON.stringify(metadata)}`);
+  for (let index = 0; index < metadata.chunks; index++) console.log(`${prefix} CHUNK ${metadata.file} ${index + 1}/${metadata.chunks} ${base64.slice(index * 4096, (index + 1) * 4096)}`);
+  console.log(`${prefix} END ${JSON.stringify(metadata)}`);
+}
+
 describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
   it("both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records", async () => {
     const before = await snapshot();
     const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE", timezoneId: "Asia/Aden", serviceWorkers: "block" });
+    let contextClosed = false, isolationAfterClose = false;
+    let diagnosticPdf: DiagnosticPdf | undefined;
+    context.once("close", () => { contextClosed = true; });
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl });
@@ -391,7 +441,13 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
         const filename = `${entry}-dispatch.pdf` as const;
         const pdf = await printPage.pdf({ path: `${directory}/${filename}`, format: "A4", preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
         const inspected = await inspectPdf(printPage, filename, false);
-        for (const expected of [reference, serviceName, labs[orderIndex], "A2", "ND2"]) expect(compact(inspected.text)).toContain(compact(expected));
+        try {
+          for (const expected of [reference, serviceName, labs[orderIndex], "A2", "ND2"]) expect(compact(inspected.text)).toContain(compact(expected));
+        } catch (failure) {
+          diagnosticPdf = { entry, filename, bytes: pdf, pages: inspected.pages, failure,
+            expectedFields: { reference, service: serviceName, lab: labs[orderIndex], shade: "A2", stumpShade: "ND2" } };
+          throw failure;
+        }
         pdfFacts.push({ filename, pages: inspected.pages }); members.push({ filename, bytes: pdf });
         await printPage.close();
         await overlay.getByRole("button", { name: "✕", exact: true }).click();
@@ -404,7 +460,20 @@ describe("lab dispatch privacy on actual built browser and PDF outputs", () => {
         await overlay.getByRole("button", { name: "✕", exact: true }).click();
         await expect.poll(() => sheet.count()).toBe(0);
       }
-    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
+    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); isolationAfterClose = true; }).catch(async (failure: unknown) => {
+      // guard.run returns the original error only when it is the sole failure:
+      // route retirement, actual close and after-close isolation all succeeded.
+      if (diagnosticPdf && failure === diagnosticPdf.failure && contextClosed && isolationAfterClose) {
+        try {
+          expect(await snapshot()).toEqual(before);
+          emitDiagnosticPdf(diagnosticPdf);
+        } catch (retentionFailure) {
+          throw new AggregateError([failure, retentionFailure], "Lab dispatch assertion failed; diagnostic retention also failed");
+        }
+      }
+      // Preserve the exact original assertion; diagnostic output never passes it.
+      throw failure;
+    });
     expect(await snapshot()).toEqual(before);
     emitEvidence(members, { entrypoints: ["patient", "lab"], clipboard: "passed", urgencyUrl: "passed-without-navigation",
       fullPdfTextAndMetadata: "passed", parentPrintIsolation: "passed", readOnlySnapshot: "unchanged", qr: qrFacts, pdfs: pdfFacts,
