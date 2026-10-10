@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { clinicalCaseCompatibility, planItemClinicalScope } from "@/lib/clinical-case-linkage";
+import { clinicalCaseCompatibility, planItemClinicalScope, type ClinicalCaseIdentity } from "@/lib/clinical-case-linkage";
 import { caseSiteFits, lineLinkage, validateLineSite } from "@/lib/invoice-clinical-linkage";
 
 const item = { serviceId: 1, category: "rct", toothCode: 36, surfaces: null };
-const target = { patientId: 7, specialty: "endodontics", status: "active", site: "36" };
+const target: ClinicalCaseIdentity = { patientId: 7, specialty: "endodontics", status: "active", site: "36" };
 const scope = planItemClinicalScope(item)!;
 const compatible = (patch: Partial<typeof target>) => clinicalCaseCompatibility({ patientId: 7, ...scope, target: { ...target, ...patch } });
 
