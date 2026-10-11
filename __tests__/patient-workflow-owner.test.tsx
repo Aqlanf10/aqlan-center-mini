@@ -46,7 +46,7 @@ vi.mock("@/components/patient/PatientCockpit", () => ({ PatientCockpit: "mock-co
 vi.mock("@/lib/patient-navigation", async (original) => ({
   ...await original<typeof import("../lib/patient-navigation")>(),
   // These tests do not navigate tabs; retain the real initial URL parser.
-  createPatientNavigation: () => ({ navigate: () => true }),
+  createPatientNavigation: () => ({ navigate: () => true, dispose: () => undefined }),
 }));
 
 vi.mock("react", async (original) => {

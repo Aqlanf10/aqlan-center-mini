@@ -1,3 +1,4 @@
+import { operationalDecisionForSigned, lockReceptionReceivable, signedReceptionFinancialState } from "./operational-checkout-db";
 import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type VisitActor, type VisitWalkout } from "./db";
 import { onClinicDaysSql } from "./clinic-day-sql";
 import { clinicDateString } from "./schedule";
@@ -15,13 +16,18 @@ interface HandoffRow {
   full_name: string;
   patient_number: string;
   signed_at: Date;
+  signature_version: string;
   eligible_invoice_id: number | null;
   handled_reason: string | null;
+  completed_details?: Record<string, unknown> | null;
+  deferred_details?: Record<string, unknown> | null;
   deferred: boolean;
 }
 
-const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number, v.signed_at,
-            i.id AS eligible_invoice_id, completed.handled_reason,
+const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version,
+            i.id AS eligible_invoice_id, completed.handled_reason, completed.details AS completed_details,
+            (SELECT a.details FROM audit_log a WHERE a.entity = 'visit' AND a.entity_id = v.id::text
+              AND a.action = 'visit.payment_deferred' AND a.created_at >= v.signed_at ORDER BY a.id DESC LIMIT 1) AS deferred_details,
             EXISTS (SELECT 1 FROM audit_log a
                      WHERE a.entity = 'visit' AND a.entity_id = v.id::text
                        AND a.action = 'visit.payment_deferred'
@@ -30,7 +36,7 @@ const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number
        LEFT JOIN invoices i ON i.id = v.invoice_id AND i.patient_id = v.patient_id
          AND i.status <> 'cancelled' AND i.total_minor - i.discount_minor > 0
        LEFT JOIN LATERAL (
-         SELECT a.details->>'reason' AS handled_reason FROM audit_log a
+         SELECT a.details->>'reason' AS handled_reason, a.details FROM audit_log a
           WHERE a.entity = 'visit' AND a.entity_id = v.id::text
             AND a.action = '${COMPLETED_ACTION}'
             AND a.details->>'patientId' = v.patient_id::text
@@ -58,9 +64,18 @@ async function toHandoff(row: HandoffRow, walkout?: VisitWalkout | null): Promis
   let status: ReceptionHandoff["status"] = row.handled_reason !== null ? "handled" : row.deferred ? "deferred" : "pending";
   if (status === "pending" && row.eligible_invoice_id !== null
     && isCollected(row, walkout === undefined ? await visitWalkout(row.id) : walkout)) status = "collected";
+  const carried = status === "pending" ? await operationalDecisionForSigned(row.id, row.patient_id, row.signed_at.toISOString()) : null;
+  if (carried) status = carried.status;
+  const decisionDetails = row.handled_reason !== null ? row.completed_details : row.deferred_details;
+  const originalProof = decisionDetails?.patientId === row.patient_id && decisionDetails?.signatureVersion === row.signature_version
+    ? decisionDetails.receivable : undefined;
+  const financial = row.handled_reason !== null || row.deferred
+    ? await signedReceptionFinancialState(row.id, row.patient_id, row.signed_at.toISOString(), originalProof)
+    : { reviewRequired: carried?.status === "pending", invoiceSettled: status === "collected" };
   return { visitId: row.id, patientId: row.patient_id, patientName: row.full_name,
     patientNumber: row.patient_number, signedAt: row.signed_at.toISOString(),
-    status, handledReason: row.handled_reason };
+    status, handledReason: carried?.reason ?? row.handled_reason,
+    financialReviewRequired: financial.reviewRequired, visitInvoiceSettled: financial.invoiceSettled };
 }
 
 /** Also serves the exact-visit checkout, including signatures outside today's window. */
@@ -127,6 +142,19 @@ export async function completeReceptionHandoff(input: CompleteReceptionHandoffIn
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const financial = await lockReceptionReceivable(client, input.visitId);
+    if (!financial.ok) {
+      await client.query("ROLLBACK"); return { ok: false, reason: financial.reason };
+    }
+    if (financial.patientId !== input.patientId) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "stale" };
+    }
+    if (financial.signedAt === null) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "not_signed" };
+    }
+    if (financial.signedAt !== input.signedAt) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "stale" };
+    }
     const { rows: [visit] } = await client.query<{
       patient_id: number | null; signed_at: Date | null; signature_version: string | null;
     }>(`SELECT v.patient_id, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version
@@ -149,7 +177,7 @@ export async function completeReceptionHandoff(input: CompleteReceptionHandoffIn
     if (!completed.length) {
       await insertAuditRow(client, { action: COMPLETED_ACTION, entity: "visit", entityId: input.visitId,
         details: { patientId: input.patientId, signedAt: input.signedAt,
-          signatureVersion: visit.signature_version, reason: input.reason.trim() },
+          signatureVersion: visit.signature_version, reason: input.reason.trim(), receivable: financial.receivable },
         actor: actor.actor, actorRole: actor.actorRole });
     }
     await client.query("COMMIT");

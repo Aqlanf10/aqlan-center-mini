@@ -52,8 +52,8 @@ beforeAll(async () => {
   patient = await mkPatient("P-E2-1");
   other = await mkPatient("P-E2-2");
   const mkCase = async (patientId: number, specialty: string, status = "active") => (await q<{ id: number }>(
-    `INSERT INTO clinical_cases (patient_id, specialty, title, status, completed_at, created_by)
-     VALUES ($1, $2, 't', $3, CASE WHEN $3 IN ('active','waiting') THEN NULL ELSE NOW() END, 'admin') RETURNING id`,
+    `INSERT INTO clinical_cases (patient_id, specialty, title, site, status, completed_at, created_by)
+     VALUES ($1, $2, 't', '36', $3, CASE WHEN $3 IN ('active','waiting') THEN NULL ELSE NOW() END, 'admin') RETURNING id`,
     [patientId, specialty, status]))[0].id;
   caseId = await mkCase(patient, "endodontics");
   otherCase = await mkCase(other, "endodontics");
@@ -77,7 +77,9 @@ describe("opening a treatment", () => {
       endo.openEndoTreatment({ ...actor, patientId: patient, caseId, toothCode: 36, kind: "initial" })));
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.reason === "tooth_busy")).toBe(true);
-    expect((await endo.openEndoTreatment({ ...actor, patientId: patient, caseId, toothCode: 46, kind: "initial" })).ok).toBe(true);
+    const case46 = (await q<{ id: number }>(`INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by)
+      VALUES($1,'endodontics','SYNTHETIC 46','46','synthetic') RETURNING id`, [patient]))[0].id;
+    expect((await endo.openEndoTreatment({ ...actor, patientId: patient, caseId: case46, toothCode: 46, kind: "initial" })).ok).toBe(true);
     expect((await endo.openEndoTreatment({ ...actor, patientId: other, caseId: otherCase, toothCode: 36, kind: "initial" })).ok).toBe(true);
     const rows = await q(`SELECT 1 FROM endo_treatments WHERE patient_id = $1 AND tooth_code = 36`, [patient]);
     expect(rows).toHaveLength(1);
@@ -277,7 +279,9 @@ describe("multi-visit, multi-canal treatment on tooth 36", () => {
 
 describe("completion preconditions", () => {
   it("cannot complete without canals/obturation/restoration; abandoning needs the reason in the database too", async () => {
-    const t = await endo.openEndoTreatment({ ...actor, patientId: patient, caseId, toothCode: 17, kind: "initial" });
+    const case17 = (await q<{ id: number }>(`INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by)
+      VALUES($1,'endodontics','SYNTHETIC 17','17','synthetic') RETURNING id`, [patient]))[0].id;
+    const t = await endo.openEndoTreatment({ ...actor, patientId: patient, caseId: case17, toothCode: 17, kind: "initial" });
     if (!t.ok) throw new Error("open failed");
     const v = await newVisit(patient, doctor1);
     await endo.saveEndoVisit({ ...actor, patientId: patient, treatmentId: t.treatment.id, visitId: v, draft: draftOf({ stage: "assessment", canals: [{ label: "MB" }] }), expectedVersion: null, actorPartyId: null });

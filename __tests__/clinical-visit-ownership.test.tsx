@@ -365,7 +365,12 @@ describe("owner lifetime, command and navigation contracts", () => {
     const upperA = find((node) => node.props["aria-label"] === "استخدام السلك العلوي المقترح");
     const lowerA = find((node) => node.props["aria-label"] === "استخدام السلك السفلي المقترح");
     const cancelA = button("إلغاء");
-    const referenceA = find((node) => node.type === "a" && node.props.href === "/patients/92001?tab=ortho");
+    const referenceA = find((node) => node.type === "a" && typeof node.props.href === "string"
+      && new URL(node.props.href, "http://synthetic.test").pathname === "/patients/92001"
+      && new URL(node.props.href, "http://synthetic.test").searchParams.get("orthoCaseId") === "95001");
+    const referenceUrl = new URL(String(referenceA.props.href), "http://synthetic.test");
+    expect(Object.fromEntries(referenceUrl.searchParams)).toEqual({ patientId: "92001", orthoCaseId: "95001",
+      pillar: "wires", tab: "treatment", sub: "ortho" });
     currentVisitId = 91002; await flush();
     await invoke(button("+ شدّة هذه الزيارة (تُحفظ مع التوقيع)"));
     const doneB = find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة");
@@ -378,6 +383,21 @@ describe("owner lifetime, command and navigation contracts", () => {
     expect(find((node) => node.props["aria-label"] === "السلك السفلي لهذه الشدّة").props.value).toBe("012");
     expect(find((node) => node.props["aria-label"] === "ما نُفّذ في الشدّة").props.value).toBe("B actual work");
     expect(writes()).toHaveLength(0);
+  });
+
+  it("preserves an existing visit adjustment reference and retires its link after owner change", async () => {
+    stored.set(91001, { ...stored.get(91001), ortho: { ...orthodonticCase, visitAdjustmentId: 96001 } });
+    await mount();
+    const reference = find(node => node.type === "a" && typeof node.props.href === "string"
+      && new URL(node.props.href, "http://synthetic.test").searchParams.get("orthoCaseId") === "95001");
+    const url = new URL(String(reference.props.href), "http://synthetic.test");
+    expect(url.pathname).toBe("/patients/92001");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ patientId: "92001", orthoCaseId: "95001",
+      visitId: "91001", pillar: "wires", tab: "treatment", sub: "ortho" });
+    currentVisitId = 91002; await flush();
+    const preventDefault = vi.fn();
+    (reference.props.onClick as (event: unknown) => void)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce(); expect(writes()).toHaveLength(0);
   });
 
   it("does not publish a sign result or reload after unmount", async () => {

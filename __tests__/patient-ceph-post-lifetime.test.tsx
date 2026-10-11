@@ -143,7 +143,9 @@ beforeEach(() => {
       : { sets: [] },
     } as Response);
   });
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { location });
+  const host = Object.assign(new EventTarget(), { location, confirm: vi.fn(() => false) });
+  vi.spyOn(host, "addEventListener"); vi.spyOn(host, "removeEventListener");
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", host);
 });
 
 describe("PatientCeph image selection follows owned document reads", () => {
@@ -223,7 +225,13 @@ describe("PatientCeph image selection follows owned document reads", () => {
     expect(writes()).toHaveLength(0);
   });
 });
-afterEach(() => { unmount(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  unmount();
+  for (const [event, listener] of vi.mocked(window.addEventListener).mock.calls) {
+    if (event === "beforeunload") expect(window.removeEventListener).toHaveBeenCalledWith(event, listener);
+  }
+  vi.unstubAllGlobals();
+});
 
 describe("PatientCeph creation belongs to its current form and authority", () => {
   it("preserves the request payload, callback and successful navigation", async () => {
@@ -235,7 +243,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     });
     expect(writes()[0][1].signal).toBeInstanceOf(AbortSignal);
     posts[0].respond(); await flush();
-    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(location.href).toBe("/ceph/71");
+    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(location.href).toBe(`/ceph/71?patientId=${PATIENT}&orthoCaseId=${CASE}&pillar=diagnostics`);
   });
 
   for (const boundary of ["response", "body"] as const) {
@@ -258,7 +266,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     const oldProps = props, oldSession = hooks.session;
     retire(kind); props = oldProps; hooks.session = oldSession; render(); await flush();
     posts[0].body.resolve({ id: 71 }); await flush();
-    expect(callback).not.toHaveBeenCalled(); expect(location.href).not.toBe("/ceph/71");
+    expect(callback).not.toHaveBeenCalled(); expect(new URL(location.href, "http://clinic.test").pathname).not.toBe("/ceph/71");
     expect(nodes(render()).some((node) => node.type === "button" && text(node).trim() === OPEN)).toBe(false);
   });
 
@@ -273,7 +281,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     expect(button(BUSY).props.disabled).toBe(true);
     expect(text(render())).not.toContain("Retired error"); expect(callback).not.toHaveBeenCalled();
     posts[1].respond({ id: 72 }); await flush();
-    expect(callback).toHaveBeenCalledExactlyOnceWith(72); expect(location.href).toBe("/ceph/72");
+    expect(callback).toHaveBeenCalledExactlyOnceWith(72); expect(location.href).toBe(`/ceph/72?patientId=${PATIENT}&orthoCaseId=${CASE}&pillar=diagnostics`);
   });
 
   it("locks two direct invocations before a disabled render, including during body decoding", async () => {
@@ -298,13 +306,13 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
 
   it.each(["unmount", "patient", "case", "permissions", "cancel"])("rechecks ownership after callback-triggered %s", async (kind) => {
     await open(); callback.mockImplementation(() => retire(kind)); click(OPEN); posts[0].respond(); await flush();
-    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(location.href).not.toBe("/ceph/71");
+    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(new URL(location.href, "http://clinic.test").pathname).not.toBe("/ceph/71");
   });
 
   it("preserves a pending same-owner form after a display-name-only change", async () => {
     await open(); click(OPEN); hooks.session = { ...hooks.session!, displayName: "Updated visible name" }; render();
     expect(button(BUSY).props.disabled).toBe(true); posts[0].respond(); await flush();
-    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(location.href).toBe("/ceph/71");
+    expect(callback).toHaveBeenCalledExactlyOnceWith(71); expect(location.href).toBe(`/ceph/71?patientId=${PATIENT}&orthoCaseId=${CASE}&pillar=diagnostics`);
   });
 
   it.each(["http", "network", "json", "invalid-id"])("shows an active %s failure without retrying automatically", async (failure) => {
@@ -317,7 +325,7 @@ describe("PatientCeph creation belongs to its current form and authority", () =>
     expect(nodes(render()).some((node) => node.props.role === "alert")).toBe(true);
     expect(button(OPEN).props.disabled).toBe(false);
     click(OPEN); expect(writes()).toHaveLength(2); // Deliberate user retry only.
-    posts[1].respond(); await flush(); expect(location.href).toBe("/ceph/71");
+    posts[1].respond(); await flush(); expect(location.href).toBe(`/ceph/71?patientId=${PATIENT}&orthoCaseId=${CASE}&pillar=diagnostics`);
   });
 
   it.each(["assistant", "cashier", "accountant", "doctor"])("does not create under a non-uploading %s authority", async (role) => {

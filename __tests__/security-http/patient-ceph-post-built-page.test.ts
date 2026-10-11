@@ -165,13 +165,23 @@ describe("PatientCeph delayed writes on the real built patient page", () => {
         f.arm("hold"); await f.card.getByRole("button", { name: OPEN, exact: true }).click();
         await expect.poll(() => f.posts.length).toBe(1);
         expect(f.posts[0].body).toMatchObject({ documentId, orthoCaseId: caseId, phase: "during", refSet: "builtin_default" });
-        const destination = f.page.url();
+        let destination = f.page.url();
+        const origin = new URL(destination), historyLength = await f.page.evaluate(() => history.length);
         if (mode === "cancel") {
           await f.card.getByRole("button", { name: "إلغاء", exact: true }).click();
           await f.card.getByRole("button", { name: NEW, exact: true }).waitFor();
         } else {
           // Released e2ef tab names; no dependency on PR250-only controls.
           await f.card.getByRole("button", { name: /مسار/ }).click();
+          await f.card.getByText("الأسلاك الحالية على الكرسي", { exact: true }).waitFor();
+          await expect.poll(() => new URL(f.page.url()).searchParams.get("pillar")).toBe("wires");
+          const moved = new URL(f.page.url());
+          for (const key of ["patientId", "planId", "planItemId", "clinicalCaseId", "orthoCaseId", "endoTreatmentId", "visitId"]) {
+            expect(moved.searchParams.get(key)).toBe(origin.searchParams.get(key));
+          }
+          expect(moved.pathname).toBe(origin.pathname); expect(moved.hash).toBe(origin.hash);
+          expect(await f.page.evaluate(() => history.length)).toBe(historyLength);
+          destination = f.page.url();
           await expect.poll(() => f.card.getByRole("button", { name: NEW, exact: true }).count()).toBe(0);
         }
         await f.release();

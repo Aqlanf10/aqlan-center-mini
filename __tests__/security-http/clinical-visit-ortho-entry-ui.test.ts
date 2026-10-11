@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
+import { missingBridge } from "../fixtures/ortho-strategy";
 
 // CI-only built-page acceptance. The isolated HTTP harness owns authentication.
 // All browser API reads and all writes are intercepted with synthetic fixtures;
@@ -56,6 +57,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
   const unexpected: string[] = [];
   const errors: string[] = [];
   const diagnosisReads: string[] = [];
+  const strategyReads: string[] = [];
   let diagnosisResponse: { body: unknown; status: number } = { body: { diagnoses: diagnosisVersions() }, status: 200 };
   let stored: Record<string, unknown> = clinicalVisit(ortho);
   if (regimen === "baseline") stored.ortho = { ...(stored.ortho as object), lastAdjustment: null,
@@ -91,6 +93,10 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
       diagnosisReads.push(url.pathname + url.search);
       await json(route, diagnosisResponse.body, diagnosisResponse.status);
     }
+    else if (method === "GET" && path === "/api/ortho/98314/strategy" && url.search === "" && ortho) {
+      strategyReads.push(path);
+      await json(route, { ...missingBridge(patientId), orthoCaseId: 98314 });
+    }
     else if (path === clinicalPath) await json(route, stored);
     else if (path === `/api/visits/${visitId}/billing-preview`) await json(route, { duesByCurrency: {}, mixedCurrencies: false, zeroReason: "شدّة مشمولة" });
     else if (path === `/api/visits/${visitId}/materials`) await json(route, { lines: [], patientId });
@@ -115,7 +121,7 @@ async function fixture(width: number, ortho = true, regimen: "ordinary" | "basel
     await page.goto(`${baseUrl}/visits/${visitId}`);
     await page.locator("#visit-notes").waitFor();
     await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).waitFor();
-    return { context, page, writes, unexpected, errors, diagnosisReads,
+    return { context, page, writes, unexpected, errors, diagnosisReads, strategyReads,
       setDiagnosisResponse: (body: unknown, status = 200) => { diagnosisResponse = { body, status }; },
       holdSave: () => { holdSave = true; },
       finishSave: async () => { if (!pendingSave) throw new Error("No synthetic save pending"); holdSave = false; await json(pendingSave, { ok: true }); pendingSave = null; },
@@ -213,8 +219,15 @@ describe("orthodontic session-first chairside entry in the built page", () => {
       await reference.locator(":scope > summary").click();
       expect(await reference.textContent()).toContain("تشخيص سابق للمرجع فقط");
       expect(await reference.textContent()).toContain("طبيب مسؤول تجريبي");
-      expect(await reference.locator("input, textarea, select, button").count()).toBe(0);
-      expect(await reference.getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
+      expect(await reference.locator("input, textarea, select").count()).toBe(0);
+      await reference.getByTestId("ortho-strategy-reference").getByText("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.", { exact: true }).waitFor();
+      expect(f.strategyReads).toEqual(["/api/ortho/98314/strategy"]);
+      expect(await reference.getByRole("button").allTextContents()).toEqual(["تحديث سجل الخطة"]);
+      expect(await reference.getByTestId("ortho-strategy-reference").getByRole("alert").count()).toBe(0);
+      const referenceUrl = new URL((await reference.getByRole("link").getAttribute("href"))!, baseUrl);
+      expect(referenceUrl.pathname).toBe(`/patients/${patientId}`);
+      expect(Object.fromEntries(referenceUrl.searchParams)).toEqual({ patientId: String(patientId), orthoCaseId: "98314",
+        pillar: "wires", tab: "treatment", sub: "ortho" });
       expect(await note(f.page, "فحص اليوم (إن أُجري)").inputValue()).toBe("");
       await reference.locator(":scope > summary").click();
       expect(await done(f.page).inputValue()).toBe("توثيق جلسة اليوم التجريبية");
@@ -446,7 +459,7 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
   it.each([1280, 390])("separates partial entries and preserves today's drafts through reference history, retry and signing at %ipx", async width => {
     const f = await fixture(width);
     try {
-      expect(f.diagnosisReads).toEqual([]);
+      expect(f.diagnosisReads).toEqual([]); expect(f.strategyReads).toEqual([]);
       await start(f.page).click(); expect(f.diagnosisReads).toEqual([]);
       await note(f.page, "شكوى جديدة أو تغيّر اليوم (إن وجد)").fill("شكوى اليوم فقط");
       await f.page.locator("#visit-notes details > summary").click();
@@ -459,6 +472,7 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
       const latest = reference.getByTestId("ortho-diagnosis-latest-entry");
       await latest.waitFor();
       expect(f.diagnosisReads).toEqual([`/api/patients/${patientId}/diagnoses?orthoCaseId=98314`]);
+      await expect.poll(() => f.strategyReads).toEqual(["/api/ortho/98314/strategy"]);
       expect(await latest.textContent()).toContain("تحديث جزئي لتشخيص الحالة التجريبية");
       expect(await latest.textContent()).toContain("نسخة 7");
       expect(await latest.textContent()).toContain("طبيب القيد الأحدث");
@@ -478,7 +492,11 @@ describe("read-only case diagnosis continuity in the built RTL page", () => {
       expect(f.diagnosisReads).toHaveLength(1); await captureDiagnosisReference(f.page, width, "history");
       await toggle.click(); await expect.poll(() => f.page.getByTestId("ortho-diagnosis-reference").count()).toBe(0);
       f.setDiagnosisResponse({}, 403); await toggle.click();
-      await reference.getByRole("alert").waitFor();
+      const diagnosisReference = reference.getByTestId("ortho-diagnosis-reference");
+      await diagnosisReference.getByRole("alert").waitFor();
+      expect(await diagnosisReference.getByRole("alert").count()).toBe(1);
+      await reference.getByTestId("ortho-strategy-reference").getByText("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.", { exact: true }).waitFor();
+      expect(await reference.getByTestId("ortho-strategy-reference").getByRole("alert").count()).toBe(0);
       expect(await reference.textContent()).toContain("هذا لا يعني عدم وجود تشخيص");
       expect(await reference.textContent()).not.toContain("لا تشخيص سريري مسجل لهذه الحالة بعد");
       await captureDiagnosisReference(f.page, width, "unavailable");

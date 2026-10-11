@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   const doctors = new Set((await listParties("doctor")).map((party) => party.id));
   const parsed = parseInvoiceInput(source, services, doctors);
   if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
-  const { patientId, baseCurrency: base, items, authorityLines, discountMinor, note, idempotencyKey } = parsed;
+  const { patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey } = parsed;
 
   /* (FIN-4) حدّ الخصم نفسه الذي يحكم الزيارة: سعر خدمة الدليل المكتوب أقل، والخصم على
      الفاتورة — بسببٍ مكتوب، ولغير المدير حتى `billing.max_discount_percent`. */
@@ -73,10 +73,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await createLinkedInvoice({
-      patientId, baseCurrency: base, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      patientId, baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
-      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, note, items }) : null,
+      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, existingPlanId, discountMinor, note, items }) : null,
       auditDetails: {
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
         ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
@@ -96,3 +96,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. أعد المحاولة." }, { status: 500 });
   }
 }
+

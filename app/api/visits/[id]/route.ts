@@ -122,8 +122,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const deferred = await deferVisitPayment(id, actor, deferReason);
       if (!deferred.ok) {
         return NextResponse.json(
-          { message: deferred.reason === "not_signed" ? "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع." : "الزيارة غير موجودة." },
-          { status: deferred.reason === "not_signed" ? 409 : 404 },
+          { message: deferred.reason === "not_signed" ? "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع." : deferred.reason === "stale" ? "تغيّرت فاتورة الزيارة. حدّث الصفحة قبل التأجيل." : "الزيارة غير موجودة." },
+          { status: deferred.reason === "not_found" ? 404 : 409 },
         );
       }
       return NextResponse.json({ ok: true, already: deferred.already, message: "أُجِّل الدفع — الرصيد باقٍ على المريض." });

@@ -84,15 +84,15 @@ export function ProposalFollowUp() {
           /* (PAT-3) لا رابط واتساب لمن سحب موافقته أو لم يوافق في وضع «بموافقة فقط». */
           const whatsapp = one.patientPhone && one.whatsappAllowed ? toWhatsAppNumber(one.patientPhone) : null;
           return (
-            <li key={one.planId} className="rounded-xl border border-slate-200 p-3 text-xs">
+            <li key={one.planId} className="min-w-0 max-w-full rounded-xl border border-slate-200 p-3 text-xs [overflow-wrap:anywhere]">
               <div className="flex flex-wrap items-center gap-2">
-                <a href={`/patients/${one.patientId}?tab=plans`} className="font-extrabold text-navy-900 underline underline-offset-4">
+                <a href={`/patients/${one.patientId}?tab=plans`} className="min-w-0 max-w-full font-extrabold text-navy-900 underline underline-offset-4">
                   {one.patientName}
                 </a>
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STAGE_CLASS[one.timing.stage]}`}>
                   {PROPOSAL_STAGE_LABEL[one.timing.stage]}
                 </span>
-                <span className="text-slate-600">{one.title} · {one.items} بند</span>
+                <span className="min-w-0 max-w-full text-slate-600">{one.title} · {one.items} بند</span>
                 {one.totalMinor !== null ? <span className="font-bold text-slate-800">{formatMoney(one.totalMinor, one.currency)}</span> : null}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">

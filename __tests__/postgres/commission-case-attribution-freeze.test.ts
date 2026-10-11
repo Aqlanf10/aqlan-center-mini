@@ -29,7 +29,7 @@ beforeAll(async () => {
   await db.openShift({ openedBy: "case-freeze-cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   serviceId = (await q<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
-     VALUES ('SYNTHETIC case attribution work', 'endo', 10000, TRUE, TRUE) RETURNING id`,
+     VALUES ('SYNTHETIC case attribution work', 'rct', 10000, TRUE, TRUE) RETURNING id`,
   ))[0].id;
 }, 180_000);
 afterAll(async () => { await db.resetPoolForTesting(); });
@@ -43,7 +43,7 @@ async function scenario(options: { sessions?: number; billingRule?: "on_start" |
   const doctor = await db.createParty({ name: `SYNTHETIC case-freeze doctor ${sequence}`, kind: "doctor", phone: null, commissionPercent: 30, note: null });
   const createCase = async (title: string, percent: number) => {
     const result = await db.createClinicalCase({
-      patientId, specialty: "endodontics", title, site: null, problem: null,
+      patientId, specialty: "endodontics", title, site: "36", problem: null,
       responsiblePartyId: doctor.id, orthoCaseId: null, actor: "case-freeze-admin", actorRole: "admin",
     });
     if (!result.ok || result.case.id === null) throw new Error("case fixture failed");
@@ -60,7 +60,7 @@ async function scenario(options: { sessions?: number; billingRule?: "on_start" |
   const plan = await db.createPlanV2({
     patientId, title: "SYNTHETIC attribution plan", specialty: null, primaryDoctorId: doctor.id,
     billingMode: "per_procedure", baseCurrency: "YER", startDate: "2024-01-01", note: null, createdBy: "case-freeze-admin",
-    items: [{ serviceId, serviceName: "SYNTHETIC case attribution work", category: "endo", toothCode: null,
+    items: [{ serviceId, serviceName: "SYNTHETIC case attribution work", category: "rct", toothCode: 36,
       surfaces: null, quantity: 1, unitPriceMinor: 10000, billingRule: options.billingRule ?? "on_completion",
       sessionCount: options.sessions ?? 1, note: null }],
     installments: options.funded ? [{ dueDate: "2024-01-01", amountMinor: 10000 }] : [],
@@ -73,7 +73,7 @@ async function scenario(options: { sessions?: number; billingRule?: "on_start" |
   const visit = await db.addVisit({ patientId, patientName: name, patientPhone: null, note: null });
   await q(`UPDATE visits SET doctor_id = $2, diagnosis = 'SYNTHETIC diagnosis' WHERE id = $1`, [visit.id, doctor.id]);
   expect(await db.setVisitProcedures({ visitId: visit.id, procedures: [{
-    serviceId, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 10000,
+    serviceId, toothCode: 36, surfaces: null, quantity: 1, unitPriceMinor: 10000,
     doctorId: doctor.id, note: null, planItemId: itemId,
   }] })).toBe(true);
   return { patientId, doctorId: doctor.id, planId: plan.planId, itemId, caseA, caseB, visitId: visit.id, initialCase };
@@ -146,14 +146,19 @@ describe("historical commission case attribution", () => {
     }
   });
 
-  it("keeps a signed included session editable; clinical status alone is not the financial boundary", async () => {
+  it("freezes signed included clinical attribution even without a financial boundary", async () => {
     const s = await scenario({ sessions: 2, funded: true });
     expect(await sign(s)).toMatchObject({ reason: null, invoiceId: null, duesMinor: 0, sessionsCompleted: 1 });
     expect(await q(`SELECT status FROM plan_items WHERE id = $1`, [s.itemId])).toEqual([{ status: "in_progress" }]);
-    expect(await relink(s, s.caseB)).toEqual({ ok: true });
+    const before = { financial: await financialState(s), clinical: await clinicalState(s), audit: await caseAuditCount(s) };
+    expect(await relink(s, s.caseB)).toEqual({ ok: false, reason: "signed_case_lock" });
+    expect(await relink(s, null)).toEqual({ ok: false, reason: "signed_case_lock" });
+    expect(await financialState(s)).toEqual(before.financial);
+    expect(await clinicalState(s)).toEqual(before.clinical);
+    expect(await caseAuditCount(s)).toEqual(before.audit);
   });
 
-  it("does not freeze an included item merely because its plan has a paid installment invoice", async () => {
+  it("freezes signed included work while retaining independent paid installment attribution", async () => {
     const s = await scenario({ sessions: 2, funded: true });
     const paid = await db.recordPlanInstallment({
       patientId: s.patientId, planId: s.planId, installmentNumber: 1, planTitle: "SYNTHETIC attribution plan",
@@ -166,7 +171,7 @@ describe("historical commission case attribution", () => {
     await q(`UPDATE payments SET created_at = '2024-04-10T06:00:00Z' WHERE id = $1`, [paid.paymentId]);
     const before = { financial: await financialState(s), report: await report(s) };
     expect(before.report.lines[0]).toMatchObject({ caseId: null, planId: s.planId, percent: 30, earnedMinor: 3000 });
-    expect(await relink(s, s.caseB)).toEqual({ ok: true });
+    expect(await relink(s, s.caseB)).toEqual({ ok: false, reason: "signed_case_lock" });
     expect(await financialState(s)).toEqual(before.financial);
     expect(await report(s)).toEqual(before.report);
   });
@@ -286,13 +291,15 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
   const column = first === "sign" ? "signed_at" : "case_id";
   const id = first === "sign" ? s.visitId : s.itemId;
   let pending: Promise<unknown>[] = [];
-  await gate.connect();
-  await witness.connect();
+  let gateConnected = false; let witnessConnected = false; let installed = false;
   try {
+    await gate.connect(); gateConnected = true;
+    await witness.connect(); witnessConnected = true;
     const { rows: [gateBackend] } = await gate.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     const { rows: [witnessBackend] } = await witness.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     await q(`CREATE FUNCTION case_freeze_test_gate() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN PERFORM pg_advisory_xact_lock(194280, 1); RETURN NEW; END $$`);
+    installed = true;
     await q(`CREATE TRIGGER case_freeze_test_gate BEFORE UPDATE OF ${column} ON ${table}
       FOR EACH ROW WHEN (NEW.id = ${id} AND NEW.${column} IS DISTINCT FROM OLD.${column})
       EXECUTE FUNCTION case_freeze_test_gate()`);
@@ -300,11 +307,13 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
     await gate.query("SELECT pg_advisory_xact_lock(194280, 1)");
     const firstOperation = first === "sign" ? sign(s) : relink(s, s.caseB);
     pending = [firstOperation];
+    void firstOperation.catch(() => {});
     const firstPid = await waitForLock(
       witness, first === "sign" ? "UPDATE visits SET signed_at" : "UPDATE plan_items SET case_id", gateBackend.pid,
     );
     const secondOperation = first === "sign" ? relink(s, s.caseB) : sign(s);
     pending.push(secondOperation);
+    void secondOperation.catch(() => {});
     // Both services lock the patient before the visit/plan item. Prove the
     // second backend waits on the first, which still waits on our trigger gate.
     const secondPid = await waitForLock(
@@ -315,12 +324,17 @@ async function gatedRace(s: Scenario, first: "sign" | "relink") {
     const outcomes = await Promise.all(pending);
     return first === "sign" ? { signed: outcomes[0], linked: outcomes[1] } : { signed: outcomes[1], linked: outcomes[0] };
   } finally {
-    await gate.query("ROLLBACK").catch(() => {});
+    if (gateConnected) await gate.query("ROLLBACK").catch(() => {});
     await Promise.allSettled(pending);
-    await q(`DROP TRIGGER IF EXISTS case_freeze_test_gate ON ${table}`);
-    await q("DROP FUNCTION IF EXISTS case_freeze_test_gate()");
-    await gate.end();
-    await witness.end();
+    try {
+      if (installed) {
+        await q(`DROP TRIGGER IF EXISTS case_freeze_test_gate ON ${table}`);
+        await q("DROP FUNCTION IF EXISTS case_freeze_test_gate()");
+      }
+    } finally {
+      if (gateConnected) await gate.end();
+      if (witnessConnected) await witness.end();
+    }
   }
 }
 
@@ -340,5 +354,57 @@ describe("case edit versus signing uses the canonical patient-first lock order",
     expect(await clinicalState(s)).toEqual([{ case_id: s.caseB, priority: 2 }]);
     await q(`UPDATE invoices SET created_at = '2024-03-10T06:00:00Z' WHERE patient_id = $1`, [s.patientId]);
     expect((await report(s)).lines[0]).toMatchObject({ caseId: s.caseB, percent: 50, accruedMinor: 5000 });
+  });
+});
+
+
+describe("signed clinical identity without invoice lineage", () => {
+  it.each(["procedure", "session", "legacy_visit"] as const)(
+    "freezes waived work through independent %s evidence, including formerly unassigned work", async evidence => {
+      for (const initialCase of [true, false]) {
+        const s = await scenario({ sessions: 2, funded: true, initialCase });
+        // Construct legacy signed records before applying the signature fixture.
+        // No signed record is edited, no invoice source is removed.
+        if (evidence !== "procedure") await q(`DELETE FROM visit_procedures WHERE visit_id = $1`, [s.visitId]);
+        if (evidence !== "session") await q(`DELETE FROM treatment_sessions WHERE plan_item_id = $1`, [s.itemId]);
+        if (evidence === "session") await q(
+          `UPDATE treatment_sessions SET visit_id = $2 WHERE plan_item_id = $1 AND sequence = 1`, [s.itemId, s.visitId]);
+        await q(`UPDATE plan_items SET visit_id = $2, status = 'planned', billing_status = 'waived' WHERE id = $1`,
+          [s.itemId, evidence === "legacy_visit" ? s.visitId : null]);
+        await q(`UPDATE visits SET signed_at = NOW(), signed_by = 'SYNTHETIC legacy signature' WHERE id = $1`, [s.visitId]);
+        expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [s.patientId])).toEqual([]);
+        const before = { clinical: await clinicalState(s), audit: await caseAuditCount(s), financial: await financialState(s) };
+        expect(await relink(s, s.caseB)).toEqual({ ok: false, reason: "signed_case_lock" });
+        if (initialCase) expect(await relink(s, null)).toEqual({ ok: false, reason: "signed_case_lock" });
+        expect(await clinicalState(s)).toEqual(before.clinical);
+        expect(await caseAuditCount(s)).toEqual(before.audit);
+        expect(await financialState(s)).toEqual(before.financial);
+        expect(await relink(s, s.initialCase, 9)).toEqual({ ok: true });
+        expect(await clinicalState(s)).toEqual([{ case_id: s.initialCase, priority: 9 }]);
+      }
+    });
+
+  it("returns a real-route 409 for signed included work with no new write or audit", async () => {
+    const s = await scenario({ sessions: 2, funded: true });
+    session.current = { userId: 1, username: "case-freeze-admin", role: "admin", expiresAt: 4_102_444_800_000 };
+    expect(await sign(s)).toMatchObject({ reason: null, invoiceId: null });
+    const before = { clinical: await clinicalState(s), audit: await caseAuditCount(s), financial: await financialState(s) };
+    const response = await PUT(new Request(`http://localhost/api/plan-items/${s.itemId}/case`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ caseId: s.caseB, priority: 2 }),
+    }), { params: Promise.resolve({ id: String(s.itemId) }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ message: expect.stringMatching(/[؀-ۿ]/) });
+    expect(await clinicalState(s)).toEqual(before.clinical);
+    expect(await caseAuditCount(s)).toEqual(before.audit);
+    expect(await financialState(s)).toEqual(before.financial);
+  });
+
+  it.each(["sign", "relink"] as const)("serializes %s-first included work using observed backend blockers", async first => {
+    const s = await scenario({ sessions: 2, funded: true });
+    const result = await gatedRace(s, first);
+    expect(result.signed).toMatchObject({ reason: null, invoiceId: null, duesMinor: 0, sessionsCompleted: 1 });
+    expect(result.linked).toEqual(first === "sign" ? { ok: false, reason: "signed_case_lock" } : { ok: true });
+    expect(await clinicalState(s)).toEqual([{ case_id: first === "sign" ? s.caseA : s.caseB, priority: first === "sign" ? 1 : 2 }]);
+    expect(await relink(s, first === "sign" ? s.caseB : s.caseA)).toEqual({ ok: false, reason: "signed_case_lock" });
   });
 });

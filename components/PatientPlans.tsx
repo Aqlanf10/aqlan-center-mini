@@ -1,5 +1,9 @@
 "use client";
 
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
@@ -52,7 +56,7 @@ interface Doctor { id: number; name: string }
 interface PlanItem extends HistoricalPlanItem {
   id: number; serviceId: number | null; serviceName: string; toothCode: number | null; surfaces: string | null;
   quantity: number; unitPriceMinor: number; totalMinor: number;
-  status: PlanItemStatus; visitId: number | null;
+  status: PlanItemStatus; visitId: number | null; caseId?: number | null;
   /* تنظيم الجلسات: رقم الجلسة المخططة وقاعدة الفوترة وحالتها والجلسات المنجزة وطبيب البند. */
   plannedVisitNumber?: number; billingRule?: BillingRule;
   billingStatus?: BillingStatus; sessionCount?: number;
@@ -85,7 +89,12 @@ interface PlannedVisit {
 
 const SPECIALTIES = ["علاج عام", "تقويم", "زراعة", "تركيبات", "جراحة", "تجميل"];
 
-export function PatientPlans({ patientId }: { patientId: number }) {
+interface PatientPlansProps {
+  patientId: number; context?: ClinicalNavigationContext;
+  onOpenClinicalContext?: (context: ClinicalNavigationContext, target?: string) => unknown;
+  onNavigationGuardChange?: (guard: () => boolean) => () => void;
+}
+export function PatientPlans({ patientId, ...props }: PatientPlansProps) {
   const session = useSession();
   // A new patient, principal or permission snapshot owns fresh state. In
   // particular A → B → A cannot resurrect A's previously visible collections.
@@ -93,10 +102,12 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   if (!session || (session.role === "doctor" && session.permissions?.canViewPlans === false)) {
     return <p role="status" className="rounded-xl border border-slate-200 p-4 text-sm text-slate-500">غير مصرّح لك بعرض خطط العلاج.</p>;
   }
-  return <PatientPlansContent key={scope} patientId={patientId} />;
+  return <PatientPlansContent key={scope} patientId={patientId} {...props} />;
 }
 
-function PatientPlansContent({ patientId }: { patientId: number }) {
+function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavigationGuardChange }: PatientPlansProps) {
+  const session = useSession();
+  const financialAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   // (TD-05) الأساس دستوري من الكود — وعملة كل خطةٍ تُعرض بعملتها هي.
   const fallback: Currency = CLINIC_BASE_CURRENCY;
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -185,6 +196,27 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
   // DOT-PF-01: share pending collections with the patient collection modal.
   const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied);
 
+  const itemGuards = useRef(new Map<number, () => boolean>());
+  const registerItemGuard = useCallback((planId: number, guard: () => boolean) => {
+    itemGuards.current.set(planId, guard);
+    return () => { if (itemGuards.current.get(planId) === guard) itemGuards.current.delete(planId); };
+  }, []);
+  const canLeave = useCallback(() => {
+    if (!readRef.current.active || busy || money.attempt !== null) return false;
+    for (const guard of itemGuards.current.values()) if (!guard()) return false;
+    return !(creating || quickCreating || agreementCreating || fromTemplate || consentFor !== null || payFor !== null)
+      || window.confirm("هناك مسودة خطة أو تحصيل غير محفوظة. هل تريد مغادرة القسم؟");
+  }, [busy, money.attempt, creating, quickCreating, agreementCreating, fromTemplate, consentFor, payFor]);
+  useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
+  const visiblePlans = plans.filter((plan) => (context?.planId === undefined || plan.id === context.planId)
+    && (context?.planItemId === undefined || plan.items.some((item) => item.id === context.planItemId))
+    && (context?.clinicalCaseId === undefined || plan.items.some((item) => item.caseId === context.clinicalCaseId)));
+  const openItem = (planId: number, item: PlanItem, target?: string) => {
+    if (!readRef.current.active || loading || readDenied || readUnavailable || !onOpenClinicalContext) return;
+    if (!onNavigationGuardChange && !canLeave()) return;
+    onOpenClinicalContext({ patientId, planId, planItemId: item.id, ...(item.caseId != null ? { clinicalCaseId: item.caseId } : {}) }, target);
+  };
+
   const collect = async (plan?: Plan) => {
     if (!readRef.current.active || busy) return;
     const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
@@ -209,6 +241,10 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
 
   return (
     <div data-testid="patient-plans-content">
+      <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
+        planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
+        onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
+      {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
       ) : null}
@@ -232,7 +268,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} /> : null}
+      {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} /> : null}
 
       {/* المداخل الواضحة: السرعة أولًا، والتعقيد عند الحاجة. كلها تنتهي إلى محرك V2 نفسه. */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -322,7 +358,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         </p>
       ) : (
         <ul className="space-y-3">
-          {plans.map((plan) => {
+          {visiblePlans.map((plan) => {
             const hasHistory = plan.items.some(hasLegacyHistory);
             const currentConsent = planConsentIsCurrent(plan);
             const coverageVerified = plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive);
@@ -472,7 +508,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
               ) : null}
 
               {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial}
+                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
@@ -954,8 +990,11 @@ interface PlanItemDraftRow {
  * للقراءة تُطبع ويُوقّع عليها المريض. والفرق بين الحالتين ظاهرٌ في الشاشة نفسها —
  * لا في رأس من يستعملها.
  */
-function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
+function PlanItems({ plan, canSeeFinancial, context, onOpenItem, registerGuard, onChanged, onError }: {
   plan: Plan; canSeeFinancial: boolean;
+  context?: ClinicalNavigationContext;
+  onOpenItem: (item: PlanItem, target?: string) => void;
+  registerGuard: (planId: number, guard: () => boolean) => () => void;
   onChanged: () => void; onError: (message: string | null) => void;
 }) {
   // (TD-05) أسعار بنود هذه الخطة بعملة اتفاقها — لا بعملة الدفاتر.
@@ -976,6 +1015,12 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
   const [itemPriceReason, setItemPriceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
+  const [itemBaseline, setItemBaseline] = useState<PlanItemDraftSnapshot>(INITIAL_PLAN_ITEM_DRAFT);
+  const itemSnapshot: PlanItemDraftSnapshot = { serviceId, tooth, surfaces, targetVisitNumber, sessionCount, billingRule, doctorId, itemPrice, itemPriceReason };
+  const itemDirty = planItemDraftChanged(itemSnapshot, itemBaseline);
+  const itemGuard = useCallback(() => !busy && (locked || !itemDirty
+    || window.confirm("هناك بند خطة غير محفوظ. هل تريد مغادرة القسم؟")), [busy, locked, itemDirty]);
+  useLayoutEffect(() => registerGuard(plan.id, itemGuard), [registerGuard, plan.id, itemGuard]);
   const historicalItems = plan.items.filter(hasLegacyHistory);
   const ordinaryProgress = historicalItems.length > 0 ? ordinaryPlanProgress(plan.items) : plan.itemsProgress;
   const visitGroups = groupItemsByVisit(plan.items.filter((item) => !hasLegacyHistory(item)));
@@ -993,6 +1038,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
           const list = (payload.services ?? payload) as Service[];
           setServices(list);
           setServiceId((current) => current ?? list[0]?.id ?? null);
+          setItemBaseline((current) => current.serviceId === null ? { ...current, serviceId: list[0]?.id ?? null } : current);
         }
         if (docRes.ok) {
           const docPayload = await docRes.json();
@@ -1032,6 +1078,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       setSessionCount("1");
       setItemPrice("");
       setItemPriceReason("");
+      setItemBaseline({ ...itemSnapshot, tooth: "", surfaces: "", sessionCount: "1", itemPrice: "", itemPriceReason: "" });
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -1064,6 +1111,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
         </span>
       </div>
 
+      {historicalItems.length > 0 ? <div className="mb-2 flex flex-wrap gap-2">{historicalItems.map((item) => <button key={item.id} type="button" disabled={busy} data-testid={`plan-item-open-case-${item.id}`} className="min-h-11 rounded-lg border px-3 text-xs" onClick={() => onOpenItem(item)}>فتح حالة البند #{item.id}</button>)}</div> : null}
       <LegacyPlanHistory items={historicalItems} currency={base} canSeeFinancial={canSeeFinancial} consented={planConsentIsCurrent(plan)} />
       {visitGroups.length === 0 ? (
         <p className="text-xs text-slate-400">{historicalItems.length > 0 ? "لا بنود أخرى مخططة هنا." : "لا بنود بعد."}</p>
@@ -1099,7 +1147,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                 </div>
                 <ul className="space-y-1">
                   {group.items.map((item) => (
-                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
+                    <li key={item.id} data-testid={`plan-item-${item.id}`} aria-current={context?.planItemId === item.id ? "true" : undefined} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
                       <span className="flex min-w-0 flex-1 items-center gap-1.5">
                         {item.status === "done" ? <span className="text-emerald-600">✓</span> : null}
                         <span className={`truncate font-bold ${item.status === "done" ? "text-emerald-700" : ""}`}>
@@ -1129,6 +1177,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                           <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">{item.doctorName}</span>
                         ) : null}
                       </span>
+                      <button type="button" data-testid={`plan-item-open-case-${item.id}`} disabled={busy} onClick={() => onOpenItem(item)} className="min-h-11 shrink-0 rounded-lg border px-2 text-xs font-bold">
+                        {item.caseId != null ? `فتح الحالة #${item.caseId}` : "مراجعة ارتباط الحالة"}
+                      </button>
                       <span className="shrink-0 font-bold">{formatMoney(item.totalMinor, base)}</span>
                       {locked ? null : (
                         <button onClick={() => void remove(item.id)} disabled={busy}

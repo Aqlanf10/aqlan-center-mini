@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { preflightConnection, runPreflightCli, preflightErrorCode } from "../scripts/db-preflight";
-import { loadMigrationFiles } from "../lib/migration-files";
+import { checksumOf, loadMigrationFiles } from "../lib/migration-files";
+import { REVIEWED_MIGRATION_FILENAMES } from "./postgres/_reviewed-migration-chain";
 import { inspectSchemaReadOnly, SchemaPreflightError } from "../lib/schema-preflight";
 import type { ReadOnlyCatalogClient } from "../lib/schema-manifest";
 import { AQLAN_CENTER_MINI_DATABASE_NAME, AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID } from "../lib/database-scope";
@@ -71,7 +72,12 @@ describe("read-only preflight connection contract", () => {
   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
     const files = await loadMigrationFiles();
     expect(files[0].version).toBe("0001");
-    expect(files).toHaveLength(43);
+    expect(files.map((file) => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);
+    for (const file of files) {
+      expect(file.version).toBe(file.filename.slice(0, 4));
+      expect(file.name).toBe(file.filename.slice(5, -4));
+      expect(file.checksum).toBe(checksumOf(file.sql));
+    }
     for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
       const source = await readFile(file, "utf8");
       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");

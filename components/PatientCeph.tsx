@@ -1,8 +1,11 @@
 "use client";
 
+import { cephStudyHref, clinicalContextSearch, type ClinicalNavigationContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "./SessionProvider";
+import { CephUnlinkedStudiesPanel } from "./CephUnlinkedStudiesPanel";
 import { friendlyDateLong } from "@/lib/reminders";
 import {
   CEPH_DIAGNOSTIC_STAGES,
@@ -43,6 +46,9 @@ export interface CephAnalysis {
   completedBy: string | null;
   completedAt: string | null;
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
+  /** (ORTHO-ID-2) أصل التصحيح وتصحيحاته — يُعرضان معًا ولا يُخفى التاريخ السابق. */
+  correctsAnalysisId?: number | null;
+  correctedBy?: number[];
 }
 
 interface PatientDocument {
@@ -85,6 +91,8 @@ const fmt = (v: number | null | undefined): string =>
 export interface PatientCephProps {
   patientId: number;
   orthoCaseId?: number | null;
+  navigationContext?: ClinicalNavigationContext;
+  onNavigationGuardChange?: (guard: () => boolean) => () => void;
   currentPhase?: OrthoPhase | null;
   embedded?: boolean;
   onAnalysisCreated?: (analysisId: number) => void;
@@ -107,6 +115,7 @@ function createWriteOwner() {
     active && form === candidate && pending === operation;
   return {
     activate: () => { active = true; },
+    isActive: () => active,
     retire: () => { active = false; retireForm(); },
     snapshot: () => ({ form, creating: pending !== null }),
     open: () => {
@@ -156,10 +165,14 @@ type ImageSelection = {
 export function PatientCeph({
   patientId,
   orthoCaseId: propOrthoCaseId,
+  navigationContext,
+  onNavigationGuardChange,
   currentPhase,
   embedded = false,
   onAnalysisCreated,
 }: PatientCephProps) {
+  const studyContext: ClinicalNavigationContext = { ...navigationContext, patientId,
+    ...(propOrthoCaseId != null ? { orthoCaseId: propOrthoCaseId } : {}), pillar: "diagnostics" };
   const session = useSession();
   // Same canonical principal/role/permission scope as the orthodontic parent.
   // Display-name-only changes must not dismiss an ordinary same-owner draft.
@@ -170,13 +183,17 @@ export function PatientCeph({
   const readOwner = useMemo(createReadOwner, [patientId, authority]);
   const mayCreate = !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
     || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
+  // ربط دراسة سابقة بحالة التقويم قرارٌ سريري: الطبيب والمدير وحدهما (والخادم يفرض الشرط نفسه).
+  const mayLink = !!session?.username?.trim() && (session.role === "admin"
+    || (session.role === "doctor" && session.permissions?.canUploadXrays === true));
   useLayoutEffect(() => {
     owner.activate();
     return owner.retire;
   }, [owner]);
   // Retire reads at commit, before a newer view can accept old response bodies.
   useLayoutEffect(() => readOwner.retire, [readOwner]);
-  const [analyses, setAnalyses] = useState<CephAnalysis[] | null>(null);
+  const [analysisSnapshot, setAnalysisSnapshot] = useState<{ owner: typeof readOwner; operation: AbortController; rows: CephAnalysis[] } | null>(null);
+  const analyses = analysisSnapshot?.owner === readOwner && readOwner.current(analysisSnapshot.operation) ? analysisSnapshot.rows : null;
   const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
   const images = imageSelection?.owner === readOwner ? imageSelection.images : [];
   const selectedDoc = imageSelection?.owner === readOwner ? imageSelection.selectedDoc : null;
@@ -187,6 +204,18 @@ export function PatientCeph({
   const [, setFormRevision] = useState(0);
   const { form, creating } = owner.snapshot();
   const showNewStudy = form !== null;
+  const canLeave = useCallback(() => {
+    if (!owner.isActive()) return false;
+    const latest = owner.snapshot();
+    if (latest.creating) return false;
+    return latest.form === null || window.confirm("هناك نموذج دراسة غير محفوظ. هل تريد مغادرة التشخيص؟");
+  }, [owner]);
+  useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [onNavigationGuardChange, canLeave]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { const state = owner.snapshot(); if (state.form || state.creating) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [owner]);
   const redrawForm = () => setFormRevision((value) => value + 1);
   /* مقارنة تحليلين (من مستودع الوكيل الآخر): تُختار بالتحديد من الجدول، ولا
      تُقارَن إلا المكتملة — المسودة أرقامها لم تُختم فمقارنتها حكمٌ على لا شيء. */
@@ -228,9 +257,10 @@ export function PatientCeph({
       if (cephRes.ok) {
         const data = await cephRes.json();
         if (!current()) return;
-        setAnalyses(data.analyses);
+        if (!Array.isArray(data.analyses) || data.analyses.some((row: CephAnalysis) => !row || row.patientId !== patientId || !Number.isSafeInteger(row.id) || row.id <= 0)) throw new Error("Invalid study owner");
+        setAnalysisSnapshot({ owner: readOwner, operation, rows: data.analyses });
       } else {
-        setError("تعذّر تحميل دراسات السيفالو.");
+        setAnalysisSnapshot(null); setError("تعذّر تحميل دراسات السيفالو.");
       }
       if (docsRes.ok) {
         const data = await docsRes.json();
@@ -255,7 +285,7 @@ export function PatientCeph({
         setRefSets((data.sets ?? []) as RefSetLite[]);
       }
     } catch {
-      if (current()) setError("تعذّر الاتصال بالخادم.");
+      if (current()) { setAnalysisSnapshot(null); setError("تعذّر الاتصال بالخادم."); }
     }
   }, [patientId, authority, readOwner]);
 
@@ -263,6 +293,9 @@ export function PatientCeph({
     void load(readOwner.begin());
     return readOwner.retire;
   }, [load, readOwner]);
+
+  const canOpenStudies = (ids: readonly number[]) => owner.isActive() && analysisSnapshot?.owner === readOwner
+    && readOwner.current(analysisSnapshot.operation) && ids.every((id) => analysisSnapshot.rows.some((row) => row.id === id && row.patientId === patientId)) && canLeave();
 
   const displayedAnalyses = useMemo(() => {
     if (!analyses) return [];
@@ -280,6 +313,12 @@ export function PatientCeph({
   const latestCompleted = useMemo(() => {
     return displayedAnalyses.find((a) => a.status === "completed") ?? null;
   }, [displayedAnalyses]);
+
+  // دراسات المريض التي لا حالة لها — تُعرض للربط الصريح داخل حالة التقويم الحالية فقط.
+  const unlinkedStudies = useMemo(
+    () => (analyses ?? []).filter((a) => a.orthoCaseId == null && a.status !== "discarded"),
+    [analyses],
+  );
 
   const openStudyForm = () => {
     if (!mayCreate || !owner.open()) return;
@@ -321,7 +360,7 @@ export function PatientCeph({
         onAnalysisCreated?.(data.id);
         // A callback may synchronously change patient/view/session or unmount.
         if (!current()) return;
-        window.location.href = `/ceph/${data.id}`;
+        window.location.href = cephStudyHref(data.id, { ...studyContext, ...(targetCaseId ? { orthoCaseId: Number(targetCaseId) } : {}) });
       } else {
         setError(typeof data?.message === "string" ? data.message : "تعذّر فتح التحليل.");
       }
@@ -409,7 +448,8 @@ export function PatientCeph({
             </div>
 
             <Link
-              href={`/ceph/${latestCompleted.id}`}
+              data-testid="ceph-open-latest" href={cephStudyHref(latestCompleted.id, studyContext)}
+              onClick={(event) => { if (!canOpenStudies([latestCompleted.id])) event.preventDefault(); }}
               className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-800 border border-emerald-200 hover:bg-emerald-50"
             >
               استعراض المخطط والتتبع ←
@@ -618,6 +658,9 @@ export function PatientCeph({
             <p className="text-[11px] text-slate-500">
               سيتم فتح مساحة التتبع فوراً مع تحديد المعالم وحساب الزوايا بمحاذاة المدارس العالمية.
             </p>
+            <p className="basis-full text-[11px] text-slate-500">
+              هذه دراسة جديدة بمرحلتها وتاريخ أشعتها الفعليين. لتصحيح دراسة معتمدة افتحها واختر «تصحيح هذه الدراسة».
+            </p>
           </div>
         </div>
       )}
@@ -626,6 +669,17 @@ export function PatientCeph({
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
           {error}
         </div>
+      )}
+
+      {propOrthoCaseId && mayLink && analyses != null && (
+        <CephUnlinkedStudiesPanel
+          patientId={patientId}
+          orthoCaseId={propOrthoCaseId}
+          authority={authority}
+          studies={unlinkedStudies}
+          onLinked={() => void load(readOwner.begin())}
+          onRefresh={() => void load(readOwner.begin())}
+        />
       )}
 
       {/* جدول وسجلات الدراسات السيفالومترية */}
@@ -661,9 +715,13 @@ export function PatientCeph({
               <p className="text-[11px] font-bold text-sky-900">
                 مقارنة #{compareIds[0]} مع #{compareIds[1]} — الأقدم «قبل» والأحدث «بعد» بترتيبٍ من الخادم.
               </p>
+              {new Set(compareIds.map((id) => analyses?.find((row) => row.id === id)?.orthoCaseId ?? null)).size > 1 ? (
+                <p role="status" data-testid="ceph-cross-case-comparison" className="text-xs font-bold text-amber-900">الدراستان من حالتين مختلفتين أو إحداهما غير مرتبطة؛ المقارنة لا توحّد هويتهما ولا تغيّر ارتباطهما.</p>
+              ) : null}
               <div className="flex gap-1.5">
                 <Link
-                  href={`/ceph/compare?first=${compareIds[0]}&second=${compareIds[1]}&patient=${patientId}`}
+                  data-testid="ceph-open-comparison" href={`/ceph/compare?first=${compareIds[0]}&second=${compareIds[1]}&patient=${patientId}&${clinicalContextSearch(studyContext)}`}
+                  onClick={(event) => { if (!canOpenStudies(compareIds)) event.preventDefault(); }}
                   className="rounded-lg bg-navy-800 px-3 py-1 text-[11px] font-extrabold text-white hover:bg-navy-900"
                 >
                   🔍 افتح المقارنة والتراكب
@@ -730,6 +788,14 @@ export function PatientCeph({
                     </td>
                     <td className="px-3 py-2.5 font-mono font-bold text-slate-800">
                       #{a.id}
+                      {a.correctsAnalysisId != null && (
+                        <span className="mt-0.5 block font-sans text-[10px] font-bold text-sky-700">تصحيح للدراسة #{a.correctsAnalysisId}</span>
+                      )}
+                      {(a.correctedBy?.length ?? 0) > 0 && (
+                        <span className="mt-0.5 block font-sans text-[10px] font-bold text-emerald-700">
+                          لها تصحيح: {a.correctedBy!.map((id) => `#${id}`).join("، ")}
+                        </span>
+                      )}
                     </td>
 
                     <td className="px-3 py-2.5">
@@ -767,7 +833,7 @@ export function PatientCeph({
                     </td>
 
                     <td className="px-3 py-2.5 text-slate-600">
-                      {a.xrayDate ? friendlyDateLong(a.xrayDate) : "—"}
+                      {a.xrayDate ? friendlyDateLong(a.xrayDate) : <span className="text-slate-500">تاريخ غير معروف</span>}
                     </td>
 
                     <td className="px-3 py-2.5">
@@ -798,7 +864,8 @@ export function PatientCeph({
 
                     <td className="px-3 py-2.5 text-left">
                       <Link
-                        href={`/ceph/${a.id}`}
+                        data-testid={`ceph-open-study-${a.id}`} href={cephStudyHref(a.id, studyContext)}
+                        onClick={(event) => { if (!canOpenStudies([a.id])) event.preventDefault(); }}
                         className="inline-flex items-center gap-1 rounded-lg bg-navy-800 px-3 py-1 text-[11px] font-bold text-white hover:bg-navy-900 transition-colors"
                       >
                         <span>فتح التتبع</span>

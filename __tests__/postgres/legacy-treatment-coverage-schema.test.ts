@@ -3,11 +3,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
 import { legacyCoverageStateFromSnapshot } from "../../lib/legacy-treatment-coverage";
 import { openPeriodontalFixture } from "./_periodontal-fixture";
+import { assertReviewedMigrationChain, expectedMigrationRegistry, LATEST_REVIEWED_MIGRATION_VERSION, migrationFilesThrough } from "./_reviewed-migration-chain";
 
 /**
  * SOURCE-ONLY proposal, not executed. Reuses only the verified fresh-UUID ownership harness
  * in pristine mode: no periodontal schema/domain is applied and no pre-existing database reset.
- * Builds the actual0042 migration chain, records an old agreement, then applies additive0043.
+ * Proves the exact 0042 → 0043 boundary before upgrading to the complete reviewed chain.
  */
 let fixture: Awaited<ReturnType<typeof openPeriodontalFixture>> | undefined;
 const pool = () => fixture!.pool;
@@ -15,6 +16,7 @@ let sequence = 0;
 type Agreement = { id: number; patient_id: number; service_id: number; tooth_code: number | null };
 let old: Agreement;
 let oldFacts: unknown;
+let shippedFiles: Awaited<ReturnType<typeof loadMigrationFiles>>;
 
 async function seedAgreement(client: DbPool | DbClient, anchor: number | null = 15, category = "bridge"): Promise<Agreement> {
   const { rows: [patient] } = await client.query<{ id: number }>(
@@ -48,14 +50,33 @@ async function insertSnapshot(client: DbPool | DbClient, agreement: Agreement, p
 beforeAll(async () => {
   fixture = await openPeriodontalFixture(process.env, { pristine: true });
   const files = await loadMigrationFiles();
-  expect(files).toHaveLength(43);
-  expect(files.slice(40).map((file) => file.filename)).toEqual([
+  assertReviewedMigrationChain(files, LATEST_REVIEWED_MIGRATION_VERSION);
+  shippedFiles = files;
+  const throughAgreements = migrationFilesThrough(files, "0042");
+  const throughCoverage = migrationFilesThrough(files, "0043");
+  expect(throughAgreements).toHaveLength(42);
+  expect(throughCoverage).toHaveLength(43);
+  expect(throughCoverage.slice(40).map((file) => file.filename)).toEqual([
     "0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
   ]);
-  await migrate(pool(), { apply: true, files: files.slice(0, 42) });
+  await migrate(pool(), { apply: true, files: throughAgreements });
+  expect((await pool().query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows)
+    .toEqual(expectedMigrationRegistry(throughAgreements));
+  expect((await pool().query("SELECT to_regclass('public.legacy_treatment_coverage_snapshots')::text AS relation")).rows[0].relation).toBeNull();
   old = await seedAgreement(pool());
   oldFacts = (await pool().query("SELECT to_jsonb(a) AS facts FROM legacy_treatment_agreements a WHERE id=$1", [old.id])).rows[0].facts;
-  await migrate(pool(), { apply: true, files });
+  expect(await migrate(pool(), { apply: true, files: throughCoverage })).toMatchObject({ appliedVersions: ["0043"] });
+  // These are historical boundary assertions. They remain exactly 43 even when
+  // later reviewed migrations exist; do not replace them with the current count.
+  expect((await pool().query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows)
+    .toEqual(expectedMigrationRegistry(throughCoverage));
+  expect((await pool().query("SELECT to_jsonb(a) AS facts FROM legacy_treatment_agreements a WHERE id=$1", [old.id])).rows[0].facts).toEqual(oldFacts);
+  expect((await pool().query("SELECT * FROM legacy_treatment_coverage_snapshots WHERE agreement_id=$1", [old.id])).rows).toHaveLength(0);
+  // Latest-chain assertions include every reviewed later file, never a filtered
+  // 0043+0051 subset that could silently omit the shipped Ceph 0047 migration.
+  expect(await migrate(pool(), { apply: true, files })).toMatchObject({
+    appliedVersions: files.slice(throughCoverage.length).map(file => file.version),
+  });
 }, 180_000);
 afterAll(async () => { await fixture?.close(); }, 30_000);
 
@@ -66,7 +87,8 @@ describe("additive immutable coverage on an owned PostgreSQL18 fixture", () => {
     expect(row.facts).toEqual(oldFacts);
     expect(row.snapshot).toBeNull();
     expect(legacyCoverageStateFromSnapshot(row.snapshot, expected(old))).toEqual({ kind: "unknown", reason: "missing_snapshot" });
-    expect((await pool().query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count).toBe(43);
+    expect((await pool().query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows)
+      .toEqual(expectedMigrationRegistry(shippedFiles));
     expect((await pool().query("SELECT to_regclass('public.periodontal_records')::text AS relation")).rows[0].relation).toBeNull();
   });
   it("keeps one complete snapshot with an actual recording time and no additional financial rows", async () => {

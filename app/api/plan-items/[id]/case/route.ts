@@ -1,3 +1,4 @@
+import { CLINICAL_CASE_LINKAGE_MESSAGE } from "@/lib/clinical-case-linkage";
 import { NextResponse } from "next/server";
 import { getPlanItemPatient, setPlanItemCase } from "@/lib/db";
 import { guardPatient, idOf, json, readBody } from "@/lib/case-route";
@@ -24,13 +25,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const guard = await guardPatient(patientId, true, "edit");
     if (!guard.ok) return guard.response;
     const result = await setPlanItemCase({
-      itemId, caseId, priority, actor: guard.session.username, actorRole: guard.session.role,
+      itemId, expectedPatientId: patientId, caseId, priority, actor: guard.session.username, actorRole: guard.session.role,
     });
     if (!result.ok) {
       if (result.reason === "billed_case_lock") {
         return json("لا يمكن تغيير الحالة المرتبطة ببند صدرت له فاتورة حفاظًا على السجل المالي والعمولات. يمكنك تعديل الأولوية فقط.", 409);
       }
-      return result.reason === "not_found" ? json("لا يوجد بند بهذا الرقم.", 404) : json("الحالة المختارة لا تخص هذا المريض.", 400);
+      if (result.reason === "not_found") return json("لا يوجد بند بهذا الرقم.", 404);
+      return json(CLINICAL_CASE_LINKAGE_MESSAGE[result.reason], result.reason === "bad_case" ? 400 : 409);
     }
     return NextResponse.json({ ok: true });
   } catch {

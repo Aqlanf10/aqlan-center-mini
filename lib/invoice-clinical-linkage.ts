@@ -271,16 +271,19 @@ export const INVOICE_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 /** بصمة الطلب لمفتاح الإعادة: كل ما يُحفظ من الطلب (المريض، العملة، الخصم، الملاحظة، البنود بجلساتها) — بترتيبٍ ثابت. */
 export function invoiceRequestFingerprint(input: {
-  patientId: number; currency: string; discountMinor: number; note?: string | null;
+  patientId: number; currency: string; discountMinor: number; note?: string | null; existingPlanId?: number | null;
   items: { serviceId: number | null; description: string; quantity: number; unitPriceMinor: number;
     doctorId: number | null; toothCode?: number | null; caseId?: number | null; sessions?: number | null;
-    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null }[];
+    surfaces?: string | null; episodeTeeth?: readonly number[] | null; scope?: string | null; planItemId?: number | null }[];
 }): string {
   return JSON.stringify([
     input.patientId, input.currency, input.discountMinor, input.note ?? null,
     input.items.map((item) => [item.serviceId, item.description, item.quantity, item.unitPriceMinor,
       item.doctorId, item.toothCode ?? null, item.caseId ?? null, item.sessions ?? null,
       item.surfaces ?? null, item.episodeTeeth ? [...item.episodeTeeth] : null, item.scope ?? null]),
+    // Keep all historical unselected fingerprints byte-for-byte compatible.
+    ...(input.existingPlanId != null || input.items.some((item) => item.planItemId != null)
+      ? [{ existingPlanId: input.existingPlanId ?? null, planItemIds: input.items.map((item) => item.planItemId ?? null) }] : []),
   ]);
 }
 
@@ -288,9 +291,10 @@ export type InvoiceLinkageRefusal =
   | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
   | "case_mismatch" | "shape_mismatch" | "ambiguous_item"
   | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
-  | "needs_financial_review" | "existing_work" | "bad_provider" | "incompatible_plan" | "bad_site" | "legacy_covered";
+  | "needs_financial_review" | "existing_work" | "bad_provider" | "incompatible_plan" | "bad_site" | "legacy_covered" | "selected_item_mismatch";
 
 export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
+  selected_item_mismatch: "بند الخطة المختار لم يعد مطابقًا للمريض والخدمة والنطاق والاتفاق؛ أعد اختيار البند الأصلي دون إنشاء بديل.",
   needs_financial_review: "هذا العلاج يحتاج مراجعة مالية لسجل فواتيره؛ لا تُنشئ التزامًا جديدًا للعمل نفسه.",
   existing_work: "يوجد سجل للعلاج نفسه بدأ أو أُنجز أو أُلغي؛ راجع البند الأصلي قبل إصدار فاتورة أخرى.",
   bad_provider: "حدّد طبيب البند المالي المتفق عليه. تغيير الطبيب أو توزيع قيمة العلاج بين أطباء يحتاج مراجعة الاتفاق.",
@@ -311,4 +315,5 @@ export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   legacy_covered: "هذا العلاج له اتفاق تاريخي قائم؛ المتبقي في الرصيد السابق ولا يُفوتر العمل نفسه مرة ثانية.",
   already_billed: "هذا العلاج له فاتورة قائمة — استخدم البند الأصلي؛ الإلغاء والتصحيح لا يسمحان بفوترة العمل نفسه من جديد.",
 };
+
 

@@ -250,10 +250,14 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     expect(await yerDue(p)).toBe(before.due);
     expect((await q(`SELECT id FROM payments WHERE patient_id = $1`, [p])).length).toBe(before.payments);
     expect(await q(`SELECT id, total_minor::text, status FROM invoices WHERE patient_id = $1 ORDER BY id`, [p])).toEqual(before.invoices);
+    const [{ signatureVersion }] = await q<{ signatureVersion: string }>(
+      `SELECT to_char(signed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "signatureVersion" FROM visits WHERE id = $1`, [v]);
     const deferRows = (await trail(v)).filter((row) => row.action === "visit.payment_deferred");
     expect(deferRows).toEqual([{
       action: "visit.payment_deferred", actor: "reception1",
-      details: { الفاتورة: signed.invoiceId, "صافي الفاتورة": 15000, العملة: "YER" },
+      details: { الفاتورة: signed.invoiceId, "صافي الفاتورة": 15000, العملة: "YER",
+        patientId: p, signatureVersion,
+        receivable: { invoiceId: signed.invoiceId, currency: "YER", status: "open", netMinor: 15000, paidMinor: 0 } },
     }]);
     expect((await patientVisitReadinessFacts(p))?.deferred).toBe(true);
   });

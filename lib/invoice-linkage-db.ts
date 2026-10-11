@@ -28,6 +28,8 @@ import {
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
+  /** Exact existing item selected by the user. A stale selection never creates replacement work. */
+  planItemId?: number | null;
   serviceId: number | null;
   category: string | null;
   doctorId: number | null;
@@ -68,24 +70,28 @@ class Refusal extends Error {
 const OPEN_CASE = `status IN ('active', 'waiting')`;
 
 interface ExistingWork {
-  id: number; quantity: number; unit_price_minor: string; case_id: number | null;
+  id: number; plan_id: number; quantity: number; unit_price_minor: string; case_id: number | null;
   session_count: number; surfaces: string | null; doctor_id: number | null; tooth_code: number | null;
   plan_status: string; base_currency: string; status: string; started_at: Date | null;
   billing_status: string; has_invoice_lineage: boolean; has_legacy_lineage: boolean; legacy_covered: boolean; legacy_context: unknown; has_sessions: boolean; installments: boolean;
   case_site: string | null; case_status: string | null; financial_review: boolean;
 }
 
-type WorkInspection = { item: ExistingWork | null; refusal: InvoiceLinkageRefusal | null };
+type WorkInspection = {
+  item: ExistingWork | null; refusal: InvoiceLinkageRefusal | null;
+  candidates?: { id: number; planId: number; clinicalCaseId: number | null }[];
+};
 
 /** The same evidence/shape rules feed save and preview. Never erase historical work identity. */
 async function inspectExistingWork(
   db: Pick<DbClient, "query">, patientId: number, currency: Currency,
-  item: { serviceId: number | null; quantity: number; unitPriceMinor: number; sessions?: number | null; caseId: number | null },
+  item: { serviceId: number | null; quantity: number; unitPriceMinor: number; sessions?: number | null; caseId: number | null; planItemId?: number | null },
   site: LineSite, claimed: readonly number[],
+  existingPlanId: number | null = null,
 ): Promise<WorkInspection> {
   // Match immutable patient/service identity too: current plan/item edits cannot hide historical work.
   const { rows } = await db.query<ExistingWork>(
-    `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces, i.doctor_id, i.tooth_code,
+    `SELECT i.id, i.plan_id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces, i.doctor_id, i.tooth_code,
        t.status AS plan_status, t.base_currency, i.status, i.started_at, i.billing_status, c.site AS case_site, c.status AS case_status, ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,
        (i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS (
          SELECT 1 FROM invoice_items ii WHERE ii.plan_item_id = i.id OR (ii.source_type = 'plan_item' AND ii.source_id = i.id))) AS has_invoice_lineage, ${PLAN_ITEM_LEGACY_LINEAGE_SQL} AS has_legacy_lineage, ${PLAN_ITEM_LEGACY_COVERED_SQL} AS legacy_covered, ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context,
@@ -120,7 +126,7 @@ async function inspectExistingWork(
   if (scoped.some((row) => row.base_currency !== currency || row.installments || row.billing_status !== "unbilled")) {
     return { item: null, refusal: "incompatible_plan" };
   }
-  if (scoped.length === 0) return { item: null, refusal: null };
+  if (scoped.length === 0) return { item: null, refusal: item.planItemId != null ? "selected_item_mismatch" : null };
   const priced = scoped.filter((row) => Number(row.unit_price_minor) === item.unitPriceMinor);
   if (priced.length === 0) return { item: null, refusal: "amount_mismatch" };
   const exact = priced.filter((row) => row.tooth_code === site.toothCode
@@ -128,10 +134,16 @@ async function inspectExistingWork(
     && row.quantity === item.quantity && normalizeSurfaces(row.surfaces) === site.surfaces
     && (item.sessions == null || row.session_count === item.sessions));
   if (exact.length === 0) return { item: null, refusal: "shape_mismatch" };
-  if (exact.length > 1) return { item: null, refusal: "ambiguous_item" };
-  const match = exact[0];
+  const candidates = exact.map((row) => ({ id: row.id, planId: row.plan_id, clinicalCaseId: row.case_id }));
+  // Resolve only within the canonical compatible set, AFTER every financial/history fence above.
+  // Plan selection alone must not erase item ambiguity.
+  const selected = item.planItemId == null ? exact : exact.filter((row) => row.id === item.planItemId);
+  if (selected.length === 0) return { item: null, refusal: "selected_item_mismatch", candidates };
+  if (selected.length > 1) return { item: null, refusal: "ambiguous_item", candidates };
+  const match = selected[0];
+  if (existingPlanId !== null && match.plan_id !== existingPlanId) return { item: null, refusal: "incompatible_plan" };
   if (item.caseId !== null && match.case_id !== null && item.caseId !== match.case_id) return { item: null, refusal: "case_mismatch" };
-  return { item: match, refusal: null };
+  return { item: match, refusal: null, candidates };
 }
 
 /** Reclassifying a catalog service cannot erase an existing therapeutic financial identity. */
@@ -154,11 +166,18 @@ async function financialOnlyLineRefusal(
   return protectedWork ? "needs_financial_review" : null;
 }
 
-export async function reusableMaster(db: Pick<DbClient, "query">, patientId: number, currency: Currency): Promise<number | null | false> {
+/** Authoritative add-to-plan compatibility; shared by automatic selection, explicit selection and preview. */
+export async function invoicePlanChoices(db: Pick<DbClient, "query">, patientId: number, currency: Currency) {
   const { rows } = await db.query<{ id: number; compatible: boolean }>(
     `SELECT t.id, (t.consent_at IS NULL AND t.base_currency = $2 AND t.billing_mode = 'per_procedure'
       AND t.total_from_items AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)) AS compatible
      FROM treatment_plans t WHERE t.patient_id = $1 AND t.status = 'active' ORDER BY t.id`, [patientId, currency]);
+  return rows;
+}
+
+export async function reusableMaster(db: Pick<DbClient, "query">, patientId: number, currency: Currency, existingPlanId: number | null = null): Promise<number | null | false> {
+  const rows = await invoicePlanChoices(db, patientId, currency);
+  if (existingPlanId !== null) return rows.find((row) => row.id === existingPlanId && row.compatible)?.id ?? false;
   if (rows.length === 0) return null;
   return rows.length === 1 && rows[0].compatible ? rows[0].id : false;
 }
@@ -190,6 +209,7 @@ async function existingLinks(client: Pick<DbClient, "query">, invoiceId: number)
 
 export async function createLinkedInvoice(input: {
   patientId: number;
+  existingPlanId?: number | null;
   baseCurrency: Currency;
   discountMinor: number;
   note: string | null;
@@ -238,8 +258,15 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [input.patientId]);
     const linkages = input.items.map((item) => lineLinkage({ serviceId: item.serviceId, category: item.category }));
+    if (input.existingPlanId != null) {
+      const { rows: [selectedPlan] } = await client.query(
+        `SELECT id FROM treatment_plans WHERE id = $1 AND patient_id = $2 AND status = 'active' AND base_currency = $3`,
+        [input.existingPlanId, input.patientId, input.baseCurrency]);
+      if (!selectedPlan || !linkages.some((linkage) => linkage.kind === "clinical")) throw new Refusal("incompatible_plan", null);
+    }
     for (const [line, item] of input.items.entries()) {
       if (linkages[line].kind === "financial") {
+        if (item.planItemId != null) throw new Refusal("selected_item_mismatch", line);
         const refusal = await financialOnlyLineRefusal(client, input.patientId, item.serviceId);
         if (refusal) throw new Refusal(refusal, line);
       }
@@ -287,7 +314,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
           && caseSiteOverlaps(siteText(prior.site), site))))) throw new Refusal("existing_work", line);
       requestedWork.push({ serviceId: item.serviceId, site });
-      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed);
+      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed, input.existingPlanId ?? null);
       if (inspection.refusal) throw new Refusal(inspection.refusal, line);
       const match = inspection.item;
       if (!match) { fresh.push(line); continue; }
@@ -310,7 +337,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
 
     let planId: number | null = null;
     if (fresh.length > 0) {
-      const masterId = await reusableMaster(client, input.patientId, input.baseCurrency);
+      const masterId = await reusableMaster(client, input.patientId, input.baseCurrency, input.existingPlanId ?? null);
       if (masterId === false) throw new Refusal("incompatible_plan", fresh[0]);
       const specialties = [...new Set(fresh.map((line) => links[line].specialty))];
       const plan = await insertPlanV2InTx(client, {
@@ -493,6 +520,8 @@ export interface LinePreview {
   /** سبب رفضٍ متوقَّع (المعاينة تحذّر؛ الحفظ يرفض فعلًا). */
   refusal: InvoiceLinkageRefusal | null;
   financialReviewRequired?: boolean;
+  /** Canonical inspected candidates; selection still requires save-time revalidation under patient locks. */
+  itemCandidates?: { id: number; planId: number; clinicalCaseId: number | null }[];
 }
 
 /**
@@ -501,12 +530,16 @@ export interface LinePreview {
  */
 export async function previewInvoiceLinkage(input: {
   patientId: number; baseCurrency: Currency;
+  existingPlanId?: number | null;
   items: { serviceId: number | null; category: string | null; quantity: number; unitPriceMinor: number;
     toothCode: number | null; caseId: number | null; sessions?: number | null;
-    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null }[];
+    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null; planItemId?: number | null }[];
 }): Promise<LinePreview[]> {
   await ensureSchema();
   const pool = getPool();
+  const selectedPlanValid = input.existingPlanId == null || (await pool.query(
+    `SELECT id FROM treatment_plans WHERE id = $1 AND patient_id = $2 AND status = 'active' AND base_currency = $3`,
+    [input.existingPlanId, input.patientId, input.baseCurrency])).rows.length === 1;
   const claimed: number[] = [];
   const newCaseForGroup = new Set<string>();
   const previews: LinePreview[] = [];
@@ -514,7 +547,9 @@ export async function previewInvoiceLinkage(input: {
   for (const [line, item] of input.items.entries()) {
     const linkage = lineLinkage({ serviceId: item.serviceId, category: item.category });
     if (linkage.kind !== "clinical") {
-      const refusal = await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
+      const refusal = item.planItemId != null ? "selected_item_mismatch" as const
+        : input.existingPlanId != null && !input.items.some((one) => lineLinkage(one).kind === "clinical") ? "incompatible_plan" as const
+        : await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
       previews.push({ line, kind: "financial", specialty: null, specialtyLabel: null, item: null, case: null,
         refusal, financialReviewRequired: refusal !== null });
       continue;
@@ -522,7 +557,7 @@ export async function previewInvoiceLinkage(input: {
     const preview: LinePreview = {
       line, kind: "clinical", specialty: linkage.specialty, specialtyLabel: LINKAGE_SPECIALTY_LABEL[linkage.specialty],
       item: { mode: "new", id: null }, case: linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
-      refusal: null,
+      refusal: selectedPlanValid ? null : "incompatible_plan",
     };
     const checked = validateLineSite(item);
     if (!checked.ok) { preview.refusal = checked.reason; previews.push(preview); continue; }
@@ -534,7 +569,8 @@ export async function previewInvoiceLinkage(input: {
     const { rows: [doctor] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [item.doctorId ?? null]);
     if (item.doctorId != null && !doctor) preview.refusal = "bad_provider";
     preview.financialReviewRequired = item.doctorId == null;
-    const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed);
+    const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed, input.existingPlanId ?? null);
+    preview.itemCandidates = inspected.candidates ?? [];
     preview.refusal = inspected.refusal ?? preview.refusal;
     const match = inspected.item;
     let linkedCase: number | null = null;
@@ -548,7 +584,7 @@ export async function previewInvoiceLinkage(input: {
       claimed.push(match.id);
       preview.item = { mode: "existing", id: match.id };
       linkedCase = match.case_id;
-    } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency) === false) {
+    } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency, input.existingPlanId ?? null) === false) {
       preview.refusal = "incompatible_plan";
     }
     if (linkage.needsCase) {
@@ -602,4 +638,5 @@ export async function previewInvoiceLinkage(input: {
   }
   return previews;
 }
+
 

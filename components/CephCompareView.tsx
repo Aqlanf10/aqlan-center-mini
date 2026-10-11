@@ -1,5 +1,7 @@
 "use client";
 
+import { cephReturnHref } from "@/lib/patient-navigation";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CHANGE_LABEL, type ChangeDirection, type ComparedMeasurement } from "@/lib/cephCompare";
 
@@ -13,12 +15,12 @@ import { CHANGE_LABEL, type ChangeDirection, type ComparedMeasurement } from "@/
 
 interface CompareResponse {
   before: {
-    id: number; phase: string; xrayDate: string | null; createdAt: string;
+    id: number; patientId: number; orthoCaseId?: number | null; phase: string; xrayDate: string | null; createdAt: string;
     documentId: number; status: string;
     measurements: { code: string; name: string; unit: string; value: number; mean: number | null }[];
   };
   after: {
-    id: number; phase: string; xrayDate: string | null; createdAt: string;
+    id: number; patientId: number; orthoCaseId?: number | null; phase: string; xrayDate: string | null; createdAt: string;
     documentId: number; status: string;
     measurements: { code: string; name: string; unit: string; value: number; mean: number | null }[];
   };
@@ -66,6 +68,8 @@ function formatDate(value: string | null): string {
 export function CephCompareView({ first, second, patientName }: {
   first: number; second: number; patientName: string;
 }) {
+  const [returnSearch, setReturnSearch] = useState("");
+  useEffect(() => { setReturnSearch(window.location.search); }, []);
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
   const [superimpose, setSuperimpose] = useState<SuperimposeResponse | null>(null);
   const [overlayError, setOverlayError] = useState<string | null>(null);
@@ -125,6 +129,11 @@ export function CephCompareView({ first, second, patientName }: {
 
   return (
     <div className="space-y-4">
+      {Number.isSafeInteger(before.patientId) && before.patientId === after.patientId ? <div className="flex flex-wrap gap-3 text-sm">
+        <a className="min-h-11 underline" href={cephReturnHref({ patientId: before.patientId, orthoCaseId: before.orthoCaseId ?? null }, returnSearch)}>العودة إلى حالة الدراسة #{before.id} والتشخيص</a>
+        {before.orthoCaseId !== after.orthoCaseId ? <a className="min-h-11 underline" href={cephReturnHref({ patientId: after.patientId, orthoCaseId: after.orthoCaseId ?? null }, returnSearch)}>حالة الدراسة #{after.id} والتشخيص</a> : null}
+      </div> : null}
+      {before.orthoCaseId !== after.orthoCaseId ? <p role="status" data-testid="ceph-compare-cross-case" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">مقارنة بين حالتين مختلفتين أو دراسة غير مرتبطة. لا يتغير ارتباط أي دراسة بهذه المقارنة.</p> : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-bold text-slate-800">

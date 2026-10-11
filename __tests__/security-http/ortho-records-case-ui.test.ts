@@ -158,11 +158,12 @@ async function fixture(width: number) {
   });
   const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
   const openCase = async (key: "A" | "B") => {
+    await page.getByLabel("حالة التقويم المحددة", { exact: true }).selectOption(String(key === "A" ? caseA : caseB));
     const card = caseCard(page, key); await card.getByRole("button", { name: /السجلات/ }).click();
     const panel = card.getByTestId("ortho-records-grid"); await panel.waitFor(); return panel;
   };
   const open = async () => {
-    await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho&orthoCaseId=${caseA}&pillar=diagnostics`, { waitUntil: "domcontentloaded" });
     if (width < 640) {
       await page.getByTestId("patient-treatment-section").waitFor();
       await expect.poll(() => page.getByTestId("patient-treatment-section").inputValue()).toBe("ortho");
@@ -205,7 +206,11 @@ describe("exact-case orthodontic record slots on the built RTL patient page", ()
       expect(await cephSummary.textContent()).toContain("أحدث دراسة معتمدة للمريض (كافة الحالات)");
       expect(await cephSummary.textContent()).toContain("بلا ربط بحالة");
       expect(await cephSummary.textContent()).toContain("قبل العلاج (T1)");
-      expect(await cephSummary.getByRole("link", { name: "استعراض المخطط والتتبع ←", exact: true }).getAttribute("href")).toBe(`/ceph/${pretreatmentStudy}`);
+      const summaryHref = new URL((await cephSummary.getByRole("link", { name: "استعراض المخطط والتتبع ←", exact: true }).getAttribute("href"))!, baseUrl);
+      expect(summaryHref.pathname).toBe(`/ceph/${pretreatmentStudy}`);
+      expect(summaryHref.searchParams.get("patientId")).toBe(String(patient));
+      expect(summaryHref.searchParams.get("orthoCaseId")).toBe(String(caseA));
+      expect(summaryHref.searchParams.get("pillar")).toBe("diagnostics");
       expect(await cephSummary.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
       expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       expect(await cephSummary.getByTestId("patient-ceph-summary-header").evaluate(element => getComputedStyle(element).flexWrap)).toBe("wrap");
