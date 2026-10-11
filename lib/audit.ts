@@ -90,6 +90,7 @@ export type AuditAction =
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next" | "ortho.strategy_revision"
+  | "ortho.assessment.append" | "ortho.lifecycle.record" | "ortho.journey_record" | "ortho.study_export" | "ortho.study_artifact"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
@@ -355,6 +356,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
   "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
+  "ortho.journey_record": "توثيق مراجعة سجل دراسة حالة التقويم",
+  "ortho.study_export": "تثبيت طلب تصدير دراسة حالة التقويم",
+  "ortho.study_artifact": "توثيق حالة ملف تصدير دراسة التقويم",
+  "ortho.lifecycle.record": "توثيق بداية حالة التقويم وتفعيلها أو إلغاء تقييمها",
+  "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",

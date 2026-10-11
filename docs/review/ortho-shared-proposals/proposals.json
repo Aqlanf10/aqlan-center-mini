@@ -1,0 +1,20 @@
+[
+  {
+    "path": "lib/db.ts",
+    "currentBase": "8ff09304ef3fbf8f01f04a1f09de2a08f6c403c5",
+    "commonClinicalBase": "443fd28f330f5f9bdda0ba6cfc67cfe30b12cff1",
+    "sourceSha256": "9ef6c533b74f99217f70ea778ca218f5d81bd2ea2d418e00415bf0b9171ba96f",
+    "threeWayExit": 0,
+    "applied": false,
+    "owner": "dot; revalidate against current unified financial packet before applying"
+  },
+  {
+    "path": "components/PatientOrtho.tsx",
+    "currentBase": "8ff09304ef3fbf8f01f04a1f09de2a08f6c403c5",
+    "commonClinicalBase": "443fd28f330f5f9bdda0ba6cfc67cfe30b12cff1",
+    "sourceSha256": "5922f17fdc60615074532d4dd9e3333241395d64eb0d8cfcffc1fcdf6b5d6593",
+    "threeWayExit": 0,
+    "applied": false,
+    "owner": "dot; revalidate against current unified financial packet before applying"
+  }
+]

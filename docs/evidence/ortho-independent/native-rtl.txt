@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+
+ Test Files  2 passed (2)
+      Tests  20 passed (20)
+   Start at  20:01:51
+   Duration  35.23s (transform 186ms, setup 0ms, import 2.45s, tests 32.13s, environment 0ms)
+

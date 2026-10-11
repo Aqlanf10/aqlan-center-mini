@@ -1,0 +1,92 @@
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/security-http/ortho-study-editor-real-react.test.ts (11 tests | 4 failed) 127099ms
+     × keeps committed/lost reply identity through detach and A→B→A at 390 32741ms
+     × keeps committed/lost reply identity through detach and A→B→A at 1280 32762ms
+   × keeps confirmed readonly data visible without a second write 32358ms
+   × chooses a source into the actual sole panel after returning from a newer multi-panel revision 3988ms
+ ❯ __tests__/security-http/ortho-case-journey-navigation-real-react.test.ts (9 tests | 2 failed) 24133ms
+     × renders responsive controls and reaches ceph/study without altering the URL at 390 2668ms
+     × renders responsive controls and reaches ceph/study without altering the URL at 768 1644ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-case-journey-navigation-real-react.test.ts > real controlled five-section journey navigation > renders responsive controls and reaches ceph/study without altering the URL at 390
+ FAIL  __tests__/security-http/ortho-case-journey-navigation-real-react.test.ts > real controlled five-section journey navigation > renders responsive controls and reaches ceph/study without altering the URL at 768
+Error: locator.selectOption: Error: strict mode violation: getByLabel('خطوة القسم', { exact: true }) resolved to 2 elements:
+    1) <select id="synthetic-navigation-step" aria-controls="synthetic-panel" class="min-h-11 w-full min-w-0 max-w-full rounded-lg border border-slate-300 bg-white p-2 text-sm">…</select> aka locator('#synthetic-navigation-step')
+    2) <ol aria-label="خطوة القسم" class="hidden flex-wrap gap-2 lg:flex">…</ol> aka getByText('المقابلة والشكوىمكتملة المدخلات3. الفحص خارج الفمالحالة غير محددة4')
+
+Call log:
+[2m  - waiting for getByLabel('خطوة القسم', { exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-case-journey-navigation-real-react.test.ts:65:80
+     63|       expect(await f.page.locator('[role="tab"]').count()).toBe(5);
+     64|       await selectSection(f.page, "records", "السجلات والتشخيص"); awai…
+     65|       if (width < 1024) await f.page.getByLabel("خطوة القسم", { exact:…
+       |                                                                                ^
+     66|       else await f.page.getByRole("button", { name: /^7\. السيفالو/ })…
+     67|       await selected(f.page, "ceph"); await geometry(f.page);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  __tests__/security-http/ortho-study-editor-real-react.test.ts > real study React editor with strictly synthetic transport > keeps committed/lost reply identity through detach and A→B→A at 390
+ FAIL  __tests__/security-http/ortho-study-editor-real-react.test.ts > real study React editor with strictly synthetic transport > keeps committed/lost reply identity through detach and A→B→A at 1280
+TimeoutError: locator.inputValue: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByLabel('تعليق الدراسة', { exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-study-editor-real-react.test.ts:46:72
+     44|       const retry = f.page.getByRole("button", { name: "إعادة التحقق ب…
+     45|       await expect.poll(() => retry.isEnabled()).toBe(true);
+     46|       expect(await f.page.getByLabel("تعليق الدراسة", { exact: true })…
+       |                                                                        ^
+     47|       await retry.click();
+     48|       await expect.poll(async () => (await f.page.evaluate(() => windo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  __tests__/security-http/ortho-study-editor-real-react.test.ts > keeps confirmed readonly data visible without a second write
+TimeoutError: locator.inputValue: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByLabel('تعليق الدراسة', { exact: true })[22m
+
+ ❯ __tests__/security-http/ortho-study-editor-real-react.test.ts:88:70
+     86|     await f.page.evaluate(() => window.__studyEditorFixture.readonly()…
+     87|     await f.page.getByText("عرض فقط حسب الصلاحية الحالية.", { exact: t…
+     88|     expect(await f.page.getByLabel("تعليق الدراسة", { exact: true }).i…
+       |                                                                      ^
+     89|     expect(await f.page.getByLabel("تعليق الدراسة", { exact: true }).i…
+     90|     expect(await f.page.getByRole("button", { name: "حفظ مسودة الدراسة…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  __tests__/security-http/ortho-study-editor-real-react.test.ts > chooses a source into the actual sole panel after returning from a newer multi-panel revision
+AssertionError: expected +0 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 0
+
+ ❯ __tests__/security-http/ortho-study-editor-real-react.test.ts:108:63
+    106|     await f.page.getByRole("button", { name: "إضافة القسم", exact: tru…
+    107|     const target = f.page.getByLabel("إضافة المرجع إلى القسم", { exact…
+    108|     await expect.poll(() => target.locator("option").count()).toBe(2);
+       |                                                               ^
+    109|     await reason.fill("Synthetic second revision");
+    110|     await f.page.getByRole("button", { name: "حفظ مسودة الدراسة", exac…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/ortho-study-editor-real-react.test.ts:108:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 failed | 14 passed (20)
+   Start at  19:47:33
+   Duration  155.02s (transform 564ms, setup 0ms, import 2.82s, tests 151.23s, environment 0ms)
+
