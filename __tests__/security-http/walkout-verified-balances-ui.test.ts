@@ -3,6 +3,8 @@ import { chromium, type Browser, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { formatMoney } from "../../lib/money";
+import { isTreatmentFinancialContext } from "../../lib/treatment-financial-context-validation";
+import type { TreatmentFinancialContext } from "../../lib/treatment-financial-context";
 import { MONEY_UNCERTAIN } from "../../lib/money-attempt";
 
 /** Actual built patient page. Synthetic transport only; unknown routes and all unplanned writes remain blocked.
@@ -76,6 +78,17 @@ describe("built patient walkout verifies balances for reception", () => {
           payments: [], plans: [], opening: null, baseCurrency: "YER",
           balance: balance(0), balances, openings: [{ patientId, currency: foreignCurrency, amountMinor: 2300, asOfDate: "2026-10-09", note: null }],
           openingAccess: { add: false, edit: false }, legacyBalanceArrangements: [], legacyOpeningPositions: [], legacyArrangementAccess: { manage: false } });
+      }
+      else if (method === "GET" && path === `/api/patients/${patientId}/treatment-financial-context` && url.search === "") {
+        const position = (dueMinor: number) => ({ billedMinor: 0, collectedMinor: 0, openingMinor: dueMinor, dueMinor });
+        const accountPositions = { YER: position(foreignCurrency ? 0 : 180000), SAR: position(foreignCurrency ? 0 : 2300), USD: position(0) };
+        if (foreignCurrency) accountPositions[foreignCurrency] = position(2300);
+        const body: TreatmentFinancialContext = { patientId, references: [], plans: [], openingPositions: [], accountPositions,
+          documents: paidInvoice ? [{ invoiceId: 98784, invoiceNumber: "SYN-PAID", status: "paid", currency: "SAR", grossMinor: 5000,
+            discountMinor: 0, netMinor: 5000, installmentPlanId: null, settlements: [], directlyLinkedSettledMinor: 0,
+            allocatedRemainingMinor: null, allocationState: "not_available" }] : [] };
+        expect(isTreatmentFinancialContext(body, patientId)).toBe(true);
+        await json(route, body);
       }
       else if (path === `/api/patients/${patientId}/legacy`) await json(route, { treatments: [], orphanPayments: [] });
       else if (path === `/api/patients/${patientId}/legacy-treatments`) await json(route, { agreements: [], canVoid: false });

@@ -31,9 +31,13 @@ beforeAll(async () => {
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, primary_doctor_id)
      VALUES ($1, 'خطة شاملة', 200000, 'YER', 'active', $2) RETURNING id`, [patientId, doctor.party_id]);
   for (const name of ["علاج عصب", "تاج"]) {
+    const category = name === "علاج عصب" ? "rct" : "crown";
+    const { rows: [service] } = await db.query<{ id: number }>(
+      `INSERT INTO services(name,category,price_minor) VALUES($1,$2,100000) RETURNING id`, [name, category]);
     const { rows: [item] } = await db.query<{ id: number }>(
-      `INSERT INTO plan_items (plan_id, service_name, quantity, unit_price_minor) VALUES ($1, $2, 1, 100000) RETURNING id`,
-      [plan.id, name]);
+      `INSERT INTO plan_items (plan_id, service_id, service_name, category, tooth_code, quantity, unit_price_minor)
+       VALUES ($1, $2, $3, $4, 21, 1, 100000) RETURNING id`,
+      [plan.id, service.id, name, category]);
     itemIds.push(item.id);
   }
 }, 120_000);
@@ -145,5 +149,88 @@ describe("CASE-MODEL-1 — permissions and messages", () => {
     const body = await response.json() as Record<string, unknown>;
     expect(Object.keys(body)).toEqual(["message"]);
     expect(String(body.message)).toMatch(/[؀-ۿ]/);
+  });
+});
+
+
+let identitySeq = 0;
+async function identityFixture() {
+  const { rows: [doctor] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username='secdoctora'`);
+  const patient = (await db.query<{ id: number }>(`INSERT INTO patients(patient_number,full_name,primary_doctor_id)
+    VALUES($1,'SYNTHETIC HTTP identity',$2) RETURNING id`, [`CASE-HTTP-${stamp}-${++identitySeq}`, doctor.party_id])).rows[0].id;
+  const plan = (await db.query<{ id: number }>(`INSERT INTO treatment_plans(patient_id,title,total_minor,status,primary_doctor_id)
+    VALUES($1,'SYNTHETIC',1,'active',$2) RETURNING id`, [patient, doctor.party_id])).rows[0].id;
+  const service = (await db.query<{ id: number }>(`INSERT INTO services(name,category,price_minor)
+    VALUES('SYNTHETIC RCT','rct',1) RETURNING id`)).rows[0].id;
+  const item = (await db.query<{ id: number }>(`INSERT INTO plan_items(plan_id,service_id,service_name,category,tooth_code,unit_price_minor)
+    VALUES($1,$2,'SYNTHETIC RCT','rct',36,1) RETURNING id`, [plan, service])).rows[0].id;
+  const target = async (specialty = "endodontics", site: string | null = "36", owner = patient) =>
+    (await db.query<{ id: number }>(`INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by)
+      VALUES($1,$2,'SYNTHETIC',$3,'synthetic') RETURNING id`, [owner, specialty, site])).rows[0].id;
+  const put = (caseId: number | null, who: Who = "doctorA", priority = 3) =>
+    authedMutation(`/api/plan-items/${item}/case`, h.sessions[who], "PUT", JSON.stringify({ caseId, priority }));
+  const snapshot = async () => ({
+    item: (await db.query(`SELECT * FROM plan_items WHERE id=$1`, [item])).rows,
+    audit: (await db.query(`SELECT * FROM audit_log WHERE entity='patient' AND entity_id=$1 ORDER BY id`, [String(patient)])).rows,
+    invoices: (await db.query(`SELECT * FROM invoices WHERE patient_id=$1`, [patient])).rows,
+    payments: (await db.query(`SELECT * FROM payments WHERE patient_id=$1`, [patient])).rows,
+  });
+  return { patient, plan, service, item, target, put, snapshot };
+}
+
+describe("case identity validation on the built HTTP server", () => {
+  it.each([
+    ["prosthodontics", "36", "تخصص الحالة"],
+    ["endodontics", "11", "موضع الحالة"],
+    ["endodontics", null, "نطاق العلاج"],
+  ] as const)("returns bounded Arabic 409 for %s / %s without writes", async (specialty, site, message) => {
+    const f = await identityFixture(); const target = await f.target(specialty, site); const before = await f.snapshot();
+    const response = await f.put(target);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ message: expect.stringContaining(message) });
+    expect(await f.snapshot()).toEqual(before);
+  });
+  it("rejects stale closed candidates and keeps current closed historical priority editable", async () => {
+    const f = await identityFixture(); const target = await f.target();
+    // Candidate was read while active; closure commits before the submission.
+    expect((await authedGet(`/api/patients/${f.patient}/cases`, h.sessions.doctorA)).status).toBe(200);
+    const close = await authedMutation(`/api/cases/${target}`, h.sessions.doctorA, "PATCH", JSON.stringify({ status: "completed", outcome: "SYNTHETIC" }));
+    expect(close.status).toBe(200);
+    const before = await f.snapshot();
+    expect((await f.put(target)).status).toBe(409);
+    expect(await f.snapshot()).toEqual(before);
+    await db.query(`UPDATE plan_items SET case_id=$2 WHERE id=$1`, [f.item, target]);
+    expect((await f.put(target, "doctorA", 8)).status).toBe(200);
+    expect((await f.snapshot()).item[0]).toMatchObject({ case_id: target, priority: 8 });
+  });
+  it("keeps draft relink/detach available while all role and patient fences remain authoritative", async () => {
+    const f = await identityFixture(); const other = await identityFixture();
+    const a = await f.target(); const b = await f.target(); const foreign = await other.target();
+    for (const target of [a, b, null]) expect((await f.put(target)).status).toBe(200);
+    const before = await f.snapshot();
+    for (const who of ["reception", "cashier", "accountant", "doctorB"] as const) expect((await f.put(a, who)).status).toBe(403);
+    for (const target of [foreign, 2147483647]) expect((await f.put(target)).status).toBe(400);
+    expect(await f.snapshot()).toEqual(before);
+  });
+  it.each(["procedure", "session", "legacy_visit"] as const)("returns 409 for signed %s evidence and allows same-case priority", async evidence => {
+    const f = await identityFixture(); const a = await f.target(); const b = await f.target();
+    expect((await f.put(a)).status).toBe(200);
+    const visit = (await db.query<{ id: number }>(`INSERT INTO visits(patient_id,patient_name)
+      VALUES($1,'SYNTHETIC signed evidence') RETURNING id`, [f.patient])).rows[0].id;
+    if (evidence === "procedure") await db.query(`INSERT INTO visit_procedures(visit_id,service_id,plan_item_id,tooth_code,unit_price_minor)
+      VALUES($1,$2,$3,36,0)`, [visit, f.service, f.item]);
+    if (evidence === "session") await db.query(`INSERT INTO treatment_sessions(plan_item_id,sequence,visit_id)
+      VALUES($1,1,$2)`, [f.item, visit]);
+    if (evidence === "legacy_visit") await db.query(`UPDATE plan_items SET visit_id=$2 WHERE id=$1`, [f.item, visit]);
+    await db.query(`UPDATE visits SET signed_at=NOW(),signed_by='SYNTHETIC' WHERE id=$1`, [visit]);
+    const before = await f.snapshot();
+    for (const target of [b, null]) {
+      const response = await f.put(target);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ message: expect.stringContaining("موقّع") });
+    }
+    expect(await f.snapshot()).toEqual(before);
+    expect((await f.put(a, "doctorA", 7)).status).toBe(200);
+    expect((await f.snapshot()).item[0]).toMatchObject({ case_id: a, priority: 7 });
   });
 });

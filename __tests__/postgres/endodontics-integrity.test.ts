@@ -19,7 +19,7 @@ beforeAll(async () => {
 afterAll(async () => { await db.resetPoolForTesting(); });
 async function fixture() {
   const patientId = (await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'synthetic') RETURNING id", [`ENDO-I-${++seq}`]))[0].id;
-  const caseId = (await q("INSERT INTO clinical_cases(patient_id,specialty,title,created_by) VALUES($1,'endodontics','synthetic','a') RETURNING id", [patientId]))[0].id;
+  const caseId = (await q("INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by) VALUES($1,'endodontics','synthetic','36','a') RETURNING id", [patientId]))[0].id;
   const opened = await endo.openEndoTreatment({ ...actor, patientId, caseId, toothCode: 36, kind: "initial" });
   if (!opened.ok) throw new Error(opened.reason);
   const treatmentId = opened.treatment.id;

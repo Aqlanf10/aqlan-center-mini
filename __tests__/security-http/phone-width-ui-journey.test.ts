@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Request } from "playwright";
 import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { baseUrl, harness } from "./_server";
@@ -106,8 +106,46 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
   for (const path of SCREENS) {
     it(`${path} fits a 390px phone`, async () => {
       const page = await context.newPage();
+      // Observe only the synthetic home visits read. Never log bodies, names,
+      // query strings, cookies, headers or arbitrary browser/server messages.
+      type Read = { epoch: number; status: number | null; finished: boolean;
+        fixturePresent: boolean; failure: "aborted" | "transport" | "invalid-json" | null };
+      const reads: Read[] = [], pending = new Map<Request, Read>();
+      let readCount = 0, traceOverflow = false, pageErrorCount = 0;
+      page.on("pageerror", () => { pageErrorCount += 1; });
+      page.on("request", request => {
+        const url = new URL(request.url());
+        if (path !== "/" || request.method() !== "GET" || url.origin !== baseUrl
+          || url.pathname !== "/api/visits" || url.search !== "") return;
+        readCount += 1;
+        if (reads.length >= 32) { traceOverflow = true; return; }
+        const read: Read = { epoch: readCount, status: null, finished: false, fixturePresent: false, failure: null };
+        reads.push(read); pending.set(request, read);
+      });
+      page.on("requestfailed", request => {
+        const read = pending.get(request); if (!read) return;
+        read.failure = request.failure()?.errorText === "net::ERR_ABORTED" ? "aborted" : "transport";
+        pending.delete(request);
+      });
+      page.on("requestfinished", request => {
+        const read = pending.get(request); if (!read) return;
+        void (async () => {
+          try {
+            const response = await request.response();
+            read.status = response?.status() ?? null;
+            const payload: unknown = await response?.json();
+            read.fixturePresent = Array.isArray(payload) && payload.some(row => row !== null && typeof row === "object"
+              && "id" in row && row.id === fixtureVisitId && "doctorId" in row && row.doctorId === fixtureDoctorId
+              && "status" in row && row.status === "done");
+            read.finished = true;
+          } catch { read.failure = "invalid-json"; }
+          finally { pending.delete(request); }
+        })();
+      });
       try {
-        const response = await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle" });
+        // The home board owns polling; network silence is not its ready state.
+        // Other routes retain their existing navigation contract.
+        const response = await page.goto(`${baseUrl}${path}`, { waitUntil: path === "/" ? "domcontentloaded" : "networkidle" });
         expect(response?.status()).toBe(200);
         await page.evaluate(() => document.fonts.ready);
         const selectScope = path === "/"
@@ -115,6 +153,16 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           : page.locator("select");
         const option = selectScope.locator(`option[value="${fixtureDoctorId}"]`);
         if (path === "/" || path === "/appointments") await option.waitFor({ state: "attached" });
+        if (path === "/") {
+          await expect.poll(() => {
+            const latest = reads.at(-1);
+            return { pending: pending.size, overflow: traceOverflow, status: latest?.status,
+              finished: latest?.finished, fixturePresent: latest?.fixturePresent, failure: latest?.failure };
+          }).toEqual({ pending: 0, overflow: false, status: 200, finished: true, fixturePresent: true, failure: null });
+          expect(await page.getByRole("tabpanel", { name: "الانتظار والكراسي" }).isVisible()).toBe(true);
+          await expect.poll(async () => (await option.textContent())?.trim()).toBe(LONG_DOCTOR_NAME);
+          expect(await page.getByRole("region", { name: "مرشّحات اليوم" }).isVisible()).toBe(true);
+        }
         const overflow = await measureOverflow(page);
         if (path === "/" || path === "/appointments") {
           expect(await option.count()).toBe(1);
@@ -124,6 +172,12 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           await doctorFilter.selectOption(String(fixtureDoctorId));
           expect(await doctorFilter.inputValue()).toBe(String(fixtureDoctorId));
           expect((await doctorFilter.locator("option:checked").textContent())?.trim()).toBe(fullLabel);
+          if (path === "/") {
+            // Native selection must update application-owned content, not just
+            // the select element: this doctor's single done fixture is adopted.
+            const doneCount = page.locator('dl[aria-label="عدّادات اليوم"]').getByText("أُنجز", { exact: true }).locator("..").locator("dd");
+            await expect.poll(() => doneCount.textContent()).toBe("1");
+          }
           const selected = await measureOverflow(page);
           console.info("[phone-doctor-filter]", JSON.stringify({ path, before: overflow, selected }));
           await mkdir(".settings-ui-artifacts", { recursive: true });
@@ -134,6 +188,10 @@ describe("P3-4 — no horizontal overflow at phone width", () => {
           expect(selected.excess, `${path} selected doctor: ${JSON.stringify(selected)}`).toBeLessThanOrEqual(1);
         }
         expect(overflow.excess, `${path}: ${overflow.wide.join(" | ")}; ${JSON.stringify(overflow)}`).toBeLessThanOrEqual(1);
+      } catch (error) {
+        console.info("PHONE_READY_DIAGNOSTIC_V1", JSON.stringify({ synthetic: true, route: path,
+          viewport: PHONE, readCount, traceOverflow, pending: pending.size, pageErrorCount, reads }));
+        throw error;
       } finally {
         await page.close();
       }

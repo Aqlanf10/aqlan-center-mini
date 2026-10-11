@@ -1,7 +1,17 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AUDIT_EXEMPT } from "@/lib/audit-coverage";
+
+const retired = vi.hoisted(() => ({ session: vi.fn(), user: vi.fn(), owns: vi.fn(), write: vi.fn() }));
+vi.mock("@/lib/session", () => ({ requireSession: retired.session }));
+vi.mock("@/lib/db", () => ({
+  CLINIC_TIME_ZONE: "Asia/Aden", findUserByUsername: retired.user, doctorOwnsPatient: retired.owns,
+  createPlan: retired.write, createPlanV2: retired.write, recordAudit: retired.write,
+}));
+vi.mock("@/lib/patient-access", () => ({ canViewPatientMoney: vi.fn() }));
+import { POST as retiredPlanPOST } from "../app/api/plans/route";
 
 /**
  * (TD-06 / TD-REG-009) كل فعل كتابة يكتب سطر تدقيق — أو مستثنى بسببه.
@@ -86,6 +96,18 @@ function handlerAudits(local: Map<string, string>, handler: string, audited: Set
   return false;
 }
 
+// A retired mutation is not an audit-exempt writer: every admitted request
+// terminates in 409, after the original authentication/body/role/patient checks.
+// Pin its entire handler so a future call/branch cannot silently inherit this
+// classification. Behavioral checks below and plans-creation-entry.test.ts cover
+// refusal, preserved policy, body limits and no writer/success-audit invocation;
+// plan-creation-entry-http.test.ts covers proxy policy and unchanged DB rows.
+const REFUSAL_ONLY = {
+  "POST /api/plans": {
+    reason: "إنشاء الخطط القديم موقوف: رفض 409 بعد الصلاحيات، بلا كتابة أو تدقيق نجاح.",
+    sha256: "cd5aa5ddddd9ccb7aba89bbdb3d060c96113a7a6226e1167f67634612a23ac2e",
+  },
+};
 const audited = auditingLibFunctions();
 const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").flatMap((file) => {
   const route = `/${relative(join(ROOT, "app"), file).replace(/\\/g, "/").replace(/\/route\.ts$/, "")}`;
@@ -93,6 +115,7 @@ const handlers = walk(join(ROOT, "app", "api"), (name) => name === "route.ts").f
   return MUTATING.filter((method) => local.has(method)).map((method) => ({
     key: `${method} ${route}`,
     audits: handlerAudits(local, method, audited),
+    sha256: createHash("sha256").update(local.get(method)!).digest("hex"),
   }));
 });
 
@@ -103,8 +126,10 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
     expect(audited.has("setPlanStatus")).toBe(true);
   });
 
-  it("كل فعل كتابة يكتب سطر تدقيق أو مستثنى بسببه في lib/audit-coverage.ts", () => {
-    const uncovered = handlers.filter((handler) => !handler.audits && !(handler.key in AUDIT_EXEMPT)).map((handler) => handler.key);
+  it("كل فعل كتابة يدقق أو يستثنى بسببه؛ ومسار الرفض يطابق عقده المثبت", () => {
+    const refusalOnly = new Map(Object.entries(REFUSAL_ONLY));
+    const uncovered = handlers.filter((handler) => !handler.audits && !(handler.key in AUDIT_EXEMPT)
+      && refusalOnly.get(handler.key)?.sha256 !== handler.sha256).map((handler) => handler.key);
     expect(uncovered).toEqual([]);
   });
 
@@ -119,4 +144,52 @@ describe("TD-06: تغطية التدقيق لكل فعل كتابة", () => {
       expect({ key, ok: /[؀-ۿ]/.test(reason) && reason.length > 15 }).toEqual({ key, ok: true });
     }
   });
+  it("تصنيف الرفض موثق ولا يغطي مسارًا مفقودًا أو كاتبًا أو مستثنى", () => {
+    for (const [key, contract] of Object.entries(REFUSAL_ONLY)) {
+      expect(contract.reason).toMatch(/[؀-ۿ]/);
+      expect(contract.reason.length).toBeGreaterThan(15);
+      expect(AUDIT_EXEMPT).not.toHaveProperty(key);
+      expect(handlers.filter(handler => handler.key === key)).toEqual([
+        { key, audits: false, sha256: contract.sha256 },
+      ]);
+    }
+  });
+
+  it.each([
+    { role: null, edit: true, owns: true, status: 401 },
+    { role: "assistant", edit: true, owns: true, status: 403 },
+    { role: "accountant", edit: true, owns: true, status: 403 },
+    { role: "doctor", edit: false, owns: true, status: 403 },
+    { role: "doctor", edit: true, owns: false, status: 403 },
+    { role: "doctor", edit: true, owns: true, status: 409 },
+    { role: "admin", edit: true, owns: true, status: 409 },
+    { role: "reception", edit: true, owns: true, status: 409 },
+    // The direct handler retains canHandleMoney; HTTP proxy still denies cashier.
+    { role: "cashier", edit: true, owns: true, status: 409 },
+  ])("retired POST plans: $role edit=$edit owned=$owns keeps $status and never writes", async ({ role, edit, owns, status }) => {
+    vi.resetAllMocks();
+    retired.session.mockResolvedValue(role ? { role, username: "synthetic-audit", partyId: 7 } : null);
+    retired.user.mockResolvedValue({ partyId: 7, permissions: { canEditPlans: edit } });
+    retired.owns.mockResolvedValue(owns);
+    const request = new Request("http://test.invalid/api/plans", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ patientId: 91, mode: "v2", title: "Synthetic refusal", fromInvoice: true }),
+    });
+    const response = await retiredPlanPOST(request);
+    expect(response.status).toBe(status);
+    if (status === 409) expect(await response.json()).toEqual({
+      code: "PLAN_CREATION_ENTRY_REQUIRED",
+      message: "ابدأ العلاج من الفاتورة أو الاتفاق السابق للنظام في حساب المريض.",
+    });
+    if (!role) expect(request.bodyUsed).toBe(false);
+    if (role === "doctor") {
+      expect(retired.user).toHaveBeenCalledExactlyOnceWith("synthetic-audit");
+      if (edit) expect(retired.owns).toHaveBeenCalledExactlyOnceWith(7, 91);
+      else expect(retired.owns).not.toHaveBeenCalled();
+    } else {
+      expect(retired.user).not.toHaveBeenCalled(); expect(retired.owns).not.toHaveBeenCalled();
+    }
+    expect(retired.write).not.toHaveBeenCalled();
+  });
+
 });

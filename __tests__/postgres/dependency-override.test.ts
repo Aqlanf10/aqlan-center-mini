@@ -81,7 +81,11 @@ describe("(CASE-MODEL-1b) unmet plan dependencies at the chair", () => {
     await createPatientProblem({ patientId, label: "التهاب لب", site: "21", specialty: "endodontics", caseId: null, actor: "dr" });
     const created = await createClinicalCase({ patientId, specialty: "prosthodontics", title: "تاج ٢١", site: "21", problem: null, responsiblePartyId: doctorId, orthoCaseId: null, actor: "dr" });
     if (!created.ok) throw new Error(created.reason);
-    // Establish attribution before signing; a retained invoice source freezes it.
+    // A new multi-tooth-category link lacks authoritative episodeTeeth. Keep the
+    // dependency/timeline fixture as persisted historical identity, then save priority.
+    expect(await setPlanItemCase({ itemId: crownItem, caseId: created.case.id, priority: 1, actor: "dr" }))
+      .toEqual({ ok: false, reason: "scope_unknown" });
+    await q(`UPDATE plan_items SET case_id=$2 WHERE id=$1`, [crownItem, created.case.id]);
     expect(await setPlanItemCase({ itemId: crownItem, caseId: created.case.id, priority: 1, actor: "dr" })).toEqual({ ok: true });
     await changeClinicalCaseStatus({ id: created.case.id!, status: "waiting", outcome: null, actor: "dr" });
     const summary = await patientWorkflow(patientId, "2026-09-29");

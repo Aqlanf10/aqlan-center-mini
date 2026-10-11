@@ -1,7 +1,10 @@
 "use client";
 
+import { cephReturnHref, cephStudyHref, readClinicalContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -74,6 +77,8 @@ interface AnalysisProp {
   completedBy: string | null;
   completedAt: string | null;
   findings: { anb: number | null; fma: number | null; wits: number | null } | null;
+  correctsAnalysisId?: number | null;
+  correctedBy?: number[];
 }
 
 interface LandmarkProp {
@@ -156,6 +161,11 @@ export function CephTracer({
   refSetName: string | null;
   diagnosis: DiagnosisProp | null;
 }) {
+  const [returnSearch, setReturnSearch] = useState("");
+  useEffect(() => { setReturnSearch(window.location.search); }, []);
+  const returnHref = cephReturnHref(analysis, returnSearch);
+  const returnContext = readClinicalContext(new URL(returnHref, "https://patient.invalid").searchParams).context ?? { patientId: analysis.patientId };
+
   const completed = analysis.status === "completed";
   const [points, setPoints] = useState<LandmarkMap>(() => {
     const map: LandmarkMap = {};
@@ -225,6 +235,13 @@ export function CephTracer({
     finalDx: diagnosis?.finalDx ?? "",
   }));
   const [dxDirty, setDxDirty] = useState(false);
+  const canLeaveStudy = () => !saving && nudgeTimer.current === null
+    && (!(dxDirty || calMode) || window.confirm("هناك تشخيص أو معايرة غير محفوظين. هل تريد مغادرة الدراسة؟"));
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (saving || dxDirty || calMode || nudgeTimer.current !== null) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [saving, dxDirty, calMode]);
 
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
   const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
@@ -370,6 +387,7 @@ export function CephTracer({
     if (!completed) setResults(computeAll(next, scale ?? NaN));
     if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
     nudgeTimer.current = setTimeout(() => {
+      nudgeTimer.current = null;
       const pt = next[code];
       if (pt) void savePoint(code, pt);
     }, 500);
@@ -490,7 +508,7 @@ export function CephTracer({
       const res = await fetch(`/api/ceph/${analysis.id}/complete`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        window.location.href = `/ceph/${analysis.id}`;
+        window.location.href = cephStudyHref(analysis.id, returnContext);
       } else {
         setMessage(data.message ?? "تعذّر الاعتماد.");
       }
@@ -502,11 +520,11 @@ export function CephTracer({
   };
 
   const duplicate = async () => {
-    if (!window.confirm("فتح نسخة تصحيح عن هذا التحليل المعتمد؟")) return;
+    if (!window.confirm("فتح مسودة تصحيح عن هذه الدراسة المعتمدة؟ الدراسة الأصلية تبقى كما اعتُمدت بقياساتها وتاريخها.")) return;
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/duplicate`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) window.location.href = `/ceph/${data.id}`;
+      if (res.ok) window.location.href = cephStudyHref(data.id, returnContext);
       else setMessage(data.message ?? "تعذّر فتح النسخة.");
     } catch {
       setMessage("تعذّر الاتصال.");
@@ -523,7 +541,7 @@ export function CephTracer({
         body: JSON.stringify({ note: note || "" }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) window.location.href = `/patients/${analysis.patientId}?tab=ceph`;
+      if (res.ok) window.location.href = returnHref;
       else setMessage(data.message ?? "تعذّر الرفض.");
     } catch {
       setMessage("تعذّر الاتصال.");
@@ -693,7 +711,7 @@ export function CephTracer({
     <div className="space-y-3">
       {/* الشريط العلوي */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
-        <Link href={`/patients/${analysis.patientId}?tab=ceph`} className="text-sm text-blue-700 hover:underline">
+        <Link href={returnHref} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="text-sm text-blue-700 hover:underline">
           ← ملف {patientName}
         </Link>
         <span className={`rounded-full border px-2 py-0.5 text-xs ${completed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
@@ -768,10 +786,31 @@ export function CephTracer({
             onClick={() => void duplicate()}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
-            نسخة تصحيح جديدة
+            تصحيح هذه الدراسة
           </button>
         )}
       </div>
+
+      {/* (ORTHO-ID-2) أصل التصحيح وتصحيحاته: يُعرضان معًا ولا يُخفى التاريخ السابق. */}
+      {(analysis.correctsAnalysisId != null || (analysis.correctedBy?.length ?? 0) > 0) && (
+        <div className="space-y-1 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-testid="ceph-lineage">
+          {analysis.correctsAnalysisId != null && (
+            <p>
+              {completed ? "هذه نسخة" : "هذه مسودة"} تصحيح للدراسة المعتمدة{" "}
+              <Link href={cephStudyHref(analysis.correctsAnalysisId, returnContext)} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="font-extrabold underline">#{analysis.correctsAnalysisId}</Link>
+              {" "}— الأصل يبقى كما اعتُمد بقياساته وتاريخه.
+            </p>
+          )}
+          {(analysis.correctedBy?.length ?? 0) > 0 && (
+            <p>
+              لهذه الدراسة {analysis.correctedBy!.length === 1 ? "تصحيح" : "تصحيحات"}:{" "}
+              {analysis.correctedBy!.map((id, index) => (
+                <span key={id}>{index > 0 ? "، " : ""}<Link href={cephStudyHref(id, returnContext)} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }} className="font-extrabold underline">#{id}</Link></span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* شريط مسار العمل السيفالومتري كمنصة WebCeph (WebCeph 3-Stage Stepper) */}
       <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs">
@@ -1020,7 +1059,7 @@ export function CephTracer({
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Link
-                href={`/patients/${analysis.patientId}?tab=ceph`}
+                href={returnHref} onClick={(event) => { if (!canLeaveStudy()) event.preventDefault(); }}
                 className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-800 transition-colors"
               >
                 استعراض مقارنة مراحل المريض الأخرى ←
@@ -1826,7 +1865,7 @@ export function CephTracer({
                     {diagnosis.softTissue && <p><b className="text-slate-500">أنسجة رخوة: </b>{diagnosis.softTissue}</p>}
                     <p><b className="text-slate-500">الاستنتاج: </b>{diagnosis.finalDx}</p>
                     {diagnosis.note && <p><b className="text-slate-500">ملاحظات: </b>{diagnosis.note}</p>}
-                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar")}</p>
+                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}</p>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
@@ -1894,7 +1933,7 @@ export function CephTracer({
             )}
             {completed && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar")}
+                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar", { timeZone: CLINIC_ZONE_FALLBACK })}
                 {analysis.note ? ` — ${analysis.note}` : ""}
               </div>
             )}

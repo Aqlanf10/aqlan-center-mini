@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "pg";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import { baseUrl, harness } from "./_server";
+import { chromium, type Browser, type BrowserContext, type Page, type Locator } from "playwright";
+import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 
 /** Browser proof for Phase 1B: UI -> persistence -> audit -> real recall consumer. */
 let browser: Browser;
@@ -40,6 +40,53 @@ async function recallIncludes(id: number): Promise<boolean> {
     const payload = await response.json();
     return payload.openPast.some((row: { id: number }) => row.id === wanted);
   }, id);
+}
+
+// Create real JSON audit history even when this file runs alone; restore the
+// setting immediately so this regression does not depend on another suite.
+async function seedTemplateHistory() {
+  const key = "plans.specialty_templates";
+  const original = await (await authedGet("/api/settings", securityHarness.sessions.admin)).json();
+  const catalog = await (await authedGet("/api/plan-templates", securityHarness.sessions.admin)).json();
+  const template = catalog.templates.find((entry: { id: string }) => entry.id === "endo") ?? catalog.templates[0];
+  expect(template).toBeTruthy();
+  for (const value of [JSON.stringify([template]), original[key]]) {
+    const current = await (await authedGet("/api/settings", securityHarness.sessions.admin)).json();
+    const saved = await authedMutation("/api/settings", securityHarness.sessions.admin, "PATCH", JSON.stringify({
+      [key]: value, __versions: { [key]: current.__versions[key] }, __reason: "إثبات عرض سجل القوالب دون تجاوز العرض",
+    }));
+    expect(saved.status).toBe(200);
+  }
+}
+
+async function reachableControl(control: Locator, output: string, name: string) {
+  const inspect = () => control.evaluate((element) => {
+    const r = element.getBoundingClientRect(); const x = (r.left + r.right) / 2; const y = (r.top + r.bottom) / 2;
+    const points = [[x, y], [r.left + 2, y], [r.right - 2, y], [x, r.top + 2], [x, r.bottom - 2]];
+    return { rect: r.toJSON(), viewport: { width: innerWidth, height: innerHeight }, scrollX,
+      entire: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight,
+      hit: points.every(([px, py]) => { const target = document.elementFromPoint(px, py); return target !== null && element.contains(target); }),
+    };
+  });
+  let geometry = await inspect();
+  const wheelSteps: { deltaY: number; before: typeof geometry; after: typeof geometry }[] = [];
+  // Native wheel input over the visible content gutter; never reposition the DOM.
+  // Bound attempts and distance, then retain the same complete-box/five-hit checks.
+  for (let attempt = 0; attempt < 16 && (!geometry.entire || !geometry.hit); attempt++) {
+    const before = geometry;
+    const distance = (before.rect.top + before.rect.bottom) / 2 - before.viewport.height / 2;
+    const deltaY = Math.sign(distance || 1) * Math.min(600, Math.max(120, Math.abs(distance)));
+    await control.page().mouse.move(24, before.viewport.height / 2);
+    await control.page().mouse.wheel(0, deltaY);
+    await control.page().waitForTimeout(100); // Allow the native compositor scroll to settle.
+    geometry = await inspect();
+    wheelSteps.push({ deltaY, before, after: geometry });
+  }
+  await writeFile(join(output, `${name}-hit-area.json`), JSON.stringify({ ...geometry, wheelSteps }, null, 2));
+  expect(geometry.entire).toBe(true);
+  expect(geometry.hit).toBe(true);
+  expect(geometry.scrollX).toBe(0);
+  expect(await control.isEnabled()).toBe(true);
 }
 
 beforeAll(async () => {
@@ -105,6 +152,7 @@ describe("رحلة واجهة الإعداد إلى المستهلك الحقي�
     await reset.waitFor({ state: "hidden" });
     expect(await recallIncludes(appointmentId)).toBe(true);
 
+    await seedTemplateHistory();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/settings`);
     await settingCard("اسم المركز").waitFor();
@@ -118,6 +166,30 @@ describe("رحلة واجهة الإعداد إلى المستهلك الحقي�
     await page.goto(`${baseUrl}/settings/history`);
     await page.getByRole("heading", { name: "سجل تغييرات الإعدادات", exact: true }).waitFor();
     await page.getByRole("article").first().waitFor();
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 844 });
+      const geometry = await page.evaluate(() => ({
+        viewport: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+        offenders: Array.from(document.querySelectorAll<HTMLElement>("main *")).flatMap((el) => {
+          const r = el.getBoundingClientRect(); const c = getComputedStyle(el);
+          return r.width && (r.left < 0 || r.right > window.innerWidth || el.scrollWidth > el.clientWidth + 1) ? [{
+            tag: el.tagName, html: el.outerHTML.slice(0, 800), rect: r.toJSON(), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+            minWidth: c.minWidth, width: c.width, overflowX: c.overflowX, overflowWrap: c.overflowWrap, display: c.display,
+          }] : [];
+        }),
+      }));
+      await writeFile(join(output, `settings-history-${width}-geometry.json`), JSON.stringify(geometry, null, 2));
+      await page.screenshot({ path: join(output, `settings-history-${width}-diagnostic.png`), fullPage: true });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+      expect(geometry.offenders).toEqual([]);
+      await reachableControl(page.getByRole("button", { name: "تطبيق الفلاتر" }), output, `settings-history-${width}-filter`);
+      const templateEntry = page.getByRole("article", { name: "قوالب الخطط حسب التخصص", exact: true }).first();
+      const restoreButton = templateEntry.getByRole("button", { name: "استعادة القيمة السابقة" });
+      await reachableControl(restoreButton, output, `settings-history-${width}-restore`);
+      await page.screenshot({ path: join(output, `settings-history-${width}-template-value.png`) });
+      await page.screenshot({ path: join(output, `settings-history-${width}-restore-action.png`) });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     expect(await page.getByRole("article").count()).toBeGreaterThan(0);
     await page.screenshot({ path: join(output, "settings-history-mobile-rtl.png"), fullPage: true });
@@ -153,6 +225,7 @@ describe("رحلة واجهة الإعداد إلى المستهلك الحقي�
     expect(await selected.getByText("ops.follow_up_lookback_days", { exact: true }).count()).toBe(1);
     expect(await selected.getByText("قبل", { exact: true }).locator("..").textContent()).toBe("قبل10 يوم");
     expect(await selected.getByText("بعد", { exact: true }).locator("..").textContent()).toBe("بعد60 يوم");
+    await reachableControl(selected.getByRole("button", { name: "استعادة القيمة السابقة" }), output, "settings-history-selected-restore");
     await selected.getByRole("button", { name: "استعادة القيمة السابقة" }).click();
     const restore = page.getByRole("dialog", { name: "استعادة قيمة سابقة" });
     await restore.waitFor({ state: "visible" });

@@ -1,8 +1,10 @@
-import { mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { assertOrthoViewportBounds, orthoViewportProof, revealOrthoControlByWheel } from "./_ortho-strategy-ui-fixture";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -54,7 +56,7 @@ beforeAll(async () => {
       (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id, source_type, source_id)
       VALUES ($1, $2, 'عمل فئة خام', 1, 10000, 10000, $3, 'visit_procedure', $4)`, [invoice.id, service.id, doctorId, procedure.id]);
   }
-  browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  browser = await chromium.launch({ headless: true, args: ["--no-sandbox"], executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 
 afterAll(async () => {
@@ -98,27 +100,149 @@ describe("reachable raw category labels on the actual built app", () => {
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const page = await context.newPage(); const errors: string[] = [], writes: string[] = [];
+    const blockedRequests: Array<Record<string, unknown>> = [];
+    const initiators: Array<Record<string, unknown>> = [];
+    const safePath = (raw: string) => {
+      try { const url = new URL(raw); return { sameOrigin: url.origin === baseUrl, path: url.pathname.slice(0, 240) }; }
+      catch { return { sameOrigin: false, path: "unavailable" }; }
+    };
+    const requestWitness = () => ({ protocol: "AQLAN_RAW_CATEGORY_REQUESTS_V1", acceptance: false,
+      head: process.env.GITHUB_SHA ?? null, run: process.env.GITHUB_RUN_ID ?? null,
+      attempt: process.env.GITHUB_RUN_ATTEMPT ?? null, width, blockedRequests, initiators });
+    // Bounded, read-only CDP request initiators. Never retain headers, cookies,
+    // query strings, bodies, stacks' arguments or unbounded page text.
+    let observationTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([(async () => {
+        const cdp = await context.newCDPSession(page);
+        cdp.on("Network.requestWillBeSent", (event: { request: { method: string; url: string };
+          initiator?: { type?: string; stack?: { callFrames?: Array<{ url: string; lineNumber: number; columnNumber: number }> } } }) => {
+          if (["GET", "HEAD"].includes(event.request.method) || initiators.length >= 8) return;
+          initiators.push({ method: event.request.method, ...safePath(event.request.url),
+            type: event.initiator?.type ?? "unknown",
+            frames: (event.initiator?.stack?.callFrames ?? []).slice(0, 4).map(frame => ({
+              ...safePath(frame.url), line: frame.lineNumber, column: frame.columnNumber,
+            })) });
+        });
+        await cdp.send("Network.enable");
+      })(), new Promise<never>((_, reject) => {
+        observationTimer = setTimeout(() => reject(new Error("Bounded request observation did not start")), 2000);
+      })]);
+    } catch (error) {
+      await context.close(); throw error;
+    } finally { clearTimeout(observationTimer); }
     page.on("pageerror", error => errors.push(error.message));
     await page.route("**/*", async route => {
       const request = route.request();
-      if (!["GET", "HEAD"].includes(request.method())) { writes.push(request.method()); await route.abort(); return; }
+      if (!["GET", "HEAD"].includes(request.method())) {
+        // Abort first. Diagnostics cannot accidentally let a request reach the server.
+        writes.push(request.method()); await route.abort();
+        if (blockedRequests.length < 8) {
+          const raw = request.postData() ?? "";
+          let shape: Record<string, unknown> = { json: false };
+          if (raw.length <= 16_384) {
+            try {
+              const body: unknown = JSON.parse(raw);
+              if (body && typeof body === "object" && !Array.isArray(body)) {
+                const value = body as Record<string, unknown>;
+                shape = { json: true, keys: Object.keys(value).sort().slice(0, 24),
+                  ownsSyntheticPatient: value.patientId === patientId,
+                  items: Array.isArray(value.items) ? value.items.slice(0, 8).map(item => {
+                    if (!item || typeof item !== "object") return { shape: "non-object" };
+                    const row = item as Record<string, unknown>;
+                    return { keys: Object.keys(row).sort().slice(0, 24),
+                      syntheticServiceCategory: [...serviceIds].find(([, id]) => id === row.serviceId)?.[0] ?? "not-owned" };
+                  }) : null };
+              }
+            } catch { /* Body format is diagnostic only; every request still fails the guard. */ }
+          }
+          blockedRequests.push({ method: request.method(), ...safePath(request.url()),
+            resourceType: request.resourceType(), navigation: request.isNavigationRequest(),
+            bodyBytes: Buffer.byteLength(raw), bodySha256: createHash("sha256").update(raw).digest("hex"), shape });
+        }
+        return;
+      }
       if (new URL(request.url()).origin !== new URL(baseUrl).origin) { await route.abort(); return; }
       await route.continue();
     });
     const before = await facts();
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "فاتورة يدوية", exact: true }).click();
+      await page.getByTestId("treatment-entry-open").click();
+      await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
       const invoice = page.getByRole("region", { name: "فاتورة جديدة", exact: true });
       const select = invoice.getByRole("combobox", { name: "الخدمة", exact: true });
       for (const category of ["constructor", "__proto__", "toString"]) {
         await select.selectOption(String(serviceIds.get(category)));
         await expect.poll(async () => invoice.getByText(category, { exact: true }).count()).toBe(1);
       }
+      // Font metrics must settle before native scrolling and strict geometry.
+      await page.evaluate(async () => { await document.fonts.ready; });
       await select.scrollIntoViewIfNeeded();
       const label = invoice.getByText("toString", { exact: true });
       await label.scrollIntoViewIfNeeded();
+      // Native wheel, not DOM scrolling: expose the whole label above real shell bars.
+      const labelReachability = await revealOrthoControlByWheel(page, label);
+      expect(await select.inputValue()).toBe(String(serviceIds.get("toString")));
+      const measure = async () => ({
+        targets: await Promise.all([select, label].map(async (target, index) => ({
+          fullBounds: await target.evaluate(orthoViewportProof).then(proof => ({
+            top: proof.top, bottom: proof.bottom, left: proof.left, right: proof.right,
+            availableViewport: proof.availableViewport, hitPoints: proof.hitPoints, unobscured: proof.unobscured,
+          })),
+          name: index === 0 ? "service-select" : "raw-category-label",
+          ...await target.evaluate((element) => {
+            const b = element.getBoundingClientRect();
+            const point = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+            const hit = document.elementFromPoint(point.x, point.y);
+            const ancestors: Array<{ tag: string; role: string | null; position: string; zIndex: string }> = [];
+            for (let node = hit, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+              const style = getComputedStyle(node);
+              ancestors.push({ tag: node.tagName, role: node.getAttribute("role"), position: style.position, zIndex: style.zIndex });
+            }
+            return { box: { x: b.x, y: b.y, width: b.width, height: b.height }, point,
+              hitOwned: hit === element || !!hit && element.contains(hit), hitAncestors: ancestors };
+          }),
+        }))),
+        shell: await page.evaluate(() => ({
+          width: innerWidth, height: innerHeight, scrollX, scrollY, fonts: document.fonts.status,
+          documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth,
+          visualViewport: visualViewport && { width: visualViewport.width, height: visualViewport.height,
+            offsetLeft: visualViewport.offsetLeft, offsetTop: visualViewport.offsetTop,
+            pageLeft: visualViewport.pageLeft, pageTop: visualViewport.pageTop },
+          bars: Array.from(document.querySelectorAll("header, nav")).flatMap((element) => {
+            const style = getComputedStyle(element), b = element.getBoundingClientRect();
+            if (!["fixed", "sticky"].includes(style.position) || !b.width || !b.height) return [];
+            return [{ tag: element.tagName, position: style.position, zIndex: style.zIndex,
+              box: { x: b.x, y: b.y, width: b.width, height: b.height } }];
+          }),
+        })),
+      });
+      // Stability is separate from reachability: an obscured but stable target
+      // still fails the original hit assertion below; never poll until it passes.
+      let previous = "", stableFrames = 0;
+      await expect.poll(async () => {
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+        const current = JSON.stringify(await measure());
+        stableFrames = current === previous ? stableFrames + 1 : 1; previous = current;
+        return stableFrames;
+      }).toBeGreaterThanOrEqual(3);
+      const witness = await measure();
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      // Retain the actual pre-assert frame even when the original geometry fails.
+      // These files are diagnostic observations, not standalone passing evidence.
+      const diagnosticPng = `service-raw-category-${width}-diagnostic.png`;
+      const diagnosticBytes = await page.screenshot({ path: `.settings-ui-artifacts/${diagnosticPng}` });
+      const afterCapture = await measure();
+      const diagnostic = { protocol: "AQLAN_RAW_CATEGORY_GEOMETRY_V1", acceptance: false,
+        head: process.env.GITHUB_SHA ?? null, run: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+        png: diagnosticPng, pngBytes: diagnosticBytes.length, pngSha256: createHash("sha256").update(diagnosticBytes).digest("hex"),
+        width, beforeCapture: witness, afterCapture, labelReachability, requestWitness: requestWitness() };
+      console.log("AQLAN_RAW_CATEGORY_GEOMETRY_V1 " + JSON.stringify(diagnostic));
+      await writeFile(`.settings-ui-artifacts/service-raw-category-${width}-diagnostic.json`, JSON.stringify(diagnostic, null, 2) + "\n");
+      expect(afterCapture).toEqual(witness);
       for (const target of [select, label]) {
+        assertOrthoViewportBounds(await target.evaluate(orthoViewportProof), width);
         const bounds = await target.boundingBox(); expect(bounds).not.toBeNull();
         expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
         expect(bounds!.y).toBeGreaterThanOrEqual(0); expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
@@ -133,6 +257,9 @@ describe("reachable raw category labels on the actual built app", () => {
       await mkdir(".settings-ui-artifacts", { recursive: true });
       await page.screenshot({ path: `.settings-ui-artifacts/service-raw-category-${width}.png` });
       expect(errors).toEqual([]); expect(writes).toEqual([]); expect(await facts()).toEqual(before);
-    } finally { await context.close(); }
+    } finally {
+      console.log("AQLAN_RAW_CATEGORY_REQUESTS_V1 " + JSON.stringify(requestWitness()));
+      await context.close();
+    }
   }, 90_000);
 });

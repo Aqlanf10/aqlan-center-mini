@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page, type Route, type Request } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
+import { readOperationalCheckoutQueue } from "../../lib/operational-checkout";
 
 const RECEPTION_EVIDENCE_MARKER = "AQLAN_RECEPTION_UI_PNG_V1";
 const RECEPTION_EVIDENCE_SUITE = "__tests__/security-http/reception-signature-handoff-ui.test.ts";
@@ -57,7 +58,7 @@ async function emitReceptionEvidence(width: number, captures: readonly Reception
 let h: Awaited<ReturnType<typeof harness>>, browser: Browser, db: Client;
 let patientId = 0, visitId = 0;
 const NAME = "مريض تسليم التوقيع الاصطناعي";
-const register = (page: Page) => page.getByRole("region", { name: "الزيارات الموقّعة للاستقبال", includeHidden: true });
+const register = (page: Page) => page.getByRole("region", { name: "زيارات الخروج للاستقبال", includeHidden: true });
 const openCheckout = async (page: Page) => { await page.getByRole("tab", { name: /التحصيل والخروج/ }).click(); };
 const item = (page: Page, id: number) => register(page).locator(`[data-handoff-visit="${id}"]:visible`);
 async function contextFor(cookie: string, width = 1280): Promise<BrowserContext> {
@@ -115,66 +116,141 @@ describe("reception signature discovery on the built application", () => {
     });
     const receptionPage = await reception.newPage(), doctorPage = await doctor.newPage();
     for (const page of [receptionPage, doctorPage]) page.on("pageerror", error => errors.push(error.message));
-    await receptionGuard.run(async () => {
-      await doctorGuard.run(async () => {
-        await receptionPage.clock.install();
-        await receptionPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-        expect(await receptionPage.getByRole("tabpanel", { name: "الانتظار والكراسي" }).isVisible()).toBe(true);
-        await openCheckout(receptionPage);
-        await expect.poll(() => register(receptionPage).innerText()).not.toContain("جارٍ تحميل");
-        expect(await item(receptionPage, visitId).count()).toBe(0);
-        await doctorPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-        expect(await register(doctorPage).count()).toBe(0);
-        signPermit = true;
-        const signed = await doctorPage.evaluate(async id => {
-          const response = await fetch(`/api/visits/${id}/clinical`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sign" }) });
-          return { status: response.status, body: await response.json() };
-        }, visitId);
-        expect(signed.status).toBe(200); expect(signed.body.invoiceId).toBeNull();
-        // Advance the existing polling interval, with no manual refresh/focus and no sign toast in reception.
-        await receptionPage.getByRole("tab", { name: "الانتظار والكراسي" }).click();
-        await receptionPage.clock.fastForward(20_001);
-        await expect.poll(() => receptionPage.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toMatch(/\([1-9]\d*\)/);
-        await openCheckout(receptionPage);
-        await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
-        expect(await item(receptionPage, visitId).innerText()).toContain(NAME);
-        expect(await item(receptionPage, visitId).innerText()).toContain("توقيع جديد");
-        expect(await item(receptionPage, visitId).getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=today&checkoutVisit=${visitId}`);
-        await receptionPage.clock.fastForward(20_001);
-        expect(await item(receptionPage, visitId).count()).toBe(1);
-        signPermit = true;
-        const retry = await doctorPage.evaluate(async id => (await fetch(`/api/visits/${id}/clinical`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sign" }),
-        })).status, visitId);
-        expect(retry).toBe(409);
-        await receptionPage.reload({ waitUntil: "domcontentloaded" });
-        await openCheckout(receptionPage);
-        await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
-        expect(await item(receptionPage, visitId).innerText()).not.toContain("توقيع جديد");
-        // Another open visit must not displace this exact signed handoff.
-        const newerVisit = (await db.query(`INSERT INTO visits (patient_id, patient_name, status, arrived_at)
-          VALUES ($1, $2, 'waiting', NOW()) RETURNING id`, [patientId, NAME])).rows[0].id as number;
-        await item(receptionPage, visitId).getByRole("link").click();
-        const checkout = receptionPage.getByRole("region", { name: "شبّاك ما بعد الزيارة" });
-        await checkout.waitFor();
-        await expect.poll(() => checkout.innerText()).toContain(`زيارة #${visitId}`);
-        expect(await receptionPage.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${newerVisit}`);
-        expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${visitId}`);
-        expect(await receptionPage.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
-        expect((await db.query(`SELECT status, invoice_id, signed_at FROM visits WHERE id = $1`, [visitId])).rows[0]).toMatchObject({ status: "done", invoice_id: null, signed_at: expect.any(Date) });
-        expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
-      }, () => {});
-    }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
+    type Read = { epoch: number; clockEpoch: number; status: number | null; finished: boolean;
+      accepted: boolean; targetCount: number; pendingCount: number; failure: "aborted" | "transport" | "invalid-json" | null };
+    const reads: Read[] = [], pending = new Map<Request, Read>();
+    let readCount = 0, clockEpoch = 0, traceOverflow = false;
+    receptionPage.on("request", request => {
+      const url = new URL(request.url());
+      if (request.method() !== "GET" || url.origin !== baseUrl || url.pathname !== "/api/visits"
+        || url.searchParams.get("view") !== "operational-checkout" || url.searchParams.has("date")) return;
+      readCount += 1;
+      if (reads.length >= 32) { traceOverflow = true; return; }
+      const read: Read = { epoch: readCount, clockEpoch, status: null, finished: false,
+        accepted: false, targetCount: 0, pendingCount: 0, failure: null };
+      reads.push(read); pending.set(request, read);
+    });
+    receptionPage.on("requestfailed", request => {
+      const read = pending.get(request); if (!read) return;
+      read.failure = request.failure()?.errorText === "net::ERR_ABORTED" ? "aborted" : "transport";
+      pending.delete(request);
+    });
+    receptionPage.on("requestfinished", request => {
+      const read = pending.get(request); if (!read) return;
+      void (async () => {
+        try {
+          const response = await request.response();
+          read.status = response?.status() ?? null;
+          const snapshot = readOperationalCheckoutQueue(await response?.json(), { username: "secreception", role: "reception" }, null);
+          read.accepted = snapshot !== null;
+          read.targetCount = snapshot?.items.filter(row => row.visitId === visitId && row.patientId === patientId && row.status === "pending").length ?? 0;
+          read.pendingCount = snapshot?.items.filter(row => row.status === "pending").length ?? 0;
+          read.finished = true;
+        } catch { read.failure = "invalid-json"; }
+        finally { pending.delete(request); }
+      })();
+    });
+    const currentReady = async (targetCount: number, expectedClockEpoch: number, afterEpoch = 0) => {
+      await expect.poll(() => {
+        const latest = reads.at(-1);
+        return { pending: pending.size, overflow: traceOverflow, newer: (latest?.epoch ?? 0) > afterEpoch,
+          clockEpoch: latest?.clockEpoch, status: latest?.status, finished: latest?.finished,
+          accepted: latest?.accepted, targetCount: latest?.targetCount, failure: latest?.failure };
+      }).toEqual({ pending: 0, overflow: false, newer: true, clockEpoch: expectedClockEpoch,
+        status: 200, finished: true, accepted: true, targetCount, failure: null });
+      // An old rendered list or absence of loading is insufficient: stale and
+      // denied reads deliberately withhold the numeric fresh badge.
+      await expect.poll(() => receptionPage.getByRole("tab", { name: /التحصيل والخروج/ }).innerText())
+        .toMatch(new RegExp(`\\(${reads.at(-1)!.pendingCount}\\)`));
+      return readCount;
+    };
+    try {
+      await receptionGuard.run(async () => {
+        await doctorGuard.run(async () => {
+          // Load the independent doctor browser first. No later navigation or
+          // manual focus is needed there to sign after reception owns its baseline.
+          expect((await doctorPage.goto(baseUrl, { waitUntil: "domcontentloaded" }))?.status()).toBe(200);
+          expect(await register(doctorPage).count()).toBe(0);
+          await receptionPage.clock.install();
+          expect((await receptionPage.goto(baseUrl, { waitUntil: "domcontentloaded" }))?.status()).toBe(200);
+          expect(await receptionPage.getByRole("tabpanel", { name: "الانتظار والكراسي" }).isVisible()).toBe(true);
+          await openCheckout(receptionPage);
+          await currentReady(0, 0);
+          expect(await item(receptionPage, visitId).count()).toBe(0);
+          // Pause only after hydration and the current read complete. A short
+          // pause boundary may start an ordinary read; drain and accept that read
+          // too before jumping 20s, otherwise its 12s abort can be fired by the jump.
+          const pauseTime = await receptionPage.evaluate(() => Date.now() + 1000);
+          await receptionPage.clock.pauseAt(new Date(pauseTime));
+          await receptionPage.getByRole("tab", { name: "الانتظار والكراسي" }).click();
+          const baselineEpoch = await currentReady(0, 0);
+          signPermit = true;
+          const signed = await doctorPage.evaluate(async id => {
+            const response = await fetch(`/api/visits/${id}/clinical`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sign" }) });
+            return { status: response.status, body: await response.json() };
+          }, visitId);
+          expect(signed.status).toBe(200); expect(signed.body.invoiceId).toBeNull();
+          // Only the clock-owned poll may discover the signature. There must be
+          // no unresolved read or intervening focus-driven discovery to count as
+          // this witness, and the new poll must finish before any next clock jump.
+          expect(pending.size).toBe(0); expect(readCount).toBe(baselineEpoch);
+          clockEpoch = 1;
+          await receptionPage.clock.fastForward(20_001);
+          await currentReady(1, 1, baselineEpoch);
+          expect(readCount).toBe(baselineEpoch + 1);
+          await expect.poll(() => receptionPage.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toMatch(/\([1-9]\d*\)/);
+          await openCheckout(receptionPage);
+          await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
+          expect(await item(receptionPage, visitId).innerText()).toContain(NAME);
+          expect(await item(receptionPage, visitId).innerText()).toContain("توقيع جديد");
+          expect(await item(receptionPage, visitId).getByRole("link").getAttribute("href")).toBe(`/patients/${patientId}?tab=today&checkoutVisit=${visitId}`);
+          const discoveredEpoch = await currentReady(1, 1, baselineEpoch);
+          clockEpoch = 2;
+          await receptionPage.clock.fastForward(20_001);
+          await currentReady(1, 2, discoveredEpoch);
+          expect(readCount).toBe(discoveredEpoch + 1);
+          expect(await item(receptionPage, visitId).count()).toBe(1);
+          signPermit = true;
+          const retry = await doctorPage.evaluate(async id => (await fetch(`/api/visits/${id}/clinical`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sign" }),
+          })).status, visitId);
+          expect(retry).toBe(409);
+          await receptionPage.clock.resume();
+          await receptionPage.reload({ waitUntil: "domcontentloaded" });
+          await openCheckout(receptionPage);
+          await expect.poll(() => item(receptionPage, visitId).count()).toBe(1);
+          expect(await item(receptionPage, visitId).innerText()).not.toContain("توقيع جديد");
+          // Another open visit must not displace this exact signed handoff.
+          const newerVisit = (await db.query(`INSERT INTO visits (patient_id, patient_name, status, arrived_at)
+            VALUES ($1, $2, 'waiting', NOW()) RETURNING id`, [patientId, NAME])).rows[0].id as number;
+          await item(receptionPage, visitId).getByRole("link").click();
+          const checkout = receptionPage.getByRole("region", { name: "شبّاك ما بعد الزيارة" });
+          await checkout.waitFor();
+          await expect.poll(() => checkout.innerText()).toContain(`زيارة #${visitId}`);
+          expect(await receptionPage.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${newerVisit}`);
+          expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${visitId}`);
+          expect(await receptionPage.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
+          expect((await db.query(`SELECT status, invoice_id, signed_at FROM visits WHERE id = $1`, [visitId])).rows[0]).toMatchObject({ status: "done", invoice_id: null, signed_at: expect.any(Date) });
+          expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
+        }, () => {});
+      }, () => { expect(unexpected).toEqual([]); expect(errors).toEqual([]); });
+    } catch (error) {
+      // Bounded structural facts from the isolated synthetic fixture only.
+      // Never emit response bodies, names, cookies, headers, URLs or raw errors.
+      console.info("RECEPTION_POLL_DIAGNOSTIC_V1", JSON.stringify({ synthetic: true, readCount, clockEpoch,
+        traceOverflow, pending: pending.size, pageErrorCount: errors.length, unexpectedCount: unexpected.length, reads }));
+      throw error;
+    }
   }, 120_000);
 
   it("rejects non-front-desk sessions on the real projection and keeps ordinary visits stripped", async () => {
     for (const session of [h.sessions.doctorA, h.sessions.doctorB, h.sessions.accountant, h.sessions.cashier, h.sessions.portalA]) {
-      expect([401, 403]).toContain((await authedGet("/api/visits?view=reception-handoff", session)).status);
+      expect([401, 403]).toContain((await authedGet("/api/visits?view=operational-checkout", session)).status);
     }
     const response = await authedGet("/api/visits", h.sessions.reception);
     expect(response.status).toBe(200);
     for (const row of await response.json()) { expect(row).not.toHaveProperty("signedAt"); expect(row).not.toHaveProperty("invoiceId"); }
-    const anonymous = await fetch(`${baseUrl}/api/visits?view=reception-handoff`);
+    const anonymous = await fetch(`${baseUrl}/api/visits?view=operational-checkout`);
     expect(anonymous.status).toBe(401);
   });
 
@@ -187,13 +263,13 @@ describe("reception signature discovery on the built application", () => {
     const payload = (date: string | null) => {
       const toDate = date ?? "2026-10-10";
       const fromDate = new Date(Date.parse(`${toDate}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-      return { owner: { username: mode === "other-owner" ? "different-reception" : "secreception", role: "reception" },
+      return { version: 1, operationalItems: [], owner: { username: mode === "other-owner" ? "different-reception" : "secreception", role: "reception" },
         fromDate, toDate, clinicTimeZone: "Asia/Aden", items: [{ visitId: activeId, patientId: 31,
-          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z`, status: "pending", handledReason: null }] };
+          patientName: `مريض تسليم اصطناعي ${activeId}`, patientNumber: "SYN-31", signedAt: `${toDate}T09:00:00Z`, status: "pending", handledReason: null, financialReviewRequired: false, visitInvoiceSettled: false }] };
     };
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const request = route.request(), url = new URL(request.url());
-      if (url.origin === baseUrl && request.method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "reception-handoff") {
+      if (url.origin === baseUrl && request.method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "operational-checkout") {
         const body = payload(url.searchParams.get("date")), thisMode = mode;
         if (hold) { hold = false; await new Promise<void>(resolve => releases.push(resolve)); }
         if (thisMode === "failed" || thisMode === "denied") { await route.fulfill({ status: thisMode === "denied" ? 403 : 503, json: { message: "تعذّر التحميل اصطناعياً" } }); return; }
@@ -215,14 +291,14 @@ describe("reception signature discovery on the built application", () => {
           expect(await item(page, 901).getByRole("link").count()).toBe(0);
           expect(await register(page).innerText()).not.toContain("لا توجد زيارات بانتظار المعالجة");
           await expect.poll(() => page.getByRole("tab", { name: /التحصيل والخروج/ }).innerText()).toContain("(…)");
-          mode = "ready"; await register(page).getByRole("button", { name: "تحديث التوقيعات" }).click();
+          mode = "ready"; await register(page).getByRole("button", { name: "تحديث زيارات الخروج" }).click();
           await expect.poll(() => item(page, 901).getByRole("link").count()).toBe(1);
         }
         // Start A, navigate to B, then A again before releasing the old A response.
         hold = true; await refresh(); await expect.poll(() => releases.length).toBe(1);
-        activeId = 902; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-09");
+        activeId = 902; await register(page).locator('input[aria-label="نهاية فترة الخروج أو التوقيع"]:visible').fill("2026-10-09");
         await expect.poll(() => item(page, 902).count()).toBe(1);
-        activeId = 903; await register(page).locator('input[aria-label="نهاية فترة التوقيع"]:visible').fill("2026-10-10");
+        activeId = 903; await register(page).locator('input[aria-label="نهاية فترة الخروج أو التوقيع"]:visible').fill("2026-10-10");
         await expect.poll(() => item(page, 903).count()).toBe(1);
         releases.shift()!();
         await refresh(); await expect.poll(() => item(page, 903).count()).toBe(1);
@@ -247,14 +323,14 @@ describe("reception signature discovery on the built application", () => {
     const unexpected: string[] = [];
     const captures: ReceptionCapture[] = [];
     let resolved = false;
-    const payload = () => ({ owner: { username: "secreception", role: "reception" },
+    const payload = () => ({ version: 1, operationalItems: [], owner: { username: "secreception", role: "reception" },
       fromDate: "2026-10-09", toDate: "2026-10-10", clinicTimeZone: "Asia/Aden",
       items: Array.from({ length: 30 }, (_, index) => ({ visitId: 7000 + index, patientId: 31,
         patientName: `مريض اصطناعي ${index}`, patientNumber: "SYN-31", signedAt: "2026-10-10T09:00:00Z",
-        status: resolved && index === 0 ? "deferred" : "pending", handledReason: resolved && index === 0 ? "تأجيل موثّق" : null })) });
+        financialReviewRequired: false, visitInvoiceSettled: false, status: resolved && index === 0 ? "deferred" : "pending", handledReason: resolved && index === 0 ? "تأجيل موثّق" : null })) });
     const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
       const url = new URL(route.request().url());
-      if (url.origin === baseUrl && route.request().method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "reception-handoff") {
+      if (url.origin === baseUrl && route.request().method() === "GET" && url.pathname === "/api/visits" && url.searchParams.get("view") === "operational-checkout") {
         await route.fulfill({ json: payload() }); return;
       }
       await allowBuiltBoardRead(route, unexpected);

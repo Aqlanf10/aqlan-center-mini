@@ -71,6 +71,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ceph/[id]/ai-analyze": { POST: CLINIC },
   "/api/ceph/[id]/complete": { POST: CLINIC },
   "/api/ceph/[id]/duplicate": { POST: CLINIC },
+  "/api/ceph/[id]/link-case": { POST: CLINIC },
   "/api/ceph/compare": { GET: CLINICAL },
   "/api/ceph/superimpose": { GET: CLINICAL },
   // الاستعلام العام عن الطابور (كشاشة الصالة) مفتوح؛ متابعة تذكرةٍ أو هاتفٍ والحضور الذاتي بجلسة البوابة.
@@ -99,6 +100,30 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/finance/reconciliation": { GET: ["admin", "reception", "accountant"] },
   "/api/finance/report": { GET: ["admin", "doctor", "accountant"] },
   "/api/health": { GET: PUBLIC },
+  // (HR-1) ملفات الطاقم وشروط الأجر: للمدير وحده — المبالغ لا تخرج عنه.
+  "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
+  // (HR-1) دليل الإسناد الآمن: بلا مبالغ — للمدير والاستقبال فقط.
+  "/api/hr/directory": { GET: FRONT_DESK },
+  // (HR-3) العقود والقوالب والملاحق: للمدير وحده.
+  "/api/hr/contracts": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/contracts/[id]": { GET: ADMIN, PATCH: ADMIN, POST: ADMIN },
+  // (HR-4) جداول العمل والورديات: قراءة للاستقبال، تعديل للمدير.
+  "/api/hr/schedules": { GET: FRONT_DESK, POST: ADMIN },
+  "/api/hr/schedules/[id]": { GET: FRONT_DESK, PATCH: ADMIN },
+  // (HR-4) الحضور وتصحيحاته والإضافي:
+  "/api/hr/attendance": { GET: FRONT_DESK, POST: FRONT_DESK },
+  "/api/hr/attendance/corrections": { GET: ADMIN, POST: ADMIN },
+  // (HR-4) الإجازات والأرصدة:
+  "/api/hr/leaves": { GET: CLINIC, POST: CLINIC },
+  "/api/hr/leaves/[id]": { GET: CLINIC, PATCH: ADMIN },
+  "/api/hr/leaves/balances": { GET: CLINIC, POST: ADMIN },
+  // (HR-5) المسير والصرف والسياسات: للمدير وحده.
+  "/api/hr/payroll/periods": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/runs": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/disburse": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/settings": { GET: ADMIN, PATCH: ADMIN },
+  "/api/hr/reports": { GET: ADMIN },
   "/api/internal/backup/run": { POST: INTERNAL },
   "/api/internal/reminders/run": { POST: INTERNAL },
   "/api/inventory": { GET: CLINIC, POST: FRONT_DESK },
@@ -126,6 +151,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/opening-balances/access": { GET: CLINIC },
   "/api/ortho": { GET: CLINIC, POST: CLINIC },
   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
+  "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
   "/api/ortho/baseline": { POST: CLINICAL },
   "/api/ortho/billing-decisions": { GET: CLINIC },
@@ -136,6 +162,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: CLINIC },
   "/api/patients/[id]": { GET: ["admin", "reception", "doctor", "assistant"], PATCH: CLINIC, DELETE: ADMIN },
   "/api/patients/[id]/arrival-panel": { GET: ["admin", "reception", "doctor", "cashier"] },
+  "/api/patients/[id]/clinical-context": { GET: CLINIC },
   "/api/patients/[id]/cases": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/ceph": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/chart": { GET: CLINIC, POST: CLINICAL },
@@ -161,6 +188,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/merge": { POST: ADMIN },
   "/api/patients/[id]/photo": { PUT: CLINIC },
   "/api/patients/[id]/plans": { GET: CLINIC },
+  "/api/patients/[id]/treatment-financial-context": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/patients/[id]/prescriptions": { GET: CLINICAL },
   "/api/patients/[id]/problems": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/referrals": { GET: CLINIC, POST: CLINICAL },
@@ -235,6 +263,13 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/settings/readiness": { GET: ADMIN },
   "/api/settings/reset": { GET: ADMIN, POST: ADMIN },
   "/api/shifts": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], PATCH: ["admin", "reception", "cashier"] },
+  // (HR-2) المهام: الأدوار غير المقيّدة (المدير والاستقبال والطبيب) — الخصوصية والرؤية
+  // على مستوى الصف داخل المسار، ودورا المال المقيّدان والمساعد مرفوضان عند الباب.
+  "/api/tasks": { GET: CLINIC, POST: CLINIC },
+  "/api/tasks/[id]": { GET: CLINIC, PATCH: CLINIC },
+  "/api/tasks/[id]/comments": { POST: CLINIC },
+  "/api/tasks/[id]/checklist": { POST: CLINIC },
+  "/api/tasks/[id]/links": { POST: CLINIC, DELETE: CLINIC },
   "/api/users": { GET: ADMIN, POST: ADMIN },
   "/api/users/[id]": { PATCH: ADMIN },
   "/api/visits": { GET: ["admin", "reception", "doctor", "assistant"], POST: CLINIC },
@@ -243,6 +278,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/visits/[id]/clinical": { GET: ["admin", "reception", "doctor", "assistant"], POST: ["admin", "doctor", "assistant"] },
   "/api/visits/[id]/materials": { GET: CLINIC },
   "/api/visits/[id]/next": { POST: CLINIC },
+  "/api/visits/[id]/reception-verification": { GET: FRONT_DESK, POST: FRONT_DESK },
+  "/api/visits/[id]/operational-checkout": { GET: FRONT_DESK, POST: FRONT_DESK },
   "/api/visits/[id]/reception-handoff": { POST: FRONT_DESK },
   "/api/visits/[id]/walkout": { GET: CLINIC },
   "/api/visits/readiness": { GET: ["admin", "reception", "doctor", "assistant"] },
@@ -347,4 +384,5 @@ export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): R
 
 export const API_ROUTE_UNKNOWN_MESSAGE = "هذا المسار غير موجود.";
 export const API_METHOD_NOT_ALLOWED_MESSAGE = "هذه العملية غير مدعومة على هذا المسار.";
+
 

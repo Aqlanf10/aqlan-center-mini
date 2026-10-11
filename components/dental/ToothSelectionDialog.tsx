@@ -40,6 +40,8 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
 }) {
   const titleId = useId();
   const hintId = useId();
+  const chartId = useId();
+  const chartScroll = useRef<HTMLDivElement>(null);
   const multi = multiSelect(mode);
   const [teeth, setTeeth] = useState<number[]>(() => [...initial.teeth].sort((a, b) => a - b));
   const [surfaces, setSurfaces] = useState<string[]>(() => initial.surfaces.split("").filter(Boolean));
@@ -149,7 +151,18 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
             </label>
           </div>
 
-          <div dir="ltr" className="overflow-x-auto overscroll-x-contain rounded-2xl border border-slate-200 bg-white p-2 shadow-card"
+          <div className="mb-2 rounded-xl bg-slate-50 p-2 text-xs" data-testid="tooth-chart-navigation">
+            <p className="text-slate-600">لرؤية بقية الأسنان، اسحب المخطط أفقيًا أو استخدم سهمي التمرير. يمين المريض على يسار الشاشة.</p>
+            <div className="mt-1 flex justify-between gap-2" dir="ltr">
+              <button type="button" aria-label="تمرير مخطط الأسنان نحو اليسار" aria-controls={chartId}
+                onClick={() => { const chart = chartScroll.current; if (chart) chart.scrollBy({ left: -Math.max(120, chart.clientWidth * 0.6), behavior: "smooth" }); }}
+                className="min-h-11 min-w-11 rounded-lg border bg-white px-3">←</button>
+              <button type="button" aria-label="تمرير مخطط الأسنان نحو اليمين" aria-controls={chartId}
+                onClick={() => { const chart = chartScroll.current; if (chart) chart.scrollBy({ left: Math.max(120, chart.clientWidth * 0.6), behavior: "smooth" }); }}
+                className="min-h-11 min-w-11 rounded-lg border bg-white px-3">→</button>
+            </div>
+          </div>
+          <div id={chartId} ref={chartScroll} tabIndex={0} aria-label="مخطط الأسنان القابل للتمرير" dir="ltr" className="overflow-x-auto overscroll-x-contain rounded-2xl border border-slate-200 bg-white p-2 shadow-card"
             data-testid="tooth-dialog-chart">
             <div className="mx-auto w-fit">
               <div className="mb-1 flex justify-between text-[10px] font-bold text-slate-400">

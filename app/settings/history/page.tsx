@@ -272,7 +272,7 @@ export default function SettingsHistoryPage() {
               const definition = settingDefinition(entry.key);
               const canRestore = canRestoreHistoryValue(definition, entry.before);
               return (
-                <article key={entry.id} aria-label={definition?.label ?? entry.key} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article key={entry.id} aria-label={definition?.label ?? entry.key} className="[overflow-wrap:anywhere] rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">

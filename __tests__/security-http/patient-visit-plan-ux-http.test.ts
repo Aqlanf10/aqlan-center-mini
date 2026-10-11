@@ -119,18 +119,24 @@ describe("(P6) billing preview is read-only", () => {
   });
 });
 
-describe("(P2) quick plan goes through the V2 engine and its price authority", () => {
-  it("the catalog price creates a V2 plan; a lower price from reception without a reason is refused", async () => {
-    const plan = (unitPriceMinor: number) => post("reception", "/api/plans", {
-      mode: "v2", patientId: ownedId, title: "خطة سريعة", currency: "YER", billingMode: "per_procedure",
-      items: [{ serviceId, quantity: 1, toothCode: 16, unitPriceMinor, billingRule: "on_completion", sessionCount: 1 }],
+describe("(P2) treatment entry creates the plan through the canonical invoice and price authority", () => {
+  it("the catalog price creates a linked plan; a lower price from reception without a reason is refused", async () => {
+    const plan = (unitPriceMinor: number) => post("reception", "/api/invoices", {
+      patientId: ownedId, currency: "YER",
+      items: [{ serviceId, quantity: 1, toothCode: 16, price: String(unitPriceMinor), sessions: 1 }],
     });
+    // Check price refusal before any invoice exists, so duplicate-work refusal cannot mask it.
+    await expectArabic(await plan(1000), 400);
     const created = await plan(40000);
     expect(created.status).toBe(201);
-    const { id } = await created.json() as { id: number };
+    const { id: invoiceId, clinical: { planId: id } } = await created.json() as { id: number; clinical: { planId: number } };
+    expect(id).toBeGreaterThan(0);
     const { rows: [row] } = await db.query<{ total_minor: string; total_from_items: boolean }>(
       `SELECT total_minor::text, total_from_items FROM treatment_plans WHERE id = $1`, [id]);
     expect(row).toEqual({ total_minor: "40000", total_from_items: true });
-    await expectArabic(await plan(1000), 400);
+    const { rows: [item] } = await db.query<{ billed_invoice_id: number; patient_id: number; consent_at: Date | null }>(
+      `SELECT i.billed_invoice_id, p.patient_id, p.consent_at FROM plan_items i
+       JOIN treatment_plans p ON p.id = i.plan_id WHERE p.id = $1`, [id]);
+    expect(item).toEqual({ billed_invoice_id: invoiceId, patient_id: ownedId, consent_at: null });
   });
 });

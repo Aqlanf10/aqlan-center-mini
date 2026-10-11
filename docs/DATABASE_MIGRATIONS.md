@@ -1,3 +1,31 @@
+# Source-only HR + current PR #322 integration preparation, 2026-10-11
+
+This is unexecuted source composition, not a deployed or accepted release. The pinned
+parents are HR `e92b733f709efb42af9541d266ce1e22fe61e10c` and current PR #322
+`d2618006fe8235fb77311dd16a329b11ac8866ff`, with verified merge-base
+`148fcbeac229cb279848e6ea37049d1599a4fafe`. The proposed ordinary merge retains both
+parents and all newer PR #322 source. Accepted Staging
+`98a64c0240acbe2b973ef16d9c7cecf960a2578b` remains the unchanged deployed-baseline
+comparison; its fixed `staging/accepted-98a64c0` branch must never advance.
+
+No branch, commit, CI, migration, application, build or deployment was created or
+executed by this preparation. HR6679 full CI failed 14 PostgreSQL cases; this HR e92 successor preserves production
+source and changes only three reviewed PostgreSQL fixture/witness files. Its full CI is pending. Both final parent CIs and exact final-source full CI
+must pass with no substantive review blockers before acceptance.
+
+All 50 original migration files are preserved: 0001–0043 and 0045–0051. Only 0044
+remains reserved. The periodontal candidate remains inactive and test-only. Both
+PG18 catalogs require source/run-bound regeneration from the exact final union on
+isolated official CI; no parent catalog proves this union and no fingerprint was
+edited by hand. Existing convergence findings remain disclosed.
+
+Publication/deployment requires the root/publisher's final source selection,
+independent review, verified exact-source generated catalogs and the separately
+authorized Staging ledger/checksum/read-only preflight and deployment gates.
+Historical success or deployment claims below refer only to their original source.
+
+# Retained migration documentation
+
 # نظام هجرات قاعدة البيانات المُرقَّمة (P1.1 + P1-FIX)
 
 > **الحالة:** P0 مُدمج في `main` (bd9a399). هذا المستند يصف نظام الهجرات كما وُضع في P1
@@ -57,10 +85,37 @@ migrations/
   0041_invoice_clinical_linkage.sql ← الربط السريري للفاتورة: مفتاح إعادة للفاتورة، رابط البند المالي الحي (billed_invoice_id)، نسب سطر الفاتورة إلى بنده عبر التصحيحات (invoice_items.plan_item_id)، ومصدر البند والحالة (origin) — أعمدة قابلة للفراغ بلا تعبئة (INV-LINK B)
   0042_legacy_treatment_agreements.sql ← العلاج السابق للنظام: جدول legacy_treatment_agreements للاتفاق التاريخي (المتفق والمدفوع قبل النظام والمتبقي عند البداية بعملته وتاريخه، وبنده وحالته، وصلته بصف تاريخ الرصيد الافتتاحي) — المتبقي وحده رصيد افتتاحي، بلا فاتورة أو إيصال؛ إلحاقي بحارس لا يسمح إلا بالإبطال، وفهارس تمنع اتفاقين حيّين لنفس (مريض، خدمة، سن) أو لنفس البند — جدول جديد بلا تعديل لقائم (INV-LINK LEGACY)
   0043_legacy_treatment_coverage.sql   ← لقطة التغطية الثابتة للعلاج التاريخي: legacy_treatment_coverage_snapshots (صف واحد لكل اتفاق: نمط الموقع، والأسنان، والنطاق، والأسطح) مع دالة التحقق aqlan_legacy_coverage_site_valid حسب فئة الخدمة، وحارس يطابق الخدمة والسن المرجعي للاتفاق ويرفض التعديل والحذف المستقل — إضافية، بلا تعبئة للصفوف القديمة ولا مال ولا موافقة (INV-LINK LEGACY)
+  (0044 محجوزة لـ 0044_invoice_admin_discount_lines.sql — مرشّح فواتير مفتوح #301 لا يُشحن مع هذه الشجرة، فتظل الفجوة معلنة في السلسلة)
+  0045_hr_staff.sql ← ملفات الطاقم: كيان مستقل عن حساب الدخول (مسمًّى حرّ لا يمنح صلاحية)، نوع تعاقد (نسبة/راتب/راتب ونسبة)، مبلغ راتب بعملته ودوريته وتاريخ سريانه كقيدٍ مسمّى، عملة الراتب مقيدة على (YER/SAR/USD)، ربط اختياري فريد بحسابٍ موجود، سجل تغييرات append-only — جدولان جديدان إضافيّان خالصان (HR-1). الترقيم 0045/0046 بعد إعادة التنسيق مع سلسلة الفواتير 0041–0044 (مراجعة دوت على PR #308 — لم تُطبَّق على الإنتاج)
+  0046_hr_tasks.sql ← المهام: خاصة بلا مسؤول بقيدٍ مسمّى (hr_tasks_no_assignee_on_private)، إسناد لموظفٍ بحسابٍ أو بلا حساب، تاريخ تخطيط planned_for مستقل عن الاستحقاق، مفتاح معاملة client_request_id فريد جزئيًّا يمنع تكرار الإنشاء عند فقدان الرد، قائمة تحقق وتعليقات وروابط بمريض/مختبر/مخزون، سجل أحداث append-only بفاعل الجلسة الفعلي — خمسة جداول جديدة إضافيّة خالصة (HR-2)
+  0048_hr_contracts_attendance_leaves.sql ← العقود وجداول العمل والحضور والإجازات: عقود إدارية وملاحقها، ورديات الدوام المرنة والمقسمة، بصمات الحضور والتصحيحات، وأنواع الإجازات وأرصدتها وطلباتها (HR-3 / HR-4)
+  0049_hr_payroll_disbursements.sql ← مسير الرواتب والمستحقات وصرفها: فترات المسير، دورات الاحتساب، بنود الرواتب والبدلات ونسب الأطباء والخصميات، وسندات الصرف بربط مالي حقيقي بـ payables و expenses (HR-5 / HR-6)
+  0050_hr_payroll_integrity.sql ← سلامة المسير والصرف (إضافية خالصة فوق 0049، رقم مقترح بانتظار تأكيد dot): لقطة شروط الأجر وأسباب الحجب على بند المسير، التزام العمولة المستقل، أجزاء الصرف (سند لكل جزء)، بصمة محتوى الطلب لمفتاح الصرف، أعمدة العكس (HR-INT)
+  0047_ceph_correction_lineage.sql     ← أصل تصحيح دراسة السيفالو: العمود corrects_analysis_id على ceph_analyses مع قيد «الأصل أقدم من التصحيح» (لا ربط ذاتي ولا دورة) ومفتاح أجنبي مركّب (patient_id, corrects_analysis_id) يفرض أن الأصل لمريض التصحيح نفسه وفهرس فريد (patient_id, id) يستلزمه وفهرس بحث جزئي — إضافية، بلا تعبئة: النسخ القديمة تبقى بلا أصل مسجَّل ولا يُخمَّن من الملاحظة. الرقم 0047 محجوز من dot (تعليق التنسيق على #314، 2026-10-09)؛ الأرقام 0044 (خصم الفاتورة الإداري #301) و0045–0046 (الطاقم والمهام #308) فجوة معلنة محجوزة لفروع مفتوحة لا تُشحن مع هذه الشجرة (ORTHO-ID-2)
+  0051_ortho_treatment_strategy.sql ← مراجعات استراتيجية علاج التقويم: ortho_strategy_revisions مرتبط بالمريض وحالتي التقويم والتخصص، مع تسلسل مراجعات ومفتاح إعادة وحراس إلحاقية؛ استثناء نقل ملكية المريض فقط عند الدمج، والتحقق المؤجل من تطابق الحالتين والسابق — جدول إضافي بلا تعبئة أو استنتاجات سريرية أو كتابة مالية
 ```
+
+في `0051`، يتبع `patient_id` المالك الحالي، بينما يبقى `recorded_patient_id`
+هوية المريض وقت التسجيل؛ ويرتبط السجل بمعرّفَي `ortho_case_id` و`clinical_case_id`
+الثابتين. تُحفظ هوية الكاتب `actor_user_id` واسمه `created_by` والوقت `created_at`
+والسبب `reason` وإصدار البنية `schema_version = 1` وسياق التسجيل الحالي أو الاسترجاعي.
+تمنع القيود تكرار إصدار للحالة، أو إنشاء خلفين للمراجعة نفسها، أو تكرار أمر الكاتب
+`(ortho_case_id, actor_user_id, command_id)`. يحسب الكاتب `request_fingerprint` من
+الطلب المُطبَّع؛ يعيد تكرار الأمر المطابق المراجعة نفسها، ويرفض اختلاف محتواه.
+ويتحقق الحارس المؤجَّل من ملكية المريض للحالتين المترابطتين، ومن أن السابق ينتمي
+إلى الحالتين نفسيهما وإصداره أقل بواحد؛ ولا يسمح حارس الإلحاق بتغيير المحتوى أو
+هوية التسجيل أو الروابط الثابتة عند نقل `patient_id` بالدمج.
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه
 عنه فالمجلد هو الصحيح وهذه الوثيقة هي المتأخرة.
+
+السلسلة المراجَعة الحالية هي `0001–0043` ثم `0047` ثم `0051`، أي 45 ملفًا بأسمائها وترتيبها
+وبصماتها. الفجوتان `0044–0046` و`0048–0050` مقصودتان لأرقام محجوزة لفروع أخرى (و`0050` محجوز
+بشكل مستقل)، وليست هجرات مطبَّقة مفقودة؛ لا تُنشأ ملفات وهمية لملئها. عند تحديث
+الفرع من `main` أو دمج تلك الفروع، تُراجَع القائمة الفعلية وسجل `schema_migrations`
+وتُوفَّق هوياتهما قبل توسيع قائمة السماح، مع إبقاء اختبارات الحدود التاريخية كما هي.
+المرشّح البيريودنتالي في اختبار السلسلة الحالية فقط هو `0052`؛ لا يوجد ملف هجرة
+بيريودنتالي مشحون في `migrations/` ولا يُفعَّل مخططه أو مساره أو محرّره في التطبيق.
 
 جدول التسجيل:
 
@@ -267,9 +322,14 @@ TypeScript، ويُطبَّق من المسارين (الهجرة و`ensureSchem
    ببايت** للثابت.
 3. `lib/db.ts` ← `ensureSchema()`: `await getPool().query(<الثابت>)` بعد آخر خطوةٍ مماثلة.
 4. اختبار وحدة `__tests__/<الميزة>-schema.test.ts` يثبت تطابق جسم الملف مع الثابت.
-5. `scripts/verify-schema-ownership.ts`: ارفع `Array.from({ length: N })` إلى رقم الهجرة الجديدة.
-6. `__tests__/postgres/schema-ownership.test.ts`: أضف الإصدار إلى القائمة، وارفع طول
-   السجل، وعدد الجداول إن أضفت جدولًا.
+5. `scripts/verify-schema-ownership.ts` و`__tests__/postgres/_reviewed-migration-chain.ts`
+   و`COORDINATED_MIGRATION_VERSIONS` في `lib/migrations.ts`:
+   أضف اسم الملف المراجَع إلى قوائم السماح الدقيقة بالترتيب، وإصداره إلى الثابت؛
+   رقم آخر هجرة ليس عدد الملفات. حافظ على رفض المفقود والمكرر والمعاد ترتيبه وغير المراجَع، وعلى تطابق
+   الاسم والإصدار وSHA-256 لمحتوى SQL، ولا توسِّع الحدود التاريخية.
+6. `__tests__/postgres/schema-ownership.test.ts`: تحقَّق من كامل هوية سجل الهجرات
+   وأسماء الجداول الجديدة، مع إبقاء تعداد الجداول التاريخية؛ وحدِّث حراس قائمة
+   الملفات في اختبارات preflight والمخطط غير المفعّل عند مراجعة هجرة جديدة.
 7. أعد توليد عقد المخطط على PostgreSQL 18: `npm run schema:contract`، والتزم
    `schema/current-schema-contract.pg18.json` مع التغيير.
 8. شغّل `npm run verify:full` محليًّا على `docker compose up -d pg18` قبل فتح الطلب.

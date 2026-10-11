@@ -4,19 +4,12 @@ import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../l
 import { validateOperationalVerificationEnvironment } from "../../lib/verification-target-policy.mjs";
 import { PERIODONTAL_SQL } from "../../lib/periodontal-schema";
 import { validatePostgresTestTarget } from "./_safe-target";
+import { assertReviewedMigrationChain } from "./_reviewed-migration-chain";
 
-/** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
+/** Collision-free test-only suffix after the actual reviewed chain, including reserved-number gaps. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
-  const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
-  if (files.length < 40 || files.length > 43) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
-  files.forEach((file, index) => {
-    const expected = String(index + 1).padStart(4, "0");
-    if (file.version !== expected) throw new Error("Shipped migration chain is missing, reordered or duplicated.");
-    if (index >= 40 && file.filename !== expectedSuffixes[index - 40]) {
-      throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
-    }
-  });
-  return ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044" } as const)[files.length as 40 | 41 | 42 | 43];
+  assertReviewedMigrationChain(files);
+  return String(Number(files.at(-1)!.version) + 1).padStart(4, "0");
 }
 
 const NAME = /^aqlan_perio_[a-f0-9]{32}(?![\s\S])/;
