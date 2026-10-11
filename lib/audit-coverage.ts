@@ -26,6 +26,7 @@ export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
   "POST /api/reports/saved": "تقرير محفوظ: تفضيل شخصي لصاحبه (أعمدة وتصفية) بلا بيانات مالية أو سريرية.",
   "PATCH /api/reports/saved": "تعديل تقرير محفوظ شخصي.",
   "DELETE /api/reports/saved": "حذف تقرير محفوظ شخصي.",
+  "POST /api/ceph/[id]/ai-analyze": "معاينة هندسية أو وصفية لا تحفظ سجلًا سريريًا أو ماليًا ولا نتيجة المزوّد؛ طلب الحفظ المباشر مرفوض والحفظ اليدوي مستقل ومدقّق في ceph.update. فرع الخدمة الخارجية الصريح لا يكتب سجل استخدام؛ تهيئة المخطط العامة ليست حفظًا للمعاينة.",
   "POST /api/invoices/clinical-preview": "معاينة الربط السريري للفاتورة قبل حفظها — قراءةٌ فقط لا تكتب شيئًا؛ الحفظ يُدقَّق في invoice.create.",
   "POST /api/patients/[id]/legacy-treatments/preview": "معاينة تسجيل علاجٍ بدأ قبل النظام — معاملة READ ONLY لا تكتب شيئًا؛ الحفظ يُدقَّق في legacy_treatment.create.",
   "POST /api/expenses/quote": "معاينة حساب سند صرف — لا يكتب شيئًا.",
