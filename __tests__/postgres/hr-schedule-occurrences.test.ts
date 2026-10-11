@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { await fixture?.close(); });
 const schedule = (start: string, end: string, endDayOffset: number, workingDays = [0, 1, 2, 3, 4, 5, 6]) => ({ timeZone: 'Asia/Aden', workingDays, graceMins: 0, segments: [{ id: 'work', start, startDayOffset: 0, end, endDayOffset }] });
-const known = (id: string, from: string, to: string | null, value: ReturnType<typeof schedule>) => ({ id, kind: 'known', from, to, value });
+const known = (id: string, from: string, to: string | null, value: ReturnType<typeof schedule>) => ({ id, kind: 'known' as const, from, to, value });
 async function rawInsert(facts: ReturnType<typeof known>[]) {
   const staff = (await fixture.source.query("INSERT INTO hr_staff(full_name,created_by) VALUES('Synthetic R1 employee','test') RETURNING id")).rows[0];
   const stream = (await fixture.source.query("INSERT INTO hr_effective_streams(kind,subject_key,staff_id) VALUES('schedule',$1::text,$1::text::int) RETURNING id", [String(staff.id)])).rows[0];
