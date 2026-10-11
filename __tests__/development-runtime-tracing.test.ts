@@ -32,11 +32,24 @@ const expectedExcludes = [
 ];
 const exclusions = nextConfig.outputFileTracingExcludes ?? {};
 
+// nextConfig and the matcher options are immutable inputs for this test file.
+// Compile their globs once; retain a distinct file matcher for each exact route.
+const configuredRouteMatchers = Object.entries(exclusions).map(([routeGlob, values]) => ({
+  matchesRoute: picomatch(routeGlob, options),
+  patterns: values.map((value) => path.join(root, value)),
+}));
+const routeFileMatchers = new Map<string, (file: string) => boolean>();
+
 function excluded(route: string, file: string): boolean {
-  const patterns = Object.entries(exclusions)
-    .filter(([routeGlob]) => picomatch(routeGlob, options)(route))
-    .flatMap(([, values]) => values.map((value) => path.join(root, value)));
-  return patterns.length > 0 && picomatch(patterns, options)(path.join(root, file));
+  let matcher = routeFileMatchers.get(route);
+  if (!matcher) {
+    const patterns = configuredRouteMatchers
+      .filter(({ matchesRoute }) => matchesRoute(route))
+      .flatMap(({ patterns }) => patterns);
+    matcher = patterns.length > 0 ? picomatch(patterns, options) : () => false;
+    routeFileMatchers.set(route, matcher);
+  }
+  return matcher(path.join(root, file));
 }
 
 function files(directory: string): string[] {
@@ -124,6 +137,39 @@ describe("temporary development-only runtime tracing boundary", () => {
       "lib/scoped-braces-runtime.mjs", "lib/runtime-braces-exception-pins.mjs",
     ];
     for (const file of retained) expect(excluded("/api/backup/full", file), file).toBe(false);
+  });
+
+  it("keeps cached matchers equivalent to the original glob oracle for all configured patterns and edge paths", () => {
+    // The original implementation remains the independent oracle for this
+    // bounded corpus, including dot:true/contains:true and path normalization.
+    const originalExcluded = (route: string, file: string): boolean => {
+      const patterns = Object.entries(exclusions)
+        .filter(([routeGlob]) => picomatch(routeGlob, options)(route))
+        .flatMap(([, values]) => values.map((value) => path.join(root, value)));
+      return patterns.length > 0 && picomatch(patterns, options)(path.join(root, file));
+    };
+    const patternWitnesses = Object.values(exclusions).flat().flatMap((pattern) => {
+      const relative = pattern.replace(/^\.\//, "");
+      return relative.endsWith("/**/*")
+        ? [relative.replace(/\/\*\*\/\*$/, "/index.js"),
+          relative.replace(/\/\*\*\/\*$/, "/.hidden/nested.js"),
+          relative.replace(/\/\*\*\/\*$/, "/nested/.proof.json")]
+        : [relative];
+    });
+    const witnesses = [...patternWitnesses,
+      "app/api/backup/full/route.ts", "components/Modal.tsx", "lib/db.ts",
+      "migrations/0050_hr_payroll_integrity.sql", "schema/current-schema-contract.pg18.json",
+      "node_modules/braces/index.js", "node_modules/tool/node_modules/braces/lib/parse.js",
+      "vendor/braces-runtime/index.js", "vendor/upstream/runtime.tgz",
+      "scripts/dependency-review-runtime/check.ts", "scripts/dependency-security-runtime/check.ts",
+      "lib/scoped-braces-exception", "lib/scoped-braces-exception.mjs.backup",
+      "vendor/braces/../runtime/index.js", "./.dependency-audit/.nested/proof.json",
+    ];
+    for (const route of ["/", "/api/backup/full", "/api/settings/backup", "/patients/[id]", "/.hidden", "/api/backup/full?probe=1"]) {
+      for (const file of [...witnesses, ...witnesses.slice().reverse()]) {
+        expect(excluded(route, file), `${route}: ${file}`).toBe(originalExcluded(route, file));
+      }
+    }
   });
 
   it("does not let runtime app, component or library imports depend on excluded development tooling", () => {
