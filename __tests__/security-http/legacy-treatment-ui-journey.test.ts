@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page, type Request, type Route } from "pla
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
 import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
+import { orthoViewportProof, revealOrthoControlByWheel } from "./_ortho-strategy-ui-fixture";
 
 /**
  * (INV-LINK LEGACY) Treatment started before the system, through the real built form and the shared Dental Chart.
@@ -68,7 +69,8 @@ async function registerThroughForm(patientId: number, width: number) {
     if (response.url().includes("/api/invoices/clinical-preview")) previews.push(-1);
   });
   try {
-    await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+    await page.getByTestId("treatment-entry-open").click();
+    await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
     const form = page.getByTestId("legacy-treatment-form");
     await form.getByLabel("الخدمة العلاجية").selectOption(String(bridge));
     await form.getByTestId("legacy-tooth-button").click();
@@ -146,6 +148,7 @@ describe("pre-system treatment through the built form", () => {
       const account = await open(patientId, width, "?tab=account");
       try {
         await account.getByTestId("legacy-agreements").waitFor();
+        await account.getByTestId("account-treatment-details").locator("summary").click();
         const header = account.getByTestId("patient-account-currency-banner").filter({ has: account.getByTestId("historical-clinical-note") });
         expect(await header.getAttribute("data-currency")).toBe("YER");
         const headerHistory = header.getByTestId("historical-clinical-note");
@@ -153,7 +156,10 @@ describe("pre-system treatment through the built form", () => {
         expect(await headerHistory.count()).toBe(1);
         expect(await headerHistory.innerText()).toContain("الباقي السريري غير معلومين");
         expect(await header.innerText()).not.toContain("باقي علاج (غير مستحق): 300,000");
-        expect(await header.innerText()).toContain("180,000");
+        const debt = account.locator('[data-testid="account-canonical-balance"][data-currency="YER"]');
+        expect(await debt.innerText()).toContain("180,000");
+        expect(await header.innerText()).toContain("تفاصيل العمل");
+        expect(await header.innerText()).not.toContain("رصيد الحساب:");
         expect(await account.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
         await account.screenshot({ path: `${SHOTS}/legacy-treatment-account-${width}.png`, fullPage: true });
       } finally { await account.context().close(); }
@@ -186,6 +192,75 @@ describe("pre-system treatment through the built form", () => {
 });
 
 describe("legacy preview failure, staleness and form ownership", () => {
+  it.each([390, 1280])("server refusal preserves historical draft and key, correction succeeds once, and only a failed ledger read hides valid balance at %i×844", async width => {
+    const { rows: [patient] } = await db.query<{ id: number }>(
+      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض رفض تاريخي اصطناعي') RETURNING id`, [`LG-REFUSE-${stamp}-${width}`]);
+    await db.query(`INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, created_by)
+      VALUES ($1, 'SAR', 25000000, CURRENT_DATE, 'secadmin')`, [patient.id]);
+    const page = await open(patient.id, width, "?tab=account");
+    await page.setViewportSize({ width, height: 844 });
+    const commands: Record<string, unknown>[] = []; let failLedger = false;
+    const click = async (control: ReturnType<Page["locator"]>) => {
+      await control.waitFor({ state: "visible" });
+      const proof = await revealOrthoControlByWheel(page, control);
+      await page.mouse.click(proof.left + proof.width / 2, proof.top + proof.height / 2);
+    };
+    const fill = async (label: string, value: string) => {
+      const control = page.getByLabel(label, { exact: true });
+      await revealOrthoControlByWheel(page, control); await control.fill(value);
+    };
+    await page.route(`**/api/patients/${patient.id}/legacy-treatments`, async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      commands.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (commands.length === 1) return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ message: "صحّح الملاحظة التاريخية ثم أعد المحاولة." }) });
+      failLedger = true; return route.continue();
+    });
+    await page.route(`**/api/patients/${patient.id}/ledger`, route => failLedger
+      ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "قراءة الحساب غير متاحة (اختبار)." }) }) : route.continue());
+    try {
+      await click(page.getByTestId("treatment-entry-open"));
+      await click(page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }));
+      const form = page.getByTestId("legacy-treatment-form");
+      const service = form.getByLabel("الخدمة العلاجية", { exact: true });
+      await revealOrthoControlByWheel(page, service); await service.selectOption(String(bridge));
+      await click(form.getByTestId("legacy-tooth-button"));
+      const dialog = page.getByTestId("tooth-dialog");
+      await dialog.waitFor();
+      for (const target of [dialog.getByTestId("odontogram-tooth-14"), page.getByTestId("tooth-dialog-confirm")]) {
+        const proof = await target.evaluate(orthoViewportProof);
+        expect(proof.left).toBeGreaterThanOrEqual(0); expect(proof.right).toBeLessThanOrEqual(proof.viewportWidth);
+        expect(proof.top).toBeGreaterThanOrEqual(0); expect(proof.bottom).toBeLessThanOrEqual(proof.viewportHeight);
+        expect(proof.hitPoints.map(point => point.unobscured)).toEqual(Array(9).fill(true));
+        await page.mouse.click(proof.left + proof.width / 2, proof.top + proof.height / 2);
+      }
+      await dialog.waitFor({ state: "detached" });
+      await fill("المبلغ المتفق عليه أصلًا", "300000"); await fill("المدفوع قبل النظام", "120000");
+      await fill("تاريخ المعلومات التاريخية", "2026-01-15"); await fill("ملاحظة الاتفاق التاريخي", "قبل التصحيح");
+      const save = form.getByRole("button", { name: "احفظ العلاج السابق", exact: true });
+      await expect.poll(() => save.isEnabled(), { timeout: 15_000 }).toBe(true); await click(save);
+      const error = page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب", exact: true });
+      await error.waitFor(); await revealOrthoControlByWheel(page, error);
+      expect(await error.innerText()).toContain("صحّح الملاحظة");
+      expect(await form.getByLabel("المبلغ المتفق عليه أصلًا").inputValue()).toBe("300000");
+      expect(await form.getByLabel("المدفوع قبل النظام").inputValue()).toBe("120000");
+      expect(await form.getByTestId("legacy-tooth-chip").innerText()).toContain("14");
+      expect(await page.getByTestId("account-canonical-balance").innerText()).toContain("250,000");
+      expect(await page.getByTestId("account-balance-unavailable").count()).toBe(0);
+      expect((await db.query(`SELECT id FROM legacy_treatment_agreements WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
+      await fill("ملاحظة الاتفاق التاريخي", "معلومة تاريخية مصححة");
+      await click(save); await page.getByTestId("invoice-clinical-notice").waitFor();
+      expect(commands).toHaveLength(2); expect(commands[1].idempotencyKey).toBe(commands[0].idempotencyKey);
+      expect(commands[1].note).toBe("معلومة تاريخية مصححة");
+      await page.getByTestId("account-balance-unavailable").waitFor();
+      expect(await page.getByTestId("account-canonical-balance").count()).toBe(0);
+      expect((await db.query(`SELECT remaining_minor::int FROM legacy_treatment_agreements WHERE patient_id=$1`, [patient.id])).rows).toEqual([{ remaining_minor: 180000 }]);
+      for (const table of ["invoices", "payments"]) expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
+      await page.screenshot({ path: `${SHOTS}/legacy-refusal-recovery-${width}.png`, fullPage: false });
+    } catch (error) {
+      await page.screenshot({ path: `${SHOTS}/legacy-refusal-failure-${width}.png`, fullPage: false }); throw error;
+    } finally { await page.context().close(); }
+  }, 120_000);
+
   it("blocks save on a failed preview, ignores a stale response, follows A→B→A, and starts clean after close/reopen", async () => {
     const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(
       "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id", [`LGST-${stamp}`, "مريض معاينة اصطناعي"]);
@@ -201,7 +276,8 @@ describe("legacy preview failure, staleness and form ownership", () => {
       return route.continue();
     });
     try {
-      await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+      await page.getByTestId("treatment-entry-open").click();
+      await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
       const form = page.getByTestId("legacy-treatment-form");
       const save = form.getByRole("button", { name: "احفظ العلاج السابق" });
       const readState = form.getByTestId("legacy-preview-read-state");
@@ -259,8 +335,15 @@ describe("legacy preview failure, staleness and form ownership", () => {
       expect(seen.some((one) => one.agreed === "400000" && one.status === 200)).toBe(true);
 
       // Close and reopen: a fresh, empty form with save disabled; nothing was written by any preview.
-      await form.getByRole("button", { name: "إلغاء" }).click();
-      await page.getByRole("button", { name: "علاج بدأ قبل النظام" }).click();
+      const discard = page.waitForEvent("dialog");
+      const cancel = form.getByRole("button", { name: "إلغاء" }).click();
+      const confirmation = await discard;
+      expect(confirmation.type()).toBe("confirm");
+      expect(confirmation.message()).toContain("مسودة فاتورة أو اتفاق غير محفوظة");
+      await confirmation.accept();
+      await cancel;
+      await page.getByTestId("treatment-entry-choice").waitFor();
+      await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
       const reopened = page.getByTestId("legacy-treatment-form");
       expect(await reopened.getByLabel("المبلغ المتفق عليه أصلًا").inputValue()).toBe("");
       expect(await reopened.getByRole("button", { name: "احفظ العلاج السابق" }).isEnabled()).toBe(false);

@@ -45,6 +45,7 @@ interface PatientCasesProps {
   canWrite: boolean;
   context?: ClinicalNavigationContext;
   onOpenOrtho?: (context: ClinicalNavigationContext) => unknown;
+  onOpenTreatmentEntry?: () => unknown;
   onOpenClinicalContext?: (context: ClinicalNavigationContext, target?: string) => unknown;
   /** Returns identity-bound cleanup, so an old child cannot clear a newer guard. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -87,7 +88,7 @@ export function PatientCases(props: PatientCasesProps) {
   return <PatientCasesWorkspace key={scope} {...props} canRead={canRead} />;
 }
 
-function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOrtho, onOpenClinicalContext, onNavigationGuardChange }:
+function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOrtho, onOpenClinicalContext, onNavigationGuardChange, onOpenTreatmentEntry }:
   PatientCasesProps & { canRead: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -250,6 +251,11 @@ function PatientCasesWorkspace({ patientId, canWrite, canRead, context, onOpenOr
         {!ready ? <button type="button" disabled={busy} onClick={() => void load(true)} className="min-h-11 px-3 font-bold underline">إعادة تحميل الحالات</button> : null}
       </div> : null}
 
+      <p className="text-xs text-slate-600">تسجيل التقييم والحالة السريرية لا ينشئ اتفاقًا ماليًا أو دَينًا.
+        {onOpenTreatmentEntry ? <button type="button" disabled={writeBlocked}
+          onClick={() => { if (!owner.active || writeBlocked) return; if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); }}
+          className="mr-2 min-h-11 rounded-lg border px-3 font-bold">فاتورة / اتفاق علاج</button> : null}
+      </p>
       {/* ── الحالات التخصصية ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="الحالات التخصصية">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

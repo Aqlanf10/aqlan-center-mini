@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { authedGet, authedMutation, harness } from "./_server";
 
@@ -53,21 +54,36 @@ describe("(SPEC-T2) editing specialty templates", () => {
     const { rows: [service] } = await db.query<{ id: number }>(
       `INSERT INTO services (name, category, price_minor, is_active, price_configured) VALUES ($1, 'cleaning', 12000, TRUE, TRUE) RETURNING id`,
       [`تنظيف اختبار ${Date.now()}`]);
-    const plan = await authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({
-      mode: "template", patientId: h.seeded.patientBId, templateId: "cleaning", title: "تنظيف",
-      steps: [{ key: (cleaning.steps as { key: string }[])[0].key, include: true, serviceId: service.id }],
+    const body = {
+      patientId: h.seeded.patientBId, currency: "YER", items: [],
+      idempotencyKey: `template-settings-adapter:${randomUUID()}`,
+      templateSelection: {
+        templateId: "cleaning", teeth: [], doctorId: null,
+        steps: [{ key: (cleaning.steps as { key: string }[])[0].key, include: true, serviceId: service.id }],
+        sites: [{ stepKey: (cleaning.steps as { key: string }[])[0].key, toothCode: null, scope: "full_mouth" }],
+      },
+    };
+    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
+    expect(preview.status).toBe(200);
+    const reviewed = await preview.json() as { template: { version: string } | null };
+    expect(reviewed.template?.version).toEqual(expect.any(String));
+    const plan = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({
+      ...body, templateSelection: { ...body.templateSelection, version: reviewed.template!.version },
     }));
     expect(plan.status).toBe(201);
-    const { id } = await plan.json() as { id: number };
+    const { clinical: { planId: id } } = await plan.json() as { clinical: { planId: number } };
     const { rows: [visit] } = await db.query<{ title: string; duration_minutes: number }>(
       `SELECT title, duration_minutes FROM planned_visits WHERE plan_id = $1`, [id]);
     expect(visit).toEqual({ title: "تنظيف عميق", duration_minutes: 60 });
 
     // الإيقاف: قالبٌ حُذف من القائمة لا يُبنى منه.
-    const gone = await authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({
-      mode: "template", patientId: h.seeded.patientBId, templateId: "endo", title: "عصب", teeth: [11],
+    const gone = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({
+      patientId: h.seeded.patientBId, currency: "YER", items: [],
+      templateSelection: { templateId: "endo", teeth: [11], doctorId: null,
+        steps: [{ key: "rct", include: true, serviceId: service.id }] },
     }));
     expect(gone.status).toBe(400);
+    expect(await gone.json()).toMatchObject({ code: "INVOICE_TEMPLATE_INVALID", message: "قالب العلاج غير موجود؛ أعد اختيار القالب الحالي." });
 
     expect((await save("", "استعادة الجاهزة")).status).toBe(200);
     const restored = await (await authedGet("/api/plan-templates", h.sessions.admin)).json() as { customized: boolean; templates: unknown[] };

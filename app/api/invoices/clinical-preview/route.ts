@@ -4,7 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { getPool, getSettings, listParties, listServices } from "@/lib/db";
 import { invoicePlanChoices, previewInvoiceLinkage } from "@/lib/invoice-linkage-db";
 import { INVOICE_LINKAGE_MESSAGE } from "@/lib/invoice-clinical-linkage";
-import { parseInvoiceInput } from "@/lib/invoice-input";
+import { parseInvoiceCommand } from "@/lib/invoice-template";
 import { checkInvoiceAuthority } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
 import { canHandleMoney } from "@/lib/roles";
@@ -23,9 +23,9 @@ export async function POST(request: Request) {
   try {
     const services = new Map((await listServices(true)).map((service) => [service.id, service]));
     const doctors = new Set((await listParties("doctor")).map((party) => party.id));
-    const parsed = parseInvoiceInput(body, services, doctors);
-    if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
     const settings = await getSettings();
+    const parsed = parseInvoiceCommand(body, services, doctors, settings, false);
+    if (!parsed.ok) return NextResponse.json({ message: parsed.message, ...(parsed.code ? { code: parsed.code } : {}) }, { status: parsed.status ?? 400 });
     const authority = checkInvoiceAuthority({
       lines: parsed.authorityLines, currency: parsed.baseCurrency, rates: foreignRatesFromSettings(settings), role: session.role,
       maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     if (!authority.ok) return NextResponse.json({ message: authority.message }, { status: 400 });
     const lines = await previewInvoiceLinkage({ patientId: parsed.patientId, baseCurrency: parsed.baseCurrency, existingPlanId: parsed.existingPlanId, items: parsed.items });
     const planChoices = await invoicePlanChoices(getPool(), parsed.patientId, parsed.baseCurrency);
-    return NextResponse.json({ existingPlanId: parsed.existingPlanId, planChoices, lines: lines.map((line) => ({ ...line,
+    return NextResponse.json({ template: parsed.template, existingPlanId: parsed.existingPlanId, planChoices, lines: lines.map((line) => ({ ...line,
       refusalMessage: line.refusal ? INVOICE_LINKAGE_MESSAGE[line.refusal] : null,
     })) }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ message: "تعذّرت معاينة الربط السريري." }, { status: 500 }); }

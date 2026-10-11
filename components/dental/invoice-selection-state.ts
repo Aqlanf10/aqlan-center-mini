@@ -6,6 +6,14 @@ export interface InvoiceSelectionEvidence {
   planChoices: InvoicePlanChoice[];
   itemChoices: ReadonlyMap<string, InvoiceItemChoice[]>;
 }
+/** JSON responses cannot forge this caller-owned marker. Only validated template expansion sets it. */
+export const INVOICE_TEMPLATE_SCHEDULED_ROW: unique symbol = Symbol("invoice-template-scheduled-row");
+export interface InvoicePreviewRequestRow {
+  key: string;
+  clinical: boolean;
+  planItemId?: number | null;
+  expectedScheduled?: typeof INVOICE_TEMPLATE_SCHEDULED_ROW;
+}
 export type InvoiceSelectionPreviewState = PreviewState & { selections?: InvoiceSelectionEvidence };
 export interface InvoiceSelection {
   /** Reference identity, not a reusable serialized key. */
@@ -37,7 +45,7 @@ export function selectInvoiceItem(selection: InvoiceSelection | null, owner: obj
 
 /** A response must identify the requested selections and preserve stable row ownership. */
 export function readInvoiceSelectionPreview(payload: unknown,
-  rows: readonly { key: string; clinical: boolean; planItemId?: number | null }[], existingPlanId: number | null) {
+  rows: readonly InvoicePreviewRequestRow[], existingPlanId: number | null) {
   const byRow = readPreviewLines(payload, rows);
   if (!byRow || !object(payload) || payload.existingPlanId !== existingPlanId || !Array.isArray(payload.planChoices)
     || !Array.isArray(payload.lines)) return null;
@@ -52,6 +60,8 @@ export function readInvoiceSelectionPreview(payload: unknown,
     if (!object(line) || typeof line.line !== "number") return null;
     const request = rows[line.line];
     if (!request) return null;
+    if (request.expectedScheduled !== undefined && request.expectedScheduled !== INVOICE_TEMPLATE_SCHEDULED_ROW) return null;
+    const scheduledTemplate = request.expectedScheduled === INVOICE_TEMPLATE_SCHEDULED_ROW;
     // Do not inherit the legacy decoder's String(mode) coercion. These are
     // discriminants, and each mode has a precise persisted-ID relationship.
     const item = line.item;
@@ -73,7 +83,15 @@ export function readInvoiceSelectionPreview(payload: unknown,
         || parsed.some((other) => other.id === candidate.id)) return null;
       parsed.push({ id: candidate.id, planId: candidate.planId, clinicalCaseId: candidate.clinicalCaseId });
     }
-    if (line.kind === "financial" && (item !== null || clinicalCase !== null || parsed.length !== 0)) return null;
+    if (scheduledTemplate && (line.scheduled !== true || !object(item) || item.mode !== "new" || item.id !== null)) return null;
+    if (line.kind === "financial") {
+      if (scheduledTemplate) {
+        // Explicit template consultation/records retain a visit, never a specialty case or adopted item.
+        if (line.specialty !== null || line.specialtyLabel !== null || !object(clinicalCase) || clinicalCase.mode !== "none"
+          || clinicalCase.id !== null || clinicalCase.title !== null || !Array.isArray(clinicalCase.options)
+          || clinicalCase.options.length !== 0 || (line.refusal === null && (!Array.isArray(line.itemCandidates) || parsed.length !== 0))) return null;
+      } else if (line.scheduled === true || item !== null || clinicalCase !== null || parsed.length !== 0) return null;
+    }
     if (line.kind === "clinical" && line.refusal === null && line.refusalMessage === null) {
       if (!object(item) || !object(clinicalCase) || clinicalCase.mode === "choose") return null;
       if (item.mode === "existing" && !parsed.some((candidate) => candidate.id === item.id
@@ -83,7 +101,7 @@ export function readInvoiceSelectionPreview(payload: unknown,
         && (candidate.clinicalCaseId === null || clinicalCase.mode === "none" || clinicalCase.mode === "existing"
           && candidate.clinicalCaseId === clinicalCase.id))) return null;
     }
-    if (line.kind === "clinical" && line.refusal === null && existingPlanId !== null) {
+    if ((line.kind === "clinical" || scheduledTemplate) && line.refusal === null && existingPlanId !== null) {
       const plan = planChoices.find((choice) => choice.id === existingPlanId);
       if (!plan || object(line.item) && line.item.mode === "new" && !plan.compatible) return null;
     }

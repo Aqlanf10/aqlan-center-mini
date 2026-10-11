@@ -56,7 +56,7 @@ beforeAll(async () => {
       (invoice_id, service_id, description, quantity, unit_price_minor, total_minor, doctor_id, source_type, source_id)
       VALUES ($1, $2, 'عمل فئة خام', 1, 10000, 10000, $3, 'visit_procedure', $4)`, [invoice.id, service.id, doctorId, procedure.id]);
   }
-  browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  browser = await chromium.launch({ headless: true, args: ["--no-sandbox"], executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 
 afterAll(async () => {
@@ -168,7 +168,8 @@ describe("reachable raw category labels on the actual built app", () => {
     const before = await facts();
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "فاتورة يدوية", exact: true }).click();
+      await page.getByTestId("treatment-entry-open").click();
+      await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
       const invoice = page.getByRole("region", { name: "فاتورة جديدة", exact: true });
       const select = invoice.getByRole("combobox", { name: "الخدمة", exact: true });
       for (const category of ["constructor", "__proto__", "toString"]) {

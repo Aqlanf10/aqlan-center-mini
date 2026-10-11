@@ -1,3 +1,4 @@
+import { MAX_ATTENDANCE_GRACE_MINS, normalizeHrPolicy } from "./hr-settings-policy";
 /**
  * (HR-3 / HR-4) العقود، جداول العمل، الحضور والانصراف، والإجازات — **طبقة الخادم وقاعدة البيانات**.
  *
@@ -607,6 +608,24 @@ export interface CreateScheduleInput {
 
 export type UpdateScheduleInput = Partial<CreateScheduleInput> & { isActive?: boolean };
 
+function validateSchedule(input: CreateScheduleInput): void {
+  const minute = (value: unknown): number => {
+    if (typeof value !== "string" || !/^\d{2}:\d{2}(?::00)?$/.test(value)) throw new Error("وقت الوردية غير صالح.");
+    const [h,m] = value.split(":").map(Number);
+    if (h > 23 || m > 59) throw new Error("وقت الوردية غير صالح.");
+    return h*60+m;
+  };
+  if (!Array.isArray(input.workingDays) || !input.workingDays.length || input.workingDays.some(day=>!Number.isInteger(day)||day<0||day>6)) throw new Error("حدد أيام عمل صالحة.");
+  const start=minute(input.shiftStartTime), end=minute(input.shiftEndTime);
+  if (start===end || (end<start && !input.crossesMidnight)) throw new Error("حدد عبور منتصف الليل للوردية الليلية.");
+  if (input.gracePeriodMins !== undefined && (!Number.isInteger(input.gracePeriodMins)||input.gracePeriodMins<0||input.gracePeriodMins>MAX_ATTENDANCE_GRACE_MINS)) throw new Error("سماح الحضور غير صالح.");
+  if (input.expectedDailyHours !== undefined && (!Number.isFinite(input.expectedDailyHours)||input.expectedDailyHours<=0||input.expectedDailyHours>24)) throw new Error("ساعات العمل اليومية غير صالحة.");
+  if (input.scheduleType === "split" || input.secondShiftStart || input.secondShiftEnd) {
+    const secondStart=minute(input.secondShiftStart),secondEnd=minute(input.secondShiftEnd);
+    if (input.crossesMidnight || end<=start || secondStart<end || secondEnd<=secondStart) throw new Error("حدد فترتين مرتبتين بلا تداخل في اليوم نفسه؛ تقسيم الوردية الليلية يحتاج سياسة مستقلة.");
+  }
+}
+
 export async function listSchedules(options?: {
   staffId?: number | string;
   department?: string;
@@ -670,6 +689,9 @@ export async function createSchedule(
 ): Promise<HrWorkScheduleView> {
   const staffId = input.staffId !== undefined && input.staffId !== null ? Number(input.staffId) : null;
   return withTransaction(getPool(), async (client) => {
+    const policy = await client.query("SELECT value FROM hr_settings WHERE key='attendance_policy' FOR SHARE");
+    const grace = input.gracePeriodMins ?? (policy.rows[0] ? normalizeHrPolicy("attendance_policy", policy.rows[0].value).lateGraceMins as number : 0);
+    validateSchedule({...input, gracePeriodMins: grace});
     const { rows } = await client.query(
       `INSERT INTO hr_work_schedules (
         staff_id, department, name, schedule_type, effective_from, effective_to,
@@ -689,7 +711,7 @@ export async function createSchedule(
         input.shiftEndTime,
         input.secondShiftStart ?? null,
         input.secondShiftEnd ?? null,
-        input.gracePeriodMins ?? 15,
+        grace,
         input.expectedDailyHours ?? 8.00,
         input.crossesMidnight ?? false,
         session.username,
@@ -729,6 +751,8 @@ export async function updateWorkSchedule(
       [schedId],
     );
     if (!currentRows[0]) throw new Error("جدول الدوام غير موجود.");
+    if ((await client.query("SELECT id FROM hr_attendance_records WHERE schedule_id=$1 LIMIT 1", [schedId])).rows.length) throw new Error("الجدول مستخدم في سجل حضور؛ أنشئ جدولًا جديدًا بتاريخ سريان بدل تعديل التاريخ.");
+    validateSchedule({...mapScheduleRow(currentRows[0]), ...input});
 
     const staffId = input.staffId !== undefined ? (input.staffId ? Number(input.staffId) : null) : undefined;
 
@@ -897,19 +921,8 @@ export async function recordAttendance(
 
 async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
     const staffId = Number(input.staffId);
-    // جلب جدول العمل الساري للموظف أو لقسمه لاحتساب التأخير والساعات بدقة
-    const schedRes = await client.query(
-      `SELECT ws.* FROM hr_work_schedules ws
-       JOIN hr_staff s ON s.id = $1
-       WHERE ws.is_active = true
-         AND ws.effective_from <= $2 AND (ws.effective_to IS NULL OR ws.effective_to >= $2)
-         AND (ws.staff_id = $1 OR (ws.staff_id IS NULL AND ws.department = s.department))
-       ORDER BY ws.staff_id NULLS LAST, ws.effective_from DESC
-       LIMIT 1`,
-      [staffId, input.attendanceDate],
-    );
-
-    const schedule = schedRes.rows[0] ?? null;
+    const schedule = await attendanceSchedule(client, staffId, input.attendanceDate);
+    if (schedule?.second_shift_start && !rawPunch) throw new Error("سجل بصمات كل فترة؛ زوج واحد لا يمثل يومًا بفترتين.");
     let workMins = 0;
     let lateMins = 0;
     let earlyExitMins = 0;
@@ -1001,6 +1014,67 @@ async function recordAttendanceInTx(client: DbClient, input: {staffId: number | 
     return record;
 }
 
+/** Existing attendance keeps its chosen schedule; a new day selects the effective assignment. */
+async function attendanceSchedule(client: DbClient, staffId: number, date: string) {
+  const {rows} = await client.query(`SELECT ws.* FROM hr_work_schedules ws JOIN hr_staff s ON s.id=$1
+    LEFT JOIN hr_attendance_records ar ON ar.staff_id=s.id AND ar.attendance_date=$2::date
+    WHERE (ar.schedule_id IS NOT NULL AND ws.id=ar.schedule_id) OR
+      (ar.schedule_id IS NULL AND ws.is_active AND ws.effective_from<=$2::date AND (ws.effective_to IS NULL OR ws.effective_to>=$2::date)
+       AND (ws.staff_id=$1 OR (ws.staff_id IS NULL AND ws.department=s.department)))
+    ORDER BY ws.staff_id NULLS LAST,ws.effective_from DESC,ws.id DESC LIMIT 1 FOR SHARE OF ws`,[staffId,date]);
+  return rows[0] ?? null;
+}
+async function attendanceView(client: DbClient, id: number) {
+  const {rows} = await client.query(`SELECT ar.*,s.full_name AS staff_name,s.job_title AS staff_job_title,s.department
+    FROM hr_attendance_records ar JOIN hr_staff s ON s.id=ar.staff_id WHERE ar.id=$1`,[id]);
+  return mapAttendanceRow(rows[0]);
+}
+async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecordView, schedule: Record<string, any>, session: SessionPayload) {
+  // At a shared boundary, close the first pair before opening the next one.
+  // Both typed events must exist; ordering never supplies a missing punch.
+  const {rows} = await client.query(`SELECT DISTINCT punch_type,punched_at FROM hr_attendance_punch_events
+    WHERE attendance_id=$1 ORDER BY punched_at,punch_type DESC`,[record.id]);
+  // The existing correction form has only one pair. Never overwrite an approved
+  // correction with a raw aggregate, or pretend that it can correct a split day.
+  // Migration 0050 marks historical applied corrections as approved. The decision
+  // status is authoritative; approved_at also records rejection decisions.
+  if ((await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1",[record.id])).rows.length) return attendanceView(client,record.id);
+  const pairs: {checkIn:Date;checkOut:Date}[]=[];
+  let incoming:Date|null=null, ambiguous=false;
+  for(const event of rows){
+    if(event.punch_type==='check_in'){
+      if(incoming) ambiguous=true;
+      incoming=new Date(event.punched_at);
+    }else if(incoming){pairs.push({checkIn:incoming,checkOut:new Date(event.punched_at)});incoming=null;}
+    else ambiguous=true;
+  }
+  const clock=(date:Date)=>new Intl.DateTimeFormat('en-GB',{timeZone:CLINIC_TIME_ZONE,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
+  const secondStart=String(schedule.second_shift_start).slice(0,5);
+  const firstEnd=String(schedule.shift_end_time).slice(0,5);
+  const segments=pairs.map(pair=>clock(pair.checkIn)>=firstEnd?1:0);
+  // An unpaired gap cannot become paid work merely because a later exit exists.
+  if(new Set(segments).size!==segments.length || pairs.some((pair,i)=>segments[i]===0 && clock(pair.checkOut)>secondStart)) ambiguous=true;
+  const incomplete=ambiguous || !!incoming || pairs.length!==2;
+  let workMinutes=0,lateMinutes=0,earlyExitMinutes=0,overtimeMinutes=0;
+  if(!ambiguous && pairs.length<=2){
+    for(const [i,pair] of pairs.entries()){
+      const calc=calculateShiftAttendance({...pair,scheduledStart:segments[i]===0?schedule.shift_start_time:schedule.second_shift_start,
+        scheduledEnd:segments[i]===0?schedule.shift_end_time:schedule.second_shift_end,graceMins:schedule.grace_period_mins,
+        crossesMidnight:false,timeZone:CLINIC_TIME_ZONE});
+      workMinutes+=calc.workMinutes;lateMinutes+=calc.lateMinutes;earlyExitMinutes+=calc.earlyExitMinutes;overtimeMinutes+=calc.overtimeMinutes;
+    }
+  }
+  const firstIn=rows.find(row=>row.punch_type==='check_in')?.punched_at ?? null;
+  const lastOut=[...rows].reverse().find(row=>row.punch_type==='check_out')?.punched_at ?? null;
+  await client.query(`UPDATE hr_attendance_records SET check_in_actual=$2,check_out_actual=$3,work_minutes=$4,
+    late_minutes=$5,early_exit_minutes=$6,overtime_minutes=$7,is_incomplete=$8,status=$9 WHERE id=$1`,
+    [record.id,firstIn,lastOut,workMinutes,lateMinutes,earlyExitMinutes,overtimeMinutes,incomplete,
+     incomplete?'incomplete':lateMinutes?'late':earlyExitMinutes?'early_exit':'present']);
+  await auditWithClient(client,'hr.attendance.record', session,'hr_attendance_record',record.id,
+    `${record.staffName} (${record.attendanceDate})`,{calculation:'split',workMinutes,isIncomplete:incomplete});
+  return attendanceView(client,record.id);
+}
+
 export async function recordAttendancePunch(
   input: AttendancePunchInput,
   session: SessionPayload,
@@ -1010,10 +1084,16 @@ export async function recordAttendancePunch(
   const instant = new Date(input.punchTime || new Date().toISOString());
   if (!Number.isFinite(instant.getTime()) || !Number.isSafeInteger(staffId) || staffId<1) throw new Error("بصمة غير صالحة.");
   const punchIso = instant.toISOString();
-  const dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
+  let dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
   return withTransaction(getPool(), async client => {
     const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
     if (!staff.rows[0]) throw new Error("الموظف غير موجود.");
+    // Select the previous overnight window even when its first entry is missing.
+    const previousDate=new Date(Date.parse(`${dateStr}T00:00:00Z`)-86400000).toISOString().slice(0,10);
+    const previousSchedule=await attendanceSchedule(client,staffId,previousDate);
+    const clock=new Intl.DateTimeFormat('en-GB',{timeZone:CLINIC_TIME_ZONE,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(instant);
+    if(previousSchedule?.crosses_midnight && clock<=String(previousSchedule.shift_end_time).slice(0,5)
+       && previousSchedule.working_days.includes(new Date(`${previousDate}T00:00:00Z`).getUTCDay())) dateStr=previousDate;
     // A checkout can complete a scheduled night shift from the prior clinic date.
     const prior = await client.query(`SELECT ar.* FROM hr_attendance_records ar LEFT JOIN hr_work_schedules ws ON ws.id=ar.schedule_id
       WHERE ar.staff_id=$1 AND (ar.attendance_date=$2::date OR
@@ -1029,11 +1109,22 @@ export async function recordAttendancePunch(
     const checkIn = row?.check_in_actual ? new Date(row.check_in_actual).toISOString() : input.punchType==='check_in' ? punchIso : null;
     const checkOut = row?.check_out_actual ? new Date(row.check_out_actual).toISOString() : input.punchType==='check_out' ? punchIso : null;
     if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
-    const record = await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session,{type:input.punchType,time:punchIso});
+    const duplicate=row && (await client.query("SELECT id FROM hr_attendance_punch_events WHERE attendance_id=$1 AND punch_type=$2 AND punched_at=$3::timestamptz LIMIT 1",[row.id,input.punchType,punchIso])).rows.length;
+    const schedule=await attendanceSchedule(client,staffId,attendanceDate);
+    const correctedSplit=row && schedule?.second_shift_start && (await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1",[row.id])).rows.length;
+    if(correctedSplit) await client.query(`UPDATE hr_attendance_records SET check_in_raw=COALESCE(check_in_raw,$2),check_out_raw=COALESCE(check_out_raw,$3) WHERE id=$1`,[row.id,input.punchType==='check_in'?punchIso:null,input.punchType==='check_out'?punchIso:null]);
+    const record = duplicate || correctedSplit ? await attendanceView(client,row.id) : await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session,{type:input.punchType,time:punchIso});
     await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
       VALUES($1,$2,$3,$4,$5,$6,$7)`,[record.id,staffId,input.punchType,punchIso,input.source || 'manual',input.note ?? null,session.username]);
-    return record;
+    if(duplicate) return record;
+    return schedule?.second_shift_start && schedule?.second_shift_end ? calculateSplitPunches(client,record,schedule,session) : record;
   });
+}
+
+async function assertSinglePairCorrection(client: DbClient, scheduleId: number | null) {
+  if(!scheduleId) return;
+  const {rows}=await client.query("SELECT second_shift_start FROM hr_work_schedules WHERE id=$1",[scheduleId]);
+  if(rows[0]?.second_shift_start) throw new Error("تصحيح يوم بفترتين يحتاج تصحيح كل فترة؛ النموذج الحالي ذو زوج واحد لا يغيّر هذا السجل.");
 }
 
 export async function correctAttendanceRecord(
@@ -1058,6 +1149,7 @@ export async function correctAttendanceRecord(
     );
     if (!currRows[0]) throw new Error("سجل الحضور غير موجود.");
     const curr = currRows[0];
+    await assertSinglePairCorrection(client,curr.schedule_id);
 
     // منع الموافقة الذاتية على تصحيح الحضور
     if (curr.staff_user_id === session.userId) {
@@ -1131,6 +1223,7 @@ export async function requestAttendanceCorrection(
     );
     if (!currRows[0]) throw new Error("سجل الحضور غير موجود.");
     const curr = currRows[0];
+    await assertSinglePairCorrection(client,curr.schedule_id);
 
     const newIn = input.newCheckIn ? new Date(input.newCheckIn) : null;
     const newOut = input.newCheckOut ? new Date(input.newCheckOut) : null;
@@ -1225,6 +1318,7 @@ export async function decideAttendanceCorrection(
 
     if (decision === "approved") {
       const {rows:[attendance]} = await client.query("SELECT * FROM hr_attendance_records WHERE id=$1 FOR UPDATE",[corr.attendance_id]);
+      await assertSinglePairCorrection(client,attendance.schedule_id);
       const iso = (value: unknown) => value ? new Date(value as string).toISOString() : null;
       if (iso(attendance.check_in_actual)!==iso(corr.old_check_in) || iso(attendance.check_out_actual)!==iso(corr.old_check_out) || attendance.status!==corr.old_status) throw new Error("تغيّر سجل الحضور؛ اطلب تصحيحًا جديدًا.");
       const checkIn = corr.new_check_in ?? attendance.check_in_actual, checkOut = corr.new_check_out ?? attendance.check_out_actual;
@@ -1512,11 +1606,20 @@ export interface CreateLeaveRequestInput {
   attachmentRefs?: Array<{ id: string; name: string; url?: string }>;
 }
 
+function validLeaveAttachmentRef(value: unknown): value is {id:string;name:string;url?:string} {
+  if(!value || typeof value!=='object' || Array.isArray(value)) return false;
+  const ref=value as Record<string,unknown>;
+  return typeof ref.id==='string' && !!ref.id.trim() && ref.id.length<=200
+    && typeof ref.name==='string' && !!ref.name.trim() && ref.name.length<=200
+    && (ref.url===undefined || (typeof ref.url==='string' && ref.url.length<=2048));
+}
+
 export async function createLeaveRequest(
   input: CreateLeaveRequestInput,
   session: SessionPayload,
 ): Promise<HrLeaveRequestView> {
   const staffId = Number(input.staffId);
+  if(input.attachmentRefs !== undefined && (!Array.isArray(input.attachmentRefs) || input.attachmentRefs.length>20 || !input.attachmentRefs.every(validLeaveAttachmentRef))) throw new Error("مرجع المرفق يحتاج معرفًا واسمًا صالحين.");
   const days = (Date.parse(input.endDate)-Date.parse(input.startDate))/86400000+1;
   if (!Number.isInteger(days) || days<1 || input.startDate.slice(0,4)!==input.endDate.slice(0,4) || !input.reason.trim() || input.isPartialDay || input.daysCount!==days) throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
   return withTransaction(getPool(), async (client) => {
@@ -1627,7 +1730,8 @@ export async function decideLeaveRequest(
       const overlap = await client.query(`SELECT id FROM hr_leave_requests WHERE staff_id=$1 AND id<>$2
         AND status IN ('pending','under_review','approved') AND start_date<=$4 AND end_date>=$3`,[curr.staff_id,reqId,curr.start_date,curr.end_date]);
       if (overlap.rows.length) throw new Error("يوجد طلب إجازة متداخل؛ راجعه قبل الاعتماد.");
-      const type = await client.query("SELECT is_paid FROM hr_leave_types WHERE code=$1",[curr.leave_type_code]);
+      const type = await client.query("SELECT is_paid, requires_attachment FROM hr_leave_types WHERE code=$1 FOR SHARE",[curr.leave_type_code]);
+      if (type.rows[0]?.requires_attachment && (!Array.isArray(curr.attachment_refs) || !curr.attachment_refs.some(validLeaveAttachmentRef))) throw new Error("نوع الإجازة يتطلب مرفقًا قبل الاعتماد.");
       const balance = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[curr.staff_id,curr.leave_type_code,year]);
       const b = balance.rows[0];
       if (type.rows[0]?.is_paid && (!b || Number(b.allocated_days)+Number(b.carried_over_days)-Number(b.used_days)-Number(b.pending_days)+(["pending","under_review"].includes(curr.status)?Number(curr.days_count):0)<Number(curr.days_count))) throw new Error("رصيد الإجازة المدفوعة يحتاج تخصيصًا معتمدًا وكافيًا.");

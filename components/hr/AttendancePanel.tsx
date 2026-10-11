@@ -58,6 +58,9 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [schedPattern, setSchedPattern] = useState("morning");
   const [schedStart, setSchedStart] = useState("08:00");
   const [schedEnd, setSchedEnd] = useState("16:00");
+  const [schedSecondStart, setSchedSecondStart] = useState("16:00");
+  const [schedSecondEnd, setSchedSecondEnd] = useState("20:00");
+  const [schedDays, setSchedDays] = useState<number[]>([0, 1, 2, 3, 4, 6]);
 
   const loadAttendance = useCallback(async () => {
     try {
@@ -236,12 +239,14 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
           staffId: selectedStaff ? Number(selectedStaff) : null,
           shiftStartTime: schedStart,
           shiftEndTime: schedEnd,
+          secondShiftStart: schedPattern === "split" ? schedSecondStart : null,
+          secondShiftEnd: schedPattern === "split" ? schedSecondEnd : null,
           crossesMidnight: schedEnd <= schedStart,
-          workingDays: [0, 1, 2, 3, 4, 6], // All except Friday
+          workingDays: schedDays,
           effectiveFrom: selectedDate,
         }),
       });
-      if (!res.ok) throw new Error("تعذّر حفظ جدول العمل.");
+      if (!res.ok) { const refused = await res.json(); throw new Error(refused.message || "تعذّر حفظ جدول العمل."); }
       setScheduleModalOpen(false);
       setSchedName("");
       void loadSchedules();
@@ -752,6 +757,19 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 />
               </div>
             </div>
+            {schedPattern === "split" && <div className="grid grid-cols-2 gap-3">
+              <label className="text-xs font-semibold text-navy-700">بداية الفترة الثانية
+                <input type="time" required value={schedSecondStart} onChange={e=>setSchedSecondStart(e.target.value)} className="mt-1 w-full rounded-xl border border-navy-200 p-2.5 text-sm" />
+              </label>
+              <label className="text-xs font-semibold text-navy-700">نهاية الفترة الثانية
+                <input type="time" required value={schedSecondEnd} onChange={e=>setSchedSecondEnd(e.target.value)} className="mt-1 w-full rounded-xl border border-navy-200 p-2.5 text-sm" />
+              </label>
+            </div>}
+            <fieldset><legend className="mb-2 text-xs font-semibold text-navy-700">أيام العمل لهذا الجدول</legend>
+              <div className="flex flex-wrap gap-3">{["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"].map((day,index)=><label key={day} className="flex items-center gap-1 text-xs">
+                <input type="checkbox" checked={schedDays.includes(index)} onChange={e=>setSchedDays(days=>e.target.checked?[...days,index]:days.filter(d=>d!==index))} />{day}
+              </label>)}</div>
+            </fieldset>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"

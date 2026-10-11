@@ -462,8 +462,11 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
         expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
         if (role === "reception") {
           expect(await view(f.page).locator("input,textarea,select").count()).toBe(0);
-          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
-        } else expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
+          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["فاتورة / اتفاق علاج", "بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
+        } else {
+          expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
+          expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
+        }
         const original = f.page.url(), length = await f.page.evaluate(() => history.length);
         await shortcut(f.page).click(); await opened(f.page, original, length);
         expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);

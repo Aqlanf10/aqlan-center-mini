@@ -8971,10 +8971,10 @@ const PAYMENT_SELECT = `
          y.method, y.note, y.created_by, y.created_at
     FROM payments y JOIN patients p ON p.id = y.patient_id`;
 
-async function itemsFor(invoiceIds: number[]): Promise<Map<number, InvoiceItem[]>> {
+async function itemsFor(invoiceIds: number[], client?: DbClient): Promise<Map<number, InvoiceItem[]>> {
   const map = new Map<number, InvoiceItem[]>();
   if (invoiceIds.length === 0) return map;
-  const { rows } = await getPool().query<{
+  const { rows } = await (client ?? getPool()).query<{
     id: number; invoice_id: number; service_id: number | null; doctor_id: number | null;
     plan_item_id: number | null; case_id: number | null; tooth_code: number | null; surfaces: string | null;
     origin_invoice_id: number | null; billing_status: BillingStatus | null; financial_review: boolean;
@@ -9122,11 +9122,11 @@ export async function createInvoice(input: {
   }
 }
 
-export async function getInvoice(id: number): Promise<Invoice | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<InvoiceRow>(`${INVOICE_SELECT} WHERE i.id = $1`, [id]);
+export async function getInvoice(id: number, client?: DbClient): Promise<Invoice | null> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<InvoiceRow>(`${INVOICE_SELECT} WHERE i.id = $1`, [id]);
   if (!rows[0]) return null;
-  const items = await itemsFor([id]);
+  const items = await itemsFor([id], client);
   return toInvoice(rows[0], items.get(id) ?? []);
 }
 

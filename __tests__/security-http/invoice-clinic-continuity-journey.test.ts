@@ -87,7 +87,8 @@ async function close(context: BrowserContext) { await context.close(); contexts.
 async function invoiceDraft(patientId: number, category: Category, tooth: number | null) {
   const view = await open("reception", patientId);
   const { page } = view;
-  await page.getByRole("button", { name: "فاتورة يدوية", exact: true }).click();
+  await page.getByTestId("treatment-entry-open").click();
+  await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
   await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(services[category]));
   // Explicit reception choice from the authorized catalogue, never inferred from the signer.
   await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
@@ -133,7 +134,7 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
   const save = first.page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
   if (mode === "lost_response") {
     await save.click();
-    await first.page.getByRole("alert", { name: "خطأ حساب المريض" }).filter({ hasText: "تعذّر الاتصال بالخادم" }).waitFor();
+    await first.page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).filter({ hasText: "تعذّر الاتصال بالخادم" }).waitFor();
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(1);
   }
   const responsePromise = first.page.waitForResponse((response) => response.url().endsWith("/api/invoices") && response.request().method() === "POST");
@@ -151,7 +152,7 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
     const refused = second.page.waitForResponse((candidate) => candidate.url().endsWith("/api/invoices") && candidate.request().method() === "POST");
     await second.page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).click();
     expect((await refused).status()).toBe(409);
-    await second.page.getByRole("alert", { name: "خطأ حساب المريض" }).waitFor();
+    await second.page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).waitFor();
     await close(second.context);
   }
   await close(first.context);

@@ -116,6 +116,7 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
       // In-page workspaces replace the current entry. Make the preceding real
       // page explicit, so Back/Forward tests page history rather than inventing
       // a Plans history entry for the canonical clinical-context callback.
+      await f.page.getByTestId("account-treatment-details").locator("summary").click();
       await f.page.locator('[data-testid="patient-account-currency-banner"][data-currency="SAR"]').waitFor();
       const accountUrl = f.page.url();
       await f.page.goto(`${baseUrl}/patients/${patientId}?tab=plans`, { waitUntil: "domcontentloaded" });
@@ -141,6 +142,8 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
       expect(await f.page.evaluate(() => window.history.length)).toBe(historyLength);
       await f.page.goBack();
       await expect.poll(() => f.page.url()).toBe(accountUrl);
+      const accountDetails = f.page.getByTestId("account-treatment-details");
+      if (await accountDetails.getAttribute("open") === null) await accountDetails.locator("summary").click();
       await f.page.locator('[data-testid="patient-account-currency-banner"][data-currency="SAR"]').waitFor();
       await f.page.goForward();
       await expect.poll(() => f.page.url()).toBe(orthoUrl);
@@ -170,6 +173,7 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
     const before = await financialState();
     const f = await open(width, "account");
     try {
+      await f.page.getByTestId("account-secondary-actions").locator("summary").click();
       await f.page.getByRole("button", { name: "تعديل الرصيد السابق", exact: true }).click();
       const opening = f.page.getByRole("region", { name: "رصيد افتتاحي", exact: true });
       await opening.getByText("الرصيد السابق المتبقي", { exact: true }).waitFor();

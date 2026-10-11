@@ -11,12 +11,21 @@ import {
 
 type LeaveRequestItem = import("@/lib/hr-contracts-attendance-shared").HrLeaveRequestView;
 type LeaveBalanceItem = import("@/lib/hr-contracts-attendance-shared").HrLeaveBalanceView;
-interface LeaveTypeItem { id: number; nameAr: string; code: string; isPaid: boolean; defaultDaysPerYear: number; }
+interface LeaveTypeItem { id: number; nameAr: string; code: string; isPaid: boolean; defaultDaysPerYear: number; requiresAttachment?: boolean; }
 
 interface StaffOption {
   id: number;
   fullName: string;
   jobTitle: string;
+}
+
+function leaveReferenceLabel(value: unknown): string {
+  const invalid = "مرجع قديم يحتاج مراجعة (غير صالح)";
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid;
+  const { id, name } = value as Record<string, unknown>;
+  if (typeof id !== "string" || !id.trim() || id.length > 200
+    || typeof name !== "string" || !name.trim() || name.length > 200) return invalid;
+  return `${name} (${id})`;
 }
 
 export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
@@ -40,6 +49,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [reqStartDate, setReqStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [reqEndDate, setReqEndDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [reqReason, setReqReason] = useState("");
+  const [reqAttachmentRef, setReqAttachmentRef] = useState("");
 
   // Balance Adjust Form
   const [adjStaffId, setAdjStaffId] = useState("");
@@ -107,6 +117,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
           startDate: reqStartDate,
           endDate: reqEndDate,
           reason: reqReason,
+          attachmentRefs: reqAttachmentRef.trim() ? [{id:reqAttachmentRef.trim(),name:"مستند مقدم للمراجعة — " + reqAttachmentRef.trim()}] : [],
         }),
       });
 
@@ -117,6 +128,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       setRequestModalOpen(false);
       setReqReason("");
+      setReqAttachmentRef("");
       void loadLeaves();
       if (selectedStaffForBalance === reqStaffId) {
         void loadBalances(reqStaffId);
@@ -302,7 +314,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                     <div className="text-navy-500">إلى: {r.endDate}</div>
                   </td>
                   <td className="px-4 py-3 font-semibold text-navy-800">{r.daysCount} يوم</td>
-                  <td className="px-4 py-3 text-xs text-navy-700 max-w-xs truncate">{r.reason}</td>
+                  <td className="px-4 py-3 text-xs text-navy-700 max-w-xs">{r.reason}{r.attachmentRefs?.length>0 && <ul aria-label="مراجع مستندات مقدمة للمراجعة" className="mt-1 text-navy-500">{r.attachmentRefs.map((ref,index)=><li key={index}>{leaveReferenceLabel(ref)}</li>)}</ul>}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block rounded-lg px-2.5 py-1 text-xs font-semibold ${
@@ -417,6 +429,10 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               />
             </div>
+            <label className="block text-xs font-semibold text-navy-700">مرجع المستند المقدم للمراجع
+              <input type="text" maxLength={160} required={leaveTypes.find(type=>type.code===reqTypeId)?.requiresAttachment===true} value={reqAttachmentRef} onChange={e=>setReqAttachmentRef(e.target.value)} className="mt-1 w-full rounded-xl border border-navy-200 p-2.5 text-sm" />
+              <span className="mt-1 block font-normal">يسجل مرجع مستند ورقي أو محفوظ لدى المركز؛ لا يرفع ملفًا ولا يثبت فحص محتواه. يراجعه المسؤول قبل الاعتماد.</span>
+            </label>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -430,7 +446,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                 disabled={submitting}
                 className="rounded-xl bg-navy-800 px-4 py-1.5 text-xs font-semibold text-white"
               >
-                {submitting ? "جاري الرفع..." : "إرسال طلب الإجازة"}
+                {submitting ? "جاري الحفظ..." : "إرسال طلب الإجازة"}
               </button>
             </div>
           </form>

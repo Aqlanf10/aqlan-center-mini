@@ -94,12 +94,15 @@ describe("P1-4 — sensitive edits leave an audit trail with before/after", () =
     const { rows: [service] } = await db.query<{ id: number }>(
       `INSERT INTO services (name, category, price_minor, price_configured, is_active)
        VALUES ($1, 'filling', 20000, TRUE, TRUE) RETURNING id`, [`حشوة تدقيق ${stamp}`]);
-    const created = await authedMutation("/api/plans", h.sessions.admin, "POST", JSON.stringify({
-      mode: "v2", patientId: h.seeded.patientAId, title: `خطة تدقيق ${stamp}`, billingMode: "installments", currency: "YER",
-      installments: [{ dueDate: "2026-12-01", amountMinor: 10000 }],
-    }));
-    expect(created.status).toBe(201);
-    const { id: planId } = await json<{ id: number }>(created);
+    // Existing installment agreements remain editable after retiring public plan creation.
+    // This isolated fixture must stay unbilled; issuing an invoice changes the scenario.
+    const { rows: [{ id: planId }] } = await db.query<{ id: number }>(
+      `INSERT INTO treatment_plans
+       (patient_id, title, total_minor, base_currency, billing_mode, total_from_items, start_date, created_by)
+       VALUES ($1, $2, 10000, 'YER', 'installments', FALSE, CURRENT_DATE, 'audit-existing-fixture') RETURNING id`,
+      [h.seeded.patientAId, `خطة تدقيق ${stamp}`]);
+    await db.query(`INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
+      VALUES ($1, 1, '2026-12-01', 10000)`, [planId]);
     const added = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
       JSON.stringify({ serviceId: service.id, quantity: 1 }));
     expect(added.status).toBe(201);

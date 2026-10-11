@@ -3,10 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { Client } from "pg";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { insertPlanV2InTx, type DbClient } from "../../lib/db";
 
 /** Built application + actual authenticated preview/save/plan APIs + isolated PostgreSQL.
- * SQL creates only synthetic patient/catalog prerequisites and reads retained records.
- * Plans, invoices, idempotency and financial identity are produced by real writers. */
+ * Existing unbilled plans are synthetic migration fixtures produced by the internal plan writer.
+ * Invoice adoption, idempotency and financial identity use real authenticated HTTP writers. */
 let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
@@ -37,15 +38,28 @@ async function newPatient(tag: string) {
     [`EIS-${stamp}-${tag}`, `Synthetic explicit invoice ${tag}`, doctorId]))[0].id;
 }
 async function plan(patientId: number, toothCode: number) {
-  const response = await authedMutation("/api/plans", h.sessions.reception, "POST", JSON.stringify({
-    mode: "v2", patientId, title: `Synthetic plan ${patientId} ${toothCode}`, currency: "YER", billingMode: "per_procedure",
-    primaryDoctorId: doctorId, items: [{ serviceId, toothCode, quantity: 1, unitPriceMinor: 10000,
-      billingRule: "on_completion", sessionCount: 1 }],
-  }));
-  const text = await response.text(); expect(response.status, text).toBe(201);
-  const { id } = JSON.parse(text) as { id: number };
-  const item = (await q<{ id: number }>("SELECT id FROM plan_items WHERE plan_id=$1 ORDER BY id", [id]))[0];
-  return { id, itemId: item.id };
+  // These must be pre-existing unbilled plans: creating invoices here would destroy
+  // the ambiguity/adoption and exact-one-invoice assertions exercised below.
+  const client: DbClient = {
+    query: async <T>(sql: string, values?: unknown[]) => {
+      const result = await db.query(sql, values);
+      return { rows: result.rows as T[], rowCount: result.rowCount ?? 0 };
+    },
+    release: () => {},
+  };
+  await db.query("BEGIN");
+  try {
+    const created = await insertPlanV2InTx(client, {
+      patientId, title: `Synthetic plan ${patientId} ${toothCode}`, baseCurrency: "YER", billingMode: "per_procedure",
+      primaryDoctorId: doctorId, specialty: null, startDate: "2026-10-01", note: null, createdBy: "existing-plan-fixture",
+      installments: [], items: [{ serviceId, serviceName: `Synthetic explicit selection ${stamp}`, category: "filling",
+        toothCode, surfaces: null, quantity: 1, unitPriceMinor: 10000, billingRule: "on_completion", sessionCount: 1, note: null }],
+    });
+    if (!created.ok) throw new Error(created.message);
+    await db.query("COMMIT");
+    expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).toHaveLength(0);
+    return { id: created.planId, itemId: created.itemIds[0] };
+  } catch (error) { await db.query("ROLLBACK"); throw error; }
 }
 async function open(patientId: number, width: number) {
   const context = await browser.newContext({ viewport: { width, height: 980 }, locale: "ar-YE" });
@@ -54,7 +68,8 @@ async function open(patientId: number, width: number) {
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); page.setDefaultTimeout(20000);
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "فاتورة يدوية", exact: true }).click();
+  await page.getByTestId("treatment-entry-open").click();
+  await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
   await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(serviceId));
   await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
   return { context, page };
@@ -147,7 +162,7 @@ describe("explicit invoice treatment selection in the built RTL application", ()
       });
       const save = page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
       await save.click();
-      await page.getByRole("alert", { name: "خطأ حساب المريض" }).waitFor();
+      await page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).waitFor();
       expect(await page.getByTestId("invoice-existing-plan").inputValue()).toBe(String(chosen.id));
       expect(await page.getByTestId("invoice-plan-item-0").inputValue()).toBe(String(chosen.itemId));
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).toHaveLength(1);

@@ -200,6 +200,7 @@ class EndoRequestError extends Error {
 }
 
 interface PatientEndoProps {
+  onOpenTreatmentEntry?: () => unknown;
   patientId: number; authorityKey?: string; canWrite: boolean; canEditPlans?: boolean; openVisitId: number | null;
   onDraftChange?: (pending: boolean) => void;
   onClinicalChange?: () => void;
@@ -218,7 +219,7 @@ export function PatientEndo(props: PatientEndoProps) {
   return <PatientEndoWorkspace key={JSON.stringify([props.patientId, authority, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
-function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
+function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onOpenTreatmentEntry, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
   const [treatments, setTreatments] = useState<EndoTreatmentView[] | null>(null);
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
@@ -457,6 +458,11 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
         <button type="button" data-testid="endo-reload" onClick={() => void load()} className="mt-2 block min-h-11 rounded-lg border border-amber-300 px-3 py-2">إعادة التحميل</button>
       </p> : null}
 
+      <p className="text-xs text-slate-600">التقييم ومسودة علاج الجذور لا ينشئان اتفاقًا ماليًا أو دَينًا.
+        {onOpenTreatmentEntry ? <button type="button" disabled={busy || caseUnavailable}
+          onClick={() => { if (!mounted.current || busy || caseUnavailable) return; if (!onNavigationGuardChange && !discard()) return; onOpenTreatmentEntry(); }}
+          className="mr-2 min-h-11 rounded-lg border px-3 font-bold">فاتورة / اتفاق علاج</button> : null}
+      </p>
       {/* ── الأسنان ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-3" aria-label="أسنان علاج الجذور">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

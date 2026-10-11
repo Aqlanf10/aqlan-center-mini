@@ -73,6 +73,7 @@ let events: Map<string, Set<() => void>>;
 let read: () => Promise<MockResponse>;
 let write: () => Promise<MockResponse>;
 const fetchMock = vi.fn();
+const openTreatmentEntry = vi.fn();
 function retire() { hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); }
 function resetOwner() { retire(); hooks.values = []; hooks.memos.clear(); hooks.pending = []; }
 function render(): ReactNode {
@@ -81,7 +82,7 @@ function render(): ReactNode {
   do {
     if (++rounds > 20) throw new Error("Plan lifecycle did not settle");
     hooks.cursor = 0; hooks.changed = false;
-    const wrapper = PatientPlans({ patientId }) as Element;
+    const wrapper = PatientPlans({ patientId, onOpenTreatmentEntry: openTreatmentEntry }) as Element;
     if (typeof wrapper.type !== "function") { if (key !== null) resetOwner(); key = null; return wrapper; }
     if (wrapper.key !== key) { resetOwner(); key = wrapper.key; }
     hooks.cursor = 0;
@@ -127,19 +128,28 @@ describe("actual PatientPlans financial-read lifetime", () => {
     expect(text(render())).not.toContain("لا توجد خطط علاج");
     expect(writes()).toEqual([]);
   });
-  it("unknown refresh preserves an open authoring draft but cannot claim empty or open another create flow", async () => {
-    await mount(); await click(button("⚡ خطة سريعة"));
-    expect(button("إغلاق الخطة السريعة")).toBeDefined();
+  it("unknown refresh preserves an existing consent draft but cannot claim empty or open financial entry", async () => {
+    await mount(); await click(button("سجّل موافقة المريض — ويُقفل الاتفاق"));
+    const consent = () => find((node) => !!node.props.plan && typeof node.props.onDone === "function");
+    const original = consent();
+    expect(original).toBeDefined();
     const pending = deferred<MockResponse>(); read = () => pending.promise; focus();
     const tree = render();
     expect(text(tree)).toContain("جارٍ تحديث الخطط"); expect(text(tree)).not.toContain("لا توجد خطط علاج");
-    expect(button("إغلاق الخطة السريعة")?.props.disabled).toBe(false);
-    expect(button("🦷 تقويم / مبلغ متفق")?.props.disabled).toBe(true);
+    expect(consent()?.type).toBe(original?.type);
+    expect(consent()?.props.plan).toMatchObject({ id: 301 });
+    expect(button("فاتورة / اتفاق علاج")?.props.disabled).toBe(true);
+    await click(button("فاتورة / اتفاق علاج"));
+    expect(openTreatmentEntry).not.toHaveBeenCalled();
     pending.resolve(response({}, 503)); await flush();
-    expect(button("إغلاق الخطة السريعة")).toBeDefined(); expect(text(render())).not.toContain("لا توجد خطط علاج");
+    expect(consent()).toBeDefined(); expect(text(render())).not.toContain("لا توجد خطط علاج");
+    expect(button("فاتورة / اتفاق علاج")?.props.disabled).toBe(true);
     read = async () => response({}, 403); focus(); await flush();
-    expect(button("إغلاق الخطة السريعة")).toBeUndefined();
-    expect(button("⚡ خطة سريعة")?.props.disabled).toBe(true);
+    expect(consent()).toBeUndefined();
+    expect(button("فاتورة / اتفاق علاج")?.props.disabled).toBe(true);
+    await click(button("فاتورة / اتفاق علاج"));
+    expect(openTreatmentEntry).not.toHaveBeenCalled();
+    expect(writes()).toEqual([]);
   });
   it("a parent masked false flag becomes unknown throughout pending and unavailable refresh", async () => {
     const body = payload(false); (body.plans[0] as Record<string, unknown>).hasInstallments = false;

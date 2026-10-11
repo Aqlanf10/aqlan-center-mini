@@ -95,7 +95,7 @@ export async function POST(request: Request) {
     shiftEndTime: raw.shiftEndTime || "17:00",
     secondShiftStart: raw.secondShiftStart || null,
     secondShiftEnd: raw.secondShiftEnd || null,
-    gracePeriodMins: raw.gracePeriodMins !== undefined ? Number(raw.gracePeriodMins) : 15,
+    gracePeriodMins: raw.gracePeriodMins !== undefined ? Number(raw.gracePeriodMins) : undefined,
     expectedDailyHours: raw.expectedDailyHours !== undefined ? Number(raw.expectedDailyHours) : 8,
     crossesMidnight: Boolean(raw.crossesMidnight),
   };

@@ -364,11 +364,12 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, context, onContextChange, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onClinicalChange, onNavigationGuardChange, onOpenTreatmentEntry }: {
   patientId: number;
   context?: ClinicalNavigationContext;
   onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onClinicalChange?: () => void;
+  onOpenTreatmentEntry?: () => unknown;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
 }) {
@@ -397,11 +398,11 @@ export function PatientOrtho({ patientId, context, onContextChange, onClinicalCh
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} registerChildGuard={registerChildGuard} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} registerChildGuard={registerChildGuard} onClinicalChange={onClinicalChange} onOpenTreatmentEntry={onOpenTreatmentEntry ? () => { if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); } : undefined} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, context, onContextChange, registerChildGuard, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; registerChildGuard: (key: string, guard: () => boolean) => () => void; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, registerChildGuard, onClinicalChange, onOpenTreatmentEntry }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; registerChildGuard: (key: string, guard: () => boolean) => () => void; onClinicalChange?: () => void; onOpenTreatmentEntry?: () => unknown }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -609,6 +610,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, registerCh
         />
       ) : null}
 
+      <p className="text-xs text-slate-600">السجل والتقييم السريري لا يثبتان اتفاقًا ماليًا أو سدادًا.
+        {onOpenTreatmentEntry ? <button type="button" onClick={() => { if (currentView()) onOpenTreatmentEntry(); }}
+          className="mr-2 min-h-11 rounded-lg border px-3 font-bold">فاتورة / اتفاق علاج</button> : null}
+      </p>
       {/* زر فتح حالة تقويم جديدة إن لم تكن هناك حالة قائمة */}
       {!open ? (
         <div className="rounded-2xl border border-dashed border-navy-300 bg-navy-50/50 p-4">

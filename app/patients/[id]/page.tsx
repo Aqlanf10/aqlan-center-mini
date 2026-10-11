@@ -59,7 +59,7 @@ import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
 import { useSetting } from "@/components/SettingsProvider";
-import { isAdmin, canViewMoney } from "@/lib/roles";
+import { isAdmin, canViewMoney, canHandleMoney } from "@/lib/roles";
 import { readPatientAccountHeader } from "@/lib/patient-account-header";
 import TreatmentFinancialContext from "@/components/TreatmentFinancialContext";
 import {
@@ -221,12 +221,20 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     owner: typeof alertOwner; verified: VerifiedPillarContext } | null>(null);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "today" || tab === "treatment";
+  const compactWorkspace = tab === "today" || tab === "treatment" || tab === "account";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const plansLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const accountLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const treatmentEntrySequence = useRef(0);
+  const [treatmentEntryRequest, setTreatmentEntryRequest] = useState<{ owner: typeof alertOwner; key: number } | null>(null);
+  const trackAccountGuard = useCallback((guard: () => boolean) => {
+    const lease = { guard, owner: alertOwner };
+    if (alertOwner.active) accountLeaveGuard.current = lease;
+    return () => { if (accountLeaveGuard.current === lease) accountLeaveGuard.current = null; };
+  }, [alertOwner]);
   const orthoLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const trackCasesGuard = useCallback((guard: () => boolean) => {
     const lease = { guard, owner: alertOwner };
@@ -251,6 +259,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     const controller = createPatientNavigation(window, {
       canLeave: (from, to) => {
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
+        const account = accountLeaveGuard.current;
+        if (account?.owner.active && !account.guard()) return false;
         const cases = casesLeaveGuard.current;
         if (cases?.owner.active && !cases.guard()) return false;
         const plans = plansLeaveGuard.current;
@@ -305,11 +315,20 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       return false;
     }
   };
+  const canStartTreatmentEntry = summary?.canSeeFinancial === true && !!session && canHandleMoney(session.role);
+  const openTreatmentEntry = () => {
+    if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id) || !canStartTreatmentEntry) return false;
+    // The same controller asks every current clinical draft owner before leaving.
+    const accepted = goTo("account");
+    if (accepted) setTreatmentEntryRequest({ owner: alertOwner, key: ++treatmentEntrySequence.current });
+    return accepted;
+  };
   const setTab = (next: Tab) => goTo(next);
   const setTreatmentSubTab = (next: TreatmentSubTab) => goTo(next);
   // Optional specialty callbacks open canonical workspaces only; they do not select or add work.
   const endoNavigation = {
     onNavigationGuardChange: trackEndoGuard,
+    onOpenTreatmentEntry: canStartTreatmentEntry ? openTreatmentEntry : undefined,
     context: clinicalContext.context,
     onContextChange: (context: ClinicalNavigationContext) => openClinicalContext(context, "endo"),
     onOpenToday: (context: ClinicalNavigationContext) => openClinicalContext(context, "today"),
@@ -1228,7 +1247,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "plans" && (
             <section aria-label="خطة العلاج">
-              <PatientPlans patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} onNavigationGuardChange={trackPlansGuard} />
+              <PatientPlans onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} onNavigationGuardChange={trackPlansGuard} />
             </section>
           )}
 
@@ -1237,7 +1256,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
+              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
           )}
 
@@ -1262,7 +1281,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "cases" && (
             <section aria-label="الحالات التخصصية وقائمة المشاكل">
-              <PatientCases patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} canWrite={session?.role === "doctor" || admin}
+              <PatientCases onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} canWrite={session?.role === "doctor" || admin}
                 onNavigationGuardChange={trackCasesGuard}
                 onOpenOrtho={(context) => {
                   if (!alertOwner.active || fileOwner !== alertOwner || file?.patient.id !== Number(id)) return false;
@@ -1322,6 +1341,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : tab === "account" ? (
         <>
+          <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
+            setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
+          }} accountDetails={<>
+            <p className="mb-2 text-xs text-slate-500">القيمة المخططة وتقدم العمل منفصلان عن الدَّين. الفاتورة المعتمدة تدخل رصيد الحساب مرة واحدة فقط؛ لا تجمع هذه الأرقام مع المستحق.</p>
         {/* Account details: separate obligations and clinical work, never added to ledger totals. */}
         {/* (TD-05) سطرٌ لكل عملة — والباقي غير المستحق بعملة خطته. */}
         {accountHeader && summary?.financial
@@ -1344,13 +1367,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   ? "border-amber-200 bg-amber-50 text-amber-800"
                   : "border-emerald-200 bg-emerald-50 text-emerald-800"
               }`}>
-                {`رصيد الحساب (${CURRENCY_LABEL[currency]}): ${formatMoney(bucket.balanceMinor, currency)}`}
-                {bucket.balanceMinor === 0 ? " · لا مبلغ مستحق بهذه العملة" : ""}
-                {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · المتبقي من الاتفاق: ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
+                {`تفاصيل العمل (${CURRENCY_LABEL[currency]})`}
+                {(bucket.agreementRemainingMinor ?? 0) > 0 ? ` · باقي الاتفاق (ليس المستحق الحالي): ${formatMoney(bucket.agreementRemainingMinor!, currency)}` : ""}
                 {bucket.clinicalProgress?.historicalItems
                   ? <> · <HistoricalClinicalNote progress={bucket.clinicalProgress} currency={currency} /></>
                   : bucket.remainingTreatmentMinor > 0
-                  ? ` · باقي علاج (غير مستحق): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
+                  ? ` · قيمة العمل المخطط المتبقي (ليست رصيد الحساب): ${formatMoney(bucket.remainingTreatmentMinor, currency)}`
                   : ""}
               </p>
             ))
@@ -1359,7 +1381,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           {clinicalContext.ready ? <TreatmentFinancialContext key={contextAuthority} authorityKey={contextAuthority} patientId={patient.id} canView={!!session && canViewMoney(session.role)}
             planId={clinicalContext.context?.planId} planItemId={clinicalContext.context?.planItemId} clinicalCaseId={clinicalContext.context?.clinicalCaseId} orthoCaseId={clinicalContext.context?.orthoCaseId}
             onOpenClinicalContext={openClinicalContext} /> : null}
-          <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} />
+          </>} />
+
           <LegacyHistory patientId={patient.id} />
         </>
       ) : (
