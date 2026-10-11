@@ -22263,7 +22263,7 @@ export interface CephAnalysisRow {
 }
 
 interface CephAnalysisDbRow {
-  id: number;
+  id: number | string;
   patient_id: number;
   document_id: number;
   status: string;
@@ -22286,21 +22286,21 @@ interface CephAnalysisDbRow {
 
 // Read DATE as text: pg parses it at local midnight, PGlite at UTC midnight.
 // Neither driver-specific Date representation should change the calendar day.
-type CephAnalysisReadRow = CephAnalysisDbRow & { xray_date_text: string | null; corrected_by?: number[] | null };
+type CephAnalysisReadRow = CephAnalysisDbRow & { xray_date_text: string | null; corrected_by?: (number | string)[] | null };
 
-/** (ORTHO-ID-2) أرقام التصحيحات غير المرفوضة لكل دراسة — int4 كي لا يعيدها pg نصوصًا (int8[]). */
-const CEPH_CORRECTED_BY_SQL = `(SELECT COALESCE(array_agg(c.id::int ORDER BY c.id), '{}'::int[])
+/** Keep full BIGINT lineage; mapCephAnalysis admits exact safe-number DTO identities for both drivers. */
+const CEPH_CORRECTED_BY_SQL = `(SELECT COALESCE(array_agg(c.id ORDER BY c.id), '{}'::bigint[])
     FROM ceph_analyses c WHERE c.corrects_analysis_id = ceph_analyses.id AND c.status <> 'discarded') AS corrected_by`;
 
 function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
   const calibrated = row.cal_x1 != null && row.cal_y1 != null && row.cal_x2 != null
     && row.cal_y2 != null && row.cal_mm != null;
   return {
-    id: row.id,
-    patientId: row.patient_id,
-    documentId: row.document_id,
+    id: normalizeClinicalProcedureId(row.id),
+    patientId: normalizeClinicalProcedureId(row.patient_id),
+    documentId: normalizeClinicalProcedureId(row.document_id),
     status: row.status as CephAnalysisRow["status"],
-    orthoCaseId: row.ortho_case_id,
+    orthoCaseId: row.ortho_case_id == null ? null : normalizeClinicalProcedureId(row.ortho_case_id),
     phase: (row.phase ?? "pretreatment") as CephPhase,
     xrayDate: row.xray_date_text,
     device: row.device,
@@ -22317,8 +22317,8 @@ function mapCephAnalysis(row: CephAnalysisReadRow): CephAnalysisRow {
     completedBy: row.completed_by,
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     findings: null,
-    correctsAnalysisId: row.corrects_analysis_id == null ? null : Number(row.corrects_analysis_id),
-    correctedBy: row.corrected_by ?? [],
+    correctsAnalysisId: row.corrects_analysis_id == null ? null : normalizeClinicalProcedureId(row.corrects_analysis_id),
+    correctedBy: (row.corrected_by ?? []).map(normalizeClinicalProcedureId),
   };
 }
 
@@ -22411,7 +22411,7 @@ export async function createCephAnalysis(input: {
         return { ok: false, message: "حالة التقويم غير موجودة لهذا المريض." };
       }
     }
-    const { rows } = await client.query<{ id: number }>(
+    const { rows } = await client.query<{ id: number | string }>(
       `INSERT INTO ceph_analyses
          (patient_id, document_id, created_by, ortho_case_id, phase, xray_date, device, ref_set)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -22425,17 +22425,18 @@ export async function createCephAnalysis(input: {
         input.refSet?.trim() || "builtin_default",
       ],
     );
+    const analysisId = normalizeClinicalProcedureId(rows[0].id);
     if (input.authorize?.isCurrent && !input.authorize.isCurrent()) {
       await client.query("ROLLBACK");
       return CEPH_FORBIDDEN;
     }
     await client.query("COMMIT");
     await recordAudit({
-      action: "ceph.create", entity: "ceph_analysis", entityId: String(rows[0].id),
+      action: "ceph.create", entity: "ceph_analysis", entityId: String(analysisId),
       entityLabel: `على المستند #${input.documentId} — مرحلة ${input.phase ?? "pretreatment"}`,
       actor: input.createdBy,
     });
-    return { ok: true, id: rows[0].id };
+    return { ok: true, id: analysisId };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     // مسودة واحدة لكل مريض: فتحَ ثانية يعني وضعين لنفس المعالم بأيدي مختلفة.
@@ -22461,14 +22462,14 @@ export async function listPatientCephAnalyses(patientId: number): Promise<CephAn
   const stampedIds = analyses.filter((a) => a.status === "completed").map((a) => a.id);
   if (stampedIds.length > 0) {
     // لقطةٌ لا حساب: ANB وFMA وWITS كما خُتمت يوم الاعتماد.
-    const { rows: ms } = await getPool().query<{ analysis_id: number; code: string; value: number }>(
+    const { rows: ms } = await getPool().query<{ analysis_id: number | string; code: string; value: number }>(
       `SELECT analysis_id, code, value FROM ceph_measurements
        WHERE analysis_id = ANY($1) AND code IN ('ANB','FMA','WITS')`,
       [stampedIds],
     );
     for (const a of analyses) {
       if (a.status !== "completed") continue;
-      const own = ms.filter((m) => m.analysis_id === a.id);
+      const own = ms.filter((m) => normalizeClinicalProcedureId(m.analysis_id) === a.id);
       if (own.length === 0) continue;
       const pick = (code: string) => own.find((m) => m.code === code)?.value ?? null;
       a.findings = { anb: pick("ANB"), fma: pick("FMA"), wits: pick("WITS") };
@@ -22567,10 +22568,10 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
   }
 
   return {
-    id: row.id,
-    patientId: row.patient_id,
-    orthoCaseId: row.ortho_case_id,
-    documentId: row.document_id,
+    id: normalizeClinicalProcedureId(row.id),
+    patientId: normalizeClinicalProcedureId(row.patient_id),
+    orthoCaseId: row.ortho_case_id == null ? null : normalizeClinicalProcedureId(row.ortho_case_id),
+    documentId: normalizeClinicalProcedureId(row.document_id),
     phase: row.phase ?? "pretreatment",
     xrayDate: row.xray_date_text,
     createdAt: row.created_at.toISOString(),
@@ -23220,18 +23221,18 @@ export async function duplicateCephAnalysis(
       return { ok: false, message: "النسخ من المعتمد فقط — المسودة تُعدَّل كما هي." };
     }
     // مسودة مفتوحة للمريض؟ إن كانت تصحيحًا لهذا الأصل نفسه فهي النتيجة (إعادة)، وإلا ترفض.
-    const { rows: open } = await client.query<{ id: number; corrects_analysis_id: number | string | null }>(
+    const { rows: open } = await client.query<{ id: number | string; corrects_analysis_id: number | string | null }>(
       `SELECT id, corrects_analysis_id FROM ceph_analyses WHERE patient_id = $1 AND status = 'draft'`,
       [source.patient_id],
     );
     if (open[0]) {
       await client.query("ROLLBACK");
-      if (open[0].corrects_analysis_id != null && Number(open[0].corrects_analysis_id) === Number(id)) {
-        return { ok: true, id: Number(open[0].id), replayed: true };
+      if (open[0].corrects_analysis_id != null && normalizeClinicalProcedureId(open[0].corrects_analysis_id) === normalizeClinicalProcedureId(id)) {
+        return { ok: true, id: normalizeClinicalProcedureId(open[0].id), replayed: true };
       }
       return { ok: false, message: "للمريض مسودة مفتوحة — أكملها أو أرفضها أولًا." };
     }
-    const { rows: created } = await client.query<{ id: number }>(
+    const { rows: created } = await client.query<{ id: number | string }>(
       `INSERT INTO ceph_analyses
          (patient_id, document_id, status, cal_x1, cal_y1, cal_x2, cal_y2, cal_mm,
           mm_per_pixel, note, created_by, ortho_case_id, phase, xray_date, device, ref_set, study_kind,
@@ -23249,7 +23250,7 @@ export async function duplicateCephAnalysis(
         id,
       ],
     );
-    const newId = Number(created[0].id);
+    const newId = normalizeClinicalProcedureId(created[0].id);
     await client.query(
       `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
        SELECT $2, code, x, y, source, $3 FROM ceph_landmarks WHERE analysis_id = $1`,

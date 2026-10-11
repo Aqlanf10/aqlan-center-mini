@@ -68,6 +68,27 @@ async function openPrescription(card: Locator) {
   await card.locator("button").filter({ hasText: "خطة العلاج والميكانيكا" }).click();
   await prescription(card).waitFor({ state: "visible" });
 }
+async function selectPrescriptionCase(page: Page, fixture: Fixture, id: number) {
+  const selector = workspace(page).getByRole("combobox", { name: "حالة التقويم المحددة", exact: true });
+  if (await selector.inputValue() !== "") {
+    await selector.selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.has("orthoCaseId")).toBe(false);
+    await ready(page);
+    await expect.poll(() => selector.inputValue()).toBe("");
+    await caseCard(page, fixture.activeId).waitFor(); await caseCard(page, fixture.closedId).waitFor();
+    expect(new URL(page.url()).searchParams.has("orthoCaseId")).toBe(false);
+  }
+  await selector.selectOption(String(id));
+  await expect.poll(() => new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(id));
+  await ready(page);
+  await expect.poll(() => selector.inputValue()).toBe(String(id));
+  expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(id));
+  expect(new URL(page.url()).searchParams.get("patientId")).toBe(String(fixture.patientId));
+  const card = caseCard(page, id); await card.waitFor();
+  expect(await caseCard(page, id === fixture.activeId ? fixture.closedId : fixture.activeId).count()).toBe(0);
+  await openPrescription(card);
+  return card;
+}
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
   await card.page().evaluate(async () => { await document.fonts.ready; });
@@ -170,9 +191,9 @@ describe("built orthodontic prescription truth", () => {
       const [initial] = await Promise.all([waitForOrtho(),
         page.goto(`${baseUrl}/patients/${fixture.patientId}?tab=ortho`, { waitUntil: "domcontentloaded" })]);
       await verifyRead(initial, null);
-      const active = caseCard(page, fixture.activeId); const closed = caseCard(page, fixture.closedId);
-      await openPrescription(active); await openPrescription(closed);
+      let active = await selectPrescriptionCase(page, fixture, fixture.activeId);
       expect(await prescription(active).textContent()).toBe("غير مسجّلة");
+      let closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
       expect(await prescription(closed).textContent()).toBe(custom);
       expect(await closed.textContent()).toContain(objectives);
       expect(await closed.textContent()).toContain(planNote);
@@ -184,15 +205,20 @@ describe("built orthodontic prescription truth", () => {
         await db.query("UPDATE ortho_cases SET bracket_system=$1 WHERE id=$2 AND patient_id=$3",
           [recorded, fixture.activeId, fixture.patientId]);
         before = await storedState(fixture.patientId);
+        active = await selectPrescriptionCase(page, fixture, fixture.activeId);
         const [response] = await Promise.all([waitForOrtho(),
           workspace(page).getByRole("button", { name: "تحديث كابينة التقويم", exact: true }).click()]);
         await verifyRead(response, recorded);
         expect(await prescription(active).textContent()).toBe(recorded?.trim() ? recorded : "غير مسجّلة");
+        closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
         expect(await prescription(closed).textContent()).toBe(custom);
         expect(await closed.textContent()).toContain(objectives);
         expect(await storedState(fixture.patientId)).toEqual(before);
       }
-      const bounds = { width, active: await capture(active, "unrecorded", width), closed: await capture(closed, "closed-custom", width) };
+      active = await selectPrescriptionCase(page, fixture, fixture.activeId);
+      const activeBounds = await capture(active, "unrecorded", width);
+      closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
+      const bounds = { width, active: activeBounds, closed: await capture(closed, "closed-custom", width) };
       await writeFile(`.settings-ui-artifacts/ortho-prescription-${width}-bounds.json`, `${JSON.stringify(bounds, null, 2)}\n`);
       expect(await storedState(fixture.patientId)).toEqual(before);
       expect(unexpected).toEqual([]); expect(errors).toEqual([]);

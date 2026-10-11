@@ -46,6 +46,7 @@ describe("guarded patient URL updates without new tab history", () => {
     const nav = createPatientNavigation(b.host, { onChange, canLeave });
     nav.navigate({ tab: "treatment", sub: "ortho" });
     expect(b.history.replaceState).toHaveBeenCalledTimes(1); expect(canLeave).toHaveBeenCalledTimes(1);
+    expect(canLeave).toHaveBeenLastCalledWith({ tab: "summary", sub: "chart" }, { tab: "treatment", sub: "ortho" });
     expect(b.host.location.search).toBe("?tab=treatment&review=1&sub=ortho");
     expect(onChange).toHaveBeenLastCalledWith({ tab: "treatment", sub: "ortho" });
     expect(b.history.pushState).not.toHaveBeenCalled(); expect(b.history.go).not.toHaveBeenCalled();

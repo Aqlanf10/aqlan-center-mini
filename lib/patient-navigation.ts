@@ -104,7 +104,7 @@ const sameView = (a: PatientLocation, b: PatientLocation) => a.tab === b.tab && 
  * behavior; tab changes do not create history entries that would need reversing.
  */
 export function createPatientNavigation(host: Window, options: {
-  canLeave: () => boolean;
+  canLeave: (from: PatientLocation, to: PatientLocation) => boolean;
   onChange: (location: PatientLocation) => void;
 }) {
   const pathname = host.location.pathname;
@@ -115,7 +115,7 @@ export function createPatientNavigation(host: Window, options: {
   const restore = () => {
     if (host.location.pathname !== pathname) return;
     const next = readPatientLocation(host.location.search);
-    if (!sameView(accepted, next) && !options.canLeave()) {
+    if (!sameView(accepted, next) && !options.canLeave(accepted, next)) {
       host.history.replaceState(null, "", patientLocationHref(host.location.href, accepted));
       return;
     }
@@ -133,7 +133,7 @@ export function createPatientNavigation(host: Window, options: {
         options.onChange(target);
         return true;
       }
-      if (!options.canLeave()) return false;
+      if (!options.canLeave(readPatientLocation(host.location.search), target)) return false;
       const href = patientLocationHref(host.location.href, target);
       // This documented Next API copies its own private routing state. No other
       // history entry is changed, and no delayed traversal/correction is queued.

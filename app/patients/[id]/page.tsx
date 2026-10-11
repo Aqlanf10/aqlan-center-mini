@@ -68,6 +68,9 @@ import {
 } from "@/lib/patient-navigation";
 
 import { useClinicalNavigationContext, readVerifiedClinicalContext } from "@/components/useClinicalNavigationContext";
+import { isSameOrthoPillarTransition, samePatientLocation, type VerifiedPillarContext } from "@/lib/ortho-pillar-navigation";
+
+type PatientPageLocation = PatientLocation & { verifiedPillar?: VerifiedPillarContext };
 
 interface PatientFile {
   patient: Patient;
@@ -207,12 +210,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [merging, setMerging] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
-  const [location, setLocation] = useState<PatientLocation>(() =>
+  const [location, setLocation] = useState<PatientPageLocation>(() =>
     readPatientLocation(typeof window === "undefined" ? "" : window.location.search));
   const contextAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
-  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority);
+  const clinicalContext = useClinicalNavigationContext(Number(id), location.context, !!location.contextError, contextAuthority,
+    location.verifiedPillar?.owner === alertOwner ? location.verifiedPillar : undefined);
   const [contextNavigationError, setContextNavigationError] = useState<string | null>(null);
   const contextRequest = useRef(0);
+  const pillarHandoff = useRef<{ source: PatientLocation; target: PatientLocation;
+    owner: typeof alertOwner; verified: VerifiedPillarContext } | null>(null);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
   const compactWorkspace = tab === "today" || tab === "treatment";
@@ -243,18 +249,28 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const trackClinicalGuard = useCallback((guard: (() => boolean) | null) => { clinicalLeaveGuard.current = guard; }, []);
   useEffect(() => {
     const controller = createPatientNavigation(window, {
-      canLeave: () => {
+      canLeave: (from, to) => {
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const cases = casesLeaveGuard.current;
         if (cases?.owner.active && !cases.guard()) return false;
         const plans = plansLeaveGuard.current;
         if (plans?.owner.active && !plans.guard()) return false;
         const ortho = orthoLeaveGuard.current;
-        if (ortho?.owner.active && !ortho.guard()) return false;
+        const handoff = pillarHandoff.current;
+        const retainsOrthoOwner = !!handoff?.owner.active && ortho?.owner === handoff.owner && from !== undefined && to !== undefined
+          && samePatientLocation(from, handoff.source) && samePatientLocation(to, handoff.target);
+        if (ortho?.owner.active && !retainsOrthoOwner && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
           : !endoDraft.current || window.confirm("هناك عمل علاج جذور غير محفوظ. هل تريد تجاهله؟");
       },
-      onChange: (next) => { ++contextRequest.current; setLocation(next); },
+      onChange: (next) => {
+        ++contextRequest.current;
+        const handoff = pillarHandoff.current;
+        const verifiedPillar = handoff?.owner.active && samePatientLocation(next, handoff.target)
+          ? handoff.verified : undefined;
+        setLocation(previous => ({ ...next, ...(verifiedPillar ? { verifiedPillar }
+          : samePatientLocation(previous, next) && previous.verifiedPillar ? { verifiedPillar: previous.verifiedPillar } : {}) }));
+      },
     });
     navigation.current = controller;
     return () => { controller.dispose(); navigation.current = null; };
@@ -272,7 +288,18 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     try {
       const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) });
       if (!capturedOwner.active || ticket !== contextRequest.current) return false;
-      return navigation.current?.navigate(patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context)) ?? false;
+      const destination = patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context);
+      // A same-case pillar is not departure from the owning workspace. Reuse this
+      // exact successful lookup once, so a redundant hook read cannot unmount its
+      // pending command/draft. Every other identity transition keeps canLeave.
+      const retainsOwner = clinicalContext.ready && !clinicalContext.error && clinicalContext.context !== undefined
+        && samePatientLocation(readPatientLocation(window.location.search), location)
+        && isSameOrthoPillarTransition({ ...location, context: clinicalContext.context }, destination);
+      const handoff = retainsOwner ? { source: location, target: destination, owner: capturedOwner,
+        verified: { owner: capturedOwner, patientId: Number(id), authority: contextAuthority, context: accepted.context } } : null;
+      if (handoff) pillarHandoff.current = handoff;
+      try { return navigation.current?.navigate(destination) ?? false; }
+      finally { if (pillarHandoff.current === handoff) pillarHandoff.current = null; }
     } catch {
       if (capturedOwner.active && ticket === contextRequest.current) setContextNavigationError("تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة.");
       return false;

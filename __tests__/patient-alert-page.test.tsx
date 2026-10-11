@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PatientFilePage from "../app/patients/[id]/page";
 import { PatientCases } from "../components/PatientCases";
 import { PatientEndo } from "../components/PatientEndo";
+import { PatientOrtho } from "../components/PatientOrtho";
 import { PatientCockpit } from "../components/patient/PatientCockpit";
 import { VitalsModal } from "../components/VitalsModal";
 import { HistoricalClinicalNote } from "../components/HistoricalClinicalNote";
-import type { ClinicalNavigationContext } from "../lib/patient-navigation";
+import { clinicalContextSearch, type ClinicalNavigationContext } from "../lib/patient-navigation";
 import { CURRENCY_LABEL, formatMoney } from "../lib/money";
 
 // Exercise the actual page handlers and hook state; leaf workspaces are not
@@ -414,6 +415,87 @@ describe("Cases navigation uses the patient-owned guarded destination", () => {
 });
 
 
+
+describe("verified same-case pillar handoff", () => {
+  const exact: ClinicalNavigationContext = { patientId: 91, clinicalCaseId: 456, orthoCaseId: 123,
+    planId: 31, planItemId: 32, visitId: 41, pillar: "wires" };
+  const reply = (context: ClinicalNavigationContext) => Response.json({ ok: true, context, specialty: "orthodontics", sub: "ortho" });
+  const ortho = () => render().find(node => node.type === PatientOrtho)!;
+  const change = (node: Element, context: ClinicalNavigationContext) =>
+    (node.props.onContextChange as (context: ClinicalNavigationContext) => Promise<boolean>)(context);
+  async function enter(allowed: ClinicalNavigationContext[] = []) {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    const valid = [exact, ...["prescription", "diagnostics", "retention"].map(pillar => ({ ...exact, pillar } as ClinicalNavigationContext)), ...allowed];
+    vi.mocked(fetch).mockImplementation((input, options) => {
+      const request = new URL(String(input), "http://clinic.test");
+      if (!request.pathname.endsWith("/clinical-context")) return original(input, options);
+      const match = request.pathname === "/api/patients/91/clinical-context"
+        ? valid.find(context => request.searchParams.toString() === clinicalContextSearch(context)) : undefined;
+      return Promise.resolve(match ? reply(match) : Response.json({ ok: false }, { status: 409 }));
+    });
+    click("patient-subtab-cases");
+    const cases = render().find(node => node.type === PatientCases)!;
+    expect(await (cases.props.onOpenOrtho as (context: ClinicalNavigationContext) => Promise<boolean>)(exact)).toBe(true);
+    await vi.waitFor(() => expect(ortho()).toBeTruthy());
+    const guard = vi.fn(() => false);
+    const cleanup = (ortho().props.onNavigationGuardChange as (guard: () => boolean) => () => void)(guard);
+    return { guard, cleanup };
+  }
+  it("keeps the owner mounted after one exact read while ordinary departure stays guarded", async () => {
+    const { guard, cleanup } = await enter();
+    const current = ortho(), original = url.href, before = vi.mocked(fetch).mock.calls.length;
+    expect(await change(current, { ...exact, pillar: "prescription" })).toBe(true);
+    expect(ortho().type).toBe(current.type); expect(ortho().key).toBe(current.key);
+    expect(ortho().props.context).toEqual({ ...exact, pillar: "prescription" });
+    expect(render().some(node => node.props["data-testid"] === "clinical-context-state")).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.slice(before).filter(([input]) => String(input).includes("/clinical-context?"))).toHaveLength(1);
+    expect(guard).not.toHaveBeenCalled();
+    const accepted = url.href;
+    click("patient-tab-summary"); expect(url.href).toBe(accepted); expect(guard).toHaveBeenCalledOnce();
+    // A browser traversal has no one-call grant, even for a previously accepted pillar.
+    url = new URL(original); window.dispatchEvent(new Event("popstate"));
+    expect(url.href).toBe(accepted); expect(guard).toHaveBeenCalledTimes(2);
+    cleanup();
+  });
+  it.each([
+    { ...exact, orthoCaseId: 124, clinicalCaseId: 457, pillar: "prescription" as const },
+    { ...exact, planId: 33, planItemId: 34, pillar: "prescription" as const },
+    { ...exact, visitId: 42, pillar: "prescription" as const },
+    { patientId: 91, orthoCaseId: 123, clinicalCaseId: 456, pillar: "prescription" as const },
+  ])("does not use a pillar grant when a clinical edge changes: %j", async target => {
+    const { guard, cleanup } = await enter([target]); const before = url.href;
+    expect(await change(ortho(), target)).toBe(false);
+    expect(url.href).toBe(before); expect(guard).toHaveBeenCalledOnce(); expect(ortho().props.context).toEqual(exact);
+    cleanup();
+  });
+  it("ignores a superseded late pillar reply instead of undoing the newer view", async () => {
+    const { guard, cleanup } = await enter(); const current = ortho();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>(resolve => { release = resolve; });
+    vi.mocked(fetch).mockImplementation((input, options) => String(input).includes("pillar=prescription") ? held : original(input, options));
+    const old = change(current, { ...exact, pillar: "prescription" });
+    expect(await change(current, { ...exact, pillar: "diagnostics" })).toBe(true);
+    expect(ortho().props.context).toEqual({ ...exact, pillar: "diagnostics" });
+    const latest = url.href; release(reply({ ...exact, pillar: "prescription" }));
+    expect(await old).toBe(false); expect(url.href).toBe(latest); expect(guard).not.toHaveBeenCalled(); cleanup();
+  });
+  it("does not reuse the accepted pillar receipt across a permission change", async () => {
+    const { cleanup } = await enter();
+    expect(await change(ortho(), { ...exact, pillar: "prescription" })).toBe(true);
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, options) => String(input).includes("/clinical-context?")
+      ? Promise.resolve(Response.json({ ok: false }, { status: 403 })) : original(input, options));
+    hooks.canEditPlans = false;
+    expect(render().some(node => node.type === PatientOrtho)).toBe(false);
+    await vi.waitFor(() => expect(render().find(node => node.props["data-testid"] === "clinical-context-state")?.props.role).toBe("alert"));
+    expect(render().some(node => node.type === PatientOrtho)).toBe(false);
+    hooks.canEditPlans = true;
+    expect(render().some(node => node.type === PatientOrtho)).toBe(false);
+    await vi.waitFor(() => expect(render().find(node => node.props["data-testid"] === "clinical-context-state")?.props.role).toBe("alert"));
+    expect(render().some(node => node.type === PatientOrtho)).toBe(false); cleanup();
+  });
+});
 
 describe("compact patient account header and Account details", () => {
   it("keeps signed ledger totals compact and moves agreement and historical details to Account", async () => {

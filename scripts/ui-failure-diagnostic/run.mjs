@@ -16,7 +16,7 @@ const groups = {
     pattern: "lists earlier unlinked studies|keeps historical/unassigned records explicit|retains unrecorded and closed legacy custom prescriptions|retires a delayed POST after pillar" },
   account: { files: ["legacy-reconciliation-preview-built-page.test.ts", "patient-navigation-ui-journey.test.ts",
     "legacy-treatment-ui-journey.test.ts", "walkout-verified-balances-ui.test.ts"],
-    baselineCount: 7, candidateCount: 18,
+    baselineCount: 7, candidateCount: 19,
     pattern: "keeps arithmetic, provenance and draft lifetimes separate|explicit tab and specialty cancellation|records 300000/120000 as a 180000 opening|reopens adjustment-only work with 180000" },
 };
 const mode = process.env.UI_DIAGNOSTIC_MODE, group = process.env.UI_DIAGNOSTIC_GROUP;
