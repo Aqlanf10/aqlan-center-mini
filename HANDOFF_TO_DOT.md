@@ -1,3 +1,17 @@
+# Published HR / clinical union and genuine catalogs — 2026-10-11
+
+This status supersedes the historical preparation records retained below. The current exact head and final run links are maintained in [PR #308](https://github.com/Aqlanf10/aqlan-center-mini/pull/308). This native-trigger successor is based on catalog child `e32492cb110ec8f0a65b219bc1ef3998bebb677b`, tree `9d2505bf559c4b96513c9f5bef04fd2460720444`.
+
+- HR parent e867 completed both full mandatory events successfully: [PR1887](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38122120659) and [push1886](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38122118162). The PR log proves 8,949 unit, 1,834 PostgreSQL and 1,346 HTTP tests passed. Focused run8 passed48 contracts and16 tasks; all42 original negative PNGs,32 positive PNGs and11 pages across3 PDFs received bounded independent visual clearance.
+- Ordinary union commit `afbbc647a415076d6ab8e3b63c89dded326974ea` has ordered parents [e867, clinical443fd28f]. All50 original SQL files and both semantic migration-fixture corrections remain preserved. No accepted Staging source or ledger was changed.
+- [Isolated catalog run38125096210](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38125096210) succeeded on that exact union, with source/run/tree-bound artifact11696707351, both generator exits0 and zero temporary databases left. Independent review accepted the raw generated schema/disclosure files; e324 committed only those exact bytes. The schema preserves all89 clinical table objects plus21 HR tables, and all23 disclosure identity/text collections equal the exact parent union. Existing convergence findings remain disclosed.
+- The normal GitHub page exposes no Run workflow control for the branch-only HR diagnostic workflow; no manual dispatch was submitted. This successor adds only the two catalog files to its existing push-path filter, preserving all existing paths, commands, assertions, deadlines, permissions and fail-closed retention. It also adds this status prefix. No application, SQL, migration or mandatory-workflow source changes accompany it.
+- Exact final combined mandatory CI and the configured48/16 native evidence run remain required. Parent success and generated catalogs do not establish final combined or live-environment acceptance. No main merge or deployment is authorized by this handoff. The unchanged accepted Staging branch must not be downgraded to plain HR.
+
+The previous preparation records below are retained byte-for-byte as historical context.
+
+---
+
 # Current prospective HR / clinical union — 2026-10-11
 
 Source-only candidate parents: HR `e867989d068edd77eafe87d56c1b7c6545ee6342` and clinical PR322 `443fd28f330f5f9bdda0ba6cfc67cfe30b12cff1`. Main was independently re-read at `148fcbeac229cb279848e6ea37049d1599a4fafe` during this preparation. If PR322 merges first, re-pin the ordinary second parent to actual main and re-review any intervening source.

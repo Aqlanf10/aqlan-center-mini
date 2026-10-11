@@ -5,6 +5,8 @@ on:
     branches: [feat/hr-staff-tasks-phase1]
     paths:
       - ".github/workflows/hr-ui-failure-diagnostic.yml"
+      - "schema/current-schema-contract.pg18.json"
+      - "schema/preflight-disclosure.pg18.json"
       - "__tests__/security-http/hr-payroll-journey.test.ts"
       - "__tests__/security-http/hr-task-create-replay.test.ts"
       - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
