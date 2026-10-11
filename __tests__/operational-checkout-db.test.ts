@@ -19,7 +19,10 @@ beforeEach(() => {
     invoice_status: "open", currency: "SAR", net: "10000", paid: "2000" };
   state.poolQuery.mockReset().mockImplementation(async () => ({ rows: [row] }));
   state.query.mockReset().mockImplementation(async (sql: string) => {
-    if (sql.startsWith("SELECT invoice_id FROM visits")) return { rows: [{ invoice_id: row.linked_id }] };
+    if (sql.startsWith("SELECT patient_id, invoice_id FROM visits")) return { rows: [{ patient_id: row.patient_id, invoice_id: row.linked_id }] };
+    if (sql.startsWith("SELECT id FROM patients")) return { rows: [{ id: row.patient_id }] };
+    if (sql.startsWith("SELECT id FROM invoices")) return { rows: [{ id: row.linked_id }] };
+    if (sql.startsWith("SELECT v.id, v.patient_id, v.invoice_id")) return { rows: [{ id: row.id, patient_id: row.patient_id, invoice_id: row.linked_id }] };
     if (sql.includes("FROM visits v")) return { rows: [row] };
     return { rows: [] };
   });
@@ -35,19 +38,43 @@ describe("operational handoff durable decision and receivable proof", () => {
       expect(describeAudit(action, "زيارة اصطناعية")).toBe(`${AUDIT_LABEL[action]} — زيارة اصطناعية`);
     }
   });
-  it("locks invoice before visit, revalidates exact version and stores only an audited visit-scoped proof", async () => {
+  it("locks patient then visit then invoice, revalidates exact version and stores only an audited visit-scoped proof", async () => {
     expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: true, item: { status: "handled", signedAt: null } });
     const calls = state.query.mock.calls.map(([sql]) => sql as string);
     expect(calls[0]).toBe("BEGIN");
     const invoiceLock = calls.findIndex(sql => sql.includes("FROM invoices") && sql.includes("FOR UPDATE"));
     const visitLock = calls.findIndex(sql => sql.includes("FOR UPDATE OF v"));
-    expect(invoiceLock).toBeGreaterThan(0); expect(visitLock).toBeGreaterThan(invoiceLock);
+    const patientLock = calls.findIndex(sql => sql.includes("FROM patients") && sql.includes("FOR KEY SHARE"));
+    expect(patientLock).toBeGreaterThan(0); expect(visitLock).toBeGreaterThan(patientLock); expect(invoiceLock).toBeGreaterThan(visitLock);
     const proofRead = calls.findIndex(sql => sql.includes("decided.details AS decision"));
-    expect(proofRead).toBeGreaterThan(visitLock);
+    expect(proofRead).toBeGreaterThan(invoiceLock);
     expect(calls.at(-1)).toBe("COMMIT"); expect(state.release).toHaveBeenCalledTimes(1);
     expect(state.audit.mock.calls[0][1]).toMatchObject({ action: "visit.operational_handoff_decided", entityId: 41,
       details: { patientId: 7, finishVersion: version, receivable: invoice, status: "handled", reason: input.reason } });
     expect(calls.some(sql => /(?:INSERT INTO|UPDATE|DELETE FROM)\s+(?:invoices|payments|visits)\b/i.test(sql))).toBe(false);
+  });
+  it.each(["owner", "link"] as const)("refuses a changed %s after the waited visit lock without following the new owner/invoice", async drift => {
+    state.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("SELECT patient_id, invoice_id FROM visits")) return { rows: [{ patient_id: 7, invoice_id: 80 }] };
+      if (sql.startsWith("SELECT id FROM patients")) return { rows: [{ id: 7 }] };
+      if (sql.startsWith("SELECT v.id, v.patient_id, v.invoice_id")) return { rows: [{ id: 41, patient_id: drift === "owner" ? 8 : 7, invoice_id: drift === "link" ? 81 : 80 }] };
+      if (sql.includes("decided.details AS decision")) return { rows: [{ ...row, patient_id: drift === "owner" ? 8 : 7, linked_id: drift === "link" ? 81 : 80 }] };
+      return { rows: [] };
+    });
+    expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: false, reason: "stale" });
+    expect(state.query.mock.calls.filter(([sql]) => String(sql).includes("FROM patients"))).toHaveLength(1);
+    expect(state.query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT id FROM invoices"))).toBe(false);
+    expect(state.audit).not.toHaveBeenCalled();
+  });
+  it("refuses owner/link drift in the final proof and missing exact-owned invoice locks", async () => {
+    const normal = state.query.getMockImplementation()!;
+    state.query.mockImplementation(async (sql: string, values: unknown[]) => sql.includes("decided.details AS decision")
+      ? { rows: [{ ...row, patient_id: 8 }] } : normal(sql, values));
+    expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: false, reason: "stale" });
+    state.query.mockImplementation(async (sql: string, values: unknown[]) => sql.startsWith("SELECT id FROM invoices")
+      ? { rows: [] } : normal(sql, values));
+    expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: false, reason: "stale" });
+    expect(state.audit).not.toHaveBeenCalled();
   });
   it("returns the original still-applicable decision on retry, without replacing its reason or status", async () => {
     await decideOperationalHandoff(input, actor);
@@ -62,7 +89,9 @@ describe("operational handoff durable decision and receivable proof", () => {
       expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: false, reason: "stale" }); row = saved;
     }
     state.query.mockImplementation(async (sql: string) => {
-      if (sql.startsWith("SELECT invoice_id FROM visits")) return { rows: [{ invoice_id: 79 }] };
+      if (sql.startsWith("SELECT patient_id, invoice_id FROM visits")) return { rows: [{ patient_id: 7, invoice_id: 79 }] };
+      if (sql.startsWith("SELECT id FROM patients")) return { rows: [{ id: 7 }] };
+      if (sql.startsWith("SELECT v.id, v.patient_id, v.invoice_id")) return { rows: [{ id: 41, patient_id: 7, invoice_id: 80 }] };
       if (sql.includes("FROM visits v")) return { rows: [row] }; return { rows: [] };
     });
     expect(await decideOperationalHandoff(input, actor)).toMatchObject({ ok: false, reason: "stale" }); expect(state.audit).not.toHaveBeenCalled();

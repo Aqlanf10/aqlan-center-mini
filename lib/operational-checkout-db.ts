@@ -138,16 +138,34 @@ export async function decideOperationalHandoff(input: OperationalDecisionInput, 
 // Both supported database backends expose this adapter, not pg's stream/config overloads.
 type QueryClient = Pick<DbClient, "query">;
 async function lockReceptionRow(client: QueryClient, visitId: number): Promise<Row | null> {
-  const { rows: [discovered] } = await client.query<{ invoice_id: number | null }>(
-    `SELECT invoice_id FROM visits WHERE id = $1`, [visitId]);
-  if (discovered?.invoice_id !== null && discovered?.invoice_id !== undefined) {
-    await client.query(`SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, [discovered.invoice_id]);
+  // Match correction/signing: patient → visit → invoice. Discovery acquires no
+  // locks; never follow a different owner/link after waiting on the old owner.
+  const { rows: [discovered] } = await client.query<{ patient_id: number | null; invoice_id: number | null }>(
+    `SELECT patient_id, invoice_id FROM visits WHERE id = $1`, [visitId]);
+  if (!discovered) return null;
+  let ownerMissing = false;
+  if (discovered.patient_id !== null) {
+    // KEY SHARE blocks merge/delete while remaining compatible with payment FKs
+    // and correction's NO KEY UPDATE. This helper never upgrades the parent.
+    const { rows } = await client.query<{ id: number }>(
+      `SELECT id FROM patients WHERE id = $1 FOR KEY SHARE`, [discovered.patient_id]);
+    ownerMissing = rows.length !== 1;
   }
-  await client.query(`SELECT v.id FROM visits v WHERE v.id = $1 FOR UPDATE OF v`, [visitId]);
-  // The statement after a waited lock sees the preceding decision/payment/correction commit.
+  const { rows: [locked] } = await client.query<{ id: number; patient_id: number | null; invoice_id: number | null }>(
+    `SELECT v.id, v.patient_id, v.invoice_id FROM visits v WHERE v.id = $1 FOR UPDATE OF v`, [visitId]);
+  if (!locked) return null;
+  let changed = ownerMissing || locked.patient_id !== discovered.patient_id || locked.invoice_id !== discovered.invoice_id;
+  if (!changed && locked.invoice_id !== null) {
+    const { rows } = await client.query<{ id: number }>(
+      `SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [locked.invoice_id, locked.patient_id]);
+    changed = rows.length !== 1;
+  }
+  // Fresh statement after all waited locks: never snapshot old receipts/audits.
+  // Drifted rows are returned only with a refusal flag; no caller may use proof.
   const { rows: [row] } = await client.query<Row>(`${SELECT} WHERE v.id = $1`, [visitId]);
   if (!row) return null;
-  return { ...row, link_changed: row.linked_id !== discovered?.invoice_id };
+  return { ...row, link_changed: changed || row.patient_id !== discovered.patient_id
+    || row.patient_id !== locked.patient_id || row.linked_id !== discovered.invoice_id || row.linked_id !== locked.invoice_id };
 }
 /** Called only inside the authorized signed-decision transaction; no independent write. */
 export async function lockReceptionReceivable(client: QueryClient, visitId: number) {

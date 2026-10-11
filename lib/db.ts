@@ -28419,7 +28419,7 @@ export type DeferPaymentResult =
  * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
  */
 export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
-  // Keep invoice→visit lock ordering shared with correction and handoff decisions.
+  // Keep patient→visit→invoice lock ordering shared with correction and handoff decisions.
   const { lockReceptionReceivable } = await import("./operational-checkout-db");
   return inVisitTransaction(async (client) => {
     const financial = await lockReceptionReceivable(client, id);

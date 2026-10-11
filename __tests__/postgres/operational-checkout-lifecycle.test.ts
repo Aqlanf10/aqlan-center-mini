@@ -160,7 +160,7 @@ it("two null-invoice decisions waiting on the same visit preserve exactly the fi
     for (const reason of ["القرار الاصطناعي الأول", "القرار الاصطناعي الثاني"]) pending.push(observe(operational.decideOperationalHandoff({
       ...visit, finishVersion: read.item.finishVersion, receivable: null, status: "handled", reason,
     }, actor)));
-    const pids = await exactBlockedWriters(pid, Array(2).fill("SELECT v.id FROM visits v WHERE v.id = $1 FOR UPDATE OF v"), pending);
+    const pids = await exactBlockedWriters(pid, Array(2).fill("SELECT v.id, v.patient_id, v.invoice_id FROM visits v WHERE v.id = $1 FOR UPDATE OF v"), pending);
     expect(pids).toHaveLength(2);
     await blocker.query("COMMIT");
     const results = await Promise.all(pending.map(result));
@@ -213,7 +213,10 @@ it.each(["handled", "deferred"] as const)("keeps legacy %s historical, flags mis
   expect((await db.patientLedger(visit.patientId)).payments).toHaveLength(2);
 });
 
-it.each(["refund", "correction"] as const)("observes exact invoice-lock writer PIDs for %s against a decision and never commits stale proof", async mutation => {
+it.each([
+  { mutation: "refund", first: "decision" }, { mutation: "refund", first: "mutation" },
+  { mutation: "correction", first: "decision" }, { mutation: "correction", first: "mutation" },
+] as const)("observes exact lock writer PIDs for $mutation with $first first and never commits stale proof", async ({ mutation, first }) => {
   const visit = await fixture();
   const invoice = (await db.createInvoice({ patientId: visit.patientId, baseCurrency: "YER", discountMinor: 0, note: null,
     createdBy: actor.actor, items: [{ serviceId: null, doctorId, description: "مرجع اصطناعي مرتبط صراحة", quantity: 1, unitPriceMinor: 10000 }] }))!;
@@ -226,19 +229,43 @@ it.each(["refund", "correction"] as const)("observes exact invoice-lock writer P
   try {
     await blocker.query("BEGIN"); const pid = (await blocker.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid as number;
     await blocker.query(`SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, [invoice.id]);
-    const decision = observe(operational.decideOperationalHandoff({ ...visit, finishVersion: read.item.finishVersion,
-      receivable: read.receivable, status: "handled", reason: "قرار اصطناعي متزامن" }, actor));
-    drain.push(decision.outcome);
-    const changed = observe<unknown>(mutation === "refund" ? payment(visit.patientId, invoice.id, 1000, receipt.id)
-      : db.correctInvoice({ invoiceId: invoice.id, lines: invoice.items.map(item => ({ itemId: item.id, quantity: 1, unitPriceMinor: 9000 })),
-        reason: "تصحيح اصطناعي متزامن", actor: actor.actor, actorRole: actor.actorRole }));
-    drain.push(changed.outcome);
-    await exactBlockedWriters(pid, ["SELECT id FROM invoices WHERE id = $1 FOR UPDATE", mutation === "refund"
+    const startDecision = () => {
+      const writer = observe(operational.decideOperationalHandoff({ ...visit, finishVersion: read.item.finishVersion,
+        receivable: read.receivable, status: "handled", reason: "قرار اصطناعي متزامن" }, actor));
+      drain.push(writer.outcome); return writer;
+    };
+    const startMutation = () => {
+      const writer = observe<unknown>(mutation === "refund" ? payment(visit.patientId, invoice.id, 1000, receipt.id)
+        : db.correctInvoice({ invoiceId: invoice.id, lines: invoice.items.map(item => ({ itemId: item.id, quantity: 1, unitPriceMinor: 9000 })),
+          reason: "تصحيح اصطناعي متزامن", actor: actor.actor, actorRole: actor.actorRole }));
+      drain.push(writer.outcome); return writer;
+    };
+    const decisionInvoice = "SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 FOR UPDATE";
+    const decisionVisit = "SELECT v.id, v.patient_id, v.invoice_id FROM visits v WHERE v.id = $1 FOR UPDATE OF v";
+    const correctionVisit = "SELECT id FROM visits WHERE invoice_id = $1 ORDER BY id FOR UPDATE";
+    const mutationInvoice = mutation === "refund"
       ? "SELECT base_currency, plan_id FROM invoices WHERE id = $1 AND patient_id = $2 FOR SHARE"
-      : "SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency, plan_id, created_at FROM invoices WHERE id = $1 FOR UPDATE"], [decision, changed]);
+      : "SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency, plan_id, created_at FROM invoices WHERE id = $1 FOR UPDATE";
+    let decision: ReturnType<typeof startDecision>, changed: ReturnType<typeof startMutation>;
+    if (first === "decision") {
+      decision = startDecision();
+      await exactBlockedWriters(pid, [decisionInvoice], [decision]);
+      changed = startMutation();
+    } else {
+      changed = startMutation();
+      await exactBlockedWriters(pid, [mutationInvoice], [changed]);
+      decision = startDecision();
+    }
+    // The first correction/decision owns the visit while waiting on the invoice;
+    // the second must wait on that visit, never form invoice→visit inversion.
+    await exactBlockedWriters(pid, mutation === "refund" ? [decisionInvoice, mutationInvoice]
+      : first === "decision" ? [decisionInvoice, correctionVisit] : [mutationInvoice, decisionVisit], [decision, changed]);
     await blocker.query("COMMIT");
     const decisionResult = await result(decision), change = await result(changed);
-    if (mutation === "correction") expect(change).toMatchObject({ ok: true });
+    if (mutation === "correction") {
+      expect(change).toMatchObject({ ok: true });
+      expect(decisionResult).toMatchObject(first === "decision" ? { ok: true } : { ok: false, reason: "stale" });
+    }
     if (!decisionResult.ok) expect(decisionResult.reason).toBe("stale");
     const after = (await operational.readOperationalHandoff(visit.visitId, visit.patientId))!;
     expect(after.item.status).toBe("pending");
@@ -251,6 +278,90 @@ it.each(["refund", "correction"] as const)("observes exact invoice-lock writer P
       expect((await q(`SELECT invoice_id, amount_minor FROM payments WHERE id = $1`, [receipt.id])).rows)
         .toEqual([{ invoice_id: invoice.id, amount_minor: "10000" }]);
     }
+  } finally {
+    await blocker.query("ROLLBACK").catch(() => {}); blocker.release(); await Promise.all(drain);
+  }
+});
+
+it.each(["owner", "invoice"] as const)("refuses changed %s during a real waited lock without following a new owner or invoice", async drift => {
+  const visit = await fixture();
+  const replacementOwner = drift === "owner" ? await fixture() : null;
+  const replacementInvoice = drift === "invoice" ? await db.createInvoice({ patientId: visit.patientId,
+    baseCurrency: "YER", discountMinor: 0, note: null, createdBy: actor.actor,
+    items: [{ serviceId: null, doctorId, description: "مرجع اصطناعي جديد صريح", quantity: 1, unitPriceMinor: 7000 }] }) : null;
+  const read = (await operational.readOperationalHandoff(visit.visitId, visit.patientId))!;
+  const blocker = await db.getPool().connect();
+  const drain: Promise<unknown>[] = [];
+  try {
+    await blocker.query("BEGIN"); const pid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+    if (drift === "owner") await blocker.query("SELECT id FROM patients WHERE id = $1 FOR UPDATE", [visit.patientId]);
+    else await blocker.query("SELECT id FROM visits WHERE id = $1 FOR UPDATE", [visit.visitId]);
+    const writer = observe(operational.decideOperationalHandoff({ ...visit, finishVersion: read.item.finishVersion,
+      receivable: read.receivable, status: "handled", reason: "طلب اصطناعي قبل تغير الهوية" }, actor));
+    drain.push(writer.outcome);
+    await exactBlockedWriters(pid, [drift === "owner" ? "SELECT id FROM patients WHERE id = $1 FOR KEY SHARE"
+      : "SELECT v.id, v.patient_id, v.invoice_id FROM visits v WHERE v.id = $1 FOR UPDATE OF v"], [writer]);
+    // Controlled synthetic row mutation tests post-wait identity refusal, not
+    // authorization of a separate patient-reassignment or invoice-link route.
+    if (drift === "owner") await blocker.query("UPDATE visits SET patient_id = $2 WHERE id = $1", [visit.visitId, replacementOwner!.patientId]);
+    else await blocker.query("UPDATE visits SET invoice_id = $2 WHERE id = $1", [visit.visitId, replacementInvoice!.id]);
+    await blocker.query("COMMIT");
+    expect(await result(writer)).toMatchObject({ ok: false, reason: "stale" });
+    expect(await audits(visit.visitId)).toHaveLength(0);
+    expect((await q("SELECT patient_id, invoice_id FROM visits WHERE id = $1", [visit.visitId])).rows).toEqual([{
+      patient_id: replacementOwner?.patientId ?? visit.patientId, invoice_id: replacementInvoice?.id ?? null,
+    }]);
+  } finally {
+    await blocker.query("ROLLBACK").catch(() => {}); blocker.release(); await Promise.all(drain);
+  }
+});
+
+it.each([
+  { mode: "complete", first: "handoff" }, { mode: "complete", first: "correction" },
+  { mode: "defer", first: "handoff" }, { mode: "defer", first: "correction" },
+  { mode: "verify", first: "handoff" }, { mode: "verify", first: "correction" },
+] as const)("signed $mode uses the same canonical lock chain with $first first and a successful correction", async ({ mode, first }) => {
+  const visit = await fixture(); await sign(visit.visitId, true);
+  const proof = (await operational.readSignedReceptionVerification(visit.visitId, visit.patientId))!;
+  const invoice = (await db.getInvoice(proof.receivable!.invoiceId))!;
+  const request = { ...proof, reason: "متابعة استقبال اصطناعية متزامنة" };
+  const action = mode === "complete" ? "visit.reception_handoff_completed" : mode === "defer" ? "visit.payment_deferred" : operational.RECEPTION_VERIFICATION_ACTION;
+  const blocker = await db.getPool().connect(), drain: Promise<unknown>[] = [];
+  try {
+    await blocker.query("BEGIN"); const pid = (await blocker.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+    await blocker.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [invoice.id]);
+    const startHandoff = () => {
+      const writer = observe<unknown>(mode === "complete" ? signed.completeReceptionHandoff(request, actor)
+        : mode === "defer" ? db.deferVisitPayment(visit.visitId, actor, request.reason)
+        : operational.verifySignedReception(request, actor));
+      drain.push(writer.outcome); return writer;
+    };
+    const startCorrection = () => {
+      const writer = observe(db.correctInvoice({ invoiceId: invoice.id,
+        lines: invoice.items.map(item => ({ itemId: item.id, quantity: item.quantity, unitPriceMinor: item.unitPriceMinor - 1000 })),
+        reason: "تصحيح تخفيض اصطناعي موثق", actor: actor.actor, actorRole: actor.actorRole }));
+      drain.push(writer.outcome); return writer;
+    };
+    const handoffInvoice = "SELECT id FROM invoices WHERE id = $1 AND patient_id = $2 FOR UPDATE";
+    const correctionInvoice = "SELECT id, invoice_number, patient_id, status, total_minor, discount_minor, base_currency, plan_id, created_at FROM invoices WHERE id = $1 FOR UPDATE";
+    let handoff: ReturnType<typeof startHandoff>, correction: ReturnType<typeof startCorrection>;
+    if (first === "handoff") {
+      handoff = startHandoff(); await exactBlockedWriters(pid, [handoffInvoice], [handoff]); correction = startCorrection();
+    } else {
+      correction = startCorrection(); await exactBlockedWriters(pid, [correctionInvoice], [correction]); handoff = startHandoff();
+    }
+    await exactBlockedWriters(pid, first === "handoff"
+      ? [handoffInvoice, "SELECT id FROM visits WHERE invoice_id = $1 ORDER BY id FOR UPDATE"]
+      : [correctionInvoice, "SELECT v.id, v.patient_id, v.invoice_id FROM visits v WHERE v.id = $1 FOR UPDATE OF v"], [handoff, correction]);
+    await blocker.query("COMMIT");
+    expect(await result(correction)).toMatchObject({ ok: true });
+    expect(await result(handoff)).toMatchObject(first === "handoff" ? { ok: true } : { ok: false, reason: "stale" });
+    expect((await q("SELECT id FROM audit_log WHERE entity='visit' AND entity_id=$1 AND action=$2", [String(visit.visitId), action])).rows)
+      .toHaveLength(first === "handoff" ? 1 : 0);
+    const current = (await db.visitWalkout(visit.visitId))!;
+    expect(current.invoice?.id).not.toBe(invoice.id);
+    expect(current.balances).toContainEqual({ currency: "YER", balanceMinor: 14000 });
+    expect((await db.patientLedger(visit.patientId)).payments).toHaveLength(0);
   } finally {
     await blocker.query("ROLLBACK").catch(() => {}); blocker.release(); await Promise.all(drain);
   }
