@@ -410,14 +410,20 @@ function CreateTaskModal({ timeZone, session, oversight, pending, onPending, onC
 
   const submit = async () => {
     if (submitting.current) return;
+    let request: PendingTaskCreation;
+    try {
+      request = pending ?? {
+        title: title.trim(), description: description.trim(), isPrivate, priority,
+        dueAt: dueAt ? parseTaskDeadline(dueAt,timeZone) : null, plannedFor: plannedFor || null,
+        assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
+        uncertain: false, clientRequestId: newRequestId(), expectedOwner: { username: session.username, role: session.role },
+      };
+    } catch (validationError) {
+      setError(validationError instanceof Error ? validationError.message : "موعد الاستحقاق غير صالح.");
+      return;
+    }
     submitting.current = true;
     setBusy(true); setError(null);
-    const request: PendingTaskCreation = pending ?? {
-      title: title.trim(), description: description.trim(), isPrivate, priority,
-      dueAt: dueAt ? parseTaskDeadline(dueAt,timeZone) : null, plannedFor: plannedFor || null,
-      assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
-      uncertain: false, clientRequestId: newRequestId(), expectedOwner: { username: session.username, role: session.role },
-    };
     activeRequest.current = request;
     onPending(request);
     try {
@@ -604,10 +610,16 @@ function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onRe
   };
 
   const submitManagementEdit = async () => {
+    let dueAt: string | null;
+    try { dueAt = editDueAt ? parseTaskDeadline(editDueAt,timeZone) : null; }
+    catch (validationError) {
+      setError(validationError instanceof Error ? validationError.message : "موعد الاستحقاق غير صالح.");
+      return;
+    }
     const body: Record<string, unknown> = {
       title: editTitle.trim(),
       priority: editPriority,
-      dueAt: editDueAt ? parseTaskDeadline(editDueAt,timeZone) : null,
+      dueAt,
       plannedFor: editPlannedFor || null,
     };
     if (oversight && !task.isPrivate) {
