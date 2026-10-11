@@ -349,8 +349,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Request Leave Modal */}
       {requestModalOpen && (
-        <Modal onClose={() => setRequestModalOpen(false)}>
-          <form onSubmit={handleCreateRequest} className="space-y-3">
+        <Modal alignTop onClose={() => setRequestModalOpen(false)}>
+          <form onSubmit={handleCreateRequest} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">طلب إجازة جديدة</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">الموظف *</label>
@@ -439,8 +439,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Adjust Balance Modal */}
       {adjustModalOpen && (
-        <Modal onClose={() => setAdjustModalOpen(false)}>
-          <form onSubmit={handleAdjustBalance} className="space-y-3">
+        <Modal alignTop onClose={() => setAdjustModalOpen(false)}>
+          <form onSubmit={handleAdjustBalance} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">تعديل رصيد إجازة لموظف</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">الموظف *</label>

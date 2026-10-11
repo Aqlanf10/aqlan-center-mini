@@ -31,6 +31,7 @@ async function staff(name: string): Promise<number> {
   expect(Number.isSafeInteger(id) && id > 0).toBe(true); return id;
 }
 const owns = (url: string, path: string) => { const parsed = new URL(url); return parsed.origin === owned.baseUrl && parsed.pathname === path; };
+const retainedClause = "بند اصطناعي: أجر 98.76 USD\nتبقى الشروط محفوظة حتى مراجعة نتيجة الحفظ.";
 async function contractsTab(page: Page) {
   const tab = page.getByRole("tablist", { name: "أقسام الموارد البشرية", exact: true }).getByRole("tab", { name: "📄 العقود", exact: true });
   const [read] = await Promise.all([
@@ -47,13 +48,14 @@ async function locked(form: Locator, title: string) {
   expect(await form.getByLabel("مسمى العقد", { exact: true }).inputValue()).toBe(title);
   expect(await form.getByLabel("الراتب الأساسي", { exact: true }).inputValue()).toBe("98.76");
   expect(await form.getByLabel("عملة الأجر", { exact: true }).inputValue()).toBe("USD");
+  expect(await form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }).inputValue()).toBe(retainedClause);
   const controls = form.locator("input,select,textarea,fieldset button");
   expect(await controls.count()).toBeGreaterThan(10);
   expect(await controls.evaluateAll(nodes => nodes.every(node => node.matches(":disabled")))).toBe(true);
   expect(await form.locator("button[type='submit']").count()).toBe(1);
   expect(await form.locator("button[type='submit']").isDisabled()).toBe(true);
 }
-async function nativeReachable(page: Page, button: Locator) {
+async function nativeReachable(page: Page, button: Locator, allowWheel = true) {
   expect(await button.count()).toBe(1);
   const observe = () => button.evaluate(element => {
     const r = element.getBoundingClientRect();
@@ -74,7 +76,7 @@ async function nativeReachable(page: Page, button: Locator) {
       viewport: { width: innerWidth, height: innerHeight }, usable: { left, top, right, bottom }, hits,
       inside: r.width > 4 && r.height > 4 && r.left >= left && r.top >= top && r.right <= right && r.bottom <= bottom };
   });
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; allowWheel && attempt < 12; attempt++) {
     const measured = await observe();
     if (measured.inside && measured.hits.every(Boolean)) return measured;
     const center = measured.box.y + measured.box.height / 2;
@@ -97,14 +99,45 @@ async function nativeReachable(page: Page, button: Locator) {
   const final = await observe(); expect(final.inside).toBe(true); expect(final.hits).toEqual([true, true, true, true, true]);
   return final;
 }
-function retain(id: string, png: Buffer, width: number, facts: Record<string, unknown>) {
+async function wholeFormFits(form: Locator) {
+  const result = await form.evaluate(element => {
+    const dialog = element.closest("dialog"); if (!dialog) throw new Error("Owned dialog is missing");
+    const visual = window.visualViewport, left = visual?.offsetLeft ?? 0, right = left + (visual?.width ?? innerWidth);
+    const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+    const controls = [...element.querySelectorAll("input,select,textarea,button,fieldset,label,h3,p,div")].map(node => {
+      const r = node.getBoundingClientRect();
+      return { tag: node.tagName, left: r.left, right: r.right, width: r.width,
+        fits: r.width > 0 && r.left >= rect.left && r.right <= rect.right && r.left >= left && r.right <= right };
+    });
+    return { box: { left: rect.left, right: rect.right, width: rect.width }, viewport: { left, right },
+      background: style.backgroundColor, opacity: style.opacity, formClientWidth: element.clientWidth, formScrollWidth: element.scrollWidth,
+      dialogClientWidth: dialog.clientWidth, dialogScrollWidth: dialog.scrollWidth, controls };
+  });
+  expect(result.background).toBe("rgb(255, 255, 255)"); expect(result.opacity).toBe("1");
+  expect(result.box.width).toBeLessThanOrEqual(768);
+  expect(result.box.left).toBeGreaterThanOrEqual(result.viewport.left);
+  expect(result.box.right).toBeLessThanOrEqual(result.viewport.right);
+  expect(result.formScrollWidth).toBeLessThanOrEqual(result.formClientWidth);
+  expect(result.dialogScrollWidth).toBeLessThanOrEqual(result.dialogClientWidth);
+  expect(result.controls.length).toBeGreaterThan(20);
+  expect(result.controls.every(control => control.fits)).toBe(true);
+  return result;
+}
+
+function retain(id: string, frames: Record<"top" | "identity" | "bottom", Buffer>, width: number, facts: Record<string, unknown>) {
   const output = process.env.HR_UI_DIAGNOSTIC_DIR; if (!output) return;
   const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
-  mkdirSync(output, { recursive: true }); writeFileSync(join(output, `${id}.png`), png);
-  writeFileSync(join(output, `${id}.json`), JSON.stringify({ format: "hr-contract-ack-native-v1", syntheticOnly: true, acceptance: false,
+  mkdirSync(output, { recursive: true });
+  const retainedFrames = Object.fromEntries(Object.entries(frames).map(([phase, png]) => {
+    const filename = phase === "bottom" ? `${id}.png` : `${id}-${phase}.png`;
+    writeFileSync(join(output, filename), png);
+    return [phase, { png: filename, pngBytes: png.length, pngSha256: hash(png) }];
+  }));
+  const png = frames.bottom;
+  writeFileSync(join(output, `${id}.json`), JSON.stringify({ format: "hr-contract-ack-native-v2", syntheticOnly: true, acceptance: false,
     runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, checkout: process.env.GITHUB_SHA,
     sourceSha256: hash(readFileSync(join(process.cwd(), "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"))),
-    viewport: { width, height: 900 }, png: `${id}.png`, pngBytes: png.length, pngSha256: hash(png), ...facts }, null, 2));
+    viewport: { width, height: 900 }, png: `${id}.png`, pngBytes: png.length, pngSha256: hash(png), frames: retainedFrames, ...facts }, null, 2));
 }
 
 /** A real HTTP body, deliberately left unfinished after successful headers.
@@ -183,7 +216,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
     const page = await context.newPage(); const sent: Record<string, unknown>[] = [];
     let stream: Awaited<ReturnType<typeof unfinishedAcknowledgement>> | undefined;
     const bodyWitness = { status: 0, bytes: 0, finished: false, aborted: false };
-    let native: { png: Buffer; facts: Record<string, unknown> } | undefined;
+    let native: { frames: Record<"top" | "identity" | "bottom", Buffer>; facts: Record<string, unknown> } | undefined;
     let release!: () => void; const deliver = new Promise<void>(resolve => { release = resolve; });
     let delivered!: () => void; const deliveryComplete = new Promise<void>(resolve => { delivered = resolve; });
     let routeFailure: unknown;
@@ -220,6 +253,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       await form.getByLabel("عملة الأجر", { exact: true }).selectOption("USD");
       await form.getByLabel("دورية الراتب", { exact: true }).selectOption("monthly");
       await form.getByLabel("الراتب الأساسي", { exact: true }).fill("98.76");
+      await form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }).fill(retainedClause);
       page.on("request", request => { if (owns(request.url(), mutationPath) && request.method() === mutationMethod) sent.push(request.postDataJSON()); });
       await page.route(`${owned.baseUrl}${mutationPath}`, async route => {
         try {
@@ -229,6 +263,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
           expect(receipt).toMatchObject({ staffId, title, templateKind: "doctor_salary", compensationKind: "salary", baseSalaryMinor: 9876,
             salaryCurrency: "USD", salaryPeriod: "monthly", status: "draft" });
           expect(Number.isSafeInteger(receipt.id) && receipt.id > 0).toBe(true);
+          expect(receipt.termsPayload.clauses).toEqual(retainedClause.split("\n"));
           if (updating) expect(receipt.id).toBe(original!.body.id);
           resolveCommit(receipt); await deliver;
           if (variant === "lost") await route.abort("connectionfailed");
@@ -246,6 +281,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
           else await route.fulfill({ response, json: { ...receipt, staffId: otherStaffId } });
         } catch (error) { routeFailure = error; rejectCommit(error); await route.abort().catch(() => undefined); } finally { delivered(); }
       }, { times: 1 });
+      const initialFormGeometry = await wholeFormFits(form);
       const saveGeometry = await nativeReachable(page, form.getByRole("button", { name: "حفظ العقد", exact: true }));
       await form.getByRole("button", { name: "حفظ العقد", exact: true }).dblclick();
       const receipt = await committed;
@@ -282,7 +318,22 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       panel = await contractsTab(page);
       await expect.poll(() => panel.getByText(/^نتيجة حفظ العقد غير مؤكدة/).isVisible()).toBe(true);
       await panel.getByRole("button", { name: /إنشاء عقد جديد/ }).click(); await locked(form, title);
+      const wholeFormGeometry = await wholeFormFits(form);
+      await nativeReachable(page, modal.getByRole("heading"));
+      const uncertaintyGeometry = await nativeReachable(page, form.getByRole("alert"));
+      expect(await form.getByRole("alert").innerText()).toContain("نتيجة حفظ العقد غير مؤكدة");
+      const topGeometry = await nativeReachable(page, modal.getByRole("heading"), false);
+      const topPng = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
+      const identityGeometry = await nativeReachable(page, form.getByLabel("مسمى العقد", { exact: true }));
+      expect(await form.getByLabel("مسمى العقد", { exact: true }).inputValue()).toBe(title);
+      const staffGeometry = await nativeReachable(page, form.getByLabel("الموظف", { exact: true }), false);
+      expect(await form.getByLabel("الموظف", { exact: true }).inputValue()).toBe(String(staffId));
+      const identityPng = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
+      await nativeReachable(page, form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }));
       const retainedGeometry = await nativeReachable(page, form.locator("button[type='submit']"));
+      const termsGeometry = await nativeReachable(page, form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }), false);
+      const termsTextFits = await form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }).evaluate(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight);
+      expect(termsTextFits).toBe(true);
       const png = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
       await modal.getByRole("button", { name: "إلغاء", exact: true }).click();
       expect(await panel.getByRole("button", { name: "بدء طلب جديد بعد المراجعة", exact: true }).count()).toBe(0);
@@ -311,13 +362,14 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       expect(persisted).toEqual([{ id: receipt.id, staff_id: staffId, amount: "9876", salary_currency: "USD", status: "draft" }]);
       expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.create' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
       if (updating) expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.update' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
-      if (png) native = { png, facts: { requests: sent.length, persistedRows: persisted.length,
+      if (png && topPng && identityPng) native = { frames: { top: topPng, identity: identityPng, bottom: png }, facts: { requests: sent.length, persistedRows: persisted.length,
         actualBackendReceiptVerified: true, acknowledgementCorruptedAfterCommit: variant, retainedAfterCloseAndTabDetach: true,
         manualReviewDidNotClaimSuccess: true, explicitNewIntentConfirmed: true,
-        saveGeometry, retainedGeometry, reviewGeometry, newIntentGeometry,
+        saveGeometry, retainedGeometry, reviewGeometry, newIntentGeometry, initialFormGeometry, wholeFormGeometry,
+        topGeometry, uncertaintyGeometry, identityGeometry, staffGeometry, termsGeometry, termsTextFits, retainedClauseVerified: true,
         ...(stream ? { runtimeDeadlineMs: CONTRACT_SAVE_RECEIPT_TIMEOUT_MS, nativeBody: bodyWitness, streamingTransport: { ...stream.facts } } : {}) } };
       await fresh.getByRole("button", { name: "إلغاء", exact: true }).click();
     } finally { release(); try { await context.close(); } finally { await stream?.close(); } }
-    if (native) retain(`contract-ack-${variant}-${width}`, native.png, width, { ...native.facts, caseCompleted: true, contextClosed: true });
+    if (native) retain(`contract-ack-${variant}-${width}`, native.frames, width, { ...native.facts, caseCompleted: true, contextClosed: true });
   }, 60_000);
 }

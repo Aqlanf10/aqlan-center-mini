@@ -558,7 +558,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
       {/* Create Contract Modal */}
       {createModalOpen && (
         <Modal alignTop busy={saveBusy} onClose={() => setCreateModalOpen(false)}>
-          <form onSubmit={handleCreateContract} className="space-y-4">
+          <form onSubmit={handleCreateContract} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-4">
             <h3 className="text-lg font-bold text-navy-900">{editingDraft||pendingSave?.method==="PATCH"?"استكمال / تعديل المسودة":"إنشاء عقد وظيفي جديد"}</h3>
 
             {formSaveError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{formSaveError}</p>}
@@ -752,6 +752,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">شروط وبنود العقد</label>
               <textarea disabled={saveLocked}
+                aria-label="شروط وبنود العقد"
                 rows={4}
                 value={formClauses}
                 onChange={(e) => setFormClauses(e.target.value)}
@@ -783,9 +784,9 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
 
       {/* Contract Details & Addenda Modal */}
       {selectedContract && contractDetails && (
-        <Modal onClose={() => setSelectedContract(null)}>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-navy-100 pb-3">
+        <Modal alignTop onClose={() => setSelectedContract(null)}>
+          <div className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-navy-100 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-navy-900">{contractDetails.contract.title}</h3>
                 <div className="text-xs text-navy-500">رقم العقد: {contractDetails.contract.contractNumber}</div>
@@ -910,8 +911,8 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
 
       {/* Add Addendum Modal */}
       {addendumModalOpen && (
-        <Modal onClose={() => setAddendumModalOpen(false)}>
-          <form onSubmit={handleAddAddendum} className="space-y-3">
+        <Modal alignTop onClose={() => setAddendumModalOpen(false)}>
+          <form onSubmit={handleAddAddendum} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">إضافة ملحق للعقد</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">عنوان الملحق *</label>
@@ -971,8 +972,8 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
 
       {/* Status Transition Modal */}
       {statusModalOpen && selectedContract && (
-        <Modal onClose={() => setStatusModalOpen(false)}>
-          <div className="space-y-3">
+        <Modal alignTop onClose={() => setStatusModalOpen(false)}>
+          <div className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">تغيير حالة العقد</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">الحالة الجديدة *</label>

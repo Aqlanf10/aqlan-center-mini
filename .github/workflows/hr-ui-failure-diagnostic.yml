@@ -10,6 +10,11 @@ on:
       - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
       - "__tests__/security-http/hr-contract-save-admission-real-react.test.ts"
       - "components/hr/ContractsPanel.tsx"
+      - "components/hr/AttendancePanel.tsx"
+      - "components/hr/LeavesPanel.tsx"
+      - "components/hr/PayrollPanel.tsx"
+      - "components/hr/StaffProfileModal.tsx"
+      - "__tests__/hr-modal-panel-containers.test.ts"
       - "app/hr/page.tsx"
       - "lib/hr-contract-save-receipt.ts"
   workflow_dispatch:
@@ -96,6 +101,7 @@ jobs:
           sha256sum __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-task-create-replay.test.ts components/hr/ContractsPanel.tsx components/hr/TasksPanel.tsx components/Modal.tsx .github/workflows/hr-ui-failure-diagnostic.yml > "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum app/hr/page.tsx lib/hr-contract-save-receipt.ts __tests__/hr-contract-save-receipt.test.ts __tests__/security-http/hr-contract-save-receipt-ui.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum __tests__/security-http/hr-contract-save-admission-real-react.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum components/hr/AttendancePanel.tsx components/hr/LeavesPanel.tsx components/hr/PayrollPanel.tsx components/hr/StaffProfileModal.tsx __tests__/hr-modal-panel-containers.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
       - name: Run full owned acceptance files with unchanged original assertions and deadlines
         id: owned
         env:
@@ -137,8 +143,9 @@ jobs:
           variants = ['lost', 'truncated', 'foreign-staff', 'foreign-number', 'foreign-patch-id', 'foreign-patch-number', 'hung-body']
           widths = [390, 1280]
           expected = {f'contract-ack-{v}-{w}' for v in variants for w in widths}
+          expected_images = {case + suffix for case in expected for suffix in ['', '-top', '-identity']}
           actual = {p.stem for p in root.glob('contract-ack-*.png')}
-          assert actual == expected, ('Incomplete negative native images', sorted(expected - actual), sorted(actual - expected))
+          assert actual == expected_images, ('Incomplete negative native images', sorted(expected_images - actual), sorted(actual - expected_images))
           assert {p.stem for p in root.glob('contract-ack-*.json')} == expected
           source = Path('__tests__/security-http/hr-contract-save-receipt-ui.test.ts').read_bytes()
           sha = lambda b: hashlib.sha256(b).hexdigest()
@@ -152,20 +159,34 @@ jobs:
           for case in sorted(expected):
               width = int(case.rsplit('-', 1)[1]); data = png(root / f'{case}.png', width)
               record = json.loads((root / f'{case}.json').read_text())
-              assert record['format'] == 'hr-contract-ack-native-v1' and record['acceptance'] is False and record['syntheticOnly'] is True
+              assert record['format'] == 'hr-contract-ack-native-v2' and record['acceptance'] is False and record['syntheticOnly'] is True
               assert record['runId'] == os.environ['GITHUB_RUN_ID'] and record['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
               assert record['checkout'] == os.environ['GITHUB_SHA'] and record['sourceSha256'] == sha(source)
               assert record['png'] == f'{case}.png' and record['pngBytes'] == len(data) and record['pngSha256'] == sha(data)
               assert record['viewport'] == {'width': width, 'height': 900} and struct.unpack('>II', data[16:24]) == (width, 900)
+              assert set(record['frames']) == {'top', 'identity', 'bottom'}
+              for phase, suffix in [('top', '-top'), ('identity', '-identity'), ('bottom', '')]:
+                  frame = record['frames'][phase]; name = f'{case}{suffix}.png'; image = png(root / name, width)
+                  assert frame == {'png': name, 'pngBytes': len(image), 'pngSha256': sha(image)}
+                  assert struct.unpack('>II', image[16:24]) == (width, 900)
               assert record['caseCompleted'] is True and record['contextClosed'] is True
               assert record['requests'] == 1 and record['persistedRows'] == 1
-              for fact in ['actualBackendReceiptVerified', 'retainedAfterCloseAndTabDetach', 'manualReviewDidNotClaimSuccess', 'explicitNewIntentConfirmed']:
+              for fact in ['actualBackendReceiptVerified', 'retainedAfterCloseAndTabDetach', 'manualReviewDidNotClaimSuccess', 'explicitNewIntentConfirmed', 'retainedClauseVerified', 'termsTextFits']:
                   assert record[fact] is True, (case, fact)
-              for name in ['saveGeometry', 'retainedGeometry', 'reviewGeometry', 'newIntentGeometry']:
+              for name in ['saveGeometry', 'retainedGeometry', 'reviewGeometry', 'newIntentGeometry', 'topGeometry', 'uncertaintyGeometry', 'identityGeometry', 'staffGeometry', 'termsGeometry']:
                   geometry = record[name]; box, usable = geometry['box'], geometry['usable']
                   assert geometry['inside'] is True and geometry['hits'] == [True] * 5
                   assert box['width'] > 4 and box['height'] > 4
                   assert box['x'] >= usable['left'] and box['y'] >= usable['top'] and box['right'] <= usable['right'] and box['bottom'] <= usable['bottom']
+              for name in ['initialFormGeometry', 'wholeFormGeometry']:
+                  form = record[name]; box, viewport = form['box'], form['viewport']
+                  assert form['background'] == 'rgb(255, 255, 255)' and form['opacity'] == '1'
+                  assert 0 < box['width'] <= 768 and box['left'] >= viewport['left'] and box['right'] <= viewport['right']
+                  assert form['formScrollWidth'] <= form['formClientWidth'] and form['dialogScrollWidth'] <= form['dialogClientWidth']
+                  assert len(form['controls']) > 20
+                  for control in form['controls']:
+                      assert control['fits'] is True and control['width'] > 0
+                      assert control['left'] >= max(box['left'], viewport['left']) and control['right'] <= min(box['right'], viewport['right'])
               if '-hung-body-' in case:
                   body, transport = record['nativeBody'], record['streamingTransport']
                   assert record['runtimeDeadlineMs'] == 12_000
@@ -185,8 +206,8 @@ jobs:
               data = (positive / name).read_bytes()
               assert 100 < len(data) <= 30_000_000 and data.startswith(b'%PDF-'), name
           assert (root / 'test-exit.txt').read_text().strip() == '0', 'Tests did not finish successfully'
-          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v1', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 14, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
-          print('Verified 14 completed negative native cases, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
+          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v2', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 42, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
+          print('Verified 14 completed negative cases with 42 native PNGs, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
           PY
       - name: Retain bounded synthetic failure witnesses
         if: always()

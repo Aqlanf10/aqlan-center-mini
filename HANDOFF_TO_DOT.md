@@ -1,3 +1,19 @@
+# HR modal visual repair candidate (2026-10-11)
+
+Base: c0f97c035109b88267fad58d023230c8eb0a21fc.
+
+The exact base focused run 38119182473 passed all 48 contract cases (31 unchanged original, 14 actual-commit acknowledgement negatives and 3 mounted admission cases) and all 16 task cases. Both mandatory base CI events remain separate required checks. Their latest observation is still in progress.
+
+Independent inspection of all 14 negative PNGs and all 32 original positive PNGs found a real visual blocker: transparent unbounded child forms on the shared native dialog backdrop, including clipped mobile contract content, payroll disbursement and attendance correction. All 11 pages across three payroll PDFs were inspected with no separate PDF blocker.
+
+This successor gives all 12 previously bare HR Modal callers a consistent opaque responsive panel, without modifying the shared Modal or transaction/authority/receipt logic. The other three callers already own bounded white panels. Eight source-level inventory cases cover all 15 callers. Native contract proof now measures the entire form and each control/group horizontally and retains three viewport frames for each of the 14 existing acknowledgement cases: heading/uncertainty, retained identity and retained terms/actions. Each frame is hash/source/run bound and emitted only after the complete existing journey and cleanup succeed. The focused artifact requires exactly 42 negative PNGs plus 14 JSON records, alongside the original 32 PNGs and three PDFs.
+
+No local application tests, builds, database work or dependency installation were performed. This source candidate is not visually accepted until exact-head isolated CI and independent native review pass. Existing original 31 contract cases, task 16 cases, all receipt assertions/deadlines and the mandatory CI workflow are preserved. No claim of durable private draft recovery across a page reload is added; the existing memory-only warning/uncertainty policy remains.
+
+The historical handoff below is retained unchanged and does not override the current gates. HR must also be composed with the accepted patient/main migration chain and genuine PostgreSQL catalog outputs before any shared Staging deployment. No main merge or deployment is approved by this source packet.
+
+---
+
 # Receipt-safe HR successor status — 2026-10-11
 
 This section supersedes the prior integration status retained below. The latest published head and both mandatory CI links are maintained in [PR #308](https://github.com/Aqlanf10/aqlan-center-mini/pull/308). This source packet is based on `416045285f063934af4f0bb8010214d99d15ffb3`; it is not merge or deployment acceptance.

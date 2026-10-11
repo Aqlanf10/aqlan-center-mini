@@ -550,8 +550,8 @@ export function HrPayrollPanel() {
 
       {/* Open Period Modal */}
       {periodModalOpen && (
-        <Modal onClose={() => setPeriodModalOpen(false)}>
-          <form onSubmit={handleOpenPeriod} className="space-y-3">
+        <Modal alignTop onClose={() => setPeriodModalOpen(false)}>
+          <form onSubmit={handleOpenPeriod} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">فتح فترة مسير رواتب جديدة</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">الشهر (YYYY-MM) *</label>
@@ -585,8 +585,8 @@ export function HrPayrollPanel() {
 
       {/* Disburse Modal */}
       {disburseModalOpen && disburseItem && activeRun && (
-        <Modal onClose={() => setDisburseModalOpen(false)}>
-          <form onSubmit={handleDisburse} className="space-y-3">
+        <Modal alignTop onClose={() => setDisburseModalOpen(false)}>
+          <form onSubmit={handleDisburse} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">صرف مستحق راتب</h3>
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
               الموظف: <span className="font-semibold">{disburseItem.staffName}</span> | المتبقي:{" "}

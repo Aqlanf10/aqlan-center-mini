@@ -566,8 +566,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Manual Punch Modal */}
       {punchModalOpen && (
-        <Modal onClose={() => setPunchModalOpen(false)}>
-          <form onSubmit={handlePunch} className="space-y-3">
+        <Modal alignTop onClose={() => setPunchModalOpen(false)}>
+          <form onSubmit={handlePunch} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">تسجيل بصمة يدوية</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">الموظف *</label>
@@ -639,8 +639,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Request Correction Modal */}
       {correctionModalOpen && selectedRecordForCorrection && (
-        <Modal onClose={() => setCorrectionModalOpen(false)}>
-          <form onSubmit={handleRequestCorrection} className="space-y-3">
+        <Modal alignTop onClose={() => setCorrectionModalOpen(false)}>
+          <form onSubmit={handleRequestCorrection} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">طلب تصحيح بصمة الحضور</h3>
             <div className="rounded-xl bg-navy-50/50 p-2.5 text-xs text-navy-700">
               الموظف: <span className="font-semibold">{selectedRecordForCorrection.staffName}</span> | التاريخ:{" "}
@@ -705,8 +705,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
       {/* Create Schedule Modal */}
       {scheduleModalOpen && (
-        <Modal onClose={() => setScheduleModalOpen(false)}>
-          <form onSubmit={handleCreateSchedule} className="space-y-3">
+        <Modal alignTop onClose={() => setScheduleModalOpen(false)}>
+          <form onSubmit={handleCreateSchedule} className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-3">
             <h3 className="text-base font-bold text-navy-900">إنشاء جدول عمل وردية</h3>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">مسمى الجدول *</label>
