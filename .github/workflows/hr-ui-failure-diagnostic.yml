@@ -169,6 +169,23 @@ jobs:
                   frame = record['frames'][phase]; name = f'{case}{suffix}.png'; image = png(root / name, width)
                   assert frame == {'png': name, 'pngBytes': len(image), 'pngSha256': sha(image)}
                   assert struct.unpack('>II', image[16:24]) == (width, 900)
+              assert set(record['captureObservations']) == {'top', 'identity', 'bottom'}
+              for phase in ['top', 'identity', 'bottom']:
+                  observation = record['captureObservations'][phase]
+                  assert observation['dimensions'] == {'width': width, 'height': 900}
+                  for moment in ['before', 'after']:
+                      dom, cdp = observation[moment]['dom'], observation[moment]['cdp']
+                      assert dom['innerWidth'] == width and dom['innerHeight'] == 900
+                      assert all(key in dom for key in ['scrollX', 'scrollY', 'visualViewport', 'documentElement', 'body', 'dialog', 'panel', 'horizontalOutliers'])
+                      assert all(key in cdp for key in ['visualViewport', 'layoutViewport', 'cssVisualViewport', 'cssLayoutViewport', 'cssContentSize'])
+                      assert len(dom['horizontalOutliers']) <= 20
+              if case == 'contract-ack-lost-390':
+                  diagnostic = record['diagnosticNoClip']; image = png(root / diagnostic['png'], None)
+                  assert diagnostic['png'] == 'diagnostic-contract-ack-lost-390-top-no-clip.png'
+                  assert diagnostic['acceptance'] is False and diagnostic['pngBytes'] == len(image) and diagnostic['pngSha256'] == sha(image)
+                  assert diagnostic['dimensions'] == dict(zip(['width', 'height'], struct.unpack('>II', image[16:24])))
+                  assert 'afterNoClip' in record['captureObservations']['top']
+              else: assert 'diagnosticNoClip' not in record
               assert record['caseCompleted'] is True and record['contextClosed'] is True
               assert record['requests'] == 1 and record['persistedRows'] == 1
               for fact in ['actualBackendReceiptVerified', 'retainedAfterCloseAndTabDetach', 'manualReviewDidNotClaimSuccess', 'explicitNewIntentConfirmed', 'retainedClauseVerified', 'termsTextFits']:
@@ -194,6 +211,7 @@ jobs:
                   assert transport['requests'] == 1 and transport['requestBodyMatches'] is True
                   assert transport['status'] == 201 and 0 < transport['bodyBytes'] < transport['completeBytes']
                   assert transport['responseEnded'] is False and transport['clientClosedWithoutEnd'] is True
+          assert {p.name for p in root.glob('diagnostic-*.png')} == {'diagnostic-contract-ack-lost-390-top-no-clip.png'}
           positive = root / 'native-positive'
           names = {f'hr-{group}-{w}.png' for group in ['payroll', 'workforce', 'nextday-form', 'nextday-self-denied', 'nextday-approved', 'nextday-result', 'nextday-reception', 'nextday-doctor', 'unverified-reversal', 'payroll-period-race', 'payroll-multipage', 'keyless-reversal'] for w in widths}
           names |= {f'hr-{group}-{variant}-{w}.png' for group in ['unverified', 'verified-replay'] for variant in ['missing', 'foreign'] for w in widths}
@@ -206,7 +224,7 @@ jobs:
               data = (positive / name).read_bytes()
               assert 100 < len(data) <= 30_000_000 and data.startswith(b'%PDF-'), name
           assert (root / 'test-exit.txt').read_text().strip() == '0', 'Tests did not finish successfully'
-          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v2', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 42, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
+          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v2', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 42, 'observationalPngs': 1, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
           print('Verified 14 completed negative cases with 42 native PNGs, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
           PY
       - name: Retain bounded synthetic failure witnesses

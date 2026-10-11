@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page, type CDPSession } from "playwright";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -124,7 +124,51 @@ async function wholeFormFits(form: Locator) {
   return result;
 }
 
-function retain(id: string, frames: Record<"top" | "identity" | "bottom", Buffer>, width: number, facts: Record<string, unknown>) {
+async function boundedCaptureObservation<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Bounded native capture observation timed out")), 5_000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+/** Observational only: never changes viewport, scroll, styles or application state. */
+async function captureFrame(page: Page, form: Locator, cdp: CDPSession, noClip = false) {
+  await boundedCaptureObservation(page.evaluate(() => document.fonts.ready.then(() => undefined)));
+  const observe = async () => ({
+    dom: await boundedCaptureObservation(form.evaluate(element => {
+      if (!(element instanceof HTMLFormElement)) throw new Error("Expected owned native form");
+      const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
+      const dialog = element.closest("dialog"); if (!dialog) throw new Error("Missing native dialog");
+      const visual = window.visualViewport;
+      const measured = (node: HTMLElement) => ({ rect: rect(node), clientWidth: node.clientWidth, scrollWidth: node.scrollWidth,
+        clientHeight: node.clientHeight, scrollHeight: node.scrollHeight, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+        transform: getComputedStyle(node).transform, animationName: getComputedStyle(node).animationName });
+      return { scrollX, scrollY, innerWidth, innerHeight, devicePixelRatio,
+        visualViewport: visual ? { offsetLeft: visual.offsetLeft, offsetTop: visual.offsetTop, pageLeft: visual.pageLeft,
+          pageTop: visual.pageTop, width: visual.width, height: visual.height, scale: visual.scale } : null,
+        documentElement: measured(document.documentElement), body: measured(document.body), dialog: measured(dialog), panel: measured(element),
+        horizontalOutliers: [...document.querySelectorAll("body *")].map(node => ({ tag: node.tagName, className: node.getAttribute("class")?.slice(0, 240) ?? "", box: rect(node) }))
+          .filter(node => node.box.width > 0 && (node.box.x < 0 || node.box.right > innerWidth)).sort((a, b) => b.box.width - a.box.width).slice(0, 20) };
+    })),
+    cdp: await boundedCaptureObservation(cdp.send("Page.getLayoutMetrics")),
+  });
+  const before = await observe();
+  // Preserve the original acceptance image with precisely its original options.
+  const png = await page.screenshot({ fullPage: false });
+  const after = await observe();
+  const dimensions = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+  let diagnostic: Buffer | undefined;
+  let afterNoClip: Awaited<ReturnType<typeof observe>> | undefined;
+  if (noClip) {
+    const raw = await boundedCaptureObservation(cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }));
+    diagnostic = Buffer.from(raw.data, "base64"); afterNoClip = await observe();
+  }
+  return { png, diagnostic, observation: { before, after, dimensions, ...(afterNoClip ? { afterNoClip } : {}) } };
+}
+
+function retain(id: string, frames: Record<"top" | "identity" | "bottom", Buffer>, width: number, facts: Record<string, unknown>, diagnostic?: Buffer) {
   const output = process.env.HR_UI_DIAGNOSTIC_DIR; if (!output) return;
   const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
   mkdirSync(output, { recursive: true });
@@ -134,10 +178,14 @@ function retain(id: string, frames: Record<"top" | "identity" | "bottom", Buffer
     return [phase, { png: filename, pngBytes: png.length, pngSha256: hash(png) }];
   }));
   const png = frames.bottom;
+  const noClip = diagnostic ? { png: "diagnostic-contract-ack-lost-390-top-no-clip.png", pngBytes: diagnostic.length, pngSha256: hash(diagnostic),
+    dimensions: { width: diagnostic.readUInt32BE(16), height: diagnostic.readUInt32BE(20) }, acceptance: false } : undefined;
+  if (diagnostic && noClip) writeFileSync(join(output, noClip.png), diagnostic);
   writeFileSync(join(output, `${id}.json`), JSON.stringify({ format: "hr-contract-ack-native-v2", syntheticOnly: true, acceptance: false,
     runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, checkout: process.env.GITHUB_SHA,
     sourceSha256: hash(readFileSync(join(process.cwd(), "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"))),
-    viewport: { width, height: 900 }, png: `${id}.png`, pngBytes: png.length, pngSha256: hash(png), frames: retainedFrames, ...facts }, null, 2));
+    viewport: { width, height: 900 }, png: `${id}.png`, pngBytes: png.length, pngSha256: hash(png), frames: retainedFrames, ...facts,
+    ...(noClip ? { diagnosticNoClip: noClip } : {}) }, null, 2));
 }
 
 /** A real HTTP body, deliberately left unfinished after successful headers.
@@ -216,7 +264,8 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
     const page = await context.newPage(); const sent: Record<string, unknown>[] = [];
     let stream: Awaited<ReturnType<typeof unfinishedAcknowledgement>> | undefined;
     const bodyWitness = { status: 0, bytes: 0, finished: false, aborted: false };
-    let native: { frames: Record<"top" | "identity" | "bottom", Buffer>; facts: Record<string, unknown> } | undefined;
+    let native: { frames: Record<"top" | "identity" | "bottom", Buffer>; facts: Record<string, unknown>; diagnostic?: Buffer } | undefined;
+    let captureSession: CDPSession | undefined;
     let release!: () => void; const deliver = new Promise<void>(resolve => { release = resolve; });
     let delivered!: () => void; const deliveryComplete = new Promise<void>(resolve => { delivered = resolve; });
     let routeFailure: unknown;
@@ -224,6 +273,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
     const committed = new Promise<Record<string, unknown>>((resolve, reject) => { resolveCommit = resolve; rejectCommit = reject; });
     void committed.catch(() => undefined);
     try {
+      if (process.env.HR_UI_DIAGNOSTIC_DIR) captureSession = await context.newCDPSession(page);
       if (variant === "hung-body") {
         stream = await unfinishedAcknowledgement();
         const cdp = await context.newCDPSession(page); await cdp.send("Network.enable");
@@ -323,18 +373,18 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       const uncertaintyGeometry = await nativeReachable(page, form.getByRole("alert"));
       expect(await form.getByRole("alert").innerText()).toContain("نتيجة حفظ العقد غير مؤكدة");
       const topGeometry = await nativeReachable(page, modal.getByRole("heading"), false);
-      const topPng = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
+      const topCapture = captureSession ? await captureFrame(page, form, captureSession, variant === "lost" && width === 390) : null;
       const identityGeometry = await nativeReachable(page, form.getByLabel("مسمى العقد", { exact: true }));
       expect(await form.getByLabel("مسمى العقد", { exact: true }).inputValue()).toBe(title);
       const staffGeometry = await nativeReachable(page, form.getByLabel("الموظف", { exact: true }), false);
       expect(await form.getByLabel("الموظف", { exact: true }).inputValue()).toBe(String(staffId));
-      const identityPng = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
+      const identityCapture = captureSession ? await captureFrame(page, form, captureSession) : null;
       await nativeReachable(page, form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }));
       const retainedGeometry = await nativeReachable(page, form.locator("button[type='submit']"));
       const termsGeometry = await nativeReachable(page, form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }), false);
       const termsTextFits = await form.getByRole("textbox", { name: "شروط وبنود العقد", exact: true }).evaluate(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight);
       expect(termsTextFits).toBe(true);
-      const png = process.env.HR_UI_DIAGNOSTIC_DIR ? await page.screenshot({ fullPage: false }) : null;
+      const bottomCapture = captureSession ? await captureFrame(page, form, captureSession) : null;
       await modal.getByRole("button", { name: "إلغاء", exact: true }).click();
       expect(await panel.getByRole("button", { name: "بدء طلب جديد بعد المراجعة", exact: true }).count()).toBe(0);
       const reviewGeometry = await nativeReachable(page, panel.getByRole("button", { name: "مراجعة قائمة العقود", exact: true }));
@@ -362,7 +412,8 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       expect(persisted).toEqual([{ id: receipt.id, staff_id: staffId, amount: "9876", salary_currency: "USD", status: "draft" }]);
       expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.create' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
       if (updating) expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.update' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
-      if (png && topPng && identityPng) native = { frames: { top: topPng, identity: identityPng, bottom: png }, facts: { requests: sent.length, persistedRows: persisted.length,
+      if (topCapture && identityCapture && bottomCapture) native = { frames: { top: topCapture.png, identity: identityCapture.png, bottom: bottomCapture.png }, diagnostic: topCapture.diagnostic,
+        facts: { captureObservations: { top: topCapture.observation, identity: identityCapture.observation, bottom: bottomCapture.observation }, requests: sent.length, persistedRows: persisted.length,
         actualBackendReceiptVerified: true, acknowledgementCorruptedAfterCommit: variant, retainedAfterCloseAndTabDetach: true,
         manualReviewDidNotClaimSuccess: true, explicitNewIntentConfirmed: true,
         saveGeometry, retainedGeometry, reviewGeometry, newIntentGeometry, initialFormGeometry, wholeFormGeometry,
@@ -370,6 +421,6 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
         ...(stream ? { runtimeDeadlineMs: CONTRACT_SAVE_RECEIPT_TIMEOUT_MS, nativeBody: bodyWitness, streamingTransport: { ...stream.facts } } : {}) } };
       await fresh.getByRole("button", { name: "إلغاء", exact: true }).click();
     } finally { release(); try { await context.close(); } finally { await stream?.close(); } }
-    if (native) retain(`contract-ack-${variant}-${width}`, native.frames, width, { ...native.facts, caseCompleted: true, contextClosed: true });
+    if (native) retain(`contract-ack-${variant}-${width}`, native.frames, width, { ...native.facts, caseCompleted: true, contextClosed: true }, native.diagnostic);
   }, 60_000);
 }
