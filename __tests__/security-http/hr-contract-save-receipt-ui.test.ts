@@ -133,6 +133,25 @@ async function boundedCaptureObservation<T>(promise: Promise<T>): Promise<T> {
   } finally { clearTimeout(timer); }
 }
 
+async function documentFits(page: Page, cdp?: CDPSession) {
+  const dom = await boundedCaptureObservation(page.evaluate(() => ({
+    viewportWidth: innerWidth, documentClientWidth: document.documentElement.clientWidth,
+    documentScrollWidth: document.documentElement.scrollWidth, bodyClientWidth: document.body.clientWidth,
+    bodyScrollWidth: document.body.scrollWidth, scrollX, visualPageLeft: visualViewport?.pageLeft ?? 0,
+  })));
+  expect(dom.documentClientWidth).toBe(dom.viewportWidth); expect(dom.bodyClientWidth).toBe(dom.viewportWidth);
+  expect(dom.documentScrollWidth).toBeLessThanOrEqual(dom.documentClientWidth);
+  expect(dom.bodyScrollWidth).toBeLessThanOrEqual(dom.bodyClientWidth);
+  expect(dom.scrollX).toBe(0); expect(dom.visualPageLeft).toBe(0);
+  const metrics = cdp ? await boundedCaptureObservation(cdp.send("Page.getLayoutMetrics")) : undefined;
+  if (metrics) {
+    expect(metrics.cssContentSize.width).toBeLessThanOrEqual(dom.viewportWidth);
+    expect(metrics.cssLayoutViewport.clientWidth).toBe(dom.viewportWidth);
+    expect(metrics.cssLayoutViewport.pageX).toBe(0); expect(metrics.cssVisualViewport.pageX).toBe(0);
+  }
+  return { dom, cdp: metrics };
+}
+
 /** Observational only: never changes viewport, scroll, styles or application state. */
 async function captureFrame(page: Page, form: Locator, cdp: CDPSession, noClip = false) {
   await boundedCaptureObservation(page.evaluate(() => document.fonts.ready.then(() => undefined)));
@@ -155,15 +174,21 @@ async function captureFrame(page: Page, form: Locator, cdp: CDPSession, noClip =
     cdp: await boundedCaptureObservation(cdp.send("Page.getLayoutMetrics")),
   });
   const before = await observe();
+  expect(before.dom.documentElement.scrollWidth).toBeLessThanOrEqual(before.dom.documentElement.clientWidth);
+  expect(before.dom.body.scrollWidth).toBeLessThanOrEqual(before.dom.body.clientWidth);
+  expect(before.cdp.cssContentSize.width).toBeLessThanOrEqual(before.dom.innerWidth);
+  expect(before.cdp.cssLayoutViewport.pageX).toBe(0); expect(before.cdp.cssVisualViewport.pageX).toBe(0);
   // Preserve the original acceptance image with precisely its original options.
   const png = await page.screenshot({ fullPage: false });
   const after = await observe();
+  expect(after).toEqual(before);
   const dimensions = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
   let diagnostic: Buffer | undefined;
   let afterNoClip: Awaited<ReturnType<typeof observe>> | undefined;
   if (noClip) {
     const raw = await boundedCaptureObservation(cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }));
     diagnostic = Buffer.from(raw.data, "base64"); afterNoClip = await observe();
+    expect(afterNoClip).toEqual(after);
   }
   return { png, diagnostic, observation: { before, after, dimensions, ...(afterNoClip ? { afterNoClip } : {}) } };
 }
@@ -289,6 +314,21 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       }
       expect((await page.goto(`${owned.baseUrl}/hr`, { waitUntil: "domcontentloaded" }))?.status()).toBe(200);
       let panel = await contractsTab(page);
+      // The real kind-filter native select previously overflowed to x=-38,
+      // creating a428px RTL document and a38px native screenshot origin shift.
+      await boundedCaptureObservation(page.evaluate(() => document.fonts.ready.then(() => undefined)));
+      const filters = panel.locator("select"); expect(await filters.count()).toBe(2);
+      for (const filter of await filters.all()) {
+        expect(await filter.isVisible()).toBe(true);
+        await nativeReachable(page, filter);
+      }
+      const filterBounds = await filters.evaluateAll(nodes => nodes.map(node => {
+        const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, viewportWidth: innerWidth };
+      }));
+      for (const box of filterBounds) {
+        expect(box.width).toBeGreaterThan(4); expect(box.left).toBeGreaterThanOrEqual(0); expect(box.right).toBeLessThanOrEqual(box.viewportWidth);
+      }
+      const beforeModalDocument = await documentFits(page, captureSession);
       if (updating) {
         await panel.locator("tbody tr").filter({ hasText: `${title}-ORIGINAL` }).getByRole("button", { name: "عرض وتعديل", exact: true }).click();
         await page.getByRole("button", { name: "استكمال / تعديل المسودة", exact: true }).click();
@@ -413,7 +453,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.create' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
       if (updating) expect((await owned.db.query("SELECT count(*)::int AS n FROM audit_log WHERE action='hr.contract.update' AND entity='hr_contract' AND entity_id=$1", [String(receipt.id)])).rows[0].n).toBe(1);
       if (topCapture && identityCapture && bottomCapture) native = { frames: { top: topCapture.png, identity: identityCapture.png, bottom: bottomCapture.png }, diagnostic: topCapture.diagnostic,
-        facts: { captureObservations: { top: topCapture.observation, identity: identityCapture.observation, bottom: bottomCapture.observation }, requests: sent.length, persistedRows: persisted.length,
+        facts: { beforeModalDocument, filterBounds, captureObservations: { top: topCapture.observation, identity: identityCapture.observation, bottom: bottomCapture.observation }, requests: sent.length, persistedRows: persisted.length,
         actualBackendReceiptVerified: true, acknowledgementCorruptedAfterCommit: variant, retainedAfterCloseAndTabDetach: true,
         manualReviewDidNotClaimSuccess: true, explicitNewIntentConfirmed: true,
         saveGeometry, retainedGeometry, reviewGeometry, newIntentGeometry, initialFormGeometry, wholeFormGeometry,

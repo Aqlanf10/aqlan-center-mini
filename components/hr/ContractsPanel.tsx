@@ -418,7 +418,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
+          className="min-w-0 max-w-full rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
         >
           <option value="">جميع الحالات</option>
           {Object.entries(HR_CONTRACT_STATUS_LABELS).map(([k, label]) => (
@@ -430,7 +430,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
         <select
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
-          className="rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
+          className="min-w-0 max-w-full rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
         >
           <option value="">جميع أنواع العقود</option>
           {HR_CANONICAL_CONTRACT_KINDS.map((k) => (

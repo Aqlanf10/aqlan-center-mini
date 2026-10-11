@@ -169,22 +169,34 @@ jobs:
                   frame = record['frames'][phase]; name = f'{case}{suffix}.png'; image = png(root / name, width)
                   assert frame == {'png': name, 'pngBytes': len(image), 'pngSha256': sha(image)}
                   assert struct.unpack('>II', image[16:24]) == (width, 900)
+              document = record['beforeModalDocument']; dom, cdp = document['dom'], document['cdp']
+              assert dom['viewportWidth'] == dom['documentClientWidth'] == dom['bodyClientWidth'] == width
+              assert dom['documentScrollWidth'] <= width and dom['bodyScrollWidth'] <= width and dom['scrollX'] == dom['visualPageLeft'] == 0
+              assert cdp['cssContentSize']['width'] <= width and cdp['cssLayoutViewport']['clientWidth'] == width
+              assert cdp['cssLayoutViewport']['pageX'] == cdp['cssVisualViewport']['pageX'] == 0
+              assert len(record['filterBounds']) == 2
+              for box in record['filterBounds']:
+                  assert box['viewportWidth'] == width and box['width'] > 4 and box['left'] >= 0 and box['right'] <= width
               assert set(record['captureObservations']) == {'top', 'identity', 'bottom'}
               for phase in ['top', 'identity', 'bottom']:
                   observation = record['captureObservations'][phase]
                   assert observation['dimensions'] == {'width': width, 'height': 900}
+                  assert observation['before'] == observation['after']
                   for moment in ['before', 'after']:
                       dom, cdp = observation[moment]['dom'], observation[moment]['cdp']
                       assert dom['innerWidth'] == width and dom['innerHeight'] == 900
                       assert all(key in dom for key in ['scrollX', 'scrollY', 'visualViewport', 'documentElement', 'body', 'dialog', 'panel', 'horizontalOutliers'])
                       assert all(key in cdp for key in ['visualViewport', 'layoutViewport', 'cssVisualViewport', 'cssLayoutViewport', 'cssContentSize'])
                       assert len(dom['horizontalOutliers']) <= 20
+                      assert dom['documentElement']['scrollWidth'] <= dom['documentElement']['clientWidth'] == width
+                      assert dom['body']['scrollWidth'] <= dom['body']['clientWidth'] == width
+                      assert cdp['cssContentSize']['width'] <= width and cdp['cssLayoutViewport']['pageX'] == cdp['cssVisualViewport']['pageX'] == 0
               if case == 'contract-ack-lost-390':
                   diagnostic = record['diagnosticNoClip']; image = png(root / diagnostic['png'], None)
                   assert diagnostic['png'] == 'diagnostic-contract-ack-lost-390-top-no-clip.png'
                   assert diagnostic['acceptance'] is False and diagnostic['pngBytes'] == len(image) and diagnostic['pngSha256'] == sha(image)
                   assert diagnostic['dimensions'] == dict(zip(['width', 'height'], struct.unpack('>II', image[16:24])))
-                  assert 'afterNoClip' in record['captureObservations']['top']
+                  assert record['captureObservations']['top']['afterNoClip'] == record['captureObservations']['top']['after']
               else: assert 'diagnosticNoClip' not in record
               assert record['caseCompleted'] is True and record['contextClosed'] is True
               assert record['requests'] == 1 and record['persistedRows'] == 1
