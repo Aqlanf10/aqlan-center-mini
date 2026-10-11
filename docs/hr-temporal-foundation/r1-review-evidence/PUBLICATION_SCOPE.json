@@ -1,0 +1,10 @@
+{
+  "testedSource": "2570fee23750205a7b4042a71e68e13b91943aeb",
+  "addsOnly": "docs/hr-temporal-foundation/r1-review-evidence/",
+  "testsRerun": false,
+  "syntheticOnly": true,
+  "secretScanMatches": [],
+  "writerEnabled": false,
+  "migrationsRegistered": false,
+  "pr325Modified": false
+}

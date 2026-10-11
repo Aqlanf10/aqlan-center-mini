@@ -1,0 +1,25 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/hr-contract-lifecycle.test.ts __tests__/hr-contract-save-receipt.test.ts __tests__/hr-contracts-attendance.test.ts __tests__/hr-financial-print.test.tsx __tests__/hr-modal-panel-containers.test.ts __tests__/hr-payroll-confirmation.test.ts __tests__/hr-payroll.test.ts __tests__/hr-privacy.test.ts __tests__/hr-schema.test.ts __tests__/hr-task-time.test.ts __tests__/hr-temporal-contracts.test.ts __tests__/hr-schedule-occurrences.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-history-r1[39m
+
+ [32m✓[39m __tests__/hr-modal-panel-containers.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 290[2mms[22m[39m
+ [32m✓[39m __tests__/hr-schedule-occurrences.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 305[2mms[22m[39m
+ [32m✓[39m __tests__/hr-task-time.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m __tests__/hr-financial-print.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m __tests__/hr-temporal-contracts.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contract-save-receipt.test.ts [2m([22m[2m38 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m __tests__/hr-privacy.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m __tests__/hr-schema.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contract-lifecycle.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m __tests__/hr-payroll-confirmation.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contracts-attendance.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m __tests__/hr-payroll.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
+[2m      Tests [22m [1m[32m159 passed[39m[22m[90m (159)[39m
+[2m   Start at [22m 21:43:14
+[2m   Duration [22m 4.25s[2m (transform 628ms, setup 0ms, import 1.41s, tests 752ms, environment 1ms)[22m
+

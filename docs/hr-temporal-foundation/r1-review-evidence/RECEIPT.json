@@ -1,0 +1,78 @@
+{
+  "completedAt": "2026-10-11T21:46:56.354882+00:00",
+  "base": "556f928aca4d474bf7e0e0e59307311b267ad8e9",
+  "baseTree": "0f76b68881d61df05a274df2706cf76b7a7fcba6",
+  "head": "2570fee23750205a7b4042a71e68e13b91943aeb",
+  "tree": "7f4afe3f4aff8bdc4f75966556b3ddb60162b708",
+  "branch": "fix/hr-history-occurrence-overlap",
+  "clean": true,
+  "pushed": false,
+  "deployed": false,
+  "tests": {
+    "unit": 159,
+    "postgres": 174,
+    "total": 333,
+    "newUnit": 21,
+    "newPostgres": 16,
+    "unchangedPriorCases": 296
+  },
+  "redBaseline": {
+    "source": "556f928aca4d474bf7e0e0e59307311b267ad8e9",
+    "unit": {
+      "failed": 3,
+      "passed": 2
+    },
+    "postgres": {
+      "failed": 3,
+      "passed": 1
+    },
+    "testSourceFiles": [
+      "before-unit-source.ts",
+      "before-postgres-source.ts"
+    ]
+  },
+  "typecheck": "passed",
+  "eslint": "passed, zero errors and warnings",
+  "postgres": "18.6, owned disposable localhost-only container removed",
+  "migrationGuard": "unchanged; expected rejection of unreviewed chain",
+  "files": {
+    "__tests__/hr-schedule-occurrences.test.ts": {
+      "beforeSha256": null,
+      "afterSha256": "816a82c90f0e99be8a0a32d10e8843267d323f8bc72a3e979175beb100cc9a9d"
+    },
+    "__tests__/postgres/hr-schedule-occurrences.test.ts": {
+      "beforeSha256": null,
+      "afterSha256": "48d96b157323ae0e2f6118488556c6ec8f13c59b4dfbe04b7517b0cab7f6d6b2"
+    },
+    "lib/hr-schedule-segments.ts": {
+      "beforeSha256": "e9e376deb37c7689b3b4f0dcffebc290f29fc639b49f7ed321fb2179d64967cf",
+      "afterSha256": "07dee98f6b9433bc58d6db5950006819db3c9e8a6a9d21db2e7e2af5baa0f2c6"
+    },
+    "lib/hr-temporal-store.ts": {
+      "beforeSha256": "557798a269d97e67469dd4b0f48a1ca8cf39f6060036b0e7653698530a8a665d",
+      "afterSha256": "87949dc29c89ecef6d731104605870e1ecc6096c33e900b4dcfef84bb25ea056"
+    },
+    "migrations/0057_hr_schedule_policy_versions.sql": {
+      "beforeSha256": "d0586f05f3421d40243cff642edb7f02e38ab2aacc640c0492d6bb5c0395c3b9",
+      "afterSha256": "8e4bf0f0adf3d2284f64bd792b3903958ce6ed62923b4cb0c61ac405b82b8791"
+    },
+    "migrations/0056_hr_employment_history.sql": {
+      "beforeSha256": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112",
+      "afterSha256": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112"
+    }
+  },
+  "patchSha256": "4b6bbf0b77fa08e9b4da7907f4e7c0af10630c211ec7428dc266828c25413f3f",
+  "integrationBlockers": [
+    "No live writer authorization or live callers; writer still owns BEGIN/COMMIT",
+    "Before integration: one transaction connection, subject/session revalidation after lock waits, consistent locks, request ID+intent digest+matching replay receipt, atomic audit/projection",
+    "Persistent raw-event ownership and persisted occurrence/correction lifecycle remain unwired; batch validation is not durable ownership",
+    "Migration registration/ownership review remains closed; 0057 checksum changed only in source review",
+    "Full application backup/restore/reset classifications and restore tests remain pending; two-table roundtrip is not full integration"
+  ],
+  "notes": [
+    "No UI/browser claim for R1; UI patch was independently tested and pushed at ae316190",
+    "Preliminary SQL time+interval representation and fixture type errors were fixed; only final logs apply to pinned head",
+    "Existing pg client concurrent-query deprecation warnings remain visible in legacy fixture logs; no test was weakened",
+    "No full product CI or merged invoice/history integration claimed"
+  ]
+}

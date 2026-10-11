@@ -1,0 +1,41 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-schedule-occurrences.test.ts __tests__/postgres/hr-temporal-foundation.test.ts __tests__/postgres/hr-operational-integrity.test.ts __tests__/postgres/hr-workforce-integrity.test.ts __tests__/postgres/hr-staff-tasks.test.ts __tests__/postgres/hr-payroll-integrity.test.ts __tests__/postgres/hr-contract-lifecycle.test.ts __tests__/postgres/hr-payroll-financial.test.ts __tests__/postgres/hr-task-create-replay.test.ts __tests__/postgres/hr-backup-roundtrip.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-history-r1[39m
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+(node:51403) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-workforce-integrity.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 7800[2mms[22m[39m
+(node:51500) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-payroll-integrity.test.ts [2m([22m[2m40 tests[22m[2m)[22m[33m 8035[2mms[22m[39m
+(node:51566) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-operational-integrity.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 7228[2mms[22m[39m
+(node:51607) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-temporal-foundation.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 2363[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-backup-roundtrip.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 2028[2mms[22m[39m
+     [33m[2m✓[22m[39m SKIP_SEED permits exact HR restoration and advancing every affected sequence [33m 580[2mms[22m[39m
+     [33m[2m✓[22m[39m a pre-HR backup restores onto the current empty schema [33m 658[2mms[22m[39m
+(node:51666) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-payroll-financial.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2922[2mms[22m[39m
+     [33m[2m✓[22m[39m creates valid employment contracts for support staff and doctor [33m 619[2mms[22m[39m
+     [33m[2m✓[22m[39m calculates payroll run and enforces approval immutability [33m 596[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses disbursement without an open cashier shift [33m 567[2mms[22m[39m
+     [33m[2m✓[22m[39m disburses payroll item under open shift, creates compliant expense, and verifies idempotency [33m 544[2mms[22m[39m
+     [33m[2m✓[22m[39m handles leave balance lifecycle, self-approval refusal, and cancellation rollback [33m 594[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-schedule-occurrences.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1581[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-contract-lifecycle.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 1397[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-staff-tasks.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 969[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-task-create-replay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 807[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m174 passed[39m[22m[90m (174)[39m
+[2m   Start at [22m 21:44:04
+[2m   Duration [22m 38.86s[2m (transform 2.18s, setup 0ms, import 1.99s, tests 35.13s, environment 1ms)[22m
+

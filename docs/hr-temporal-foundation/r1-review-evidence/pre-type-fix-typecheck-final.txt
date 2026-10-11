@@ -1,0 +1,12 @@
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+__tests__/postgres/hr-schedule-occurrences.test.ts(64,68): error TS2322: Type '{ id: string; kind: string; from: string; to: string | null; value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }' is not assignable to type 'TemporalFact<{ timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }>'.
+  Type '{ id: string; kind: string; from: string; to: string | null; value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }' is not assignable to type '{ readonly id: string; readonly kind: "known"; readonly from: string; readonly to: string | null; readonly value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }'.
+    Types of property 'kind' are incompatible.
+      Type 'string' is not assignable to type '"known"'.
+__tests__/postgres/hr-schedule-occurrences.test.ts(67,75): error TS2322: Type '{ id: string; kind: string; from: string; to: string | null; value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }' is not assignable to type 'TemporalFact<{ timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }>'.
+  Type '{ id: string; kind: string; from: string; to: string | null; value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }' is not assignable to type '{ readonly id: string; readonly kind: "known"; readonly from: string; readonly to: string | null; readonly value: { timeZone: string; workingDays: number[]; graceMins: number; segments: { id: string; start: string; startDayOffset: number; end: string; endDayOffset: number; }[]; }; }'.
+    Types of property 'kind' are incompatible.
+      Type 'string' is not assignable to type '"known"'.

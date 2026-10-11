@@ -1,0 +1,30 @@
+[
+  {
+    "from": "before-unit-source.ts",
+    "to": "before-unit-source.ts.txt"
+  },
+  {
+    "from": "before-postgres-source.ts",
+    "to": "before-postgres-source.ts.txt"
+  },
+  {
+    "from": "check-reviewed-chain.mts",
+    "to": "check-reviewed-chain.mts.txt"
+  },
+  {
+    "from": "source/lib/hr-temporal-store.ts",
+    "to": "source/lib/hr-temporal-store.ts.txt"
+  },
+  {
+    "from": "source/lib/hr-schedule-segments.ts",
+    "to": "source/lib/hr-schedule-segments.ts.txt"
+  },
+  {
+    "from": "source/__tests__/hr-schedule-occurrences.test.ts",
+    "to": "source/__tests__/hr-schedule-occurrences.test.ts.txt"
+  },
+  {
+    "from": "source/__tests__/postgres/hr-schedule-occurrences.test.ts",
+    "to": "source/__tests__/postgres/hr-schedule-occurrences.test.ts.txt"
+  }
+]

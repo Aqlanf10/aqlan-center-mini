@@ -1,0 +1,35 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-schedule-occurrences.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-history-r1[39m
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ [31m❯[39m __tests__/postgres/hr-schedule-occurrences.test.ts [2m([22m[2m4 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 775[2mms[22m[39m
+   [32m✓[39m raw SQL rejects weekly recurrence overlap on 1[32m 18[2mms[22m[39m
+   [32m✓[39m raw SQL rejects weekly recurrence overlap on 6[32m 21[2mms[22m[39m
+   [32m✓[39m raw SQL rejects Oct1 night continuing into a new Oct2 05:00 schedule[32m 29[2mms[22m[39m
+[31m   [31m×[31m raw SQL allows exactly touching versions and long but spaced occurrences[39m[32m 31[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m __tests__/postgres/hr-schedule-occurrences.test.ts[2m > [22mraw SQL allows exactly touching versions and long but spaced occurrences
+[31m[1merror[22m: occurrence_overlap[39m
+[90m [2m❯[22m node_modules/pg-pool/index.js:[2m45:11[22m[39m
+[36m [2m❯[22m __tests__/postgres/hr-schedule-occurrences.test.ts:[2m30:11[22m[39m
+    [90m 28|[39m })[33m;[39m
+    [90m 29|[39m it('raw SQL allows exactly touching versions and long but spaced occur…
+    [90m 30|[39m   expect((await rawInsert([known('old', '2026-10-01', '2026-10-02', sc…
+    [90m   |[39m           [31m^[39m
+    [90m 31|[39m   expect((await rawInsert([known('long', '2026-10-01', null, schedule(…
+    [90m 32|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m   Start at [22m 21:40:24
+[2m   Duration [22m 1.33s[2m (transform 68ms, setup 0ms, import 113ms, tests 775ms, environment 0ms)[22m
+

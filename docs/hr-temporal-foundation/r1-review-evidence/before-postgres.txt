@@ -1,0 +1,224 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-schedule-occurrences.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-history-r1[39m
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ [31m❯[39m __tests__/postgres/hr-schedule-occurrences.test.ts [2m([22m[2m4 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[33m 847[2mms[22m[39m
+[31m   [31m×[31m raw SQL rejects weekly recurrence overlap on 1[39m[32m 24[2mms[22m[39m
+[31m   [31m×[31m raw SQL rejects weekly recurrence overlap on 6[39m[32m 25[2mms[22m[39m
+[31m   [31m×[31m raw SQL rejects Oct1 night continuing into a new Oct2 05:00 schedule[39m[32m 25[2mms[22m[39m
+   [32m✓[39m raw SQL allows exactly touching versions and long but spaced occurrences[32m 30[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 3 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m __tests__/postgres/hr-schedule-occurrences.test.ts[2m > [22mraw SQL rejects weekly recurrence overlap on 1
+[41m[1m FAIL [22m[49m __tests__/postgres/hr-schedule-occurrences.test.ts[2m > [22mraw SQL rejects weekly recurrence overlap on 6
+[31m[1mAssertionError[22m: promise resolved "Result{ command: 'INSERT', …(9) }" instead of rejecting[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- Error {[39m
+[32m-   "message": "rejected promise",[39m
+[31m+ Result {[39m
+[31m+   "RowCtor": null,[39m
+[31m+   "_parsers": undefined,[39m
+[31m+   "_prebuiltEmptyResultObject": null,[39m
+[31m+   "_types": TypeOverrides {[39m
+[31m+     "_types": {[39m
+[31m+       "arrayParser": {[39m
+[31m+         "create": [Function create],[39m
+[31m+       },[39m
+[31m+       "builtins": {[39m
+[31m+         "ABSTIME": 702,[39m
+[31m+         "ACLITEM": 1033,[39m
+[31m+         "BIT": 1560,[39m
+[31m+         "BOOL": 16,[39m
+[31m+         "BPCHAR": 1042,[39m
+[31m+         "BYTEA": 17,[39m
+[31m+         "CHAR": 18,[39m
+[31m+         "CID": 29,[39m
+[31m+         "CIDR": 650,[39m
+[31m+         "CIRCLE": 718,[39m
+[31m+         "DATE": 1082,[39m
+[31m+         "FLOAT4": 700,[39m
+[31m+         "FLOAT8": 701,[39m
+[31m+         "GTSVECTOR": 3642,[39m
+[31m+         "INET": 869,[39m
+[31m+         "INT2": 21,[39m
+[31m+         "INT4": 23,[39m
+[31m+         "INT8": 20,[39m
+[31m+         "INTERVAL": 1186,[39m
+[31m+         "JSON": 114,[39m
+[31m+         "JSONB": 3802,[39m
+[31m+         "MACADDR": 829,[39m
+[31m+         "MACADDR8": 774,[39m
+[31m+         "MONEY": 790,[39m
+[31m+         "NUMERIC": 1700,[39m
+[31m+         "OID": 26,[39m
+[31m+         "PATH": 602,[39m
+[31m+         "PG_DEPENDENCIES": 3402,[39m
+[31m+         "PG_LSN": 3220,[39m
+[31m+         "PG_NDISTINCT": 3361,[39m
+[31m+         "PG_NODE_TREE": 194,[39m
+[31m+         "POLYGON": 604,[39m
+[31m+         "REFCURSOR": 1790,[39m
+[31m+         "REGCLASS": 2205,[39m
+[31m+         "REGCONFIG": 3734,[39m
+[31m+         "REGDICTIONARY": 3769,[39m
+[31m+         "REGNAMESPACE": 4089,[39m
+[31m+         "REGOPER": 2203,[39m
+[31m+         "REGOPERATOR": 2204,[39m
+[31m+         "REGPROC": 24,[39m
+[31m+         "REGPROCEDURE": 2202,[39m
+[31m+         "REGROLE": 4096,[39m
+[31m+         "REGTYPE": 2206,[39m
+[31m+         "RELTIME": 703,[39m
+[31m+         "SMGR": 210,[39m
+[31m+         "TEXT": 25,[39m
+[31m+         "TID": 27,[39m
+[31m+         "TIME": 1083,[39m
+[31m+         "TIMESTAMP": 1114,[39m
+[31m+         "TIMESTAMPTZ": 1184,[39m
+[31m+         "TIMETZ": 1266,[39m
+[31m+         "TINTERVAL": 704,[39m
+[31m+         "TSQUERY": 3615,[39m
+[31m+         "TSVECTOR": 3614,[39m
+[31m+         "TXID_SNAPSHOT": 2970,[39m
+[31m+         "UUID": 2950,[39m
+[31m+         "VARBIT": 1562,[39m
+[31m+         "VARCHAR": 1043,[39m
+[31m+         "XID": 28,[39m
+[31m+         "XML": 142,[39m
+[31m+       },[39m
+[31m+       "getTypeParser": [Function getTypeParser],[39m
+[31m+       "setTypeParser": [Function setTypeParser],[39m
+[31m+     },[39m
+[31m+     "binary": {},[39m
+[31m+     "text": {},[39m
+[31m+   },[39m
+[31m+   "command": "INSERT",[39m
+[31m+   "fields": [],[39m
+[31m+   "oid": 0,[39m
+[31m+   "rowAsArray": false,[39m
+[31m+   "rowCount": 1,[39m
+[31m+   "rows": [],[39m
+[2m  }[22m
+
+[36m [2m❯[22m __tests__/postgres/hr-schedule-occurrences.test.ts:[2m24:100[22m[39m
+    [90m 22|[39m }
+    [90m 23|[39m it.each([[1, 2], [6, 0]])('raw SQL rejects weekly recurrence overlap o…
+    [90m 24|[39m   await expect(rawInsert([known('long', '2026-10-01', null, schedule('…
+    [90m   |[39m                                                                                                    [31m^[39m
+    [90m 25|[39m })[33m;[39m
+    [90m 26|[39m it('raw SQL rejects Oct1 night continuing into a new Oct2 05:00 schedu…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m __tests__/postgres/hr-schedule-occurrences.test.ts[2m > [22mraw SQL rejects Oct1 night continuing into a new Oct2 05:00 schedule
+[31m[1mAssertionError[22m: promise resolved "Result{ command: 'INSERT', …(9) }" instead of rejecting[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- Error {[39m
+[32m-   "message": "rejected promise",[39m
+[31m+ Result {[39m
+[31m+   "RowCtor": null,[39m
+[31m+   "_parsers": undefined,[39m
+[31m+   "_prebuiltEmptyResultObject": null,[39m
+[31m+   "_types": TypeOverrides {[39m
+[31m+     "_types": {[39m
+[31m+       "arrayParser": {[39m
+[31m+         "create": [Function create],[39m
+[31m+       },[39m
+[31m+       "builtins": {[39m
+[31m+         "ABSTIME": 702,[39m
+[31m+         "ACLITEM": 1033,[39m
+[31m+         "BIT": 1560,[39m
+[31m+         "BOOL": 16,[39m
+[31m+         "BPCHAR": 1042,[39m
+[31m+         "BYTEA": 17,[39m
+[31m+         "CHAR": 18,[39m
+[31m+         "CID": 29,[39m
+[31m+         "CIDR": 650,[39m
+[31m+         "CIRCLE": 718,[39m
+[31m+         "DATE": 1082,[39m
+[31m+         "FLOAT4": 700,[39m
+[31m+         "FLOAT8": 701,[39m
+[31m+         "GTSVECTOR": 3642,[39m
+[31m+         "INET": 869,[39m
+[31m+         "INT2": 21,[39m
+[31m+         "INT4": 23,[39m
+[31m+         "INT8": 20,[39m
+[31m+         "INTERVAL": 1186,[39m
+[31m+         "JSON": 114,[39m
+[31m+         "JSONB": 3802,[39m
+[31m+         "MACADDR": 829,[39m
+[31m+         "MACADDR8": 774,[39m
+[31m+         "MONEY": 790,[39m
+[31m+         "NUMERIC": 1700,[39m
+[31m+         "OID": 26,[39m
+[31m+         "PATH": 602,[39m
+[31m+         "PG_DEPENDENCIES": 3402,[39m
+[31m+         "PG_LSN": 3220,[39m
+[31m+         "PG_NDISTINCT": 3361,[39m
+[31m+         "PG_NODE_TREE": 194,[39m
+[31m+         "POLYGON": 604,[39m
+[31m+         "REFCURSOR": 1790,[39m
+[31m+         "REGCLASS": 2205,[39m
+[31m+         "REGCONFIG": 3734,[39m
+[31m+         "REGDICTIONARY": 3769,[39m
+[31m+         "REGNAMESPACE": 4089,[39m
+[31m+         "REGOPER": 2203,[39m
+[31m+         "REGOPERATOR": 2204,[39m
+[31m+         "REGPROC": 24,[39m
+[31m+         "REGPROCEDURE": 2202,[39m
+[31m+         "REGROLE": 4096,[39m
+[31m+         "REGTYPE": 2206,[39m
+[31m+         "RELTIME": 703,[39m
+[31m+         "SMGR": 210,[39m
+[31m+         "TEXT": 25,[39m
+[31m+         "TID": 27,[39m
+[31m+         "TIME": 1083,[39m
+[31m+         "TIMESTAMP": 1114,[39m
+[31m+         "TIMESTAMPTZ": 1184,[39m
+[31m+         "TIMETZ": 1266,[39m
+[31m+         "TINTERVAL": 704,[39m
+[31m+         "TSQUERY": 3615,[39m
+[31m+         "TSVECTOR": 3614,[39m
+[31m+         "TXID_SNAPSHOT": 2970,[39m
+[31m+         "UUID": 2950,[39m
+[31m+         "VARBIT": 1562,[39m
+[31m+         "VARCHAR": 1043,[39m
+[31m+         "XID": 28,[39m
+[31m+         "XML": 142,[39m
+[31m+       },[39m
+[31m+       "getTypeParser": [Function getTypeParser],[39m
+[31m+       "setTypeParser": [Function setTypeParser],[39m
+[31m+     },[39m
+[31m+     "binary": {},[39m
+[31m+     "text": {},[39m
+[31m+   },[39m
+[31m+   "command": "INSERT",[39m
+[31m+   "fields": [],[39m
+[31m+   "oid": 0,[39m
+[31m+   "rowAsArray": false,[39m
+[31m+   "rowCount": 1,[39m
+[31m+   "rows": [],[39m
+[2m  }[22m
+
+[36m [2m❯[22m __tests__/postgres/hr-schedule-occurrences.test.ts:[2m27:166[22m[39m
+
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (4)[39m
+[2m   Start at [22m 21:38:37
+[2m   Duration [22m 1.43s[2m (transform 77ms, setup 0ms, import 123ms, tests 847ms, environment 0ms)[22m
+

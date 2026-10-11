@@ -1,0 +1,420 @@
+diff --git a/__tests__/hr-schedule-occurrences.test.ts b/__tests__/hr-schedule-occurrences.test.ts
+new file mode 100644
+index 00000000..fdde79f5
+--- /dev/null
++++ b/__tests__/hr-schedule-occurrences.test.ts
+@@ -0,0 +1,97 @@
++import { expect, it } from 'vitest';
++import { collectScheduleEvidence, correctScheduleSegment, selectHrSchedule, validateEffectiveSchedule, validateScheduleTimeline, type HrEffectiveSchedule } from '../lib/hr-schedule-segments';
++import type { TemporalTimeline } from '../lib/hr-temporal';
++
++const schedule = (start: string, end: string, endDayOffset: 0 | 1, workingDays = [0, 1, 2, 3, 4, 5, 6]): HrEffectiveSchedule => ({ timeZone: 'Asia/Aden', workingDays, graceMins: 0, segments: [{ id: 'work', start, startDayOffset: 0, end, endDayOffset }] });
++const transition = (start: string): TemporalTimeline<HrEffectiveSchedule> => ({ revision: 2, facts: [
++  { id: 'old', kind: 'known', from: '2026-10-01', to: '2026-10-02', value: schedule('22:00', '06:00', 1) },
++  { id: 'new', kind: 'known', from: '2026-10-02', to: null, value: schedule(start, '13:00', 0) },
++] });
++
++it.each([[1, 2], [6, 0]])('rejects recurring 25-hour occurrences on weekdays %j', (...days) => {
++  expect(() => validateEffectiveSchedule(schedule('22:00', '23:00', 1, days))).toThrow(/occurrence_overlap/);
++});
++it('rejects the old Oct1 night / new Oct2 05:00 overlap before selection', () => {
++  expect(() => selectHrSchedule(transition('05:00'), '2026-10-02')).toThrow(/occurrence_overlap/);
++});
++it('allows the exact 06:00 shared boundary across dated versions', () => {
++  expect(selectHrSchedule(transition('06:00'), '2026-10-01')).toMatchObject({ kind: 'selected', factId: 'old' });
++  expect(selectHrSchedule(transition('06:00'), '2026-10-02')).toMatchObject({ kind: 'selected', factId: 'new' });
++});
++it('allows long but spaced occurrences without inventing a legal duration ceiling', () => {
++  expect(validateEffectiveSchedule(schedule('00:00', '23:59', 1, [1, 3, 5])).segments[0].end).toBe('23:59');
++});
++
++it.each([0, 1, 2, 3, 4, 5, 6])('checks consecutive repeats for every weekday including wrap: %i', day => {
++  expect(() => validateEffectiveSchedule(schedule('22:00', '23:00', 1, [day, (day + 1) % 7]))).toThrow(/occurrence_overlap/);
++  expect(validateEffectiveSchedule(schedule('22:00', '22:00', 1, [day, (day + 1) % 7]))).toBeDefined();
++});
++it('compares split segments instead of rejecting overlapping envelopes around legitimate gaps', () => {
++  const value = { ...schedule('08:00', '09:00', 0), segments: [schedule('08:00', '09:00', 0).segments[0], { id: 'late', start: '10:00', startDayOffset: 1 as const, end: '11:00', endDayOffset: 1 as const }] };
++  expect(validateEffectiveSchedule(value)).toEqual(value);
++});
++it('compares actual UTC across changed zones and a gap without assuming missing history is a day off', () => {
++  const timeline: TemporalTimeline<HrEffectiveSchedule> = { revision: 1, facts: [
++    { id: 'old-zone', kind: 'known', from: '2026-10-01', to: '2026-10-02', value: { ...schedule('22:00', '06:00', 1), timeZone: 'America/Adak' } },
++    { id: 'new-zone', kind: 'known', from: '2026-10-03', to: '2026-10-04', value: { ...schedule('01:00', '09:00', 0), timeZone: 'Pacific/Kiritimati' } },
++  ] };
++  expect(() => validateScheduleTimeline(timeline)).toThrow(/occurrence_overlap/);
++  expect(() => validateScheduleTimeline({ ...timeline, facts: [...timeline.facts].reverse() })).toThrow(/occurrence_overlap/);
++});
++it('checks the furthest possible three-day anchor gap for opposite time zones', () => {
++  const make = (start: string): TemporalTimeline<HrEffectiveSchedule> => ({ revision: 1, facts: [
++    { id: 'old-zone', kind: 'known', from: '2026-10-01', to: '2026-10-02', value: { ...schedule('00:00', '23:59', 1, [4]), timeZone: 'Etc/GMT+12' } },
++    { id: 'new-zone', kind: 'known', from: '2026-10-04', to: '2026-10-05', value: { ...schedule(start, '03:00', 0, [0]), timeZone: 'Pacific/Kiritimati' } },
++  ] });
++  expect(() => validateScheduleTimeline(make('00:00'))).toThrow(/occurrence_overlap/);
++  expect(validateScheduleTimeline(make('02:00')).facts).toHaveLength(2);
++});
++it.each([['2026-03-08', '2026-03-09', '02:30', 'nonexistent_wall_time'], ['2026-11-01', '2026-11-02', '01:30', 'ambiguous_wall_time']])('blocks unresolved %s transition endpoints before calculating another version', (from, to, start, code) => {
++  const timeline: TemporalTimeline<HrEffectiveSchedule> = { revision: 1, facts: [
++    { id: 'old-zone', kind: 'known', from, to, value: { ...schedule(start, '04:00', 0), timeZone: 'America/New_York' } },
++    { id: 'new-zone', kind: 'known', from: to, to: null, value: schedule('06:00', '13:00', 0) },
++  ] };
++  expect(() => selectHrSchedule(timeline, to)).toThrow(expect.objectContaining({ code }));
++});
++
++function assignments() {
++  return ['2026-10-01', '2026-10-02'].map(anchorDay => {
++    const selected = selectHrSchedule(transition('06:00'), anchorDay);
++    if (selected.kind !== 'selected') throw new Error('fixture selection');
++    return { anchorDay, segments: selected.windows.map(window => ({ segmentId: window.id, punches: [
++      { id: `${anchorDay}-in`, type: 'check_in' as const, at: window.start },
++      { id: `${anchorDay}-out`, type: 'check_out' as const, at: window.end },
++    ] })) };
++  });
++}
++it('requires separate exit/entry raw IDs at a shared boundary and preserves both occurrences', () => {
++  const input = assignments(), result = collectScheduleEvidence(transition('06:00'), input);
++  expect(result).toMatchObject({ complete: true, totalWorkMinutes: 900, provenWorkMinutes: 900 });
++  expect(result.occurrences.map(o => o.factId)).toEqual(['old', 'new']);
++  expect(result.occurrences[0].evidence.segments[0].rawPunches).toEqual(input[0].segments[0].punches);
++  expect(input[0].segments[0].punches[1].at).toBe(input[1].segments[0].punches[0].at);
++  input[1].segments[0].punches[0].id = input[0].segments[0].punches[1].id;
++  expect(() => collectScheduleEvidence(transition('06:00'), input)).toThrow(/two occurrences/);
++});
++it('does not invent a missing boundary punch or allow actual work to overlap across anchors', () => {
++  const missing = assignments(); missing[1].segments[0].punches.shift();
++  expect(collectScheduleEvidence(transition('06:00'), missing)).toMatchObject({ complete: false, totalWorkMinutes: null, provenWorkMinutes: 480 });
++  const overlapping = assignments(); overlapping[1].segments[0].punches[0].at = '2026-10-02T02:30:00Z';
++  expect(() => collectScheduleEvidence(transition('06:00'), overlapping)).toThrow(/overlaps across occurrences/);
++  expect(() => collectScheduleEvidence(transition('06:00'), [assignments()[0], assignments()[0]])).toThrow(/only once/);
++});
++it('rechecks cross-occurrence overlap after an approved correction without changing raw evidence', () => {
++  const current = collectScheduleEvidence(transition('06:00'), assignments());
++  const correction = { segmentId: 'work', status: 'approved' as const, expectedSegmentVersion: 1, newIn: '2026-10-01T19:00:00Z', newOut: '2026-10-02T03:30:00Z', reason: 'Synthetic documented correction', requestedBy: 1, decidedBy: 2 };
++  expect(() => correctScheduleSegment(current, '2026-10-01', correction)).toThrow(/overlaps across occurrences/);
++  const fixed = correctScheduleSegment(current, '2026-10-01', { ...correction, newOut: '2026-10-02T02:30:00Z' });
++  expect(fixed.totalWorkMinutes).toBe(870);
++  expect(fixed.occurrences[0].evidence.segments[0].rawPunches).toEqual(current.occurrences[0].evidence.segments[0].rawPunches);
++  expect(fixed.occurrences[1]).toEqual(current.occurrences[1]);
++  expect(current.totalWorkMinutes).toBe(900);
++});
++it('keeps unknown history unresolved and refuses to turn an empty evidence set into zero earned time', () => {
++  expect(selectHrSchedule({ revision: 0, facts: [] }, '2026-10-01')).toMatchObject({ kind: 'blocked', code: 'schedule_history_unknown' });
++  expect(() => collectScheduleEvidence({ revision: 0, facts: [] }, assignments())).toThrow(/not resolved/);
++  expect(collectScheduleEvidence(transition('06:00'), [])).toMatchObject({ complete: false, totalWorkMinutes: null });
++});
+diff --git a/__tests__/postgres/hr-schedule-occurrences.test.ts b/__tests__/postgres/hr-schedule-occurrences.test.ts
+new file mode 100644
+index 00000000..2c08d7a2
+--- /dev/null
++++ b/__tests__/postgres/hr-schedule-occurrences.test.ts
+@@ -0,0 +1,70 @@
++import { afterAll, beforeAll, expect, it } from 'vitest';
++import { readFile } from 'node:fs/promises';
++import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
++import { HR_STAFF_SQL } from '../../lib/hr-schema';
++import { appendHrTimeline, readHrTimeline } from '../../lib/hr-temporal-store';
++
++let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
++beforeAll(async () => {
++  fixture = await openBackupTimestampFixture({ ...process.env });
++  await fixture.source.query(await readFile('migrations/0001_baseline_schema.sql', 'utf8'));
++  await fixture.source.query(HR_STAFF_SQL);
++  await fixture.source.query(await readFile('migrations/0056_hr_employment_history.sql', 'utf8'));
++  await fixture.source.query(await readFile('migrations/0057_hr_schedule_policy_versions.sql', 'utf8'));
++  await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(901,'r1-manager','Synthetic R1 Manager','synthetic','admin')");
++});
++afterAll(async () => { await fixture?.close(); });
++const schedule = (start: string, end: string, endDayOffset: number, workingDays = [0, 1, 2, 3, 4, 5, 6]) => ({ timeZone: 'Asia/Aden', workingDays, graceMins: 0, segments: [{ id: 'work', start, startDayOffset: 0, end, endDayOffset }] });
++const known = (id: string, from: string, to: string | null, value: ReturnType<typeof schedule>) => ({ id, kind: 'known' as const, from, to, value });
++async function rawInsert(facts: ReturnType<typeof known>[]) {
++  const staff = (await fixture.source.query("INSERT INTO hr_staff(full_name,created_by) VALUES('Synthetic R1 employee','test') RETURNING id")).rows[0];
++  const stream = (await fixture.source.query("INSERT INTO hr_effective_streams(kind,subject_key,staff_id) VALUES('schedule',$1::text,$1::text::int) RETURNING id", [String(staff.id)])).rows[0];
++  return fixture.source.query("INSERT INTO hr_effective_revisions(stream_id,revision,previous_revision,actor_user_id,reason,snapshot) VALUES($1,1,0,901,'Synthetic R1 proof',$2) RETURNING stream_id", [stream.id, JSON.stringify({ revision: 1, facts })]);
++}
++it.each([[1, 2], [6, 0]])('raw SQL rejects weekly recurrence overlap on %j', async (...days) => {
++  await expect(rawInsert([known('long', '2026-10-01', null, schedule('22:00', '23:00', 1, days))])).rejects.toMatchObject({ code: '23514', message: expect.stringContaining('occurrence_overlap') });
++});
++it('raw SQL rejects Oct1 night continuing into a new Oct2 05:00 schedule', async () => {
++  await expect(rawInsert([known('old', '2026-10-01', '2026-10-02', schedule('22:00', '06:00', 1)), known('new', '2026-10-02', null, schedule('05:00', '13:00', 0))])).rejects.toMatchObject({ code: '23514', message: expect.stringContaining('occurrence_overlap') });
++});
++it('raw SQL allows exactly touching versions and long but spaced occurrences', async () => {
++  expect((await rawInsert([known('old', '2026-10-01', '2026-10-02', schedule('22:00', '06:00', 1)), known('new', '2026-10-02', null, schedule('06:00', '13:00', 0))])).rowCount).toBe(1);
++  expect((await rawInsert([known('long', '2026-10-01', null, schedule('00:00', '23:59', 1, [1, 3, 5]))])).rowCount).toBe(1);
++});
++it.each([0, 1, 2, 3, 4, 5, 6])('raw SQL handles consecutive weekday %i and accepts a 24-hour touching repeat', async day => {
++  await expect(rawInsert([known('long', '2026-10-01', null, schedule('22:00', '23:00', 1, [day, (day + 1) % 7]))])).rejects.toMatchObject({ code: '23514', message: expect.stringContaining('occurrence_overlap') });
++  expect((await rawInsert([known('long', '2026-10-01', null, schedule('22:00', '22:00', 1, [day, (day + 1) % 7]))])).rowCount).toBe(1);
++});
++it('raw SQL accepts separate split segments even when occurrence envelopes intersect', async () => {
++  const value = { ...schedule('08:00', '09:00', 0), segments: [schedule('08:00', '09:00', 0).segments[0], { id: 'late', start: '10:00', startDayOffset: 1, end: '11:00', endDayOffset: 1 }] };
++  expect((await rawInsert([known('split', '2026-10-01', null, value)])).rowCount).toBe(1);
++});
++it('raw SQL checks distant local dates that overlap in UTC, with a safe later start accepted', async () => {
++  const facts = (start: string) => [
++    known('old-zone', '2026-10-01', '2026-10-02', { ...schedule('00:00', '23:59', 1, [4]), timeZone: 'Etc/GMT+12' }),
++    known('new-zone', '2026-10-04', '2026-10-05', { ...schedule(start, '03:00', 0, [0]), timeZone: 'Pacific/Kiritimati' }),
++  ];
++  await expect(rawInsert(facts('00:00'))).rejects.toMatchObject({ code: '23514', message: expect.stringContaining('occurrence_overlap') });
++  expect((await rawInsert(facts('02:00'))).rowCount).toBe(1);
++});
++it.each([['2026-03-08', '2026-03-09', '02:30', 'nonexistent_wall_time'], ['2026-11-01', '2026-11-02', '01:30', 'ambiguous_wall_time']])('raw SQL does not silently normalize %s DST endpoints', async (from, to, start, code) => {
++  await expect(rawInsert([
++    known('old-zone', from, to, { ...schedule(start, '04:00', 0), timeZone: 'America/New_York' }),
++    known('new-zone', to, null, schedule('06:00', '13:00', 0)),
++  ])).rejects.toMatchObject({ code: '23514', message: expect.stringContaining(code) });
++});
++it('failed raw and adapter revisions preserve the prior snapshot; a corrected boundary appends once', async () => {
++  const old = known('old', '2026-10-01', '2026-10-02', schedule('22:00', '06:00', 1));
++  const streamId = (await rawInsert([old])).rows[0].stream_id;
++  const row = (await fixture.source.query('SELECT subject_key FROM hr_effective_streams WHERE id=$1', [streamId])).rows[0];
++  const stream = { kind: 'schedule' as const, subjectKey: row.subject_key };
++  const before = await readHrTimeline(fixture.source, stream);
++  const next = known('new', '2026-10-02', null, schedule('05:00', '13:00', 0));
++  await expect(fixture.source.query("INSERT INTO hr_effective_revisions(stream_id,revision,previous_revision,actor_user_id,reason,snapshot) VALUES($1,2,1,901,'Synthetic conflicting revision',$2)", [streamId, JSON.stringify({ revision: 2, facts: [old, next] })])).rejects.toMatchObject({ code: '23514', message: expect.stringContaining('occurrence_overlap') });
++  await expect(appendHrTimeline(fixture.source, stream, { append: [next], supersedeIds: [], expectedRevision: 1, reason: 'Synthetic conflicting revision' }, 901)).rejects.toMatchObject({ code: 'occurrence_overlap' });
++  expect(await readHrTimeline(fixture.source, stream)).toEqual(before);
++  const corrected = known('safe-new', '2026-10-02', null, schedule('06:00', '13:00', 0));
++  const after = await appendHrTimeline(fixture.source, stream, { append: [corrected], supersedeIds: [], expectedRevision: 1, reason: 'Synthetic non-overlapping revision' }, 901);
++  expect(after.revision).toBe(2); expect(await readHrTimeline(fixture.source, stream, 1)).toEqual(before);
++  expect((await fixture.source.query('SELECT count(*)::int AS n FROM hr_effective_revisions WHERE stream_id=$1', [streamId])).rows[0].n).toBe(2);
++});
+diff --git a/lib/hr-schedule-segments.ts b/lib/hr-schedule-segments.ts
+index 11468053..4bd7e8c4 100644
+--- a/lib/hr-schedule-segments.ts
++++ b/lib/hr-schedule-segments.ts
+@@ -1,4 +1,4 @@
+-import { addCalendarDays, assertDay, immutableJson, selectTemporal, temporalFail, type TemporalTimeline } from './hr-temporal';
++import { addCalendarDays, assertDay, immutableJson, selectTemporal, temporalFail, validateTimeline, type TemporalTimeline } from './hr-temporal';
+ 
+ export interface HrScheduleSegment {
+   readonly id: string;
+@@ -20,7 +20,18 @@ export function validateEffectiveSchedule(value: HrEffectiveSchedule): HrEffecti
+   try { new Intl.DateTimeFormat('en', { timeZone: copy.timeZone }); } catch { temporalFail('invalid_timezone', 'Invalid time zone.'); }
+   if (!Array.isArray(copy.workingDays) || !copy.workingDays.length || copy.workingDays.length > 7 || new Set(copy.workingDays).size !== copy.workingDays.length || copy.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) temporalFail('invalid_schedule', 'Working days must be distinct weekday numbers.');
+   if (!Number.isInteger(copy.graceMins) || copy.graceMins < 0 || copy.graceMins > 120) temporalFail('invalid_schedule', 'Grace must match the supported 0–120 minute range.');
+-  validateScheduleSegments(copy.segments); return copy;
++  validateScheduleSegments(copy.segments);
++  // Offsets are 0/1, so only consecutive anchor days can overlap in one zone.
++  // Include Saturday→Sunday; compare segments, not the envelope around split shifts.
++  for (const day of copy.workingDays) if (copy.workingDays.includes((day + 1) % 7)) {
++    for (const left of copy.segments) for (const right of copy.segments) {
++      if (minute(left.start) + left.startDayOffset * 1440 < minute(right.end) + (right.endDayOffset + 1) * 1440
++          && minute(right.start) + (right.startDayOffset + 1) * 1440 < minute(left.end) + left.endDayOffset * 1440) {
++        temporalFail('occurrence_overlap', 'occurrence_overlap: recurring schedule segments overlap across anchor days.');
++      }
++    }
++  }
++  return copy;
+ }
+ function minute(clock: string): number {
+   if (typeof clock !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)) temporalFail('invalid_clock', 'Use HH:MM and an explicit day offset.');
+@@ -57,6 +68,8 @@ function uniqueWallInstant(day: string, clock: string, timeZone: string): string
+   }));
+   const matches = [...offsets].map(offset => nominal - offset).filter(candidate => local(candidate) === wall);
+   if (matches.length !== 1) temporalFail(matches.length ? 'ambiguous_wall_time' : 'nonexistent_wall_time', 'This wall time requires explicit time-zone resolution; no punch is inferred.');
++  // A technical search bound for version transitions, not a maximum shift length.
++  if (Math.abs(nominal - matches[0]) >= 86400000) temporalFail('timezone_offset_unresolved', 'An offset outside the supported ±24-hour bound requires review.');
+   return new Date(matches[0]).toISOString();
+ }
+ export function materializeScheduleSegments(anchorDay: string, timeZone: string, segments: readonly HrScheduleSegment[]) {
+@@ -68,8 +81,39 @@ export function materializeScheduleSegments(anchorDay: string, timeZone: string,
+   for (const [i, window] of windows.entries()) if (window.end <= window.start || (i > 0 && window.start < windows[i - 1].end)) temporalFail('segment_overlap', 'Materialized windows overlap or reverse.');
+   return immutableJson({ anchorDay, timeZone, calculationVersion: 'hr-segments-v1', windows });
+ }
++/** Validate dated versions as well as each repeating value, before writing or calculating. */
++export function validateScheduleTimeline(timeline: TemporalTimeline<HrEffectiveSchedule>): TemporalTimeline<HrEffectiveSchedule> {
++  const saved = validateTimeline(timeline);
++  const facts = saved.facts.filter(fact => fact.kind === 'known').sort((a, b) => a.from.localeCompare(b.from));
++  for (const fact of facts) validateEffectiveSchedule(fact.value);
++  for (let i = 0; i < facts.length; i++) for (let j = i + 1; j < facts.length; j++) {
++    const left = facts[i], right = facts[j];
++    // Local endpoints are in [anchor, anchor+2 days), offsets strictly within ±24h.
++    // Anchors >=4 days apart cannot overlap in UTC, even when the zone changes.
++    if (Date.parse(`${right.from}T00:00:00Z`) - Date.parse(`${left.to}T00:00:00Z`) >= 3 * 86400000) break;
++    const prior: HrSegmentWindow[] = [], next: HrSegmentWindow[] = [];
++    for (let offset = 1; offset <= 3; offset++) {
++      const epoch = Date.parse(`${left.to}T00:00:00Z`) - offset * 86400000;
++      if (epoch >= Date.parse(`${left.from}T00:00:00Z`)) {
++        const day = new Date(epoch).toISOString().slice(0, 10);
++        if (left.value.workingDays.includes(new Date(epoch).getUTCDay())) prior.push(...materializeScheduleSegments(day, left.value.timeZone, left.value.segments).windows);
++      }
++    }
++    for (let offset = 0; offset < 3; offset++) {
++      const epoch = Date.parse(`${right.from}T00:00:00Z`) + offset * 86400000;
++      if (epoch <= Date.parse('9999-12-31T00:00:00Z') && (right.to === null || epoch < Date.parse(`${right.to}T00:00:00Z`))) {
++        const day = new Date(epoch).toISOString().slice(0, 10);
++        if (right.value.workingDays.includes(new Date(epoch).getUTCDay())) next.push(...materializeScheduleSegments(day, right.value.timeZone, right.value.segments).windows);
++      }
++    }
++    for (const a of prior) for (const b of next) if (a.start < b.end && b.start < a.end) {
++      temporalFail('occurrence_overlap', 'occurrence_overlap: dated schedule versions overlap in UTC.');
++    }
++  }
++  return saved;
++}
+ export function selectHrSchedule(timeline: TemporalTimeline<HrEffectiveSchedule>, anchorDay: string) {
+-  const selected = selectTemporal(timeline, anchorDay);
++  const selected = selectTemporal(validateScheduleTimeline(timeline), anchorDay);
+   if (selected.kind === 'unknown') return immutableJson({ kind: 'blocked' as const, code: 'schedule_history_unknown', selection: selected });
+   const value = validateEffectiveSchedule(selected.fact.value);
+   const identity = { timelineRevision: selected.revision, factId: selected.fact.id, graceMins: value.graceMins, workingDays: value.workingDays };
+@@ -166,3 +210,39 @@ export function appendSegmentEvidence(current: HrSegmentEvidence, punches: reado
+     ...(current.state === 'corrected' ? { state: current.state, actualIn: current.actualIn, actualOut: current.actualOut, workMinutes: current.workMinutes } : {}),
+   });
+ }
++
++/** One employee / one calculation batch. Durable event ownership still requires integration. */
++export function collectScheduleEvidence(timeline: TemporalTimeline<HrEffectiveSchedule>, assignments: readonly {
++  anchorDay: string; segments: readonly { segmentId: string; punches: readonly HrSegmentPunch[] }[];
++}[]) {
++  const days = new Set<string>();
++  const occurrences = assignments.map(assignment => {
++    if (days.has(assignment.anchorDay)) temporalFail('duplicate_occurrence', 'An anchor day can be assigned only once.');
++    days.add(assignment.anchorDay);
++    const selected = selectHrSchedule(timeline, assignment.anchorDay);
++    if (selected.kind !== 'selected') temporalFail(selected.kind === 'blocked' ? selected.code : 'not_scheduled', 'The occurrence is not resolved; no work total can be calculated.');
++    return { anchorDay: assignment.anchorDay, timelineRevision: selected.timelineRevision, factId: selected.factId,
++      evidence: collectOccurrenceEvidence(selected.windows, assignment.segments) };
++  });
++  return summarizeScheduleEvidence(occurrences);
++}
++function summarizeScheduleEvidence(occurrences: readonly { anchorDay: string; timelineRevision: number; factId: string; evidence: ReturnType<typeof collectOccurrenceEvidence> }[]) {
++  const rawIds = new Set<string>(), actual: { start: number; end: number }[] = [];
++  for (const occurrence of occurrences) for (const segment of occurrence.evidence.segments) {
++    for (const punch of segment.rawPunches) {
++      if (rawIds.has(punch.id)) temporalFail('reused_punch', 'A raw event cannot belong to two occurrences.');
++      rawIds.add(punch.id);
++    }
++    if (segment.actualIn && segment.actualOut) actual.push({ start: instant(segment.actualIn), end: instant(segment.actualOut) });
++  }
++  actual.sort((a, b) => a.start - b.start);
++  for (let i = 1; i < actual.length; i++) if (actual[i].start < actual[i - 1].end) temporalFail('actual_occurrence_overlap', 'Actual work overlaps across occurrences and requires review.');
++  const complete = occurrences.length > 0 && occurrences.every(occurrence => occurrence.evidence.complete);
++  const provenWorkMinutes = occurrences.reduce((sum, occurrence) => sum + occurrence.evidence.provenWorkMinutes, 0);
++  return immutableJson({ occurrences, complete, provenWorkMinutes, totalWorkMinutes: complete ? provenWorkMinutes : null });
++}
++export function correctScheduleSegment(current: ReturnType<typeof collectScheduleEvidence>, anchorDay: string, correction: HrSegmentCorrection) {
++  if (!current.occurrences.some(occurrence => occurrence.anchorDay === anchorDay)) temporalFail('invalid_assignment', 'Unknown occurrence.');
++  return summarizeScheduleEvidence(current.occurrences.map(occurrence => occurrence.anchorDay === anchorDay
++    ? { ...occurrence, evidence: correctOccurrenceSegment(occurrence.evidence, correction) } : occurrence));
++}
+diff --git a/lib/hr-temporal-store.ts b/lib/hr-temporal-store.ts
+index 8e04073c..8159674e 100644
+--- a/lib/hr-temporal-store.ts
++++ b/lib/hr-temporal-store.ts
+@@ -2,7 +2,7 @@
+ import type { Pool, PoolClient } from 'pg';
+ import { reviseTimeline, temporalFail, validateTimeline, type TemporalChange, type TemporalTimeline } from './hr-temporal';
+ import { validateEffectivePolicy, type HrEffectivePolicy, type HrEffectivePolicyKey } from './hr-effective-policy';
+-import { validateEffectiveSchedule, type HrEffectiveSchedule } from './hr-schedule-segments';
++import { validateScheduleTimeline, type HrEffectiveSchedule } from './hr-schedule-segments';
+ 
+ export interface HrTemporalStream { readonly kind: 'employment' | 'policy' | 'schedule'; readonly subjectKey: string }
+ function streamKey(stream: HrTemporalStream): void {
+@@ -16,8 +16,8 @@ function validateValues<T>(timeline: TemporalTimeline<T>, stream: HrTemporalStre
+   for (const fact of copy.facts) {
+     if (stream.kind === 'employment' && (!fact.value || typeof fact.value !== 'object' || !('status' in fact.value) || typeof fact.value.status !== 'string' || !['active', 'suspended', 'ended'].includes(fact.value.status))) temporalFail('invalid_employment', 'Unknown employment status.');
+     if (stream.kind === 'policy') validateEffectivePolicy(fact.value as HrEffectivePolicy, stream.subjectKey as HrEffectivePolicyKey);
+-    if (stream.kind === 'schedule' && fact.kind === 'known') validateEffectiveSchedule(fact.value as HrEffectiveSchedule);
+   }
++  if (stream.kind === 'schedule') validateScheduleTimeline(copy as TemporalTimeline<HrEffectiveSchedule>);
+   return copy;
+ }
+ export async function readHrTimeline<T>(source: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>, stream: HrTemporalStream, revision?: number): Promise<TemporalTimeline<T>> {
+diff --git a/migrations/0057_hr_schedule_policy_versions.sql b/migrations/0057_hr_schedule_policy_versions.sql
+index 10ef4f5c..313dbd83 100644
+--- a/migrations/0057_hr_schedule_policy_versions.sql
++++ b/migrations/0057_hr_schedule_policy_versions.sql
+@@ -62,6 +62,93 @@ BEGIN
+     IF EXISTS(SELECT 1 FROM jsonb_array_elements(payload->'segments') s GROUP BY s->>'id' HAVING count(*)>1) THEN
+       RAISE EXCEPTION 'duplicate_segment' USING ERRCODE='23514';
+     END IF;
++    -- With day offsets 0/1 only consecutive weekday anchors can overlap.
++    -- Check actual segment intervals, including Saturday→Sunday, not split-shift envelopes.
++    IF EXISTS (
++      SELECT 1 FROM jsonb_array_elements_text(payload->'workingDays') d
++        CROSS JOIN jsonb_array_elements(payload->'segments') a
++        CROSS JOIN jsonb_array_elements(payload->'segments') b
++      WHERE payload->'workingDays' @> to_jsonb(ARRAY[(d::int+1)%7])
++        AND extract(epoch FROM (a->>'start')::time) + (a->>'startDayOffset')::int * 86400
++          < extract(epoch FROM (b->>'end')::time) + ((b->>'endDayOffset')::int+1) * 86400
++        AND extract(epoch FROM (b->>'start')::time) + ((b->>'startDayOffset')::int+1) * 86400
++          < extract(epoch FROM (a->>'end')::time) + (a->>'endDayOffset')::int * 86400
++    ) THEN RAISE EXCEPTION 'occurrence_overlap' USING ERRCODE='23514'; END IF;
+   ELSE RAISE EXCEPTION 'invalid_domain' USING ERRCODE='23514'; END IF;
+ END;
+ $$;
++
++-- AT TIME ZONE alone silently chooses a DST fold/gap. Require a unique round trip,
++-- mirroring the source materializer. This is resolution evidence, not worked time.
++CREATE FUNCTION aqlan_hr_unique_wall_instant(day DATE, clock TEXT, zone TEXT)
++RETURNS TIMESTAMPTZ LANGUAGE plpgsql AS $$
++DECLARE wall TIMESTAMP; nominal TIMESTAMPTZ; matches INTEGER; resolved TIMESTAMPTZ;
++BEGIN
++  IF day<DATE '0001-01-01' OR day>DATE '9999-12-31' THEN
++    RAISE EXCEPTION 'invalid_date' USING ERRCODE='23514';
++  END IF;
++  wall:=day+clock::time; nominal:=wall AT TIME ZONE 'UTC';
++  WITH offsets AS (
++    SELECT DISTINCT ((nominal+h*interval '1 hour') AT TIME ZONE zone)
++      - ((nominal+h*interval '1 hour') AT TIME ZONE 'UTC') AS delta
++    FROM unnest(ARRAY[-36,-24,-12,0,12,24,36]) h
++  ), candidates AS (
++    SELECT DISTINCT nominal-delta AS value FROM offsets
++    WHERE (nominal-delta) AT TIME ZONE zone=wall
++  ) SELECT count(*),min(value) INTO matches,resolved FROM candidates;
++  IF matches=0 THEN RAISE EXCEPTION 'nonexistent_wall_time' USING ERRCODE='23514'; END IF;
++  IF matches<>1 THEN RAISE EXCEPTION 'ambiguous_wall_time' USING ERRCODE='23514'; END IF;
++  IF abs(extract(epoch FROM nominal-resolved))>=86400 THEN
++    RAISE EXCEPTION 'timezone_offset_unresolved' USING ERRCODE='23514';
++  END IF;
++  RETURN resolved;
++END;
++$$;
++CREATE FUNCTION aqlan_hr_schedule_windows(payload JSONB, anchor_day DATE)
++RETURNS TABLE(bounds TSTZRANGE) LANGUAGE plpgsql AS $$
++DECLARE segment JSONB; starts TIMESTAMPTZ; ends TIMESTAMPTZ;
++BEGIN
++  IF NOT payload->'workingDays' @> to_jsonb(ARRAY[extract(dow FROM anchor_day)::int]) THEN RETURN; END IF;
++  FOR segment IN SELECT value FROM jsonb_array_elements(payload->'segments') LOOP
++    starts:=aqlan_hr_unique_wall_instant(anchor_day+(segment->>'startDayOffset')::int,segment->>'start',payload->>'timeZone');
++    ends:=aqlan_hr_unique_wall_instant(anchor_day+(segment->>'endDayOffset')::int,segment->>'end',payload->>'timeZone');
++    IF ends<=starts THEN RAISE EXCEPTION 'segment_overlap' USING ERRCODE='23514'; END IF;
++    bounds:=tstzrange(starts,ends,'[)'); RETURN NEXT;
++  END LOOP;
++END;
++$$;
++CREATE FUNCTION aqlan_hr_validate_schedule_occurrences() RETURNS trigger LANGUAGE plpgsql AS $$
++DECLARE domain TEXT; pair RECORD; left_day DATE; right_day DATE; left_offset INTEGER; right_offset INTEGER;
++BEGIN
++  SELECT kind INTO STRICT domain FROM hr_effective_streams WHERE id=NEW.stream_id;
++  IF domain<>'schedule' THEN RETURN NEW; END IF;
++  -- The generic revision validator runs first alphabetically and holds the stream lock.
++  -- Each endpoint is in local [anchor,anchor+2 days), with an offset strictly within
++  -- ±24h. Anchors >=4 days apart cannot overlap, including a change of time zone.
++  FOR pair IN
++    SELECT a.f AS left_fact,b.f AS right_fact
++    FROM jsonb_array_elements(NEW.snapshot->'facts') a(f)
++      CROSS JOIN jsonb_array_elements(NEW.snapshot->'facts') b(f)
++    WHERE a.f->>'kind'='known' AND b.f->>'kind'='known'
++      AND (a.f->>'from')::date<(b.f->>'from')::date
++      AND (b.f->>'from')::date-(a.f->>'to')::date BETWEEN 0 AND 2
++  LOOP
++    FOR left_offset IN 1..3 LOOP
++      left_day:=(pair.left_fact->>'to')::date-left_offset;
++      IF left_day<(pair.left_fact->>'from')::date THEN CONTINUE; END IF;
++      FOR right_offset IN 0..2 LOOP
++        right_day:=(pair.right_fact->>'from')::date+right_offset;
++        IF right_day>DATE '9999-12-31' OR right_day>=(pair.right_fact->>'to')::date THEN CONTINUE; END IF;
++        IF EXISTS (
++          SELECT 1 FROM aqlan_hr_schedule_windows(pair.left_fact->'value',left_day) a
++            CROSS JOIN aqlan_hr_schedule_windows(pair.right_fact->'value',right_day) b
++          WHERE a.bounds && b.bounds
++        ) THEN RAISE EXCEPTION 'occurrence_overlap' USING ERRCODE='23514'; END IF;
++      END LOOP;
++    END LOOP;
++  END LOOP;
++  RETURN NEW;
++END;
++$$;
++CREATE TRIGGER hr_effective_schedule_occurrences_validate BEFORE INSERT ON hr_effective_revisions
++  FOR EACH ROW EXECUTE FUNCTION aqlan_hr_validate_schedule_occurrences();

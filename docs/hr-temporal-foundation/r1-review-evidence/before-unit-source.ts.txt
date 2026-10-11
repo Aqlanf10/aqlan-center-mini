@@ -1,0 +1,23 @@
+import { expect, it } from 'vitest';
+import { selectHrSchedule, validateEffectiveSchedule, type HrEffectiveSchedule } from '../lib/hr-schedule-segments';
+import type { TemporalTimeline } from '../lib/hr-temporal';
+
+const schedule = (start: string, end: string, endDayOffset: 0 | 1, workingDays = [0, 1, 2, 3, 4, 5, 6]): HrEffectiveSchedule => ({ timeZone: 'Asia/Aden', workingDays, graceMins: 0, segments: [{ id: 'work', start, startDayOffset: 0, end, endDayOffset }] });
+const transition = (start: string): TemporalTimeline<HrEffectiveSchedule> => ({ revision: 2, facts: [
+  { id: 'old', kind: 'known', from: '2026-10-01', to: '2026-10-02', value: schedule('22:00', '06:00', 1) },
+  { id: 'new', kind: 'known', from: '2026-10-02', to: null, value: schedule(start, '13:00', 0) },
+] });
+
+it.each([[1, 2], [6, 0]])('rejects recurring 25-hour occurrences on weekdays %j', (...days) => {
+  expect(() => validateEffectiveSchedule(schedule('22:00', '23:00', 1, days))).toThrow(/occurrence_overlap/);
+});
+it('rejects the old Oct1 night / new Oct2 05:00 overlap before selection', () => {
+  expect(() => selectHrSchedule(transition('05:00'), '2026-10-02')).toThrow(/occurrence_overlap/);
+});
+it('allows the exact 06:00 shared boundary across dated versions', () => {
+  expect(selectHrSchedule(transition('06:00'), '2026-10-01')).toMatchObject({ kind: 'selected', factId: 'old' });
+  expect(selectHrSchedule(transition('06:00'), '2026-10-02')).toMatchObject({ kind: 'selected', factId: 'new' });
+});
+it('allows long but spaced occurrences without inventing a legal duration ceiling', () => {
+  expect(validateEffectiveSchedule(schedule('00:00', '23:59', 1, [1, 3, 5])).segments[0].end).toBe('23:59');
+});

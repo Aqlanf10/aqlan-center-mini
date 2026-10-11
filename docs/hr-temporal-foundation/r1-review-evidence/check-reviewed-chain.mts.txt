@@ -1,0 +1,8 @@
+import {loadMigrationFiles} from '/workspace/hr-history-r1/lib/migration-files.ts';
+import {assertReviewedMigrationChain} from '/workspace/hr-history-r1/__tests__/postgres/_reviewed-migration-chain.ts';
+const files=await loadMigrationFiles('/workspace/hr-history-r1/migrations');
+try {assertReviewedMigrationChain(files); throw new Error('Unexpected acceptance of not-yet-reviewed integration chain');}
+catch(error){
+ if(!(error instanceof Error)||!/Unreviewed shipped migration baseline/.test(error.message))throw error;
+ console.log(JSON.stringify({result:'expected_closed_guard',newIdentities:files.slice(-2).map(f=>({filename:f.filename,version:f.version,checksum:f.checksum})),error:error.message,guardEdited:false},null,2));
+}
