@@ -115,8 +115,11 @@ jobs:
           printf 'started\n' > "$HR_UI_DIAGNOSTIC_DIR/started.txt"
           set +e
           npm run test:security-http -- "${files[@]}" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
-          status=${PIPESTATUS[0]}
+          pipeline_status=("${PIPESTATUS[@]}")
+          status=${pipeline_status[0]}
+          if [ "$status" -eq 0 ]; then status=${pipeline_status[1]}; fi
           set -e
+          printf '%s\n' "${pipeline_status[@]}" > "$HR_UI_DIAGNOSTIC_DIR/pipeline-exit.txt"
           printf '%s\n' "$status" > "$HR_UI_DIAGNOSTIC_DIR/test-exit.txt"
           exit "$status"
       - name: Verify complete synthetic contract evidence after test start

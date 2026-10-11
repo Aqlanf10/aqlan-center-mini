@@ -31,7 +31,7 @@ type FixtureWindow = Window & {
   retiredContractSubmit?: (event: { preventDefault: () => void }) => Promise<void>;
 };
 const mount = (page: Page, username: string, role = "admin") => page.evaluate(({ username, role }) => {
-  (window as FixtureWindow).mountContractOwner(username, role);
+  (window as unknown as FixtureWindow).mountContractOwner(username, role);
 }, { username, role });
 
 async function setup() {
@@ -67,11 +67,11 @@ async function fillAndCapture(page: Page) {
     if (!key) throw new Error("Committed React form props are unavailable");
     const props = (form as unknown as Record<string, { onSubmit?: FixtureWindow["retiredContractSubmit"] }>)[key];
     if (typeof props.onSubmit !== "function") throw new Error("Production submit handler is unavailable");
-    (window as FixtureWindow).retiredContractSubmit = props.onSubmit;
+    (window as unknown as FixtureWindow).retiredContractSubmit = props.onSubmit;
   });
 }
 const invokeRetired = (page: Page) => page.evaluate(async () => {
-  const handler = (window as FixtureWindow).retiredContractSubmit;
+  const handler = (window as unknown as FixtureWindow).retiredContractSubmit;
   if (!handler) throw new Error("No retained production handler");
   await handler({ preventDefault() {} });
 });
