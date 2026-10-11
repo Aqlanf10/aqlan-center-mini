@@ -454,6 +454,23 @@ for(const width of [390,1280]){
  });
 }
 
+// The existing tab's accessible name includes its exposed document icon. Scope
+// navigation to the owned HR tablist and witness the actual contract read before
+// any form action; no polling delay or role/authority relaxation is introduced.
+async function openContractsPanel(page:Page){
+ const tab=page.getByRole("tablist",{name:"أقسام الموارد البشرية",exact:true})
+   .getByRole("tab",{name:"📄 العقود",exact:true});
+ const [response]=await Promise.all([
+   page.waitForResponse(r=>{const url=new URL(r.url());return url.origin===baseUrl&&url.pathname==="/api/hr/contracts"&&r.request().method()==="GET";}),
+   tab.click(),
+ ]);
+ expect(response.status()).toBe(200);expect(Array.isArray(await response.json())).toBe(true);
+ await expect.poll(()=>tab.getAttribute("aria-selected")).toBe("true");
+ const panel=page.getByRole("region",{name:"إدارة العقود",exact:true});
+ await expect.poll(()=>panel.count()).toBe(1);
+ await expect.poll(()=>panel.getByText("جاري تحميل العقود...",{exact:true}).count()).toBe(0);
+}
+
 // Independent owned contract journey runs after existing payroll cases.
  it("shows the allowed administrative approval journey and preserves the approved original through an addendum",async()=>{
    const name=`HR-LIFECYCLE-${Date.now()}`;
@@ -461,7 +478,7 @@ for(const width of [390,1280]){
    const created=await api("POST","/api/hr/contracts",{staffId:staff.body.staff?.id??staff.body.id,title:name,templateKind:"support_staff",startDate:"2026-01-01",compensationKind:"salary",baseSalaryMinor:25000,salaryCurrency:"YER",salaryPeriod:"monthly",termsPayload:{clauses:["Synthetic original clause"]}});expect(created.status).toBe(201);const id=created.body.id;
    expect((await api("PATCH",`/api/hr/contracts/${id}`,{action:"transition",status:"active",reason:"Forbidden approval bypass"})).status).toBe(409);
    const page=await context.newPage();try{
-     await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();
+     await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);
      const row=page.locator("tbody tr").filter({hasText:name});await expect.poll(()=>row.count()).toBe(1);await row.getByRole("button",{name:"عرض وتعديل",exact:true}).click();
      await page.getByRole("button",{name:"تغيير الحالة",exact:true}).click();
      const dialog=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"تغيير حالة العقد",exact:true})});
@@ -493,7 +510,7 @@ for(const [index,template] of contractTemplateCases.entries()){
   const name=`HR-TEMPLATE-${index}-${Date.now()}`;
   const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"Synthetic template",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});expect(staff.status).toBe(201);
   const page=await context.newPage();try{
-   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
+   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
    const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});
    await form.getByRole("button",{name:template.button,exact:true}).click();
    expect(await form.getByLabel("نوع العقد",{exact:true}).inputValue()).toBe(template.kind);
@@ -504,18 +521,18 @@ for(const [index,template] of contractTemplateCases.entries()){
    for(const key of ["baseSalaryMinor","salaryCurrency","salaryPeriod","commissionRatePercent","doctorPartyId","probationEndDate"])expect(contract[key]).toBeNull();
    expect(contract.status).toBe("draft");expect(contract.termsPayload.clauses).toEqual([]);expect(contract.termsPayload.workingHoursPerWeek).toBeNull();
    expect((await api("PATCH",`/api/hr/contracts/${contract.id}`,{action:"transition",status:"approved"})).status).toBe(409);
-   await page.reload({waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();const row=page.locator("tbody tr").filter({hasText:name});await row.getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+   await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);const row=page.locator("tbody tr").filter({hasText:name});await row.getByRole("button",{name:"عرض وتعديل",exact:true}).click();
    await expect.poll(()=>page.getByRole("status").filter({hasText:"شروط الأجر غير مكتملة"}).count()).toBe(1);
    const persisted=(await db.query("SELECT * FROM hr_contracts WHERE id=$1",[contract.id])).rows[0];expect(persisted.base_salary_minor).toBeNull();expect(persisted.commission_rate_percent).toBeNull();expect(persisted.approved_at).toBeNull();
    await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});await expect.poll(()=>page.textContent("body")).toContain("شروط الأجر غير مكتملة");expect(await page.textContent("body")).toContain("مسودة عقد عمل غير معتمدة");
    if(index===0){
-    await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+    await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
     await page.getByRole("button",{name:"استكمال / تعديل المسودة",exact:true}).click();
     const editor=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"استكمال / تعديل المسودة",exact:true})});
     expect(await editor.getByLabel("الراتب الأساسي",{exact:true}).inputValue()).toBe("");expect(await editor.getByLabel("نوع العقد",{exact:true}).isDisabled()).toBe(true);
     await editor.getByLabel("عملة الأجر",{exact:true}).selectOption("SAR");await editor.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await editor.getByLabel("الراتب الأساسي",{exact:true}).fill("123.45");
     const updated=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await editor.getByRole("button",{name:"حفظ العقد",exact:true}).click();expect((await updated).status()).toBe(200);
-    await page.reload({waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+    await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
     await expect.poll(()=>page.getByRole("dialog").innerText()).toContain(formatAmount(12345,"SAR"));
     await page.getByRole("button",{name:"تغيير الحالة",exact:true}).click();const statusDialog=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"تغيير حالة العقد",exact:true})});await statusDialog.getByRole("combobox").selectOption("approved");
     const approved=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await statusDialog.getByRole("button",{name:"تأكيد التغيير",exact:true}).click();expect((await approved).status()).toBe(200);
@@ -537,14 +554,14 @@ for(const scenario of [
   const name=`HR-MONEY-${scenario.currency||"RATE"}-${Date.now()}`;
   const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"Synthetic contract money",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});expect(staff.status).toBe(201);
   const page=await context.newPage();try{
-   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
+   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
    const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});await form.getByRole("button",{name:scenario.button,exact:true}).click();await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
    if(scenario.amount){await form.getByLabel("عملة الأجر",{exact:true}).selectOption(scenario.currency);await form.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await form.getByLabel("الراتب الأساسي",{exact:true}).fill(scenario.amount);}
    if(scenario.rate)await form.getByLabel("نسبة الطبيب (%)",{exact:true}).fill(scenario.rate);
    const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();const response=await saved;expect(response.status()).toBe(201);const contract=await response.json();
    const minor=scenario.amount?parseAmount(scenario.amount,scenario.currency as Currency):null;
    expect(contract.baseSalaryMinor).toBe(minor);expect(contract.salaryCurrency).toBe(scenario.currency||null);expect(contract.commissionRatePercent).toBe(scenario.rate?Number(scenario.rate):null);
-   await page.reload({waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"العقود",exact:true}).click();await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+   await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
    const details=page.getByRole("dialog");if(minor!==null)await expect.poll(()=>details.innerText()).toContain(formatAmount(minor,scenario.currency as Currency));if(scenario.rate)await expect.poll(()=>details.innerText()).toContain(`${scenario.rate}%`);
    const persisted=(await api("GET",`/api/hr/contracts/${contract.id}`)).body.contract;expect(persisted.baseSalaryMinor).toBe(minor);expect(persisted.salaryCurrency).toBe(scenario.currency||null);expect(persisted.commissionRatePercent).toBe(scenario.rate?Number(scenario.rate):null);
    await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});if(minor!==null)await expect.poll(()=>page.textContent("body")).toContain(formatAmount(minor,scenario.currency as Currency));if(scenario.rate)await expect.poll(()=>page.textContent("body")).toContain(`${scenario.rate}%`);
