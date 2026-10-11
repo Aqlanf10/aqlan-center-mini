@@ -274,6 +274,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/visits/[id]/clinical": { GET: ["admin", "reception", "doctor", "assistant"], POST: ["admin", "doctor", "assistant"] },
   "/api/visits/[id]/materials": { GET: CLINIC },
   "/api/visits/[id]/next": { POST: CLINIC },
+  "/api/visits/[id]/reception-handoff": { POST: FRONT_DESK },
   "/api/visits/[id]/walkout": { GET: CLINIC },
   "/api/visits/readiness": { GET: ["admin", "reception", "doctor", "assistant"] },
   "/api/waiting-list": { GET: CLINIC, POST: CLINIC },

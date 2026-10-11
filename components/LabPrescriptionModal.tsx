@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import QRCode from "qrcode";
 import {
   type LabOrderClinicalDTO,
@@ -8,7 +8,8 @@ import {
   LAB_PRIORITY_LABEL,
   LAB_IMPRESSION_LABEL,
   LAB_TOOTH_ROLE_META,
-  parseLabTeeth,
+  toLabDispatchExternal,
+  labDispatchQrPayload,
   formatLabPrescriptionText,
 } from "@/lib/lab";
 import { LabDentalChart } from "./LabDentalChart";
@@ -26,7 +27,7 @@ interface LabPrescriptionModalProps {
 type PaperSize = "a4" | "a5";
 
 export function LabPrescriptionModal({
-  order,
+  order: internalOrder,
   clinicName,
   clinicPhone,
   onClose,
@@ -37,28 +38,21 @@ export function LabPrescriptionModal({
   const settingsPhone = useSetting("clinic.phone");
   const resolvedName = clinicName ?? settingsName;
   const resolvedPhone = clinicPhone ?? settingsPhone;
-  const printRef = useRef<HTMLDivElement>(null);
+  const order = toLabDispatchExternal(internalOrder);
   const [paperSize, setPaperSize] = useState<PaperSize>("a4");
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
+  const [qrCode, setQrCode] = useState<{ reference: string; url: string } | null>(null);
+  const qrCodeDataUrl = qrCode?.reference === order.reference ? qrCode.url : "";
   const [copied, setCopied] = useState(false);
 
-  const toothMap = parseLabTeeth(order.toothNumbers);
-  const selectedTeethCodes = Object.keys(toothMap).map(Number).sort((a, b) => a - b);
+  const toothMap = Object.fromEntries(order.teeth.map(({ code, role }) => [code, role]));
+  const selectedTeethCodes = order.teeth.map(({ code }) => code);
+  const qrPayload = labDispatchQrPayload(order);
+  const reference = order.reference;
+  const priorityInfo = order.priority ? LAB_PRIORITY_LABEL[order.priority] : { label: "غير محدد", bg: "bg-slate-100", text: "text-slate-700" };
 
   // Generate QR Code containing the lab order reference
   useEffect(() => {
-    const qrPayload = JSON.stringify({
-      rx: `RX-${order.id}`,
-      patient: order.patientName,
-      fileNo: order.patientNumber || undefined,
-      work: order.workType,
-      shade: order.shade || undefined,
-      lab: order.labName,
-      sentDate: order.sentDate,
-      dueDate: order.dueDate,
-      priority: order.priority || "normal",
-      teeth: order.toothNumbers || undefined,
-    });
+    let active = true;
 
     QRCode.toDataURL(qrPayload, {
       errorCorrectionLevel: "M",
@@ -69,58 +63,31 @@ export function LabPrescriptionModal({
         light: "#ffffff",
       },
     })
-      .then((url) => setQrCodeDataUrl(url))
-      .catch((err) => {
-        console.error("Failed to generate QR Code:", err);
-      });
-  }, [order]);
-
-  const handlePrint = () => {
-    window.print();
-  };
+      .then((url) => { if (active) setQrCode({ reference, url }); })
+      .catch(() => { /* The reference remains readable if QR generation fails. */ });
+    return () => { active = false; };
+  }, [qrPayload, reference]);
 
   const handleCopyWhatsApp = () => {
-    const text = formatLabPrescriptionText(order, resolvedName, resolvedPhone);
+    const text = formatLabPrescriptionText(internalOrder, resolvedName, resolvedPhone);
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 3000);
   };
 
   return (
+    // A tall prescription must grow below the scroll origin. Center alignment
+    // puts its first actions above that origin, where native scrolling cannot reach them.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-navy-950/75 p-2 sm:p-4 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-white print:p-0 print:backdrop-blur-none"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Print Style Injector for A4 / A5 Layouts */}
+      {/* The patient screen must never become an external dispatch document.
+          Printing is available only through the separately authorized page. */}
       <style jsx global>{`
-        @media print {
-          @page {
-            size: ${paperSize === "a5" ? "A5 portrait" : "A4 portrait"};
-            margin: ${paperSize === "a5" ? "8mm" : "12mm"};
-          }
-          body {
-            background: #ffffff !important;
-            color: #000000 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          /* Hide non-printable elements */
-          nav, header, aside, .print\\:hidden {
-            display: none !important;
-          }
-          /* Show print sheet clearly */
-          #lab-prescription-print-root {
-            display: block !important;
-            box-shadow: none !important;
-            border: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-        }
+        @media print { body { display: none !important; } }
       `}</style>
 
       <div className="relative my-4 sm:my-8 w-full max-w-4xl rounded-3xl border border-slate-200 bg-white p-4 sm:p-7 shadow-2xl transition-all print:m-0 print:max-w-none print:rounded-none print:border-none print:p-0 print:shadow-none">
@@ -136,11 +103,11 @@ export function LabPrescriptionModal({
                   استمارة طلب العمل المخبري
                 </h3>
                 <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-200">
-                  🔒 بيانات سريرية خالية من التكاليف المالية
+                  🔒 إرسالية بمرجع الطلب دون هوية المريض
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                مستند فني وسريري معتمد يشمل مخطط الأسنان، مواصفات العمل، ورمز الاستجابة السريعة
+                راجع المواصفات والتنبيهات الفنية؛ للطباعة استخدم صفحة الإرسالية المنفصلة
               </p>
             </div>
           </div>
@@ -148,7 +115,7 @@ export function LabPrescriptionModal({
           <div className="flex flex-wrap items-center gap-2">
             {/* Paper Size Selector */}
             <div className="flex items-center rounded-xl bg-slate-100 p-1 border border-slate-200 text-xs font-bold">
-              <span className="px-2 text-slate-500 text-[11px]">حجم الورق:</span>
+              <span className="px-2 text-slate-500 text-[11px]">حجم المعاينة:</span>
               <button
                 type="button"
                 onClick={() => setPaperSize("a4")}
@@ -186,22 +153,13 @@ export function LabPrescriptionModal({
 
             {/* Open Dedicated Print Page */}
             <a
-              href={`/print/lab/${order.id}`}
+              href={`/print/lab/${internalOrder.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-bold text-sky-800 hover:bg-sky-100"
             >
-              <span>📄 صفحة طباعة رسمية</span>
+              <span>🖨️ صفحة طباعة الإرسالية (A4)</span>
             </a>
-
-            {/* Print Button */}
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 rounded-xl bg-navy-900 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-navy-800"
-            >
-              <span>🖨️ طباعة ({paperSize.toUpperCase()})</span>
-            </button>
 
             {/* Close */}
             <button
@@ -217,7 +175,6 @@ export function LabPrescriptionModal({
         {/* Printable Prescription Body */}
         <div
           id="lab-prescription-print-root"
-          ref={printRef}
           className={`space-y-4 text-slate-900 ${
             paperSize === "a5" ? "text-[11px] leading-tight space-y-3" : "text-xs space-y-4"
           }`}
@@ -244,16 +201,16 @@ export function LabPrescriptionModal({
                   {/* الرمز يُمسح بجهاز المختبر، والنصّ تحته للإنسان — عربيّ دائمًا. */}
                   <img
                     src={qrCodeDataUrl}
-                    alt={`رمز استعلام للطلب رقم ${order.id}`}
+                    alt={`مرجع الطلب ${order.reference}`}
                     className={paperSize === "a5" ? "h-14 w-14" : "h-18 w-18"}
                   />
-                  <span className="text-[8px] font-mono font-bold text-slate-500 mt-0.5">امسح للاستعلام</span>
+                  <span className="text-[8px] font-mono font-bold text-slate-500 mt-0.5">مرجع المطابقة</span>
                 </div>
               ) : null}
 
               <div className="text-right" dir="rtl">
                 <div className="inline-block rounded-xl bg-navy-950 px-3 py-1 text-xs font-black text-white font-mono shadow-2xs">
-                  طلب مخبري رقم {order.id}
+                  مرجع الطلب {order.reference}
                 </div>
                 <p className="mt-1 text-[10px] font-bold text-slate-500">
                   تاريخ الإرسال: <span className="font-mono text-slate-900 font-bold">{order.sentDate}</span>
@@ -265,18 +222,15 @@ export function LabPrescriptionModal({
             </div>
           </div>
 
-          {/* Patient, Doctor & Laboratory Info Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 rounded-2xl bg-slate-50/80 p-3 text-xs border border-slate-200">
-            <div>
-              <span className="block text-[10px] font-bold text-slate-400">اسم المريض</span>
-              <span className="font-black text-navy-950 text-xs sm:text-sm">{order.patientName}</span>
-              {order.patientNumber && (
-                <span className="block text-[10px] font-mono text-slate-500 font-bold">
-                  ملف رقم: #{order.patientNumber}
-                </span>
-              )}
-            </div>
+          <div role="note" className="rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-sm text-amber-950">
+            <strong>مراجعة فنية مطلوبة قبل الإرسال والتنفيذ</strong>
+            <ul className="mt-1 list-inside list-disc">
+              {order.reviewWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          </div>
 
+          {/* Lab and clinician business contacts; never patient identity. */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 rounded-2xl bg-slate-50/80 p-3 text-xs border border-slate-200">
             <div>
               <span className="block text-[10px] font-bold text-slate-400">المختبر السني</span>
               <span className="font-black text-navy-900 text-xs sm:text-sm">{order.labName}</span>
@@ -294,10 +248,10 @@ export function LabPrescriptionModal({
               <span className="block text-[10px] font-bold text-slate-400">درجة الأولوية</span>
               <span
                 className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-black ${
-                  LAB_PRIORITY_LABEL[order.priority || "normal"].bg
-                } ${LAB_PRIORITY_LABEL[order.priority || "normal"].text}`}
+                  priorityInfo.bg
+                } ${priorityInfo.text}`}
               >
-                {LAB_PRIORITY_LABEL[order.priority || "normal"].label}
+                {priorityInfo.label}
               </span>
             </div>
           </div>
@@ -332,24 +286,11 @@ export function LabPrescriptionModal({
               <div>
                 <span className="text-[10px] font-bold text-slate-400 block">نوع الطبعة المسلّمة</span>
                 <span className="font-bold text-slate-800">
-                  {LAB_IMPRESSION_LABEL[order.impressionType || "physical"]}
+                  {order.impressionType ? LAB_IMPRESSION_LABEL[order.impressionType] : "غير محدد"}
                 </span>
               </div>
 
-              {order.details && (
-                <div>
-                  <span className="text-[10px] font-bold text-slate-400 block">المواصفات والتعليمات الفنية</span>
-                  <span className="font-medium text-slate-800">{order.details}</span>
-                </div>
-              )}
             </div>
-
-            {order.note && (
-              <div className="rounded-xl bg-amber-50/60 p-2 text-xs text-amber-950 border border-amber-200/80">
-                <span className="font-bold">ملاحظات الطبيب الفنية: </span>
-                <span>{order.note}</span>
-              </div>
-            )}
           </div>
 
           {/* FDI Dental Chart (Visual Clinical Tooth Roles) */}
@@ -366,13 +307,13 @@ export function LabPrescriptionModal({
               )}
             </div>
 
-            {order.toothNumbers ? (
+            {order.toothNumbers && order.teeth.every((tooth) => tooth.role) ? (
               <div className={paperSize === "a5" ? "scale-[0.88] origin-top -mb-2" : ""}>
                 <LabDentalChart value={order.toothNumbers} readOnly={true} showSummary={false} />
               </div>
             ) : (
               <p className="rounded-xl border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">
-                لم يتم تحديد أرقام أسنان محددة في هذا الطلب.
+                المخطط يحتاج أرقام أسنان وأدوارًا محددة؛ راجع البيانات أدناه قبل التنفيذ.
               </p>
             )}
 
@@ -385,7 +326,7 @@ export function LabPrescriptionModal({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                   {selectedTeethCodes.map((code) => {
                     const role = toothMap[code];
-                    const meta = LAB_TOOTH_ROLE_META[role];
+                    const meta = role ? LAB_TOOTH_ROLE_META[role] : null;
                     return (
                       <div
                         key={code}
@@ -400,7 +341,7 @@ export function LabPrescriptionModal({
                             meta ? meta.badgeClass : "bg-slate-100 text-slate-700"
                           }`}
                         >
-                          {meta ? `${meta.icon} ${meta.shortLabel}` : role}
+                          {meta ? `${meta.icon} ${meta.shortLabel}` : "دور غير محدد"}
                         </span>
                       </div>
                     );

@@ -1,8 +1,6 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
-import { getLabOrderById, getPatient, getSettingsSafe } from "@/lib/db";
-import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
-import { friendlyDateLong } from "@/lib/reminders";
+import { getLabOrderById, getSettingsSafe } from "@/lib/db";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
@@ -11,11 +9,9 @@ import {
   LAB_IMPRESSION_LABEL,
   LAB_PRIORITY_LABEL,
   LAB_TOOTH_ROLE_META,
-  parseLabTeeth,
-  summarizeLabTeeth,
-  type LabToothRole,
+  toLabDispatchExternal,
+  labDispatchQrPayload,
 } from "@/lib/lab";
-import { toothName } from "@/lib/dental";
 
 export const dynamic = "force-dynamic";
 
@@ -38,34 +34,18 @@ export default async function LabOrderPrintPage({
   const orderId = Number(rawId);
   if (!Number.isInteger(orderId) || orderId <= 0) notFound();
 
-  const order = await getLabOrderById(orderId);
-  if (!order) notFound();
+  const internalOrder = await getLabOrderById(orderId);
+  if (!internalOrder) notFound();
   /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
    * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, order.patientId).catch(() => false))) notFound();
+  if (!(await canAccessPatient(session, internalOrder.patientId).catch(() => false))) notFound();
 
 
-  const [patient, settings] = await Promise.all([
-    getPatient(order.patientId),
-    getSettingsSafe(),
-  ]);
-
-  const toothMap = parseLabTeeth(order.toothNumbers);
-  const toothSummary = summarizeLabTeeth(toothMap);
-  const selectedTeethCodes = Object.keys(toothMap).map(Number).sort((a, b) => a - b);
-
-  // توليد رمز QR للطلب
-  const qrPayload = JSON.stringify({
-    rx: `RX-${order.id}`,
-    patient: order.patientName,
-    fileNo: order.patientNumber || undefined,
-    work: order.workType,
-    shade: order.shade || undefined,
-    lab: order.labName,
-    sent: order.sentDate,
-    due: order.dueDate,
-    priority: order.priority,
-  });
+  const settings = await getSettingsSafe();
+  const order = toLabDispatchExternal(internalOrder);
+  const toothMap = Object.fromEntries(order.teeth.map(({ code, role }) => [code, role]));
+  const selectedTeethCodes = order.teeth.map(({ code }) => code);
+  const qrPayload = labDispatchQrPayload(order);
 
   let qrCodeDataUrl = "";
   try {
@@ -79,9 +59,8 @@ export default async function LabOrderPrintPage({
     // fallback
   }
 
-  const clinicName = settings["clinic.name"] || "مركز عقلان لطب الأسنان";
-  const priorityInfo = LAB_PRIORITY_LABEL[order.priority] || { label: "عادي", badge: "bg-slate-100" };
-  const impressionLabel = LAB_IMPRESSION_LABEL[order.impressionType] || "طبعة سيليكون مطاطي";
+  const priorityInfo = order.priority ? LAB_PRIORITY_LABEL[order.priority] : { label: "غير محدد" };
+  const impressionLabel = order.impressionType ? LAB_IMPRESSION_LABEL[order.impressionType] : "غير محدد";
 
   const upperTeeth = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
   const lowerTeeth = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
@@ -98,7 +77,7 @@ export default async function LabOrderPrintPage({
           title="تذكرة إرسالية معمل تركيبات وتعويضات الأسنان"
         />
         <div style={{ textAlign: "center", marginTop: "-2mm", marginBottom: "2mm", fontSize: "8pt", color: "#64748b" }}>
-          Dental Laboratory Work Authorization Order · RX-{order.id}
+          Dental Laboratory Dispatch · {order.reference}
         </div>
 
         {/* شريط البيانات الأساسية */}
@@ -115,28 +94,10 @@ export default async function LabOrderPrintPage({
             fontSize: "9pt",
           }}
         >
-          {/* بيانات المريض */}
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5mm" }}>
-            <div>
-              <span style={{ color: "#64748b", fontWeight: "bold" }}>المريض: </span>
-              <strong style={{ fontSize: "10.5pt", color: "#0f172a" }}>{order.patientName}</strong>
-            </div>
-            <div>
-              <span style={{ color: "#64748b" }}>رقم الملف: </span>
-              <strong style={{ fontFamily: "monospace", color: "#0369a1" }}>
-                {order.patientNumber || "—"}
-              </strong>
-              {patient && (
-                <span style={{ marginRight: "3mm", color: "#475569" }}>
-                  ({GENDER_LABEL[patient.gender]}
-                  {patient.birthYear ? ` · ${ageText(ageFromBirthYear(patient.birthYear, order.sentDate))}` : ""})
-                </span>
-              )}
-            </div>
-            <div>
-              <span style={{ color: "#64748b" }}>هاتف المريض: </span>
-              <span dir="ltr" style={{ fontWeight: "600" }}>{order.patientPhone || "—"}</span>
-            </div>
+            <span style={{ color: "#64748b", fontWeight: "bold" }}>مرجع الطلب:</span>
+            <strong dir="ltr" style={{ fontSize: "14pt", color: "#0f172a" }}>{order.reference}</strong>
+            <span>تُطابق الإرسالية داخل العيادة بهذا المرجع.</span>
           </div>
 
           {/* بيانات الطلب والمختبر */}
@@ -148,7 +109,7 @@ export default async function LabOrderPrintPage({
             </div>
             <div>
               <span style={{ color: "#64748b" }}>الطبيب المعالج: </span>
-              <strong style={{ color: "#334155" }}>{order.doctorName || "د. عقلان الكامل"}</strong>
+              <strong style={{ color: "#334155" }}>{order.doctorName || "غير محدد"}</strong>
             </div>
             <div style={{ display: "flex", gap: "3mm", alignItems: "center" }}>
               <div>
@@ -166,7 +127,7 @@ export default async function LabOrderPrintPage({
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             {qrCodeDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrCodeDataUrl} alt="QR Code" style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
+              <img src={qrCodeDataUrl} alt={`مرجع الطلب ${order.reference}`} style={{ width: "65px", height: "65px", borderRadius: "4px" }} />
             ) : null}
             <span
               style={{
@@ -183,6 +144,13 @@ export default async function LabOrderPrintPage({
               {priorityInfo.label}
             </span>
           </div>
+        </div>
+
+        <div role="note" style={{ marginTop: "3mm", padding: "3mm", border: "2px solid #b45309", backgroundColor: "#fffbeb", fontSize: "9pt" }}>
+          <strong>مراجعة فنية مطلوبة قبل الإرسال والتنفيذ</strong>
+          <ul style={{ margin: "1mm 0 0", paddingInlineStart: "5mm" }}>
+            {order.reviewWarnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
         </div>
 
         {/* جدول المواصفات الفنية للعمل */}
@@ -223,7 +191,7 @@ export default async function LabOrderPrintPage({
                       {order.shade}
                     </span>
                   ) : (
-                    "حسب تقدير الفني / غير محدد"
+                    "غير محدد"
                   )}
                 </td>
                 <td style={{ padding: "2.5mm 3mm", fontWeight: "bold", color: "#475569" }}>
@@ -235,7 +203,7 @@ export default async function LabOrderPrintPage({
                       {order.stumpShade}
                     </span>
                   ) : (
-                    "طبيعي"
+                    "غير محدد"
                   )}
                 </td>
               </tr>
@@ -247,8 +215,8 @@ export default async function LabOrderPrintPage({
                   {selectedTeethCodes.length > 0 ? (
                     <div style={{ display: "flex", gap: "2mm", flexWrap: "wrap", alignItems: "center" }}>
                       {selectedTeethCodes.map((code) => {
-                        const role = toothMap[code] || "crown";
-                        const meta = LAB_TOOTH_ROLE_META[role];
+                        const role = toothMap[code];
+                        const meta = role ? LAB_TOOTH_ROLE_META[role] : null;
                         return (
                           <span
                             key={code}
@@ -260,7 +228,7 @@ export default async function LabOrderPrintPage({
                               fontSize: "9pt",
                             }}
                           >
-                            <strong>#{code}</strong> ({meta?.label || "تاج"})
+                            <strong>#{code}</strong> ({meta?.label || "دور غير محدد"})
                           </span>
                         );
                       })}
@@ -269,7 +237,7 @@ export default async function LabOrderPrintPage({
                       </span>
                     </div>
                   ) : (
-                    order.toothNumbers || "كامل الفك / عام"
+                    "غير محدد — راجع نطاق العمل قبل التنفيذ"
                   )}
                 </td>
               </tr>
@@ -299,7 +267,7 @@ export default async function LabOrderPrintPage({
           {/* الفك العلوي */}
           <div style={{ display: "flex", justifyContent: "center", gap: "1mm", marginBottom: "1.5mm" }}>
             {upperTeeth.map((tooth) => {
-              const isSelected = toothMap[tooth] !== undefined;
+              const isSelected = selectedTeethCodes.includes(tooth);
               return (
                 <div
                   key={tooth}
@@ -329,7 +297,7 @@ export default async function LabOrderPrintPage({
           {/* الفك السفلي */}
           <div style={{ display: "flex", justifyContent: "center", gap: "1mm", marginTop: "1.5mm" }}>
             {lowerTeeth.map((tooth) => {
-              const isSelected = toothMap[tooth] !== undefined;
+              const isSelected = selectedTeethCodes.includes(tooth);
               return (
                 <div
                   key={tooth}
@@ -351,34 +319,6 @@ export default async function LabOrderPrintPage({
                 </div>
               );
             })}
-          </div>
-        </div>
-
-        {/* تعليمات وتفاصيل الطبيب المعالج */}
-        <div style={{ marginTop: "4mm" }}>
-          <h3 style={{ fontSize: "10pt", fontWeight: "900", color: "#0f172a", marginBottom: "1.5mm" }}>
-            تعليمات وتوجيهات الطبيب المعالج لفني المختبر:
-          </h3>
-          <div
-            style={{
-              padding: "3.5mm 4mm",
-              backgroundColor: "#ffffff",
-              border: "1.5px solid #cbd5e1",
-              borderRadius: "3mm",
-              minHeight: "22mm",
-              fontSize: "9.5pt",
-              lineHeight: "1.5",
-              color: "#1e293b",
-            }}
-          >
-            {order.details ? (
-              <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{order.details}</p>
-            ) : (
-              <p style={{ margin: 0, color: "#94a3b8", fontStyle: "italic" }}>
-                يرجى الالتزام بالتشريح الطبيعي، ومراعاة نقاط التماس المتقاربة (Tight Proximal Contacts)،
-                والإطباق الخفيف (Light Centric Occlusion) بدون أي إعاقة حركية.
-              </p>
-            )}
           </div>
         </div>
 
@@ -407,7 +347,7 @@ export default async function LabOrderPrintPage({
             </p>
             <div style={{ height: "14mm" }} />
             <div style={{ borderTop: "1px solid #cbd5e1", paddingTop: "1mm", fontSize: "8pt", color: "#64748b" }}>
-              {order.doctorName || "د. عقلان الكامل"} · التاريخ: {order.sentDate}
+              {order.doctorName || "غير محدد"} · التاريخ: {order.sentDate}
             </div>
           </div>
 

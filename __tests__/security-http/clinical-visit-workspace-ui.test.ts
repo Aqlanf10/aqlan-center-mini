@@ -1,6 +1,95 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
+import { formatMoney } from "../../lib/money";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const CATALOG_EVIDENCE_MARKER = "AQLAN_VISIT_CATALOG_UI_PNG_V1";
+const CATALOG_TEST_PATH = "__tests__/security-http/clinical-visit-workspace-ui.test.ts";
+const catalogHash = (value: Uint8Array | string) => createHash("sha256").update(value).digest("hex");
+type CatalogScene = "grouped-closed" | "search-filtered" | "currency-SAR" | "currency-USD" | "currency-YER";
+
+async function captureCatalog(page: Page, scene: CatalogScene) {
+  const select = page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+  const search = page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true });
+  // Scroll the actual controls into the viewport; never restyle or clone them.
+  await select.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const proof = await select.evaluate((node) => {
+    if (!(node instanceof HTMLSelectElement)) throw new Error("Native catalogue select missing");
+    const bounds = node.getBoundingClientRect();
+    return {
+      tag: node.tagName, selectedValue: node.value,
+      bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+      unobscured: node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)),
+      groups: Array.from(node.querySelectorAll("optgroup"), (group) => ({ label: group.label,
+        options: Array.from(group.querySelectorAll("option"), (option) => ({ value: option.value, text: option.textContent, disabled: option.disabled })) })),
+      viewport: { width: innerWidth, height: innerHeight }, documentWidth: document.documentElement.scrollWidth,
+    };
+  });
+  const searchBounds = await search.boundingBox();
+  const currency = await page.getByRole("radio", { checked: true }).innerText();
+  expect(searchBounds).not.toBeNull();
+  for (const bounds of [proof.bounds, searchBounds!]) {
+    expect(bounds.width).toBeGreaterThan(0); expect(bounds.height).toBeGreaterThan(0);
+    expect(bounds.x).toBeGreaterThanOrEqual(-1); expect(bounds.x + bounds.width).toBeLessThanOrEqual(proof.viewport.width + 1);
+    expect(bounds.y).toBeGreaterThanOrEqual(0); expect(bounds.y + bounds.height).toBeLessThanOrEqual(proof.viewport.height);
+  }
+  expect(proof.unobscured).toBe(true);
+  expect(proof.documentWidth).toBeLessThanOrEqual(proof.viewport.width + 1);
+  // The closed control is captured. Native OS popup pixels/scroll dimensions
+  // are not claimed; the real option text/grouping is recorded as DOM evidence.
+  return { scene, proof: { ...proof, searchBounds, query: await search.inputValue(), currency,
+    nativePopupPixels: "not-captured", optionEvidence: "asserted-live-DOM" },
+    png: await page.screenshot({ type: "png", fullPage: false }) };
+}
+
+type CatalogCapture = Awaited<ReturnType<typeof captureCatalog>>;
+async function emitCatalogEvidence(width: number, kind: "catalogue" | "currency", captures: readonly CatalogCapture[]) {
+  // Follow the existing _invoice-visual-evidence.ts bounded stdout protocol.
+  // Fixed synthetic browser buffers only, after assertions and context teardown.
+  const scenes: readonly CatalogScene[] = kind === "catalogue"
+    ? ["grouped-closed", "search-filtered"] : ["currency-SAR", "currency-USD", "currency-YER"];
+  if (![390, 1280].includes(width) || captures.length !== scenes.length) throw new Error("Incomplete catalogue evidence batch");
+  let totalBytes = 0;
+  const images = captures.map(({ scene, proof, png }, index) => {
+    if (scene !== scenes[index] || !Buffer.isBuffer(png) || png.length < 45 || png.length > 256 * 1024
+      || png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" || png.readUInt32BE(8) !== 13
+      || png.toString("ascii", 12, 16) !== "IHDR" || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== 844
+      || !png.subarray(-12).equals(Buffer.from("0000000049454e44ae426082", "hex"))
+      || proof.viewport.width !== width || proof.viewport.height !== 844) throw new Error("Invalid required catalogue capture");
+    const geometry = JSON.stringify(proof);
+    if (Buffer.byteLength(geometry) > 6144) throw new Error("Catalogue DOM evidence exceeds bound");
+    totalBytes += png.length;
+    return { scene: `${scene}-${width}`, width, height: 844, bytes: png.length, sha256: catalogHash(png),
+      proofSha256: catalogHash(geometry), chunks: Math.ceil(png.toString("base64").length / 4096) };
+  });
+  if (totalBytes > 768 * 1024) throw new Error("Catalogue PNG batch exceeds bound");
+  const runId = /^\d{1,24}$/.test(process.env.GITHUB_RUN_ID ?? "") ? process.env.GITHUB_RUN_ID : "unavailable";
+  const checkoutSha = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(process.env.GITHUB_SHA ?? "") ? process.env.GITHUB_SHA : "unavailable";
+  const identity = { suite: CATALOG_TEST_PATH, testSha256: catalogHash(readFileSync(CATALOG_TEST_PATH)),
+    kind, width, runId, checkoutSha, synthetic: true, nativePopupPixels: "not-captured", totalBytes, images };
+  const batch = catalogHash(JSON.stringify(identity));
+  const records = [`${CATALOG_EVIDENCE_MARKER} BEGIN ${JSON.stringify({ batch, scenes: images.length })}`];
+  for (const [position, { png, proof }] of captures.entries()) {
+    const image = images[position], encoded = png.toString("base64");
+    records.push(`${CATALOG_EVIDENCE_MARKER} DOM ${JSON.stringify({ batch, scene: image.scene, proof })}`);
+    for (let index = 0; index < image.chunks; index++) {
+      records.push(`${CATALOG_EVIDENCE_MARKER} CHUNK ${JSON.stringify({ batch, scene: image.scene,
+        index: index + 1, count: image.chunks, data: encoded.slice(index * 4096, (index + 1) * 4096) })}`);
+    }
+  }
+  records.push(`${CATALOG_EVIDENCE_MARKER} MANIFEST ${JSON.stringify({ batch, ...identity })}`);
+  if (records.some((record) => Buffer.byteLength(record) > 8192)
+    || records.reduce((total, record) => total + Buffer.byteLength(record) + 1, 0) > 1280 * 1024) {
+    throw new Error("Catalogue stdout evidence exceeds transport bound");
+  }
+  // Validate the complete batch before the first frame; propagate write failure.
+  for (const record of records) await new Promise<void>((resolve, reject) => {
+    process.stdout.write(`${record}\n`, (error) => error ? reject(error) : resolve());
+  });
+}
 
 // Real built app + isolated HTTP harness. Synthetic intercepted browser API data;
 // no browser clinical, inventory, payment, signature or other write reaches a server.
@@ -15,7 +104,8 @@ afterAll(async () => { await browser?.close(); });
 const patientId = 98301, visitId = 98302, doctorId = 98303;
 const clinicalPath = `/api/visits/${visitId}/clinical`;
 const services = [
-  { id: 98304, name: "خدمة حشو اصطناعية", category: "filling", priceMinor: 100, priceConfigured: true },
+  { id: 98304, name: "خدمة حشو اصطناعية", category: "filling", priceMinor: 100, priceConfigured: true,
+    priceIn: { SAR: { minor: 2500, source: "catalog" }, USD: { minor: 700, source: "converted" } } },
   { id: 98305, name: "خدمة بفئة مخصصة اصطناعية", category: "قسم مخصص", priceMinor: 0, priceConfigured: false },
   { id: 98306, name: "خدمة عامة اصطناعية", category: null, priceMinor: 200, priceConfigured: true },
   { id: 98307, name: "خدمة معطلة اصطناعية", category: "consultation", isActive: false, priceMinor: 100, priceConfigured: true },
@@ -128,41 +218,123 @@ describe("actual visit workspace choices and review", () => {
     } finally { await f.context.close(); }
   });
 
-  it("retains every active catalog category and unpriced choices through one keyboard-accessible action", async () => {
-    const f = await fixture(390);
+  it.each([390, 1280])("retains every active category in one searchable native grouped dropdown at %ipx", async (width) => {
+    const f = await fixture(width);
+    const captures: CatalogCapture[] = [];
     try {
       const { page } = f;
-      const add = page.getByRole("button", { name: "أضف إجراءً", exact: true });
-      expect(await add.count()).toBe(1); expect(await page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).count()).toBe(0);
-      await add.click();
-      const picker = page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true });
-      const search = picker.getByRole("textbox", { name: "بحث في الخدمات" });
-      // Let the modal finish its existing initial focus before testing Tab wrapping.
-      // Otherwise its 30ms focus timer can replace a correctly wrapped focus.
-      await expect.poll(() => search.evaluate((node) => document.activeElement === node)).toBe(true);
-      for (const service of services.filter((row) => row.isActive !== false)) expect(await picker.getByText(service.name, { exact: true }).count()).toBe(1);
-      expect(await picker.getByText(services[3].name, { exact: true }).count()).toBe(0);
-      const close = picker.getByRole("button", { name: "إغلاق", exact: true });
-      const finalLink = picker.getByRole("link", { name: /إدارة الأسعار/ });
-      await page.setViewportSize({ width: 390, height: 400 });
-      const footerBox = (await finalLink.boundingBox())!;
-      expect(footerBox.y).toBeGreaterThanOrEqual(0); expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(400);
-      await finalLink.focus(); await page.keyboard.press("Tab");
-      expect(await close.evaluate((node) => document.activeElement === node)).toBe(true);
-      await page.keyboard.press("Shift+Tab");
-      expect(await finalLink.evaluate((node) => document.activeElement === node)).toBe(true);
-      expect(await picker.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+      const add = page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+      const search = page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true });
+      expect(await add.count()).toBe(1);
+      expect(await page.getByRole("button", { name: "أضف إجراءً", exact: true }).count()).toBe(0);
+      expect(await page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true }).count()).toBe(0);
+      expect(await add.evaluate((node) => node.tagName)).toBe("SELECT");
+      for (const service of services.filter((row) => row.isActive !== false)) {
+        expect(await add.locator(`option[value="${service.id}"]`).count()).toBe(1);
+      }
+      expect(await add.locator(`option[value="${services[3].id}"]`).count()).toBe(0);
+      expect(await add.locator('option[value="manual"]').count()).toBe(0);
+      expect(await add.locator('optgroup[label*="قسم مخصص"]').count()).toBe(1);
+      expect(await add.locator('optgroup[label*="عام"]').count()).toBe(1);
+      captures.push(await captureCatalog(page, "grouped-closed"));
+      await search.fill("لا توجد خدمة بهذا الاسم");
+      expect(await add.locator("optgroup option").count()).toBe(0);
+      expect(await page.getByText("لا خدمة تطابق البحث.", { exact: true }).count()).toBe(1);
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(0);
       await search.fill(services[1].name);
-      const custom = picker.getByRole("button").filter({ hasText: services[1].name });
-      await custom.focus(); await custom.press("Enter");
-      await expect.poll(() => picker.count()).toBe(0);
-      expect(await page.getByTestId("visit-work-recorded").count()).toBe(1);
+      const choice = add.locator(`option[value="${services[1].id}"]`);
+      expect(await choice.textContent()).toContain("غير مُسعّر");
+      expect(await add.locator("optgroup option").count()).toBe(1);
+      captures.push(await captureCatalog(page, "search-filtered"));
+      // Native keyboard selection invokes the same callback as pointer selection.
+      await search.press("Tab");
+      expect(await add.evaluate((node) => document.activeElement === node)).toBe(true);
+      await add.press("ArrowDown");
+      await expect.poll(() => page.getByTestId("visit-work-recorded").count()).toBe(1);
       expect(await page.getByRole("textbox", { name: "السعر", exact: true }).inputValue()).toBe("0");
       expect(await field(page, "③ ما نُفّذ").inputValue()).toBe("ملاحظة الطبيب الأصلية");
-      await add.click(); await picker.getByRole("textbox", { name: "بحث في الخدمات" }).press("Escape");
-      expect(await add.evaluate((node) => document.activeElement === node)).toBe(true);
+      await search.fill("");
+      expect(await add.locator("optgroup option").count()).toBe(3);
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
       expect(f.writes).toHaveLength(0); f.verify();
     } finally { await f.context.close(); }
+    await emitCatalogEvidence(width, "catalogue", captures);
+  });
+
+  it.each([390, 1280])("keeps live YER/SAR/USD catalog prices and locked plan ownership at %ipx", async (width) => {
+    const f = await fixture(width);
+    const captures: CatalogCapture[] = [];
+    try {
+      const { page } = f;
+      const add = page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+      const search = page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true });
+      await page.getByTestId("planned-item-98400").getByRole("button", { name: "+ نفّذ اليوم", exact: true }).click();
+      const planned = page.getByTestId("visit-work-recorded").filter({ hasText: "من الخطة — سعرها من قاعدة البند" });
+      const plannedPrice = planned.getByRole("textbox", { name: "السعر", exact: true });
+      // Staging a plan before any free row adopts the plan currency, SAR.
+      // Re-selecting that currency is a no-op, not permission to erase a price.
+      const sar = page.getByRole("radio", { name: "ريال سعودي", exact: true });
+      expect(await sar.getAttribute("aria-checked")).toBe("true");
+      await add.selectOption(String(services[0].id));
+      const free = page.getByTestId("visit-work-recorded").filter({ hasText: "إجراء من الدليل" });
+      const freePrice = free.getByRole("textbox", { name: "السعر", exact: true });
+      await freePrice.fill("123");
+      await search.fill("لا توجد خدمة بهذا الاسم");
+      await search.fill("");
+      expect(await freePrice.inputValue()).toBe("123");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+      expect(f.writes).toHaveLength(0);
+      await sar.click();
+      expect(await freePrice.inputValue()).toBe("123");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await plannedPrice.isDisabled()).toBe(true);
+      expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(2500, "SAR"));
+      expect(await page.locator("#visit-procedures").textContent()).toContain(formatMoney(13300, "SAR"));
+      expect(f.writes).toHaveLength(0);
+      // Exercise real currency changes below. The existing explicit change
+      // handler reprices free drafts; it never reprices the linked plan row.
+      await page.getByRole("radio", { name: "ريال يمني", exact: true }).click();
+      expect(await freePrice.inputValue()).toBe("100");
+      expect(await plannedPrice.inputValue()).toBe("10.00");
+      expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(100, "YER"));
+      expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+      expect(f.writes).toHaveLength(0);
+      for (const [currency, label, minor, amount] of [
+        ["SAR", "ريال سعودي", 2500, "25.00"], ["USD", "دولار", 700, "7.00"], ["YER", "ريال يمني", 100, "100"],
+      ] as const) {
+        await page.getByRole("radio", { name: label, exact: true }).click();
+        expect(await page.getByRole("radio", { name: label, exact: true }).getAttribute("aria-checked")).toBe("true");
+        expect(await add.locator(`option[value="${services[0].id}"]`).textContent()).toContain(formatMoney(minor, currency));
+        expect(await freePrice.inputValue()).toBe(amount);
+        expect(await plannedPrice.inputValue()).toBe("10.00");
+        expect(await plannedPrice.isDisabled()).toBe(true);
+        expect(await planned.textContent()).toContain("الحالة #98501");
+        expect(await planned.textContent()).toContain("انتظار تقييم البند المرجعي #98502");
+        if (currency === "SAR") {
+          expect(await page.getByTestId("currency-subtotals").count()).toBe(0);
+          expect(await page.locator("#visit-procedures").textContent()).toContain(formatMoney(3500, "SAR"));
+        } else {
+          expect(await page.getByTestId("currency-subtotals").textContent()).toContain(formatMoney(1000, "SAR"));
+          expect(await page.getByTestId("currency-subtotals").textContent()).toContain(formatMoney(minor, currency));
+        }
+        if (currency !== "YER") expect(await add.locator(`option[value="${services[2].id}"]`).textContent()).toContain("لا سعر بهذه العملة");
+        expect(await page.getByTestId("visit-work-recorded").count()).toBe(2);
+        expect(await field(page, "③ ما نُفّذ").inputValue()).toBe("ملاحظة الطبيب الأصلية");
+        expect(f.writes).toHaveLength(0);
+        captures.push(await captureCatalog(page, `currency-${currency}`));
+      }
+      await page.getByRole("button", { name: "احفظ بلا توقيع", exact: true }).click();
+      await expect.poll(() => f.writes.length).toBe(1);
+      expect(f.writes[0].billingCurrency).toBe("YER");
+      expect(f.writes[0].procedures).toEqual([
+        expect.objectContaining({ planItemId: 98400, toothCode: 16, unitPriceMinor: 1000 }),
+        expect.objectContaining({ planItemId: null, serviceId: services[0].id, unitPriceMinor: 100 }),
+      ]);
+      f.verify();
+    } finally { await f.context.close(); }
+    await emitCatalogEvidence(width, "currency", captures);
   });
 
   it("keeps a staged plan item, its tooth, currency and unmet requirements together without marking clearance", async () => {

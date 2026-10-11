@@ -333,17 +333,12 @@ describe("real clinic role handoff on one synthetic patient", () => {
     await noteField(doctor.page, "① الشكوى الرئيسية").fill("فحص اصطناعي لا يخص مريضاً حقيقياً");
     await noteField(doctor.page, "② الفحص").fill("نتيجة فحص اصطناعية لاختبار انتقال السياق");
     await noteField(doctor.page, "② التشخيص").fill(`تشخيص اصطناعي خاص ${stamp}`);
-    await doctor.page.getByRole("button", { name: "أضف إجراءً", exact: true }).click();
-    const servicePicker = doctor.page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true });
-    await servicePicker.getByRole("textbox", { name: "بحث في الخدمات", exact: true }).fill(serviceName);
-    const serviceChoice = servicePicker.getByRole("button").filter({
-      has: doctor.page.getByText(serviceName, { exact: true }),
-    });
-    await serviceChoice.waitFor();
+    const servicePicker = doctor.page.getByRole("combobox", { name: "أضف إجراءً", exact: true });
+    await doctor.page.getByRole("searchbox", { name: "بحث في الخدمات", exact: true }).fill(serviceName);
+    const serviceChoice = servicePicker.locator(`option[value="${serviceId}"]`);
     expect(await serviceChoice.count()).toBe(1);
-    expect(await serviceChoice.innerText()).toContain(formatMoney(TOTAL, "YER"));
-    await serviceChoice.click();
-    await servicePicker.waitFor({ state: "hidden" });
+    expect(await serviceChoice.textContent()).toContain(formatMoney(TOTAL, "YER"));
+    await servicePicker.selectOption(String(serviceId));
     const recorded = doctor.page.getByTestId("visit-work-recorded");
     expect(await recorded.count()).toBe(1);
     expect(await recorded.getByText(serviceName, { exact: true }).count()).toBe(1);
