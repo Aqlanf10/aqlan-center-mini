@@ -1,8 +1,10 @@
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {chromium,type APIResponse,type Browser,type BrowserContext,type Page} from "playwright";
 import {Pool} from "pg";
-import {mkdirSync} from "node:fs";
+import {mkdirSync,readFileSync,writeFileSync} from "node:fs";
 import {join} from "node:path";
+import {createHash} from "node:crypto";
+import {fileURLToPath} from "node:url";
 import {execFileSync} from "node:child_process";
 import {harness,type Harness} from "./_server";
 import {formatAmount,parseAmount,type Currency} from "@/lib/money";
@@ -497,6 +499,47 @@ async function openContractsPanel(page:Page){
    }finally{await page.close();}
  },120000);
 
+// Isolated CI-only observations. No forced clicks, sleeps, changed assertions,
+// altered deadlines, or application behavior. Files contain synthetic UI data only.
+async function contractUiDiagnostic(page:Page,caseKey:string){
+ const directory=process.env.HR_UI_DIAGNOSTIC_DIR;
+ if(!directory)return {phase:(_name:string)=>{},witness:async(_label:string)=>{},capture:async(_reason:string)=>{},finish:()=>{},beforeClose:async()=>{},onFailure:async()=>{}};
+ const reportPath=join(directory,`${caseKey}.json`),imagePath=join(directory,`${caseKey}.png`);
+ const events:Array<Record<string,unknown>>=[];
+ const report:Record<string,unknown>={protocol:1,synthetic:true,acceptance:false,caseKey,sourceBaseBlob:"325b63eec2b75af373655710fd480ea67db12f8f",sourceSha256:createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex"),githubSha:process.env.GITHUB_SHA??null,runId:process.env.GITHUB_RUN_ID??null,runAttempt:process.env.GITHUB_RUN_ATTEMPT??null,viewport:page.viewportSize(),phase:"page-created",completed:false,events};
+ let completed=false,failed=false,capturePromise:Promise<void>|undefined;
+ const short=(value:unknown)=>String(value).slice(0,600);
+ const persist=()=>{try{mkdirSync(directory,{recursive:true});writeFileSync(reportPath,JSON.stringify(report,null,2)+"\n");}catch(error){console.warn("HR_CONTRACT_DIAGNOSTIC_WRITE_FAILED",caseKey,short(error));}};
+ const record=(kind:string,detail:Record<string,unknown>={})=>{const event={kind,phase:report.phase,...detail};const retained=events.length<64;if(retained)events.push(event);persist();if(retained)console.info("HR_CONTRACT_UI_DIAGNOSTIC",JSON.stringify({caseKey,...event}));};
+ const bounded=async<T,>(work:Promise<T>,milliseconds:number):Promise<T>=>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Diagnostic observation timed out")),milliseconds);})]);}finally{if(timer)clearTimeout(timer);}};
+ const owns=(url:string)=>{try{const parsed=new URL(url);return parsed.origin===baseUrl&&/^\/api\/hr\/contracts(?:\/\d+)?$/.test(parsed.pathname);}catch{return false;}};
+ page.on("request",request=>{
+  if(!owns(request.url())||!["POST","PATCH"].includes(request.method()))return;
+  let payload:Record<string,unknown>={};
+  try{const body=request.postDataJSON() as Record<string,unknown>;for(const key of ["staffId","templateKind","compensationKind","startDate","endDate","probationEndDate","salaryCurrency","salaryPeriod","baseSalaryMinor","commissionRatePercent","doctorPartyId","action","status"]){const value=body?.[key];if(value===null||typeof value==="number"||typeof value==="boolean")payload[key]=value;else if(typeof value==="string")payload[key]=value.slice(0,80);}if(typeof body?.title==="string")payload.title=/^HR-(TEMPLATE|MONEY)-/.test(body.title)?body.title.slice(0,100):"[redacted]";}catch{payload={parseFailure:true};}
+  record("request",{method:request.method(),path:new URL(request.url()).pathname,payload});
+ });
+ page.on("response",response=>{if(owns(response.url()))record("response",{method:response.request().method(),path:new URL(response.url()).pathname,status:response.status()});});
+ page.on("requestfailed",request=>{if(owns(request.url()))record("request-failed",{method:request.method(),path:new URL(request.url()).pathname,error:short(request.failure()?.errorText??"unknown")});});
+ // A passive CDP observer preserves Playwright's existing dialog handling.
+ // A page.on('dialog') listener would itself stop automatic dismissal.
+ try{const session=await bounded(page.context().newCDPSession(page),1500);session.on("Page.javascriptDialogOpening",event=>record("javascript-dialog",{type:event.type,message:short(event.message)}));await bounded(session.send("Page.enable"),1500);}catch(error){record("dialog-observer-unavailable",{error:short(error)});}
+ const witness=async(label:string)=>{
+  try{const geometry=await bounded(page.evaluate(()=>{
+   const rect=(element:Element|null)=>{if(!element)return null;const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,top:r.top,bottom:r.bottom,left:r.left,right:r.right};};
+   const dialog=Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]")).find(node=>Array.from(node.querySelectorAll("h3")).some(heading=>["إنشاء عقد وظيفي جديد","استكمال / تعديل المسودة"].includes(heading.textContent?.trim()??"")))??null;
+   const form=dialog?.querySelector("form")??null;
+   const controls=Array.from(form?.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>("input,select,textarea")??[]).map(node=>({tag:node.tagName,type:node.type,label:node.getAttribute("aria-label"),required:node.required,disabled:node.disabled,valid:node.validity.valid,validationMessage:node.validationMessage.slice(0,160),...(node.getAttribute("aria-label")==="تاريخ البدء"?{dateValue:node.value}:{})}));
+   const buttons=Array.from(form?.querySelectorAll<HTMLButtonElement>("fieldset button,button[type='submit']")??[]).map(button=>{const r=button.getBoundingClientRect();const cx=r.x+r.width/2,cy=r.y+r.height/2;const hit=cx>=0&&cy>=0&&cx<innerWidth&&cy<innerHeight?document.elementFromPoint(cx,cy):null;return {name:button.textContent?.trim().slice(0,100),disabled:button.disabled,rect:rect(button),centerInViewport:cx>=0&&cy>=0&&cx<innerWidth&&cy<innerHeight,centerReceivesEvents:Boolean(hit&&(hit===button||button.contains(hit)))};});
+   const style=dialog?getComputedStyle(dialog):null;
+   return {viewport:{width:innerWidth,height:innerHeight},openDialogCount:document.querySelectorAll("dialog[open]").length,dialog:rect(dialog),form:rect(form),scroll:dialog?{top:dialog.scrollTop,left:dialog.scrollLeft,height:dialog.scrollHeight,width:dialog.scrollWidth,clientHeight:dialog.clientHeight,clientWidth:dialog.clientWidth}:null,style:style?{display:style.display,alignItems:style.alignItems,overflowY:style.overflowY,height:style.height,paddingTop:style.paddingTop,paddingBottom:style.paddingBottom}:null,buttons,controls,activeElement:{tag:document.activeElement?.tagName,label:document.activeElement?.getAttribute("aria-label")??null}};
+  }),2000);report[label]=geometry;record("geometry",{label,geometry});}catch(error){record("geometry-unavailable",{label,error:short(error)});}
+ };
+ const capture=(reason:string)=>{if(!capturePromise){failed=true;report.failurePhase=report.phase;capturePromise=(async()=>{record("failure-capture",{reason});await witness("failureGeometry");try{await page.screenshot({path:imagePath,fullPage:false,timeout:3000});report.image=`${caseKey}.png`;record("failure-image-saved");}catch(error){record("failure-image-unavailable",{error:short(error)});}persist();})();}return capturePromise;};
+ persist();
+ return {phase:(name:string)=>{if(failed)return;report.phase=name;record("phase");},witness,capture,finish:()=>{if(failed)return;completed=true;report.completed=true;record("complete");},beforeClose:async()=>{if(!completed)await capture("test did not reach completion before finally");},onFailure:async()=>{await capture("Vitest onTestFailed");try{await page.close();}catch(error){record("failure-cleanup-unavailable",{error:short(error)});}}};
+}
+
 // Real template buttons -> canonical writer -> browser reopen -> print.
 const contractTemplateCases=[
  {button:"عقد موظف مساند (راتب)",kind:"support_staff",pay:"salary"},
@@ -506,42 +549,43 @@ const contractTemplateCases=[
  {button:"فترة تجربة",kind:"support_staff",pay:"salary"},
 ] as const;
 for(const [index,template] of contractTemplateCases.entries()){
- it(`creates and reopens the actual ${template.kind}/${index} template with unknown wages intact`,async()=>{
+ it(`creates and reopens the actual ${template.kind}/${index} template with unknown wages intact`,async({onTestFailed})=>{
   const name=`HR-TEMPLATE-${index}-${Date.now()}`;
   const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"Synthetic template",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});expect(staff.status).toBe(201);
-  const page=await context.newPage();try{
-   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
+  const page=await context.newPage();const diagnostic=await contractUiDiagnostic(page,`contract-template-${index}`);onTestFailed(diagnostic.onFailure);try{
+   diagnostic.phase("open-hr-page");await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});diagnostic.phase("open-contracts-panel");await openContractsPanel(page);diagnostic.phase("open-create-modal");await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();await diagnostic.witness("openedGeometry");
    const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});
-   await form.getByRole("button",{name:template.button,exact:true}).click();
+   diagnostic.phase("choose-template");await form.getByRole("button",{name:template.button,exact:true}).click();diagnostic.phase("verify-template-empty-terms");
    expect(await form.getByLabel("نوع العقد",{exact:true}).inputValue()).toBe(template.kind);
    for(const label of ["الراتب الأساسي","نسبة الطبيب (%)","أجر الساعة","ساعات العمل أسبوعياً","عملة الأجر","دورية الراتب","نهاية فترة التجربة"])expect(await form.getByLabel(label,{exact:true}).inputValue()).toBe("");
-   await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
-   const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();const response=await saved;expect(response.status()).toBe(201);const contract=await response.json();
+   diagnostic.phase("select-staff");await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));diagnostic.phase("fill-title");await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
+   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response");expect(response.status()).toBe(201);const contract=await response.json();
    expect(contract.templateKind).toBe(template.kind);expect(contract.compensationKind).toBe(template.pay);
    for(const key of ["baseSalaryMinor","salaryCurrency","salaryPeriod","commissionRatePercent","doctorPartyId","probationEndDate"])expect(contract[key]).toBeNull();
    expect(contract.status).toBe("draft");expect(contract.termsPayload.clauses).toEqual([]);expect(contract.termsPayload.workingHoursPerWeek).toBeNull();
    expect((await api("PATCH",`/api/hr/contracts/${contract.id}`,{action:"transition",status:"approved"})).status).toBe(409);
-   await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);const row=page.locator("tbody tr").filter({hasText:name});await row.getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+   diagnostic.phase("reload-contract-list");await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);const row=page.locator("tbody tr").filter({hasText:name});await row.getByRole("button",{name:"عرض وتعديل",exact:true}).click();
    await expect.poll(()=>page.getByRole("status").filter({hasText:"شروط الأجر غير مكتملة"}).count()).toBe(1);
    const persisted=(await db.query("SELECT * FROM hr_contracts WHERE id=$1",[contract.id])).rows[0];expect(persisted.base_salary_minor).toBeNull();expect(persisted.commission_rate_percent).toBeNull();expect(persisted.approved_at).toBeNull();
-   await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});await expect.poll(()=>page.textContent("body")).toContain("شروط الأجر غير مكتملة");expect(await page.textContent("body")).toContain("مسودة عقد عمل غير معتمدة");
+   diagnostic.phase("print-contract");await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});await expect.poll(()=>page.textContent("body")).toContain("شروط الأجر غير مكتملة");expect(await page.textContent("body")).toContain("مسودة عقد عمل غير معتمدة");
    if(index===0){
     await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
-    await page.getByRole("button",{name:"استكمال / تعديل المسودة",exact:true}).click();
+    diagnostic.phase("open-draft-editor");await page.getByRole("button",{name:"استكمال / تعديل المسودة",exact:true}).click();
     const editor=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"استكمال / تعديل المسودة",exact:true})});
     expect(await editor.getByLabel("الراتب الأساسي",{exact:true}).inputValue()).toBe("");expect(await editor.getByLabel("نوع العقد",{exact:true}).isDisabled()).toBe(true);
     await editor.getByLabel("عملة الأجر",{exact:true}).selectOption("SAR");await editor.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await editor.getByLabel("الراتب الأساسي",{exact:true}).fill("123.45");
-    const updated=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await editor.getByRole("button",{name:"حفظ العقد",exact:true}).click();expect((await updated).status()).toBe(200);
-    await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+    await diagnostic.witness("beforeDraftSaveGeometry");diagnostic.phase("save-draft-update");const updated=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await editor.getByRole("button",{name:"حفظ العقد",exact:true}).click();expect((await updated).status()).toBe(200);
+    diagnostic.phase("reload-contract-list");await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
     await expect.poll(()=>page.getByRole("dialog").innerText()).toContain(formatAmount(12345,"SAR"));
     await page.getByRole("button",{name:"تغيير الحالة",exact:true}).click();const statusDialog=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"تغيير حالة العقد",exact:true})});await statusDialog.getByRole("combobox").selectOption("approved");
-    const approved=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await statusDialog.getByRole("button",{name:"تأكيد التغيير",exact:true}).click();expect((await approved).status()).toBe(200);
+    diagnostic.phase("approve-completed-draft");const approved=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await statusDialog.getByRole("button",{name:"تأكيد التغيير",exact:true}).click();expect((await approved).status()).toBe(200);
     await expect.poll(()=>page.getByRole("button",{name:"استكمال / تعديل المسودة",exact:true}).count()).toBe(0);
     const final=(await api("GET",`/api/hr/contracts/${contract.id}`)).body.contract;expect(final.status).toBe("approved");expect(final.baseSalaryMinor).toBe(12345);expect(final.salaryCurrency).toBe("SAR");expect(final.signedAt).toBeNull();
-    await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});await expect.poll(()=>page.textContent("body")).toContain(formatAmount(12345,"SAR"));
+    diagnostic.phase("print-contract");await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});await expect.poll(()=>page.textContent("body")).toContain(formatAmount(12345,"SAR"));
    }
 
-  }finally{await page.close();}
+  diagnostic.finish();
+  }finally{await diagnostic.beforeClose();await page.close();}
  },120000);
 }
 for(const scenario of [
@@ -550,22 +594,23 @@ for(const scenario of [
  {button:"عقد مختلط (راتب ونسبة)",currency:"SAR",amount:"123.45",rate:"12.5"},
  {button:"عقد طبيب (راتب)",currency:"USD",amount:"98.76",rate:""},
 ]){
- it(`retains explicit ${scenario.button}/${scenario.currency} amounts through UI save, reopen and print`,async()=>{
+ it(`retains explicit ${scenario.button}/${scenario.currency} amounts through UI save, reopen and print`,async({onTestFailed})=>{
   const name=`HR-MONEY-${scenario.currency||"RATE"}-${Date.now()}`;
   const staff=await api("POST","/api/hr/staff",{fullName:name,department:"secretariat",jobTitle:"Synthetic contract money",hireDate:"2026-01-01",endDate:null,phone:null,note:null,workStatus:"active",contractKind:"salary",salaryAmountMinor:10000,salaryCurrency:"YER",salaryPeriod:"monthly",salaryEffectiveOn:"2026-01-01"});expect(staff.status).toBe(201);
-  const page=await context.newPage();try{
-   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();
-   const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});await form.getByRole("button",{name:scenario.button,exact:true}).click();await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
-   if(scenario.amount){await form.getByLabel("عملة الأجر",{exact:true}).selectOption(scenario.currency);await form.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await form.getByLabel("الراتب الأساسي",{exact:true}).fill(scenario.amount);}
+  const page=await context.newPage();const diagnostic=await contractUiDiagnostic(page,`contract-money-${scenario.currency||"RATE"}`);onTestFailed(diagnostic.onFailure);try{
+   diagnostic.phase("open-hr-page");await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});diagnostic.phase("open-contracts-panel");await openContractsPanel(page);diagnostic.phase("open-create-modal");await page.getByRole("button",{name:/إنشاء عقد جديد/}).click();await diagnostic.witness("openedGeometry");
+   const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});diagnostic.phase("choose-template");await form.getByRole("button",{name:scenario.button,exact:true}).click();diagnostic.phase("select-staff");await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));diagnostic.phase("fill-title");await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
+   diagnostic.phase("fill-explicit-money");if(scenario.amount){await form.getByLabel("عملة الأجر",{exact:true}).selectOption(scenario.currency);await form.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await form.getByLabel("الراتب الأساسي",{exact:true}).fill(scenario.amount);}
    if(scenario.rate)await form.getByLabel("نسبة الطبيب (%)",{exact:true}).fill(scenario.rate);
-   const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();const response=await saved;expect(response.status()).toBe(201);const contract=await response.json();
+   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response");expect(response.status()).toBe(201);const contract=await response.json();
    const minor=scenario.amount?parseAmount(scenario.amount,scenario.currency as Currency):null;
    expect(contract.baseSalaryMinor).toBe(minor);expect(contract.salaryCurrency).toBe(scenario.currency||null);expect(contract.commissionRatePercent).toBe(scenario.rate?Number(scenario.rate):null);
-   await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+   diagnostic.phase("reload-contract-list");await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
    const details=page.getByRole("dialog");if(minor!==null)await expect.poll(()=>details.innerText()).toContain(formatAmount(minor,scenario.currency as Currency));if(scenario.rate)await expect.poll(()=>details.innerText()).toContain(`${scenario.rate}%`);
    const persisted=(await api("GET",`/api/hr/contracts/${contract.id}`)).body.contract;expect(persisted.baseSalaryMinor).toBe(minor);expect(persisted.salaryCurrency).toBe(scenario.currency||null);expect(persisted.commissionRatePercent).toBe(scenario.rate?Number(scenario.rate):null);
-   await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});if(minor!==null)await expect.poll(()=>page.textContent("body")).toContain(formatAmount(minor,scenario.currency as Currency));if(scenario.rate)await expect.poll(()=>page.textContent("body")).toContain(`${scenario.rate}%`);
+   diagnostic.phase("print-contract");await page.goto(`${baseUrl}/print/hr/contracts/${contract.id}`,{waitUntil:"domcontentloaded"});if(minor!==null)await expect.poll(()=>page.textContent("body")).toContain(formatAmount(minor,scenario.currency as Currency));if(scenario.rate)await expect.poll(()=>page.textContent("body")).toContain(`${scenario.rate}%`);
    expect((await db.query("SELECT base_salary_minor::text AS amount,salary_currency,commission_rate_percent::text AS rate FROM hr_contracts WHERE id=$1",[contract.id])).rows[0]).toEqual({amount:minor===null?null:String(minor),salary_currency:scenario.currency||null,rate:scenario.rate?Number(scenario.rate).toFixed(2):null});
-  }finally{await page.close();}
+  diagnostic.finish();
+  }finally{await diagnostic.beforeClose();await page.close();}
  },120000);
 }

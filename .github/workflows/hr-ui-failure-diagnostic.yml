@@ -1,0 +1,100 @@
+name: HR UI failure diagnostic
+
+on:
+  push:
+    branches: [feat/hr-staff-tasks-phase1]
+    paths:
+      - ".github/workflows/hr-ui-failure-diagnostic.yml"
+  workflow_dispatch:
+
+# Additive diagnosis only. Mandatory full CI remains unchanged and required.
+permissions:
+  contents: read
+concurrency:
+  group: hr-ui-failure-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  focused:
+    name: HR diagnostic / ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - group: contracts
+            file: hr-payroll-journey.test.ts
+          - group: tasks
+            file: hr-task-create-replay.test.ts
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+    steps:
+      - name: Check out exact diagnostic source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm install -g npm@11
+          npm ci
+      - name: Verify unchanged environment contract
+        run: npm run verify:environment
+      - name: Typecheck diagnostic source
+        run: npm run typecheck
+      - name: Build exact source
+        run: npm run build
+      - name: Install Chromium and PDF inspection
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends poppler-utils
+      - name: Record exact source provenance
+        env:
+          HR_DIAGNOSTIC_GROUP: ${{ matrix.group }}
+        run: |
+          mkdir -p "$HR_UI_DIAGNOSTIC_DIR"
+          git rev-parse HEAD > "$HR_UI_DIAGNOSTIC_DIR/checkout.txt"
+          git rev-parse HEAD^{tree} > "$HR_UI_DIAGNOSTIC_DIR/tree.txt"
+          printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$HR_DIAGNOSTIC_GROUP" > "$HR_UI_DIAGNOSTIC_DIR/run.txt"
+          sha256sum __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-task-create-replay.test.ts components/hr/ContractsPanel.tsx components/hr/TasksPanel.tsx components/Modal.tsx .github/workflows/hr-ui-failure-diagnostic.yml > "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+      - name: Run full owned file with original assertions and deadlines
+        env:
+          HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
+        run: |
+          set -o pipefail
+          npm run test:security-http -- "__tests__/security-http/$HR_DIAGNOSTIC_FILE" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+      - name: Retain bounded synthetic failure witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-ui-failure-diagnostic-${{ matrix.group }}
+          path: ${{ runner.temp }}/hr-ui-diagnostic/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
