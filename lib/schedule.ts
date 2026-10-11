@@ -406,3 +406,15 @@ export function distributeAppointmentsToChairs(
   return chairs;
 }
 
+
+/** Convert a clinic wall clock to an instant; reject DST gaps instead of silently shifting them. */
+export function clinicLocalDateTimeToIso(date: string, time: string, timeZone: string): string {
+  const wall = new Date(`${date}T${time}:00Z`);
+  if (!Number.isFinite(wall.getTime())) throw new Error("Invalid clinic date/time");
+  const parts = (instant: Date) => new Intl.DateTimeFormat("en-CA", {timeZone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(instant);
+  const clock = (instant: Date) => { const p = Object.fromEntries(parts(instant).map(x=>[x.type,x.value])); return Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second)); };
+  let candidate = wall.getTime();
+  for (let i=0;i<3;i++) candidate += wall.getTime()-clock(new Date(candidate));
+  if (clock(new Date(candidate)) !== wall.getTime()) throw new Error("Clinic time does not exist");
+  return new Date(candidate).toISOString();
+}

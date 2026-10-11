@@ -7,16 +7,30 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
-  const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
-  if (files.length < 40 || files.length > 43) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
+  const invoiceSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
+  const hrSuffixes = [
+    "0045_hr_staff.sql",
+    "0046_hr_tasks.sql",
+    "0048_hr_contracts_attendance_leaves.sql",
+    "0049_hr_payroll_disbursements.sql",
+    "0050_hr_payroll_integrity.sql",
+  ];
+  // 0001–0043 قاعدة main المتصلة، ثم لاحقة الموارد البشرية مع الفجوتين المعلنتين:
+  // الفجوة 0044 محجوزة لفواتير #301 والفجوة 0047 محجوزة لسيفالو #319.
+  // فيأخذ المرشّح البيريودنتالي التجريبي فجوة 0044.
   files.forEach((file, index) => {
-    const expected = String(index + 1).padStart(4, "0");
-    if (file.version !== expected) throw new Error("Shipped migration chain is missing, reordered or duplicated.");
-    if (index >= 40 && file.filename !== expectedSuffixes[index - 40]) {
+    const expectedVersion = String(index + 1 + (index >= 43 ? 1 : 0) + (index >= 45 ? 1 : 0)).padStart(4, "0");
+    if (file.version !== expectedVersion) throw new Error("Shipped migration chain is missing, reordered or duplicated.");
+    if (index >= 40 && index < 43 && file.filename !== invoiceSuffixes[index - 40]) {
+      throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
+    }
+    if (index >= 43 && file.filename !== hrSuffixes[index - 43]) {
       throw new Error("Unreviewed shipped migration suffix for periodontal candidate.");
     }
   });
-  return ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044" } as const)[files.length as 40 | 41 | 42 | 43];
+  const candidate: string | undefined = ({ 40: "0041", 41: "0042", 42: "0043", 43: "0044", 45: "0044", 47: "0044", 48: "0044" } as const)[files.length];
+  if (!candidate) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
+  return candidate;
 }
 
 const NAME = /^aqlan_perio_[a-f0-9]{32}(?![\s\S])/;

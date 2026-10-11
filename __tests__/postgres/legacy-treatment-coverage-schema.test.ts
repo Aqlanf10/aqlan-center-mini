@@ -1,6 +1,6 @@
 import type { DbPool, DbClient } from "../../lib/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadMigrationFiles, migrate } from "../../lib/migrations";
+import { COORDINATED_MIGRATION_VERSIONS, loadMigrationFiles, migrate } from "../../lib/migrations";
 import { legacyCoverageStateFromSnapshot } from "../../lib/legacy-treatment-coverage";
 import { openPeriodontalFixture } from "./_periodontal-fixture";
 
@@ -48,9 +48,17 @@ async function insertSnapshot(client: DbPool | DbClient, agreement: Agreement, p
 beforeAll(async () => {
   fixture = await openPeriodontalFixture(process.env, { pristine: true });
   const files = await loadMigrationFiles();
-  expect(files).toHaveLength(43);
+  // السلسلة المنسّقة: 0001–0043 ثم لاحقة الموارد البشرية 0045–0049 (فجوتا 0044 و 0047 معلنتان).
+  expect(files.map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
   expect(files.slice(40).map((file) => file.filename)).toEqual([
-    "0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
+    "0041_invoice_clinical_linkage.sql",
+    "0042_legacy_treatment_agreements.sql",
+    "0043_legacy_treatment_coverage.sql",
+    "0045_hr_staff.sql",
+    "0046_hr_tasks.sql",
+    "0048_hr_contracts_attendance_leaves.sql",
+    "0049_hr_payroll_disbursements.sql",
+    "0050_hr_payroll_integrity.sql",
   ]);
   await migrate(pool(), { apply: true, files: files.slice(0, 42) });
   old = await seedAgreement(pool());
@@ -66,7 +74,7 @@ describe("additive immutable coverage on an owned PostgreSQL18 fixture", () => {
     expect(row.facts).toEqual(oldFacts);
     expect(row.snapshot).toBeNull();
     expect(legacyCoverageStateFromSnapshot(row.snapshot, expected(old))).toEqual({ kind: "unknown", reason: "missing_snapshot" });
-    expect((await pool().query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count).toBe(43);
+    expect((await pool().query("SELECT COUNT(*)::int AS count FROM schema_migrations")).rows[0].count).toBe(COORDINATED_MIGRATION_VERSIONS.length);
     expect((await pool().query("SELECT to_regclass('public.periodontal_records')::text AS relation")).rows[0].relation).toBeNull();
   });
   it("keeps one complete snapshot with an actual recording time and no additional financial rows", async () => {

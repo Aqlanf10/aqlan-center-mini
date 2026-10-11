@@ -1,0 +1,46 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-payroll-journey.test.ts -t older payroll fetch
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts (17 tests | 2 failed | 15 skipped) 36014ms
+   × an older payroll fetch cannot replace the newly selected period at 390px 5513ms
+   × an older payroll fetch cannot replace the newly selected period at 1280px 4443ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > an older payroll fetch cannot replace the newly selected period at 390px
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > an older payroll fetch cannot replace the newly selected period at 1280px
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:397:33
+    395|    await page.waitForLoadState("networkidle");
+    396|    expect(await page.locator('section[aria-label="إدارة المسير والصرف"…
+    397|    expect(await marker.count()).toBe(1);
+       |                                 ^
+    398|    await page.screenshot({path:join(evidence,`hr-payroll-period-race-$…
+    399|   }finally{release();await fixture.close();}
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 skipped (17)
+   Start at  23:35:07
+   Duration  51.24s (transform 412ms, setup 0ms, import 1.76s, tests 36.01s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

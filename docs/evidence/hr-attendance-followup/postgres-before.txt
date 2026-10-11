@@ -1,0 +1,192 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-workforce-integrity.test.ts
+
+
+ RUN  v4.1.11 /tmp/hr-followup-baseline
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+(node:221408) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts (22 tests | 10 failed) 52323ms
+   × a correction remains pending and leaves raw and actual punches unchanged until another admin approves 1761ms
+   × repeated completed night checkout stays on its original shift and does not block the next checkin 1374ms
+   × approved missing check_in is never promoted to raw by replaying the opposite real punch 1236ms
+   × approved missing check_out is never promoted to raw by replaying the opposite real punch 1210ms
+   × cancelling leave with a pending correction clears operational leave and returns balance only once 1346ms
+   × cancelling leave with a rejected correction clears operational leave and returns balance only once 868ms
+   × cancelling leave with a approved correction clears operational leave and returns balance only once 1622ms
+   × a completed legacy night record without event rows matches an exact stored raw checkout 1223ms
+   × a retained cancelled-leave record acquires its real night schedule on the first punch 1509ms
+   × the first real checkout after an approved missing night checkout supplies only raw evidence to that shift 1645ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > a correction remains pending and leaves raw and actual punches unchanged until another admin approves
+AssertionError: promise resolved "{ id: 1, attendanceId: 1, …(16) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "approvedAt": "2026-10-10T21:07:10.586Z",
++   "approvedBy": "work-reviewer",
++   "attendanceId": 1,
++   "createdAt": "2026-10-10T21:07:10.552Z",
++   "decisionReason": null,
++   "fieldCorrected": "check_in",
++   "id": 1,
++   "newCheckIn": "2026-08-01T06:00:00.000Z",
++   "newCheckOut": null,
++   "newStatus": "present",
++   "oldCheckIn": "2026-08-01T05:00:00.000Z",
++   "oldCheckOut": "2026-08-01T13:00:00.000Z",
++   "oldStatus": "present",
++   "reason": "Correction fixture",
++   "requestedBy": "work-admin",
++   "staffId": 1,
++   "staffName": "Workforce fixture",
++   "status": "approved",
+  }
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:31:84
+     29|  await work.decideAttendanceCorrection(correction.id,"approved",null,r…
+     30|  const approved=(await work.listAttendanceRecords({staffId}))[0];expec…
+     31|  await expect(work.decideAttendanceCorrection(correction.id,"approved"…
+       |                                                                                    ^
+     32| });
+     33| it("a night shift checkout joins its prior clinic date and preserves b…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > repeated completed night checkout stays on its original shift and does not block the next checkin
+AssertionError: expected 3 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 3
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:138:20
+    136|  await work.recordAttendancePunch({staffId,punchType:"check_out",punch…
+    137|  const replay=await work.recordAttendancePunch({staffId,punchType:"che…
+    138|  expect(replay.id).toBe(first.id);expect(await work.listAttendanceReco…
+       |                    ^
+    139|  const next=await work.recordAttendancePunch({staffId,punchType:"check…
+    140|  expect(next.attendanceDate).toBe("2026-08-02");expect(next.checkOutRa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > approved missing check_in is never promoted to raw by replaying the opposite real punch
+AssertionError: expected '2026-08-01T05:00:00.000Z' to be null
+
+- Expected:
+null
+
++ Received:
+"2026-08-01T05:00:00.000Z"
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:151:69
+    149|   await work.decideAttendanceCorrection(correction.id,"approved",null,…
+    150|   const replay=await work.recordAttendancePunch({staffId,punchType:opp…
+    151|   expect(missing==="check_in"?replay.checkInRaw:replay.checkOutRaw).to…
+       |                                                                     ^
+    152|   expect((await db.getPool().query("SELECT count(*)::int AS n FROM hr_…
+    153|   // The first actual evidence differs from the approved correction an…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > approved missing check_out is never promoted to raw by replaying the opposite real punch
+AssertionError: expected '2026-08-01T13:00:00.000Z' to be null
+
+- Expected:
+null
+
++ Received:
+"2026-08-01T13:00:00.000Z"
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:151:69
+    149|   await work.decideAttendanceCorrection(correction.id,"approved",null,…
+    150|   const replay=await work.recordAttendancePunch({staffId,punchType:opp…
+    151|   expect(missing==="check_in"?replay.checkInRaw:replay.checkOutRaw).to…
+       |                                                                     ^
+    152|   expect((await db.getPool().query("SELECT count(*)::int AS n FROM hr_…
+    153|   // The first actual evidence differs from the approved correction an…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > cancelling leave with a pending correction clears operational leave and returns balance only once
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > cancelling leave with a rejected correction clears operational leave and returns balance only once
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > cancelling leave with a approved correction clears operational leave and returns balance only once
+AssertionError: expected 'on_leave' not to be 'on_leave' // Object.is equality
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:177:71
+    175|   await work.decideLeaveRequest(leave.id,"cancelled","Cancelled",revie…
+    176|   await work.decideLeaveRequest(leave.id,"cancelled","Repeated cancell…
+    177|   expect((await work.listAttendanceRecords({staffId}))[0].status).not.…
+       |                                                                       ^
+    178|   expect((await work.listLeaveBalances(staffId,2026))[0]).toMatchObjec…
+    179|   expect((await db.getPool().query("SELECT status FROM hr_attendance_c…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > a completed legacy night record without event rows matches an exact stored raw checkout
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:189:20
+    187|  const old=await work.recordAttendance({staffId,attendanceDate:"2026-0…
+    188|  const replay=await work.recordAttendancePunch({staffId,punchType:"che…
+    189|  expect(replay.id).toBe(old.id);expect(replay.checkInRaw).toBe(old.che…
+       |                    ^
+    190|  const next=await work.recordAttendancePunch({staffId,punchType:"check…
+    191| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > a retained cancelled-leave record acquires its real night schedule on the first punch
+Error: يوجد طلب إجازة معتمد؛ راجعه قبل تسجيل حضور.
+ ❯ lib/hr-contracts-attendance.ts:938:43
+    936|       ORDER BY ar.attendance_date ASC LIMIT 1 FOR UPDATE OF ar`,[staff…
+    937|     const row = prior.rows[0];
+    938|     if (row?.status === 'on_leave') throw new Error("يوجد طلب إجازة مع…
+       |                                           ^
+    939|     const attendanceDate = row?.attendance_date instanceof Date ? row.…
+    940|     const checkIn = row?.check_in_actual ? new Date(row.check_in_actua…
+ ❯ withTransaction lib/transactions.ts:28:20
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:201:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯
+
+ FAIL  __tests__/postgres/hr-workforce-integrity.test.ts > the first real checkout after an approved missing night checkout supplies only raw evidence to that shift
+AssertionError: expected '2026-08-02T03:15:00.000Z' to be null
+
+- Expected:
+null
+
++ Received:
+"2026-08-02T03:15:00.000Z"
+
+ ❯ __tests__/postgres/hr-workforce-integrity.test.ts:212:151
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/10]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  10 failed | 12 passed (22)
+   Start at  21:06:49
+   Duration  56.89s (transform 9.77s, setup 0ms, import 1.01s, tests 52.32s, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

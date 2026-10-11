@@ -1,0 +1,78 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-payroll-journey.test.ts -t keyless legacy reversal
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts (21 tests | 2 failed | 19 skipped) 42736ms
+   × a confirmed keyless legacy reversal is recovered without inventing a request key at 390px 6056ms
+   × a confirmed keyless legacy reversal is recovered without inventing a request key at 1280px 5816ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > a confirmed keyless legacy reversal is recovered without inventing a request key at 390px
+AssertionError: expected 'HR-CONFIRM-keyless-390\nاختبار تأكيد …' to contain 'معكوس:'
+
+- Expected
++ Received
+
+- معكوس:
++ HR-CONFIRM-keyless-390
++ اختبار تأكيد صرف
++ 	10,000	0	—	9,000	—	10,000	1,000	مسدد جزئيًا	صرف
++ سند الراتب #1
++ عكس الصرف #1
+
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:444:43
+    442|    await row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:tr…
+    443|    const reversed=(await response.json()).disbursement;expect(reversed…
+    444|    await expect.poll(()=>row.innerText()).toContain("معكوس:");
+       |                                           ^
+    445|    await expect.poll(()=>page.evaluate(id=>localStorage.getItem(`hr:pa…
+    446|    expect((await db.query("SELECT client_request_id FROM hr_payroll_di…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:444:4
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/hr-payroll-journey.test.ts > a confirmed keyless legacy reversal is recovered without inventing a request key at 1280px
+AssertionError: expected 'HR-CONFIRM-keyless-1280\nاختبار تأكيد…' to contain 'معكوس:'
+
+- Expected
++ Received
+
+- معكوس:
++ HR-CONFIRM-keyless-1280
++ اختبار تأكيد صرف
++ 	10,000	0	—	9,000	—	10,000	1,000	مسدد جزئيًا	صرف
++ سند الراتب #3
++ عكس الصرف #2
+
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:444:43
+    442|    await row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:tr…
+    443|    const reversed=(await response.json()).disbursement;expect(reversed…
+    444|    await expect.poll(()=>row.innerText()).toContain("معكوس:");
+       |                                           ^
+    445|    await expect.poll(()=>page.evaluate(id=>localStorage.getItem(`hr:pa…
+    446|    expect((await db.query("SELECT client_request_id FROM hr_payroll_di…
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ __tests__/security-http/hr-payroll-journey.test.ts:444:4
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 19 skipped (21)
+   Start at  00:16:09
+   Duration  64.82s (transform 646ms, setup 0ms, import 3.06s, tests 42.74s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

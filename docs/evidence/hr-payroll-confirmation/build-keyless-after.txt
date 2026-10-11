@@ -1,0 +1,383 @@
+
+> aqlan-center@0.1.0 build
+> next build
+
+▲ Next.js 16.3.8 (Turbopack)
+✓ Running next.config.ts took 320ms
+- Experiments (use with caution):
+  · proxyClientMaxBodySize: 33554432
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 15.5s
+  Running TypeScript ...
+  Finished TypeScript in 29.2s ...
+  Collecting page data using 4 workers ...
+  Generating static pages using 4 workers (0/5) ...
+  Generating static pages using 4 workers (1/5)
+  Generating static pages using 4 workers (2/5)
+  Generating static pages using 4 workers (3/5)
+✓ Generating static pages using 4 workers (5/5) in 550ms
+Turbopack build encountered 1 warning:
+./lib/migration-files.ts:37:25
+Warning: Dynamic filesystem access causes tracing of the whole project
+  [90m35 |[0m [36mexport[0m [36masync[0m [36mfunction[0m loadMigrationFiles(dir?: string): [33mPromise[0m<[33mMigrationFile[0m[]> {
+  [90m36 |[0m   [36mconst[0m resolved = dir ?? defaultMigrationsDir();
+[33m[1m>[0m [90m37 |[0m   [36mconst[0m entries = [36mawait[0m readdir(resolved);
+  [90m   |[0m                         [33m[1m^^^^^^^^^^^^^^^^^[0m
+  [90m38 |[0m   [36mconst[0m files: [33mMigrationFile[0m[] = [];
+  [90m39 |[0m   [36mfor[0m ([36mconst[0m filename [36mof[0m entries) {
+  [90m40 |[0m     [36mconst[0m match = [33mMIGRATION_FILENAME_PATTERN[0m.exec(filename);
+
+Static analysis determined that this filesystem access causes the whole project to be traced and included in the output.
+This is usually unintentional and leads to all source files (including the public folder) to be deployed as part of the server code.
+This can slow down deployments or lead to failures when size limits are exceeded.
+To resolve this, you can
+- make sure the path is statically scoped to some subfolder, for example path.join(process.cwd(), 'data', bar), or
+- only use them in development, or
+- opt out by adding an ignore comment to the highlighted call: fs.readdir(/*turbopackIgnore: true*/ ...), or
+- remove them.
+
+Import traces:
+  #1 [App Route]:
+    ./lib/migration-files.ts
+    ./lib/productionBackup.ts
+    ./app/api/settings/production-backup/route.ts
+
+  #2 [App Route]:
+    ./lib/migration-files.ts
+    ./lib/restore/staging.ts
+    ./lib/restore/admin.ts
+    ./app/api/settings/backup/restore/route.ts
+
+
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ƒ /api/accounting
+├ ƒ /api/ai/chat
+├ ƒ /api/ai/confirmation
+├ ƒ /api/appointments
+├ ƒ /api/appointments/[id]
+├ ƒ /api/appointments/availability
+├ ƒ /api/audit
+├ ƒ /api/auth/login
+├ ƒ /api/auth/logout
+├ ƒ /api/auth/me
+├ ƒ /api/auth/password
+├ ƒ /api/auth/setup
+├ ƒ /api/backup
+├ ƒ /api/backup/documents
+├ ƒ /api/backup/full
+├ ƒ /api/book
+├ ƒ /api/booking-requests
+├ ƒ /api/booking-requests/[id]
+├ ƒ /api/cases/[id]
+├ ƒ /api/ceph-reference-sets
+├ ƒ /api/ceph/[id]
+├ ƒ /api/ceph/[id]/ai-analyze
+├ ƒ /api/ceph/[id]/complete
+├ ƒ /api/ceph/[id]/duplicate
+├ ƒ /api/ceph/compare
+├ ƒ /api/ceph/superimpose
+├ ƒ /api/checkin
+├ ƒ /api/display
+├ ƒ /api/display/notice
+├ ƒ /api/documents/[id]
+├ ƒ /api/executive
+├ ƒ /api/expense-attachments/[id]
+├ ƒ /api/expenses
+├ ƒ /api/expenses/[id]/attachments
+├ ƒ /api/expenses/quote
+├ ƒ /api/export
+├ ƒ /api/families
+├ ƒ /api/families/[id]
+├ ƒ /api/families/[id]/guarantor
+├ ƒ /api/families/[id]/members
+├ ƒ /api/families/[id]/members/[patientId]
+├ ƒ /api/finance/commission-overrides
+├ ƒ /api/finance/commissions
+├ ƒ /api/finance/debts
+├ ƒ /api/finance/expense-categories
+├ ƒ /api/finance/fx
+├ ƒ /api/finance/lab-accounting
+├ ƒ /api/finance/lab-reconciliation
+├ ƒ /api/finance/reconciliation
+├ ƒ /api/finance/report
+├ ƒ /api/health
+├ ƒ /api/hr/attendance
+├ ƒ /api/hr/attendance/corrections
+├ ƒ /api/hr/contracts
+├ ƒ /api/hr/contracts/[id]
+├ ƒ /api/hr/directory
+├ ƒ /api/hr/leaves
+├ ƒ /api/hr/leaves/[id]
+├ ƒ /api/hr/leaves/balances
+├ ƒ /api/hr/payroll/disburse
+├ ƒ /api/hr/payroll/periods
+├ ƒ /api/hr/payroll/runs
+├ ƒ /api/hr/reports
+├ ƒ /api/hr/schedules
+├ ƒ /api/hr/schedules/[id]
+├ ƒ /api/hr/settings
+├ ƒ /api/hr/staff
+├ ƒ /api/hr/staff/[id]
+├ ƒ /api/internal/backup/run
+├ ƒ /api/internal/reminders/run
+├ ƒ /api/inventory
+├ ƒ /api/inventory/[id]
+├ ƒ /api/inventory/[id]/movements
+├ ƒ /api/inventory/patient-cost
+├ ƒ /api/inventory/value
+├ ƒ /api/invoices
+├ ƒ /api/invoices/[id]
+├ ƒ /api/invoices/[id]/correct
+├ ƒ /api/invoices/clinical-preview
+├ ƒ /api/lab
+├ ƒ /api/lab/[id]
+├ ƒ /api/lab/pricing
+├ ƒ /api/lab/pricing/[id]
+├ ƒ /api/lab/services
+├ ƒ /api/lab/services/[id]
+├ ƒ /api/laboratories
+├ ƒ /api/laboratories/[id]
+├ ƒ /api/messages
+├ ƒ /api/messages/file/[id]
+├ ƒ /api/messages/outbound
+├ ƒ /api/messages/voice/[id]
+├ ƒ /api/opening-balances
+├ ƒ /api/opening-balances/access
+├ ƒ /api/ortho
+├ ƒ /api/ortho/[id]
+├ ƒ /api/ortho/adjustments/[id]/billing-decision
+├ ƒ /api/ortho/baseline
+├ ƒ /api/ortho/billing-decisions
+├ ƒ /api/ortho/followups
+├ ƒ /api/parties
+├ ƒ /api/parties/[id]
+├ ƒ /api/party-openings
+├ ƒ /api/patients
+├ ƒ /api/patients/[id]
+├ ƒ /api/patients/[id]/arrival-panel
+├ ƒ /api/patients/[id]/cases
+├ ƒ /api/patients/[id]/ceph
+├ ƒ /api/patients/[id]/chart
+├ ƒ /api/patients/[id]/contact
+├ ƒ /api/patients/[id]/diagnoses
+├ ƒ /api/patients/[id]/documents
+├ ƒ /api/patients/[id]/endo
+├ ƒ /api/patients/[id]/endo/[treatmentId]
+├ ƒ /api/patients/[id]/endo/[treatmentId]/crown
+├ ƒ /api/patients/[id]/endo/[treatmentId]/visits
+├ ƒ /api/patients/[id]/endo/[treatmentId]/visits/[endoVisitId]/addenda
+├ ƒ /api/patients/[id]/family
+├ ƒ /api/patients/[id]/intake-history
+├ ƒ /api/patients/[id]/ledger
+├ ƒ /api/patients/[id]/legacy
+├ ƒ /api/patients/[id]/legacy-balance-arrangement
+├ ƒ /api/patients/[id]/legacy-onboarding
+├ ƒ /api/patients/[id]/legacy-treatments
+├ ƒ /api/patients/[id]/legacy-treatments/[agreementId]/void
+├ ƒ /api/patients/[id]/legacy-treatments/preview
+├ ƒ /api/patients/[id]/materials
+├ ƒ /api/patients/[id]/medical-history
+├ ƒ /api/patients/[id]/merge
+├ ƒ /api/patients/[id]/photo
+├ ƒ /api/patients/[id]/plans
+├ ƒ /api/patients/[id]/prescriptions
+├ ƒ /api/patients/[id]/problems
+├ ƒ /api/patients/[id]/referrals
+├ ƒ /api/patients/[id]/timeline
+├ ƒ /api/patients/[id]/vitals
+├ ƒ /api/patients/[id]/workflow
+├ ƒ /api/patients/import
+├ ƒ /api/patients/import/legacy
+├ ƒ /api/payables
+├ ƒ /api/payments
+├ ƒ /api/payments/[id]/correct
+├ ƒ /api/ping
+├ ƒ /api/plan-items/[id]/case
+├ ƒ /api/plan-items/[id]/dependencies
+├ ƒ /api/plan-templates
+├ ƒ /api/planned-visits/[id]/schedule
+├ ƒ /api/plans
+├ ƒ /api/plans/[id]
+├ ƒ /api/plans/[id]/consent
+├ ƒ /api/plans/[id]/items
+├ ƒ /api/plans/proposals
+├ ƒ /api/plans/reminders
+├ ƒ /api/portal/appointments
+├ ƒ /api/portal/appointments/confirm
+├ ƒ /api/portal/intake
+├ ƒ /api/portal/login
+├ ƒ /api/portal/logout
+├ ƒ /api/portal/me
+├ ƒ /api/portal/messages
+├ ƒ /api/portal/statement
+├ ƒ /api/prescriptions
+├ ƒ /api/prescriptions/[id]/void
+├ ƒ /api/print-log
+├ ƒ /api/problems/[id]
+├ ƒ /api/provider-blocks
+├ ƒ /api/provider-blocks/[id]
+├ ƒ /api/recall
+├ ƒ /api/referrals/[id]
+├ ƒ /api/referrals/[id]/transition
+├ ƒ /api/referrals/mine
+├ ƒ /api/report
+├ ƒ /api/reports
+├ ƒ /api/reports/daily-clinic
+├ ƒ /api/reports/saved
+├ ƒ /api/service-materials
+├ ƒ /api/services
+├ ƒ /api/services/[id]
+├ ƒ /api/services/prices
+├ ƒ /api/services/provisional
+├ ƒ /api/settings
+├ ƒ /api/settings/ai
+├ ƒ /api/settings/ai/providers
+├ ƒ /api/settings/ai/providers/[id]
+├ ƒ /api/settings/ai/providers/[id]/test
+├ ƒ /api/settings/ai/providers/reorder
+├ ƒ /api/settings/ai/test
+├ ƒ /api/settings/appointment-services
+├ ƒ /api/settings/appointment-services/[id]
+├ ƒ /api/settings/backup
+├ ƒ /api/settings/backup/archive/[backupId]
+├ ƒ /api/settings/backup/config
+├ ƒ /api/settings/backup/restore
+├ ƒ /api/settings/backup/run
+├ ƒ /api/settings/display/announcements
+├ ƒ /api/settings/display/announcements/[id]
+├ ƒ /api/settings/display/announcements/reorder
+├ ƒ /api/settings/history
+├ ƒ /api/settings/material-rates
+├ ƒ /api/settings/messaging
+├ ƒ /api/settings/messaging/test
+├ ƒ /api/settings/production-backup
+├ ƒ /api/settings/readiness
+├ ƒ /api/settings/reset
+├ ƒ /api/shifts
+├ ƒ /api/tasks
+├ ƒ /api/tasks/[id]
+├ ƒ /api/tasks/[id]/checklist
+├ ƒ /api/tasks/[id]/comments
+├ ƒ /api/tasks/[id]/links
+├ ƒ /api/users
+├ ƒ /api/users/[id]
+├ ƒ /api/visits
+├ ƒ /api/visits/[id]
+├ ƒ /api/visits/[id]/billing-preview
+├ ƒ /api/visits/[id]/clinical
+├ ƒ /api/visits/[id]/materials
+├ ƒ /api/visits/[id]/next
+├ ƒ /api/visits/[id]/walkout
+├ ƒ /api/visits/readiness
+├ ƒ /api/waiting-list
+├ ƒ /api/waiting-list/[id]
+├ ƒ /api/webhooks/sms
+├ ƒ /api/webhooks/whatsapp
+├ ○ /apple-icon.png
+├ ƒ /appointments
+├ ƒ /book
+├ ƒ /ceph/[id]
+├ ƒ /ceph/compare
+├ ƒ /checkin
+├ ƒ /display
+├ ƒ /display-app.webmanifest
+├ ƒ /executive
+├ ƒ /finance
+├ ƒ /finance/accounting
+├ ƒ /finance/commissions
+├ ƒ /finance/debts
+├ ƒ /finance/expense-categories
+├ ƒ /finance/fx
+├ ƒ /finance/lab-accounting
+├ ƒ /finance/opening
+├ ƒ /finance/parties
+├ ƒ /finance/parties/[id]
+├ ƒ /finance/plans
+├ ƒ /finance/reconciliation
+├ ƒ /finance/reports
+├ ƒ /finance/services
+├ ƒ /finance/settings/lab-accounting
+├ ƒ /hr
+├ ○ /icon.png
+├ ƒ /inventory
+├ ƒ /lab
+├ ƒ /login
+├ ƒ /manifest.webmanifest
+├ ƒ /messages
+├ ƒ /my-work
+├ ƒ /ortho
+├ ƒ /patients
+├ ƒ /patients/[id]
+├ ƒ /portal
+├ ƒ /print/card/[id]
+├ ƒ /print/ceph-compare
+├ ƒ /print/ceph/[id]
+├ ƒ /print/commission-statement/[id]
+├ ƒ /print/consent/[id]
+├ ƒ /print/dossier/[id]
+├ ƒ /print/family-statement/[id]
+├ ƒ /print/hr/contracts/[id]
+├ ƒ /print/hr/payroll/[id]
+├ ƒ /print/hr/staff
+├ ƒ /print/hr/tasks
+├ ƒ /print/invoice/[id]
+├ ƒ /print/lab/[id]
+├ ƒ /print/party/[id]
+├ ƒ /print/patient-card/[id]
+├ ƒ /print/plan/[id]
+├ ƒ /print/post-op/[id]
+├ ƒ /print/prescription/[id]
+├ ƒ /print/receipt/[id]
+├ ƒ /print/referral/[id]
+├ ƒ /print/report
+├ ƒ /print/shift/[id]
+├ ƒ /print/statement/[id]
+├ ƒ /print/voucher/[id]
+├ ƒ /print/walkout/[id]
+├ ƒ /recall
+├ ƒ /report
+├ ƒ /reports
+├ ƒ /reports/daily-clinic
+├ ƒ /requests
+├ ƒ /settings
+├ ƒ /settings/ai
+├ ƒ /settings/appointment-services
+├ ƒ /settings/audit
+├ ƒ /settings/backup
+├ ƒ /settings/export
+├ ƒ /settings/finance-expenses
+├ ƒ /settings/history
+├ ƒ /settings/import
+├ ƒ /settings/lab-pricing
+├ ƒ /settings/lab-services
+├ ƒ /settings/laboratories
+├ ƒ /settings/laboratories/services
+├ ƒ /settings/material-rates
+├ ƒ /settings/messaging
+├ ƒ /settings/plan-templates
+├ ƒ /settings/readiness
+├ ƒ /settings/reset
+├ ƒ /settings/service-materials
+├ ƒ /settings/users
+├ ƒ /setup
+├ ƒ /visits/[id]
+├ ƒ /visits/[id]/clinical
+└ ƒ /waiting-list
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -55,6 +55,11 @@ import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
+import { HR_STAFF_SQL } from "./hr-schema";
+import { HR_TASKS_SQL } from "./hr-tasks-schema";
+import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
+import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
+import { HR_PAYROLL_INTEGRITY_SQL } from "./hr-payroll-integrity-schema";
 import { ENDO_STAGE_LABEL } from "./endodontics";
 import { PATIENT_FAMILIES_SQL } from "./patient-families-schema";
 import { LEGACY_BALANCE_ARRANGEMENTS_SQL } from "./legacy-balance-arrangements-schema";
@@ -2054,6 +2059,16 @@ export function ensureSchema(): Promise<void> {
     /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
     await getPool().query(LEGACY_TREATMENT_SQL);
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
+    /* (HR-1) ملفات الطاقم وسجل تغييراته — جسد الهجرة 0045 حرفيًّا. */
+    await getPool().query(HR_STAFF_SQL);
+    /* (HR-2) المهام وقوائمها التعليقات وسجل تغييراتها — جسد الهجرة 0046 حرفيًّا. */
+    await getPool().query(HR_TASKS_SQL);
+    /* (HR-3/HR-4) العقود وجداول الدوام والحضور والإجازات — جسد الهجرة 0048 حرفيًّا. */
+    await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
+    /* (HR-5/HR-6) المسير والمستحقات وسندات الصرف والسياسات — جسد الهجرة 0049 حرفيًّا. */
+    await getPool().query(HR_PAYROLL_SQL);
+    /* (HR-INT) سلامة المسير والصرف: لقطة الشروط، التزام العمولة، أجزاء الصرف، بصمة الطلب، العكس — جسد الهجرة 0050 حرفيًّا. */
+    await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -2098,6 +2113,27 @@ export function ensureSchema(): Promise<void> {
        ON CONFLICT (id) DO NOTHING`,
     );
 
+    /* بذرُ أنواع الإجازات الافتراضية وسياسات الموارد البشرية */
+    await getPool().query(
+      `INSERT INTO hr_leave_types (code, name_ar, is_paid, default_days_per_year, allow_negative, requires_attachment)
+       VALUES
+         ('annual', 'إجازة سنوية', true, NULL, false, false),
+         ('sick', 'إجازة مرضية', true, NULL, false, true),
+         ('unpaid', 'إجازة بدون راتب', false, NULL, true, false),
+         ('emergency', 'إجازة طارئة', true, NULL, false, false),
+         ('holiday', 'عطلة رسمية', true, NULL, false, false)
+       ON CONFLICT (code) DO NOTHING`,
+    );
+
+    await getPool().query(
+      `INSERT INTO hr_settings (key, value, description, effective_from, updated_by)
+       VALUES
+         ('payroll_cycle', '{"default_currency":"YER","salary_day":28,"cutoff_day":25}'::jsonb, 'دورة الرواتب الشهرية ويوم الاستحقاق', CURRENT_DATE, 'system'),
+         ('attendance_policy', '{"late_grace_mins":15,"late_deduction_rate_per_hour":1.0,"overtime_rate_multiplier":1.5}'::jsonb, 'سياسة التأخير والإضافي وسماح الحضور', CURRENT_DATE, 'system'),
+         ('leave_policy', '{"annual_default_days":21,"probation_months":3}'::jsonb, 'سياسة الإجازات السنوية وفترة التجربة', CURRENT_DATE, 'system')
+       ON CONFLICT (key) DO NOTHING`,
+    );
+
     // بذر المجموعة المرجعية المدمجة من سجل التعريفات نفسه — مصدرُ حقيقةٍ واحد:
     // المجموعة المدمجة إسقاطٌ لتعريفات الكود تُزامَن عند كل إقلاع (لا مسار
     // تعديلٍ لها من الواجهة)، وأي مجموعة محلية للأدمن لاحقًا صفٌّ مستقل لا يُمسّ.
@@ -2137,7 +2173,7 @@ export function ensureSchema(): Promise<void> {
         const shotsPass = await hashPassword("shots-only-local-1234");
         await getPool().query(
           `INSERT INTO users (username, display_name, password_hash, role)
-           VALUES 
+           VALUES
              ('admin', 'المدير العام (د. عقلان)', $1, 'admin'),
              ('doctor', 'د. أروى (أخصائي التقويم)', $2, 'doctor'),
              ('reception', 'استقبال المركز', $3, 'reception'),
@@ -10643,13 +10679,13 @@ function describeCommissionSnapshot(value: CommissionSnapshotValue | null): stri
 }
 
 /** سجل سياسات الأطباء لتقرير العمولة — خطٌّ زمني لكل طبيب + الحالة الحيّة احتياطًا. */
-export async function loadCommissionPolicyTimelines(): Promise<{
+export async function loadCommissionPolicyTimelines(queryRunner?: DbClient | DbPool): Promise<{
   timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
   names: Map<number, string>;
 }> {
   await ensureSchema();
-  const pool = getPool();
+  const pool = queryRunner ?? getPool();
   const [{ rows: historyRows }, { rows: liveRows }] = await Promise.all([
     pool.query<{ party_id: number; percent: string; config: unknown; effective_from: Date; effective_from_us: string }>(
       `SELECT party_id, percent, config, effective_from, to_char(effective_from, 'US') AS effective_from_us
@@ -11757,7 +11793,7 @@ function settledOnPayableSql(e: string, p: string): string {
  * (P0-2) مجموع ما سُدّد من التزامٍ بعملته: سنداته المرتبطة به مباشرةً + ما وُزّع
  * عليه من سندات التسوية المجمّعة (expense_payable_allocations). الإبطالات بالسالب.
  */
-function payableSettledTotalSql(p: string): string {
+export function payableSettledTotalSql(p: string): string {
   return `(COALESCE((SELECT SUM(${settledOnPayableSql("se", p)}) FROM expenses se WHERE se.payable_id = ${p}.id), 0)
     + COALESCE((SELECT SUM(sa.settled_minor) FROM expense_payable_allocations sa WHERE sa.payable_id = ${p}.id), 0))`;
 }
@@ -11766,7 +11802,7 @@ function payableSettledTotalSql(p: string): string {
  * (FIA-1) قيمة الالتزام الفعلية بعملته: مبلغه الأصلي + تصحيحاته الإلحاقية. التصحيحات للرصيد
  * الافتتاحي وحده (payable_adjustments) — والتزام التشغيل بلا تصحيحات فقيمته مبلغه.
  */
-function payableAmountSql(p: string): string {
+export function payableAmountSql(p: string): string {
   return `(${p}.amount_minor + COALESCE((SELECT SUM(pa.delta_minor) FROM payable_adjustments pa WHERE pa.payable_id = ${p}.id), 0))`;
 }
 
@@ -11837,6 +11873,8 @@ async function partyBuckets(client: DbClient, partyId: number): Promise<PartyBuc
 }
 
 export interface RecordExpenseInput {
+  /** Internal HR settlement context; HTTP callers never populate this field. */
+  hrPayrollItemId?: number;
   category: ExpenseCategory;
   partyId: number | null;
   payeeText: string | null;
@@ -11881,7 +11919,7 @@ export interface RecordExpenseResult {
  * المجمّعة). ترتيب الأقفال ثابت: الجهة ثم الالتزام — فلا يتزاحم سندان على رصيدٍ
  * واحد ولا يتقاطعان في قفل.
  */
-async function recordExpenseInTx(
+export async function recordExpenseInTx(
   client: DbClient,
   input: RecordExpenseInput,
   settingsRates: RateMap,
@@ -11912,6 +11950,37 @@ async function recordExpenseInTx(
     );
     if (!rows[0]) return { id: null, reason: "party_not_found", quote: null };
     partyKind = rows[0].kind;
+  }
+
+  // The HR payable must be settled through its atomic component payout and reversal.
+  // An unlinked expense cannot silently leave a second outstanding claim in the payroll.
+  if (input.payableId !== null) {
+    const hrClaim = await client.query(`SELECT id FROM hr_payroll_items WHERE payable_id=$1 OR commission_payable_id=$1`,[input.payableId]);
+    if (hrClaim.rows.length && !hrClaim.rows.some(row=>Number(row.id)===input.hrPayrollItemId)) return {id:null,reason:"hr_payroll_settlement_required",quote:null};
+  }
+  if (input.category === "commission" && partyKind === "doctor" && partyId !== null) {
+    // Old approved claims have no reliable component linkage or immutable terms.
+    // Match only structural identities; historical amounts must be reconciled explicitly.
+    const legacyClaim = await client.query(`SELECT i.id
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id
+      JOIN hr_payroll_periods p ON p.id=r.period_id JOIN hr_staff s ON s.id=i.staff_id
+      LEFT JOIN users u ON u.id=s.user_id LEFT JOIN payables b ON b.id=i.payable_id
+      WHERE r.status IN ('approved','closed') AND i.currency=$2 AND i.commissions_minor>0
+        AND (i.commission_payable_id IS NULL OR COALESCE(i.pay_terms_snapshot->>'source','') NOT IN ('contract','staff_profile'))
+        AND (b.party_id=$1 OR u.party_id=$1 OR i.pay_terms_snapshot->>'doctorPartyId'=$1::text
+          OR EXISTS (SELECT 1 FROM hr_contracts c WHERE c.staff_id=i.staff_id AND c.doctor_party_id=$1
+            AND c.status IN ('approved','active','expired','terminated')
+            AND c.start_date<=p.end_date AND (c.end_date IS NULL OR c.end_date>=p.start_date)))
+      LIMIT 1`,[partyId,input.currency]);
+    if (legacyClaim.rows.length) return {id:null,reason:"hr_payroll_reconciliation_required",quote:null};
+    const claims = await client.query(`SELECT i.id, (${payableAmountSql("b")}-${payableSettledTotalSql("b")}) AS remaining
+      FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id JOIN payables b ON b.id=i.commission_payable_id
+      WHERE b.party_id=$1 AND i.currency=$2 AND r.status IN ('approved','closed')`,[partyId,input.currency]);
+    if (claims.rows.length) {
+      const earned=(await commissionReport("0001-01-01","9999-12-31",undefined,client)).find(row=>row.doctorId===partyId && row.currency===input.currency);
+      if (input.amountMinor>Math.max(0,earned?.dueMinor ?? 0)) return {id:null,reason:"exceeds_party_balance",quote:null};
+      if (claims.rows.some(row=>Number(row.remaining)>0) && !claims.rows.some(row=>Number(row.id)===input.hrPayrollItemId)) return {id:null,reason:"hr_payroll_settlement_required",quote:null};
+    }
   }
 
   const quote: SettlementQuote = {
@@ -12101,15 +12170,31 @@ export async function voidExpense(
   reopenedLabOrderIds?: number[];
 }> {
   await ensureSchema();
+  return withTransaction(getPool(), async (client) => {
+    const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",[id]);
+    if (linked.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
+    return voidExpenseInTx(client,id,context);
+  });
+}
+
+export async function voidExpenseInTx(
+  client: DbClient,
+  id: number,
+  context: { actor: string; actorRole?: string | null; reason?: string | null },
+): Promise<{
+  ok: boolean;
+  reason?: "not_found" | "closed_shift" | "no_shift" | "already_voided" | "missing_reason";
+  voidedId?: number;
+  voidedVoucherNumber?: string;
+  /** (P0-2) أوامر المختبر التي أعادها الإبطال «غير مسدّدة». */
+  reopenedLabOrderIds?: number[];
+}> {
   const reason = context.reason?.trim() ?? "";
   if (!reason) return { ok: false, reason: "missing_reason" };
-  const client = await getPool().connect();
   let snapshot: Record<string, unknown> | null = null;
   let created: { id: number; voucher_number: string } | null = null;
   let reopened: number[] = [];
   let supplierPayment = false;
-  try {
-    await client.query("BEGIN");
     const { rows: rowsE } = await client.query<{
       id: number; voucher_number: string; category: string; payee_text: string | null;
       amount_minor: string; currency: string; exchange_rate: string;
@@ -12136,7 +12221,6 @@ export async function voidExpense(
       [id],
     );
     if (!rowsE[0]) {
-      await client.query("ROLLBACK");
       return { ok: false, reason: "not_found" };
     }
     const current = rowsE[0];
@@ -12149,7 +12233,6 @@ export async function voidExpense(
     if (current.reversal_of_id !== null) {
       // هذا القيد نفسه إبطالٌ لسند آخر — لا يُبطَل الإبطال؛ قيد معاكس للمعاكس
       // يُعقّد الحسابات بلا داعٍ.
-      await client.query("ROLLBACK");
       return { ok: false, reason: "already_voided" };
     }
     const { rows: voidRows } = await client.query<{ n: number }>(
@@ -12157,7 +12240,6 @@ export async function voidExpense(
       [id],
     );
     if (Number(voidRows[0]?.n ?? 0) > 0) {
-      await client.query("ROLLBACK");
       return { ok: false, reason: "already_voided" };
     }
     supplierPayment = current.payable_id != null || isGuardedPartyKind(current.party_kind);
@@ -12169,8 +12251,7 @@ export async function voidExpense(
         `SELECT id FROM cashier_shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1 FOR SHARE`,
       );
       if (!open[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "no_shift" };
+          return { ok: false, reason: "no_shift" };
       }
       targetShiftId = open[0].id;
     } else {
@@ -12182,8 +12263,7 @@ export async function voidExpense(
         [current.shift_id],
       );
       if (!originalShift[0]) {
-        await client.query("ROLLBACK");
-        return { ok: false, reason: "closed_shift" };
+          return { ok: false, reason: "closed_shift" };
       }
     }
     snapshot = {
@@ -12271,17 +12351,10 @@ export async function voidExpense(
         );
       }
     }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
-  await recordAudit({
+  await insertAuditRow(client, {
     action: "expense.void",
     entity: "expense",
-    entityId: id,
+    entityId: String(id),
     entityLabel: snapshot ? String((snapshot as Record<string, unknown>).voucherNumber ?? "") : `#${id}`,
     details: {
       ...snapshot,
@@ -12577,9 +12650,10 @@ export async function commissionReport(
   to: string,
   /** (COMM-DETAIL-1) مجمِّع التفصيل — اختياري؛ لا يغيّر أي رقم من المجاميع. */
   detail?: CommissionDetailCollector,
+  queryRunner?: DbClient | DbPool,
 ): Promise<CommissionRow[]> {
   await ensureSchema();
-  const pool = getPool();
+  const pool = queryRunner ?? getPool();
 
   const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
     pool.query<{ id: number; name: string; commission_percent: string }>(
@@ -12625,11 +12699,16 @@ export async function commissionReport(
     // الصرف يحمل عملته الكاملة) — لا بمكافئه الأساسي: المقارنة داخل العملة
     // الواحدة حصرًا، وما صُرف بعملةٍ أخرى لا يُطرح من دَين هذه العملة أبدًا.
     pool.query<{ party_id: number; currency: string; paid: string }>(
-      `SELECT party_id, currency, COALESCE(SUM(amount_minor), 0) AS paid
-         FROM expenses
-        WHERE category = 'commission' AND party_id IS NOT NULL
-          AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
-        GROUP BY party_id, currency`,
+      `SELECT e.party_id, e.currency, COALESCE(SUM(e.amount_minor), 0) AS paid
+         FROM expenses e
+         LEFT JOIN hr_payroll_disbursement_parts hp ON hp.expense_id = COALESCE(e.reversal_of_id,e.id) AND hp.component='commission'
+         LEFT JOIN hr_payroll_disbursements hd ON hd.id=hp.disbursement_id
+         LEFT JOIN hr_payroll_items hi ON hi.id=hd.item_id
+         LEFT JOIN hr_payroll_runs hr ON hr.id=hi.run_id
+         LEFT JOIN hr_payroll_periods period ON period.id=hr.period_id
+        WHERE e.category = 'commission' AND e.party_id IS NOT NULL
+          AND COALESCE(period.end_date,(e.created_at AT TIME ZONE $1)::date) BETWEEN $2::date AND $3::date
+        GROUP BY e.party_id, e.currency`,
       [CLINIC_TIME_ZONE, from, to],
     ),
   ]);
@@ -12839,7 +12918,7 @@ export async function commissionReport(
 
   /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
      مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
-  const policies = await loadCommissionPolicyTimelines();
+  const policies = await loadCommissionPolicyTimelines(queryRunner);
   /* (COMM-DETAIL-1 · F-5) القواعد القديمة المخزَّنة بالاسم تُحلّ إلى معرّف الخدمة مرّةً
      هنا (في الذاكرة) — والملتبس وغير المحلول يُقال في التفصيل ولا يُخمَّن. */
   const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies);
@@ -15848,6 +15927,14 @@ export async function listAudit(input: {
         AND ($3::text IS NULL OR action = $3::text)
         AND ($4::text IS NULL OR actor = $4::text)
         AND ($5::text IS NULL OR (entity = $5::text AND ($6::text IS NULL OR entity_id = $6::text)))
+        /* (HR-2) خصوصية المهام الخاصة: عمليات المهمة الخاصة تُدقَّق في القاعدة
+           (الأثر محفوظ append-only للتحقيق) ولا تُعاد في واجهة التدقيق العام —
+           فلترة مشتقة من حالة المهمة لحظة القراءة لا من علمٍ مكتوب، فلا تُتبَّع
+           مهمةٌ خاصة بمعرّفها أو فاعلها أو وقتها أو روابطها حتى من المدير. */
+        AND NOT (entity = 'hr_task' AND EXISTS (
+          SELECT 1 FROM hr_tasks pt
+           WHERE pt.id::text = audit_log.entity_id AND pt.is_private
+        ))
       ORDER BY id DESC
       LIMIT $8`,
     [
@@ -25963,6 +26050,7 @@ export async function resetClinicData<F>(
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }
+      await client.query(`UPDATE hr_leave_balances SET used_days = 0, pending_days = 0`);
       await client.query(
         `INSERT INTO audit_log (action, entity, entity_id, summary, details, actor, actor_role, source_ip, user_agent)
          VALUES ('system.reset', 'system', NULL, $1, $2::jsonb, $3, $4::text, $5::text, $6::text)`,

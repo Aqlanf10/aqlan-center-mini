@@ -42,6 +42,24 @@ export { BASELINE_VERSION, checksumOf, defaultMigrationsDir, loadMigrationFiles,
  *    المسارين تتطابق. التقاعد الكامل لensureSchema قرار P2 بعد إثبات المسار.
  */
 
+/**
+ * السلسلة المتوقعة لملفات الهجرات المُرقَّمة في أي شجرة عملٍ سليمة.
+ *
+ * 0001–0043: قاعدة main بعد دمج سلسلة الفواتير (INV-LINK B+E في #274/#285/#294).
+ * 0044: محجوزة لمرشّح مفتوح (#301 بملف 0044_invoice_admin_discount_lines.sql)
+ * 0045–0046: المرحلة الأولى للموارد البشرية (HR-1/HR-2 ملفات الطاقم والمهام).
+ * 0047: محجوزة لمرشّح سيفالو المفتوح (#319 بملف 0047_ceph_correction_lineage.sql) — فجوة معلنة.
+ * 0048–0049: هذه المرحلة لحزمة الموارد البشرية المتكاملة بتخصيص dot:
+ *   0048 للعقود وجداول العمل والحضور والإجازات.
+ *   0049 للمسير والمستحقات والروابط المالية وسندات الصرف.
+ * 0050: سلامة المسير والصرف (HR-INT) — رقمٌ مقترح فوق 0049، إضافي خالص، ينتظر تأكيد dot.
+ * الحارس يقبل السلسلة الصريحة مع الفجوتين المعلنتين (0044 و 0047).
+ */
+export const COORDINATED_MIGRATION_VERSIONS: readonly string[] = [
+  ...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
+  "0045", "0046", "0048", "0049", "0050",
+];
+
 export interface AppliedMigrationRow {
   version: string;
   name: string;

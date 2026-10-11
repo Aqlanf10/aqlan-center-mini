@@ -99,6 +99,30 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/finance/reconciliation": { GET: ["admin", "reception", "accountant"] },
   "/api/finance/report": { GET: ["admin", "doctor", "accountant"] },
   "/api/health": { GET: PUBLIC },
+  // (HR-1) ملفات الطاقم وشروط الأجر: للمدير وحده — المبالغ لا تخرج عنه.
+  "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
+  // (HR-1) دليل الإسناد الآمن: بلا مبالغ — للمدير والاستقبال فقط.
+  "/api/hr/directory": { GET: FRONT_DESK },
+  // (HR-3) العقود والقوالب والملاحق: للمدير وحده.
+  "/api/hr/contracts": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/contracts/[id]": { GET: ADMIN, PATCH: ADMIN, POST: ADMIN },
+  // (HR-4) جداول العمل والورديات: قراءة للاستقبال، تعديل للمدير.
+  "/api/hr/schedules": { GET: FRONT_DESK, POST: ADMIN },
+  "/api/hr/schedules/[id]": { GET: FRONT_DESK, PATCH: ADMIN },
+  // (HR-4) الحضور وتصحيحاته والإضافي:
+  "/api/hr/attendance": { GET: FRONT_DESK, POST: FRONT_DESK },
+  "/api/hr/attendance/corrections": { GET: ADMIN, POST: ADMIN },
+  // (HR-4) الإجازات والأرصدة:
+  "/api/hr/leaves": { GET: CLINIC, POST: CLINIC },
+  "/api/hr/leaves/[id]": { GET: CLINIC, PATCH: ADMIN },
+  "/api/hr/leaves/balances": { GET: CLINIC, POST: ADMIN },
+  // (HR-5) المسير والصرف والسياسات: للمدير وحده.
+  "/api/hr/payroll/periods": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/runs": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/payroll/disburse": { GET: ADMIN, POST: ADMIN },
+  "/api/hr/settings": { GET: ADMIN, PATCH: ADMIN },
+  "/api/hr/reports": { GET: ADMIN },
   "/api/internal/backup/run": { POST: INTERNAL },
   "/api/internal/reminders/run": { POST: INTERNAL },
   "/api/inventory": { GET: CLINIC, POST: FRONT_DESK },
@@ -235,6 +259,13 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/settings/readiness": { GET: ADMIN },
   "/api/settings/reset": { GET: ADMIN, POST: ADMIN },
   "/api/shifts": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], PATCH: ["admin", "reception", "cashier"] },
+  // (HR-2) المهام: الأدوار غير المقيّدة (المدير والاستقبال والطبيب) — الخصوصية والرؤية
+  // على مستوى الصف داخل المسار، ودورا المال المقيّدان والمساعد مرفوضان عند الباب.
+  "/api/tasks": { GET: CLINIC, POST: CLINIC },
+  "/api/tasks/[id]": { GET: CLINIC, PATCH: CLINIC },
+  "/api/tasks/[id]/comments": { POST: CLINIC },
+  "/api/tasks/[id]/checklist": { POST: CLINIC },
+  "/api/tasks/[id]/links": { POST: CLINIC, DELETE: CLINIC },
   "/api/users": { GET: ADMIN, POST: ADMIN },
   "/api/users/[id]": { PATCH: ADMIN },
   "/api/visits": { GET: ["admin", "reception", "doctor", "assistant"], POST: CLINIC },

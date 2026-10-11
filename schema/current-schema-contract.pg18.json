@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 88,
-    "columns": 1156,
-    "constraints": 1074,
-    "indexes": 275,
-    "triggers": 28
+    "tables": 109,
+    "columns": 1448,
+    "constraints": 1461,
+    "indexes": 344,
+    "triggers": 30
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -2937,6 +2937,2444 @@
           ]
         }
       }
+    },
+    "hr_attendance_corrections": {
+      "columns": {
+        "approved_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "approved_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "attendance_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "decision_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "field_corrected": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "new_check_in": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "new_check_out": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "new_status": {
+          "type": "text",
+          "nullable": true
+        },
+        "old_check_in": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "old_check_out": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "old_status": {
+          "type": "text",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "requested_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_attendance_corrections_field_corrected_check",
+        "hr_attendance_corrections_reason_check",
+        "hr_attendance_corrections_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "attendance_id"
+          ],
+          "refTable": "hr_attendance_records",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_attendance_corrections_att_idx": {
+          "columns": [
+            "attendance_id"
+          ],
+          "unique": false
+        },
+        "hr_attendance_corrections_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_attendance_punch_events": {
+      "columns": {
+        "attendance_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "punch_type": {
+          "type": "text",
+          "nullable": false
+        },
+        "punched_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "recorded_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_attendance_punch_events_punch_type_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "attendance_id"
+          ],
+          "refTable": "hr_attendance_records",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_attendance_punch_events_attendance_idx": {
+          "columns": [
+            "attendance_id"
+          ],
+          "unique": false
+        },
+        "hr_attendance_punch_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_attendance_records": {
+      "columns": {
+        "attendance_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "check_in_actual": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "check_in_raw": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "check_out_actual": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "check_out_raw": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "early_exit_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_incomplete": {
+          "type": "bool",
+          "nullable": false
+        },
+        "late_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "notes": {
+          "type": "text",
+          "nullable": true
+        },
+        "overtime_approved": {
+          "type": "bool",
+          "nullable": false
+        },
+        "overtime_approved_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "overtime_approved_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "overtime_minutes": {
+          "type": "int4",
+          "nullable": false
+        },
+        "schedule_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "source": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "work_minutes": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "staff_id",
+          "attendance_date"
+        ]
+      ],
+      "checks": [
+        "hr_attendance_records_early_exit_minutes_check",
+        "hr_attendance_records_late_minutes_check",
+        "hr_attendance_records_notes_check",
+        "hr_attendance_records_overtime_minutes_check",
+        "hr_attendance_records_source_check",
+        "hr_attendance_records_status_check",
+        "hr_attendance_records_work_minutes_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "schedule_id"
+          ],
+          "refTable": "hr_work_schedules",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_attendance_date_idx": {
+          "columns": [
+            "attendance_date",
+            "status"
+          ],
+          "unique": false
+        },
+        "hr_attendance_records_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_attendance_records_staff_id_attendance_date_key": {
+          "columns": [
+            "staff_id",
+            "attendance_date"
+          ],
+          "unique": true
+        },
+        "hr_attendance_staff_date_idx": {
+          "columns": [
+            "staff_id",
+            "attendance_date"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_contracts": {
+      "columns": {
+        "addendum_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "approved_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "approved_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "attachment_refs": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "base_salary_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "commission_rate_percent": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "compensation_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "contract_number": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "doctor_party_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "end_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "notes": {
+          "type": "text",
+          "nullable": true
+        },
+        "notice_period_days": {
+          "type": "int4",
+          "nullable": false
+        },
+        "parent_contract_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "probation_end_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "salary_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "salary_period": {
+          "type": "text",
+          "nullable": true
+        },
+        "signed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "signed_by_center": {
+          "type": "bool",
+          "nullable": false
+        },
+        "signed_by_staff": {
+          "type": "bool",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "start_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "template_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "terms_payload": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "title": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "version_number": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "contract_number"
+        ]
+      ],
+      "checks": [
+        "hr_contracts_base_salary_minor_check",
+        "hr_contracts_check",
+        "hr_contracts_check1",
+        "hr_contracts_commission_rate_percent_check",
+        "hr_contracts_compensation_kind_check",
+        "hr_contracts_contract_number_check",
+        "hr_contracts_notes_check",
+        "hr_contracts_notice_period_days_check",
+        "hr_contracts_salary_currency_check",
+        "hr_contracts_salary_period_check",
+        "hr_contracts_status_check",
+        "hr_contracts_template_kind_check",
+        "hr_contracts_title_check",
+        "hr_contracts_version_number_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "parent_contract_id"
+          ],
+          "refTable": "hr_contracts",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "doctor_party_id"
+          ],
+          "refTable": "parties",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_contracts_contract_number_key": {
+          "columns": [
+            "contract_number"
+          ],
+          "unique": true
+        },
+        "hr_contracts_expiry_idx": {
+          "columns": [
+            "status",
+            "end_date"
+          ],
+          "unique": false
+        },
+        "hr_contracts_parent_idx": {
+          "columns": [
+            "parent_contract_id"
+          ],
+          "unique": false
+        },
+        "hr_contracts_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_contracts_staff_idx": {
+          "columns": [
+            "staff_id",
+            "status"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_leave_balances": {
+      "columns": {
+        "allocated_days": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "carried_over_days": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "effective_from": {
+          "type": "date",
+          "nullable": false
+        },
+        "effective_to": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "leave_type_code": {
+          "type": "text",
+          "nullable": false
+        },
+        "pending_days": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "used_days": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "year": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "staff_id",
+          "leave_type_code",
+          "year"
+        ]
+      ],
+      "checks": [
+        "hr_leave_balances_allocated_days_check",
+        "hr_leave_balances_carried_over_days_check",
+        "hr_leave_balances_pending_days_check",
+        "hr_leave_balances_used_days_check",
+        "hr_leave_balances_year_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "leave_type_code"
+          ],
+          "refTable": "hr_leave_types",
+          "refColumns": [
+            "code"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_leave_balances_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_leave_balances_staff_id_leave_type_code_year_key": {
+          "columns": [
+            "staff_id",
+            "leave_type_code",
+            "year"
+          ],
+          "unique": true
+        },
+        "hr_leave_balances_staff_year_idx": {
+          "columns": [
+            "staff_id",
+            "year"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_leave_requests": {
+      "columns": {
+        "attachment_refs": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "days_count": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "decision_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "decision_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "decision_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "end_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_partial_day": {
+          "type": "bool",
+          "nullable": false
+        },
+        "leave_type_code": {
+          "type": "text",
+          "nullable": false
+        },
+        "partial_hours": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "start_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_leave_requests_check",
+        "hr_leave_requests_days_count_check",
+        "hr_leave_requests_partial_hours_check",
+        "hr_leave_requests_reason_check",
+        "hr_leave_requests_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "leave_type_code"
+          ],
+          "refTable": "hr_leave_types",
+          "refColumns": [
+            "code"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_leave_requests_dates_idx": {
+          "columns": [
+            "start_date",
+            "end_date"
+          ],
+          "unique": false
+        },
+        "hr_leave_requests_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_leave_requests_staff_idx": {
+          "columns": [
+            "staff_id",
+            "status"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_leave_types": {
+      "columns": {
+        "allow_negative": {
+          "type": "bool",
+          "nullable": false
+        },
+        "code": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "default_days_per_year": {
+          "type": "numeric",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_paid": {
+          "type": "bool",
+          "nullable": false
+        },
+        "name_ar": {
+          "type": "text",
+          "nullable": false
+        },
+        "requires_attachment": {
+          "type": "bool",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "code"
+        ]
+      ],
+      "checks": [
+        "hr_leave_types_code_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "hr_leave_types_code_key": {
+          "columns": [
+            "code"
+          ],
+          "unique": true
+        },
+        "hr_leave_types_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_payroll_disbursement_parts": {
+      "columns": {
+        "amount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "component": {
+          "type": "text",
+          "nullable": false
+        },
+        "disbursement_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "expense_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "payable_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "disbursement_id",
+          "component"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_disbursement_parts_amount_minor_check",
+        "hr_payroll_disbursement_parts_component_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "disbursement_id"
+          ],
+          "refTable": "hr_payroll_disbursements",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_payroll_disb_parts_expense_idx": {
+          "columns": [
+            "expense_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_disbursement_parts_disbursement_id_component_key": {
+          "columns": [
+            "disbursement_id",
+            "component"
+          ],
+          "unique": true
+        },
+        "hr_payroll_disbursement_parts_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_payroll_disbursements": {
+      "columns": {
+        "amount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "disbursed_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "disbursed_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "expense_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "item_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "notes": {
+          "type": "text",
+          "nullable": true
+        },
+        "payment_method": {
+          "type": "text",
+          "nullable": false
+        },
+        "reference_number": {
+          "type": "text",
+          "nullable": true
+        },
+        "request_fingerprint": {
+          "type": "text",
+          "nullable": true
+        },
+        "reversal_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "reversed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "reversed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "client_request_id"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_disbursements_amount_minor_check",
+        "hr_payroll_disbursements_client_request_id_check",
+        "hr_payroll_disbursements_currency_check",
+        "hr_payroll_disbursements_notes_check",
+        "hr_payroll_disbursements_payment_method_check",
+        "hr_payroll_disbursements_reference_number_check",
+        "hr_payroll_disbursements_reversal_reason_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "expense_id"
+          ],
+          "refTable": "expenses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "item_id"
+          ],
+          "refTable": "hr_payroll_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_payroll_disb_expense_idx": {
+          "columns": [
+            "expense_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_disb_item_idx": {
+          "columns": [
+            "item_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_disb_staff_idx": {
+          "columns": [
+            "staff_id",
+            "disbursed_at"
+          ],
+          "unique": false
+        },
+        "hr_payroll_disbursements_client_request_id_key": {
+          "columns": [
+            "client_request_id"
+          ],
+          "unique": true
+        },
+        "hr_payroll_disbursements_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_payroll_items": {
+      "columns": {
+        "advances_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "allowance_details": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "allowances_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "base_salary_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "blocker_codes": {
+          "type": "_text",
+          "nullable": false
+        },
+        "commission_basis_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "commission_details": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "commission_payable_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "commissions_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "deduction_details": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "deductions_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "net_due_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "notes": {
+          "type": "text",
+          "nullable": true
+        },
+        "paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "pay_terms_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "payable_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "remaining_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "run_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "run_id",
+          "staff_id"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_items_advances_minor_check",
+        "hr_payroll_items_allowances_minor_check",
+        "hr_payroll_items_base_salary_minor_check",
+        "hr_payroll_items_check",
+        "hr_payroll_items_check1",
+        "hr_payroll_items_commissions_minor_check",
+        "hr_payroll_items_currency_check",
+        "hr_payroll_items_deductions_minor_check",
+        "hr_payroll_items_net_due_minor_check",
+        "hr_payroll_items_notes_check",
+        "hr_payroll_items_paid_minor_check",
+        "hr_payroll_items_remaining_minor_check",
+        "hr_payroll_items_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "run_id"
+          ],
+          "refTable": "hr_payroll_runs",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "commission_payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "payable_id"
+          ],
+          "refTable": "payables",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_payroll_items_comm_payable_idx": {
+          "columns": [
+            "commission_payable_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_items_payable_idx": {
+          "columns": [
+            "payable_id"
+          ],
+          "unique": false
+        },
+        "hr_payroll_items_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_payroll_items_run_id_staff_id_key": {
+          "columns": [
+            "run_id",
+            "staff_id"
+          ],
+          "unique": true
+        },
+        "hr_payroll_items_run_idx": {
+          "columns": [
+            "run_id",
+            "status"
+          ],
+          "unique": false
+        },
+        "hr_payroll_items_staff_idx": {
+          "columns": [
+            "staff_id",
+            "status"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_payroll_periods": {
+      "columns": {
+        "closed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "closed_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "end_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "name": {
+          "type": "text",
+          "nullable": false
+        },
+        "period_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "start_date": {
+          "type": "date",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "period_key"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_periods_check",
+        "hr_payroll_periods_name_check",
+        "hr_payroll_periods_period_key_check",
+        "hr_payroll_periods_status_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "hr_payroll_periods_period_key_key": {
+          "columns": [
+            "period_key"
+          ],
+          "unique": true
+        },
+        "hr_payroll_periods_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_payroll_periods_status_idx": {
+          "columns": [
+            "status",
+            "start_date"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_payroll_runs": {
+      "columns": {
+        "approved_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "approved_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "period_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "total_advances_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_allowances_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_base_salary_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_commissions_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_deductions_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_net_due_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "total_remaining_minor": {
+          "type": "int8",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "period_id",
+          "currency"
+        ]
+      ],
+      "checks": [
+        "hr_payroll_runs_currency_check",
+        "hr_payroll_runs_status_check",
+        "hr_payroll_runs_total_advances_minor_check",
+        "hr_payroll_runs_total_allowances_minor_check",
+        "hr_payroll_runs_total_base_salary_minor_check",
+        "hr_payroll_runs_total_commissions_minor_check",
+        "hr_payroll_runs_total_deductions_minor_check",
+        "hr_payroll_runs_total_net_due_minor_check",
+        "hr_payroll_runs_total_paid_minor_check",
+        "hr_payroll_runs_total_remaining_minor_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "period_id"
+          ],
+          "refTable": "hr_payroll_periods",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_payroll_runs_period_id_currency_key": {
+          "columns": [
+            "period_id",
+            "currency"
+          ],
+          "unique": true
+        },
+        "hr_payroll_runs_period_idx": {
+          "columns": [
+            "period_id",
+            "status"
+          ],
+          "unique": false
+        },
+        "hr_payroll_runs_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_settings": {
+      "columns": {
+        "description": {
+          "type": "text",
+          "nullable": true
+        },
+        "effective_from": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "key": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "updated_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "value": {
+          "type": "jsonb",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "key"
+        ]
+      ],
+      "checks": [
+        "hr_settings_key_check"
+      ],
+      "foreignKeys": [],
+      "indexes": {
+        "hr_settings_key_key": {
+          "columns": [
+            "key"
+          ],
+          "unique": true
+        },
+        "hr_settings_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {}
+    },
+    "hr_staff": {
+      "columns": {
+        "contract_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "department": {
+          "type": "text",
+          "nullable": false
+        },
+        "end_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "full_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "hire_date": {
+          "type": "date",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "job_title": {
+          "type": "text",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "phone": {
+          "type": "text",
+          "nullable": true
+        },
+        "salary_amount_minor": {
+          "type": "int8",
+          "nullable": true
+        },
+        "salary_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "salary_effective_on": {
+          "type": "date",
+          "nullable": true
+        },
+        "salary_period": {
+          "type": "text",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "user_linked_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "work_status": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "user_id"
+        ]
+      ],
+      "checks": [
+        "hr_staff_check",
+        "hr_staff_check1",
+        "hr_staff_contract_kind_check",
+        "hr_staff_department_check",
+        "hr_staff_full_name_check",
+        "hr_staff_job_title_check",
+        "hr_staff_note_check",
+        "hr_staff_pay_terms_complete",
+        "hr_staff_phone_check",
+        "hr_staff_salary_amount_minor_check",
+        "hr_staff_salary_currency_check",
+        "hr_staff_salary_period_check",
+        "hr_staff_work_status_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_staff_department_idx": {
+          "columns": [
+            "department",
+            "work_status"
+          ],
+          "unique": false
+        },
+        "hr_staff_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_staff_user_id_key": {
+          "columns": [
+            "user_id"
+          ],
+          "unique": true
+        },
+        "hr_staff_user_idx": {
+          "columns": [
+            "user_id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_staff_changes": {
+      "columns": {
+        "action": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_role": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "field": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "new_value": {
+          "type": "text",
+          "nullable": true
+        },
+        "old_value": {
+          "type": "text",
+          "nullable": true
+        },
+        "reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_staff_changes_action_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_staff_changes_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_staff_changes_staff_idx": {
+          "columns": [
+            "staff_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "hr_staff_changes_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "hr_task_checklist": {
+      "columns": {
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "done": {
+          "type": "bool",
+          "nullable": false
+        },
+        "done_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "done_by": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "label": {
+          "type": "text",
+          "nullable": false
+        },
+        "position": {
+          "type": "int4",
+          "nullable": false
+        },
+        "task_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_task_checklist_client_request_id_check",
+        "hr_task_checklist_label_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "task_id"
+          ],
+          "refTable": "hr_tasks",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_task_checklist_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_task_checklist_request_dedupe_idx": {
+          "columns": [
+            "task_id",
+            "client_request_id"
+          ],
+          "unique": true
+        },
+        "hr_task_checklist_task_idx": {
+          "columns": [
+            "task_id",
+            "position",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_task_comments": {
+      "columns": {
+        "author_display_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "author_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "body": {
+          "type": "text",
+          "nullable": false
+        },
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "task_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_task_comments_body_check",
+        "hr_task_comments_client_request_id_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "task_id"
+          ],
+          "refTable": "hr_tasks",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "author_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_task_comments_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_task_comments_request_dedupe_idx": {
+          "columns": [
+            "task_id",
+            "client_request_id"
+          ],
+          "unique": true
+        },
+        "hr_task_comments_task_idx": {
+          "columns": [
+            "task_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_task_events": {
+      "columns": {
+        "action": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_display_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "field": {
+          "type": "text",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "link_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "new_value": {
+          "type": "text",
+          "nullable": true
+        },
+        "old_value": {
+          "type": "text",
+          "nullable": true
+        },
+        "task_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_task_events_action_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "task_id"
+          ],
+          "refTable": "hr_tasks",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_task_events_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_task_events_task_idx": {
+          "columns": [
+            "task_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "hr_task_events_append_only": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "hr_task_links": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "link_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "link_kind": {
+          "type": "text",
+          "nullable": false
+        },
+        "link_label": {
+          "type": "text",
+          "nullable": false
+        },
+        "linked_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "task_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "task_id",
+          "link_kind",
+          "link_id"
+        ]
+      ],
+      "checks": [
+        "hr_task_links_link_id_check",
+        "hr_task_links_link_kind_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "task_id"
+          ],
+          "refTable": "hr_tasks",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_task_links_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_task_links_task_id_link_kind_link_id_key": {
+          "columns": [
+            "task_id",
+            "link_kind",
+            "link_id"
+          ],
+          "unique": true
+        },
+        "hr_task_links_task_idx": {
+          "columns": [
+            "task_id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_tasks": {
+      "columns": {
+        "assignee_label": {
+          "type": "text",
+          "nullable": false
+        },
+        "assignee_staff_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "assignee_user_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "client_request_id": {
+          "type": "text",
+          "nullable": true
+        },
+        "completed_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "description": {
+          "type": "text",
+          "nullable": false
+        },
+        "due_at": {
+          "type": "timestamptz",
+          "nullable": true
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_private": {
+          "type": "bool",
+          "nullable": false
+        },
+        "owner_display_name": {
+          "type": "text",
+          "nullable": false
+        },
+        "owner_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "planned_for": {
+          "type": "date",
+          "nullable": true
+        },
+        "priority": {
+          "type": "text",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "title": {
+          "type": "text",
+          "nullable": false
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_tasks_assignee_label_check",
+        "hr_tasks_check",
+        "hr_tasks_check1",
+        "hr_tasks_check2",
+        "hr_tasks_client_request_id_check",
+        "hr_tasks_description_check",
+        "hr_tasks_no_assignee_on_private",
+        "hr_tasks_priority_check",
+        "hr_tasks_status_check",
+        "hr_tasks_title_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "assignee_staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "assignee_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "owner_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_tasks_assignee_staff_idx": {
+          "columns": [
+            "assignee_staff_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "hr_tasks_assignee_user_idx": {
+          "columns": [
+            "assignee_user_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "hr_tasks_owner_idx": {
+          "columns": [
+            "owner_user_id",
+            "created_at"
+          ],
+          "unique": false
+        },
+        "hr_tasks_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_tasks_request_dedupe_idx": {
+          "columns": [
+            "client_request_id"
+          ],
+          "unique": true
+        },
+        "hr_tasks_status_due_idx": {
+          "columns": [
+            "status",
+            "due_at"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
+    },
+    "hr_work_schedules": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "crosses_midnight": {
+          "type": "bool",
+          "nullable": false
+        },
+        "department": {
+          "type": "text",
+          "nullable": true
+        },
+        "effective_from": {
+          "type": "date",
+          "nullable": false
+        },
+        "effective_to": {
+          "type": "date",
+          "nullable": true
+        },
+        "expected_daily_hours": {
+          "type": "numeric",
+          "nullable": false
+        },
+        "grace_period_mins": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "is_active": {
+          "type": "bool",
+          "nullable": false
+        },
+        "name": {
+          "type": "text",
+          "nullable": false
+        },
+        "schedule_type": {
+          "type": "text",
+          "nullable": false
+        },
+        "second_shift_end": {
+          "type": "text",
+          "nullable": true
+        },
+        "second_shift_start": {
+          "type": "text",
+          "nullable": true
+        },
+        "shift_end_time": {
+          "type": "text",
+          "nullable": false
+        },
+        "shift_start_time": {
+          "type": "text",
+          "nullable": false
+        },
+        "staff_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "working_days": {
+          "type": "jsonb",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "hr_work_schedules_check",
+        "hr_work_schedules_department_check",
+        "hr_work_schedules_expected_daily_hours_check",
+        "hr_work_schedules_grace_period_mins_check",
+        "hr_work_schedules_name_check",
+        "hr_work_schedules_schedule_type_check",
+        "hr_work_schedules_second_shift_end_check",
+        "hr_work_schedules_second_shift_start_check",
+        "hr_work_schedules_shift_end_time_check",
+        "hr_work_schedules_shift_start_time_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "staff_id"
+          ],
+          "refTable": "hr_staff",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "hr_work_schedules_dept_idx": {
+          "columns": [
+            "department",
+            "is_active"
+          ],
+          "unique": false
+        },
+        "hr_work_schedules_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "hr_work_schedules_staff_idx": {
+          "columns": [
+            "staff_id",
+            "is_active"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {}
     },
     "inventory_items": {
       "columns": {

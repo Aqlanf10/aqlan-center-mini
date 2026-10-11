@@ -35,6 +35,9 @@ const NAV: NavItem[] = [
   { href: "/patients", label: "المرضى", icon: "user" },
   /* (REF-2) عملي السريري: الإحالات إليّ ومني والعائدة إليّ ومرضاي اليوم — للأطباء وحدهم. */
   { href: "/my-work", label: "عملي السريري", icon: "inbox", needs: "doctor" },
+  /* (HR-1/HR-2) الموارد البشرية والمهام: ملفات الطاقم (المدير) والمهام (المدير والاستقبال
+     والطبيب — مهامي ومهام الفريق). الأدوار المقيّدة عند الباب لا يرونها ولا يصلون إليها. */
+  { href: "/hr", label: "الموارد البشرية والمهام", icon: "briefcase" },
   { href: "/ortho", label: "متابعة التقويم", icon: "tooth" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "المالية", icon: "wallet", needs: "money" },
