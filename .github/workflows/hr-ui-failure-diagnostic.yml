@@ -12,6 +12,8 @@ on:
       - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
       - "__tests__/security-http/hr-contract-save-admission-real-react.test.ts"
       - "components/AppShell.tsx"
+      - "lib/invoice-clinical-linkage.ts"
+      - "__tests__/invoice-clinical-linkage.test.ts"
       - "__tests__/security-http/ortho-prescription-truth-built-page.test.ts"
       - "__tests__/security-http/service-raw-category-display.test.ts"
       - "components/hr/ContractsPanel.tsx"
@@ -112,6 +114,7 @@ jobs:
           sha256sum __tests__/security-http/hr-contract-save-admission-real-react.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum components/hr/AttendancePanel.tsx components/hr/LeavesPanel.tsx components/hr/PayrollPanel.tsx components/hr/StaffProfileModal.tsx __tests__/hr-modal-panel-containers.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum components/AppShell.tsx components/PatientOrtho.tsx components/PatientLedger.tsx components/ServiceSelect.tsx __tests__/security-http/_ortho-strategy-ui-fixture.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/service-raw-category-display.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum lib/invoice-clinical-linkage.ts __tests__/invoice-clinical-linkage.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
       - name: Run full owned acceptance files with unchanged original assertions and deadlines
         id: owned
         env:
@@ -310,6 +313,12 @@ jobs:
               assert diagnostic['width'] == w and diagnostic['beforeCapture'] == diagnostic['afterCapture']
               assert [t['name'] for t in diagnostic['beforeCapture']['targets']] == ['service-select', 'raw-category-label']
               assert all(t['hitOwned'] is True for t in diagnostic['beforeCapture']['targets'])
+              assert diagnostic['labelReachability']['reachability']['method'] == 'native-mouse-wheel'
+              for target_geometry in diagnostic['beforeCapture']['targets']:
+                  box = target_geometry['fullBounds']; usable = box['availableViewport']
+                  assert box['top'] >= usable['top'] and box['bottom'] <= usable['bottom']
+                  assert box['left'] >= 0 and box['right'] <= w and box['unobscured'] is True
+                  assert len(box['hitPoints']) == 9 and all(point['unobscured'] is True for point in box['hitPoints'])
               bounds = json.loads((target / f'ortho-prescription-{w}-bounds.json').read_text())
               assert bounds['width'] == w
               for kind in ['active', 'closed']:

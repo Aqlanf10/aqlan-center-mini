@@ -39,7 +39,7 @@ const CATEGORY_LINKAGE: Record<string, { specialty: LinkageSpecialty; needsCase:
 
 export function lineLinkage(input: { serviceId: number | null; category: string | null }): LineLinkage {
   if (input.serviceId === null || !input.category) return { kind: "financial" };
-  const found = CATEGORY_LINKAGE[input.category];
+  const found = Object.hasOwn(CATEGORY_LINKAGE, input.category) ? CATEGORY_LINKAGE[input.category] : undefined;
   return found ? { kind: "clinical", ...found } : { kind: "financial" };
 }
 

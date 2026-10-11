@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { assertOrthoViewportBounds, orthoViewportProof, revealOrthoControlByWheel } from "./_ortho-strategy-ui-fixture";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -99,10 +100,68 @@ describe("reachable raw category labels on the actual built app", () => {
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const page = await context.newPage(); const errors: string[] = [], writes: string[] = [];
+    const blockedRequests: Array<Record<string, unknown>> = [];
+    const initiators: Array<Record<string, unknown>> = [];
+    const safePath = (raw: string) => {
+      try { const url = new URL(raw); return { sameOrigin: url.origin === baseUrl, path: url.pathname.slice(0, 240) }; }
+      catch { return { sameOrigin: false, path: "unavailable" }; }
+    };
+    const requestWitness = () => ({ protocol: "AQLAN_RAW_CATEGORY_REQUESTS_V1", acceptance: false,
+      head: process.env.GITHUB_SHA ?? null, run: process.env.GITHUB_RUN_ID ?? null,
+      attempt: process.env.GITHUB_RUN_ATTEMPT ?? null, width, blockedRequests, initiators });
+    // Bounded, read-only CDP request initiators. Never retain headers, cookies,
+    // query strings, bodies, stacks' arguments or unbounded page text.
+    let observationTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([(async () => {
+        const cdp = await context.newCDPSession(page);
+        cdp.on("Network.requestWillBeSent", (event: { request: { method: string; url: string };
+          initiator?: { type?: string; stack?: { callFrames?: Array<{ url: string; lineNumber: number; columnNumber: number }> } } }) => {
+          if (["GET", "HEAD"].includes(event.request.method) || initiators.length >= 8) return;
+          initiators.push({ method: event.request.method, ...safePath(event.request.url),
+            type: event.initiator?.type ?? "unknown",
+            frames: (event.initiator?.stack?.callFrames ?? []).slice(0, 4).map(frame => ({
+              ...safePath(frame.url), line: frame.lineNumber, column: frame.columnNumber,
+            })) });
+        });
+        await cdp.send("Network.enable");
+      })(), new Promise<never>((_, reject) => {
+        observationTimer = setTimeout(() => reject(new Error("Bounded request observation did not start")), 2000);
+      })]);
+    } catch (error) {
+      await context.close(); throw error;
+    } finally { clearTimeout(observationTimer); }
     page.on("pageerror", error => errors.push(error.message));
     await page.route("**/*", async route => {
       const request = route.request();
-      if (!["GET", "HEAD"].includes(request.method())) { writes.push(request.method()); await route.abort(); return; }
+      if (!["GET", "HEAD"].includes(request.method())) {
+        // Abort first. Diagnostics cannot accidentally let a request reach the server.
+        writes.push(request.method()); await route.abort();
+        if (blockedRequests.length < 8) {
+          const raw = request.postData() ?? "";
+          let shape: Record<string, unknown> = { json: false };
+          if (raw.length <= 16_384) {
+            try {
+              const body: unknown = JSON.parse(raw);
+              if (body && typeof body === "object" && !Array.isArray(body)) {
+                const value = body as Record<string, unknown>;
+                shape = { json: true, keys: Object.keys(value).sort().slice(0, 24),
+                  ownsSyntheticPatient: value.patientId === patientId,
+                  items: Array.isArray(value.items) ? value.items.slice(0, 8).map(item => {
+                    if (!item || typeof item !== "object") return { shape: "non-object" };
+                    const row = item as Record<string, unknown>;
+                    return { keys: Object.keys(row).sort().slice(0, 24),
+                      syntheticServiceCategory: [...serviceIds].find(([, id]) => id === row.serviceId)?.[0] ?? "not-owned" };
+                  }) : null };
+              }
+            } catch { /* Body format is diagnostic only; every request still fails the guard. */ }
+          }
+          blockedRequests.push({ method: request.method(), ...safePath(request.url()),
+            resourceType: request.resourceType(), navigation: request.isNavigationRequest(),
+            bodyBytes: Buffer.byteLength(raw), bodySha256: createHash("sha256").update(raw).digest("hex"), shape });
+        }
+        return;
+      }
       if (new URL(request.url()).origin !== new URL(baseUrl).origin) { await route.abort(); return; }
       await route.continue();
     });
@@ -121,8 +180,15 @@ describe("reachable raw category labels on the actual built app", () => {
       await select.scrollIntoViewIfNeeded();
       const label = invoice.getByText("toString", { exact: true });
       await label.scrollIntoViewIfNeeded();
+      // Native wheel, not DOM scrolling: expose the whole label above real shell bars.
+      const labelReachability = await revealOrthoControlByWheel(page, label);
+      expect(await select.inputValue()).toBe(String(serviceIds.get("toString")));
       const measure = async () => ({
         targets: await Promise.all([select, label].map(async (target, index) => ({
+          fullBounds: await target.evaluate(orthoViewportProof).then(proof => ({
+            top: proof.top, bottom: proof.bottom, left: proof.left, right: proof.right,
+            availableViewport: proof.availableViewport, hitPoints: proof.hitPoints, unobscured: proof.unobscured,
+          })),
           name: index === 0 ? "service-select" : "raw-category-label",
           ...await target.evaluate((element) => {
             const b = element.getBoundingClientRect();
@@ -170,11 +236,12 @@ describe("reachable raw category labels on the actual built app", () => {
       const diagnostic = { protocol: "AQLAN_RAW_CATEGORY_GEOMETRY_V1", acceptance: false,
         head: process.env.GITHUB_SHA ?? null, run: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
         png: diagnosticPng, pngBytes: diagnosticBytes.length, pngSha256: createHash("sha256").update(diagnosticBytes).digest("hex"),
-        width, beforeCapture: witness, afterCapture };
+        width, beforeCapture: witness, afterCapture, labelReachability, requestWitness: requestWitness() };
       console.log("AQLAN_RAW_CATEGORY_GEOMETRY_V1 " + JSON.stringify(diagnostic));
       await writeFile(`.settings-ui-artifacts/service-raw-category-${width}-diagnostic.json`, JSON.stringify(diagnostic, null, 2) + "\n");
       expect(afterCapture).toEqual(witness);
       for (const target of [select, label]) {
+        assertOrthoViewportBounds(await target.evaluate(orthoViewportProof), width);
         const bounds = await target.boundingBox(); expect(bounds).not.toBeNull();
         expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
         expect(bounds!.y).toBeGreaterThanOrEqual(0); expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
@@ -189,6 +256,9 @@ describe("reachable raw category labels on the actual built app", () => {
       await mkdir(".settings-ui-artifacts", { recursive: true });
       await page.screenshot({ path: `.settings-ui-artifacts/service-raw-category-${width}.png` });
       expect(errors).toEqual([]); expect(writes).toEqual([]); expect(await facts()).toEqual(before);
-    } finally { await context.close(); }
+    } finally {
+      console.log("AQLAN_RAW_CATEGORY_REQUESTS_V1 " + JSON.stringify(requestWitness()));
+      await context.close();
+    }
   }, 90_000);
 });
