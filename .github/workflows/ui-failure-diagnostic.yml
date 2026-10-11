@@ -54,7 +54,6 @@ jobs:
       CLINIC_TIME_ZONE: Asia/Aden
       UI_DIAGNOSTIC_MODE: ${{ matrix.mode }}
       UI_DIAGNOSTIC_GROUP: ${{ matrix.group }}
-      UI_DIAGNOSTIC_OUTPUT: ${{ runner.temp }}/ui-failure-${{ matrix.mode }}-${{ matrix.group }}
     steps:
       - name: Check out the exact trial source
         uses: actions/checkout@v7
@@ -88,13 +87,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends poppler-utils
       - name: Run bounded real HTTP trials with immediate failure evidence
+        env:
+          UI_DIAGNOSTIC_OUTPUT: ${{ runner.temp }}/ui-failure-${{ matrix.mode }}-${{ matrix.group }}
         run: node ../diagnostic-control/scripts/ui-failure-diagnostic/run.mjs
       - name: Retain exact diagnostic evidence even after test failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-failure-diagnostic-${{ matrix.mode }}-${{ matrix.group }}
-          path: ${{ env.UI_DIAGNOSTIC_OUTPUT }}/
+          path: ${{ runner.temp }}/ui-failure-${{ matrix.mode }}-${{ matrix.group }}/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
