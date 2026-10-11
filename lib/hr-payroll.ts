@@ -1,3 +1,4 @@
+import { normalizeHrPolicy } from "./hr-settings-policy";
 /** HR payroll uses the existing commission engine, payables and append-only expenses. */
 import { createHash } from "node:crypto";
 import {
@@ -204,7 +205,7 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
     const run = runRows.rows[0];
     const staff = await client.query(`SELECT s.*, s.hire_date::text, s.end_date::text, s.salary_effective_on::text,
       u.party_id AS user_party_id FROM hr_staff s LEFT JOIN users u ON u.id = s.user_id
-      WHERE s.work_status IN ('active','ended') ORDER BY s.id FOR SHARE OF s`);
+      WHERE s.work_status IN ('active','ended','suspended') ORDER BY s.id FOR SHARE OF s`);
     const commissions = await commissionReport(period.start_date, period.end_date, undefined, client);
     let baseTotal = 0, commissionTotal = 0;
     const included: number[] = [], doctors = new Set<number>();
@@ -213,6 +214,7 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
       if (!resolved.inScope || !resolved.terms) continue;
       const terms = resolved.terms;
       if (!hasCommission(terms.kind) && terms.currency !== currency) continue;
+      if (st.work_status === "suspended") fail("employment_history_required", "تاريخ سريان الإيقاف غير موثق؛ لم تتغير المسودة. يلزم سجل حالة مؤرخ ومراجعة الاستحقاق قبل إعادة الحساب أو الاعتماد.");
       const blockers = [...resolved.blockers];
       const doctorId = resolved.contract?.doctorPartyId ?? st.user_party_id ?? null;
       let commissionMinor = 0;
@@ -256,6 +258,7 @@ export async function approvePayrollRun(runId: number | string, session: Session
       const staffRows = await client.query(`SELECT s.*,hire_date::text,end_date::text,salary_effective_on::text,u.party_id AS user_party_id
         FROM hr_staff s LEFT JOIN users u ON u.id=s.user_id WHERE s.id=$1 FOR UPDATE OF s`, [item.staff_id]);
       const staff = staffRows.rows[0];
+      if (staff.work_status === "suspended") fail("employment_history_required", "تاريخ سريان الإيقاف غير موثق؛ راجع الاستحقاق قبل الاعتماد.");
       const resolved = await staffResolution(client, staff, run);
       const blockers = [...new Set([...(item.blocker_codes ?? []), ...resolved.blockers])];
       if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map((b) => PAY_BLOCKER_LABEL[b as keyof typeof PAY_BLOCKER_LABEL] ?? b).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
@@ -469,7 +472,9 @@ export async function getHrSettings(runner: QueryRunner = getPool()): Promise<Hr
   const { rows } = await runner.query(`SELECT key, value FROM hr_settings`);
   const result: Record<string, any> = {};
   for (const r of rows) {
-    result[r.key] = typeof r.value === "object" ? r.value : JSON.parse(String(r.value));
+    if (["payroll_cycle", "attendance_policy", "leave_policy"].includes(r.key)) {
+      result[r.key] = normalizeHrPolicy(r.key, typeof r.value === "object" ? r.value : JSON.parse(String(r.value)));
+    }
   }
   return {
     payrollCycle: result.payroll_cycle,
@@ -488,12 +493,29 @@ export async function updateHrSetting(
 }
 
 async function updateSettingInTx(client: DbClient, key: string, value: Record<string, unknown>, session: SessionPayload) {
+    let normalized: Record<string, unknown>;
+    try {
+      const patch = normalizeHrPolicy(key, value, true);
+      const current = await client.query("SELECT value FROM hr_settings WHERE key=$1 FOR UPDATE", [key]);
+      let before: Record<string, unknown> = {};
+      if (current.rows[0]) {
+        try { before = normalizeHrPolicy(key, current.rows[0].value); }
+        catch {
+          // Older versions admitted invalid values. A complete valid replacement
+          // repairs them; an incomplete patch cannot invent missing policy.
+          normalizeHrPolicy(key, patch);
+        }
+      }
+      normalized = normalizeHrPolicy(key, { ...before, ...patch });
+    } catch (error) {
+      fail("invalid_setting", error instanceof Error ? error.message : "سياسة غير صالحة.", 400);
+    }
     await client.query(
       `INSERT INTO hr_settings (key, value, updated_by, updated_at)
        VALUES ($1, $2, $3, NOW())
        ON CONFLICT (key) DO UPDATE
        SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-      [key, JSON.stringify(value), session.username],
+      [key, JSON.stringify(normalized!), session.username],
     );
 
     await auditWithClient(
@@ -503,7 +525,7 @@ async function updateSettingInTx(client: DbClient, key: string, value: Record<st
       "hr_settings",
       key,
       `تحديث سياسة: ${key}`,
-      { key, value },
+      { key, value: normalized! },
     );
 }
 
@@ -513,6 +535,7 @@ export async function updateHrSettings(
   authorize?: HrPayrollWriteAuthorizer,
 ): Promise<HrSettingsPayload> {
   return withPayrollTransaction(session, authorize, async client => {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch) || Object.keys(patch).some(key => !["payrollCycle", "attendancePolicy", "leavePolicy"].includes(key))) fail("invalid_setting", "حقل إعدادات غير معروف.", 400);
     const changes = [["payroll_cycle", patch.payrollCycle], ["attendance_policy", patch.attendancePolicy], ["leave_policy", patch.leavePolicy]] as const;
     for (const [key, value] of changes) {
       if (value !== undefined) {

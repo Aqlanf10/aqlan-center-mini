@@ -1,5 +1,7 @@
 "use client";
 
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { taskDeadlineInput, parseTaskDeadline } from "@/lib/hr-task-time";
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { Modal } from "@/components/Modal";
 import {
@@ -65,6 +67,7 @@ interface TaskCounts {
 }
 
 interface TaskListPayload {
+  timeZone?: string;
   tasks: TaskView[];
   counts: TaskCounts;
   overdueCount: number;
@@ -95,9 +98,9 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
   urgent: "bg-danger-50 text-danger-700",
 };
 
-function fmtDate(value: string | null): string {
+function fmtDate(value: string | null, timeZone: string): string {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("ar", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ar", { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(value));
 }
 
 /** مفتاح معاملةٍ للعميل: فقدان الرد ثم إعادة الإرسال لا يكرّر الإنشاء. */
@@ -193,6 +196,7 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
   }
 
   const visibleTasks = payload.tasks;
+  const timeZone = payload.timeZone ?? CLINIC_ZONE_FALLBACK;
 
   return (
     <section aria-label="المهام">
@@ -298,7 +302,7 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
                   {task.assigneeLabel && <span>المسؤول: {task.assigneeLabel}</span>}
                   <span>صاحبها: {task.ownerDisplayName}</span>
                   {task.plannedFor && <span>التخطيط: {task.plannedFor}</span>}
-                  {task.dueAt && <span>الاستحقاق: {fmtDate(task.dueAt)}</span>}
+                  {task.dueAt && <span>الاستحقاق: {fmtDate(task.dueAt,timeZone)}</span>}
                 </div>
               </button>
             </li>
@@ -332,6 +336,7 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
 
       {createOpen && session && (
         <CreateTaskModal
+          timeZone={timeZone}
           key={owner}
           session={session}
           pending={pending}
@@ -343,6 +348,7 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
       )}
       {detail && (
         <TaskDetailModal
+          timeZone={timeZone}
           detail={detail}
           session={session}
           oversight={oversight}
@@ -354,7 +360,8 @@ function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pe
   );
 }
 
-function CreateTaskModal({ session, oversight, pending, onPending, onClose, onCreated }: {
+function CreateTaskModal({ timeZone, session, oversight, pending, onPending, onClose, onCreated }: {
+  timeZone: string;
   session: SessionInfo;
   pending: PendingTaskCreation | undefined;
   onPending: (request: PendingTaskCreation | undefined, expectedKey?: string) => void;
@@ -366,7 +373,7 @@ function CreateTaskModal({ session, oversight, pending, onPending, onClose, onCr
   const [description, setDescription] = useState(pending?.description ?? "");
   const [isPrivate, setIsPrivate] = useState(pending?.isPrivate ?? false);
   const [priority, setPriority] = useState<TaskPriority>(pending?.priority ?? "normal");
-  const [dueAt, setDueAt] = useState(pending?.dueAt ?? "");
+  const [dueAt, setDueAt] = useState(pending?.dueAt ? taskDeadlineInput(parseTaskDeadline(pending.dueAt,timeZone),timeZone) : "");
   const [plannedFor, setPlannedFor] = useState(pending?.plannedFor ?? "");
   const [assignee, setAssignee] = useState(pending?.assigneeStaffId == null ? "" : String(pending.assigneeStaffId));
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
@@ -407,7 +414,7 @@ function CreateTaskModal({ session, oversight, pending, onPending, onClose, onCr
     setBusy(true); setError(null);
     const request: PendingTaskCreation = pending ?? {
       title: title.trim(), description: description.trim(), isPrivate, priority,
-      dueAt: dueAt || null, plannedFor: plannedFor || null,
+      dueAt: dueAt ? parseTaskDeadline(dueAt,timeZone) : null, plannedFor: plannedFor || null,
       assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
       uncertain: false, clientRequestId: newRequestId(), expectedOwner: { username: session.username, role: session.role },
     };
@@ -518,7 +525,8 @@ const EVENT_LABEL: Record<string, string> = {
   comment: "تعليق", checklist: "قائمة التحقق", visibility: "الخصوصية", link: "ربط", unlink: "فكّ ربط",
 };
 
-function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail }: {
+function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onReloadDetail }: {
+  timeZone: string;
   detail: TaskDetail;
   session: SessionInfo | null;
   oversight: boolean;
@@ -534,7 +542,7 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
   // نموذج التحرير الإداري — لمن يملك canManage: العنوان والأولوية والموعدان والإسناد.
   const [editTitle, setEditTitle] = useState(task.title);
   const [editPriority, setEditPriority] = useState<TaskPriority>(task.priority);
-  const [editDueAt, setEditDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 16) : "");
+  const [editDueAt, setEditDueAt] = useState(taskDeadlineInput(task.dueAt,timeZone));
   const [editPlannedFor, setEditPlannedFor] = useState(task.plannedFor ?? "");
   const [editAssignee, setEditAssignee] = useState(task.assigneeStaffId ? String(task.assigneeStaffId) : "");
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
@@ -599,7 +607,7 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
     const body: Record<string, unknown> = {
       title: editTitle.trim(),
       priority: editPriority,
-      dueAt: editDueAt ? new Date(editDueAt).toISOString() : null,
+      dueAt: editDueAt ? parseTaskDeadline(editDueAt,timeZone) : null,
       plannedFor: editPlannedFor || null,
     };
     if (oversight && !task.isPrivate) {
@@ -620,16 +628,16 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
           <span className={`rounded-md px-2 py-0.5 font-semibold ${PRIORITY_STYLE[task.priority]}`}>{TASK_PRIORITY_LABEL[task.priority]}</span>
           <span className="text-navy-600">صاحبها: {task.ownerDisplayName}</span>
           {task.assigneeLabel && <span className="text-navy-600">المسؤول: {task.assigneeLabel}</span>}
-          {task.dueAt && <span className="text-navy-600">الاستحقاق: {fmtDate(task.dueAt)}</span>}
+          {task.dueAt && <span className="text-navy-600">الاستحقاق: {fmtDate(task.dueAt,timeZone)}</span>}
           {task.overdue && <span className="rounded-md bg-danger-100 px-2 py-0.5 font-bold text-danger-700">متأخرة</span>}
         </div>
 
         {task.description && <p className="whitespace-pre-wrap rounded-xl bg-navy-50 p-3 text-sm">{task.description}</p>}
-        {task.plannedFor && <p className="text-xs text-navy-600">تاريخ التخطيط: <span className="ltr-nums">{task.plannedFor}</span>{task.dueAt ? <> — موعد الاستحقاق: <span className="ltr-nums">{fmtDate(task.dueAt)}</span></> : null}</p>}
+        {task.plannedFor && <p className="text-xs text-navy-600">تاريخ التخطيط: <span className="ltr-nums">{task.plannedFor}</span>{task.dueAt ? <> — موعد الاستحقاق: <span className="ltr-nums">{fmtDate(task.dueAt,timeZone)}</span></> : null}</p>}
 
         {/* التحرير الإداري — لمن يملك canManage (صاحبها أو الإدارة المخولة) */}
         {detail.permissions.canManage && !editOpen && (
-          <button onClick={() => { setEditOpen(true); setEditTitle(task.title); setEditPriority(task.priority); setEditDueAt(task.dueAt ? task.dueAt.slice(0, 16) : ""); setEditPlannedFor(task.plannedFor ?? ""); setEditAssignee(task.assigneeStaffId ? String(task.assigneeStaffId) : ""); }}
+          <button onClick={() => { setEditOpen(true); setEditTitle(task.title); setEditPriority(task.priority); setEditDueAt(taskDeadlineInput(task.dueAt,timeZone)); setEditPlannedFor(task.plannedFor ?? ""); setEditAssignee(task.assigneeStaffId ? String(task.assigneeStaffId) : ""); }}
             className="justify-self-start rounded-xl bg-navy-100 px-4 py-2 text-xs font-semibold text-navy-800">
             تعديل العنوان والأولوية والمواعيد…
           </button>
@@ -767,7 +775,7 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
               <li key={entry.id} className="rounded-xl bg-white p-3 text-sm shadow-card">
                 <div className="mb-1 flex flex-wrap items-center justify-between gap-1 text-xs text-navy-600">
                   <span className="font-semibold text-navy-800">{entry.authorDisplayName}</span>
-                  <span>{fmtDate(entry.createdAt)}</span>
+                  <span>{fmtDate(entry.createdAt,timeZone)}</span>
                 </div>
                 <p className="whitespace-pre-wrap">{entry.body}</p>
               </li>
@@ -830,7 +838,7 @@ function TaskDetailModal({ detail, session, oversight, onRefresh, onReloadDetail
                   <span className="font-semibold">{event.actorDisplayName}</span> — {EVENT_LABEL[event.action] ?? event.action}
                   {kindLabel ? ` بسجل ${kindLabel}` : event.field && event.newValue ? `: ${event.field} → ${event.newValue}` : ""}
                   {valuesHidden ? " — القيم محجوبة عنك (لا صلاحية لك بالسجل المرتبط)" : ""}
-                  <span className="ms-2 text-navy-500">{fmtDate(event.createdAt)}</span>
+                  <span className="ms-2 text-navy-500">{fmtDate(event.createdAt,timeZone)}</span>
                 </li>
               );
             })}

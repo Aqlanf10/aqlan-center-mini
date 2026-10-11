@@ -1,3 +1,5 @@
+import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { parseTaskDeadline } from "@/lib/hr-task-time";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -36,7 +38,7 @@ export async function GET(request: Request) {
     scope: url.searchParams.get("scope") === "team" ? "team" : "mine",
   };
   try {
-    return NextResponse.json(await listTasks(session, filters));
+    return NextResponse.json({...await listTasks(session, filters), timeZone: CLINIC_TIME_ZONE});
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل المهام." }, { status: 500 });
   }
@@ -76,11 +78,8 @@ export async function POST(request: Request) {
   }
   let dueAt: string | null = null;
   if (source.dueAt !== undefined && source.dueAt !== null && source.dueAt !== "") {
-    const parsed = new Date(String(source.dueAt));
-    if (Number.isNaN(parsed.getTime())) {
-      return NextResponse.json({ message: "موعد الاستحقاق تاريخٌ صالح." }, { status: 400 });
-    }
-    dueAt = parsed.toISOString();
+    try { dueAt = parseTaskDeadline(source.dueAt, CLINIC_TIME_ZONE); }
+    catch { return NextResponse.json({ message: "موعد الاستحقاق بتوقيت العيادة أو بإزاحة زمنية صريحة." }, { status: 400 }); }
   }
   // تاريخ التخطيط: يومٌ مستقل عن الاستحقاق — حالة «مخطّطة» وحدها لا تعوّضه.
   let plannedFor: string | null = null;

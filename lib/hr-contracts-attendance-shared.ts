@@ -373,7 +373,10 @@ export function calculateShiftAttendance(params: {
     const p = Object.fromEntries(new Intl.DateTimeFormat("en",{timeZone:params.timeZone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(date).map(p=>[p.type,p.value]));
     return Number(p.hour)*60+Number(p.minute);
   };
-  const actualInMin = minutes(params.checkIn);
+  let actualInMin = minutes(params.checkIn);
+  // A first punch after midnight still belongs to the overnight window that
+  // began the previous clinic day. Duration is measured from real instants.
+  if (schedEndMin >= 1440 && actualInMin <= endH * 60 + endM) actualInMin += 1440;
   const workMinutes = Math.max(0, Math.round((params.checkOut.getTime()-params.checkIn.getTime())/60000));
   const actualOutMin = actualInMin + workMinutes;
 
