@@ -11,6 +11,9 @@ on:
       - "__tests__/security-http/hr-task-create-replay.test.ts"
       - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
       - "__tests__/security-http/hr-contract-save-admission-real-react.test.ts"
+      - "components/AppShell.tsx"
+      - "__tests__/security-http/ortho-prescription-truth-built-page.test.ts"
+      - "__tests__/security-http/service-raw-category-display.test.ts"
       - "components/hr/ContractsPanel.tsx"
       - "components/hr/AttendancePanel.tsx"
       - "components/hr/LeavesPanel.tsx"
@@ -38,6 +41,10 @@ jobs:
       max-parallel: 2
       matrix:
         include:
+          - group: mobile-shell
+            file: ortho-prescription-truth-built-page.test.ts
+            extra_file: service-raw-category-display.test.ts
+            admission_file: ""
           - group: contracts
             file: hr-payroll-journey.test.ts
             extra_file: hr-contract-save-receipt-ui.test.ts
@@ -104,9 +111,11 @@ jobs:
           sha256sum app/hr/page.tsx lib/hr-contract-save-receipt.ts __tests__/hr-contract-save-receipt.test.ts __tests__/security-http/hr-contract-save-receipt-ui.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum __tests__/security-http/hr-contract-save-admission-real-react.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
           sha256sum components/hr/AttendancePanel.tsx components/hr/LeavesPanel.tsx components/hr/PayrollPanel.tsx components/hr/StaffProfileModal.tsx __tests__/hr-modal-panel-containers.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum components/AppShell.tsx components/PatientOrtho.tsx components/PatientLedger.tsx components/ServiceSelect.tsx __tests__/security-http/_ortho-strategy-ui-fixture.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/service-raw-category-display.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
       - name: Run full owned acceptance files with unchanged original assertions and deadlines
         id: owned
         env:
+          HR_DIAGNOSTIC_GROUP: ${{ matrix.group }}
           HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
           HR_DIAGNOSTIC_EXTRA_FILE: ${{ matrix.extra_file }}
           HR_DIAGNOSTIC_ADMISSION_FILE: ${{ matrix.admission_file }}
@@ -121,8 +130,12 @@ jobs:
           if [ -n "$HR_DIAGNOSTIC_ADMISSION_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_ADMISSION_FILE"); fi
           printf '%s\n' "${files[@]}" > "$HR_UI_DIAGNOSTIC_DIR/test-files.txt"
           printf 'started\n' > "$HR_UI_DIAGNOSTIC_DIR/started.txt"
+          extra_reporter=()
+          if [ "$HR_DIAGNOSTIC_GROUP" = "mobile-shell" ]; then
+            extra_reporter=(--reporter=json "--outputFile.json=$HR_UI_DIAGNOSTIC_DIR/mobile-shell-results.json")
+          fi
           set +e
-          npm run test:security-http -- "${files[@]}" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+          npm run test:security-http -- "${files[@]}" --reporter=verbose "${extra_reporter[@]}" 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
           pipeline_status=("${PIPESTATUS[@]}")
           status=${pipeline_status[0]}
           if [ "$status" -eq 0 ]; then status=${pipeline_status[1]}; fi
@@ -240,6 +253,73 @@ jobs:
           assert (root / 'test-exit.txt').read_text().strip() == '0', 'Tests did not finish successfully'
           (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v2', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 42, 'observationalPngs': 1, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
           print('Verified 14 completed negative cases with 42 native PNGs, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
+          PY
+      - name: Retain and verify complete current-head mobile shell evidence
+        if: always() && matrix.group == 'mobile-shell'
+        env:
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, shutil, struct
+          from pathlib import Path
+          root = Path(os.environ['HR_UI_DIAGNOSTIC_DIR'])
+          if not (root / 'started.txt').exists():
+              print('Mobile shell tests did not start; no native acceptance claimed.')
+              raise SystemExit(0)
+          source = Path('.settings-ui-artifacts')
+          target = root / 'native-mobile-shell'
+          target.mkdir()
+          widths = [390, 1280]
+          expected = {f'ortho-prescription-{kind}-{w}.png' for kind in ['unrecorded', 'closed-custom'] for w in widths}
+          expected |= {f'ortho-prescription-{w}-bounds.json' for w in widths}
+          expected |= {f'service-raw-category-{w}{suffix}' for w in widths for suffix in ['.png', '-diagnostic.png', '-diagnostic.json']}
+          actual = sorted(p for pattern in ['ortho-prescription-*', 'service-raw-category-*'] for p in source.glob(pattern) if p.is_file())
+          for p in actual: shutil.copyfile(p, target / p.name)
+          sha = lambda b: hashlib.sha256(b).hexdigest()
+          # Partial evidence is retained before any completeness assertion.
+          index = {'format': 'mobile-shell-native-v1', 'acceptance': False,
+              'runId': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'checkout': (root / 'checkout.txt').read_text().strip(), 'tree': (root / 'tree.txt').read_text().strip(),
+              'expectedFiles': sorted(expected), 'files': [{'name': p.name, 'bytes': p.stat().st_size,
+                  'sha256': sha(p.read_bytes())} for p in sorted(target.iterdir())]}
+          (root / 'mobile-shell-index.json').write_text(json.dumps(index, indent=2) + '\n')
+          assert index['checkout'] == os.environ['GITHUB_SHA']
+          assert {p.name for p in target.iterdir()} == expected, 'Incomplete/unexpected mobile shell evidence'
+          assert (root / 'pipeline-exit.txt').read_text().split() == ['0', '0']
+          assert (root / 'test-exit.txt').read_text().strip() == '0'
+          result = json.loads((root / 'mobile-shell-results.json').read_text())
+          assert result['success'] is True
+          assert (result['numTotalTests'], result['numPassedTests'], result['numFailedTests'], result['numPendingTests']) == (12, 12, 0, 0)
+          assert len(result['testResults']) == 2
+          assert {Path(row['name']).name for row in result['testResults']} == {
+              'ortho-prescription-truth-built-page.test.ts', 'service-raw-category-display.test.ts'}
+          assert '[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة' in (root / 'test-output.log').read_text()
+          for p in target.glob('*.png'):
+              data = p.read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data[:8] == b'\x89PNG\r\n\x1a\n'
+              w = int(p.stem.removesuffix('-diagnostic').rsplit('-', 1)[1])
+              h = 1000 if p.name.startswith('ortho-') and w == 1280 else 844
+              assert struct.unpack('>II', data[16:24]) == (w, h), p.name
+          for w in widths:
+              diagnostic = json.loads((target / f'service-raw-category-{w}-diagnostic.json').read_text())
+              assert diagnostic['protocol'] == 'AQLAN_RAW_CATEGORY_GEOMETRY_V1' and diagnostic['acceptance'] is False
+              assert diagnostic['head'] == os.environ['GITHUB_SHA'] and diagnostic['run'] == os.environ['GITHUB_RUN_ID']
+              assert diagnostic['attempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+              image = target / f'service-raw-category-{w}-diagnostic.png'
+              assert diagnostic['png'] == image.name and diagnostic['pngBytes'] == image.stat().st_size and diagnostic['pngSha256'] == sha(image.read_bytes())
+              assert diagnostic['width'] == w and diagnostic['beforeCapture'] == diagnostic['afterCapture']
+              assert [t['name'] for t in diagnostic['beforeCapture']['targets']] == ['service-select', 'raw-category-label']
+              assert all(t['hitOwned'] is True for t in diagnostic['beforeCapture']['targets'])
+              bounds = json.loads((target / f'ortho-prescription-{w}-bounds.json').read_text())
+              assert bounds['width'] == w
+              for kind in ['active', 'closed']:
+                  frame = bounds[kind]['frame']
+                  assert frame['requiredHeight'] <= frame['availableViewport']['height'] - 4
+                  assert frame['top'] >= frame['availableViewport']['top']
+                  assert frame['bottom'] <= frame['availableViewport']['bottom']
+                  assert frame['identityExposed'] is True and bounds[kind]['unobscured'] is True
+          (root / 'mobile-shell-complete.json').write_text(json.dumps({
+              **index, 'testsPassed': 12, 'filesComplete': True, 'independentPixelReviewRequired': True}, indent=2) + '\n')
           PY
       - name: Retain bounded synthetic failure witnesses
         if: always()

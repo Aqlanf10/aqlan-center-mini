@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,9 +116,64 @@ describe("reachable raw category labels on the actual built app", () => {
         await select.selectOption(String(serviceIds.get(category)));
         await expect.poll(async () => invoice.getByText(category, { exact: true }).count()).toBe(1);
       }
+      // Font metrics must settle before native scrolling and strict geometry.
+      await page.evaluate(async () => { await document.fonts.ready; });
       await select.scrollIntoViewIfNeeded();
       const label = invoice.getByText("toString", { exact: true });
       await label.scrollIntoViewIfNeeded();
+      const measure = async () => ({
+        targets: await Promise.all([select, label].map(async (target, index) => ({
+          name: index === 0 ? "service-select" : "raw-category-label",
+          ...await target.evaluate((element) => {
+            const b = element.getBoundingClientRect();
+            const point = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+            const hit = document.elementFromPoint(point.x, point.y);
+            const ancestors: Array<{ tag: string; role: string | null; position: string; zIndex: string }> = [];
+            for (let node = hit, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+              const style = getComputedStyle(node);
+              ancestors.push({ tag: node.tagName, role: node.getAttribute("role"), position: style.position, zIndex: style.zIndex });
+            }
+            return { box: { x: b.x, y: b.y, width: b.width, height: b.height }, point,
+              hitOwned: hit === element || !!hit && element.contains(hit), hitAncestors: ancestors };
+          }),
+        }))),
+        shell: await page.evaluate(() => ({
+          width: innerWidth, height: innerHeight, scrollX, scrollY, fonts: document.fonts.status,
+          documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth,
+          visualViewport: visualViewport && { width: visualViewport.width, height: visualViewport.height,
+            offsetLeft: visualViewport.offsetLeft, offsetTop: visualViewport.offsetTop,
+            pageLeft: visualViewport.pageLeft, pageTop: visualViewport.pageTop },
+          bars: Array.from(document.querySelectorAll("header, nav")).flatMap((element) => {
+            const style = getComputedStyle(element), b = element.getBoundingClientRect();
+            if (!["fixed", "sticky"].includes(style.position) || !b.width || !b.height) return [];
+            return [{ tag: element.tagName, position: style.position, zIndex: style.zIndex,
+              box: { x: b.x, y: b.y, width: b.width, height: b.height } }];
+          }),
+        })),
+      });
+      // Stability is separate from reachability: an obscured but stable target
+      // still fails the original hit assertion below; never poll until it passes.
+      let previous = "", stableFrames = 0;
+      await expect.poll(async () => {
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+        const current = JSON.stringify(await measure());
+        stableFrames = current === previous ? stableFrames + 1 : 1; previous = current;
+        return stableFrames;
+      }).toBeGreaterThanOrEqual(3);
+      const witness = await measure();
+      await mkdir(".settings-ui-artifacts", { recursive: true });
+      // Retain the actual pre-assert frame even when the original geometry fails.
+      // These files are diagnostic observations, not standalone passing evidence.
+      const diagnosticPng = `service-raw-category-${width}-diagnostic.png`;
+      const diagnosticBytes = await page.screenshot({ path: `.settings-ui-artifacts/${diagnosticPng}` });
+      const afterCapture = await measure();
+      const diagnostic = { protocol: "AQLAN_RAW_CATEGORY_GEOMETRY_V1", acceptance: false,
+        head: process.env.GITHUB_SHA ?? null, run: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+        png: diagnosticPng, pngBytes: diagnosticBytes.length, pngSha256: createHash("sha256").update(diagnosticBytes).digest("hex"),
+        width, beforeCapture: witness, afterCapture };
+      console.log("AQLAN_RAW_CATEGORY_GEOMETRY_V1 " + JSON.stringify(diagnostic));
+      await writeFile(`.settings-ui-artifacts/service-raw-category-${width}-diagnostic.json`, JSON.stringify(diagnostic, null, 2) + "\n");
+      expect(afterCapture).toEqual(witness);
       for (const target of [select, label]) {
         const bounds = await target.boundingBox(); expect(bounds).not.toBeNull();
         expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);

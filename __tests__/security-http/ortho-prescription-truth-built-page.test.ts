@@ -92,6 +92,33 @@ async function selectPrescriptionCase(page: Page, fixture: Fixture, id: number) 
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
   await card.page().evaluate(async () => { await document.fonts.ready; });
+  if (width === 390) {
+    const navigation = card.page().locator("nav.fixed");
+    const hr = navigation.getByRole("link", { name: "الموظفون: الموارد البشرية والمهام", exact: true });
+    const label = hr.getByText("الموظفون", { exact: true });
+    expect(await hr.count()).toBe(1); expect(await hr.isVisible()).toBe(true);
+    expect(await hr.getAttribute("href")).toBe("/hr");
+    const labelBounds = await label.evaluate((element) => {
+      const range = document.createRange(); range.selectNodeContents(element);
+      const text = range.getBoundingClientRect(), box = element.getBoundingClientRect();
+      return { lines: range.getClientRects().length, text: { left: text.left, right: text.right },
+        box: { left: box.left, right: box.right }, fontSize: Number.parseFloat(getComputedStyle(element).fontSize) };
+    });
+    expect(labelBounds.lines).toBe(1);
+    expect(labelBounds.fontSize).toBeGreaterThanOrEqual(10);
+    expect(labelBounds.text.left).toBeGreaterThanOrEqual(labelBounds.box.left);
+    expect(labelBounds.text.right).toBeLessThanOrEqual(labelBounds.box.right);
+    const target = await hr.boundingBox(); expect(target).not.toBeNull();
+    expect(target!.width).toBeGreaterThanOrEqual(44); expect(target!.height).toBeGreaterThanOrEqual(44);
+    expect(target!.x).toBeGreaterThanOrEqual(0); expect(target!.x + target!.width).toBeLessThanOrEqual(width);
+    expect(target!.y).toBeGreaterThanOrEqual(0);
+    expect(target!.y + target!.height).toBeLessThanOrEqual(card.page().viewportSize()!.height);
+    expect(await hr.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit === element || !!hit && element.contains(hit);
+    })).toBe(true);
+  }
   const identifier = card.locator("span").filter({ hasText: /^#\d+$/ });
   const panel = card.getByRole("heading", { name: "وصفة الجهاز والمواصفات الميكانيكية", exact: true }).locator("..");
   expect(await identifier.count()).toBe(1); expect(await panel.count()).toBe(1);

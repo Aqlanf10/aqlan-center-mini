@@ -23,6 +23,7 @@ import { isGatedRole, pageVisibleToRole } from "@/lib/role-routes";
 interface NavItem {
   href: string;
   label: string;
+  mobileLabel?: string;
   icon: IconName;
   badge?: "requests" | "lab" | "messages";
   /** من يرى هذا الرابط. الغياب يعني الجميع. */
@@ -37,7 +38,7 @@ const NAV: NavItem[] = [
   { href: "/my-work", label: "عملي السريري", icon: "inbox", needs: "doctor" },
   /* (HR-1/HR-2) الموارد البشرية والمهام: ملفات الطاقم (المدير) والمهام (المدير والاستقبال
      والطبيب — مهامي ومهام الفريق). الأدوار المقيّدة عند الباب لا يرونها ولا يصلون إليها. */
-  { href: "/hr", label: "الموارد البشرية والمهام", icon: "briefcase" },
+  { href: "/hr", label: "الموارد البشرية والمهام", mobileLabel: "الموظفون", icon: "briefcase" },
   { href: "/ortho", label: "متابعة التقويم", icon: "tooth" },
   { href: "/messages", label: "الرسائل", icon: "chat", badge: "messages" },
   { href: "/finance", label: "المالية", icon: "wallet", needs: "money" },
@@ -586,13 +587,14 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
             <a
               key={item.href}
               href={item.href}
+              aria-label={item.mobileLabel ? `${item.mobileLabel}: ${item.label}` : undefined}
               aria-current={isActive(item.href) ? "page" : undefined}
               className={`relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-bold ${
                 isActive(item.href) ? "text-navy-900" : "text-slate-600"
               }`}
             >
               <Icon name={item.icon} className="h-5 w-5" />
-              {item.label}
+              <span>{item.mobileLabel ?? item.label}</span>
               <Badge item={item} badges={badges} floating />
             </a>
           ))}
