@@ -42,6 +42,18 @@ export { BASELINE_VERSION, checksumOf, defaultMigrationsDir, loadMigrationFiles,
  *    المسارين تتطابق. التقاعد الكامل لensureSchema قرار P2 بعد إثبات المسار.
  */
 
+/**
+ * Exact reviewed HR + current PR #322 migration union.
+ * 0001–0043 are the unchanged common main chain; 0044 remains reserved.
+ * 0045/0046/0048/0049/0050 are the original HR files.
+ * 0047/0051 are the original accepted Ceph/orthodontic strategy files.
+ * No migration is invented, renumbered or rewritten to fill the reserved gap.
+ */
+export const COORDINATED_MIGRATION_VERSIONS: readonly string[] = [
+  ...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
+  "0045", "0046", "0047", "0048", "0049", "0050", "0051",
+];
+
 export interface AppliedMigrationRow {
   version: string;
   name: string;

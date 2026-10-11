@@ -130,3 +130,28 @@ describe("verifiedSessionRole (proxy, Web Crypto)", () => {
     }
   });
 });
+
+
+describe("treatment financial reference gate", () => {
+  const path = "/api/patients/17/treatment-financial-context";
+  for (const role of ["cashier", "accountant"] as const) {
+    it(`${role}: exact GET requires patient-ledger authority`, () => {
+      for (const suffix of ["", "/", "//"]) {
+        expect(restrictedRouteAllowed(role, path + suffix, "GET")).toBe(true);
+        expect(restrictedRouteAllowed(role, path + suffix, "GET", { viewPatientLedger: true })).toBe(true);
+        expect(restrictedRouteAllowed(role, path + suffix, "GET", { viewPatientLedger: false })).toBe(false);
+      }
+      for (const method of ["HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+        expect(restrictedRouteAllowed(role, path, method, { viewPatientLedger: true })).toBe(false);
+      }
+      for (const denied of [
+        "/patients/17", "/api/patients/17", "/api/patients/17/clinical-context",
+        "/api/patients/17/documents", "/api/patients/17/workflow", "/api/patients/17/cases",
+        `${path}/extra`, `${path}-extra`, "/api/patients/abc/treatment-financial-context",
+      ]) expect(restrictedRouteAllowed(role, denied, "GET", { viewPatientLedger: true }), denied).toBe(false);
+    });
+  }
+  it("does not grant the assistant financial access", () => {
+    expect(restrictedRouteAllowed("assistant", path, "GET", { viewPatientLedger: true })).toBe(false);
+  });
+});

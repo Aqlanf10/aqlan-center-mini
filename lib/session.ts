@@ -79,3 +79,13 @@ export async function requireSession(client?: DbClient): Promise<SessionPayload 
 export async function requireSessionStrict(): Promise<SessionPayload | null> {
   return requireSession();
 }
+
+/** Revalidate an already authenticated server-side payload under the caller's
+ * transaction. The caller must supply the admitted signed session; this does not
+ * authenticate arbitrary client JSON. Reuses the canonical account/credential/
+ * role/permission checks and held user SHARE lock, without rereading cookies. */
+export async function revalidateSessionInTransaction(
+  payload: SessionPayload, client: DbClient,
+): Promise<SessionPayload | null> {
+  return currentSession(payload, client);
+}

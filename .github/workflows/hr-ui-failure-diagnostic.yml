@@ -1,0 +1,372 @@
+name: HR UI failure diagnostic
+
+on:
+  push:
+    branches: [feat/hr-staff-tasks-phase1]
+    paths:
+      - ".github/workflows/hr-ui-failure-diagnostic.yml"
+      - "schema/current-schema-contract.pg18.json"
+      - "schema/preflight-disclosure.pg18.json"
+      - "__tests__/security-http/hr-payroll-journey.test.ts"
+      - "__tests__/security-http/hr-task-create-replay.test.ts"
+      - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
+      - "__tests__/security-http/hr-contract-save-admission-real-react.test.ts"
+      - "components/AppShell.tsx"
+      - "lib/invoice-clinical-linkage.ts"
+      - "__tests__/invoice-clinical-linkage.test.ts"
+      - "__tests__/security-http/ortho-prescription-truth-built-page.test.ts"
+      - "__tests__/security-http/service-raw-category-display.test.ts"
+      - "components/hr/ContractsPanel.tsx"
+      - "components/hr/AttendancePanel.tsx"
+      - "components/hr/LeavesPanel.tsx"
+      - "components/hr/PayrollPanel.tsx"
+      - "components/hr/StaffProfileModal.tsx"
+      - "__tests__/hr-modal-panel-containers.test.ts"
+      - "app/hr/page.tsx"
+      - "lib/hr-contract-save-receipt.ts"
+  workflow_dispatch:
+
+# Additive diagnosis only. Mandatory full CI remains unchanged and required.
+permissions:
+  contents: read
+concurrency:
+  group: hr-ui-failure-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  focused:
+    name: HR diagnostic / ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - group: mobile-shell
+            file: ortho-prescription-truth-built-page.test.ts
+            extra_file: service-raw-category-display.test.ts
+            admission_file: ""
+          - group: contracts
+            file: hr-payroll-journey.test.ts
+            extra_file: hr-contract-save-receipt-ui.test.ts
+            admission_file: hr-contract-save-admission-real-react.test.ts
+          - group: tasks
+            file: hr-task-create-replay.test.ts
+            extra_file: ""
+            admission_file: ""
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out exact diagnostic source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm install -g npm@11
+          npm ci
+      - name: Verify unchanged environment contract
+        run: npm run verify:environment
+      - name: Typecheck diagnostic source
+        run: npm run typecheck
+      - name: Build exact source
+        run: npm run build
+      - name: Install Chromium and PDF inspection
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends poppler-utils
+      - name: Record exact source provenance
+        env:
+          HR_DIAGNOSTIC_GROUP: ${{ matrix.group }}
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+        run: |
+          mkdir -p "$HR_UI_DIAGNOSTIC_DIR"
+          git rev-parse HEAD > "$HR_UI_DIAGNOSTIC_DIR/checkout.txt"
+          git rev-parse HEAD^{tree} > "$HR_UI_DIAGNOSTIC_DIR/tree.txt"
+          printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$HR_DIAGNOSTIC_GROUP" > "$HR_UI_DIAGNOSTIC_DIR/run.txt"
+          sha256sum __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-task-create-replay.test.ts components/hr/ContractsPanel.tsx components/hr/TasksPanel.tsx components/Modal.tsx .github/workflows/hr-ui-failure-diagnostic.yml > "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum app/hr/page.tsx lib/hr-contract-save-receipt.ts __tests__/hr-contract-save-receipt.test.ts __tests__/security-http/hr-contract-save-receipt-ui.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum __tests__/security-http/hr-contract-save-admission-real-react.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum components/hr/AttendancePanel.tsx components/hr/LeavesPanel.tsx components/hr/PayrollPanel.tsx components/hr/StaffProfileModal.tsx __tests__/hr-modal-panel-containers.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum components/AppShell.tsx components/PatientOrtho.tsx components/PatientLedger.tsx components/ServiceSelect.tsx __tests__/security-http/_ortho-strategy-ui-fixture.ts __tests__/security-http/ortho-prescription-truth-built-page.test.ts __tests__/security-http/service-raw-category-display.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum lib/invoice-clinical-linkage.ts __tests__/invoice-clinical-linkage.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+      - name: Run full owned acceptance files with unchanged original assertions and deadlines
+        id: owned
+        env:
+          HR_DIAGNOSTIC_GROUP: ${{ matrix.group }}
+          HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
+          HR_DIAGNOSTIC_EXTRA_FILE: ${{ matrix.extra_file }}
+          HR_DIAGNOSTIC_ADMISSION_FILE: ${{ matrix.admission_file }}
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+          HR_EVIDENCE_DIR: ${{ runner.temp }}/hr-ui-diagnostic/native-positive
+        run: |
+          set -o pipefail
+          # Restore all 31 original contract cases and add the 14 real-write
+          # negative acknowledgement cases, three admission cases and one delayed-JS
+          # hydration regression. Tasks still runs all 16 original cases.
+          files=("__tests__/security-http/$HR_DIAGNOSTIC_FILE")
+          if [ -n "$HR_DIAGNOSTIC_EXTRA_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_EXTRA_FILE"); fi
+          if [ -n "$HR_DIAGNOSTIC_ADMISSION_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_ADMISSION_FILE"); fi
+          printf '%s\n' "${files[@]}" > "$HR_UI_DIAGNOSTIC_DIR/test-files.txt"
+          printf 'started\n' > "$HR_UI_DIAGNOSTIC_DIR/started.txt"
+          extra_reporter=()
+          if [ "$HR_DIAGNOSTIC_GROUP" = "mobile-shell" ]; then
+            extra_reporter=(--reporter=json "--outputFile.json=$HR_UI_DIAGNOSTIC_DIR/mobile-shell-results.json")
+          fi
+          set +e
+          npm run test:security-http -- "${files[@]}" --reporter=verbose "${extra_reporter[@]}" 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          status=${pipeline_status[0]}
+          if [ "$status" -eq 0 ]; then status=${pipeline_status[1]}; fi
+          set -e
+          printf '%s\n' "${pipeline_status[@]}" > "$HR_UI_DIAGNOSTIC_DIR/pipeline-exit.txt"
+          printf '%s\n' "$status" > "$HR_UI_DIAGNOSTIC_DIR/test-exit.txt"
+          exit "$status"
+      - name: Verify complete synthetic contract evidence after test start
+        if: always() && matrix.group == 'contracts'
+        env:
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, struct
+          from pathlib import Path
+          root = Path(os.environ['HR_UI_DIAGNOSTIC_DIR'])
+          if not (root / 'started.txt').exists():
+              print('Contract tests did not start; no native acceptance claimed.')
+              raise SystemExit(0)
+          variants = ['lost', 'truncated', 'foreign-staff', 'foreign-number', 'foreign-patch-id', 'foreign-patch-number', 'hung-body']
+          widths = [390, 1280]
+          expected = {f'contract-ack-{v}-{w}' for v in variants for w in widths}
+          expected_images = {case + suffix for case in expected for suffix in ['', '-top', '-identity']}
+          actual = {p.stem for p in root.glob('contract-ack-*.png')}
+          assert actual == expected_images, ('Incomplete negative native images', sorted(expected_images - actual), sorted(actual - expected_images))
+          assert {p.stem for p in root.glob('contract-ack-*.json')} == expected
+          source = Path('__tests__/security-http/hr-contract-save-receipt-ui.test.ts').read_bytes()
+          sha = lambda b: hashlib.sha256(b).hexdigest()
+          def png(path, width):
+              data = path.read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data[:8] == b'\x89PNG\r\n\x1a\n', path.name
+              actual_width, height = struct.unpack('>II', data[16:24])
+              assert 0 < actual_width < 50_000 and 0 < height < 50_000, path.name
+              if width is not None: assert actual_width == width, path.name
+              return data
+          # The delayed-JS regression is additive; none of the original
+          # 42 negative frames or 32 positive PNGs/three PDFs is substituted.
+          hydration_images = {'hr-hydration-held-1280.png', 'hr-hydration-ready-1280.png'}
+          assert {p.name for p in root.glob('hr-hydration-*.png')} == hydration_images
+          assert {p.name for p in root.glob('hr-hydration-*.json')} == {'hr-hydration-1280.json'}
+          hydration = json.loads((root / 'hr-hydration-1280.json').read_text())
+          assert hydration['format'] == 'hr-hydration-native-v1' and hydration['acceptance'] is False and hydration['syntheticOnly'] is True
+          assert hydration['checkout'] == os.environ['GITHUB_SHA'] and hydration['tree'] == (root / 'tree.txt').read_text().strip()
+          assert hydration['runId'] == os.environ['GITHUB_RUN_ID'] and hydration['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+          assert hydration['sourceSha256'] == sha(Path('__tests__/security-http/hr-payroll-journey.test.ts').read_bytes())
+          assert hydration['pageSourceSha256'] == sha(Path('app/hr/page.tsx').read_bytes())
+          assert hydration['viewport'] == {'width': 1280, 'height': 900} and hydration['heldScriptCount'] > 0
+          assert hydration['caseCompleted'] is True and hydration['contextClosed'] is True and hydration['writes'] == []
+          assert hydration['periodsStatus'] == 200 and len(hydration['frames']) == 2
+          assert {frame['png'] for frame in hydration['frames']} == hydration_images
+          for frame in hydration['frames']:
+              data = png(root / frame['png'], 1280)
+              assert struct.unpack('>II', data[16:24]) == (1280, 900)
+              assert frame['bytes'] == len(data) and frame['sha256'] == sha(data)
+          held, after = hydration['held'], hydration['after']
+          assert held['pathname'] == after['pathname'] == '/hr'
+          assert held['payrollSections'] == held['payrollSelects'] == 0
+          assert after['payrollSections'] == 1 and after['payrollSelects'] > 0
+          assert len(held['tablists']) == len(after['tablists']) == 1
+          assert held['tablists'][0]['busy'] == 'true' and after['tablists'][0]['busy'] == 'false'
+          assert len(held['tablists'][0]['tabs']) == len(after['tablists'][0]['tabs']) == 7
+          assert all(tab['disabled'] is True for tab in held['tablists'][0]['tabs'])
+          assert all(tab['disabled'] is False for tab in after['tablists'][0]['tabs'])
+          assert [tab['index'] for tab in held['tablists'][0]['tabs'] if tab['selected'] == 'true'] == [0]
+          assert [tab['index'] for tab in after['tablists'][0]['tabs'] if tab['selected'] == 'true'] == [5]
+          for case in sorted(expected):
+              width = int(case.rsplit('-', 1)[1]); data = png(root / f'{case}.png', width)
+              record = json.loads((root / f'{case}.json').read_text())
+              assert record['format'] == 'hr-contract-ack-native-v2' and record['acceptance'] is False and record['syntheticOnly'] is True
+              assert record['runId'] == os.environ['GITHUB_RUN_ID'] and record['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+              assert record['checkout'] == os.environ['GITHUB_SHA'] and record['sourceSha256'] == sha(source)
+              assert record['png'] == f'{case}.png' and record['pngBytes'] == len(data) and record['pngSha256'] == sha(data)
+              assert record['viewport'] == {'width': width, 'height': 900} and struct.unpack('>II', data[16:24]) == (width, 900)
+              assert set(record['frames']) == {'top', 'identity', 'bottom'}
+              for phase, suffix in [('top', '-top'), ('identity', '-identity'), ('bottom', '')]:
+                  frame = record['frames'][phase]; name = f'{case}{suffix}.png'; image = png(root / name, width)
+                  assert frame == {'png': name, 'pngBytes': len(image), 'pngSha256': sha(image)}
+                  assert struct.unpack('>II', image[16:24]) == (width, 900)
+              document = record['beforeModalDocument']; dom, cdp = document['dom'], document['cdp']
+              assert dom['viewportWidth'] == dom['documentClientWidth'] == dom['bodyClientWidth'] == width
+              assert dom['documentScrollWidth'] <= width and dom['bodyScrollWidth'] <= width and dom['scrollX'] == dom['visualPageLeft'] == 0
+              assert cdp['cssContentSize']['width'] <= width and cdp['cssLayoutViewport']['clientWidth'] == width
+              assert cdp['cssLayoutViewport']['pageX'] == cdp['cssVisualViewport']['pageX'] == 0
+              assert len(record['filterBounds']) == 2
+              for box in record['filterBounds']:
+                  assert box['viewportWidth'] == width and box['width'] > 4 and box['left'] >= 0 and box['right'] <= width
+              assert set(record['captureObservations']) == {'top', 'identity', 'bottom'}
+              for phase in ['top', 'identity', 'bottom']:
+                  observation = record['captureObservations'][phase]
+                  assert observation['dimensions'] == {'width': width, 'height': 900}
+                  assert observation['before'] == observation['after']
+                  for moment in ['before', 'after']:
+                      dom, cdp = observation[moment]['dom'], observation[moment]['cdp']
+                      assert dom['innerWidth'] == width and dom['innerHeight'] == 900
+                      assert all(key in dom for key in ['scrollX', 'scrollY', 'visualViewport', 'documentElement', 'body', 'dialog', 'panel', 'horizontalOutliers'])
+                      assert all(key in cdp for key in ['visualViewport', 'layoutViewport', 'cssVisualViewport', 'cssLayoutViewport', 'cssContentSize'])
+                      assert len(dom['horizontalOutliers']) <= 20
+                      assert dom['documentElement']['scrollWidth'] <= dom['documentElement']['clientWidth'] == width
+                      assert dom['body']['scrollWidth'] <= dom['body']['clientWidth'] == width
+                      assert cdp['cssContentSize']['width'] <= width and cdp['cssLayoutViewport']['pageX'] == cdp['cssVisualViewport']['pageX'] == 0
+              if case == 'contract-ack-lost-390':
+                  diagnostic = record['diagnosticNoClip']; image = png(root / diagnostic['png'], None)
+                  assert diagnostic['png'] == 'diagnostic-contract-ack-lost-390-top-no-clip.png'
+                  assert diagnostic['acceptance'] is False and diagnostic['pngBytes'] == len(image) and diagnostic['pngSha256'] == sha(image)
+                  assert diagnostic['dimensions'] == dict(zip(['width', 'height'], struct.unpack('>II', image[16:24])))
+                  assert record['captureObservations']['top']['afterNoClip'] == record['captureObservations']['top']['after']
+              else: assert 'diagnosticNoClip' not in record
+              assert record['caseCompleted'] is True and record['contextClosed'] is True
+              assert record['requests'] == 1 and record['persistedRows'] == 1
+              for fact in ['actualBackendReceiptVerified', 'retainedAfterCloseAndTabDetach', 'manualReviewDidNotClaimSuccess', 'explicitNewIntentConfirmed', 'retainedClauseVerified', 'termsTextFits']:
+                  assert record[fact] is True, (case, fact)
+              for name in ['saveGeometry', 'retainedGeometry', 'reviewGeometry', 'newIntentGeometry', 'topGeometry', 'uncertaintyGeometry', 'identityGeometry', 'staffGeometry', 'termsGeometry']:
+                  geometry = record[name]; box, usable = geometry['box'], geometry['usable']
+                  assert geometry['inside'] is True and geometry['hits'] == [True] * 5
+                  assert box['width'] > 4 and box['height'] > 4
+                  assert box['x'] >= usable['left'] and box['y'] >= usable['top'] and box['right'] <= usable['right'] and box['bottom'] <= usable['bottom']
+              for name in ['initialFormGeometry', 'wholeFormGeometry']:
+                  form = record[name]; box, viewport = form['box'], form['viewport']
+                  assert form['background'] == 'rgb(255, 255, 255)' and form['opacity'] == '1'
+                  assert 0 < box['width'] <= 768 and box['left'] >= viewport['left'] and box['right'] <= viewport['right']
+                  assert form['formScrollWidth'] <= form['formClientWidth'] and form['dialogScrollWidth'] <= form['dialogClientWidth']
+                  assert len(form['controls']) > 20
+                  for control in form['controls']:
+                      assert control['fits'] is True and control['width'] > 0
+                      assert control['left'] >= max(box['left'], viewport['left']) and control['right'] <= min(box['right'], viewport['right'])
+              if '-hung-body-' in case:
+                  body, transport = record['nativeBody'], record['streamingTransport']
+                  assert record['runtimeDeadlineMs'] == 12_000
+                  assert body['status'] == 201 and body['bytes'] > 0 and body['finished'] is False and body['aborted'] is True
+                  assert transport['requests'] == 1 and transport['requestBodyMatches'] is True
+                  assert transport['status'] == 201 and 0 < transport['bodyBytes'] < transport['completeBytes']
+                  assert transport['responseEnded'] is False and transport['clientClosedWithoutEnd'] is True
+          assert {p.name for p in root.glob('diagnostic-*.png')} == {'diagnostic-contract-ack-lost-390-top-no-clip.png'}
+          positive = root / 'native-positive'
+          names = {f'hr-{group}-{w}.png' for group in ['payroll', 'workforce', 'nextday-form', 'nextday-self-denied', 'nextday-approved', 'nextday-result', 'nextday-reception', 'nextday-doctor', 'unverified-reversal', 'payroll-period-race', 'payroll-multipage', 'keyless-reversal'] for w in widths}
+          names |= {f'hr-{group}-{variant}-{w}.png' for group in ['unverified', 'verified-replay'] for variant in ['missing', 'foreign'] for w in widths}
+          pdfs = {'hr-payroll-all-rows.pdf', 'hr-payroll-multipage-390.pdf', 'hr-payroll-multipage-1280.pdf'}
+          assert {p.name for p in positive.iterdir()} == names | pdfs, 'Incomplete/unexpected original positive outputs'
+          # Existing positive images are full-page captures; their original
+          # test-owned geometry assertions remain the authority for dimensions.
+          for name in names: png(positive / name, None)
+          for name in pdfs:
+              data = (positive / name).read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data.startswith(b'%PDF-'), name
+          assert (root / 'test-exit.txt').read_text().strip() == '0', 'Tests did not finish successfully'
+          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v2', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 42, 'observationalPngs': 1, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
+          print('Verified 14 completed negative cases with 42 native PNGs, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
+          PY
+      - name: Retain and verify complete current-head mobile shell evidence
+        if: always() && matrix.group == 'mobile-shell'
+        env:
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, shutil, struct
+          from pathlib import Path
+          root = Path(os.environ['HR_UI_DIAGNOSTIC_DIR'])
+          if not (root / 'started.txt').exists():
+              print('Mobile shell tests did not start; no native acceptance claimed.')
+              raise SystemExit(0)
+          source = Path('.settings-ui-artifacts')
+          target = root / 'native-mobile-shell'
+          target.mkdir()
+          widths = [390, 1280]
+          expected = {f'ortho-prescription-{kind}-{w}.png' for kind in ['unrecorded', 'closed-custom'] for w in widths}
+          expected |= {f'ortho-prescription-{w}-bounds.json' for w in widths}
+          expected |= {f'service-raw-category-{w}{suffix}' for w in widths for suffix in ['.png', '-diagnostic.png', '-diagnostic.json']}
+          actual = sorted(p for pattern in ['ortho-prescription-*', 'service-raw-category-*'] for p in source.glob(pattern) if p.is_file())
+          for p in actual: shutil.copyfile(p, target / p.name)
+          sha = lambda b: hashlib.sha256(b).hexdigest()
+          # Partial evidence is retained before any completeness assertion.
+          index = {'format': 'mobile-shell-native-v1', 'acceptance': False,
+              'runId': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'checkout': (root / 'checkout.txt').read_text().strip(), 'tree': (root / 'tree.txt').read_text().strip(),
+              'expectedFiles': sorted(expected), 'files': [{'name': p.name, 'bytes': p.stat().st_size,
+                  'sha256': sha(p.read_bytes())} for p in sorted(target.iterdir())]}
+          (root / 'mobile-shell-index.json').write_text(json.dumps(index, indent=2) + '\n')
+          assert index['checkout'] == os.environ['GITHUB_SHA']
+          assert {p.name for p in target.iterdir()} == expected, 'Incomplete/unexpected mobile shell evidence'
+          assert (root / 'pipeline-exit.txt').read_text().split() == ['0', '0']
+          assert (root / 'test-exit.txt').read_text().strip() == '0'
+          result = json.loads((root / 'mobile-shell-results.json').read_text())
+          assert result['success'] is True
+          assert (result['numTotalTests'], result['numPassedTests'], result['numFailedTests'], result['numPendingTests']) == (12, 12, 0, 0)
+          assert len(result['testResults']) == 2
+          assert {Path(row['name']).name for row in result['testResults']} == {
+              'ortho-prescription-truth-built-page.test.ts', 'service-raw-category-display.test.ts'}
+          assert '[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة' in (root / 'test-output.log').read_text()
+          for p in target.glob('*.png'):
+              data = p.read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data[:8] == b'\x89PNG\r\n\x1a\n'
+              w = int(p.stem.removesuffix('-diagnostic').rsplit('-', 1)[1])
+              h = 1000 if p.name.startswith('ortho-') and w == 1280 else 844
+              assert struct.unpack('>II', data[16:24]) == (w, h), p.name
+          for w in widths:
+              diagnostic = json.loads((target / f'service-raw-category-{w}-diagnostic.json').read_text())
+              assert diagnostic['protocol'] == 'AQLAN_RAW_CATEGORY_GEOMETRY_V1' and diagnostic['acceptance'] is False
+              assert diagnostic['head'] == os.environ['GITHUB_SHA'] and diagnostic['run'] == os.environ['GITHUB_RUN_ID']
+              assert diagnostic['attempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+              image = target / f'service-raw-category-{w}-diagnostic.png'
+              assert diagnostic['png'] == image.name and diagnostic['pngBytes'] == image.stat().st_size and diagnostic['pngSha256'] == sha(image.read_bytes())
+              assert diagnostic['width'] == w and diagnostic['beforeCapture'] == diagnostic['afterCapture']
+              assert [t['name'] for t in diagnostic['beforeCapture']['targets']] == ['service-select', 'raw-category-label']
+              assert all(t['hitOwned'] is True for t in diagnostic['beforeCapture']['targets'])
+              assert diagnostic['labelReachability']['reachability']['method'] == 'native-mouse-wheel'
+              for target_geometry in diagnostic['beforeCapture']['targets']:
+                  box = target_geometry['fullBounds']; usable = box['availableViewport']
+                  assert box['top'] >= usable['top'] and box['bottom'] <= usable['bottom']
+                  assert box['left'] >= 0 and box['right'] <= w and box['unobscured'] is True
+                  assert len(box['hitPoints']) == 9 and all(point['unobscured'] is True for point in box['hitPoints'])
+              bounds = json.loads((target / f'ortho-prescription-{w}-bounds.json').read_text())
+              assert bounds['width'] == w
+              for kind in ['active', 'closed']:
+                  frame = bounds[kind]['frame']
+                  assert frame['requiredHeight'] <= frame['availableViewport']['height'] - 4
+                  assert frame['top'] >= frame['availableViewport']['top']
+                  assert frame['bottom'] <= frame['availableViewport']['bottom']
+                  assert frame['identityExposed'] is True and bounds[kind]['unobscured'] is True
+          (root / 'mobile-shell-complete.json').write_text(json.dumps({
+              **index, 'testsPassed': 12, 'filesComplete': True, 'independentPixelReviewRequired': True}, indent=2) + '\n')
+          PY
+      - name: Retain bounded synthetic failure witnesses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-ui-failure-diagnostic-${{ matrix.group }}
+          path: ${{ runner.temp }}/hr-ui-diagnostic/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

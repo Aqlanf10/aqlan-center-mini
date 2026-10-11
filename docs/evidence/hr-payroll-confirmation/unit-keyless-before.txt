@@ -1,0 +1,72 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/hr-payroll-confirmation.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/hr-payroll-confirmation.test.ts (4 tests | 1 failed) 24ms
+     × confirms the unchanged null identity of a legitimate keyless legacy reversal 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/hr-payroll-confirmation.test.ts > payroll receipt confirmation > confirms the unchanged null identity of a legitimate keyless legacy reversal
+AssertionError: expected null to deeply equal { Object (id, itemId, ...) }
+
+- Expected:
+{
+  "amountMinor": 2500,
+  "clientRequestId": null,
+  "currency": "SAR",
+  "disbursedAt": "2026-10-01T09:00:00.000Z",
+  "disbursedBy": "synthetic-admin",
+  "expenseId": 20,
+  "id": 12,
+  "itemId": 8,
+  "notes": "note",
+  "parts": [
+    {
+      "amountMinor": 1500,
+      "component": "salary",
+      "expenseId": 20,
+      "payableId": 30,
+    },
+    {
+      "amountMinor": 1000,
+      "component": "commission",
+      "expenseId": 21,
+      "payableId": 31,
+    },
+  ],
+  "paymentMethod": "cash",
+  "referenceNumber": "ref",
+  "reversalReason": "legacy correction",
+  "reversedAt": "2026-10-01T10:00:00.000Z",
+  "reversedBy": "second-admin",
+  "staffId": 4,
+}
+
++ Received:
+null
+
+ ❯ __tests__/hr-payroll-confirmation.test.ts:41:107
+     39|     const old={...receipt,clientRequestId:null};
+     40|     const reversed={...old,reversedAt:"2026-10-01T10:00:00.000Z",rever…
+     41|     expect(readPayrollReversalConfirmation({success:true,disbursement:…
+       |                                                                                                           ^
+     42|     expect(readPayrollReversalConfirmation({success:true,disbursement:…
+     43|     expect(readPayrollPaymentConfirmation({success:true,disbursement:o…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  00:16:34
+   Duration  690ms (transform 70ms, setup 0ms, import 121ms, tests 24ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

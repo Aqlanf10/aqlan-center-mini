@@ -1,0 +1,111 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-payroll-integrity.test.ts -t settings|session expiry
+
+
+ RUN  v4.1.11 /tmp/hr-confirmation-baseline
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+(node:254444) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/postgres/hr-payroll-integrity.test.ts (40 tests | 3 failed | 37 skipped) 40012ms
+     × session expiry while awaiting a real payroll lock rolls back vouchers and balances 8385ms
+     × settings patch rolls back every policy if the second audit fails 4469ms
+     × settings writer refuses a forged non-manager actor 8265ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/hr-payroll-integrity.test.ts > ٤ — تعديل سياسات الموارد البشرية عملية واحدة مدققة > session expiry while awaiting a real payroll lock rolls back vouchers and balances
+AssertionError: expected null to match object { Object (code, status) }
+
+- Expected:
+{
+  "code": "session_expired",
+  "status": 401,
+}
+
++ Received:
+null
+
+ ❯ __tests__/postgres/hr-payroll-integrity.test.ts:599:37
+    597|       clock = vi.spyOn(Date,"now").mockReturnValue(expiring.expiresAt+…
+    598|       await blocker.query("COMMIT");
+    599|       expect((await outcome).error).toMatchObject({code:"session_expir…
+       |                                     ^
+    600|       expect(await payroll.findDisbursementByRequestId("expiry-while-l…
+    601|       expect(await cashOut()).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/postgres/hr-payroll-integrity.test.ts > ٤ — تعديل سياسات الموارد البشرية عملية واحدة مدققة > settings patch rolls back every policy if the second audit fails
+AssertionError: expected { payrollCycle: { …(3) }, …(2) } to deeply equal { payrollCycle: { …(3) }, …(2) }
+
+- Expected
++ Received
+
+@@ -7,10 +7,10 @@
+    "leavePolicy": {
+      "annual_default_days": 21,
+      "probation_months": 3,
+    },
+    "payrollCycle": {
+-     "cutoff_day": 25,
+-     "default_currency": "YER",
+-     "salary_day": 28,
++     "cutoffDay": 8,
++     "defaultCurrency": "SAR",
++     "salaryDay": 12,
+    },
+  }
+
+ ❯ __tests__/postgres/hr-payroll-integrity.test.ts:613:45
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/postgres/hr-payroll-integrity.test.ts > ٤ — تعديل سياسات الموارد البشرية عملية واحدة مدققة > settings writer refuses a forged non-manager actor
+AssertionError: promise resolved "{ payrollCycle: { …(3) }, …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "attendancePolicy": {
++     "late_deduction_rate_per_hour": 1,
++     "late_grace_mins": 15,
++     "overtime_rate_multiplier": 1.5,
++   },
++   "leavePolicy": {
++     "annualDefaultDays": 26,
++     "probationMonths": 4,
++   },
++   "payrollCycle": {
++     "cutoffDay": 8,
++     "defaultCurrency": "SAR",
++     "salaryDay": 12,
++   },
+  }
+
+ ❯ __tests__/postgres/hr-payroll-integrity.test.ts:619:124
+    617|   it("settings writer refuses a forged non-manager actor", async () =>…
+    618|     const before = await payroll.getHrSettings();
+    619|     await expect(payroll.updateHrSettings({leavePolicy:{annualDefaultD…
+       |                                                                                                                            ^
+    620|     expect(await payroll.getHrSettings()).toEqual(before);
+    621|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 37 skipped (40)
+   Start at  23:27:15
+   Duration  65.59s (transform 13.25s, setup 0ms, import 18.98s, tests 40.01s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

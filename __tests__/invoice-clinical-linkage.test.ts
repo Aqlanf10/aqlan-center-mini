@@ -37,6 +37,24 @@ describe("(INV-LINK B) line classification uses the catalog category only", () =
       expect(lineLinkage({ serviceId: 9, category })).toEqual({ kind: "financial" });
     }
   });
+  it.each([...new Set([...Object.getOwnPropertyNames(Object.prototype),
+    "Constructor", "ToString", "hasownproperty", "custom_raw", "endo", "ORTHO", " ortho", "ortho ", ""])]
+  )("raw category %s cannot inherit a clinical linkage", (category) => {
+    expect(lineLinkage({ serviceId: 9, category })).toEqual({ kind: "financial" });
+    expect(lineLinkage({ serviceId: null, category })).toEqual({ kind: "financial" });
+    expect(toothScope(category)).toBe("none");
+  });
+  it.each([
+    ["ortho", "orthodontics", true], ["rct", "endodontics", true],
+    ["post", "prosthodontics", true], ["crown", "prosthodontics", true], ["bridge", "prosthodontics", true],
+    ["implant", "implantology", true], ["cleaning", "periodontics", true],
+    ["extraction", "surgery", true], ["surgery", "surgery", true],
+    ["veneer", "cosmetic", true], ["whitening", "cosmetic", true],
+    ["filling", "restorative", false], ["sealant", "restorative", false],
+  ] as const)("preserves the exact owned %s linkage and still requires a service", (category, specialty, needsCase) => {
+    expect(lineLinkage({ serviceId: 9, category })).toEqual({ kind: "clinical", specialty, needsCase });
+    expect(lineLinkage({ serviceId: null, category })).toEqual({ kind: "financial" });
+  });
   it("sessions: request, else template step, else one", () => {
     expect(sessionsFor("rct", 5, DEFAULT_SPECIALTY_TEMPLATES)).toBe(5);
     expect(sessionsFor("rct", null, DEFAULT_SPECIALTY_TEMPLATES)).toBe(3);

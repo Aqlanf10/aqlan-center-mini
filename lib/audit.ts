@@ -69,11 +69,12 @@ export type AuditAction =
   /* (CHAIR-1) إقرار الجاهزية للكرسي، وتجاوز الطوارئ بسببٍ مكتوب، وتأجيل الدفع عند الشبّاك. */
   | "visit.clear" | "visit.clearance_bypass" | "visit.payment_deferred"
   | "visit.reception_handoff_completed"
+  | "visit.operational_handoff_decided" | "visit.reception_handoff_verified"
   | "document.upload" | "document.remove"
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
   | "document.upload.rejected_signature"
-  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
+  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard" | "ceph.link"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
   | "lab_order.cancel" | "lab_order.delete"
@@ -88,7 +89,7 @@ export type AuditAction =
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
-  | "diagnosis.create" | "ortho.book_next"
+  | "diagnosis.create" | "ortho.book_next" | "ortho.strategy_revision"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
@@ -128,7 +129,22 @@ export type AuditAction =
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
-  | "system.reset";
+  | "system.reset"
+  /* (HR-1) ملفات الطاقم: إنشاء وتعديل (بما فيه شروط الأجر) وربط/فكّ حساب الدخول. */
+  | "hr.staff.create" | "hr.staff.update" | "hr.staff.link_user" | "hr.staff.unlink_user"
+  /* (HR-2) المهام: بيانات وصفية فقط في التدقيق — عنوان الخاصة لا يُكتب في السجل العام.
+     التفاصيل الكاملة (من/ماذا/القيم) في hr_task_events خلف صلاحية القراءة نفسها. */
+  | "task.create" | "task.update" | "task.status" | "task.assign" | "task.visibility"
+  | "task.comment" | "task.checklist" | "task.link" | "task.unlink"
+  /* (HR-3) العقود الإدارية: إنشاء، تعديل، اعتماد، إنهاء، وملحق */
+  | "hr.contract.create" | "hr.contract.update" | "hr.contract.approve" | "hr.contract.terminate" | "hr.contract.addendum"
+  /* (HR-4) جداول العمل والحضور والإجازات */
+  | "hr.schedule.create" | "hr.schedule.update"
+  | "hr.attendance.record" | "hr.attendance.correct" | "hr.attendance.overtime"
+  | "hr.leave.request" | "hr.leave.decision" | "hr.leave.balance_adjust"
+  /* (HR-5/HR-6) المستحقات والمسير والصرف والسياسات */
+  | "hr.payroll.period.create" | "hr.payroll.calculate" | "hr.payroll.approve"
+  | "hr.payroll.disburse" | "hr.payroll.close" | "hr.settings.update";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.create": "إنشاء فاتورة",
@@ -147,6 +163,38 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "patient.update": "تعديل بيانات مريض",
   "patient.merge": "دمج ملف مريض مكرر",
   "system.reset": "إعادة ضبط — مسح البيانات التجريبية",
+  "hr.staff.create": "إنشاء ملف موظف",
+  "hr.staff.update": "تعديل ملف موظف",
+  "hr.staff.link_user": "ربط ملف موظف بحساب دخول",
+  "hr.staff.unlink_user": "فكّ ربط ملف موظف بحسابه",
+  "task.create": "إنشاء مهمة",
+  "task.update": "تعديل مهمة",
+  "task.status": "تغيير حالة مهمة",
+  "task.assign": "إسناد مهمة",
+  "task.visibility": "تحويل مهمة خاصة إلى مشتركة",
+  "task.comment": "تعليق على مهمة",
+  "task.checklist": "بند في قائمة تحقق مهمة",
+  "task.link": "ربط مهمة بسجل",
+  "task.unlink": "فكّ ربط مهمة عن سجل",
+  "hr.contract.create": "إنشاء مسودة عقد",
+  "hr.contract.update": "تعديل عقد",
+  "hr.contract.approve": "اعتماد عقد",
+  "hr.contract.terminate": "إنهاء عقد",
+  "hr.contract.addendum": "إصدار ملحق عقد",
+  "hr.schedule.create": "إنشاء جدول دوام",
+  "hr.schedule.update": "تعديل جدول دوام",
+  "hr.attendance.record": "تسجيل حضور وانصراف",
+  "hr.attendance.correct": "تصحيح سجل حضور",
+  "hr.attendance.overtime": "اعتماد ساعات إضافية",
+  "hr.leave.request": "تقديم طلب إجازة",
+  "hr.leave.decision": "قرار بشأن طلب إجازة",
+  "hr.leave.balance_adjust": "تعديل رصيد إجازات",
+  "hr.payroll.period.create": "إنشاء فترة مسير رواتب",
+  "hr.payroll.calculate": "احتساب مسير رواتب",
+  "hr.payroll.approve": "اعتماد مسير رواتب",
+  "hr.payroll.disburse": "صرف مستحقات مسير",
+  "hr.payroll.close": "إقفال فترة مسير رواتب",
+  "hr.settings.update": "تحديث سياسات الموارد البشرية",
   "patient.import": "استيراد مرضى من ملف",
   "reminder.auto": "جولة التذكير الآلي بواتساب",
   "messaging.channel.update": "تعديل إعدادات قناة مراسلة",
@@ -211,6 +259,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.clearance_bypass": "إدخال طوارئ قبل إقرار الجاهزية",
   "visit.payment_deferred": "تأجيل الدفع عند الشبّاك",
   "visit.reception_handoff_completed": "إنهاء متابعة الاستقبال للزيارة — دون إثبات سداد",
+  "visit.operational_handoff_decided": "تسجيل قرار متابعة زيارة انتهى جلوسها دون توقيع سريري — دون إثبات سداد",
+  "visit.reception_handoff_verified": "إعادة تحقق مالية لمتابعة استقبال سابقة — دون إثبات سداد",
   "document.upload": "رفع مستند",
   "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
@@ -219,6 +269,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.update": "تحديث تحليل سيفالومتري",
   "ceph.complete": "اعتماد تحليل سيفالومتري",
   "ceph.discard": "رفض مسودة سيفالومتري",
+  "ceph.link": "ربط دراسة سيفالومتري بحالة التقويم",
   "inventory.item": "إدارة بند مخزون",
   "inventory.move": "حركة مخزون",
   "lab.create": "إضافة مختبر جديد",
@@ -303,6 +354,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
+  "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",

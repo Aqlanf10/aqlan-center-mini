@@ -36,6 +36,8 @@ export const RESET_WIPE_TABLES = [
   "endo_canal_records",
   "endo_visits",
   "endo_treatments",
+  // Clinical append-only history; removed only by the existing explicit reset TRUNCATE.
+  "ortho_strategy_revisions",
   "ortho_adjustments",
   "ortho_cases",
   "tooth_conditions",
@@ -64,6 +66,22 @@ export const RESET_WIPE_TABLES = [
   "lab_order_tracking",
   "lab_orders",
   "inventory_movements",
+  // (HR-2) المهام وأبناؤها — بيانات تشغيلية تُمسح، وملفات الطاقم وسجل تغييراته يبقيان مع المستخدمين
+  "hr_task_events",
+  "hr_task_comments",
+  "hr_task_checklist",
+  "hr_task_links",
+  "hr_tasks",
+  // (HR-3/HR-4/HR-5) الحضور والإجازات والمسير والصرف — سجلات تشغيلية تُمسح
+  "hr_payroll_disbursement_parts",
+  "hr_payroll_disbursements",
+  "hr_payroll_items",
+  "hr_payroll_runs",
+  "hr_payroll_periods",
+  "hr_leave_requests",
+  "hr_attendance_punch_events",
+  "hr_attendance_corrections",
+  "hr_attendance_records",
   // المال
   "journal_manual_lines",
   "journal_manual",
@@ -99,6 +117,14 @@ export const RESET_WIPE_TABLES = [
 /** ما يبقى — الإعداد الذي لا يُعاد تجهيزه، وسجل التدقيق، وسجل الهجرات. */
 export const RESET_KEEP_TABLES = [
   "users",
+  // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
+  "hr_staff",
+  "hr_staff_changes",
+  "hr_contracts",
+  "hr_work_schedules",
+  "hr_leave_types",
+  "hr_leave_balances",
+  "hr_settings",
   "settings",
   "parties",
   "doctor_commission_history",
@@ -154,6 +180,7 @@ export const RESET_PREVIEW_GROUPS: { label: string; table: (typeof RESET_WIPE_TA
   { label: "أوامر المختبر", table: "lab_orders" },
   { label: "حركات المخزون", table: "inventory_movements" },
   { label: "الرسائل", table: "messages" },
+  { label: "المهام", table: "hr_tasks" },
   { label: "معالجات النظام القديم (أرشيف)", table: "legacy_treatments" },
 ];
 

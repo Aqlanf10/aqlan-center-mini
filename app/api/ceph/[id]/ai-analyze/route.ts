@@ -11,6 +11,7 @@ import {
 import { aiChat, getAiSettings } from "@/lib/ai";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return forbidden();
   }
 
+  const wantsSave = (body.action === "suggest-landmarks" && body.save)
+    || (body.action === "generate-diagnosis" && body.saveToDiagnosis);
+  if (wantsSave && !(await canAccessPatient(session, study.analysis.patientId, "canUploadXrays"))) {
+    return forbidden();
+  }
+
   // 1) خيار اقتراح المعالم الذكي
   if (body.action === "suggest-landmarks") {
     const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};
@@ -95,9 +102,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }));
 
     let saved = false;
-    if (body.save && study.analysis.status === "draft") {
-      const res = await updateCephLandmarks(id, suggestedPoints, session.username);
-      saved = res.ok;
+    if (body.save) {
+      try {
+        const res = await updateCephLandmarks(id, suggestedPoints, session.username, { authorize: cephWriteAuthorizer(session) });
+        if (!res.ok) return NextResponse.json({ message: res.message }, { status: res.status ?? 409 });
+        saved = true;
+      } catch {
+        return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
@@ -176,18 +188,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       recommendationsText: aiEnhancedText || expert.formatted.recommendationsText,
     };
 
-    if (body.saveToDiagnosis && study.analysis.status === "draft") {
-      await updateCephDiagnosis(
-        id,
-        {
-          skeletal: suggestion.skeletal,
-          dental: suggestion.dental,
-          softTissue: suggestion.softTissue,
-          finalDx: suggestion.finalDx,
-          note: suggestion.recommendationsText,
-        },
-        session.username,
-      );
+    if (body.saveToDiagnosis) {
+      try {
+        const res = await updateCephDiagnosis(
+          id,
+          {
+            skeletal: suggestion.skeletal,
+            dental: suggestion.dental,
+            softTissue: suggestion.softTissue,
+            finalDx: suggestion.finalDx,
+            note: suggestion.recommendationsText,
+          },
+          session.username,
+          { authorize: cephWriteAuthorizer(session) },
+        );
+        if (!res.ok) return NextResponse.json({ message: res.message }, { status: res.status ?? 409 });
+      } catch {
+        return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
+      }
     }
 
     return NextResponse.json({

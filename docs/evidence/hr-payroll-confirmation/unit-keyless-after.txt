@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/hr-payroll-confirmation.test.ts __tests__/hr-payroll.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  00:20:43
+   Duration  2.22s (transform 630ms, setup 0ms, import 794ms, tests 35ms, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

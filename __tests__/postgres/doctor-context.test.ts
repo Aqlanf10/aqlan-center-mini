@@ -58,8 +58,14 @@ describe("(P0-E) the doctor opens today's visit with context", () => {
     });
     if (!plan.ok) throw new Error(plan.message);
     const items = await q<{ id: number; tooth_code: number }>(`SELECT id, tooth_code FROM plan_items WHERE plan_id = $1 ORDER BY id`, [plan.planId]);
+    const case37 = await createClinicalCase({
+      patientId, specialty, title: "علاج عصب 37", site: "37", problem: null, responsiblePartyId: doctorId,
+      orthoCaseId: null, actor: "doctor",
+    });
+    if (!case37.ok) throw new Error(case37.reason);
     for (const item of items) {
-      expect((await setPlanItemCase({ itemId: item.id, caseId: created.case.id, priority: null, actor: "doctor" })).ok).toBe(true);
+      const exactCase = item.tooth_code === 36 ? created.case.id : case37.case.id;
+      expect((await setPlanItemCase({ itemId: item.id, caseId: exactCase, priority: null, actor: "doctor" })).ok).toBe(true);
     }
     await q(`UPDATE plan_items SET status = 'done' WHERE id = $1`, [items[1].id]);
 
@@ -67,9 +73,11 @@ describe("(P0-E) the doctor opens today's visit with context", () => {
     const visit = await getClinicalVisit(today.id);
     expect(visit?.previousVisit).toMatchObject({ id: previous.id, date: "2026-09-15", diagnosis: "التهاب لب غير عكوس 36" });
     expect(visit?.latestDiagnosis).toEqual({ text: "التهاب لب غير عكوس 36", date: "2026-09-15" });
-    expect(visit?.activeCases).toEqual([expect.objectContaining({
-      title: "علاج عصب 36", status: "active", doneSteps: 1, totalSteps: 2, nextStep: "علاج عصب — سن 36",
-    })]);
+    expect(visit?.activeCases).toHaveLength(2);
+    expect(visit?.activeCases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: "علاج عصب 36", status: "active", doneSteps: 0, totalSteps: 1, nextStep: "علاج عصب — سن 36" }),
+      expect.objectContaining({ title: "علاج عصب 37", status: "active", doneSteps: 1, totalSteps: 1 }),
+    ]));
   });
 
   it("a new patient has an empty context, not an error", async () => {

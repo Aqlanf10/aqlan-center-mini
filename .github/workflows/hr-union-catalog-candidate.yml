@@ -1,0 +1,159 @@
+name: HR union catalog candidate
+
+on:
+  push:
+    branches: [feat/hr-staff-tasks-phase1]
+    paths: [".github/workflows/hr-union-catalog-candidate.yml"]
+  workflow_dispatch:
+    inputs:
+      expected_head:
+        description: Exact reviewed commit SHA for this branch run
+        required: true
+        type: string
+
+# Additive source-only generation. This does not replace or weaken mandatory CI.
+permissions:
+  contents: read
+concurrency:
+  group: hr-union-catalog-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm install -g npm@11
+          npm ci
+      - name: Verify guarded target, complete union and exact provenance
+        env:
+          CATALOG_DIR: ${{ runner.temp }}/hr-union-catalog-candidate
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        run: |
+          mkdir -p "$CATALOG_DIR"
+          node --import tsx --input-type=module <<'JS'
+          import { writeFileSync, readdirSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          import { Client } from 'pg';
+          import { validateOwnershipHarnessEnvironment, assertPostgres18VersionNum } from './scripts/verify-schema-ownership.ts';
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+          if (head !== process.env.GITHUB_SHA || process.env.GITHUB_REF !== 'refs/heads/feat/hr-staff-tasks-phase1') throw new Error('Catalog source/ref mismatch');
+          if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && process.env.EXPECTED_HEAD !== head) throw new Error('Reviewed expected head mismatch');
+          const migrations = readdirSync('migrations').filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
+          const versions = migrations.map(name => Number(name.slice(0, 4)));
+          const required = Array.from({ length: 51 }, (_, index) => index + 1).filter(version => version !== 44);
+          if (JSON.stringify(versions) !== JSON.stringify(required)) throw new Error('Expected complete 50-file HR/clinical migration union');
+          const target = validateOwnershipHarnessEnvironment();
+          if (process.env.DATABASE_URL !== target.maintenanceUrl.toString()) throw new Error('Schema generator must use the guarded local maintenance target');
+          const client = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
+          await client.connect();
+          try {
+            const { rows } = await client.query("SELECT current_setting('server_version_num') AS version_num, current_setting('server_version') AS version");
+            const major = assertPostgres18VersionNum(rows[0].version_num);
+            const leftovers = await client.query("SELECT datname FROM pg_database WHERE datname ~ '^(schema_check_|aqlan_schema_ownership_)'");
+            if (leftovers.rows.length) throw new Error('Generated database prefix is not pristine');
+            writeFileSync(join(process.env.CATALOG_DIR, 'postgres-version.json'), JSON.stringify({ major, version: rows[0].version, versionNum: rows[0].version_num, generatedDatabasesBefore: 0 }, null, 2));
+          } finally { await client.end(); }
+          writeFileSync(join(process.env.CATALOG_DIR, 'provenance.json'), JSON.stringify({ format: 'hr-union-catalog-candidate-v1', acceptance: false,
+            runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, event: process.env.GITHUB_EVENT_NAME,
+            workflowRef: process.env.GITHUB_WORKFLOW_REF, head, tree, parents: execFileSync('git', ['show', '-s', '--format=%P', 'HEAD'], { encoding: 'utf8' }).trim().split(' '), migrations }, null, 2));
+          JS
+          git ls-tree -r HEAD > "$CATALOG_DIR/git-tree.txt"
+          git ls-files -z | xargs -0 sha256sum > "$CATALOG_DIR/source-sha256.txt"
+          cp schema/current-schema-contract.pg18.json "$CATALOG_DIR/committed-current-schema-contract.pg18.json"
+          cp schema/preflight-disclosure.pg18.json "$CATALOG_DIR/committed-preflight-disclosure.pg18.json"
+      - name: Generate genuine source-only PostgreSQL candidates
+        id: generate
+        env:
+          CATALOG_DIR: ${{ runner.temp }}/hr-union-catalog-candidate
+        run: |
+          printf 'started\n' > "$CATALOG_DIR/started.txt"
+          set +e
+          npm run schema:contract > "$CATALOG_DIR/current-schema-generator.log" 2>&1
+          schema_status=$?
+          if [ "$schema_status" -eq 0 ]; then
+            cp schema/current-schema-contract.pg18.json "$CATALOG_DIR/current-schema-contract.pg18.json"
+            copy_status=$?
+            if [ "$copy_status" -ne 0 ]; then schema_status=$copy_status; fi
+          fi
+          node --import tsx scripts/generate-preflight-disclosure.ts > "$CATALOG_DIR/preflight-disclosure.pg18.json" 2> "$CATALOG_DIR/disclosure-generator.log"
+          disclosure_status=$?
+          set -e
+          printf '{"schemaExit":%s,"disclosureExit":%s}\n' "$schema_status" "$disclosure_status" > "$CATALOG_DIR/generation-status.json"
+          if [ "$schema_status" -ne 0 ]; then exit "$schema_status"; fi
+          exit "$disclosure_status"
+      - name: Verify cleanup and fail-closed candidate completeness
+        if: always() && steps.generate.outcome != 'skipped'
+        env:
+          CATALOG_DIR: ${{ runner.temp }}/hr-union-catalog-candidate
+        run: |
+          node --import tsx --input-type=module <<'JS'
+          import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { createHash } from 'node:crypto';
+          import { Client } from 'pg';
+          import { validateOwnershipHarnessEnvironment, assertPostgres18VersionNum } from './scripts/verify-schema-ownership.ts';
+          const root = process.env.CATALOG_DIR;
+          const target = validateOwnershipHarnessEnvironment();
+          const client = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
+          await client.connect();
+          try {
+            const { rows } = await client.query("SELECT current_setting('server_version_num') AS version_num");
+            assertPostgres18VersionNum(rows[0].version_num);
+            const remaining = await client.query("SELECT datname FROM pg_database WHERE datname ~ '^(schema_check_|aqlan_schema_ownership_)'");
+            writeFileSync(join(root, 'cleanup.json'), JSON.stringify({ generatedDatabasesRemaining: remaining.rows.length }, null, 2));
+            if (remaining.rows.length) throw new Error('Generator cleanup incomplete');
+          } finally { await client.end(); }
+          const read = name => JSON.parse(readFileSync(join(root, name), 'utf8'));
+          if (readFileSync(join(root, 'started.txt'), 'utf8').trim() !== 'started') throw new Error('Missing generation start witness');
+          const status = read('generation-status.json');
+          if (status.schemaExit !== 0 || status.disclosureExit !== 0) throw new Error('One or both genuine generators failed');
+          const schema = read('current-schema-contract.pg18.json'), disclosure = read('preflight-disclosure.pg18.json');
+          if (schema.format !== 'aqlan-current-schema-contract' || schema.formatVersion !== 1 || schema.generatedBy !== 'ensureSchema()' || !String(schema.generatedOnServerVersion).startsWith('18.') || !schema.tables || !(schema.counts?.tables > 0)) throw new Error('Invalid genuine current-schema result');
+          if (disclosure.format !== 'aqlan-preflight-disclosure' || disclosure.formatVersion !== 1 || !disclosure.sections || Object.keys(disclosure.sections).length === 0) throw new Error('Invalid genuine disclosure result');
+          const allowed = ['postgres-version.json', 'provenance.json', 'git-tree.txt', 'source-sha256.txt', 'committed-current-schema-contract.pg18.json', 'committed-preflight-disclosure.pg18.json', 'started.txt', 'current-schema-generator.log', 'current-schema-contract.pg18.json', 'preflight-disclosure.pg18.json', 'disclosure-generator.log', 'generation-status.json', 'cleanup.json'];
+          if (JSON.stringify(readdirSync(root).sort()) !== JSON.stringify(allowed.sort())) throw new Error('Missing or unexpected candidate evidence');
+          const files = allowed.map(name => { const data = readFileSync(join(root, name)); if (data.length > 30_000_000) throw new Error('Candidate member exceeds bound'); return { path: name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') }; });
+          writeFileSync(join(root, 'complete-index.json'), JSON.stringify({ format: 'hr-union-catalog-complete-v1', acceptance: false, runId: process.env.GITHUB_RUN_ID, head: process.env.GITHUB_SHA, files }, null, 2));
+          JS
+      - name: Retain exact generated candidates and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-union-pg18-catalog-candidate
+          path: ${{ runner.temp }}/hr-union-catalog-candidate/
+          if-no-files-found: error
+          retention-days: 7

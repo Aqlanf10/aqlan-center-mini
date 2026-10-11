@@ -5,7 +5,7 @@ import { INVOICE_IDEMPOTENCY_PATTERN, parseLineSiteFields } from "./invoice-clin
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
 
 export type ParsedInvoiceInput = {
-  patientId: number; baseCurrency: Currency; items: LinkedInvoiceLineInput[];
+  patientId: number; baseCurrency: Currency; existingPlanId: number | null; items: LinkedInvoiceLineInput[];
   authorityLines: InvoiceLineAuthorityInput[]; discountMinor: number; note: string | null; idempotencyKey: string | null;
 };
 
@@ -25,6 +25,11 @@ export function parseInvoiceInput(
     return { ok: false, message: "عملة الفاتورة يجب أن تكون YER أو SAR أو USD." };
   }
   const base = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
+  // Selections are exact identities, not coercible booleans/arrays or a hint to create replacement work.
+  const selectedId = (value: unknown): number | null | undefined => value === undefined || value === null
+    ? null : typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : undefined;
+  const existingPlanId = selectedId(source.existingPlanId);
+  if (existingPlanId === undefined) return { ok: false, message: "الخطة المختارة غير صالحة." };
 
   const rawItems = Array.isArray(source.items) ? source.items : [];
   if (rawItems.length === 0 || rawItems.length > 40) {
@@ -91,6 +96,8 @@ export function parseInvoiceInput(
     };
     const toothCode = optionalInt(raw.toothCode, 11, 85);
     const caseId = optionalInt(raw.caseId, 1, 2_147_483_647);
+    const planItemId = selectedId(raw.planItemId);
+    if (planItemId === undefined) return { ok: false, message: "بند الخطة المختار غير صالح." };
     const sessions = optionalInt(raw.sessions, 1, 60);
     if (toothCode === undefined) return { ok: false, message: "رقم السن غير صحيح بالترقيم الدولي." };
     if (caseId === undefined) return { ok: false, message: "الحالة المختارة غير صالحة." };
@@ -101,7 +108,7 @@ export function parseInvoiceInput(
 
     items.push({
       serviceId: service ? service.id : null, category: service?.category ?? null, doctorId, description, quantity,
-      unitPriceMinor, toothCode, caseId, sessions, ...siteFields,
+      unitPriceMinor, toothCode, caseId, planItemId, sessions, ...siteFields,
     });
     authorityLines.push({
       description, service: service ?? null, requestedMinor: unitPriceMinor, quantity,
@@ -119,5 +126,6 @@ export function parseInvoiceInput(
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
-  return { ok: true, patientId, baseCurrency: base, items, authorityLines, discountMinor, note, idempotencyKey };
+  return { ok: true, patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey };
 }
+

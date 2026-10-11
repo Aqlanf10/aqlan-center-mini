@@ -186,3 +186,29 @@ describe("ENDO-2 — workflow over HTTP", () => {
   });
 
 });
+
+
+describe("Endo canonical tooth boundary over HTTP", () => {
+  it.each(["11", null] as const)("rejects a selected case with site %s before episode or audit insertion", async site => {
+    const created = await send("doctorA", "POST", `/api/patients/${patientId}/cases`, {
+      specialty: "endodontics", title: "SYNTHETIC scope boundary", site,
+    });
+    expect(created.status).toBe(201);
+    const target = (await created.json() as { id: number }).id;
+    const snapshot = async () => ({
+      treatments: (await db.query(`SELECT * FROM endo_treatments WHERE patient_id=$1 ORDER BY id`, [patientId])).rows,
+      audit: (await db.query(`SELECT * FROM audit_log WHERE entity='patient' AND entity_id=$1 ORDER BY id`, [String(patientId)])).rows,
+      invoices: (await db.query(`SELECT * FROM invoices WHERE patient_id=$1 ORDER BY id`, [patientId])).rows,
+      payments: (await db.query(`SELECT * FROM payments WHERE patient_id=$1 ORDER BY id`, [patientId])).rows,
+    });
+    const before = await snapshot();
+    const response = await send("doctorA", "POST", base(), { toothCode: 47, caseId: target });
+    expect(response.status).toBe(409);
+    const body = await response.json() as Record<string, unknown>;
+    expect(Object.keys(body)).toEqual(["message"]);
+    expect(body.message).toBe(site === null
+      ? "موضع الحالة غير محدّد؛ راجع نطاقها السريري قبل فتح نوبة جديدة."
+      : "موضع الحالة لا يطابق سن نوبة علاج الجذور.");
+    expect(await snapshot()).toEqual(before);
+  });
+});

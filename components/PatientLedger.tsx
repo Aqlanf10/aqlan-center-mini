@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
-import { isAdmin } from "@/lib/roles";
+import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { friendlyDateLong } from "@/lib/reminders";
 import { PLAN_STATUS_LABEL } from "@/lib/plans";
 import { ServiceSelect } from "./ServiceSelect";
@@ -19,7 +19,11 @@ import { LegacyTreatmentForm } from "./LegacyTreatmentForm";
 import { LegacyTreatmentAgreements } from "./LegacyTreatmentAgreements";
 import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
-import { invoiceLineInputProblem, previewForRow, readPreviewLines, type PreviewState } from "./dental/invoice-preview-state";
+import { invoiceLineInputProblem, previewForRow } from "./dental/invoice-preview-state";
+import {
+  readInvoiceSelectionPreview, selectInvoiceItem, selectInvoicePlan, selectionForOwner,
+  type InvoiceSelection, type InvoiceSelectionPreviewState,
+} from "./dental/invoice-selection-state";
 import {
   PER_TOOTH_SPLIT_NOTICE, applyToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
@@ -268,15 +272,15 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
       || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
 }
 
-export function PatientLedger({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+export function PatientLedger({ patientId, selectionContextKey = "", onClinicalChange }: { patientId: number; selectionContextKey?: string; onClinicalChange?: () => void }) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
   const scope = JSON.stringify([patientId, session]);
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
-  return <PatientLedgerContent key={scope} patientId={patientId} onClinicalChange={onClinicalChange} />;
+  return <PatientLedgerContent key={scope} patientId={patientId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} />;
 }
 
-function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientLedgerContent({ patientId, selectionContextKey, onClinicalChange }: { patientId: number; selectionContextKey: string; onClinicalChange?: () => void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -472,7 +476,7 @@ function PatientLedgerContent({ patientId, onClinicalChange }: { patientId: numb
 
       {mode === "invoice" ? (
         <InvoiceForm key={patientId}
-          patientId={patientId} base={base} services={services} busy={busy}
+          patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
           onSubmit={async (body) => {
             const created = await send(() => fetch("/api/invoices", {
               method: "POST", headers: { "Content-Type": "application/json" },
@@ -805,13 +809,18 @@ const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
-function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
+function InvoiceForm({ patientId, base, services, busy, selectionContextKey = "", onSubmit }: {
   patientId: number;
   base: Currency;
   services: Service[];
   busy: boolean;
+  selectionContextKey?: string;
   onSubmit: (body: Record<string, unknown>) => void;
 }) {
+  const formSession = useSession();
+  const canSubmit = canHandleMoney(formSession?.role);
+  const authorityKey = JSON.stringify(formSession);
+  const authority = useMemo(() => ({ authorityKey, canSubmit }), [authorityKey, canSubmit]);
   /* مفاتيح ثابتة للأسطر: اختيار عدة أسنان يقسم السطر إلى أسطر، فلا يصلح الترتيب مفتاحًا. */
   const rowSeq = useRef(0);
   const nextRowKey = () => `row-${++rowSeq.current}`;
@@ -821,11 +830,13 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
   /* (INV-LINK B) مفتاح الإعادة لهذا النموذج: نقرةٌ مزدوجة أو ردٌّ ضائع يعيد الفاتورة نفسها لا فاتورةً ثانية. */
   const [idempotencyKey] = useState(() => newIdempotencyKey("inv"));
-  const [previewState, setPreviewState] = useState<PreviewState | null>(null);
+  const [previewState, setPreviewState] = useState<(InvoiceSelectionPreviewState & { owner: object }) | null>(null);
+  const [selection, setSelection] = useState<InvoiceSelection | null>(null);
   const [previewRetry, setPreviewRetry] = useState(0);
-  const [doctorCatalog, setDoctorCatalog] = useState<{ patientId: number; rows: { id: number; name: string }[] } | null>(null);
-  const doctors = doctorCatalog?.patientId === patientId ? doctorCatalog.rows : [];
+  const [doctorCatalog, setDoctorCatalog] = useState<{ patientId: number; owner: object; rows: { id: number; name: string }[] } | null>(null);
+  const doctors = doctorCatalog?.patientId === patientId && doctorCatalog.owner === authority ? doctorCatalog.rows : [];
   useEffect(() => {
+    if (!canSubmit) return;
     const controller = new AbortController();
     void fetch("/api/parties?kind=doctor", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
@@ -834,11 +845,11 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
         // Read only the already-authorized catalogue. Denied/malformed reads expose no fallback list.
         if (response.ok && Array.isArray(payload) && payload.every((entry) => record(entry)
           && positiveId(entry.id) && typeof entry.name === "string" && entry.kind === "doctor")) {
-          setDoctorCatalog({ patientId, rows: payload.map((entry) => ({ id: entry.id as number, name: entry.name as string })) });
+          setDoctorCatalog({ patientId, owner: authority, rows: payload.map((entry) => ({ id: entry.id as number, name: entry.name as string })) });
         } else setDoctorCatalog(null);
       }).catch(() => { if (!controller.signal.aborted) setDoctorCatalog(null); });
     return () => controller.abort();
-  }, [patientId]);
+  }, [patientId, authority, canSubmit]);
   const [discount, setDiscount] = useState("");
   /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
   const [discountReason, setDiscountReason] = useState("");
@@ -878,27 +889,42 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
   const inputProblems = rows.map((row) => row.serviceId || row.description.trim()
     ? invoiceLineInputProblem({ price: row.price, quantity: row.quantity, currency,
       servicePriceMinor: serviceOf(row.serviceId)?.priceMinor ?? null }) : null);
+  // Keep text/price/tooth drafts; only explicit identity selections expire on changed work/context.
+  const selectionScope = JSON.stringify({ patientId, currency, base, selectionContextKey,
+    catalog: services.map((service) => [service.id, service.category, service.priceMinor]), rows });
+  const selectionOwner = useMemo(() => ({ selectionScope, authority }), [selectionScope, authority]);
+  const selected = selectionForOwner(selection, selectionOwner);
   // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
   const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, idempotencyKey, base, retry: previewRetry,
+    authorityKey, selectionContextKey, existingPlanId: selected.existingPlanId,
     catalog: services.map((service) => [service.id, service.category, service.priceMinor]),
     rows: rows.map((row, index) => ({ row, index })).filter(({ row }) => row.serviceId || row.description.trim())
       .map(({ row, index }) => ({ key: row.key, clinical: isClinical(row.serviceId), inputProblem: inputProblems[index],
         serviceId: row.serviceId ? Number(row.serviceId) : undefined, description: row.description,
         price: row.price, priceReason: row.priceReason, quantity: Number(row.quantity) || 1,
         caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
+        planItemId: isClinical(row.serviceId) ? selected.itemIds.get(row.key) ?? null : null,
         doctorId: row.doctorId ? Number(row.doctorId) : undefined, ...toothPayload(modeOf(row), row) })),
   });
+  // A state-owned generation survives ordinary renders, but never revives an earlier A after A -> B -> A.
+  // React restarts this component before committing when the guarded render-time adjustment runs.
+  const [previewGeneration, setPreviewGeneration] = useState(() => ({ previewKey, authority }));
+  const previewOwner = previewGeneration.previewKey === previewKey && previewGeneration.authority === authority
+    ? previewGeneration : { previewKey, authority };
+  if (previewOwner !== previewGeneration) setPreviewGeneration(previewOwner);
   // Forget old evidence rather than reviving it if inputs later return to an earlier value.
-  if (previewState && previewState.requestKey !== previewKey) setPreviewState(null);
+  if (previewState && (previewState.requestKey !== previewKey || previewState.owner !== previewOwner)) setPreviewState(null);
   useEffect(() => {
+    if (!canSubmit) return;
     const request = JSON.parse(previewKey) as {
       patientId: number; currency: Currency; discount: string; discountReason: string; idempotencyKey: string;
-      rows: { key: string; clinical: boolean; [field: string]: unknown }[];
+      existingPlanId: number | null;
+      rows: { key: string; clinical: boolean; planItemId?: number | null; [field: string]: unknown }[];
     };
     if (!request.rows.some((row) => row.clinical) || request.rows.some((row) => row.inputProblem)) return;
     const controller = new AbortController();
     const unavailable = () => {
-      if (!controller.signal.aborted) setPreviewState({ requestKey: previewKey, status: "unavailable", byRow: new Map() });
+      if (!controller.signal.aborted) setPreviewState({ owner: previewOwner, requestKey: previewKey, status: "unavailable", byRow: new Map() });
     };
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
@@ -906,6 +932,7 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
       void fetch("/api/invoices/clinical-preview", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
         body: JSON.stringify({ patientId: request.patientId, currency: request.currency,
+          existingPlanId: request.existingPlanId,
           discount: request.discount, discountReason: request.discountReason, idempotencyKey: request.idempotencyKey,
           items: request.rows.map((row) => {
             const { key, clinical, inputProblem, ...item } = row;
@@ -918,18 +945,20 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
         if (controller.signal.aborted) return;
         if (!response.ok && [400, 401, 403, 409, 422].includes(response.status)
           && record(payload) && typeof payload.message === "string" && payload.message.trim()) {
-          setPreviewState({ requestKey: previewKey, status: "refused", message: payload.message.slice(0, 1500), byRow: new Map() });
+          setPreviewState({ owner: previewOwner, requestKey: previewKey, status: "refused", message: payload.message.slice(0, 1500), byRow: new Map() });
           return;
         }
-        const byRow = response.ok ? readPreviewLines(payload, request.rows) : null;
-        if (!byRow) { unavailable(); return; }
-        setPreviewState({ requestKey: previewKey, status: "ready", byRow });
+        const evidence = response.ok ? readInvoiceSelectionPreview(payload, request.rows, request.existingPlanId) : null;
+        if (!evidence) { unavailable(); return; }
+        setPreviewState({ owner: previewOwner, requestKey: previewKey, status: "ready", ...evidence });
       }).catch(unavailable).finally(() => clearTimeout(deadline));
     }, 350);
     return () => { controller.abort(); clearTimeout(timer); clearTimeout(deadline); };
-  }, [previewKey]);
+  }, [previewKey, previewOwner, canSubmit]);
+  const currentPreview = previewState?.owner === previewOwner ? previewState : null;
+  const selectionEvidence = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.selections : undefined;
   const clinicalPreviewBlocked = rows.some((row) => isClinical(row.serviceId)
-    && previewForRow(previewState, previewKey, row.key).status !== "ready");
+    && previewForRow(currentPreview, previewKey, row.key).status !== "ready");
 
   /* (INV-LINK TOOTH) لا يُحفظ بندٌ يحتاج سنًّا بلا سن — والخادم يرفضه أيضًا. */
   const toothProblems = rows.map((row) => row.serviceId ? toothProblem(modeOf(row), row) : null);
@@ -1004,8 +1033,9 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
     );
   };
 
+  if (!canSubmit) return <p role="status" className="text-sm text-slate-500">لا توجد صلاحية لإصدار فاتورة في الجلسة الحالية.</p>;
   return (
-    <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
+    <section className="mb-4 min-w-0 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
       <h3 className="mb-3 text-sm font-bold">فاتورة جديدة</h3>
       <label className="mb-3 block w-48">
         <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الفاتورة</span>
@@ -1017,6 +1047,29 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
           ))}
         </select>
       </label>
+      {rows.some((row) => isClinical(row.serviceId)) ? <div className="mb-3 min-w-0 space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
+        <label className="block min-w-0">
+          <span className="mb-1 block text-xs font-bold text-sky-900">الخطة المقصودة للأعمال الجديدة</span>
+          <select aria-label="الخطة المقصودة للأعمال الجديدة" data-testid="invoice-existing-plan"
+            value={selected.existingPlanId ?? ""} disabled={busy || !selectionEvidence}
+            onChange={(event) => {
+              const planId = event.target.value ? Number(event.target.value) : null;
+              setSelection((current) => selectInvoicePlan(current, selectionOwner, planId, selectionEvidence?.planChoices ?? []) ?? current);
+            }}
+            className="min-h-[44px] w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs disabled:opacity-60">
+            <option value="">دون اختيار صريح — لا تُتجاوز الخطط الملتبسة تلقائيًا</option>
+            {selected.existingPlanId !== null && !selectionEvidence?.planChoices.some((choice) => choice.id === selected.existingPlanId)
+              ? <option value={selected.existingPlanId} disabled>خطة #{selected.existingPlanId} — بانتظار إعادة التحقق</option> : null}
+            {selectionEvidence?.planChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.compatible}>
+              خطة #{choice.id}{choice.compatible ? " — تقبل إضافة العمل" : " — لا تقبل إضافة أعمال بهذه الفاتورة"}
+            </option>)}
+          </select>
+        </label>
+        <p className="text-[11px] text-sky-900">بنود العلاج القائمة تُختار أدناه بهويتها. تغيير المريض أو سياق الحالة أو العملة أو الخدمة أو السن أو بيانات البند يلغي الاختيار الصريح ويعيد المعاينة، مع إبقاء مسودة الفاتورة.</p>
+        {selected.existingPlanId !== null || selected.itemIds.size > 0 ? <button type="button" disabled={busy}
+          onClick={() => setSelection({ owner: selectionOwner, existingPlanId: null, itemIds: new Map() })}
+          className="min-h-[44px] text-xs font-bold text-sky-800 underline">مسح اختيار الخطة والبنود</button> : null}
+      </div> : null}
       {splitNotice ? (
         <p role="status" data-testid="invoice-split-notice"
           className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
@@ -1128,11 +1181,36 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
               {toothProblems[index]}
             </p>
           ) : null}
+          {isClinical(row.serviceId) && (() => {
+            const itemId = selected.itemIds.get(row.key) ?? null;
+            const choices = (selectionEvidence?.itemChoices.get(row.key) ?? []).filter((choice) =>
+              (selected.existingPlanId === null || choice.planId === selected.existingPlanId)
+              && (!row.caseId || choice.clinicalCaseId === null || choice.clinicalCaseId === Number(row.caseId)));
+            if (!choices.length && itemId === null) return null;
+            return <label className="block min-w-0 rounded-lg border border-sky-200 bg-white p-2">
+              <span className="mb-1 block text-xs font-bold text-slate-700">بند الخطة المقصود لهذا العمل</span>
+              <select aria-label="بند الخطة المقصود" data-testid={`invoice-plan-item-${index}`}
+                value={itemId ?? ""} disabled={busy || !selectionEvidence}
+                onChange={(event) => {
+                  const next = event.target.value ? Number(event.target.value) : null;
+                  setSelection((current) => selectInvoiceItem(current, selectionOwner, row.key, next, choices) ?? current);
+                }}
+                className="min-h-[44px] w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs disabled:opacity-60">
+                <option value="">دون اختيار صريح — يجب حسم تعدد البنود</option>
+                {itemId !== null && !choices.some((choice) => choice.id === itemId)
+                  ? <option value={itemId} disabled>بند #{itemId} — يحتاج إعادة التحقق</option> : null}
+                {choices.map((choice) => <option key={choice.id} value={choice.id}>
+                  بند #{choice.id} · خطة #{choice.planId}{choice.clinicalCaseId !== null ? ` · حالة #${choice.clinicalCaseId}` : ""}
+                </option>)}
+              </select>
+              <span className="mt-1 block text-[11px] text-slate-500">الاختيار لا يتجاوز الفواتير السابقة أو الاتفاق التاريخي؛ يعيد الخادم التحقق عند الحفظ.</span>
+            </label>;
+          })()}
           {(() => {
             if (!isClinical(row.serviceId)) return null;
             if (inputProblems[index]) return <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state="invalid"
               className="text-[11px] font-bold text-rose-800">صحّح بيانات البند قبل معاينة الربط السريري.</div>;
-            const evidence = previewForRow(previewState, previewKey, row.key);
+            const evidence = previewForRow(currentPreview, previewKey, row.key);
             const preview = evidence.line;
             if (!preview) return (
               <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status}
@@ -1210,9 +1288,10 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
       ) : null}
       <button
         onClick={() => {
-          if (busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked) return;
+          if (!canSubmit || busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked) return;
           onSubmit({
             currency,
+            existingPlanId: selected.existingPlanId,
             discount,
             discountReason,
             items: rows
@@ -1226,11 +1305,12 @@ function InvoiceForm({ patientId, base, services, busy, onSubmit }: {
                 quantity: Number(row.quantity) || 1,
                 ...toothPayload(modeOf(row), row),
                 caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
+                planItemId: isClinical(row.serviceId) ? selected.itemIds.get(row.key) ?? null : null,
               })),
             idempotencyKey,
           });
         }}
-        disabled={busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || !rows.some((row) => row.serviceId || row.description.trim())}
+        disabled={!canSubmit || busy || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || !rows.some((row) => row.serviceId || row.description.trim())}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
       >
         احفظ الفاتورة
@@ -1347,3 +1427,4 @@ function OpeningForm({ base, busy, canEdit, openings, onSubmit, onClear }: {
     </section>
   );
 }
+

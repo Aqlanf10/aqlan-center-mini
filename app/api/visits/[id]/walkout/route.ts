@@ -40,7 +40,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
       ? await readReceptionHandoff(id, walkout) : null;
     return NextResponse.json({ ...walkout, summary, signedToday,
-      ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
+      ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason,
+        financialReviewRequired: handoff.financialReviewRequired, visitInvoiceSettled: handoff.visitInvoiceSettled } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });

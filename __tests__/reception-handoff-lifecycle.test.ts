@@ -1,7 +1,10 @@
+vi.mock("../lib/operational-checkout-db", () => ({ operationalDecisionForSigned: vi.fn().mockResolvedValue(null),
+  lockReceptionReceivable: state.proof,
+  signedReceptionFinancialState: vi.fn().mockResolvedValue({ reviewRequired: false, invoiceSettled: false }) }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VisitWalkout } from "../lib/db";
 
-const state = vi.hoisted(() => ({ poolQuery: vi.fn(), query: vi.fn(), connect: vi.fn(), release: vi.fn(), audit: vi.fn(), walkout: vi.fn(), schema: vi.fn() }));
+const state = vi.hoisted(() => ({ poolQuery: vi.fn(), query: vi.fn(), connect: vi.fn(), release: vi.fn(), audit: vi.fn(), walkout: vi.fn(), schema: vi.fn(), proof: vi.fn() }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", ensureSchema: state.schema,
   getPool: () => ({ query: state.poolQuery, connect: state.connect }), insertAuditRow: state.audit, visitWalkout: state.walkout }));
 const { completeReceptionHandoff, listReceptionHandoffs, readReceptionHandoff, isHandoffSignature } = await import("../lib/reception-handoff-db");
@@ -21,6 +24,7 @@ const walkout = (override: Partial<VisitWalkout> = {}): VisitWalkout => ({ visit
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.proof.mockReset().mockResolvedValue({ ok: true, patientId: 7, signedAt, receivable: null });
   state.audit.mockReset().mockResolvedValue(undefined);
   state.connect.mockResolvedValue({ query: state.query, release: state.release });
   state.query.mockReset().mockImplementation(async (sql: string) => {
@@ -92,7 +96,7 @@ describe("transactional exact-signature handoff completion", () => {
     expect(state.query.mock.calls[1][0]).toContain("FOR UPDATE OF v");
     expect(state.audit).toHaveBeenCalledWith(expect.objectContaining({ query: state.query }), expect.objectContaining({
       action: "visit.reception_handoff_completed", entity: "visit", entityId: 41, actor: "desk", actorRole: "reception",
-      details: { patientId: 7, signedAt, signatureVersion, reason: input.reason },
+      details: { patientId: 7, signedAt, signatureVersion, reason: input.reason, receivable: null },
     }));
     expect(state.query).toHaveBeenLastCalledWith("COMMIT");
     expect(state.release).toHaveBeenCalledOnce();
@@ -125,8 +129,10 @@ describe("transactional exact-signature handoff completion", () => {
     expect(state.connect).not.toHaveBeenCalled();
   });
   it("rejects unsigned and missing visits with no audit", async () => {
+    state.proof.mockResolvedValue({ ok: true, patientId: 7, signedAt: null, receivable: null });
     state.query.mockResolvedValue({ rows: [{ patient_id: 7, signed_at: null, signature_version: null }] });
     expect(await completeReceptionHandoff(input, actor)).toEqual({ ok: false, reason: "not_signed" });
+    state.proof.mockResolvedValue({ ok: false, reason: "not_found" });
     state.query.mockResolvedValue({ rows: [] });
     expect(await completeReceptionHandoff(input, actor)).toEqual({ ok: false, reason: "not_found" });
     expect(state.audit).not.toHaveBeenCalled();
