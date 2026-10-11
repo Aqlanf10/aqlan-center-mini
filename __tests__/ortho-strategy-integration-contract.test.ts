@@ -10,13 +10,15 @@ const boundaries = [
   ["visit sign", visit, "  const sign = useCallback(", "  /** (VISIT-2) فتح ملف", "ef28cfac2060d5b9e80e2e17a947a49287c3daf8c0c6efe5a6798504c45a698e"],
   ["visit payload", visit, "  const payload = () => (", "  /*\n   * «مخطَّط لليوم»", "e311cf68c9ceb5fb0305c20c5c07bc401ce06505dbb4515c5e84d3fa3e98afda"],
   ["visit planned callback", visit, "  const addPlannedItem = (", "  /* ملاحظة جلسةٍ", "28ab4c344ef3a0bdb893778e4b0fe50405235e514251c0e8440d014a19905156"],
-  ["Ortho owner", ortho, "function makeOwner(", "function sameDraftValue", "b8ae3da315cde570ccc2a3b4c463dfb644692725f781501bcecdd922664c157e"],
-  ["Ortho retirement", ortho, "function retireOwner(", "function sessionScope", "256983951910e914e0084b53d4b1fd25a9b9efd006d5d0c8d209e97a4f3f12d1"],
+  ["Ortho owner", ortho, "function makeOwner(", "function sameDraftValue", "c296ba23c366552a47e10336c1960a5c91d8d55709f38fbe4edf428274b96044"],
+  ["Ortho retirement", ortho, "function retireOwner(", "function sessionScope", "83425a2d293e9c1cb46ddeac87238eeb4d37e1f4f4a97c28c1176bab3813dced"],
   ["Ortho mutation admission", ortho, "function beginMutation(", "function endMutation", "15c0f2e29b6a017dc3f0b40c03398011f7ddad2f28fbbbf763f3758720d5b056"],
-  // Reviewed invoice-entry callback addition; owner/child/mutation/draft authority above remains unchanged.
-  ["Ortho scoped navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "d634abadbc7ead9e9e9dd110b007321ae44f37b79bf0d313a02f2c0edda0f392"],
+  // Local union: added intake/study/retention owners, actor identity and guarded section navigation.
+  // Original Visit and mutation-admission hashes and the exact invoice callback stay pinned.
+  // Behavioural lifetime coverage: patient-ortho-read-safety + ortho-completion-cancel; native union test.
+  ["Ortho scoped navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "3c7cd20039c2a8349a04e803e190a2cdb811f1183f7b6d326e5cf9c892072403"],
 ] as const;
-describe("strategy integration preserves released5ae authority boundaries", () => {
+describe("strategy integration preserves authority boundaries at the local union checkpoint", () => {
   it.each(boundaries)("keeps %s byte-identical", (_label, source, start, end, hash) => {
     expect(source.split(start)).toHaveLength(2);
     const from = source.indexOf(start), to = source.indexOf(end, from);
@@ -40,6 +42,19 @@ describe("strategy integration preserves released5ae authority boundaries", () =
     expect(wrapper).toContain("onNavigationGuardChange?.(canLeave)");
     expect(wrapper).toContain("if (childGuards.current.get(key) === guard) childGuards.current.delete(key)");
     expect(wrapper).toContain("owner.activate(); return () => owner.retire();");
+  });
+  it("extends retirement and pending navigation guards to every newly mounted clinical owner", () => {
+    const retirement = ortho.slice(ortho.indexOf("function retireOwner("), ortho.indexOf("function sessionScope"));
+    for (const name of ["assessments", "intakes", "studies", "retentions"]) {
+      expect(retirement).toContain(`owner.${name}.values()`);
+      expect(retirement).toContain(`owner.${name}.clear()`);
+    }
+    const sectionGuard = ortho.slice(ortho.indexOf("const canChangeSection ="), ortho.indexOf("useLayoutEffect(() => onNavigationGuardChange"));
+    expect(sectionGuard).toContain("!owner.active || owner.denied || !owner.clinical || owner.mutations.size > 0");
+    expect(sectionGuard).toContain("slot.current?.busy || slot.current?.uncertain");
+    expect(sectionGuard.match(/value.busy \|\| value.uncertain/g)).toHaveLength(4);
+    expect(sectionGuard).toContain("for (const guard of childGuards.current.values()) if (!guard()) return false");
+    expect(ortho).toContain("[session.userId ?? null, session.username, session.role, session.permissions ?? null]");
   });
   it("uses the current prescription pillar and Ortho lifetime without a new top-level tab", () => {
     expect(ortho.match(/<OrthoStrategyPanel /g)).toHaveLength(1);

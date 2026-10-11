@@ -15,6 +15,7 @@ describe("WITS zero is distinct from an undefined occlusal axis", () => {
   it("still refuses a zero-length plane and missing calibration, even at zero separation", () => {
     expect(measure("WITS", { ...points, OcclP: points.OcclA }, 0.5)).toBeNaN();
     expect(measure("WITS", points, 0)).toBeNaN();
+    expect(measure("WITS", points, -0.5)).toBeNaN();
     expect(measure("WITS", points, Number.NaN)).toBeNaN();
   });
 });

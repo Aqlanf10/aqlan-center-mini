@@ -366,6 +366,7 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "WITS": {
       if (!has("A", "B", "OcclA", "OcclP")) return NaN;
+      if (!Number.isFinite(mmPerPixel) || mmPerPixel <= 0) return NaN;
       if (dist(p("OcclA"), p("OcclP")) === 0) return NaN;
       // قدمُ العمود لكلٍّ من A وB على مستوى الإطباق، ثم المسافة بينهما على
       // اتجاه المستوى نفسه موجبًا نحو الأمام. القيم الأكبر نحو الصنف الثاني.

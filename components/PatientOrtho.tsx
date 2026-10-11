@@ -276,8 +276,8 @@ function retireOwner(owner: OrthoOwner) {
   for (const slot of owner.intakes.values()) slot.retire();
   owner.intakes.clear();
   for (const retention of owner.retentions.values()) retention.retire();
-      owner.retentions.clear();
-      for (const study of owner.studies.values()) study.retire();
+  owner.retentions.clear();
+  for (const study of owner.studies.values()) study.retire();
   owner.studies.clear(); owner.journeySelections.clear(); owner.journeyNavigationTicket++;
 }
 function sessionScope(session: SessionInfo | null) {
