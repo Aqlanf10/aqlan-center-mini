@@ -29,9 +29,9 @@ async function opened(command = open()) {
   expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.code);
   return result.event;
 }
-async function billingRequest(caseId: number | null, existingPlanId: number | null = null) {
+async function billingRequest(caseId: number | null, existingPlanId: number | null = null, scope = "both") {
   const serviceId = (await fixture.pool.query("INSERT INTO services(name,category,price_minor,is_active,price_configured) VALUES($1,'ortho',10000,true,true) RETURNING id", [key()])).rows[0].id;
-  const items = [{ serviceId, category: "ortho", doctorId, description: "Synthetic separately authorized orthodontic service", quantity: 1, unitPriceMinor: 10000, toothCode: null, scope: "both", caseId, sessions: 1 }];
+  const items = [{ serviceId, category: "ortho", doctorId, description: "Synthetic separately authorized orthodontic service", quantity: 1, unitPriceMinor: 10000, toothCode: null, scope, caseId, sessions: 1 }];
   return { patientId, existingPlanId, baseCurrency: "YER" as const, discountMinor: 0, note: null, createdBy: username, actorRole: "admin", templates: DEFAULT_SPECIALTY_TEMPLATES, items,
     idempotencyKey: key(), requestHash: invoiceRequestFingerprint({ patientId, existingPlanId, currency: "YER", discountMinor: 0, items }), auditDetails: {} };
 }
@@ -99,6 +99,21 @@ describe("connected ortho union", () => {
       expect(await financialCounts()).toEqual(before);
       expect((await fixture.pool.query("SELECT id FROM clinical_cases WHERE patient_id=$1", [patientId])).rows).toEqual([{ id: event.clinicalCaseId }]);
     }
+  });
+  it("a known but incompatible assessment site also blocks automatic financial shell creation", async () => {
+    const first = await linkage.createLinkedInvoice(await billingRequest(null, null, "upper"));
+    if (!first.ok) throw new Error(first.reason);
+    const read = await lifecycle.readOrthoLifecycle({ patientId, session });
+    if (!read.ok) throw new Error(read.code);
+    const bridge = read.clinicalCases[0];
+    await opened({ ...open(), bridge: { mode: "existing", clinicalCaseId: bridge.id, expectedContentHash: bridge.contentHash } });
+    const before = await financialCounts(), invoice = await billingRequest(null, first.planId), historical = await historicalRequest(null);
+    expect((await linkage.previewInvoiceLinkage(invoice))[0].refusal).toBe("bad_site");
+    expect(await linkage.createLinkedInvoice(invoice)).toMatchObject({ ok: false, reason: "bad_site" });
+    expect(await legacy.previewLegacyTreatment(historical)).toMatchObject({ ok: false, reason: "ortho_scope_mismatch" });
+    expect(await legacy.createLegacyTreatment(historical)).toMatchObject({ ok: false, reason: "ortho_scope_mismatch" });
+    expect(await financialCounts()).toEqual(before);
+    expect((await fixture.pool.query("SELECT id FROM clinical_cases WHERE patient_id=$1", [patientId])).rows).toEqual([{ id: bridge.id }]);
   });
   it("concurrent intake and financial entry serialize to one episode, with an explicit non-writing refusal for the losing context", async () => {
     const input = await billingRequest(null);

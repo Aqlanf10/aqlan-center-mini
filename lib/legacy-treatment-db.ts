@@ -293,13 +293,14 @@ async function decideLegacyTreatment(client: DbClient, input: {
       if (!chosen || !caseSiteFits(specialty, chosen.site, site)) throw new Refusal("bad_case");
       casePlan = { mode: "existing", id: chosen.id, title: chosen.title };
     } else {
-      const { rows: sameSpecialty } = await client.query<{ id: number; title: string | null; site: string | null }>(
-        `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
+      const { rows: sameSpecialty } = await client.query<{ id: number; title: string | null; site: string | null; ortho_status: string | null }>(
+        `SELECT id, title, site, (SELECT status FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1) AS ortho_status
+          FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
           AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
           ORDER BY id${forUpdate}`, [patientId, specialty]);
-      // An assessment with unknown arches is still an existing identity. It must
-      // block automatic shell creation until its scope is explicitly recorded.
-      if (specialty === "orthodontics" && sameSpecialty.some((row) => !(row.site ?? "").trim())) {
+      // Unknown or incompatible assessment scope cannot fall through to a new shell.
+      if (specialty === "orthodontics" && sameSpecialty.some((row) => !(row.site ?? "").trim()
+        || row.ortho_status === "assessment" && !caseSiteFits(specialty, row.site, site))) {
         throw new Refusal("ortho_scope_mismatch");
       }
       const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));

@@ -509,12 +509,14 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           caseId = known.id;
         } else {
           /* حالةٌ مفتوحة للتخصص تُعاد فقط إن وافق موضعُها سنَّ البند (للتخصص الموضعي): علاج عصب 36 لا يُلحق بحالة 11. */
-          const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
-            `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
+          const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null; ortho_status: string | null }>(
+            `SELECT id, site, (SELECT status FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1) AS ortho_status
+              FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
               AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
               ORDER BY id FOR UPDATE`,
             [input.patientId, specialty]);
-          if (sameSpecialty.some((row) => !(row.site ?? "").trim())) throw new Refusal("bad_site", line);
+          if (sameSpecialty.some((row) => !(row.site ?? "").trim()
+            || row.ortho_status === "assessment" && !caseSiteFits(specialty, row.site, site))) throw new Refusal("bad_site", line);
           const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
           if (open.length > 1) throw new Refusal("ambiguous_case", line);
           if (open.length === 1) {
@@ -722,12 +724,14 @@ export async function previewInvoiceLinkage(input: {
       preview.refusal = "incompatible_plan";
     }
     if (linkage.kind === "clinical" && linkage.needsCase) {
-      const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(
-        `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
+      const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null; ortho_status: string | null }>(
+        `SELECT id, title, site, (SELECT status FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1) AS ortho_status
+          FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
           AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
           ORDER BY id`,
         [input.patientId, linkage.specialty]);
-      if (item.caseId === null && linkedCase === null && sameSpecialty.some((row) => !(row.site ?? "").trim())) {
+      if (item.caseId === null && linkedCase === null && sameSpecialty.some((row) => !(row.site ?? "").trim()
+        || row.ortho_status === "assessment" && !caseSiteFits(linkage.specialty, row.site, site))) {
         preview.refusal = preview.refusal ?? "bad_site";
       }
       // Explicit, inherited, and automatic choices all require exact patient/specialty/site/lifecycle compatibility.
