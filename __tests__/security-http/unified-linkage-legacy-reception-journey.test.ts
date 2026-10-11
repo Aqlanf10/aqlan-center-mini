@@ -18,7 +18,9 @@ let serial = 0;
 type Who = "reception" | "doctorA" | "admin";
 type Agreement = { id: number; planId: number; planItemId: number; caseId: number; agreedMinor: number;
   previouslyPaidMinor: number; remainingMinor: number; openingEffect: string };
-type Walkout = { patientId: number; signedAt: string; invoice: { id: number } | null;
+type Walkout = { visitId: number; patientId: number; signedAt: string; invoice: { id: number } | null;
+  checkout: { previous: Record<string, number>; current: Record<string, number>;
+    paymentsToday: unknown[]; openingPaidToday: unknown[] };
   summary: { currency: string; currentBalanceMinor: number }[];
   receptionHandoff?: { status: string; handledReason: string | null } };
 
@@ -80,7 +82,7 @@ async function historical(patientId: number, paid = "120000") {
   expect(replay).toMatchObject({ replayed: true, agreement: { id: result.agreement.id } });
   return result.agreement;
 }
-async function parity(patientId: number, visitId: number, expectedDue: number, collected: number) {
+async function parity(patientId: number, visitId: number, expectedDue: number, collected: number, noFinancialSources: boolean) {
   const ledger = await read<{ invoices: unknown[]; payments: { amountMinor: number; openingCurrency: string | null }[];
     balances: Record<string, { dueMinor: number; billedMinor: number; collectedMinor: number; openingMinor: number }> }>(`/api/patients/${patientId}/ledger`);
   const workflow = await read<{ financial: { byCurrency: Record<string, { balanceMinor: number }> } }>(`/api/patients/${patientId}/workflow`);
@@ -99,8 +101,29 @@ async function parity(patientId: number, visitId: number, expectedDue: number, c
   for (const position of financial.openingPositions) {
     expect(position).toMatchObject({ currency: "YER", remainingMinor: expectedDue, scope: "patient_currency", allocationState: "not_allocated" });
   }
-  expect(walkout.summary.find(row => row.currency === "YER")?.currentBalanceMinor).toBe(expectedDue);
+  expect(walkout.checkout.current.YER).toBe(expectedDue);
+  expect(walkout.invoice).toBeNull();
+  expect(walkout.visitId).toBe(visitId);
   expect(walkout.patientId).toBe(patientId);
+  expect(walkout.signedAt).toBeTruthy();
+  if (noFinancialSources) {
+    // Fully paid before the system creates neither an opening nor current cash.
+    // The canonical summary deliberately omits all-zero currency buckets.
+    expect(expectedDue).toBe(0); expect(collected).toBe(0);
+    expect(walkout.checkout.previous.YER).toBe(0);
+    expect(walkout.checkout.current.YER).toBe(0);
+    expect(walkout.checkout.paymentsToday).toEqual([]);
+    expect(walkout.checkout.openingPaidToday).toEqual([]);
+    expect(walkout.summary).toEqual([]);
+    expect(ledger.payments).toEqual([]);
+    expect(financial.openingPositions).toEqual([]);
+    expect(await q(`SELECT id FROM payments WHERE patient_id = $1`, [patientId])).toEqual([]);
+    expect(await q(`SELECT patient_id FROM patient_opening_balances WHERE patient_id = $1`, [patientId])).toEqual([]);
+  } else {
+    const yer = walkout.summary.filter(row => row.currency === "YER");
+    expect(yer).toHaveLength(1);
+    expect(yer[0].currentBalanceMinor).toBe(expectedDue);
+  }
   expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual([]);
   const receipts = await q<{ total: string }>(`SELECT COALESCE(SUM(amount_minor), 0)::text AS total FROM payments
     WHERE patient_id = $1 AND opening_currency = 'YER' AND currency = 'YER' AND kind = 'payment'`, [patientId]);
@@ -161,9 +184,9 @@ describe("Unified linkage: historical care → real signature → reception deci
       `/api/patients/${patientId}/clinical-context?planItemId=${agreement.planItemId}&visitId=${visitId}`);
     expect(exact).toMatchObject({ ok: true, sub: "endo", context: { patientId, visitId,
       planId: agreement.planId, planItemId: agreement.planItemId, clinicalCaseId: agreement.caseId } });
-    await parity(patientId, visitId, opening, 0);
+    await parity(patientId, visitId, opening, 0, opening === 0);
     if (collection) await collect(patientId, collection);
-    const before = await parity(patientId, visitId, due, collection);
+    const before = await parity(patientId, visitId, due, collection, opening === 0);
     const reason = collection === 0 && due > 0 ? "تأجيل التحصيل مع بقاء الدين" : "مراجعة الاستقبال مع حفظ الرصيد الفعلي";
     const body = { patientId, signedAt: before.signedAt, reason };
     // Wrong-patient handoff is rejected before it can hide an unrelated visit.
@@ -171,7 +194,7 @@ describe("Unified linkage: historical care → real signature → reception deci
     await mutate("doctorA", `/api/visits/${visitId}/reception-handoff`, body, 403);
     await mutate("reception", `/api/visits/${visitId}/reception-handoff`, body, 200);
     await mutate("reception", `/api/visits/${visitId}/reception-handoff`, body, 200);
-    const after = await parity(patientId, visitId, due, collection);
+    const after = await parity(patientId, visitId, due, collection, opening === 0);
     expect(after.receptionHandoff).toMatchObject({ status: "handled", handledReason: reason });
     expect(await q(`SELECT id FROM patient_opening_balance_history WHERE patient_id = $1`, [patientId]))
       .toHaveLength(opening > 0 ? 1 : 0);

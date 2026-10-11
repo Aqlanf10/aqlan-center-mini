@@ -9,9 +9,10 @@ import { assertStrategyCiBoundary, createStrategyFixture, type StrategyFixture }
 let browser: Browser, fixture: StrategyFixture;
 let newerId = 0, visitId = 0;
 const studies: number[] = [];
+const ownedServiceIds: number[] = [];
 beforeAll(async () => {
   assertStrategyCiBoundary(); const h = await harness();
-  fixture = await createStrategyFixture(h, "V2 native navigation", { status: "completed", permissions: { canViewXrays: true, canUploadXrays: true } });
+  fixture = await createStrategyFixture(h, "V2 native navigation", { status: "completed", permissions: { canViewXrays: true, canUploadXrays: true, canViewServicePrices: true } });
   newerId = (await fixture.db.query<{ id: number }>(`INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,$2,'active') RETURNING id`, [fixture.patientId, fixture.username])).rows[0].id;
   await fixture.db.query(`INSERT INTO clinical_cases(patient_id,specialty,title,site,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic later case','upper and lower',$2,$3)`, [fixture.patientId, newerId, fixture.username]);
   visitId = (await fixture.db.query<{ id: number }>(`INSERT INTO visits(patient_id,patient_name,doctor_id,status) VALUES($1,'Synthetic unrecorded visit',$2,'done') RETURNING id`, [fixture.patientId, fixture.partyId])).rows[0].id;
@@ -19,7 +20,10 @@ beforeAll(async () => {
     const clinical = (await fixture.db.query<{ id: number }>(`INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by) VALUES($1,'endodontics',$2,$3,$4) RETURNING id`, [fixture.patientId, `Synthetic Endo ${tooth}`, String(tooth), fixture.username])).rows[0].id;
     await fixture.db.query("INSERT INTO endo_treatments(patient_id,case_id,tooth_code,created_by) VALUES($1,$2,$3,$4)", [fixture.patientId,clinical,tooth,fixture.username]);
   }
-  await fixture.db.query("INSERT INTO services(name,category,price_minor) VALUES($1,'filling',1000),($2,'filling',2000)", [`Synthetic A ${fixture.uuid}`,`Synthetic B ${fixture.uuid}`]);
+  const services = await fixture.db.query<{ id: number }>(
+    "INSERT INTO services(name,category,price_minor,is_active,price_configured) VALUES($1,'filling',1000,TRUE,TRUE),($2,'filling',2000,TRUE,TRUE) RETURNING id",
+    [`Synthetic A ${fixture.uuid}`,`Synthetic B ${fixture.uuid}`]);
+  ownedServiceIds.push(...services.rows.map(row => row.id));
   const documentId = (await fixture.db.query<{ id: number }>(`INSERT INTO patient_documents(patient_id,kind,title,mime_type,size_bytes,sha256,storage_key,uploaded_by)
     VALUES($1,'xray','Synthetic UI image metadata','image/png',1,$2,$3,$4) RETURNING id`, [fixture.patientId,'0'.repeat(64),`synthetic-${fixture.uuid}.png`,fixture.username])).rows[0].id;
   for (let index=0;index<2;index++) {
@@ -52,11 +56,26 @@ describe("V2 exact native traversal and dirty/pending guards",()=>{
   },120000);
   it("service-only and billing-rule-only plan drafts block tab departure",async()=>{
     const {page,context}=await mount();try{
-      await page.goto(href("plans",`planId=${fixture.planId}`));
+      const writes: string[] = [];
+      page.on("request", request => { if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) writes.push(`${request.method()} ${new URL(request.url()).pathname}`); });
+      // A doctor needs explicit catalogue-price permission; do not mistake a
+      // correctly denied catalogue for a dirty-field navigation failure.
+      const [catalogue] = await Promise.all([page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.origin === baseUrl && url.pathname === "/api/services" && url.search === "" && response.request().method() === "GET";
+      }), page.goto(href("plans",`planId=${fixture.planId}`))]);
+      expect(catalogue.status()).toBe(200);
+      const catalogueRows = await catalogue.json() as { id: number; name: string }[];
+      expect(Array.isArray(catalogueRows)).toBe(true);
+      expect(catalogueRows.filter(row => ownedServiceIds.includes(row.id)).map(row => row.id).sort((a,b) => a-b))
+        .toEqual([...ownedServiceIds].sort((a,b) => a-b));
       const service=page.getByLabel("خدمة الخطة",{exact:true});await service.waitFor();
       await expect.poll(()=>service.locator("option").count()).toBeGreaterThan(2);
       const original=await service.inputValue();
-      const other=await service.locator("option").evaluateAll((options,original)=>options.map((node)=>(node as HTMLOptionElement).value).find((value)=>value!==""&&value!==original)!,original);
+      const alternateId = ownedServiceIds.find(id => String(id) !== original);
+      expect(alternateId).toBeDefined();
+      const other = String(alternateId);
+      await expect.poll(() => service.locator(`option[value="${other}"]`).count()).toBe(1);
       await service.selectOption(other);
       let dialogs=0;page.on("dialog",async dialog=>{dialogs++;await dialog.dismiss();});
       await page.getByTestId("patient-subtab-cases").click();
@@ -67,6 +86,8 @@ describe("V2 exact native traversal and dirty/pending guards",()=>{
       await billing.selectOption(alternative);await page.getByTestId("patient-subtab-cases").click();
       expect(dialogs).toBe(2);expect(await billing.inputValue()).toBe(alternative);
       expect(new URL(page.url()).searchParams.get("sub")).toBe("plans");
+      expect(new URL(page.url()).searchParams.get("planId")).toBe(String(fixture.planId));
+      expect(writes).toEqual([]);
     }finally{await context.close();}
   },120000);
   it("plan-only and visit-only Endo entries require a deliberate episode choice",async()=>{
