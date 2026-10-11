@@ -10,6 +10,7 @@ beforeAll(async()=>{
   process.env.SKIP_SEED="false";process.env.DB_POOL_MAX="2";process.env.SESSION_SECRET??="synthetic-contract-lifecycle-session-secret-only";
   db=await import("../../lib/db");hr=await import("../../lib/hr");contracts=await import("../../lib/hr-contracts-attendance");
   await db.resetPoolForTesting();await db.ensureSchema();
+  expect((db.getPool() as unknown as {options:{max:number}}).options.max).toBe(2);
   const username=`contract_${uuid}`,passwordHash="synthetic-contract-password-hash";
   const row=(await fixture.source.query<{id:number}>("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic contract admin',$2,'admin') RETURNING id",[username,passwordHash])).rows[0];
   const {sessionCredentialVersion}=await import("../../lib/auth");admin={userId:row.id,username,role:"admin",expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion(passwordHash)};
@@ -23,17 +24,33 @@ async function countAudit(id:number){return Number((await fixture.source.query("
 const consume=<T>(promise:Promise<T>)=>promise.then(value=>({ok:true as const,value}),error=>({ok:false as const,error}));
 function unwrap<T>(outcome:{ok:true;value:T}|{ok:false;error:unknown}):T{if(!outcome.ok)throw outcome.error;return outcome.value;}
 async function twoBlockedWriters(blocker:number,pending:Promise<unknown>[]){
-  let done=false;for(const operation of pending)void operation.then(()=>{done=true;},()=>{done=true;});
+  const settled:{first?:{ok:true}|{ok:false;error:unknown}}={};
+  for(const operation of pending)void operation.then(()=>{settled.first??={ok:true};},error=>{settled.first??={ok:false,error};});
+  type Observation={pid:number;blockers:number[];query:string;state:string;wait_event_type:string|null;wait_event:string|null};
+  let observed:Observation[]=[];
+  const report=()=>console.info("HR_CONTRACT_LOCK_OBSERVATION",JSON.stringify({
+    blocker,poolMax:(db.getPool() as unknown as {options:{max:number}}).options.max,
+    writers:observed.slice(0,6).map(row=>({...row,query:row.query.slice(0,220),blockers:row.blockers.slice(0,6)})),
+  }));
   const until=Date.now()+10000;
   do{
-    if(done)throw new Error("Writer settled before observed staff contention");
-    const rows=(await fixture.source.query<{pid:number;blockers:number[];query:string}>(`SELECT pid,pg_blocking_pids(pid) AS blockers,query FROM pg_stat_activity
-      WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE%'`)).rows;
+    if(settled.first){report();if(!settled.first.ok)throw settled.first.error;throw new Error("Writer settled before observed staff contention");}
+    // The observer also owns the held blocker transaction. PostgreSQL retains
+    // its first pg_stat_activity snapshot until cleared. Only observe the exact
+    // parameterized staff/session queries on this isolated fixture database.
+    await fixture.source.query("SELECT pg_stat_clear_snapshot()");
+    observed=(await fixture.source.query<Observation>(`SELECT pid,pg_blocking_pids(pid) AS blockers,query,state,wait_event_type,wait_event FROM pg_stat_activity
+      WHERE datname=current_database() AND application_name='aqlan-center-mini'
+      AND (query='SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE'
+        OR query='SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1 FOR SHARE')
+      ORDER BY pid`)).rows;
+    const rows=observed.filter(row=>row.wait_event_type==='Lock'&&row.query==='SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE');
     const first=rows.find(r=>r.blockers.includes(blocker));
     const second=first&&rows.find(r=>r.pid!==first.pid&&(r.blockers.includes(blocker)||r.blockers.includes(first.pid)));
     if(first&&second){expect(first.pid).not.toBe(second.pid);return [first.pid,second.pid];}
     await new Promise(resolve=>setTimeout(resolve,20));
   }while(Date.now()<until);
+  report();
   throw new Error("Exact two-writer staff lock chain not observed");
 }
 describe("canonical contract writers",()=>{

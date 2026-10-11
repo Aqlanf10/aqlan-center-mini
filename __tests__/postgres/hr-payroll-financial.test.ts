@@ -32,6 +32,7 @@ const {
 
 const {
   createContract,
+  approveContract,
   transitionContractStatus,
   adjustLeaveBalance,
   createLeaveRequest,
@@ -50,26 +51,9 @@ const {
 
 import type { SessionPayload } from "../../lib/auth";
 
-const adminSession: SessionPayload = {
-  userId: 1,
-  username: "hr-admin-finance",
-  role: "admin",
-  expiresAt: Date.now() + 3600000,
-};
-
-const managerSession: SessionPayload = {
-  userId: 2,
-  username: "hr-manager-finance",
-  role: "admin",
-  expiresAt: Date.now() + 3600000,
-};
-
-const staffUserSession: SessionPayload = {
-  userId: 3,
-  username: "hr-staff-finance",
-  role: "reception",
-  expiresAt: Date.now() + 3600000,
-};
+let adminSession: SessionPayload;
+let managerSession: SessionPayload;
+let staffUserSession: SessionPayload;
 
 let supportStaffId: number;
 let doctorStaffId: number;
@@ -81,14 +65,20 @@ beforeEach(async () => {
   await ensureSchema();
   const pool = getPool();
 
-  // Create users for sessions
-  await pool.query(
-    `INSERT INTO users (id, username, display_name, password_hash, role)
-     VALUES (1, 'hr-admin-finance', 'المدير العام', 'x', 'admin'),
-            (2, 'hr-manager-finance', 'مدير الموارد', 'x', 'admin'),
-            (3, 'hr-staff-finance', 'الموظف المشبوك', 'x', 'reception')
-     ON CONFLICT (id) DO NOTHING`,
-  );
+  // Each case admits real synthetic accounts after the schema reset. No fixed
+  // IDs or pre-credential payloads may bypass the canonical writer's authority.
+  process.env.SESSION_SECRET ??= "synthetic-hr-financial-session-secret-only";
+  const {sessionCredentialVersion}=await import("../../lib/auth");
+  async function admittedSession(username:string,displayName:string,role:SessionPayload["role"]):Promise<SessionPayload>{
+    const {rows:[user]}=await pool.query<{id:number;username:string;password_hash:string;role:SessionPayload["role"];is_active:boolean}>(
+      `INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$2,'synthetic-financial-password-hash',$3)
+       RETURNING id,username,password_hash,role,is_active`,[username,displayName,role]);
+    expect(user.is_active).toBe(true);expect(user.role).toBe(role);
+    return {userId:user.id,username:user.username,role:user.role,expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion(user.password_hash)};
+  }
+  adminSession=await admittedSession("hr-admin-finance","المدير العام","admin");
+  managerSession=await admittedSession("hr-manager-finance","مدير الموارد","admin");
+  staffUserSession=await admittedSession("hr-staff-finance","الموظف المشبوك","reception");
 
   // 1. Create support staff
   const staffRes = await createStaff(
@@ -114,7 +104,7 @@ beforeEach(async () => {
   supportStaffId = staffRes.id;
 
   // Link staff user id to support staff
-  await pool.query(`UPDATE hr_staff SET user_id = 3 WHERE id = $1`, [supportStaffId]);
+  await pool.query(`UPDATE hr_staff SET user_id = $1 WHERE id = $2`, [staffUserSession.userId,supportStaffId]);
 
   // 2. Create doctor staff
   const doctorRes = await createStaff(
@@ -150,6 +140,7 @@ beforeEach(async () => {
     { staffId:doctorStaffId,templateKind:"doctor_hybrid" as const,title:"عقد مستقل للطبيب",compensationKind:"salary_commission" as const,baseSalaryMinor:10000000,doctorPartyId,commissionRatePercent:30 },
   ]) {
     const contract = await createContract({ ...input,startDate:"2026-01-01",salaryCurrency:"YER",salaryPeriod:"monthly" },adminSession);
+    await approveContract(contract.id,adminSession);
     await transitionContractStatus(contract.id,"active","تهيئة مستقلة للاختبار",adminSession);
   }
 
@@ -176,6 +167,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       adminSession,
     );
     expect(c1.id).toBeDefined();
+    await approveContract(c1.id,adminSession);
     await transitionContractStatus(c1.id, "active", "اعتماد العقد للتشغيل", adminSession);
 
     // Contract 2: Doctor hybrid (Salary + Commission)
@@ -195,6 +187,7 @@ describe("HR Financial Lifecycle and Payroll on PostgreSQL 18", () => {
       adminSession,
     );
     expect(c2.id).toBeDefined();
+    await approveContract(c2.id,adminSession);
     await transitionContractStatus(c2.id, "active", "اعتماد عقد الطبيب", adminSession);
   });
 
