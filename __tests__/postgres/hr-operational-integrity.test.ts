@@ -151,3 +151,28 @@ it.each(['check_in','check_out'] as const)('touching split shifts never invent a
  expect((await db.getPool().query('SELECT * FROM hr_attendance_punch_events WHERE staff_id=$1',[staffId])).rows).toHaveLength(3);
  expect(await punch(missingType,'16:00')).toMatchObject({workMinutes:720,isIncomplete:false});
 });
+
+it.each(['rejected','approved'] as const)('a legacy %s split correction uses decision status when later raw evidence arrives',async decision=>{
+ await work.createSchedule({staffId,name:'Legacy correction split',scheduleType:'split',effectiveFrom:'2026-01-01',workingDays:[0,1,2,3,4,5,6],shiftStartTime:'08:00',shiftEndTime:'12:00',secondShiftStart:'16:00',secondShiftEnd:'20:00'},admin);
+ const punch=(punchType:'check_in'|'check_out',time:string)=>work.recordAttendancePunch({staffId,punchType,punchTime:`2026-08-01T${time}:00+03:00`},admin);
+ await punch('check_in','08:00');const first=await punch('check_out','12:00');
+ // Before P1, split days could receive a single-pair request; retain that historical fixture.
+ const {rows:[correction]}=await db.getPool().query(`INSERT INTO hr_attendance_corrections
+  (attendance_id,staff_id,field_corrected,old_check_in,old_check_out,old_status,new_check_out,reason,requested_by,status)
+  VALUES($1,$2,'check_out',$3,$4,$5,'2026-08-01T12:10:00+03:00','Historical split request',$6,'pending') RETURNING id`,[first.id,staffId,first.checkInActual,first.checkOutActual,first.status,admin.username]);
+ if(decision==='rejected'){
+  await work.decideAttendanceCorrection(correction.id,'rejected','Not approved',reviewer);
+ }else{
+  // A previously applied approval must stay intact; the current form refuses new split approvals.
+  await db.getPool().query("UPDATE hr_attendance_corrections SET status='approved',approved_by=$2,approved_at=NOW() WHERE id=$1",[correction.id,reviewer.username]);
+  await db.getPool().query("UPDATE hr_attendance_records SET check_out_actual='2026-08-01T12:10:00+03:00',work_minutes=250 WHERE id=$1",[first.id]);
+ }
+ const decided=(await db.getPool().query('SELECT * FROM hr_attendance_corrections WHERE id=$1',[correction.id])).rows[0];
+ expect(decided.status).toBe(decision);expect(decided.approved_at).not.toBeNull();
+ const before=(await work.listAttendanceRecords({staffId}))[0];
+ await punch('check_in','16:00');const after=await punch('check_out','20:00');
+ if(decision==='rejected')expect(after).toMatchObject({workMinutes:480,isIncomplete:false});
+ else expect(after).toMatchObject({workMinutes:before.workMinutes,checkInActual:before.checkInActual,checkOutActual:before.checkOutActual,isIncomplete:before.isIncomplete});
+ expect((await db.getPool().query('SELECT * FROM hr_attendance_punch_events WHERE staff_id=$1',[staffId])).rows).toHaveLength(4);
+ expect((await db.getPool().query('SELECT * FROM hr_attendance_corrections WHERE id=$1',[correction.id])).rows[0]).toEqual(decided);
+});

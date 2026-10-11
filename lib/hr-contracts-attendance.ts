@@ -1036,7 +1036,9 @@ async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecor
     WHERE attendance_id=$1 ORDER BY punched_at,punch_type DESC`,[record.id]);
   // The existing correction form has only one pair. Never overwrite an approved
   // correction with a raw aggregate, or pretend that it can correct a split day.
-  if ((await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND approved_at IS NOT NULL LIMIT 1",[record.id])).rows.length) return attendanceView(client,record.id);
+  // Migration 0050 marks historical applied corrections as approved. The decision
+  // status is authoritative; approved_at also records rejection decisions.
+  if ((await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1",[record.id])).rows.length) return attendanceView(client,record.id);
   const pairs: {checkIn:Date;checkOut:Date}[]=[];
   let incoming:Date|null=null, ambiguous=false;
   for(const event of rows){
@@ -1109,7 +1111,7 @@ export async function recordAttendancePunch(
     if (checkIn && checkOut && Date.parse(checkOut)<Date.parse(checkIn)) throw new Error("وقت الخروج يسبق الدخول.");
     const duplicate=row && (await client.query("SELECT id FROM hr_attendance_punch_events WHERE attendance_id=$1 AND punch_type=$2 AND punched_at=$3::timestamptz LIMIT 1",[row.id,input.punchType,punchIso])).rows.length;
     const schedule=await attendanceSchedule(client,staffId,attendanceDate);
-    const correctedSplit=row && schedule?.second_shift_start && (await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND approved_at IS NOT NULL LIMIT 1",[row.id])).rows.length;
+    const correctedSplit=row && schedule?.second_shift_start && (await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND status='approved' LIMIT 1",[row.id])).rows.length;
     if(correctedSplit) await client.query(`UPDATE hr_attendance_records SET check_in_raw=COALESCE(check_in_raw,$2),check_out_raw=COALESCE(check_out_raw,$3) WHERE id=$1`,[row.id,input.punchType==='check_in'?punchIso:null,input.punchType==='check_out'?punchIso:null]);
     const record = duplicate || correctedSplit ? await attendanceView(client,row.id) : await recordAttendanceInTx(client,{staffId,attendanceDate,checkIn,checkOut,notes:input.note},session,{type:input.punchType,time:punchIso});
     await client.query(`INSERT INTO hr_attendance_punch_events(attendance_id,staff_id,punch_type,punched_at,source,note,recorded_by)
