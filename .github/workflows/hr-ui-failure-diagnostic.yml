@@ -7,6 +7,11 @@ on:
       - ".github/workflows/hr-ui-failure-diagnostic.yml"
       - "__tests__/security-http/hr-payroll-journey.test.ts"
       - "__tests__/security-http/hr-task-create-replay.test.ts"
+      - "__tests__/security-http/hr-contract-save-receipt-ui.test.ts"
+      - "__tests__/security-http/hr-contract-save-admission-real-react.test.ts"
+      - "components/hr/ContractsPanel.tsx"
+      - "app/hr/page.tsx"
+      - "lib/hr-contract-save-receipt.ts"
   workflow_dispatch:
 
 # Additive diagnosis only. Mandatory full CI remains unchanged and required.
@@ -28,10 +33,12 @@ jobs:
         include:
           - group: contracts
             file: hr-payroll-journey.test.ts
-            pattern: "/USD amounts through UI save, reopen and print$"
+            extra_file: hr-contract-save-receipt-ui.test.ts
+            admission_file: hr-contract-save-admission-real-react.test.ts
           - group: tasks
             file: hr-task-create-replay.test.ts
-            pattern: ".*"
+            extra_file: ""
+            admission_file: ""
     services:
       postgres:
         image: postgres:18-alpine
@@ -87,17 +94,97 @@ jobs:
           git rev-parse HEAD^{tree} > "$HR_UI_DIAGNOSTIC_DIR/tree.txt"
           printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$HR_DIAGNOSTIC_GROUP" > "$HR_UI_DIAGNOSTIC_DIR/run.txt"
           sha256sum __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-task-create-replay.test.ts components/hr/ContractsPanel.tsx components/hr/TasksPanel.tsx components/Modal.tsx .github/workflows/hr-ui-failure-diagnostic.yml > "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
-      - name: Diagnose selected original case with unchanged assertions and deadlines
+          sha256sum app/hr/page.tsx lib/hr-contract-save-receipt.ts __tests__/hr-contract-save-receipt.test.ts __tests__/security-http/hr-contract-save-receipt-ui.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+          sha256sum __tests__/security-http/hr-contract-save-admission-real-react.test.ts >> "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
+      - name: Run full owned acceptance files with unchanged original assertions and deadlines
+        id: owned
         env:
           HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
-          HR_DIAGNOSTIC_PATTERN: ${{ matrix.pattern }}
+          HR_DIAGNOSTIC_EXTRA_FILE: ${{ matrix.extra_file }}
+          HR_DIAGNOSTIC_ADMISSION_FILE: ${{ matrix.admission_file }}
           HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+          HR_EVIDENCE_DIR: ${{ runner.temp }}/hr-ui-diagnostic/native-positive
         run: |
           set -o pipefail
-          # Contract diagnosis selects one original money case; mandatory CI still
-          # executes all 31 cases. The tasks job executes its complete 16-case file.
-          printf '%s\n' "$HR_DIAGNOSTIC_PATTERN" > "$HR_UI_DIAGNOSTIC_DIR/test-name-pattern.txt"
-          npm run test:security-http -- "__tests__/security-http/$HR_DIAGNOSTIC_FILE" --testNamePattern "$HR_DIAGNOSTIC_PATTERN" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+          # Restore all 31 original contract cases and add the 14 real-write
+          # negative acknowledgement cases. Tasks still runs all 16 original cases.
+          files=("__tests__/security-http/$HR_DIAGNOSTIC_FILE")
+          if [ -n "$HR_DIAGNOSTIC_EXTRA_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_EXTRA_FILE"); fi
+          if [ -n "$HR_DIAGNOSTIC_ADMISSION_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_ADMISSION_FILE"); fi
+          printf '%s\n' "${files[@]}" > "$HR_UI_DIAGNOSTIC_DIR/test-files.txt"
+          printf 'started\n' > "$HR_UI_DIAGNOSTIC_DIR/started.txt"
+          set +e
+          npm run test:security-http -- "${files[@]}" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$status" > "$HR_UI_DIAGNOSTIC_DIR/test-exit.txt"
+          exit "$status"
+      - name: Verify complete synthetic contract evidence after test start
+        if: always() && matrix.group == 'contracts'
+        env:
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, struct
+          from pathlib import Path
+          root = Path(os.environ['HR_UI_DIAGNOSTIC_DIR'])
+          if not (root / 'started.txt').exists():
+              print('Contract tests did not start; no native acceptance claimed.')
+              raise SystemExit(0)
+          variants = ['lost', 'truncated', 'foreign-staff', 'foreign-number', 'foreign-patch-id', 'foreign-patch-number', 'hung-body']
+          widths = [390, 1280]
+          expected = {f'contract-ack-{v}-{w}' for v in variants for w in widths}
+          actual = {p.stem for p in root.glob('contract-ack-*.png')}
+          assert actual == expected, ('Incomplete negative native images', sorted(expected - actual), sorted(actual - expected))
+          assert {p.stem for p in root.glob('contract-ack-*.json')} == expected
+          source = Path('__tests__/security-http/hr-contract-save-receipt-ui.test.ts').read_bytes()
+          sha = lambda b: hashlib.sha256(b).hexdigest()
+          def png(path, width):
+              data = path.read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data[:8] == b'\x89PNG\r\n\x1a\n', path.name
+              actual_width, height = struct.unpack('>II', data[16:24])
+              assert 0 < actual_width < 50_000 and 0 < height < 50_000, path.name
+              if width is not None: assert actual_width == width, path.name
+              return data
+          for case in sorted(expected):
+              width = int(case.rsplit('-', 1)[1]); data = png(root / f'{case}.png', width)
+              record = json.loads((root / f'{case}.json').read_text())
+              assert record['format'] == 'hr-contract-ack-native-v1' and record['acceptance'] is False and record['syntheticOnly'] is True
+              assert record['runId'] == os.environ['GITHUB_RUN_ID'] and record['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+              assert record['checkout'] == os.environ['GITHUB_SHA'] and record['sourceSha256'] == sha(source)
+              assert record['png'] == f'{case}.png' and record['pngBytes'] == len(data) and record['pngSha256'] == sha(data)
+              assert record['viewport'] == {'width': width, 'height': 900} and struct.unpack('>II', data[16:24]) == (width, 900)
+              assert record['caseCompleted'] is True and record['contextClosed'] is True
+              assert record['requests'] == 1 and record['persistedRows'] == 1
+              for fact in ['actualBackendReceiptVerified', 'retainedAfterCloseAndTabDetach', 'manualReviewDidNotClaimSuccess', 'explicitNewIntentConfirmed']:
+                  assert record[fact] is True, (case, fact)
+              for name in ['saveGeometry', 'retainedGeometry', 'reviewGeometry', 'newIntentGeometry']:
+                  geometry = record[name]; box, usable = geometry['box'], geometry['usable']
+                  assert geometry['inside'] is True and geometry['hits'] == [True] * 5
+                  assert box['width'] > 4 and box['height'] > 4
+                  assert box['x'] >= usable['left'] and box['y'] >= usable['top'] and box['right'] <= usable['right'] and box['bottom'] <= usable['bottom']
+              if '-hung-body-' in case:
+                  body, transport = record['nativeBody'], record['streamingTransport']
+                  assert record['runtimeDeadlineMs'] == 12_000
+                  assert body['status'] == 201 and body['bytes'] > 0 and body['finished'] is False and body['aborted'] is True
+                  assert transport['requests'] == 1 and transport['requestBodyMatches'] is True
+                  assert transport['status'] == 201 and 0 < transport['bodyBytes'] < transport['completeBytes']
+                  assert transport['responseEnded'] is False and transport['clientClosedWithoutEnd'] is True
+          positive = root / 'native-positive'
+          names = {f'hr-{group}-{w}.png' for group in ['payroll', 'workforce', 'nextday-form', 'nextday-self-denied', 'nextday-approved', 'nextday-result', 'nextday-reception', 'nextday-doctor', 'unverified-reversal', 'payroll-period-race', 'payroll-multipage', 'keyless-reversal'] for w in widths}
+          names |= {f'hr-{group}-{variant}-{w}.png' for group in ['unverified', 'verified-replay'] for variant in ['missing', 'foreign'] for w in widths}
+          pdfs = {'hr-payroll-all-rows.pdf', 'hr-payroll-multipage-390.pdf', 'hr-payroll-multipage-1280.pdf'}
+          assert {p.name for p in positive.iterdir()} == names | pdfs, 'Incomplete/unexpected original positive outputs'
+          # Existing positive images are full-page captures; their original
+          # test-owned geometry assertions remain the authority for dimensions.
+          for name in names: png(positive / name, None)
+          for name in pdfs:
+              data = (positive / name).read_bytes()
+              assert 100 < len(data) <= 30_000_000 and data.startswith(b'%PDF-'), name
+          assert (root / 'test-exit.txt').read_text().strip() == '0', 'Tests did not finish successfully'
+          (root / 'native-complete.json').write_text(json.dumps({'format': 'hr-contract-native-complete-v1', 'runId': os.environ['GITHUB_RUN_ID'], 'checkout': os.environ['GITHUB_SHA'], 'negativeCases': 14, 'negativePngs': 14, 'positivePngs': 32, 'positivePdfs': 3, 'files': [{'path': str(p.relative_to(root)), 'bytes': p.stat().st_size, 'sha256': sha(p.read_bytes())} for p in sorted(root.rglob('*')) if p.is_file()]}, indent=2))
+          print('Verified 14 completed negative native cases, 32 original positive PNGs and 3 PDFs; independent pixel/PDF review still required.')
+          PY
       - name: Retain bounded synthetic failure witnesses
         if: always()
         uses: actions/upload-artifact@v4

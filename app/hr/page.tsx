@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContractSaveAdmissionGate, type ContractSaveAdmissionLease, type PendingContractSave } from "@/lib/hr-contract-save-receipt";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { HrTasksPanel } from "@/components/hr/TasksPanel";
@@ -25,6 +26,39 @@ export default function HrPage() {
   const session = useSession();
   const [tab, setTab] = useState<HrTab>("tasks");
   const admin = isAdmin(session?.role);
+  const owner = session ? `${session.username}\u0000${session.role}` : "";
+  // Private contract intent belongs to this HR page and signed owner, above
+  // tab mounting. It is never written to browser storage or automatically retried.
+  const [contractSaves, setContractSaves] = useState<Record<string, PendingContractSave | undefined>>({});
+  const contractSavesRef = useRef(contractSaves);
+  const [saveAdmissionGate] = useState(createContractSaveAdmissionGate);
+  const saveAdmission = useMemo(() => Object.freeze({ owner, admin, contractsVisible: tab === "contracts" }), [owner, admin, tab]);
+  // Commit, never render, advances the live owner/tab generation. An old A
+  // callback is not admitted after A -> B -> A or a detach/reopen cycle.
+  useLayoutEffect(() => saveAdmissionGate.commit(saveAdmission), [saveAdmissionGate, saveAdmission]);
+  const reserveContractSave = (request: PendingContractSave, lease: ContractSaveAdmissionLease): boolean => {
+    const owner = lease.view.owner;
+    if (!lease.canAdmit() || request.owner !== owner || contractSavesRef.current[owner]) return false;
+    const next = { ...contractSavesRef.current, [owner]: request };
+    contractSavesRef.current = next;
+    setContractSaves(next);
+    return true;
+  };
+  const settleContractSave = (owner: string, expectedToken: string, request?: PendingContractSave): boolean => {
+    const current = contractSavesRef.current[owner];
+    if (!current || current.token !== expectedToken
+      || (request && (request.owner !== owner || request.token !== expectedToken))) return false;
+    const next = { ...contractSavesRef.current, [owner]: request };
+    contractSavesRef.current = next;
+    setContractSaves(next);
+    return true;
+  };
+  useEffect(() => {
+    if (!Object.values(contractSaves).some(Boolean)) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [contractSaves]);
 
   const TABS = [
     { id: "tasks" as HrTab, label: "المهام", icon: "✓", visible: true },
@@ -76,7 +110,7 @@ export default function HrPage() {
       <main className="min-h-[500px]">
         {tab === "tasks" && <HrTasksPanel session={session} />}
         {tab === "staff" && admin && <HrStaffPanel />}
-        {tab === "contracts" && admin && <HrContractsPanel />}
+        {tab === "contracts" && admin && <HrContractsPanel key={owner} session={session} pendingSave={contractSaves[owner]} saveAdmission={saveAdmission} mountSaveAdmission={saveAdmissionGate.mount} onReserveSave={reserveContractSave} onSettleSave={settleContractSave} />}
         {tab === "attendance" && <HrAttendancePanel isAdmin={admin} />}
         {tab === "leaves" && <HrLeavesPanel isAdmin={admin} />}
         {tab === "payroll" && admin && <HrPayrollPanel />}

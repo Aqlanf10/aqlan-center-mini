@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
+import type { SessionInfo } from "@/components/SessionProvider";
+import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { readBoundedContractSaveReceipt, confirmsContractSave, snapshotContractSave, type ContractSaveAdmissionView, type ContractSaveAdmissionLease, type PendingContractSave } from "@/lib/hr-contract-save-receipt";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { clinicDateString } from "@/lib/schedule";
 import {
@@ -38,6 +41,7 @@ interface ContractItem {
   approvedAt: string | null;
   addendaCount?: number;
   createdAt: string;
+  createdBy: string;
   updatedAt: string;
 }
 
@@ -60,7 +64,24 @@ interface AddendumItem {
   createdAt: string;
 }
 
-export function HrContractsPanel() {
+export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSaveAdmission, onReserveSave, onSettleSave }: {
+  session: SessionInfo | null;
+  pendingSave: PendingContractSave | undefined;
+  saveAdmission: ContractSaveAdmissionView;
+  mountSaveAdmission: (view: ContractSaveAdmissionView) => ContractSaveAdmissionLease;
+  onReserveSave: (request: PendingContractSave, lease: ContractSaveAdmissionLease) => boolean;
+  onSettleSave: (owner: string, expectedToken: string, request?: PendingContractSave) => boolean;
+}) {
+  const saveAdmissionLease = useRef<ContractSaveAdmissionLease | undefined>(undefined);
+  useLayoutEffect(() => {
+    const lease = mountSaveAdmission(saveAdmission);
+    saveAdmissionLease.current = lease;
+    return () => { lease.detach(); if (saveAdmissionLease.current === lease) saveAdmissionLease.current = undefined; };
+  }, [mountSaveAdmission, saveAdmission]);
+  const currentSaveAdmission = () => {
+    const lease = saveAdmissionLease.current;
+    return lease?.view === saveAdmission && lease.canAdmit() ? lease : undefined;
+  };
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -99,6 +120,18 @@ export function HrContractsPanel() {
   const [formHoursWeek, setFormHoursWeek] = useState("");
   const [formClauses, setFormClauses] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [reviewedPending, setReviewedPending] = useState<string | null>(null);
+  const activeSave = useRef(pendingSave);
+  const previousSave = useRef(pendingSave?.token);
+  const saveBusy = submitting || pendingSave?.phase === "awaiting";
+  const saveLocked = saveBusy || Boolean(pendingSave);
+  const formSaveError = saveError ?? (pendingSave?.phase === "uncertain" ? "نتيجة حفظ العقد غير مؤكدة. قد يكون الحفظ تم؛ لا تُعِد الإرسال قبل مراجعة قائمة العقود." : null);
+  useEffect(() => {
+    activeSave.current = pendingSave;
+    if (previousSave.current && !pendingSave) { setCreateModalOpen(false); setEditingDraft(null); }
+    previousSave.current = pendingSave?.token;
+  }, [pendingSave]);
 
   // Addendum form state
   const [addendumTitle, setAddendumTitle] = useState("");
@@ -166,6 +199,7 @@ export function HrContractsPanel() {
   };
 
   const openDraftEditor = (contract:ContractItem) => {
+    if (activeSave.current || pendingSave) { setError("راجع طلب حفظ العقد المعلق قبل بدء تعديل آخر."); return; }
     if(!hrContractEditable(contract))return;
     setEditingDraft(contract);setFormStaffId(String(contract.staffId));setFormTitle(contract.title);setFormKind(contract.templateKind);
     setFormStartDate(contract.startDate);setFormEndDate(contract.endDate??"");setFormProbationDate(contract.probationEndDate??"");
@@ -177,46 +211,78 @@ export function HrContractsPanel() {
     setFormClauses(contract.termsPayload.clauses?.join("\n")??"");setSelectedContract(null);setContractDetails(null);setCreateModalOpen(true);
   };
 
+  const reopenPendingSave = () => {
+    if (!pendingSave) return;
+    const payload = pendingSave.payload;
+    setEditingDraft(null);setFormStaffId(payload.staffId);setFormTitle(payload.title);setFormKind(payload.templateKind);
+    setFormStartDate(payload.startDate);setFormEndDate(payload.endDate??"");setFormProbationDate(payload.probationEndDate??"");
+    setFormCurrency(payload.salaryCurrency??"");setFormSalaryPeriod(payload.salaryPeriod??"");
+    setFormBaseSalary(payload.baseSalaryMinor!==null&&payload.salaryCurrency?toInputAmount(payload.baseSalaryMinor,payload.salaryCurrency as Currency):"");
+    setFormCommissionRate(payload.commissionRatePercent===null?"":String(payload.commissionRatePercent));setFormDoctorPartyId(payload.doctorPartyId===null?"":String(payload.doctorPartyId));
+    setFormHoursWeek(payload.termsPayload.workingHoursPerWeek==null?"":String(payload.termsPayload.workingHoursPerWeek));
+    setFormHourlyRate(payload.termsPayload.hourlyRateMinor!=null&&payload.salaryCurrency?toInputAmount(Number(payload.termsPayload.hourlyRateMinor),payload.salaryCurrency as Currency):"");
+    setFormClauses(Array.isArray(payload.termsPayload.clauses)?payload.termsPayload.clauses.join("\n"):"");
+    setCreateModalOpen(true);
+  };
+
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formStaffId || !formTitle) {
-      alert("يرجى تعبئة الحقول الإلزامية.");
-      return;
-    }
+    const lease = currentSaveAdmission();
+    if (!lease || activeSave.current || pendingSave || submitting) return;
+    if (!session || !formStaffId || !formTitle) { alert("يرجى تعبئة الحقول الإلزامية."); return; }
     if ((formBaseSalary.trim() || formHourlyRate.trim()) && !formCurrency) { alert("اختر عملة المبلغ صراحةً."); return; }
-    setSubmitting(true);
+    let request: PendingContractSave | undefined;
+    let confirmed = false;
+    setSubmitting(true);setSaveError(null);
     try {
-      const res = await fetch(editingDraft?`/api/hr/contracts/${editingDraft.id}`:"/api/hr/contracts", {
-        method: editingDraft?"PATCH":"POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const snapshot = snapshotContractSave({
+        token: newIdempotencyKey("hr-contract-intent"), owner: `${session.username}\u0000${session.role}`, phase: "awaiting",
+        method: editingDraft ? "PATCH" : "POST", path: editingDraft ? `/api/hr/contracts/${editingDraft.id}` : "/api/hr/contracts",
+        expectedId: editingDraft ? Number(editingDraft.id) : null,
+        expectedContractNumber: editingDraft?.contractNumber ?? null,
+        expectedStatus: editingDraft?.status ?? "draft", expectedCreator: editingDraft?.createdBy ?? session.username,
+        payload: {
           ...(editingDraft?{expectedUpdatedAt:editingDraft.updatedAt}:{}),
-          staffId: formStaffId,
-
-          title: formTitle,
-          templateKind: formKind,
-          compensationKind: hrContractCompensationKind(formKind),
-          startDate: formStartDate,
-          endDate: formEndDate || null,
-          probationEndDate: formProbationDate || null,
-          salaryCurrency: formCurrency || null,
-          salaryPeriod: formSalaryPeriod || null,
+          staffId: formStaffId, title: formTitle, templateKind: formKind,
+          compensationKind: hrContractCompensationKind(formKind), startDate: formStartDate,
+          endDate: formEndDate || null, probationEndDate: formProbationDate || null,
+          salaryCurrency: formCurrency || null, salaryPeriod: formSalaryPeriod || null,
           baseSalaryMinor: formBaseSalary.trim() ? parseAmount(formBaseSalary, formCurrency as Currency) : null,
           commissionRatePercent: formCommissionRate.trim() ? Number(formCommissionRate) : null,
           doctorPartyId: formDoctorPartyId ? Number(formDoctorPartyId) : null,
           termsPayload: { ...editingDraft?.termsPayload, clauses: formClauses.split("\n").filter(Boolean), workingHoursPerWeek: formHoursWeek.trim() ? Number(formHoursWeek) : null, hourlyRateMinor: formHourlyRate.trim() ? parseAmount(formHourlyRate, formCurrency as Currency) : null },
-        }),
+        },
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "تعذّر إنشاء العقد.");
+      // The long-lived owner reserves synchronously before fetch, independently
+      // of React's next render or this tab's lifetime. This is not a replay key.
+      if (!onReserveSave(snapshot, lease)) throw new Error("يوجد طلب حفظ عقد معلق؛ راجعه قبل بدء طلب آخر.");
+      request = snapshot;activeSave.current = snapshot;
+      const submitted = request;
+      const { status, receipt } = await readBoundedContractSaveReceipt(async (signal) => {
+        const res = await fetch(submitted.path, { method: submitted.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(submitted.payload), signal });
+        // Headers alone do not establish a complete, matching response. This
+        // read-only continuation cannot release intent after the deadline wins.
+        const receipt: unknown = await res.json();
+        return { status: res.status, receipt };
+      });
+      if (status !== (request.method === "POST" ? 201 : 200) || !confirmsContractSave(receipt, request)) {
+        throw new Error("تعذّر التحقق من إيصال حفظ العقد.");
       }
-      setCreateModalOpen(false);setEditingDraft(null);
-      void loadContracts();
+      confirmed = true;
+      if (onSettleSave(request.owner, request.token) && lease.canAdmit()) {
+        setCreateModalOpen(false);setEditingDraft(null);setSaveError(null);
+        void loadContracts();
+      }
     } catch (err: any) {
-      alert(err.message || "حدث خطأ أثناء حفظ العقد.");
+      if (request) {
+        const uncertain = snapshotContractSave({ ...request, phase: "uncertain" });
+        activeSave.current = uncertain;
+        onSettleSave(request.owner, request.token, uncertain);
+        if (lease.canAdmit()) setSaveError("نتيجة حفظ العقد غير مؤكدة. قد يكون الحفظ تم؛ لا تُعِد الإرسال قبل مراجعة قائمة العقود.");
+      } else if (lease.canAdmit()) setSaveError(err?.message || "تعذّر إعداد طلب حفظ العقد.");
     } finally {
-      setSubmitting(false);
+      if (!request || confirmed) activeSave.current = undefined;
+      if (lease.canAdmit()) setSubmitting(false);
     }
   };
 
@@ -298,6 +364,17 @@ export function HrContractsPanel() {
 
   return (
     <section aria-label="إدارة العقود" className="space-y-4">
+      {pendingSave && <div role="status" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p>{pendingSave.phase === "awaiting" ? "جارٍ انتظار إيصال حفظ العقد؛ لا تُعِد الإرسال." : createModalOpen ? "طلب حفظ العقد معلق للمراجعة." : "نتيجة حفظ العقد غير مؤكدة. قد يكون الحفظ تم؛ لا تُعِد الإرسال قبل مراجعة قائمة العقود."}</p>
+        <p>الطلب محفوظ في ذاكرة صفحة الموارد البشرية لهذا المستخدم فقط. تغيير التبويب أو إغلاق نافذة العقد لا يمحوه، لكن تحديث الصفحة أو مغادرتها يفقده؛ راجع القائمة أولاً لتجنب التكرار.</p>
+        <button type="button" onClick={reopenPendingSave} className="rounded-lg border px-3 py-2">عرض طلب الحفظ المعلق</button>
+        <button type="button" disabled={saveBusy} onClick={() => { setCreateModalOpen(false); setReviewedPending(pendingSave.token); void loadContracts(); }} className="rounded-lg border px-3 py-2 disabled:opacity-50">مراجعة قائمة العقود</button>
+        {reviewedPending === pendingSave.token && <button type="button" disabled={saveBusy} onClick={() => {
+          if (!currentSaveAdmission()) return;
+          if (!window.confirm("قد يكون طلب الحفظ السابق قد نُفّذ. بدء طلب جديد لا يتحقق من الطلب السابق وقد ينشئ عقدًا مكررًا. هل راجعت قائمة العقود وتريد بدء طلب مستقل؟")) return;
+          if (currentSaveAdmission() && onSettleSave(pendingSave.owner, pendingSave.token)) { activeSave.current = undefined; setReviewedPending(null); setSaveError(null); setCreateModalOpen(false); setEditingDraft(null); }
+        }} className="rounded-lg border px-3 py-2">بدء طلب جديد بعد المراجعة</button>}
+      </div>}
       {/* Stats bar */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-2xl border border-navy-100 bg-white p-4 shadow-sm">
@@ -316,6 +393,8 @@ export function HrContractsPanel() {
           <button
             type="button"
             onClick={() => {
+              if (activeSave.current || pendingSave) { reopenPendingSave(); return; }
+              setSaveError(null);
               setEditingDraft(null);setFormTitle("");setFormStaffId("");setFormStartDate(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));setFormKind("support_staff");setFormBaseSalary("");setFormCommissionRate("");setFormCurrency("");setFormSalaryPeriod("");setFormDoctorPartyId("");setFormHoursWeek("");setFormHourlyRate("");setFormProbationDate("");setFormEndDate("");setFormClauses("");
               setCreateModalOpen(true);
             }}
@@ -478,12 +557,13 @@ export function HrContractsPanel() {
 
       {/* Create Contract Modal */}
       {createModalOpen && (
-        <Modal onClose={() => setCreateModalOpen(false)}>
+        <Modal alignTop busy={saveBusy} onClose={() => setCreateModalOpen(false)}>
           <form onSubmit={handleCreateContract} className="space-y-4">
-            <h3 className="text-lg font-bold text-navy-900">{editingDraft?"استكمال / تعديل المسودة":"إنشاء عقد وظيفي جديد"}</h3>
+            <h3 className="text-lg font-bold text-navy-900">{editingDraft||pendingSave?.method==="PATCH"?"استكمال / تعديل المسودة":"إنشاء عقد وظيفي جديد"}</h3>
 
+            {formSaveError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{formSaveError}</p>}
             {/* Template Selector */}
-            <fieldset disabled={Boolean(editingDraft)} className="rounded-xl border border-navy-100 bg-navy-50/50 p-3">
+            <fieldset disabled={Boolean(editingDraft) || saveLocked} className="rounded-xl border border-navy-100 bg-navy-50/50 p-3">
               <div className="mb-2 text-xs font-semibold text-navy-600">اختر تصنيف العقد؛ الأجر والبنود غير مسجلة حتى تدخلها صراحةً:</div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -523,7 +603,7 @@ export function HrContractsPanel() {
                 <label className="mb-1 block text-xs font-semibold text-navy-700">الموظف *</label>
                 <select
                   required
-                  disabled={Boolean(editingDraft)} aria-label="الموظف" value={formStaffId}
+                  disabled={Boolean(editingDraft) || saveLocked} aria-label="الموظف" value={formStaffId}
                   onChange={(e) => setFormStaffId(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
@@ -539,7 +619,7 @@ export function HrContractsPanel() {
             </div>
 
             <label className="block text-xs font-semibold">جهة الطبيب في محرك العمولات
-              <select value={formDoctorPartyId} onChange={(e)=>setFormDoctorPartyId(e.target.value)} className="w-full rounded-xl border p-2">
+              <select disabled={saveLocked} value={formDoctorPartyId} onChange={(e)=>setFormDoctorPartyId(e.target.value)} className="w-full rounded-xl border p-2">
                 <option value="">اختر جهة الطبيب للعقد بنسبة أو مختلط</option>{doctorParties.map((d)=><option key={d.id} value={d.id}>{d.name} ({d.commissionPercent}%)</option>)}
               </select>
             </label>
@@ -547,7 +627,7 @@ export function HrContractsPanel() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">مسمى العقد *</label>
-                <input
+                <input disabled={saveLocked}
                   required
                   type="text"
                   aria-label="مسمى العقد" value={formTitle}
@@ -558,7 +638,7 @@ export function HrContractsPanel() {
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">نوع العقد *</label>
                 <select
-                  disabled={Boolean(editingDraft)} aria-label="نوع العقد" value={formKind}
+                  disabled={Boolean(editingDraft) || saveLocked} aria-label="نوع العقد" value={formKind}
                   onChange={(e) => setFormKind(e.target.value as HrContractKind)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
@@ -574,7 +654,7 @@ export function HrContractsPanel() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">تاريخ البدء *</label>
-                <input
+                <input disabled={saveLocked}
                   required
                   type="date"
                   aria-label="تاريخ البدء" value={formStartDate}
@@ -584,7 +664,7 @@ export function HrContractsPanel() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">تاريخ الانتهاء</label>
-                <input
+                <input disabled={saveLocked}
                   type="date"
                   aria-label="تاريخ الانتهاء" value={formEndDate}
                   onChange={(e) => setFormEndDate(e.target.value)}
@@ -593,7 +673,7 @@ export function HrContractsPanel() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">نهاية فترة التجربة</label>
-                <input
+                <input disabled={saveLocked}
                   type="date"
                   aria-label="نهاية فترة التجربة" value={formProbationDate}
                   onChange={(e) => setFormProbationDate(e.target.value)}
@@ -604,7 +684,7 @@ export function HrContractsPanel() {
 
             <p className="text-xs text-navy-600">يمكن حفظ المسودة ناقصة؛ يلزم إكمال شروط الأجر صراحةً قبل الاعتماد. اختيار جهة الطبيب لا يملأ نسبة العقد تلقائيًا.</p>
             <label className="block text-xs font-semibold">دورية الراتب
-              <select aria-label="دورية الراتب" value={formSalaryPeriod} onChange={e=>setFormSalaryPeriod(e.target.value)} className="w-full rounded-xl border p-2">
+              <select disabled={saveLocked} aria-label="دورية الراتب" value={formSalaryPeriod} onChange={e=>setFormSalaryPeriod(e.target.value)} className="w-full rounded-xl border p-2">
                 <option value="">غير مسجلة</option><option value="monthly">شهري</option><option value="weekly">أسبوعي</option><option value="daily">يومي</option><option value="per_shift">لكل وردية</option>
               </select>
             </label>
@@ -614,7 +694,7 @@ export function HrContractsPanel() {
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">العملة *</label>
-                  <select
+                  <select disabled={saveLocked}
                     aria-label="عملة الأجر" value={formCurrency}
                     onChange={(e) => setFormCurrency(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
@@ -629,7 +709,7 @@ export function HrContractsPanel() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">الراتب الأساسي</label>
-                  <input
+                  <input disabled={saveLocked}
                     type="number"
                     step="any"
                     aria-label="الراتب الأساسي" value={formBaseSalary}
@@ -639,7 +719,7 @@ export function HrContractsPanel() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">نسبة الطبيب (%)</label>
-                  <input
+                  <input disabled={saveLocked}
                     type="number"
                     step="any"
                     aria-label="نسبة الطبيب (%)" value={formCommissionRate}
@@ -649,7 +729,7 @@ export function HrContractsPanel() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">أجر الساعة</label>
-                  <input
+                  <input disabled={saveLocked}
                     type="number"
                     step="any"
                     aria-label="أجر الساعة" value={formHourlyRate}
@@ -659,7 +739,7 @@ export function HrContractsPanel() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">ساعات العمل أسبوعياً</label>
-                  <input
+                  <input disabled={saveLocked}
                     type="number"
                     aria-label="ساعات العمل أسبوعياً" value={formHoursWeek}
                     onChange={(e) => setFormHoursWeek(e.target.value)}
@@ -671,7 +751,7 @@ export function HrContractsPanel() {
 
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">شروط وبنود العقد</label>
-              <textarea
+              <textarea disabled={saveLocked}
                 rows={4}
                 value={formClauses}
                 onChange={(e) => setFormClauses(e.target.value)}
@@ -684,16 +764,17 @@ export function HrContractsPanel() {
               <button
                 type="button"
                 onClick={() => setCreateModalOpen(false)}
+                disabled={saveBusy}
                 className="rounded-xl border border-navy-200 px-4 py-2 text-sm font-semibold text-navy-700 hover:bg-navy-50"
               >
                 إلغاء
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={saveLocked}
                 className="rounded-xl bg-navy-800 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-navy-700 disabled:opacity-50"
               >
-                {submitting ? "جاري الحفظ..." : "حفظ العقد"}
+                {saveBusy ? "جاري الحفظ..." : "حفظ العقد"}
               </button>
             </div>
           </form>

@@ -1,3 +1,19 @@
+# Receipt-safe HR successor status — 2026-10-11
+
+This section supersedes the prior integration status retained below. The latest published head and both mandatory CI links are maintained in [PR #308](https://github.com/Aqlanf10/aqlan-center-mini/pull/308). This source packet is based on `416045285f063934af4f0bb8010214d99d15ffb3`; it is not merge or deployment acceptance.
+
+- [Focused run 38116380525](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38116380525) passed all 16 task replay cases. The selected original USD contract case failed: the browser observed POST 201 and 750 native body bytes, but neither request completion nor the awaited JSON body finished. Subsequent GET and visible row evidence do not substitute for the original mutation receipt. The complete original 31-case contract suite remains required.
+- Contract creation/draft completion now consumes and validates the exact POST/PATCH receipt before clean success. The immutable memory-only intent binds owner, method/target, contract identity, creator, terms and financial fields. A single 12-second client deadline bounds response headers and complete JSON consumption. A lost, malformed, mismatched or unfinished acknowledgement retains locked uncertainty and permits manual list review, never automatic resubmission or success inferred from a matching title/GET.
+- Pending contract intent survives modal close and HR-tab detach under its original parent owner. New admission requires the current committed admin/panel lifetime; settlement remains scoped to its original owner/token. Manual review and an explicit duplicate-risk confirmation are required before a distinct new intent. Private terms are not stored persistently. Full reload/navigation still requires reviewing the contract list; durable cross-reload contract replay is an open limitation.
+- Added real-HTTP negative browser journeys cover one actual commit followed by lost/truncated/foreign receipts, foreign contract numbers and a deliberately unfinished 201 JSON body at 390/1280. Ordinary wheel/click and complete clipping/five interior hit checks cover Save, retained uncertainty, review and new-intent actions. Separate mounted real-React tests exercise retired handlers and owner/tab changes. These additions require CI execution on the final source; source review is not a passing result.
+- The additive focused workflow runs all 31 original contract cases plus the new negative/admission cases and all 16 task cases. Existing positive PNG/PDF outputs and source-bound negative native evidence are retained with fail-closed completeness checks. Mandatory CI, original assertions/deadlines and migration/financial/authority gates are unchanged.
+
+Final exact-head mandatory checks, independent native image/PDF review, substantive review closure, and a reviewed compatible HR/clinical Staging union remain required. No main merge, Staging publication or Production verification is claimed here.
+
+---
+
+# Earlier integration status retained verbatim
+
 # Current integration status — PR #308, 2026-10-11
 
 This section supersedes the historical delivery status below. The branch remains `feat/hr-staff-tasks-phase1`; the literal current published head and its exact-head CI links are maintained in [PR #308](https://github.com/Aqlanf10/aqlan-center-mini/pull/308). Source review alone does not establish merge or deployment readiness.
