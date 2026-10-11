@@ -1,0 +1,317 @@
+[
+  {
+    "path": "lib/db.ts",
+    "sha256": "714c8df46434b80ef5686747cee302a91707b64bbef59eb647cf48673e1b0d66",
+    "unchanged": true
+  },
+  {
+    "path": "components/PatientOrtho.tsx",
+    "sha256": "6e4d086806c961146b0a730b91fe33b7b7d4be46c372e76e5f8c9e239bc277fa",
+    "unchanged": true
+  },
+  {
+    "path": "components/PatientLedger.tsx",
+    "sha256": "d468760df296c7bdd9de2165817f70505c66a66f44d15d06476d9472541b0638",
+    "unchanged": true
+  },
+  {
+    "path": "components/PatientPlans.tsx",
+    "sha256": "b7fc1af8f01063b01597d6f156a330c28c0f1f0f21d98d6a542bb391b124c0ab",
+    "unchanged": true
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "sha256": "90de0eecee04e8cf88f147980e8169da6ef384b16c43af2bcb4e88453a04f225",
+    "unchanged": true
+  },
+  {
+    "path": "lib/migrations.ts",
+    "sha256": "6ddf52860056e0229ea70e3cc149cd161c9d4e2ae777be40cb3d003f4b5ffbb9",
+    "unchanged": true
+  },
+  {
+    "path": "__tests__/postgres/_reviewed-migration-chain.ts",
+    "sha256": "5289bf31266b12baba0d7e3437ffa0d1011c172d0cb77328522ab1ace71849ff",
+    "unchanged": true
+  },
+  {
+    "path": "package.json",
+    "sha256": "ff50dcc2a742db16243aa15d236fa2b4e075a4fef1be2aa836d5612135ed7260",
+    "unchanged": true
+  },
+  {
+    "path": "package-lock.json",
+    "sha256": "5df7ced31497dc6de92937fa41e995e3e7912856f51ade2b56ce4e169dbb3bd5",
+    "unchanged": true
+  },
+  {
+    "path": "app/api/invoices/[id]/correct/route.ts",
+    "sha256": "0cea525332d4be6c54c7a01cb350d6aca02266b1980207aac763d54268952c75",
+    "unchanged": true
+  },
+  {
+    "path": "app/api/invoices/[id]/route.ts",
+    "sha256": "af9207c1f5fef964eb967045b7317366e0ec2e65e5a4f4753db845f8ada625c6",
+    "unchanged": true
+  },
+  {
+    "path": "app/api/invoices/clinical-preview/route.ts",
+    "sha256": "8463cc10b9f71110389877753426eaf4888afc861ee1764804eab22603bf7198",
+    "unchanged": true
+  },
+  {
+    "path": "app/api/invoices/route.ts",
+    "sha256": "1266c8beec3431b46a9e9b0a284ae5e0accf89697f87eaa4ed931fbe3b491133",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0001_baseline_schema.sql",
+    "sha256": "471941f93a5a0964e6c93eb99b819f365b789fa3996a82ce89ff958e7292735c",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0002_confirmation_claim_ttl_index.sql",
+    "sha256": "8e82e58d93157e073a7dcdc3759464d407eb7ee78ab5427a144a4566b865cd41",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0003_payment_idempotency_and_reversal.sql",
+    "sha256": "2d7644b59b5d89129231df9b36fc7813aeae82012f5f870217cc70ca57e39705",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0004_material_rate_history.sql",
+    "sha256": "e12bff312e49c6cb688b528ba74bfd9ae37f8973ab55d13d4b0af4ef1c554256",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0005_financial_append_only.sql",
+    "sha256": "4d1aa4610f59a0ecc2be8de30623412e7d76cce0f4fef55495f7a1a40be001e5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0006_appointment_lifecycle.sql",
+    "sha256": "ab43d938e78f119fec15612f0cf74ebdb77a0bbc1742830ea7049f037b265738",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0007_appointment_services_and_capacity.sql",
+    "sha256": "ca54ac08747340bf57d9e2db840b5f178cafad9b47735e401da053b06a540fa5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0008_appointment_chair_and_new_patient_snapshots.sql",
+    "sha256": "d48c166365763e51210b94743716013cb4585116d5be901d3da4fd79d2d9ad38",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0009_waiting_list.sql",
+    "sha256": "5adf1caf65e0d1fafb120ca6804a49a4e235d2cb2020a9367c19349a6ff4bc6c",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0010_waiting_list_completion.sql",
+    "sha256": "e13dbc54a1d3c67901774683f35b58a8f92e2923acac8d0d9d14afabbd188b1e",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0011_appointment_waiting_link.sql",
+    "sha256": "2ed90959cf938aad7f1ca4c463940c365a696791cc194f27b9835144b8b7b3dd",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0012_doctor_commission_history.sql",
+    "sha256": "935aeaa10093f1ecd92cd76d5739374fd0335886def5466acc6cf5f5958f6dc5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0013_supplier_payment_settlement.sql",
+    "sha256": "5c9b953ec9ed4a0fd37e866fd3680a5dbb8086781dd513e7117485c86a9bece1",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0014_shift_close_expected_difference.sql",
+    "sha256": "9cea77e776682491c68f6b9a276e674721ef93147e0cf9a3a56d8b76c3f73bb5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0015_saved_reports.sql",
+    "sha256": "11943e35fd386421d8796e01f6a814f24bd2ef0a606b2014e93175026189d7d5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0016_finance_controls.sql",
+    "sha256": "95f686afd7d4aa3bfa8ad2b08680dbc38e2e33260a0ace30c6b5dfeb69fab12d",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0017_stock_supplier_link.sql",
+    "sha256": "0c2f8d13421709bb10cf1916dc4a815dd587d33297ebff48265c590268dcafe5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0018_patient_demographics.sql",
+    "sha256": "d3302636a51c81c92facf9abe4cece7d5ec75ee81d919ec4dae75f32e3f0a971",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0019_audit_source.sql",
+    "sha256": "e2d9d1f8a9a1ed5167f747a5e3ff6d07524c972dcae2522476ecfc26d14c1618",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0020_expense_attachments.sql",
+    "sha256": "4eb9e583ef41f50c77bf59b3270d53572ffe58b7361cb9bad97d287932b65401",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0021_patient_referrals.sql",
+    "sha256": "77bf64e5e4add9671de5d6d2cf2ed9053bed97d735f45e6be0ebdb0616bd0956",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0022_patient_referral_source.sql",
+    "sha256": "48eebf1b9bb30967abf0545e7359c66fc5d468ffe1f61738d48a86f8abaf4d2e",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0023_opening_balance_currency.sql",
+    "sha256": "462d20ff9ce81629997d7e496ec16e26512b045ed912fedfd091ce84247f6d72",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0024_legacy_archive.sql",
+    "sha256": "10234599fa312563c48fe358e6ad147edbeeb7bad50e7f97c7955eeaf51c61d1",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0025_messaging_channels.sql",
+    "sha256": "43523ca1f21b789427219c4967d4179b321eebb733d77e8eb08cd047d1ff1d98",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0026_visit_currency.sql",
+    "sha256": "cd39a2d88d68bbadf66db85791cb86ce815e664f1f0123b06ef73c2b5045e68b",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0027_medical_history.sql",
+    "sha256": "9b9c06adda890ec41168c9d7cd89a6def20f9ce6ca990f2bbe3fb2c2248cbf25",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0028_patient_identity.sql",
+    "sha256": "68eb3b3092b2dacf961859220f169fe729cc36a5c006375c97946a5c203048e4",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0029_planned_visit_interval.sql",
+    "sha256": "4b6fdc44c0cc1f5c5e1d6c48c88cc816d3b34e318d65948e5992b111f64a1b40",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0030_party_opening_balances.sql",
+    "sha256": "e458044711fbebcd622e018fa12a86320faec0e5dbd09d634a68e01abe9cd7ba",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0031_journal_line_currency.sql",
+    "sha256": "f39a9a57326316d72a236efdcfd5f05cb370a60bfe484f2ac9641e3abc0dc7d5",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0032_specialty_cases.sql",
+    "sha256": "7573e9db617dbdf7007366e73e52a475cf776a4875c3d43b0198821395e7e19b",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0033_internal_referrals.sql",
+    "sha256": "bdd5c61494323aa77d5de18ea302e0b2da5cb5bc133a610e9dd717e68887faa4",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0034_ortho_legacy_baseline.sql",
+    "sha256": "ddfba160fc16aa0857a07b4fc091435c2510caead9563934108772a636537f47",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0035_commission_case_overrides.sql",
+    "sha256": "4e648eac55cc8188224aada88d5a85d29019852f59c8d8cbbad88d0e01da6603",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0036_visit_clearance.sql",
+    "sha256": "c0593b6ff09fc95e93efd22fb7efa57643210758095d32e6c046143ba0bbbea6",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0037_patient_families.sql",
+    "sha256": "1ef399a1ea6d41cf51bd05889cbf31d16aaddb5ba2b3dfa74b4b82cab218956b",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0038_legacy_balance_arrangements.sql",
+    "sha256": "d2ee64f0b3236d7595de5443c0f05cb06aafcd20064e10a992014d29b2ab6f2e",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0039_ortho_adjustment_billing_decision.sql",
+    "sha256": "1dd2066a86a123dcf778e20cad92ff8fa47a2d4656a40f9ec693b80b6a14274b",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0040_endodontics.sql",
+    "sha256": "14f84d75b397b95fa25e8502d021b626fc38f973532125ffa8754ebeef10b142",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0041_invoice_clinical_linkage.sql",
+    "sha256": "3fb5db8869d1b051fc5b08aa7a25c2c00343df26b590e7e844f4de7f3f6a7337",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0042_legacy_treatment_agreements.sql",
+    "sha256": "32ab5f852a088cff1de7b7f876b0976b2d461b7ef67f9b3793e131773af486c8",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0043_legacy_treatment_coverage.sql",
+    "sha256": "8da7e57a474052dcef35a2269b4613d9a2839121c404130862b0e67dec78296f",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0045_hr_staff.sql",
+    "sha256": "c3ef983b19de9b33eb8d6c4460b8acbfe8a087321eb77252a6aece5b43b78970",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0046_hr_tasks.sql",
+    "sha256": "b56c20c66b7b9616d67b2abc48823d4c27c7935e6da39088f1859eedae9db8ff",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0047_ceph_correction_lineage.sql",
+    "sha256": "543ec31b8bb13679abaa19ecd46e2aaea6690f94129bfdfe10bd9f15d9437e10",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0048_hr_contracts_attendance_leaves.sql",
+    "sha256": "1b5d7a87e0d53d455b73363d0af45c0940c03a9fe10125ab9128eefab85eb241",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0049_hr_payroll_disbursements.sql",
+    "sha256": "7bdeeaf170029c845d56ca21e2836db746040a8490291b8fae3b2d3ad4b01e62",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0050_hr_payroll_integrity.sql",
+    "sha256": "f273b970554c11aca74d65a9926a68f324d47d87d3e2983489715c16d6454075",
+    "unchanged": true
+  },
+  {
+    "path": "migrations/0051_ortho_treatment_strategy.sql",
+    "sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e",
+    "unchanged": true
+  }
+]

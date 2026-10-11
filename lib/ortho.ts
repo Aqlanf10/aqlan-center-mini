@@ -29,7 +29,7 @@ export const APPLIANCE_LABEL: Record<Appliance, string> = {
 };
 
 /** الجهاز الثابت وحده هو الذي تُتابَع أسلاكه — والمتحرّك يُتابع بخطواته. */
-export function usesArchwires(appliance: Appliance): boolean {
+export function usesArchwires(appliance: Appliance | null | undefined): boolean {
   return appliance === "fixed_metal" || appliance === "fixed_ceramic";
 }
 
@@ -68,9 +68,15 @@ export const PHASE_HINT: Record<OrthoPhase, string> = {
 
 export const PHASE_ORDER: OrthoPhase[] = ["aligning", "working", "finishing", "retention"];
 
-export type CaseStatus = "active" | "retention" | "completed" | "discontinued";
+export type CaseStatus = "assessment" | "assessment_cancelled" | "active" | "retention" | "completed" | "discontinued";
+
+/** Identity reuse includes intake; treatment execution remains an explicit separate allowlist. */
+export const isOpenOrthoCase = (status: unknown): boolean => status === "assessment" || status === "active" || status === "retention";
+export const isTreatmentOrthoCase = (status: unknown): boolean => status === "active" || status === "retention";
 
 export const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
+  assessment: "قيد تقييم التقويم",
+  assessment_cancelled: "أُلغي ملف تقييم التقويم",
   active: "جارية",
   retention: "تثبيت",
   completed: "مكتملة",
@@ -127,11 +133,11 @@ export const WIRE_SEQUENCE: Record<SlotSize, Archwire[]> = {
   ],
 };
 
-export function wiresFor(slot: SlotSize): Archwire[] {
-  return WIRE_SEQUENCE[slot] ?? WIRE_SEQUENCE["022"];
+export function wiresFor(slot: SlotSize | null | undefined): Archwire[] {
+  return slot === "018" || slot === "022" ? WIRE_SEQUENCE[slot] : [];
 }
 
-export function findWire(slot: SlotSize, code: string): Archwire | null {
+export function findWire(slot: SlotSize | null | undefined, code: string): Archwire | null {
   return wiresFor(slot).find((wire) => wire.code === code) ?? null;
 }
 
@@ -141,7 +147,7 @@ export function findWire(slot: SlotSize, code: string): Archwire | null {
  * يُعيد `null` عند آخر السلسلة — ولا يدور إلى أولها: العودة إلى سلكٍ مرنٍ بعد
  * الفولاذي قرارٌ سريري يُتّخذ عمدًا، لا اقتراحٌ يقدّمه برنامج.
  */
-export function nextWire(slot: SlotSize, current: string | null): Archwire | null {
+export function nextWire(slot: SlotSize | null | undefined, current: string | null): Archwire | null {
   const wires = wiresFor(slot);
   if (!current) return wires[0] ?? null;
   const index = wires.findIndex((wire) => wire.code === current);
@@ -271,6 +277,7 @@ export function canComplete(input: {
 }): { ok: true } | { ok: false; message: string } {
   if (input.status === "completed") return { ok: false, message: "الحالة مكتملة سلفًا." };
   if (input.status === "discontinued") return { ok: false, message: "الحالة متوقّفة." };
+  if (!isTreatmentOrthoCase(input.status)) return { ok: false, message: "لا يوجد بدء علاج موثّق في هذه الحالة؛ إنهاء التقييم له إجراء مستقل ولا يُعد إكمالًا للعلاج." };
   if (!input.retainer) {
     return { ok: false, message: "سجّل المثبّت قبل إغلاق الحالة — الارتداد يُضيع نتيجة سنتين." };
   }
