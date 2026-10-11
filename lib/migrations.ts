@@ -51,7 +51,7 @@ export { BASELINE_VERSION, checksumOf, defaultMigrationsDir, loadMigrationFiles,
  */
 export const COORDINATED_MIGRATION_VERSIONS: readonly string[] = [
   ...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
-  "0045", "0046", "0047", "0048", "0049", "0050", "0051",
+  "0045", "0046", "0047", "0048", "0049", "0050", "0051", "0052", "0053", "0054",
 ];
 
 export interface AppliedMigrationRow {

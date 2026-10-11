@@ -96,7 +96,7 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
       .filter((one) => one.status === "active" || one.status === "waiting")
       .map((one) => ({ title: one.title, specialty: one.specialty, status: one.status })),
     ortho: ortho ? {
-      phase: PHASE_LABEL[ortho.phase] ?? ortho.phase,
+      phase: ortho.phase === null ? "تقييم — لم يبدأ العلاج" : PHASE_LABEL[ortho.phase] ?? ortho.phase,
       upperWire: ortho.upperWire,
       lowerWire: ortho.lowerWire,
       lastAdjustmentOn: ortho.adjustments[0]?.doneOn ?? null,

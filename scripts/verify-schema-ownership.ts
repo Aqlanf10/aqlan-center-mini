@@ -256,6 +256,9 @@ export function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof lo
     "0049_hr_payroll_disbursements.sql",
     "0050_hr_payroll_integrity.sql",
     "0051_ortho_treatment_strategy.sql",
+    "0052_ortho_assessment.sql",
+    "0053_ortho_case_journey.sql",
+    "0054_ortho_assessment_lifecycle.sql",
   ] as const;
   const expected = expectedFilenames.map((filename) => filename.slice(0, 4));
   const actual = files.map((file) => file.version);

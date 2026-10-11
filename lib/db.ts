@@ -47,6 +47,9 @@ import { JOURNAL_CURRENCY_SQL } from "./journal-currency-schema";
 import { SPECIALTY_CASES_SQL } from "./specialty-cases-schema";
 import { INTERNAL_REFERRALS_SQL } from "./internal-referrals-schema";
 import { ORTHO_TREATMENT_STRATEGY_SQL } from "./ortho-treatment-strategy-schema";
+import { ORTHO_ASSESSMENT_SQL } from "./ortho-assessment-schema";
+import { ORTHO_CASE_JOURNEY_SQL } from "./ortho-case-journey-schema";
+import { ORTHO_ASSESSMENT_LIFECYCLE_SQL } from "./ortho-assessment-lifecycle-schema";
 import { ORTHO_BASELINE_SQL } from "./ortho-baseline-schema";
 import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
@@ -2076,6 +2079,10 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
     // (ORTHO-STRATEGY) Append-only case planning history, shared with reserved migration0051.
     await getPool().query(ORTHO_TREATMENT_STRATEGY_SQL);
+    // Append-only assessment inputs and server result witnesses; exact migration0052 body.
+    await getPool().query(ORTHO_ASSESSMENT_SQL);
+    await getPool().query(ORTHO_CASE_JOURNEY_SQL);
+    await getPool().query(ORTHO_ASSESSMENT_LIFECYCLE_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -16096,7 +16103,7 @@ export interface VisitOrtho {
   caseId: number;
   appliance: string;
   phase: string;
-  slot: string;
+  slot: string | null;
   upperWire: string | null;
   lowerWire: string | null;
   lastAdjustment: string | null;
@@ -16362,7 +16369,8 @@ async function visitOrthoContext(patientId: number | null, visitId: number): Pro
   const visitDay = clinicDateString(visit.arrived_at, CLINIC_TIME_ZONE);
   const open = recorded.length === 1 ? await getOrthoCase(recorded[0].case_id, today)
     : !visit.signed_at && visitDay === today ? await openOrthoCaseFor(patientId, today) : null;
-  if (!open || open.patientId !== patientId || (recorded.length === 0 && open.startDate > visitDay)) return null;
+  if (!open || open.patientId !== patientId || open.appliance === null || open.phase === null
+    || (recorded.length === 0 && (!isTreatmentOrthoCase(open.status) || (open.startDate !== null && open.startDate > visitDay)))) return null;
   const recordedAdjustment = recorded.length === 1 ? open.adjustments.find((entry) => entry.visitId === visitId) : undefined;
   if (recorded.length === 1 && !recordedAdjustment) return null;
   const last = recordedAdjustment ?? open.adjustments[0] ?? null;
@@ -20644,7 +20652,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
              (SELECT COUNT(*) FROM visits WHERE patient_id = $1 AND signed_at IS NOT NULL)::text AS visits,
              (SELECT COUNT(*) FROM lab_orders WHERE patient_id = $1 AND status IN ('sent', 'received'))::text AS open_lab,
              (SELECT COUNT(*) FROM patient_documents WHERE patient_id = $1 AND removed_at IS NULL)::text AS documents,
-             (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('active', 'retention'))::text AS ortho`,
+             (SELECT COUNT(*) FROM ortho_cases WHERE patient_id = $1 AND status IN ('assessment', 'active', 'retention'))::text AS ortho`,
           [patientId],
         );
         return {
@@ -21376,24 +21384,25 @@ export async function documentsForArchive(): Promise<{
 // ─── التقويم ─────────────────────────────────────────────────────────────────
 
 import {
-  canComplete, caseProgress, nextWire,
+  canComplete, isTreatmentOrthoCase, nextWire,
   type Appliance, type Arches, type CaseProgress, type CaseStatus,
   type ElasticClass, type OrthoPhase, type RetainerType, type SlotSize,
 } from "./ortho";
 import { isLegacyFinancialMode, type BaselineDraft, type LegacyFinancialMode, type OrthoSessionDraft } from "./ortho-baseline";
+import { lifecycleProgress, permitsOrthoDocumentation, isOrthoCalendarDate, type NullableOrthoProgress } from "./ortho-assessment-lifecycle";
 
 export interface OrthoCase {
   id: number;
   patientId: number;
   patientName: string;
-  appliance: Appliance;
-  arches: Arches;
-  slot: SlotSize;
+  appliance: Appliance | null;
+  arches: Arches | null;
+  slot: SlotSize | null;
   bracketSystem: string | null;
   status: CaseStatus;
-  phase: OrthoPhase;
-  startDate: string;
-  plannedMonths: number;
+  phase: OrthoPhase | null;
+  startDate: string | null;
+  plannedMonths: number | null;
   upperWire: string | null;
   lowerWire: string | null;
   planId: number | null;
@@ -21413,7 +21422,9 @@ export interface OrthoCase {
   legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
   adjustments: OrthoAdjustment[];
-  progress: CaseProgress;
+  progress: CaseProgress | NullableOrthoProgress;
+  /** Present for the explicit assessment lifecycle; opening is not treatment start. */
+  lifecycle?: { version: number; clinicalCaseId: number; openedAt: string; cancelledAt: string | null; intakeKind: "new" | "transferred" | "unknown" } | null;
 }
 
 export interface OrthoAdjustment {
@@ -21435,15 +21446,16 @@ export interface OrthoAdjustment {
 }
 
 interface CaseRow {
-  id: number; patient_id: number; full_name: string; appliance: string; arches: string;
-  slot: string; bracket_system: string | null; status: string; phase: string;
-  start_date: Date; planned_months: number; upper_wire: string | null;
+  id: number; patient_id: number; full_name: string; appliance: string | null; arches: string | null;
+  slot: string | null; bracket_system: string | null; status: string; phase: string | null;
+  start_date: Date | null; planned_months: number | null; upper_wire: string | null;
   lower_wire: string | null; plan_id: number | null; retainer: string | null;
   retainer_on: Date | null; note: string | null; closed_at: Date | null;
   closed_by: string | null; closed_note: string | null;
   baseline_kind: string | null; baseline_recorded_at: Date | null; elastics: string | null;
   responsible_doctor_id: number | null; responsible_doctor_name: string | null;
   legacy_financial_mode: string | null; remaining_objectives: string | null;
+  lifecycle_clinical_case_id: number | null; lifecycle_version: number; assessment_opened_at: Date | null; assessment_cancelled_at: Date | null; assessment_intake_kind: "new" | "transferred" | "unknown" | null;
 }
 
 interface AdjustmentRow {
@@ -21458,7 +21470,10 @@ const CASE_SELECT = `
          c.status, c.phase, c.start_date, c.planned_months, c.upper_wire, c.lower_wire,
          c.plan_id, c.retainer, c.retainer_on, c.note, c.closed_at, c.closed_by, c.closed_note,
          c.baseline_kind, c.baseline_recorded_at, c.elastics, c.responsible_doctor_id,
-         rd.name AS responsible_doctor_name, c.legacy_financial_mode, c.remaining_objectives
+         rd.name AS responsible_doctor_name, c.legacy_financial_mode, c.remaining_objectives,
+         c.lifecycle_version, c.assessment_opened_at, c.assessment_cancelled_at, c.assessment_intake_kind,
+         (SELECT b.id FROM clinical_cases b JOIN ortho_case_lifecycle_events e ON e.clinical_case_id=b.id AND e.ortho_case_id=c.id AND e.version=1
+           WHERE b.ortho_case_id=c.id AND b.patient_id=c.patient_id AND b.specialty='orthodontics') AS lifecycle_clinical_case_id
     FROM ortho_cases c JOIN patients p ON p.id = c.patient_id
     LEFT JOIN parties rd ON rd.id = c.responsible_doctor_id`;
 
@@ -21500,17 +21515,28 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
 
   return rows.map((row) => {
     const adjustments = byCase.get(row.id) ?? [];
+    if (!permitsOrthoDocumentation(row.status)) throw new Error("Unsupported Ortho case status");
+    const startDate = row.start_date === null ? null : dateText(row.start_date);
+    if (startDate !== null && !isOrthoCalendarDate(startDate)) throw new Error("Invalid recorded Ortho start date");
+    if (row.planned_months !== null && (!Number.isInteger(row.planned_months) || row.planned_months < 1 || row.planned_months > 120)) throw new Error("Invalid recorded Ortho duration");
+    if (row.slot !== null && row.slot !== "018" && row.slot !== "022") throw new Error("Invalid recorded Ortho slot");
+    const assessment = row.status === "assessment" || row.status === "assessment_cancelled";
+    if (assessment && [row.appliance,row.arches,row.slot,row.bracket_system,row.phase,startDate,row.planned_months,row.upper_wire,row.lower_wire,row.retainer,row.retainer_on,row.plan_id].some(v=>v!==null)) throw new Error("Assessment contains undocumented treatment facts");
+    if (!assessment && (row.appliance===null || !["fixed_metal","fixed_ceramic","aligners","removable","functional"].includes(row.appliance)
+      || row.arches===null || !["upper","lower","both"].includes(row.arches) || row.phase===null || !["aligning","working","finishing","retention"].includes(row.phase))) throw new Error("Invalid recorded Ortho treatment facts");
+    if (!Number.isSafeInteger(row.lifecycle_version) || row.lifecycle_version<0 || assessment && row.lifecycle_version===0) throw new Error("Invalid Ortho lifecycle witness");
+    if (row.lifecycle_version>0 && (!Number.isSafeInteger(row.lifecycle_clinical_case_id) || (row.lifecycle_clinical_case_id ?? 0)<=0 || !row.assessment_opened_at || !row.assessment_intake_kind || !["new","transferred","unknown"].includes(row.assessment_intake_kind))) throw new Error("Missing Ortho intake provenance");
     return {
       id: row.id,
       patientId: row.patient_id,
       patientName: row.full_name,
-      appliance: row.appliance as Appliance,
-      arches: row.arches as Arches,
-      slot: row.slot as SlotSize,
+      appliance: row.appliance as Appliance | null,
+      arches: row.arches as Arches | null,
+      slot: row.slot as SlotSize | null,
       bracketSystem: row.bracket_system,
       status: row.status as CaseStatus,
-      phase: row.phase as OrthoPhase,
-      startDate: dateText(row.start_date),
+      phase: row.phase as OrthoPhase | null,
+      startDate,
       plannedMonths: row.planned_months,
       upperWire: row.upper_wire,
       lowerWire: row.lower_wire,
@@ -21529,8 +21555,10 @@ async function hydrateCases(rows: CaseRow[], today: string): Promise<OrthoCase[]
       legacyFinancialMode: isLegacyFinancialMode(row.legacy_financial_mode) ? row.legacy_financial_mode : null,
       remainingObjectives: row.remaining_objectives,
       adjustments,
-      progress: caseProgress({
-        startDate: dateText(row.start_date),
+      lifecycle: row.lifecycle_version>0 ? {version:row.lifecycle_version,clinicalCaseId:row.lifecycle_clinical_case_id!,openedAt:row.assessment_opened_at!.toISOString(),cancelledAt:row.assessment_cancelled_at?.toISOString()??null,intakeKind:row.assessment_intake_kind!} : null,
+      progress: lifecycleProgress({
+        status: row.status,
+        startDate,
         plannedMonths: row.planned_months,
         adjustments: adjustments.length,
         lastAdjustmentDate: adjustments[0]?.doneOn ?? null,
@@ -22008,9 +22036,9 @@ export async function closeOrthoCase(input: {
         retainer: (rows[0].retainer as RetainerType) ?? null,
       });
       if (!guard.ok) { await client.query("ROLLBACK"); return guard; }
-    } else if (rows[0].status === "completed" || rows[0].status === "discontinued") {
+    } else if (!isTreatmentOrthoCase(rows[0].status)) {
       await client.query("ROLLBACK");
-      return { ok: false, message: "الحالة مغلقة سلفًا." };
+      return { ok: false, message: "هذه ليست حالة علاج جارية؛ إلغاء التقييم له إجراء مستقل." };
     }
 
     await client.query(
@@ -22052,7 +22080,7 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
   await ensureSchema();
   const { rows } = await getPool().query<{
     case_id: number; patient_id: number; full_name: string; phone: string | null;
-    status: string; phase: string; start_date: Date; last_adjustment_date: string | null;
+    status: string; phase: string; start_date: Date | null; last_adjustment_date: string | null;
     next_weeks: number | null; upper_wire: string | null; lower_wire: string | null;
     clinical_case_id: number | null; bookings: ProjectedFollowupBooking[]; last_no_show: boolean;
   }>(
@@ -22108,7 +22136,7 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
       WHERE c.status IN ('active', 'retention')`,
   );
   return rows.map((row) => {
-    const startDate = dateText(row.start_date);
+    const startDate = row.start_date === null ? null : dateText(row.start_date);
     const bookingProjection = projectFollowupBookings({
       target: { patientId: row.patient_id, orthoCaseId: row.case_id, clinicalCaseId: row.clinical_case_id, startDate },
       today,
@@ -26425,7 +26453,11 @@ export interface SpecialtyCase {
   responsiblePartyId: number | null;
   responsibleName: string | null;
   status: SpecialtyCaseStatus;
-  startedOn: string;
+  /** Generic episode opening for non-Ortho; actual treatment start for Ortho. */
+  startedOn: string | null;
+  startedOnMeaning: "clinical_case_opened" | "ortho_treatment_started";
+  clinicalCaseOpenedOn: string | null;
+  assessmentOpenedAt: string | null;
   completedAt: string | null;
   outcome: string | null;
   itemsTotal: number;
@@ -26491,7 +26523,8 @@ export interface PlanItemDependency {
 interface SpecialtyCaseRow {
   id: number | null; kind: "specialty" | "ortho"; ortho_case_id: number | null; patient_id: number;
   specialty: string; title: string; site: string | null; problem: string | null;
-  responsible_party_id: number | null; responsible_name: string | null; status: string; started_on: string;
+  responsible_party_id: number | null; responsible_name: string | null; status: string; started_on: string | null;
+  clinical_case_opened_on: string | null; assessment_opened_at: Date | null;
   completed_at: Date | null; outcome: string | null; items_total: number; items_done: number; created_by: string;
   origin: string | null; needs_assessment: boolean; legacy: boolean;
 }
@@ -26501,6 +26534,8 @@ const toSpecialtyCase = (row: SpecialtyCaseRow): SpecialtyCase => ({
   specialty: row.specialty, title: row.title, site: row.site, problem: row.problem,
   responsiblePartyId: row.responsible_party_id, responsibleName: row.responsible_name,
   status: row.status as SpecialtyCaseStatus, startedOn: row.started_on,
+  startedOnMeaning: row.ortho_case_id === null ? "clinical_case_opened" : "ortho_treatment_started",
+  clinicalCaseOpenedOn: row.clinical_case_opened_on, assessmentOpenedAt: row.assessment_opened_at?.toISOString() ?? null,
   completedAt: row.completed_at ? row.completed_at.toISOString() : null, outcome: row.outcome,
   itemsTotal: row.items_total, itemsDone: row.items_done, createdBy: row.created_by,
   origin: row.origin ?? null, needsAssessment: row.needs_assessment === true,
@@ -26519,9 +26554,11 @@ const SPECIALTY_CASE_SELECT = `
          d.name AS responsible_name,
          -- حالة التقويم المجسورة مصدرها وحدة التقويم وحدها: لا تنفصل الشاشتان أبدًا.
          CASE WHEN o.id IS NULL THEN c.status
+              WHEN o.status IN ('assessment', 'assessment_cancelled') THEN c.status
               WHEN o.status IN ('active', 'retention') THEN 'active'
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END AS status,
-         c.started_on::text AS started_on,
+         CASE WHEN o.id IS NULL THEN c.started_on ELSE o.start_date END::text AS started_on,
+         c.started_on::text AS clinical_case_opened_on, o.assessment_opened_at,
          CASE WHEN o.id IS NULL THEN c.completed_at ELSE o.closed_at END AS completed_at,
          CASE WHEN o.id IS NULL THEN c.outcome ELSE o.closed_note END AS outcome,
          c.created_by, c.created_at,
@@ -26546,9 +26583,11 @@ const SPECIALTY_CASE_SELECT = `
   UNION ALL
   SELECT NULL, 'ortho', o.id, o.patient_id, 'orthodontics', 'تقويم الأسنان', NULL, NULL,
          COALESCE(o.responsible_doctor_id, t.primary_doctor_id), d.name,
-         CASE WHEN o.status IN ('active', 'retention') THEN 'active'
+         CASE WHEN o.status = 'assessment' THEN 'waiting'
+              WHEN o.status = 'assessment_cancelled' THEN 'cancelled'
+              WHEN o.status IN ('active', 'retention') THEN 'active'
               WHEN o.status = 'completed' THEN 'completed' ELSE 'closed' END,
-         o.start_date::text, o.closed_at, o.closed_note, o.created_by, o.created_at,
+         o.start_date::text, NULL::text, o.assessment_opened_at, o.closed_at, o.closed_note, o.created_by, o.created_at,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status <> 'cancelled')::int,
          (SELECT COUNT(*) FROM plan_items i WHERE i.plan_id = o.plan_id AND i.status = 'done')::int,
          NULL,
@@ -26612,11 +26651,16 @@ export async function createClinicalCase(input: CaseDraft & {
       const { rows } = await client.query<{ status: string; closed_at: Date | null; arches: string | null }>(
         `SELECT status, closed_at, arches FROM ortho_cases WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.orthoCaseId, input.patientId]);
       if (!rows[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "bad_ortho" }; }
+      if (rows[0].status === "assessment" || rows[0].status === "assessment_cancelled") { await client.query("ROLLBACK"); return {ok:false,reason:"already_bridged"}; }
       /* (ORTHO-ID) موضع الجسر نطاق فك حالة التقويم نفسها لا نصٌّ حرٌّ يكتبه المنشئ — فتتطابق القراءتان. */
       bridgeSite = orthoArchesSiteText(rows[0].arches) ?? bridgeSite;
+      if (!permitsOrthoDocumentation(rows[0].status)) { await client.query("ROLLBACK"); return {ok:false,reason:"bad_ortho"}; }
       bridgeStatus = rows[0].status === "active" || rows[0].status === "retention" ? "active"
         : rows[0].status === "completed" ? "completed" : "closed";
-      if (bridgeStatus !== "active") bridgeClosedAt = rows[0].closed_at ?? new Date();
+      if (bridgeStatus !== "active") {
+        if (!rows[0].closed_at) { await client.query("ROLLBACK"); return {ok:false,reason:"bad_ortho"}; }
+        bridgeClosedAt = rows[0].closed_at;
+      }
       const { rows: bridged } = await client.query(`SELECT 1 FROM clinical_cases WHERE ortho_case_id = $1`, [input.orthoCaseId]);
       if (bridged[0]) { await client.query("ROLLBACK"); return { ok: false, reason: "already_bridged" }; }
     }
@@ -27766,11 +27810,12 @@ export async function listMyReferrals(partyId: number): Promise<{
  *    بعد: القاعدة قد تحمل أزواجًا مكررة قديمة (تقرير ortho-duplicate-adjustments) تُسوّى بقرار المالك أولًا.
  */
 
-type OrthoSessionRefusal = "not_found" | "closed" | "wrong_patient" | "visit_not_found";
+type OrthoSessionRefusal = "not_found" | "closed" | "not_treatment" | "wrong_patient" | "visit_not_found";
 
 const ORTHO_SESSION_REFUSAL: Record<OrthoSessionRefusal, string> = {
   not_found: "الحالة غير موجودة.",
   closed: "الحالة مغلقة — لا تُسجَّل عليها شدّات.",
+  not_treatment: "ملف التقييم ليس حالة علاج جارية؛ وثّق بدء العلاج صراحةً قبل تسجيل شدّة.",
   wrong_patient: "الزيارة وحالة التقويم لمريضين مختلفين.",
   visit_not_found: "الزيارة غير موجودة.",
 };
@@ -27821,7 +27866,8 @@ async function writeOrthoSessionInTx(
     }
   }
 
-  if (found.status === "completed" || found.status === "discontinued") return { ok: false, reason: "closed" };
+  // Preserve the exact historical visit retry above; fresh treatment writes are positive-gated.
+  if (!isTreatmentOrthoCase(found.status)) return { ok: false, reason: ["completed", "discontinued"].includes(found.status) ? "closed" : "not_treatment" };
 
   // سلكٌ لم يُغيَّر يبقى كما هو: الفراغ يعني «بلا تغيير» لا «أُزيل السلك».
   const upper = input.upperWire?.trim() || found.upper_wire;

@@ -18,7 +18,11 @@ const tasks = { version: "0046", filename: "0046_hr_tasks.sql" };
 const contracts = { version: "0048", filename: "0048_hr_contracts_attendance_leaves.sql" };
 const payroll = { version: "0049", filename: "0049_hr_payroll_disbursements.sql" };
 const integrity = { version: "0050", filename: "0050_hr_payroll_integrity.sql" };
-const reviewed = () => [...baseline(), invoice, legacy, coverage, staff, tasks, ceph, contracts, payroll, integrity, strategy];
+const through51 = () => [...baseline(), invoice, legacy, coverage, staff, tasks, ceph, contracts, payroll, integrity, strategy];
+
+const reviewed = () => [...through51(), ...[
+  "0052_ortho_assessment.sql", "0053_ortho_case_journey.sql", "0054_ortho_assessment_lifecycle.sql",
+].map(filename => ({ filename, version: filename.slice(0, 4) }))];
 
 describe("inactive periodontal candidate uses a reviewed collision-free test-only version", () => {
   it("keeps the pre-invoice baseline at test-only 0041", () => {
@@ -34,9 +38,9 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, coverage])).toBe("0044");
   });
   it("preserves the reserved 0044 gap and every original HR/Ceph/strategy file, placing the test-only candidate after 0051", () => {
-    expect(periodontalCandidateMigrationVersion(reviewed())).toBe("0052");
-    expect(reviewed()).toHaveLength(50);
-    expect(reviewed().slice(40).map(file => file.version)).toEqual(["0041", "0042", "0043", "0045", "0046", "0047", "0048", "0049", "0050", "0051"]);
+    expect(periodontalCandidateMigrationVersion(through51())).toBe("0052");
+    expect(through51()).toHaveLength(50);
+    expect(through51().slice(40).map(file => file.version)).toEqual(["0041", "0042", "0043", "0045", "0046", "0047", "0048", "0049", "0050", "0051"]);
   });
   it("does not weaken gap, ordering, suffix or future-baseline guards", () => {
     expect(() => periodontalCandidateMigrationVersion(baseline().slice(1))).toThrow();
@@ -91,7 +95,7 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(migrationFilesThrough(files, "0043")).toEqual(files.slice(0, 43));
     expect(migrationFilesThrough(files, "0047")).toEqual(files.slice(0, 46));
     expect(migrationFilesThrough(files, "0050")).toEqual(files.slice(0, 49));
-    expect(migrationFilesThrough(files, "0051")).toEqual(files);
+    expect(migrationFilesThrough(files, "0051")).toEqual(files.slice(0, 50));
     expect(() => migrationFilesThrough(files.slice(0, 42), "0043")).toThrow();
     expect(() => migrationFilesThrough(files, "0044")).toThrow();
     expect(() => migrationFilesThrough([...files, { version: "0052", filename: "0052_unreviewed.sql" }], "0043")).toThrow();
@@ -114,6 +118,6 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     assertReviewedMigrationChain(files, LATEST_REVIEWED_MIGRATION_VERSION);
     expect(files.map(file => file.filename)).toEqual(REVIEWED_MIGRATION_FILENAMES);
     expect(expectedMigrationRegistry(files).map(row => row.version)).toEqual(files.map(file => file.version));
-    expect(periodontalCandidateMigrationVersion(files)).toBe("0052");
+    expect(periodontalCandidateMigrationVersion(files)).toBe("0058");
   });
 });

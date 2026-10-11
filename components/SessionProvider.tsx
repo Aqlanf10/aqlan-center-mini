@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { sessionActorId } from "@/lib/session-actor";
 import type { Role } from "@/lib/roles";
 import type { DoctorPermissions } from "@/lib/doctor-permissions";
 
@@ -18,6 +19,8 @@ import type { DoctorPermissions } from "@/lib/doctor-permissions";
  *    منفصل غير المتصفح — لا يُصدر من دخول المتصفح ولا يُخزَّن في الصفحة.
  */
 export interface SessionInfo {
+  /** Server-derived lifecycle identity; never a write authorization. */
+  userId?: number | null;
   username: string;
   role: Role | string;
   displayName?: string;
@@ -119,13 +122,16 @@ export function SessionProvider({ value, children }: {
         if (cancelled) return;
         if (response.ok) {
           const me = (await response.json()) as {
+            userId?: number;
             username?: string;
             displayName?: string;
             role?: string;
             permissions?: DoctorPermissions | null;
           };
+          if (cancelled) return;
           if (me?.username && me?.role) {
             setSessionState({
+              userId: sessionActorId(me.userId),
               username: me.username,
               displayName: me.displayName,
               role: me.role,

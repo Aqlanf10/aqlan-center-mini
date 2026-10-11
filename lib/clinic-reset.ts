@@ -37,6 +37,13 @@ export const RESET_WIPE_TABLES = [
   "endo_visits",
   "endo_treatments",
   // Clinical append-only history; removed only by the existing explicit reset TRUNCATE.
+  "ortho_case_study_artifact_events",
+  "ortho_case_study_export_manifests",
+  "ortho_case_study_revisions",
+  "ortho_retention_entries",
+  "ortho_decision_revisions",
+  "ortho_assessment_revisions",
+  "ortho_case_lifecycle_events",
   "ortho_strategy_revisions",
   "ortho_adjustments",
   "ortho_cases",

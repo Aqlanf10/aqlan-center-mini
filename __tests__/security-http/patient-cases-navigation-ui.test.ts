@@ -48,6 +48,7 @@ function casesPayload(planVisible: boolean) {
     id: BRIDGE, kind: "specialty", orthoCaseId: HISTORICAL, patientId: h.seeded.patientAId,
     specialty: "orthodontics", title: HISTORICAL_TITLE, site: null, problem: "سجل تاريخي اصطناعي",
     responsiblePartyId: null, responsibleName: "طبيب اصطناعي", status: "completed", startedOn: "2023-01-01",
+  startedOnMeaning: "ortho_treatment_started", clinicalCaseOpenedOn: null, assessmentOpenedAt: null,
     completedAt: "2024-12-01T00:00:00.000Z", outcome: "اكتمل العلاج الاصطناعي", itemsTotal: 0,
     itemsDone: 0, createdBy: "synthetic-cases-navigation", waitingOn: [],
   };

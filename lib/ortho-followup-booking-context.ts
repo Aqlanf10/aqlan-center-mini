@@ -8,7 +8,7 @@ export interface FollowupTarget {
   patientId: number;
   orthoCaseId: number;
   clinicalCaseId: number | null;
-  startDate: string;
+  startDate: string | null;
 }
 
 export interface FollowupBookingFacts {
@@ -77,7 +77,7 @@ function validDate(value: unknown): value is string {
 
 function validTarget(target: FollowupTarget): boolean {
   return id(own(target, "patientId")) && id(own(target, "orthoCaseId"))
-    && optionalId(own(target, "clinicalCaseId")) && validDate(own(target, "startDate"));
+    && optionalId(own(target, "clinicalCaseId")) && (own(target, "startDate") === null || validDate(own(target, "startDate")));
 }
 
 /** Missing projections are uncertainty, never permission to invent a link. */
@@ -92,7 +92,7 @@ export function classifyFollowupBooking(target: FollowupTarget, booking: Followu
   const status = own(booking, "status");
   if (status === "done" || status === "cancelled" || status === "no_show") return decision("excluded", "not_open");
   if (status !== "booked" && status !== "arrived") return decision("needs_review", "unknown_status");
-  if (booking.scheduledDate < target.startDate) return decision("needs_review", "before_case_start");
+  if (target.startDate !== null && booking.scheduledDate < target.startDate) return decision("needs_review", "before_case_start");
 
   const serviceId = own(booking, "serviceId");
   const referralId = own(booking, "referralId");

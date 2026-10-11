@@ -6,11 +6,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   WEBCEPH_RECORD_SLOTS,
   PHOTO_STAGE_LABEL,
-  suggestPhotoStage,
   type PhotoStage,
   type PhotoView,
 } from "@/lib/ortho-photos";
-import { suggestCephPhase, type OrthoPhase } from "@/lib/ortho";
+import { type OrthoPhase } from "@/lib/ortho";
 import { useSession } from "./SessionProvider";
 import {
   caseRecordSlots, caseRecordStudy, decodeOrthoRecordDocuments, decodeOrthoRecordStudies,
@@ -26,15 +25,13 @@ const READ_TIMEOUT_MS = 15_000;
 export interface WebCephRecordsGridProps {
   patientId: number;
   orthoCaseId: number;
-  currentPhase?: OrthoPhase;
-  startDate?: string;
+  currentPhase?: OrthoPhase | null;
+  startDate?: string | null;
 }
 
 export function WebCephRecordsGrid({
   patientId,
   orthoCaseId,
-  currentPhase = "aligning",
-  startDate,
 }: WebCephRecordsGridProps) {
   const session = useSession();
   const hasSession = Boolean(session?.username?.trim());
@@ -42,10 +39,10 @@ export function WebCephRecordsGrid({
     || (session?.role === "doctor" && session.permissions?.canViewXrays === true));
   const canUpload = canRead && (session?.role !== "doctor" || session.permissions?.canUploadXrays === true);
   const permissionScope = JSON.stringify(session?.permissions ?? null);
-  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope],
+  const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope],
     active: false, ready: false, busy: false, sequence: 0,
     controller: null, timer: null, picker: null }),
-    [patientId, orthoCaseId, session?.username, session?.role, permissionScope]);
+    [patientId, orthoCaseId, session?.userId, session?.username, session?.role, permissionScope]);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [operation, setOperation] = useState<{ owner: Owner; slot?: PhotoView; documentId?: number } | null>(null);
   const [failure, setFailure] = useState<{ owner: Owner; message: string } | null>(null);
@@ -73,15 +70,10 @@ export function WebCephRecordsGrid({
     };
   }, [owner]);
 
-  // المرحلة الزمنية المحددة للفلترة (افتراضياً: المقترحة تلقائياً أو "all")
-  const defaultStage = useMemo<PhotoStage>(() => {
-    return suggestPhotoStage({
-      date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
-      startDate: startDate || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
-      phase: currentPhase,
-      isFirstSession: false,
-    });
-  }, [startDate, currentPhase]);
+  // Acquisition facts are authored explicitly; upload time and filter selection are not clinical provenance.
+  const [acquisition, setAcquisition] = useState<{ owner: Owner; stage: PhotoStage | ""; date: string; cephPhase: "" | "T1" | "T2" | "T3" | "T4" } | null>(null);
+  const facts = acquisition?.owner === owner ? acquisition : { owner, stage: "" as const, date: "", cephPhase: "" as const };
+  const changeAcquisition = (change: Partial<typeof facts>) => { if (owner.active && !owner.busy) setAcquisition({ ...facts, ...change, owner }); };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -150,7 +142,8 @@ export function WebCephRecordsGrid({
       }
 
       // 2. إنشاء دراسة جديدة ونقل الطبيب إليها فوراً
-      const phase = suggestCephPhase(currentPhase);
+      const phase = facts.cephPhase;
+      if (!phase) { setError("اختر مرحلة التقاط صورة السيفالو صراحةً قبل إنشاء الدراسة."); return; }
       const res = await fetch(`/api/patients/${patientId}/ceph`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,7 +190,7 @@ export function WebCephRecordsGrid({
     setOperation({ owner, slot: slotKey });
     setError(null);
 
-    const stageToSave = activeStage === "all" ? defaultStage : activeStage;
+    const stageToSave = facts.stage;
     const slotDef = WEBCEPH_RECORD_SLOTS.find((s) => s.key === slotKey);
 
     const formData = new FormData();
@@ -205,9 +198,9 @@ export function WebCephRecordsGrid({
     formData.append("kind", slotDef?.category === "xray" ? "xray" : "photo");
     formData.append("title", slotDef ? `${slotDef.labelAr} (${slotDef.labelEn})` : file.name);
     formData.append("photoView", slotKey);
-    formData.append("photoStage", stageToSave);
+    if (stageToSave) formData.append("photoStage", stageToSave);
     formData.append("orthoCaseId", String(orthoCaseId));
-    formData.append("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
+    if (facts.date) formData.append("takenOn", facts.date);
 
     try {
       const res = await fetch(`/api/patients/${patientId}/documents`, {
@@ -291,6 +284,16 @@ export function WebCephRecordsGrid({
         </div>
       </div>
 
+      {canUpload && <fieldset className="grid gap-3 sm:grid-cols-3" disabled={!!operation}>
+        <legend className="text-xs font-bold">مصدر الصورة التالية — اترك غير المعروف فارغًا</legend>
+        <label className="text-xs">مرحلة التصوير<select aria-label="مرحلة التصوير" className="block min-h-11 w-full rounded border" value={facts.stage} onChange={e => changeAcquisition({ stage: e.target.value as PhotoStage | "" })}>
+          <option value="">غير معروفة</option>{Object.entries(PHOTO_STAGE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select></label>
+        <label className="text-xs">تاريخ التقاط الصورة<input aria-label="تاريخ التقاط الصورة" className="block min-h-11 w-full rounded border" type="date" max={clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)} value={facts.date} onChange={e => changeAcquisition({ date: e.target.value })} /></label>
+        <label className="text-xs">مرحلة صورة السيفالو<select aria-label="مرحلة صورة السيفالو" className="block min-h-11 w-full rounded border" value={facts.cephPhase} onChange={e => changeAcquisition({ cephPhase: e.target.value as typeof facts.cephPhase })}>
+          <option value="">اختيار صريح قبل التحليل</option><option value="T1">T1 — قبل العلاج</option><option value="T2">T2 — أثناء العلاج</option><option value="T3">T3 — بعد العلاج</option><option value="T4">T4 — التثبيت</option>
+        </select></label>
+      </fieldset>}
       {error && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
           ⚠️ {error}

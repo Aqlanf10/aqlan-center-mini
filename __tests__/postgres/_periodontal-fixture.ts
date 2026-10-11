@@ -9,7 +9,9 @@ import { assertReviewedMigrationChain } from "./_reviewed-migration-chain";
 /** Collision-free test-only suffix after the actual reviewed chain, including reserved-number gaps. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
   assertReviewedMigrationChain(files);
-  return String(Number(files.at(-1)!.version) + 1).padStart(4, "0");
+  // 0055 clinical governance and 0056–0057 HR are reserved source identities.
+  // This suffix exists only inside an owned temporary test database.
+  return files.at(-1)!.version === "0054" ? "0058" : String(Number(files.at(-1)!.version) + 1).padStart(4, "0");
 }
 
 const NAME = /^aqlan_perio_[a-f0-9]{32}(?![\s\S])/;

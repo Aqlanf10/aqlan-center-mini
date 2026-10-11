@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { permitsOrthoDocumentation, orthoDocumentationContext } from "./ortho-assessment-lifecycle";
 import type { SessionPayload } from "./auth";
 import { ensureSchema, findUserByUsername, getPool, insertAuditRow, type DbClient } from "./db";
 import { canAccessPatient } from "./patient-access";
@@ -116,7 +117,7 @@ async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): P
     [input.orthoCaseId, input.patientId]);
   const ortho = cases[0];
   if (!ortho || ortho.patient_id !== input.patientId) fail(404, "ortho_case_not_found", "حالة التقويم غير متاحة لهذا المريض.");
-  if (!["active", "retention", "completed", "discontinued"].includes(ortho.status)) {
+  if (!permitsOrthoDocumentation(ortho.status)) {
     fail(409, "invalid_case_state", "تعذّر التحقق من حالة التقويم الحالية.");
   }
   const { rows: bridges } = await client.query<{ id: number; patient_id: number; ortho_case_id: number }>(
@@ -133,7 +134,7 @@ async function lockOwner(client: DbClient, input: OwnerInput, write: boolean): P
   // Authorization is tied to both canonical live owners. Historical recorded
   // patient identity below is provenance only and never grants patient access.
   return { patientId: ortho.patient_id, orthoCaseId: ortho.id, clinicalCaseId: bridges[0]?.id ?? null,
-    recordingContext: ortho.status === "completed" || ortho.status === "discontinued" ? "retrospective" : "current" };
+    recordingContext: orthoDocumentationContext(ortho.status) };
 }
 
 /** Fixed property order and normalized text/IDs; row and link ordering remain

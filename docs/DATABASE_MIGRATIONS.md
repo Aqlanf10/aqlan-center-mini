@@ -522,3 +522,12 @@ name. Property hashes localize reviewed structural differences; `WITHHELD`
 localizes only the affected known object/property and requires a separately
 reviewed next step. Neither outcome permits adoption or runtime-DDL retirement.
 This implementation and its tests perform **no Production drilldown execution**.
+
+
+## Local Ortho union candidate (review required, not deployed)
+
+- `0052_ortho_assessment.sql`: immutable assessment revisions; exact SQL derived from PR324 assessment schema module.
+- `0053_ortho_case_journey.sql`: decision, retention and saved-study revisions and export evidence contracts. Does not enable an exporter.
+- `0054_ortho_assessment_lifecycle.sql`: assessment opening/activation/cancellation, explicit nullable historical treatment facts. No financial writer or backfill.
+
+0044 and 0055–0057 remain reserved and absent. The prior HR/finance migration bytes are preserved. The periodontal test fixture appends test-only0058 to this exact reviewed chain; no production placeholder is added. Existing unversioned bootstrap databases with the0054 nullable changes fail the original0001 adoption probe, as designed. Migrate a verified compatible historical schema **before** running the new bootstrap; never bypass the adoption guard. Fresh numbered migration and bootstrap ownership comparison are tested only on synthetic PostgreSQL.

@@ -69,13 +69,14 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     expect(Number(rows[0].count)).toBe(0); // migrations لا تبذر بيانات
   });
 
-  it("قاعدة موجودة من النظام الحالي (ensureSchema) → اعتماد خط الأساس بلا تنفيذ ولا فقد بيانات", async () => {
-    // قاعدة «إنتاج حالي»: أنشأها ensureSchema (مع بذر الحسابات) قبل معرفة نظام الهجرات.
-    await ensureSchema();
-    const seeded = await listUsers();
-    expect(seeded.length).toBeGreaterThan(0);
-
+  it("مخطط تاريخي متوافق حتى0051 → اعتماد خط الأساس ثم الاتحاد دون فقد بيانات", async () => {
+    // Reconstruct the compatible historical schema before0054 changes nullability.
     const pool = getPool();
+    await migrate(pool, { apply: true, files: realFiles.filter(file => file.version <= "0051") });
+    await pool.query("DROP TABLE schema_migrations");
+    await pool.query("INSERT INTO users(username,display_name,password_hash,role) VALUES('synthetic-adoption','Synthetic adoption','synthetic-not-a-login-hash','admin')");
+    const seeded = (await pool.query("SELECT id, username FROM users ORDER BY id")).rows;
+    expect(seeded.length).toBe(1);
     const result = await migrate(pool, { apply: true, files: realFiles });
     expect(result.adoptedBaseline).toBe(true);
 
@@ -87,6 +88,14 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     expect(status.pending).toHaveLength(0);
     const baseline = status.applied.find((row) => row.version === BASELINE_VERSION);
     expect(baseline?.adopted).toBe(true);
+  });
+
+  it("يرفض اعتماد bootstrap0054 nullable بوصفه0001 ولا يضعف مجس المخطط", async () => {
+    await ensureSchema();
+    await expect(migrate(getPool(), { apply: true, files: realFiles })).rejects.toThrow("BASELINE_SCHEMA_MISMATCH");
+    const status = await migrationStatus(getPool(), realFiles);
+    expect(status.applied).toHaveLength(0);
+    expect(status.baselineDiff?.ok).toBe(false);
   });
 
   it("تشغيل ثانٍ → no-op كامل (idempotent)", async () => {

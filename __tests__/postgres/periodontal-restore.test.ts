@@ -135,8 +135,8 @@ beforeAll(async () => {
   shippedFiles = shipped;
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
   // Count is the actual file count, not the highest reserved version. The reviewed
-  // 0001–0043 + 0045–0051 union has 50 original files; only 0044 stays reserved.
-  // The inactive periodontal candidate is test-only 0052, never a shipped migration.
+  // 0001–0043 + 0045–0054 local union has 53 files; only 0044 stays reserved.
+  // The inactive periodontal candidate is test-only 0058 (0055–0057 remain reserved), never a shipped migration.
   shippedCount = shipped.length;
   expect(shipped.map((file) => file.version)).toEqual(COORDINATED_MIGRATION_VERSIONS);
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
@@ -144,7 +144,7 @@ beforeAll(async () => {
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);
   await copyFile(candidatePath, path.join(selection.directory, `${candidateVersion}_periodontal_candidate.sql`));
   candidateFiles = await readMigrationFiles(selection.directory);
-  // Keep every original migration byte and require the test-only candidate after 0051.
+  // Keep every original migration byte and require the test-only candidate after the validated full chain.
   expect(candidateFiles.filter((file) => file.version !== candidateVersion)).toEqual(shipped); // Includes exact SQL and SHA-256 checksums.
   expect(candidateFiles).toHaveLength(shippedCount + 1);
   expect(candidateFiles[shippedCount].version).toBe(candidateVersion);

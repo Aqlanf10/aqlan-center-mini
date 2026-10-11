@@ -7,6 +7,8 @@ import { SettingsProvider } from "@/components/SettingsProvider";
 import { SessionProvider } from "@/components/SessionProvider";
 import { requireSession } from "@/lib/session";
 import { AppShell } from "@/components/AppShell";
+import { OrthoCaseRecoveryProvider } from "@/components/OrthoCaseRecoveryProvider";
+import { sessionActorId } from "@/lib/session-actor";
 import { PwaRegister } from "@/components/PwaRegister";
 
 /**
@@ -78,6 +80,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             value={
               session
                 ? {
+                    userId: sessionActorId(session.userId),
                     username: session.username,
                     role: session.role,
                     displayName: user?.displayName || session.username,
@@ -86,7 +89,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 : null
             }
           >
-            <AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell>
+            <OrthoCaseRecoveryProvider><AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell></OrthoCaseRecoveryProvider>
           </SessionProvider>
         </SettingsProvider>
         <PwaRegister />

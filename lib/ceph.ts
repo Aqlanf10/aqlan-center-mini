@@ -366,6 +366,7 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
     }
     case "WITS": {
       if (!has("A", "B", "OcclA", "OcclP")) return NaN;
+      if (dist(p("OcclA"), p("OcclP")) === 0) return NaN;
       // قدمُ العمود لكلٍّ من A وB على مستوى الإطباق، ثم المسافة بينهما على
       // اتجاه المستوى نفسه موجبًا نحو الأمام. القيم الأكبر نحو الصنف الثاني.
       const fa = projectOnLine(p("A"), p("OcclA"), p("OcclP"));
@@ -373,7 +374,9 @@ export function measure(code: string, L: LandmarkMap, mmPerPixel: number): numbe
       let dir = vec(fb, fa);
       if (dir.x < 0) dir = { x: -dir.x, y: -dir.y };
       const len = Math.hypot(dir.x, dir.y);
-      if (len === 0) return NaN;
+      // Coincident AO/BO is a valid zero separation on the checked axis;
+      // calibration is still mandatory at zero.
+      if (len === 0) return pixelsToMm(0, mmPerPixel);
       const along = ((fa.x - fb.x) * dir.x + (fa.y - fb.y) * dir.y) / len;
       return pixelsToMm(along, mmPerPixel);
     }

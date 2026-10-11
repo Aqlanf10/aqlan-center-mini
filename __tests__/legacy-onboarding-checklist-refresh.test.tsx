@@ -232,6 +232,7 @@ beforeEach(() => {
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
 });
 afterEach(() => { unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 

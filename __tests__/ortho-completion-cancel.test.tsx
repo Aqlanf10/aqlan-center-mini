@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
+import { OrthoCaseJourneyNavigation } from "../components/OrthoCaseJourneyNavigation";
 import { RETAINER_LABEL } from "../lib/ortho";
 
 // Exercise PatientOrtho's real rendered button handlers with synthetic hook storage.
@@ -92,6 +93,13 @@ function text(node: ReactNode): string {
   if (node && typeof node === "object" && "props" in node) return text((node as Element).props.children as ReactNode);
   return "";
 }
+function expandNavigation(node: ReactNode): ReactNode {
+  if (Array.isArray(node)) return node.map(expandNavigation);
+  if (!node || typeof node !== "object" || !("props" in node)) return node;
+  const element = node as Element;
+  if (element.type === OrthoCaseJourneyNavigation) return OrthoCaseJourneyNavigation(element.props as unknown as ComponentProps<typeof OrthoCaseJourneyNavigation>);
+  return { ...element, props: { ...element.props, children: expandNavigation(element.props.children as ReactNode) } };
+}
 function render() {
   let tree: ReactNode = null; let rounds = 0;
   do {
@@ -99,8 +107,9 @@ function render() {
     hooks.cursor = 0; hooks.changed = false;
     const provider = PatientOrtho({ patientId: PATIENT_ID });
     hooks.context = provider.props.value;
-    const workspace = provider.props.children as ReactElement<Record<string, unknown>>;
-    tree = (workspace.type as (props: Record<string, unknown>) => ReactNode)(workspace.props);
+    const intakeProvider = provider.props.children as ReactElement<Record<string, unknown>>;
+    const workspace = intakeProvider.props.children as ReactElement<Record<string, unknown>>;
+    tree = expandNavigation((workspace.type as (props: Record<string, unknown>) => ReactNode)(workspace.props));
     hooks.pending.splice(0).forEach((effect) => effect());
   } while (hooks.changed);
   return tree;
@@ -116,7 +125,7 @@ async function settle() { for (let index = 0; index < 40; index++) await Promise
 async function openRetention(status: "active" | "retention") {
   caseRow = { ...fixture, status };
   render(); await settle();
-  await click(button("التثبيت والاستبقاء"));
+  await click(button("الإنهاء والتثبيت"));
   expect(buttons(COMPLETE_LABEL)).toHaveLength(1);
   expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
     [`/api/ortho?patientId=${PATIENT_ID}`, "GET"], [`/api/patients/${PATIENT_ID}`, "GET"],
@@ -151,7 +160,7 @@ beforeEach(() => {
     if (url === `/api/patients/${PATIENT_ID}`) return Response.json({ patient: { id: PATIENT_ID, fullName: "Synthetic patient", phone: null } });
     throw new Error(`Unexpected synthetic read: ${url}`);
   });
-  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { prompt });
+  vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("window", { prompt, addEventListener: vi.fn(), removeEventListener: vi.fn() });
 });
 afterEach(async () => { await settle(); vi.unstubAllGlobals(); });
 

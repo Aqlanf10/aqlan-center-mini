@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { APPLIANCE_LABEL, ARCHES_LABEL, PHASE_LABEL, SLOT_LABEL } from "@/lib/ortho";
 import { readIntakeJson, readIntakeResponse, type IntakeEvent } from "@/lib/ortho-assessment-intake-client";
 import type { IntakeOwner, IntakeRequest } from "@/lib/ortho-assessment-intake-owner";
-import { readIntakeEditor, intakeEditorCommand, type IntakeEditorDraft } from "@/lib/ortho-assessment-intake-editor";
+import { blankIntakeEditor, readIntakeEditor, intakeEditorCommand, type IntakeEditorDraft } from "@/lib/ortho-assessment-intake-editor";
 const inputClass="min-h-11 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100";
 const buttonClass="min-h-11 min-w-11 rounded border px-4 py-2 text-sm font-semibold disabled:opacity-50";
 const TIMEOUT=20_000;
@@ -47,7 +47,10 @@ export function OrthoAssessmentIntake({owner,onSaved,confirmDiscard}:OrthoAssess
     const next={...draft,[key]:value};
     // A changed appliance makes bracket facts explicitly inapplicable, never inherited.
     if(key==="appliance"&&value!=="fixed_metal"&&value!=="fixed_ceramic"){next.slot="";next.bracketSystem="";}
-    if(lease.change(JSON.stringify(next)))setNotice("");
+    // The empty document is the untouched editor. A same-value event or a full
+    // revert must not invent unsaved work; other outstanding fields survive.
+    const serialized=JSON.stringify(next);
+    if(lease.change(serialized===JSON.stringify(blankIntakeEditor(initialAction))?"":serialized))setNotice("");
   };
   const transport=async(request:IntakeRequest)=>{
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),TIMEOUT);let acknowledged=false;

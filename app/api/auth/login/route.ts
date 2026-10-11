@@ -160,6 +160,7 @@ export async function POST(request: Request) {
     const response = isHtmlRequest
       ? NextResponse.redirect(getRedirectUrl("/", request), 303)
       : NextResponse.json({
+          userId: user.id,
           username: user.username,
           displayName: user.displayName,
           role: user.role,

@@ -160,7 +160,7 @@ describe("TD-04: المصفوفة والباب متفقان", () => {
 });
 
 describe("TD-04: كل مسار طاقم يستدعي حارسًا معروفًا", () => {
-  const GUARDS = /\b(requireSession|requireSessionStrict|readSessionPayload|guardPatient|familyWriter|requireBackupAdminReadOnly|requireBackupAdminSession)\(/;
+  const GUARDS = /\b(requireSession|requireSessionStrict|readSessionPayload|guardPatient|familyWriter|admitJourney|requireBackupAdminReadOnly|requireBackupAdminSession)\(/;
 
   it("لا مسار طاقم بلا حارس جلسة في ملفه", () => {
     const unguarded = ROUTES.filter((route) => {

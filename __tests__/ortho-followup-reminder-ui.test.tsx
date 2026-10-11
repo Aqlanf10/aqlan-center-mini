@@ -157,7 +157,7 @@ describe("orthodontic board follow-up message", () => {
     await openBoard(row);
     const message = decodedMessage();
     expect(message).toBe(unbookedFollowupText(row.patientName));
-    for (const fabricated of [row.dueDate, friendlyDate(row.dueDate), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم"]) {
+    for (const fabricated of [row.dueDate, friendlyDate(row.dueDate!), "16:00", "4:00", "الساعة", "مكانكم محفوظ", "نذكّركم بموعدكم"]) {
       expect(message).not.toContain(fabricated);
     }
     expect(text(links()[0])).toBe("واتساب لترتيب متابعة");
@@ -169,7 +169,7 @@ describe("orthodontic board follow-up message", () => {
     const row = fixture({ dueDate: "2026-11-02", lastAdjustmentDate: TODAY, daysSinceLast: 0, buckets: ["no_appointment"] });
     await openBoard(row);
     expect(decodedMessage()).toBe(unbookedFollowupText(row.patientName));
-    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate));
+    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate!));
   });
 
   it.each(["booked", "arrived"])("preserves the exact existing reminder for an actual %s appointment", async (status) => {
@@ -181,7 +181,7 @@ describe("orthodontic board follow-up message", () => {
       durationMinutes: 15, note: null, status: "booked",
     }, "upcoming"));
     expect(decodedMessage()).toContain("10:30 صباحًا");
-    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate));
+    expect(decodedMessage()).not.toContain(friendlyDate(row.dueDate!));
     expect(text(links()[0])).toBe("واتساب تذكير");
   });
 

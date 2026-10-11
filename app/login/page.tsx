@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/Icon";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
+import { sessionActorId } from "@/lib/session-actor";
 import { useSessionActions } from "@/components/SessionProvider";
 import { AlertCircle, Eye, EyeOff, Loader2, Lock, LogIn, User } from "lucide-react";
 import { InstallApp } from "@/components/InstallApp";
@@ -82,6 +83,7 @@ export default function LoginPage() {
       // لا توكن يُستلم ولا يُخزَّن في JavaScript إطلاقاً.
       if (payload?.username) {
         setSession({
+          userId: sessionActorId(payload.userId),
           username: payload.username,
           displayName: payload.displayName,
           role: payload.role,

@@ -92,7 +92,7 @@ export interface FollowupCase {
   patientPhone: string | null;
   status: FollowupCaseStatus;
   phase: string;
-  startDate: string;
+  startDate: string | null;
   /** تاريخ آخر شدّة — وقد لا توجد شدّة بعد لحالةٍ فُتحت حديثًا. */
   lastAdjustmentDate: string | null;
   nextWeeks: number;
@@ -109,7 +109,7 @@ export interface FollowupCase {
 export interface FollowupRow extends FollowupCase {
   buckets: FollowupBucket[];
   /** التاريخ المستحق للشدّة القادمة بحساب nextWeeks — للعرض في القائمة. */
-  dueDate: string;
+  dueDate: string | null;
   daysSinceLast: number | null;
 }
 
@@ -127,8 +127,8 @@ export function classifyFollowups(input: {
   return input.cases.map((row) => {
     const buckets: FollowupBucket[] = [];
     const since = row.lastAdjustmentDate ?? row.startDate;
-    const daysSinceLast = daysBetween(since, input.today);
-    const dueDate = nextAdjustmentDate(since, row.nextWeeks);
+    const daysSinceLast = since === null ? null : daysBetween(since, input.today);
+    const dueDate = since === null ? null : nextAdjustmentDate(since, row.nextWeeks);
 
     const appointment = row.nextAppointment ?? row.bookingContext?.pastUnresolvedAppointment ?? null;
     if (appointment) {
@@ -145,9 +145,9 @@ export function classifyFollowups(input: {
 
     if (row.lastWasNoShow) buckets.push("no_show");
 
-    if (daysSinceLast >= 56) buckets.push("lapsed_8");
-    else if (daysSinceLast >= 42) buckets.push("lapsed_6");
-    else if (daysSinceLast >= 28) buckets.push("lapsed_4");
+    if (daysSinceLast !== null && daysSinceLast >= 56) buckets.push("lapsed_8");
+    else if (daysSinceLast !== null && daysSinceLast >= 42) buckets.push("lapsed_6");
+    else if (daysSinceLast !== null && daysSinceLast >= 28) buckets.push("lapsed_4");
 
     if (row.status === "retention") buckets.push("retention");
 
@@ -185,7 +185,7 @@ export function groupByBucket(rows: FollowupRow[]): Map<FollowupBucket, Followup
     list.sort((a, b) => {
       const aDate = a.lastAdjustmentDate ?? a.startDate;
       const bDate = b.lastAdjustmentDate ?? b.startDate;
-      const byAge = aDate.localeCompare(bDate);
+      const byAge = aDate === null ? bDate === null ? 0 : 1 : bDate === null ? -1 : aDate.localeCompare(bDate);
       if (byAge !== 0) return byAge;
       if (bucket === "today" || bucket === "tomorrow" || bucket === "this_week" || bucket === "upcoming" || bucket === "overdue") {
         return (a.nextAppointment?.date ?? "").localeCompare(b.nextAppointment?.date ?? "");

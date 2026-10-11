@@ -169,7 +169,7 @@ export default function OrthoFollowupPage() {
                   </a>
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     آخر شدّ: {row.lastAdjustmentDate ? friendlyDateLong(row.lastAdjustmentDate) : "بلا شدّات"} ({sinceAdjustmentText(row.daysSinceLast)})
-                    {" · الاستحقاق: "}{friendlyDateLong(row.dueDate)}
+                    {" · الاستحقاق: "}{row.dueDate === null ? "غير معروف — لا يوجد تاريخ سريري مؤكد" : friendlyDateLong(row.dueDate)}
                   </p>
                   {!contextKnown ? (
                     <p role="status" className="mt-0.5 text-[11px] font-bold text-amber-700">

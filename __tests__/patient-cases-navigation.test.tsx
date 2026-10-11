@@ -112,6 +112,7 @@ const row = (changes: Partial<SpecialtyCase> = {}): SpecialtyCase => ({
   id: null, kind: "ortho", orthoCaseId: 71, patientId: 91,
   specialty: "orthodontics", title: "Canonical orthodontic case", site: null, problem: null,
   responsiblePartyId: null, responsibleName: null, status: "active", startedOn: "2026-10-01",
+  startedOnMeaning: "ortho_treatment_started", clinicalCaseOpenedOn: null, assessmentOpenedAt: null,
   completedAt: null, outcome: null, itemsTotal: 0, itemsDone: 0, createdBy: "synthetic", ...changes,
 });
 const planItem = (id = 101): CasePlanItem => ({

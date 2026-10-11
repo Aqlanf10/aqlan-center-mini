@@ -150,13 +150,13 @@ export interface FullSetCheck {
 export interface FullSetInput {
   /** تاريخ جلسة اليوم. */
   sessionDate: string;
-  startDate: string;
+  startDate: string | null;
   /** آخر مجموعة كاملة مكتملة، إن وُجدت. */
   lastFullSetDate: string | null;
   /** الفاصل بالأشهر بين المجموعات الروتينية — من الإعدادات، الافتراض ٦. */
   intervalMonths: number;
   /** المرحلة الحالية. */
-  phase: "aligning" | "working" | "finishing" | "retention";
+  phase: "aligning" | "working" | "finishing" | "retention" | null;
   /** الوجهات المصوَّرة في هذه الجلسة حتى الآن. */
   capturedViews: PhotoView[];
 }
@@ -363,8 +363,8 @@ export function buildComparison(photos: StagePhoto[]): ComparisonColumn[] {
         if (byRank !== 0) return byRank;
         // داخل الدور نفسه: الأقدم تُمثّل البداية والأحدث تُمثّل ما بعدها.
         return stage === "initial"
-          ? (a.takenOn ?? a.uploadedAt).localeCompare(b.takenOn ?? b.uploadedAt)
-          : (b.takenOn ?? b.uploadedAt).localeCompare(a.takenOn ?? a.uploadedAt);
+          ? a.takenOn === null ? b.takenOn === null ? a.id - b.id : 1 : b.takenOn === null ? -1 : a.takenOn.localeCompare(b.takenOn)
+          : a.takenOn === null ? b.takenOn === null ? a.id - b.id : 1 : b.takenOn === null ? -1 : b.takenOn.localeCompare(a.takenOn);
       });
     return {
       stage,
@@ -373,4 +373,23 @@ export function buildComparison(photos: StagePhoto[]): ComparisonColumn[] {
       count: inStage.length,
     };
   });
+}
+
+/** Strict exact-case projection. Unknown dates/stages remain visibly unknown. */
+export function comparisonPhotosForCase(raw: unknown, patientId: number, orthoCaseId: number): { photos: StagePhoto[]; unclassified: number } {
+  if (!Array.isArray(raw) || !photoId(patientId) || !photoId(orthoCaseId)) throw new Error("invalid_comparison_scope");
+  const photos: StagePhoto[] = [], ids = new Set<number>(); let unclassified = 0;
+  for (const row of raw) {
+    if (!photoRecord(row) || !photoId(row.id) || ids.has(row.id) || row.patientId !== patientId
+      || !(row.orthoCaseId === null || photoId(row.orthoCaseId)) || typeof row.isImage !== "boolean"
+      || !(row.removedAt === null || typeof row.removedAt === "string")
+      || typeof row.uploadedAt !== "string" || !Number.isFinite(Date.parse(row.uploadedAt))
+      || !(row.takenOn === null || photoCalendarDate(row.takenOn))) throw new Error("invalid_comparison_document");
+    ids.add(row.id);
+    if (!row.isImage || row.removedAt !== null || row.orthoCaseId !== orthoCaseId || row.photoStage === "archived") continue;
+    if (!isPhotoStage(row.photoStage) || !Object.hasOwn(PHOTO_STAGE_LABEL, row.photoStage)) { unclassified++; continue; }
+    if (row.photoView !== null && !isPhotoView(row.photoView)) throw new Error("invalid_comparison_view");
+    photos.push({ id: row.id, stage: row.photoStage as PhotoStage, view: row.photoView, takenOn: row.takenOn, uploadedAt: row.uploadedAt });
+  }
+  return { photos, unclassified };
 }

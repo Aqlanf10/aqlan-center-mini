@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
+import { makeIntakeRecoveryLedger, type IntakeRecoveryLedger } from "../lib/ortho-assessment-intake-owner";
 import type { SessionInfo } from "../components/SessionProvider";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
 import type { OrthoStrategyReadResult } from "../lib/ortho-treatment-strategy-store";
@@ -18,9 +19,10 @@ const hooks = vi.hoisted(() => ({
   current: null as Scope | null, changed: false, retiredWrites: 0,
   layout: [] as Array<() => void>, passive: [] as Array<() => void>,
   session: null as SessionInfo | null, contexts: new Map<unknown, unknown>(),
-  existingRefresh: null as (() => void) | null,
+  existingRefresh: null as (() => void) | null, intakeRecovery: null as IntakeRecoveryLedger | null,
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
+vi.mock("../components/OrthoCaseRecoveryProvider", () => ({ useOrthoIntakeRecovery: () => hooks.intakeRecovery, useOrthoStudyRecovery: () => null, useOrthoRetentionRecovery: () => null }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
 vi.mock("../components/LegacyOnboardingChecklist", () => ({ LegacyOnboardingChecklist: () => null }));
 vi.mock("../components/OrthoPackageLink", () => ({ OrthoPackageLink: ({ onChanged }: { onChanged: () => void }) => {
@@ -73,7 +75,7 @@ vi.mock("react", async (original) => {
 type Element = ReactElement<Record<string, unknown>>;
 type Component = (props: Record<string, unknown>) => ReactNode;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
-type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown> };
+type ResponseLike = { ok: boolean; status: number; json: () => Promise<unknown>; text?: () => Promise<string>; headers?: Headers; redirected?: boolean };
 type Pending = { id: number; url: string; method: string; init?: RequestInit; json: ReturnType<typeof vi.fn>;
   headers: (status: number) => void; body: (value: unknown) => void; fail: (message?: string) => void };
 function deferred<T>() {
@@ -81,7 +83,7 @@ function deferred<T>() {
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
-const principalA = (): SessionInfo => ({ username: "synthetic-ortho-a", role: "doctor", displayName: "Synthetic A",
+const principalA = (): SessionInfo => ({ userId: 17, username: "synthetic-ortho-a", role: "doctor", displayName: "Synthetic A",
   permissions: { ...DEFAULT_DOCTOR_PERMISSIONS } });
 // Contract bound, kept local so the semantic preimage counterfactual below can
 // import the frozen pre-fix component, which has no new timeout export.
@@ -219,6 +221,11 @@ async function grant(empty = false) {
   expect(workspace().props["data-read-state"]).toBe("ready");
 }
 async function mount(empty = false) { render(); hidden("loading"); await grant(empty); }
+async function mountNewIntake() {
+  hooks.intakeRecovery = makeIntakeRecoveryLedger();
+  await mount(true); await flush();
+  expect(executed.has("OrthoAssessmentIntake")).toBe(true);
+}
 function refresh() { click(control("تحديث كابينة التقويم")); hidden("loading"); return pair(); }
 async function retry(empty = false) { click(control("إعادة تحميل كابينة التقويم")); hidden("loading"); await grant(empty); }
 async function failClinical() {
@@ -238,25 +245,28 @@ beforeEach(() => {
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
-  strategyReadFixture = null;
+  strategyReadFixture = null; hooks.intakeRecovery = null;
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
-  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn() });
+  vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
   createURL.mockImplementation(() => `blob:synthetic-ortho-${createURL.mock.calls.length}`);
   vi.spyOn(URL, "createObjectURL").mockImplementation(createURL);
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(revokeURL);
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
+    if (method === "GET" && url === "/api/ortho/intake?patientId=19" && hooks.intakeRecovery) return Promise.resolve(Response.json({ ok: true, patientId: 19, writable: true, canLinkPlan: true, openCase: null, history: [], clinicalCases: [], plans: [], choicesTruncated: false }));
     if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 71, name: "Synthetic responsible doctor" }] });
     const isStrategyRead = method === "GET" && url === "/api/ortho/41/strategy"
       && patientId === 19 && strategyReadFixture?.patientId === 19 && strategyReadFixture.orthoCaseId === 41;
     const isRead = isStrategyRead || method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
-    const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline",
+    const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline", "/api/ortho/intake?patientId=19",
       "/api/appointments", "/api/visits/61/clinical", "/api/patients/19/documents", "/api/patients/20/documents"].includes(url);
     if (!isRead && !isWrite) { unexpected.push(`${method} ${url}`); return Promise.reject(new Error("Unexpected synthetic request")); }
     const head = deferred<ResponseLike>(); const body = deferred<unknown>(); const json = vi.fn(() => body.promise);
     requests.push({ id: requests.length + 1, url, method, init, json,
-      headers: (status) => head.resolve({ ok: status >= 200 && status < 300, status, json }),
+      headers: (status) => head.resolve(url.includes("/ortho/intake?") ? new Response(new ReadableStream({
+        async start(controller) { controller.enqueue(new TextEncoder().encode(JSON.stringify(await body.promise))); controller.close(); },
+      }), { status, headers: { "cache-control": "private, no-store" } }) : { ok: status >= 200 && status < 300, status, json }),
       body: body.resolve, fail: (message = "Synthetic transport failure") => head.reject(new TypeError(message)) });
     // AbortSignal is recorded but intentionally ignored by transport completion.
     return head.promise;
@@ -271,6 +281,7 @@ afterEach(() => {
 
 describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () => {
   const dirtyWarning = "هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟";
+  const intakeWarning = "هناك تدوين لبداية الحالة غير محفوظ. هل تريد مغادرة القسم؟";
   const uncertainWarning = "نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟";
 
   it("registers before reads complete, allows clean departure, and retires its guard on unmount", async () => {
@@ -319,22 +330,21 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
   });
 
   it.each(["new", "baseline", "adjustment"] as const)("does not treat unedited %s defaults or same-value input as unsaved work", async (kind) => {
-    await mount(kind !== "adjustment");
-    if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
-    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
-    else click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
-    const label = kind === "new" ? "نظام البراكيت" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
+    if (kind === "new") await mountNewIntake(); else await mount(kind !== "adjustment");
+    if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
+    else if (kind === "adjustment") click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const label = kind === "new" ? "سبب تدوين بداية الحالة" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
     const before = fields(); edit(label, String(control(label).props.value));
     expect(currentNavigation().guard()).toBe(true); expect(fields()).toEqual(before);
     expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
   });
 
   it.each(["new", "baseline"] as const)("retains the exact edited %s fields when departure is cancelled", async (kind) => {
-    await mount(true);
-    if (kind === "new") { click(button("+ فتح حالة تقويم جديدة")); edit("نظام البراكيت", "private-draft prescription"); edit("المدة المتوقعة", "27"); }
+    if (kind === "new") await mountNewIntake(); else await mount(true);
+    if (kind === "new") { edit("سبب تدوين بداية الحالة", "private-draft reason"); edit("سياق التقييم", "transferred"); }
     else { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("الأهداف المتبقية", "private-draft objectives"); edit("النظام المالي السابق", "per_session"); }
     const before = fields();
-    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(dirtyWarning);
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenCalledExactlyOnceWith(kind === "new" ? intakeWarning : dirtyWarning);
     expect(fields()).toEqual(before); expect(writes()).toEqual([]); expect(hooks.retiredWrites).toBe(0);
   });
 
@@ -431,6 +441,7 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
 
 describe("PatientOrtho outstanding-change navigation guard (source gate, UNRUN)", () => {
   const dirtyWarning = "هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟";
+  const intakeWarning = "هناك تدوين لبداية الحالة غير محفوظ. هل تريد مغادرة القسم؟";
 
   it("leaves clean before booking, while an untouched booking form is open, and after Back", async () => {
     await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 }); await saving; await flush(); await grant();
@@ -461,18 +472,17 @@ describe("PatientOrtho outstanding-change navigation guard (source gate, UNRUN)"
   });
 
   it.each(["new", "baseline", "adjustment"] as const)("clears reverted %s edits without clearing another field's outstanding change", async (kind) => {
-    await mount(kind !== "adjustment");
-    if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
-    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
-    else click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
-    const label = kind === "new" ? "نظام البراكيت" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
-    const otherLabel = kind === "new" ? "المدة المتوقعة" : kind === "baseline" ? "الأشهر المتبقية" : "أسابيع حتى الشدّة القادمة";
+    if (kind === "new") await mountNewIntake(); else await mount(kind !== "adjustment");
+    if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); }
+    else if (kind === "adjustment") click(button("⚡ سجّل شدّة وجلسة جديدة الآن"));
+    const label = kind === "new" ? "سبب تدوين بداية الحالة" : kind === "baseline" ? "الأهداف المتبقية" : "ما نُفّذ في الشدّة";
+    const otherLabel = kind === "new" ? "سياق التقييم" : kind === "baseline" ? "الأشهر المتبقية" : "أسابيع حتى الشدّة القادمة";
     const original = String(control(label).props.value); const otherOriginal = String(control(otherLabel).props.value);
     const before = fields();
-    edit(label, `${original} synthetic changed value`); edit(otherLabel, "5");
-    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
+    edit(label, `${original} synthetic changed value`); edit(otherLabel, kind === "new" ? "transferred" : "5");
+    expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(kind === "new" ? intakeWarning : dirtyWarning);
     edit(label, original);
-    expect(currentNavigation().guard()).toBe(false); expect(control(otherLabel).props.value).toBe("5");
+    expect(currentNavigation().guard()).toBe(false); expect(control(otherLabel).props.value).toBe(kind === "new" ? "transferred" : "5");
     edit(otherLabel, otherOriginal); confirmLeave.mockClear();
     expect(fields()).toEqual(before); expect(currentNavigation().guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled();
     // A second edit/revert cycle must establish and clear its own outstanding baseline.
@@ -544,8 +554,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     respond(current.ortho, { cases: [row] }); respond(current.patient, contact()); await flush();
     expect(reads().map(request => request.url)).toEqual(["/api/ortho?patientId=19", "/api/patients/19"]);
     strategyReadFixture = strategyReply;
-    click(one((node) => node.type === "button" && elements(node)
-      .some((child) => child.type === "span" && text(child) === "خطة العلاج والميكانيكا")));
+    click(one((node) => node.type === "button" && text(node) === "الخطة والميكانيكا والاتفاق"));
     await acceptStrategyRead(1);
     expect(reads().map(request => request.url)).toEqual(["/api/ortho?patientId=19", "/api/patients/19", "/api/ortho/41/strategy"]);
     return { row, before };
@@ -741,15 +750,17 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
   });
 
   it("preserves new-case and baseline values outside unavailable rendered views", async () => {
-    await mount(true); click(button("+ فتح حالة تقويم جديدة")); edit("نظام البراكيت", "private-draft bracket");
-    edit("المدة المتوقعة", "27"); const newDraft = fields(); const oldNewForm = form();
+    await mountNewIntake(); edit("سبب تدوين بداية الحالة", "private-draft intake");
+    edit("سياق التقييم", "transferred"); const newDraft = fields(); const oldNewForm = form();
     await failClinical(); await retry(true); expect(fields()).toEqual(newDraft); await submit(oldNewForm); expect(writes()).toEqual([]);
-    click(button("✕ إغلاق النموذج")); click(button("تسجيل حالة سابقة (قبل النظام)")); await flush();
+    confirmLeave.mockReturnValue(true); click(button("تجاهل المسودة صراحةً"));
+    hooks.intakeRecovery = null; render();
+    click(button("تسجيل حالة سابقة (قبل النظام)")); await flush();
     edit("النظام المالي السابق", "prepaid_included"); edit("المطاطات الحالية", "private-draft baseline");
     edit("الطبيب المسؤول", "71"); edit("الأهداف المتبقية", "private-draft objectives");
     const baselineDraft = fields(); const oldBaseline = form(); await failClinical(); await retry(true);
     expect(fields()).toEqual(baselineDraft); await submit(oldBaseline); expect(writes()).toEqual([]);
-    expect(executed.has("NewCase")).toBe(true); expect(executed.has("LegacyBaselineForm")).toBe(true);
+    expect(executed.has("OrthoAssessmentIntake")).toBe(true); expect(executed.has("LegacyBaselineForm")).toBe(true);
   });
 
   it.each(["ortho", "patient"] as const)("paired %s denial during a pending save stops uploads, stale errors and success callbacks", async (key) => {
@@ -924,14 +935,14 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
   });
 
   it.each(["new", "baseline", "adjustment"] as const)("latches duplicate same-turn %s submits before the disabled render", async (kind) => {
-    await mount(kind !== "adjustment");
-    if (kind === "new") click(button("+ فتح حالة تقويم جديدة"));
-    else if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("النظام المالي السابق", "per_session"); }
-    else adjustment();
+    if (kind === "new") await mountNewIntake(); else await mount(kind !== "adjustment");
+    if (kind === "baseline") { click(button("تسجيل حالة سابقة (قبل النظام)")); await flush(); edit("النظام المالي السابق", "per_session"); }
+    else if (kind === "adjustment") adjustment();
+    if (kind === "new") { edit("الحالة السريرية للتقييم", "new"); edit("سبب تدوين بداية الحالة", "Synthetic reason"); }
     const view = form(); const first = submit(view); const duplicate = submit(view);
-    expect(writes()).toHaveLength(1); respond(writes()[0], { message: "Synthetic ordinary rejection" }, 409);
+    expect(writes()).toHaveLength(1); respond(writes()[0], { code: "head_changed", message: "Synthetic ordinary rejection" }, 409);
     await Promise.all([first, duplicate]); await flush();
-    expect(text(render())).toContain("Synthetic ordinary rejection"); expect(writes()).toHaveLength(1);
+    expect(text(render())).toContain(kind === "new" ? "لم يتأكد الحفظ" : "Synthetic ordinary rejection"); expect(writes()).toHaveLength(1);
   });
 
   it.each([undefined, null, 0, -1, "81", 1.5])("unknown 2xx adjustment id %s cannot upload or automatically repost", async (id) => {

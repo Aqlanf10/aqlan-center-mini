@@ -104,6 +104,10 @@ const button = (label: string) => find(n => n.type === "button" && text(n).inclu
 const invoke = (node: Element) => (node.props.onClick as () => unknown)();
 const writes = () => fetchMock.mock.calls.filter(([, options]) => options?.method === "POST");
 const imageSources = (tree = render()) => nodes(tree).filter(node => node.type === "img").map(node => node.props.src);
+function selectCephPhase() {
+  const select = find(n => n.type === "select" && n.props["aria-label"] === "مرحلة صورة السيفالو");
+  (select.props.onChange as (event: unknown) => void)({ target: { value: "T1" } });
+}
 const picker = () => find(n => n.type === "input" && n.props.type === "file");
 function selectFile(input = picker()) {
   return (input.props.onChange as (event: unknown) => unknown)({ target: { files: [new File(["synthetic"], "synthetic.png", { type: "image/png" })] } });
@@ -204,7 +208,7 @@ describe("record action ownership", () => {
     read = url => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [study({ id: "61" })] });
     await ready(); invoke(button("فتح التحليل (#61)")); expect(location.href).toBe("/ceph/61");
     props = { ...props, orthoCaseId: 22 }; read = url => response(url.endsWith("/documents") ? { documents: [document({ orthoCaseId: 22 })] } : { analyses: [] });
-    write = () => response({ id: "71" }, 201); await ready(); invoke(button("بدء التتبع والتحليل")); await ready();
+    write = () => response({ id: "71" }, 201); await ready(); selectCephPhase(); invoke(button("بدء التتبع والتحليل")); await ready();
     expect(location.href).toBe("/ceph/71"); expect(writes()).toHaveLength(1);
   });
   it("permits an existing exact-case analysis for a read-only doctor but not upload or creation", async () => {
@@ -214,7 +218,7 @@ describe("record action ownership", () => {
   });
   it("creates only one analysis on repeated clicks, with the current case, and ignores late foreign-owner navigation", async () => {
     const pending = deferred<unknown>(); read = url => response(url.endsWith("/documents") ? { documents: [document()] } : { analyses: [] });
-    write = () => pending.promise; await ready(); const launch = button("بدء التتبع والتحليل"); invoke(launch); invoke(launch);
+    write = () => pending.promise; await ready(); selectCephPhase(); const launch = button("بدء التتبع والتحليل"); invoke(launch); invoke(launch);
     expect(writes()).toHaveLength(1); expect(JSON.parse(writes()[0][1].body).orthoCaseId).toBe(21);
     props = { patientId: 12, orthoCaseId: 22 }; read = url => response(url.endsWith("/documents") ? { documents: [] } : { analyses: [] }); await ready();
     pending.resolve(response({ id: 71 }, 201)); await ready(); expect(location.href).toBe("");
