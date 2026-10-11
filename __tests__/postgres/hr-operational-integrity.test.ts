@@ -128,3 +128,26 @@ it('split second-period early entry is actual work and does not make the two pai
  for(const [punchType,time] of [['check_in','08:00'],['check_out','12:00'],['check_in','15:55'],['check_out','20:00']] as const)record=await work.recordAttendancePunch({staffId,punchType,punchTime:`2026-08-01T${time}:00+03:00`},admin);
  expect(record).toMatchObject({workMinutes:485,lateMinutes:0,earlyExitMinutes:0,isIncomplete:false});
 });
+
+it.each(['chronological','reverse','concurrent'] as const)('touching split shifts keep both boundary events with %s arrival and replay',async order=>{
+ await work.createSchedule({staffId,name:'Touching split',scheduleType:'split',effectiveFrom:'2026-01-01',workingDays:[0,1,2,3,4,5,6],shiftStartTime:'08:00',shiftEndTime:'16:00',secondShiftStart:'16:00',secondShiftEnd:'20:00'},admin);
+ const events=[['check_in','08:00'],['check_out','16:00'],['check_in','16:00'],['check_out','20:00']] as const;
+ const punch=([punchType,time]:typeof events[number])=>work.recordAttendancePunch({staffId,punchType,punchTime:`2026-08-01T${time}:00+03:00`},admin);
+ if(order==='concurrent'){await punch(events[0]);await Promise.all(events.slice(1).map(punch));}
+ else for(const event of order==='reverse'?[...events].reverse():events)await punch(event);
+ const complete=(await work.listAttendanceRecords({staffId}))[0];
+ expect(complete).toMatchObject({workMinutes:720,lateMinutes:0,earlyExitMinutes:0,isIncomplete:false,status:'present'});
+ for(const event of [events[1],events[2]])expect(await punch(event)).toMatchObject({workMinutes:720,isIncomplete:false});
+ expect((await db.getPool().query('SELECT * FROM hr_attendance_punch_events WHERE staff_id=$1',[staffId])).rows).toHaveLength(6);
+ await expect(work.requestAttendanceCorrection({attendanceRecordId:complete.id,fieldCorrected:'check_out',newCheckOut:'2026-08-01T21:00:00+03:00',reason:'Preserve segment correction protection'},admin)).rejects.toThrow(/فترتين/);
+});
+
+it.each(['check_in','check_out'] as const)('touching split shifts never invent a missing boundary %s',async missingType=>{
+ await work.createSchedule({staffId,name:'Missing touching boundary',scheduleType:'split',effectiveFrom:'2026-01-01',workingDays:[0,1,2,3,4,5,6],shiftStartTime:'08:00',shiftEndTime:'16:00',secondShiftStart:'16:00',secondShiftEnd:'20:00'},admin);
+ const punch=(punchType:'check_in'|'check_out',time:string)=>work.recordAttendancePunch({staffId,punchType,punchTime:`2026-08-01T${time}:00+03:00`},admin);
+ await punch('check_in','08:00');await punch(missingType==='check_in'?'check_out':'check_in','16:00');
+ const incomplete=await punch('check_out','20:00');
+ expect(incomplete.isIncomplete).toBe(true);expect(incomplete.workMinutes).toBeLessThan(720);
+ expect((await db.getPool().query('SELECT * FROM hr_attendance_punch_events WHERE staff_id=$1',[staffId])).rows).toHaveLength(3);
+ expect(await punch(missingType,'16:00')).toMatchObject({workMinutes:720,isIncomplete:false});
+});

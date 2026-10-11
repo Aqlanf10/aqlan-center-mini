@@ -1030,8 +1030,10 @@ async function attendanceView(client: DbClient, id: number) {
   return mapAttendanceRow(rows[0]);
 }
 async function calculateSplitPunches(client: DbClient, record: HrAttendanceRecordView, schedule: Record<string, any>, session: SessionPayload) {
+  // At a shared boundary, close the first pair before opening the next one.
+  // Both typed events must exist; ordering never supplies a missing punch.
   const {rows} = await client.query(`SELECT DISTINCT punch_type,punched_at FROM hr_attendance_punch_events
-    WHERE attendance_id=$1 ORDER BY punched_at,punch_type`,[record.id]);
+    WHERE attendance_id=$1 ORDER BY punched_at,punch_type DESC`,[record.id]);
   // The existing correction form has only one pair. Never overwrite an approved
   // correction with a raw aggregate, or pretend that it can correct a split day.
   if ((await client.query("SELECT id FROM hr_attendance_corrections WHERE attendance_id=$1 AND approved_at IS NOT NULL LIMIT 1",[record.id])).rows.length) return attendanceView(client,record.id);
