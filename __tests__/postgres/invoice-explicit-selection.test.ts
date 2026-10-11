@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { assertRealPostgresUrl, dropPublicSchema, rawPool, stubPostgresEnv } from "./_setup";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 import { invoiceRequestFingerprint } from "../../lib/invoice-clinical-linkage";
 
@@ -10,17 +10,28 @@ const linkage = await import("../../lib/invoice-linkage-db");
 const { listTreatmentFinancialReferences } = await import("../../lib/treatment-financial-context-db");
 const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) =>
   (await db.getPool().query(sql, params)).rows as T[];
+// Observe through one independent connection: the gate and both canonical writers
+// occupy all three application connections while the exact lock edge is asserted.
+let observerPool: ReturnType<typeof rawPool>;
+const observe = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) =>
+  (await observerPool.query(sql, params)).rows as T[];
 let serviceId = 0;
 let doctorId = 0;
 beforeAll(async () => {
-  await dropPublicSchema(process.env.DATABASE_URL!);
+  const url = new URL(process.env.DATABASE_URL!);
+  expect(["localhost", "127.0.0.1"]).toContain(url.hostname);
+  expect(url.pathname).toBe("/aqlan_p1_test");
+  observerPool = rawPool(url.toString(), 1);
+  await dropPublicSchema(url.toString());
   await db.ensureSchema();
   doctorId = (await q<{ id: number }>("INSERT INTO parties (kind, name) VALUES ('doctor', 'Reference doctor') RETURNING id"))[0].id;
   serviceId = (await q<{ id: number }>(`INSERT INTO services (name, category, price_minor, is_active, price_configured)
     VALUES ('Reference restoration', 'filling', 10000, true, true) RETURNING id`))[0].id;
   await db.openShift({ openedBy: "reference-test", opening: { YER: 0, SAR: 0, USD: 0 } });
 }, 180000);
-afterAll(async () => { await db.resetPoolForTesting(); });
+afterAll(async () => {
+  try { await observerPool?.end(); } finally { await db.resetPoolForTesting(); }
+});
 const patient = async (tag: string) => (await q<{ id: number }>(
   "INSERT INTO patients (patient_number, full_name) VALUES ($1, $1) RETURNING id", [tag]))[0].id;
 async function plan(patientId: number, toothCode: number) {
@@ -119,7 +130,7 @@ describe("canonical explicit plan/item selection with actual writers", () => {
       closing = db.setPlanStatus(a.id, "cancelled", { actor: "reference-test", actorRole: "admin", reason: "Synthetic concurrent closure" });
       void closing.catch(() => undefined); // Consume rejection immediately; assert outcome and drain below.
       const closureLockStatement = "SELECT status, title FROM treatment_plans WHERE id = $1 FOR UPDATE";
-      const observedClosure = () => q<{ pid: number }>(
+      const observedClosure = () => observe<{ pid: number }>(
         `SELECT a.pid FROM pg_stat_activity a WHERE a.datname = current_database()
           AND a.state = 'active' AND a.wait_event_type = 'Lock' AND a.query = $2
           AND $1 = ANY(pg_blocking_pids(a.pid))`, [gatePid, closureLockStatement]);
@@ -128,7 +139,7 @@ describe("canonical explicit plan/item selection with actual writers", () => {
       pending = linkage.createLinkedInvoice(input);
       void pending.catch(() => undefined);
       const writerLockStatement = "SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE";
-      const observedWriters = () => q<{ pid: number; query: string; blockers: number[] }>(
+      const observedWriters = () => observe<{ pid: number; query: string; blockers: number[] }>(
         `SELECT a.pid, a.query, pg_blocking_pids(a.pid) AS blockers FROM pg_stat_activity a
          WHERE a.datname = current_database() AND a.pid <> pg_backend_pid()
            AND a.state = 'active' AND a.wait_event_type = 'Lock'
@@ -138,15 +149,18 @@ describe("canonical explicit plan/item selection with actual writers", () => {
       expect(blockedWriter.pid).not.toBe(closurePid);
       expect(blockedWriter.query).toBe(writerLockStatement);
       expect(blockedWriter.blockers).toContain(closurePid);
-      expect((await q<{ blocked: boolean }>(
+      expect((await observe<{ blocked: boolean }>(
         "SELECT $2 = ANY(pg_blocking_pids($1)) AS blocked", [blockedWriter.pid, closurePid]))[0].blocked).toBe(true);
       await gate.query("COMMIT");
       expect(await closing).toBe("ok");
       expect(await pending).toMatchObject({ ok: false, reason: "incompatible_plan" });
       expect(await counts(id)).toEqual({ invoices: 0, items: 1, payments: 0 });
     } finally {
-      await gate.query("ROLLBACK"); gate.release();
-      await Promise.allSettled([closing, pending]);
+      try {
+        await gate.query("ROLLBACK");
+      } finally {
+        try { gate.release(); } finally { await Promise.allSettled([closing, pending]); }
+      }
     }
   });
   it("reads invoice/payment/correction identity using actual writers and never posts while projecting", async () => {
