@@ -127,7 +127,8 @@ jobs:
         run: |
           set -o pipefail
           # Restore all 31 original contract cases and add the 14 real-write
-          # negative acknowledgement cases. Tasks still runs all 16 original cases.
+          # negative acknowledgement cases, three admission cases and one delayed-JS
+          # hydration regression. Tasks still runs all 16 original cases.
           files=("__tests__/security-http/$HR_DIAGNOSTIC_FILE")
           if [ -n "$HR_DIAGNOSTIC_EXTRA_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_EXTRA_FILE"); fi
           if [ -n "$HR_DIAGNOSTIC_ADMISSION_FILE" ]; then files+=("__tests__/security-http/$HR_DIAGNOSTIC_ADMISSION_FILE"); fi
@@ -174,6 +175,36 @@ jobs:
               assert 0 < actual_width < 50_000 and 0 < height < 50_000, path.name
               if width is not None: assert actual_width == width, path.name
               return data
+          # The delayed-JS regression is additive; none of the original
+          # 42 negative frames or 32 positive PNGs/three PDFs is substituted.
+          hydration_images = {'hr-hydration-held-1280.png', 'hr-hydration-ready-1280.png'}
+          assert {p.name for p in root.glob('hr-hydration-*.png')} == hydration_images
+          assert {p.name for p in root.glob('hr-hydration-*.json')} == {'hr-hydration-1280.json'}
+          hydration = json.loads((root / 'hr-hydration-1280.json').read_text())
+          assert hydration['format'] == 'hr-hydration-native-v1' and hydration['acceptance'] is False and hydration['syntheticOnly'] is True
+          assert hydration['checkout'] == os.environ['GITHUB_SHA'] and hydration['tree'] == (root / 'tree.txt').read_text().strip()
+          assert hydration['runId'] == os.environ['GITHUB_RUN_ID'] and hydration['runAttempt'] == os.environ['GITHUB_RUN_ATTEMPT']
+          assert hydration['sourceSha256'] == sha(Path('__tests__/security-http/hr-payroll-journey.test.ts').read_bytes())
+          assert hydration['pageSourceSha256'] == sha(Path('app/hr/page.tsx').read_bytes())
+          assert hydration['viewport'] == {'width': 1280, 'height': 900} and hydration['heldScriptCount'] > 0
+          assert hydration['caseCompleted'] is True and hydration['contextClosed'] is True and hydration['writes'] == []
+          assert hydration['periodsStatus'] == 200 and len(hydration['frames']) == 2
+          assert {frame['png'] for frame in hydration['frames']} == hydration_images
+          for frame in hydration['frames']:
+              data = png(root / frame['png'], 1280)
+              assert struct.unpack('>II', data[16:24]) == (1280, 900)
+              assert frame['bytes'] == len(data) and frame['sha256'] == sha(data)
+          held, after = hydration['held'], hydration['after']
+          assert held['pathname'] == after['pathname'] == '/hr'
+          assert held['payrollSections'] == held['payrollSelects'] == 0
+          assert after['payrollSections'] == 1 and after['payrollSelects'] > 0
+          assert len(held['tablists']) == len(after['tablists']) == 1
+          assert held['tablists'][0]['busy'] == 'true' and after['tablists'][0]['busy'] == 'false'
+          assert len(held['tablists'][0]['tabs']) == len(after['tablists'][0]['tabs']) == 7
+          assert all(tab['disabled'] is True for tab in held['tablists'][0]['tabs'])
+          assert all(tab['disabled'] is False for tab in after['tablists'][0]['tabs'])
+          assert [tab['index'] for tab in held['tablists'][0]['tabs'] if tab['selected'] == 'true'] == [0]
+          assert [tab['index'] for tab in after['tablists'][0]['tabs'] if tab['selected'] == 'true'] == [5]
           for case in sorted(expected):
               width = int(case.rsplit('-', 1)[1]); data = png(root / f'{case}.png', width)
               record = json.loads((root / f'{case}.json').read_text())

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createContractSaveAdmissionGate, type ContractSaveAdmissionLease, type PendingContractSave } from "@/lib/hr-contract-save-receipt";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,6 +13,12 @@ import { HrPayrollPanel } from "@/components/hr/PayrollPanel";
 import { HrReportsPanel } from "@/components/hr/ReportsPanel";
 import { isAdmin } from "@/lib/roles";
 
+// Server markup and the first hydration render stay non-interactive. React
+// publishes the client snapshot only after it owns the mounted tab handlers.
+const subscribeHydration = () => () => {};
+const clientHydrated = () => true;
+const serverHydrated = () => false;
+
 type HrTab = "tasks" | "staff" | "contracts" | "attendance" | "leaves" | "payroll" | "reports";
 
 /**
@@ -24,6 +30,7 @@ type HrTab = "tasks" | "staff" | "contracts" | "attendance" | "leaves" | "payrol
  */
 export default function HrPage() {
   const session = useSession();
+  const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
   const [tab, setTab] = useState<HrTab>("tasks");
   const admin = isAdmin(session?.role);
   const owner = session ? `${session.username}\u0000${session.role}` : "";
@@ -82,6 +89,7 @@ export default function HrPage() {
         <div
           role="tablist"
           aria-label="أقسام الموارد البشرية"
+          aria-busy={!hydrated}
           className="flex gap-1.5 overflow-x-auto no-scrollbar scroll-smooth"
         >
           {TABS.filter((t) => t.visible).map((t) => {
@@ -91,7 +99,8 @@ export default function HrPage() {
                 key={t.id}
                 role="tab"
                 aria-selected={isActive}
-                onClick={() => setTab(t.id)}
+                disabled={!hydrated}
+                onClick={() => { if (hydrated) setTab(t.id); }}
                 className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
                   isActive
                     ? "bg-navy-900 text-white shadow-md shadow-navy-950/20"

@@ -36,11 +36,49 @@ async function api(method:string,path:string,body?:unknown,cookie=h.sessions.adm
  const res=await fetch(`${baseUrl}${path}`,{method,headers:{cookie,origin:baseUrl,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
  return {status:res.status,body:await res.json()};
 }
-async function ready(page:Page){
- await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
- await page.getByRole("tab",{name:"المسير والصرف"}).click();
- await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
- await expect.poll(async()=>await page.locator("tbody").textContent()).toContain("HR-JOURNEY-HYBRID");
+async function boundedReadinessObservation<T>(work:Promise<T>):Promise<T | {observationUnavailable:true}>{
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{return await Promise.race([work,new Promise<{observationUnavailable:true}>(resolve=>{timer=setTimeout(()=>resolve({observationUnavailable:true}),2000);})]);}
+ catch{return {observationUnavailable:true};}finally{if(timer)clearTimeout(timer);}
+}
+async function hrReadinessSnapshot(page:Page){
+ return page.evaluate(()=>({
+  readyState:document.readyState,pathname:location.pathname,fonts:document.fonts.status,
+  tablists:Array.from(document.querySelectorAll('[role="tablist"][aria-label="أقسام الموارد البشرية"]')).map(list=>({
+   busy:list.getAttribute("aria-busy"),tabs:Array.from(list.querySelectorAll<HTMLButtonElement>('[role="tab"]')).map((tab,index)=>({index,disabled:tab.disabled,selected:tab.getAttribute("aria-selected")})),
+  })),
+  payrollSections:document.querySelectorAll('section[aria-label="إدارة المسير والصرف"]').length,
+  payrollSelects:document.querySelectorAll('section[aria-label="إدارة المسير والصرف"] select').length,
+ }));
+}
+function firstPayrollReadinessDiagnostic(page:Page){
+ const dir=process.env.HR_UI_DIAGNOSTIC_DIR;
+ if(!dir)return {phase:(_value:string)=>{},close:async(_completed:boolean)=>{}};
+ let phase="created",active=true;
+ const events:Array<Record<string,unknown>>=[];
+ const record=(value:Record<string,unknown>)=>{if(active&&events.length<64)events.push({phase,...value});};
+ const ownedPath=(url:string)=>{const path=new URL(url).pathname;return ["/hr","/api/tasks","/api/hr/payroll/periods","/api/hr/payroll/runs"].includes(path)?path:null;};
+ const response=(r:BrowserResponse)=>{const path=ownedPath(r.url());if(path)record({kind:"response",path,status:r.status(),method:r.request().method()});};
+ const finished=(r:import("playwright").Request)=>{const path=ownedPath(r.url());if(path)record({kind:"finished",path,method:r.method()});};
+ const failed=(r:import("playwright").Request)=>{const path=ownedPath(r.url());if(path)record({kind:"failed",path,method:r.method()});};
+ const error=(e:Error)=>record({kind:"pageerror",hydrationRelated:/hydrat|Minified React error #(418|423|425)/i.test(e.message),messageSha256:createHash("sha256").update(e.message).digest("hex")});
+ const consoleError=(message:import("playwright").ConsoleMessage)=>{if(message.type()==="error")record({kind:"consoleerror",hydrationRelated:/hydrat|Minified React error #(418|423|425)/i.test(message.text()),messageSha256:createHash("sha256").update(message.text()).digest("hex")});};
+ page.on("response",response);page.on("requestfinished",finished);page.on("requestfailed",failed);page.on("pageerror",error);page.on("console",consoleError);
+ return {phase:(value:string)=>{phase=value;},close:async(completed:boolean)=>{
+  const dom=await boundedReadinessObservation(hrReadinessSnapshot(page));
+  let image:Record<string,unknown>|null=null;
+  if(!completed){const bytes=await boundedReadinessObservation(page.screenshot({fullPage:false,timeout:2000}));if(Buffer.isBuffer(bytes)){const png="payroll-first-ready-failure.png";writeFileSync(join(dir,png),bytes);image={png,bytes:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex")};}}
+  active=false;page.off("response",response);page.off("requestfinished",finished);page.off("requestfailed",failed);page.off("pageerror",error);page.off("console",consoleError);
+  const value={format:"hr-first-payroll-readiness-v1",acceptance:false,syntheticOnly:true,checkout:process.env.GITHUB_SHA??null,runId:process.env.GITHUB_RUN_ID??null,phase,completed,dom,events,image};
+  writeFileSync(join(dir,"payroll-first-ready.json"),JSON.stringify(value,null,2)+"\n");console.log("HR_FIRST_PAYROLL_READINESS "+JSON.stringify(value));
+ }};
+}
+async function ready(page:Page,phase:((value:string)=>void)=()=>{}){
+ phase("goto-domcontentloaded");await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
+ phase("single-native-payroll-tab-click");await page.getByRole("tab",{name:"المسير والصرف"}).click();
+ phase("select-owned-payroll-period");await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
+ phase("assert-owned-payroll-content");await expect.poll(async()=>await page.locator("tbody").textContent()).toContain("HR-JOURNEY-HYBRID");
+ phase("owned-payroll-ready");
 }
 beforeAll(async()=>{
  h=await harness();isolated=await openHrJourneyServer(h);db=isolated.db;baseUrl=isolated.baseUrl;
@@ -76,15 +114,15 @@ describe("HR contract to payroll to cash: actual API and browser",()=>{
    expect(items.find(i=>i.staffName==="HR-JOURNEY-SALARY")).toMatchObject({baseSalaryMinor:80000,commissionsMinor:0});
    expect(items.find(i=>i.staffName==="HR-JOURNEY-PERCENT")).toMatchObject({baseSalaryMinor:0,commissionsMinor:12000});
    expect(items.find(i=>i.staffName==="HR-JOURNEY-HYBRID")).toMatchObject({baseSalaryMinor:100000,commissionsMinor:12000});
-   const page=await context.newPage();try{
-    await ready(page);expect(await page.locator("tbody").textContent()).toContain("112,000");
+   const page=await context.newPage(),diagnostic=firstPayrollReadinessDiagnostic(page);let completed=false;try{
+    await ready(page,diagnostic.phase);expect(await page.locator("tbody").textContent()).toContain("112,000");
     await page.screenshot({path:join(evidence,"hr-payroll-1280.png"),fullPage:true});
     await page.setViewportSize({width:390,height:844});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
     await page.screenshot({path:join(evidence,"hr-payroll-390.png"),fullPage:true});
     await page.goto(`${baseUrl}/print/hr/payroll/${run.id}`);for(const item of items)expect(await page.textContent("body")).toContain(item.staffName);
-    await page.pdf({path:join(evidence,"hr-payroll-all-rows.pdf"),format:"A4",printBackground:true});
-   }finally{await page.close();}
+    await page.pdf({path:join(evidence,"hr-payroll-all-rows.pdf"),format:"A4",printBackground:true});completed=true;
+   }finally{try{await diagnostic.close(completed);}finally{await page.close();}}
  });
  it("lost response, reload, double click and stale second tab reuse one partial payout",async()=>{
    const item=items.find(i=>i.staffName==="HR-JOURNEY-SALARY");const page=await context.newPage(),second=await context.newPage();
@@ -632,3 +670,74 @@ for(const scenario of [
   }finally{await diagnostic.beforeClose();await page.close();}
  },120000);
 }
+
+// Real SSR and browser hydration, with only this application's JS delivery held.
+// No DOM state injection, sleeps, action retries or forced clicks are used.
+it("HR tabs are honestly disabled before hydration and one native click opens payroll after release",async()=>{
+ const own=await browser.newContext({viewport:{width:1280,height:900}});
+ const pair=h.sessions.admin.cookie.split(";")[0],split=pair.indexOf("=");await own.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
+ const page=await own.newPage(),writes:Array<{method:string;path:string}>=[],heldScripts:string[]=[];
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});let released=false,completed=false,phase="created";
+ let held:Awaited<ReturnType<typeof hrReadinessSnapshot>>|undefined,after:Awaited<ReturnType<typeof hrReadinessSnapshot>>|undefined;
+ let heldImage:Buffer|undefined,readyImage:Buffer|undefined;let periodsStatus:number|undefined;
+ await page.route("**/*",async route=>{
+  const request=route.request(),url=new URL(request.url());
+  if(!["GET","HEAD"].includes(request.method())){await route.abort("blockedbyclient");writes.push({method:request.method(),path:url.pathname});return;}
+  if(url.origin===new URL(baseUrl).origin&&request.resourceType()==="script"&&url.pathname.startsWith("/_next/")){
+   heldScripts.push(url.pathname);await gate;
+  }
+  await route.continue();
+ });
+ try{
+  phase="navigate-while-own-js-held";const navigated=await page.goto(`${baseUrl}/hr`,{waitUntil:"commit"});expect(navigated?.status()).toBe(200);
+  const tabs=page.getByRole("tablist",{name:"أقسام الموارد البشرية",exact:true});
+  const payroll=tabs.getByRole("tab",{name:"المسير والصرف"});
+  phase="assert-ssr-disabled-tabs";await expect.poll(()=>payroll.isVisible()).toBe(true);await expect.poll(()=>heldScripts.length).toBeGreaterThan(0);
+  expect(await tabs.getAttribute("aria-busy")).toBe("true");
+  expect(await tabs.getByRole("tab").evaluateAll(nodes=>nodes.every(node=>(node as HTMLButtonElement).disabled))).toBe(true);
+  expect(await payroll.getAttribute("aria-selected")).toBe("false");
+  const box=await payroll.boundingBox();expect(box).not.toBeNull();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(1280);
+  expect(await payroll.evaluate(element=>{const b=element.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return hit===element||!!hit&&element.contains(hit);})).toBe(true);
+  // A physical early click cannot activate the disabled SSR affordance.
+  phase="physical-early-click";await page.mouse.click(box!.x+box!.width/2,box!.y+box!.height/2);
+  held=await hrReadinessSnapshot(page);expect(held.payrollSections).toBe(0);expect(held.payrollSelects).toBe(0);
+  expect(held.tablists[0].tabs.filter(tab=>tab.selected==="true").map(tab=>tab.index)).toEqual([0]);expect(writes).toEqual([]);
+  phase="capture-disabled-ssr";heldImage=await page.screenshot({fullPage:false});
+  const periods=page.waitForResponse(response=>response.url().endsWith("/api/hr/payroll/periods")&&response.request().method()==="GET");
+  phase="release-own-js";release();released=true;
+  // Playwright waits on the real disabled affordance, then performs one click.
+  phase="single-hydrated-native-click";await payroll.click();expect(await payroll.getAttribute("aria-selected")).toBe("true");expect(await tabs.getAttribute("aria-busy")).toBe("false");
+  phase="verify-real-periods-response";const response=await periods;periodsStatus=response.status();expect(periodsStatus).toBe(200);const body=await response.json();expect(Array.isArray(body)).toBe(true);
+  expect(body.some((period:{id:number})=>period.id===run.periodId)).toBe(true);
+  phase="select-owned-period";await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
+  phase="assert-owned-payroll-row";await expect.poll(async()=>await page.locator("tbody").textContent()).toContain("HR-JOURNEY-HYBRID");
+  after=await hrReadinessSnapshot(page);expect(after.payrollSections).toBe(1);expect(after.payrollSelects).toBeGreaterThan(0);expect(writes).toEqual([]);
+  phase="capture-hydrated-payroll";readyImage=await page.screenshot({fullPage:false});completed=true;phase="completed";
+ }finally{
+  const dir=process.env.HR_UI_DIAGNOSTIC_DIR;
+  let failureDom:unknown=null,failureImage:Buffer|undefined,contextClosed=false;
+  if(!completed&&dir){
+   // Observe the actual failure before releasing held JS or closing the page.
+   failureDom=await boundedReadinessObservation(hrReadinessSnapshot(page));
+   const observed=await boundedReadinessObservation(page.screenshot({fullPage:false,timeout:2000}));if(Buffer.isBuffer(observed))failureImage=observed;
+  }
+  if(!released)release();
+  try{await own.close();contextClosed=true;}finally{
+   if(dir){
+    const hash=(data:Buffer)=>createHash("sha256").update(data).digest("hex");
+    const frames:Array<{name:string;data:Buffer}>=[];
+    if(heldImage)frames.push({name:"hr-hydration-held-1280.png",data:heldImage});
+    if(readyImage)frames.push({name:"hr-hydration-ready-1280.png",data:readyImage});
+    if(failureImage)frames.push({name:"hr-hydration-failure-1280.png",data:failureImage});
+    for(const frame of frames)writeFileSync(join(dir,frame.name),frame.data);
+    const record={format:"hr-hydration-native-v1",acceptance:false,syntheticOnly:true,
+     checkout:process.env.GITHUB_SHA??null,tree:execFileSync("git",["rev-parse","HEAD^{tree}"],{encoding:"utf8"}).trim(),runId:process.env.GITHUB_RUN_ID??null,runAttempt:process.env.GITHUB_RUN_ATTEMPT??null,
+     sourceSha256:hash(readFileSync(fileURLToPath(import.meta.url))),pageSourceSha256:hash(readFileSync("app/hr/page.tsx")),viewport:{width:1280,height:900},
+     phase,heldScriptCount:heldScripts.length,held:held??null,after:after??null,periodsStatus:periodsStatus??null,writes,caseCompleted:completed,contextClosed,failureDom,
+     frames:frames.map(frame=>({png:frame.name,bytes:frame.data.length,sha256:hash(frame.data)})),
+    };
+    writeFileSync(join(dir,"hr-hydration-1280.json"),JSON.stringify(record,null,2)+"\n");console.log("HR_HYDRATION_NATIVE "+JSON.stringify(record));
+   }
+  }
+ }
+});
