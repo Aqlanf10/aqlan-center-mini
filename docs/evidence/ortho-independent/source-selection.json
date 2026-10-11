@@ -1,0 +1,1744 @@
+{
+  "baseSha": "8ff09304ef3fbf8f01f04a1f09de2a08f6c403c5",
+  "baseKind": "HR integration, not main",
+  "archiveSha256": "c90c7041b3eafd01afbbfffda9840e2520cb976317d791d89de31e62a9c5dd1d",
+  "manifestSha256": "88c3b822460b99bb71c386c25d09f0315f5a1231a305d38bf6bc4f5715a857e9",
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sourceSha256": "e1608d84f085465e81e2d8e5a00ced7ef48dbf9eeaa9c56150af2cab87d7cb5e",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/fixtures/ortho-assessment-schema2.ts",
+      "sourceSha256": "2a1d394dc1627a471c6ab00ef5329e0587524c21731c4c6e325d6b130af8a0df",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "2a1d394dc1627a471c6ab00ef5329e0587524c21731c4c6e325d6b130af8a0df",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/fixtures/ortho-case-journey-navigation-real-react.tsx",
+      "sourceSha256": "79d6ee682cdb4477c80b22d8c0006aae384a85f8b2fa520ebf4a9cf0e0998e03",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "79d6ee682cdb4477c80b22d8c0006aae384a85f8b2fa520ebf4a9cf0e0998e03",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/fixtures/ortho-retention-ui.ts",
+      "sourceSha256": "4a70777d0278a044e83e5c6d0850c16fd8cdf3bbd8cb63577e820bbe968b3b58",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "4a70777d0278a044e83e5c6d0850c16fd8cdf3bbd8cb63577e820bbe968b3b58",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/fixtures/ortho-study-editor-real-react.tsx",
+      "sourceSha256": "5a3c5e98ae4af0b6ece1ed40ac04996a7c0ee0a1c9f49e63fcdb96edbe73f3d3",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "cc19b57117096709126a75623e45c7d5cfcdbdc8700fba720d87901101e1aa9e",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-assessment-arithmetic.test.ts",
+      "sourceSha256": "24785900778c6f93a4009d962416ea56a6402be513eed59bc3d5ce69a7e93614",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "24785900778c6f93a4009d962416ea56a6402be513eed59bc3d5ce69a7e93614",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-client-transitive.test.ts",
+      "sourceSha256": "04fa0efdf444e185baeeeefedd9d8bf4966c9cefe73472f4e28aee974f440c63",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "04fa0efdf444e185baeeeefedd9d8bf4966c9cefe73472f4e28aee974f440c63",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-contract-v2.test.ts",
+      "sourceSha256": "2018aa40248764e6b7765659191d5bbc1157276bff124b28f95bfa2393e3782b",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "2018aa40248764e6b7765659191d5bbc1157276bff124b28f95bfa2393e3782b",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-documentary-context.test.ts",
+      "sourceSha256": "eb14ea32ececca386169fc8ddfa9b1d2a9993d3869c5f342c5ae4a04ee8bca63",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "eb14ea32ececca386169fc8ddfa9b1d2a9993d3869c5f342c5ae4a04ee8bca63",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-documentary-schema.test.ts",
+      "sourceSha256": "d33deb191d2385dd927bae4b385c9585a845a1bd5df26054dae7082c4a5aac39",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-evidence.test.ts",
+      "sourceSha256": "66a165e0ad05edb55968e882369ac3f40151a60f9c5359df68ac7a2041946a06",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-findings-v2.test.ts",
+      "sourceSha256": "8af4d14cf203c24488fef5b1737350b1c88011a044a3900f453de012129fd60b",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "8af4d14cf203c24488fef5b1737350b1c88011a044a3900f453de012129fd60b",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-client.test.ts",
+      "sourceSha256": "93d3e901e77bf7c07b9fed93684c08386bc998ae37715be99f3a514b24b4b79a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "93d3e901e77bf7c07b9fed93684c08386bc998ae37715be99f3a514b24b4b79a",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-fixtures.ts",
+      "sourceSha256": "d9432ac0de257842c1c016d1a0396e2a23f3abab4aa7a846674c59135b79f3c2",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d9432ac0de257842c1c016d1a0396e2a23f3abab4aa7a846674c59135b79f3c2",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-handlers.test.tsx",
+      "sourceSha256": "c392a3e941c165f90b72142800608982d767655df96cf76dababb0cf396a9087",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "c392a3e941c165f90b72142800608982d767655df96cf76dababb0cf396a9087",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-owner.test.ts",
+      "sourceSha256": "5cdfe160c855b60d9b6e87bc74770589fd34e130713fbecb91f555f5bc0ac99f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "5cdfe160c855b60d9b6e87bc74770589fd34e130713fbecb91f555f5bc0ac99f",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-permission-key.test.ts",
+      "sourceSha256": "7a5c4f7218fa5f47b1d070bf04823fc221433ad089c72ba579569621b06fc643",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7a5c4f7218fa5f47b1d070bf04823fc221433ad089c72ba579569621b06fc643",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-intake-selection.test.tsx",
+      "sourceSha256": "b1ddd9c21ea3e45a47635a60e3ce711e11b6d0fec093dcdace30a6445f2282f6",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-lifecycle-schema.test.ts",
+      "sourceSha256": "0ce2ddd2301dcd85f15dead0ff3937d27db5c2503fe4b0bfcd18090d5e2f2618",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-lifecycle.test.ts",
+      "sourceSha256": "51ded4f51acd568ebac2aafa3966b484ba32cbc83534af9a30acf33473453d4d",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "51ded4f51acd568ebac2aafa3966b484ba32cbc83534af9a30acf33473453d4d",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-measurement-editor-v2.test.ts",
+      "sourceSha256": "c93ef4627ab62f491853e6959b125c8361792e7c6156e94d51013ebf503f88aa",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "c93ef4627ab62f491853e6959b125c8361792e7c6156e94d51013ebf503f88aa",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-owner-v2.test.ts",
+      "sourceSha256": "375b1fe9e7911be6de00943504a72010a1b1fe2cdab677a810b42f717d7c2366",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "375b1fe9e7911be6de00943504a72010a1b1fe2cdab677a810b42f717d7c2366",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-reset-classification.test.ts",
+      "sourceSha256": "a4da721e05efc1b4efbd35be15f14c0fb3311dab6c21c63b858c890fa1ceda6a",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-schema-contract.test.ts",
+      "sourceSha256": "b379efd4bf915b9548e5989cd8fb1ba00ae54ba64742ec22af8448c1b397d6a3",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-assessment-source-graph.test.ts",
+      "sourceSha256": "f5cc6ead66fb1f1f3680e85c257b61f3fb461e06131cb539cf6063f3a7f391f4",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "f5cc6ead66fb1f1f3680e85c257b61f3fb461e06131cb539cf6063f3a7f391f4",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-store.test.ts",
+      "sourceSha256": "42ff21fc2ef2e44162c220f26610358bfa8f10161c57f5c70d01e2b186aaf5ad",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "42ff21fc2ef2e44162c220f26610358bfa8f10161c57f5c70d01e2b186aaf5ad",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-assessment-view-admission.test.tsx",
+      "sourceSha256": "a3da4735400f0699e1c96bbab03549cc4f7d8ccf414c99f89be6f9134c122794",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "a3da4735400f0699e1c96bbab03549cc4f7d8ccf414c99f89be6f9134c122794",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-journey-navigation-ui.test.tsx",
+      "sourceSha256": "d15cc373701f4d979d5c72a5e6beabf608bdf0177b017574af7c725e4651dcb4",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d15cc373701f4d979d5c72a5e6beabf608bdf0177b017574af7c725e4651dcb4",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-journey-navigation.test.ts",
+      "sourceSha256": "abcd2abb770efafb9aeb5a8ef2e05ad5d1019e6b3bd3cc72d7bd1e802930a0e6",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "abcd2abb770efafb9aeb5a8ef2e05ad5d1019e6b3bd3cc72d7bd1e802930a0e6",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-journey-schema-contract.test.ts",
+      "sourceSha256": "85923a6e80b5163461d2348253cba294e8d2807509d185105fd52e6e03126809",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-case-render-contract.test.ts",
+      "sourceSha256": "ba4c3d291ef91f2d6dbf7e0b395babaf241068120a741d0e3b9c2af36b65e3ab",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "81cadc8fe852e858053a9b7a8f68e54ac06b1fb0077d9602e65d813b2079042d",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-case-study-artifact-chain.test.ts",
+      "sourceSha256": "79324a9a045b0c7f98954513d1a988088000dcd3300c5915f6fcad5cef145d4c",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "79324a9a045b0c7f98954513d1a988088000dcd3300c5915f6fcad5cef145d4c",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-assessment-projection.test.ts",
+      "sourceSha256": "1e50d835a1160c5d8ebedc7e991cef2c03c61db06efbdfb53e897761981bf5ef",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1e50d835a1160c5d8ebedc7e991cef2c03c61db06efbdfb53e897761981bf5ef",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-capture.test.ts",
+      "sourceSha256": "6d5f17deac7be438aff880e8748b9f2d688885747c227bc454d27cb9524b4fdc",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "6d5f17deac7be438aff880e8748b9f2d688885747c227bc454d27cb9524b4fdc",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-contract.test.ts",
+      "sourceSha256": "d5f536b8fd6a8fdd82b966bbf8bf56afe71620abb3307dd53c2508c1e4a73b2f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d5f536b8fd6a8fdd82b966bbf8bf56afe71620abb3307dd53c2508c1e4a73b2f",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-draft-recovery.test.ts",
+      "sourceSha256": "480d433891d0efe344219aa572630aa626eafa9a0ec2b0f728cf39e472ddd862",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "480d433891d0efe344219aa572630aa626eafa9a0ec2b0f728cf39e472ddd862",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-editor-contract.test.ts",
+      "sourceSha256": "9f027a237f0056a13d99c7af1fcb6e5aa310c486c780ef19dbd67c55e54eb7bb",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "9f027a237f0056a13d99c7af1fcb6e5aa310c486c780ef19dbd67c55e54eb7bb",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-export-command.test.ts",
+      "sourceSha256": "039d16c23429ccd2371bdaf6ac61b859040005d962955e6997595cb361d33b5b",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "039d16c23429ccd2371bdaf6ac61b859040005d962955e6997595cb361d33b5b",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-mount-owner.test.ts",
+      "sourceSha256": "6eec8d6c53b34c35cb1ed76c20ee60cb9136f10bc428f8260d18d1045cbcbb7e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "fc4f43c3ef627ee16f6753074fa17fec9334a46ff3b2331df12b67fc0e7a7550",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-case-study-owner.test.ts",
+      "sourceSha256": "4317e2a6688bfac987e06388cdc8a8e97d668a94972170efa198ec736db44e2d",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4317e2a6688bfac987e06388cdc8a8e97d668a94972170efa198ec736db44e2d",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-recorded-facts.test.ts",
+      "sourceSha256": "f9efa14df1777b33ad825ce2feaeccc64108e470f301b35a9aed03f4ad947898",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "f9efa14df1777b33ad825ce2feaeccc64108e470f301b35a9aed03f4ad947898",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-case-study-review-contract.test.ts",
+      "sourceSha256": "09e059e8b23fbccf6b8de7ad3749360e04c03699466804617a471cf2cee53624",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "09e059e8b23fbccf6b8de7ad3749360e04c03699466804617a471cf2cee53624",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-closed-case-progress.test.ts",
+      "sourceSha256": "3a653154eca931616c3de388ea2d0983e6ae623439e11afc84c81b37d448bb4c",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-intake-evidence.test.ts",
+      "sourceSha256": "77fb50ee5ec93bd66ad193105fdb36bf4351abeff434899eda956bf2122973c0",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-lifecycle-treatment-gates.test.ts",
+      "sourceSha256": "d03776bfeb65d77e9fa104035846842d854be2829c1d3d0b16db0ccaac3916d6",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-lifecycle-unknown-followup.test.ts",
+      "sourceSha256": "1acd1d734f6a95587daaf40d92767d8a68c92e71af1876334d1d93de032d7f87",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-photo-comparison-projection.test.ts",
+      "sourceSha256": "bd28cd3f7af20d1716a729dbc06621d417eedc470a43c7d48fe34fd5f8a67e92",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-retention-client.test.ts",
+      "sourceSha256": "02cecc2e5ef379d1e907ec385d963d2bd28b9ffe9cd1f796c7098be892f8d5e5",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "6ac066f71510649e5839e5380fe69bebf7207ae472002b2682222c4a4cf87376",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-retention-command-ack.test.ts",
+      "sourceSha256": "7562a64b2e096656a57c06a684755f487bf401a34ef328df2d46b5a8105f94da",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7562a64b2e096656a57c06a684755f487bf401a34ef328df2d46b5a8105f94da",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-device-history.test.ts",
+      "sourceSha256": "4a12bfa4c5e3d91d824a0836b242c478090eb0742094671a6d968ab75416f19c",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4a12bfa4c5e3d91d824a0836b242c478090eb0742094671a6d968ab75416f19c",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-document-picker-handlers.test.tsx",
+      "sourceSha256": "178a57d3831d251a066c3fa31c2344fe1d79f33cdc4f8ecb2c4cc468a8cb21a2",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "6bb84cae345d6bac2e5a088f5872d58465cb6d022457f24aad7a8647c6c4f34b",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-retention-document-picker.test.ts",
+      "sourceSha256": "9e584f493cba44b5e268191a70d802c723fea15f13b732d2ddffe99c3b29c7e6",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "9e584f493cba44b5e268191a70d802c723fea15f13b732d2ddffe99c3b29c7e6",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-editor-document.test.ts",
+      "sourceSha256": "babd6b1ca763eb044aacad4d252e48fcf8f9d2055968852d62d9180ba15fdec1",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "babd6b1ca763eb044aacad4d252e48fcf8f9d2055968852d62d9180ba15fdec1",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-editor-handlers.test.tsx",
+      "sourceSha256": "ce68d6ebd36d657c7aacc7586570d32821d1c4f57252660fa2640936d5dad4e2",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ce68d6ebd36d657c7aacc7586570d32821d1c4f57252660fa2640936d5dad4e2",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-editor.test.ts",
+      "sourceSha256": "81c88d2815305c496f5c922279f1ec7a509309692d8bf5002b76533052c6a2f7",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "81c88d2815305c496f5c922279f1ec7a509309692d8bf5002b76533052c6a2f7",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-evidence.test.ts",
+      "sourceSha256": "654ef57828668555f6df3b115c71de3b1fe914a3cbbaeb784d008553c67e24c5",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-retention-mounted-handlers.test.tsx",
+      "sourceSha256": "54b26654f8c5c527a55ce311847c9f7ddae01d5b3aa5238e4c93d8881f784f2e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7cc62c27e753c9682fc864ba3f483d32d571f170217881f4b308dd0eea3cdc7a",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/ortho-retention-owner.test.ts",
+      "sourceSha256": "ad832e3177a1cc64bcc6da03acb6f6148b139f0b5f64748d37a8e3200c81bee9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ad832e3177a1cc64bcc6da03acb6f6148b139f0b5f64748d37a8e3200c81bee9",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-retention-transport.test.ts",
+      "sourceSha256": "83e0f6175898da1faeb76b0c745f99d86940cab47660f00c2a60baa02429dc9b",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "83e0f6175898da1faeb76b0c745f99d86940cab47660f00c2a60baa02429dc9b",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-study-evidence.test.ts",
+      "sourceSha256": "8dee33836991059b36d87b8d2a445e68409d2596889757ec3bb1af860b87a96e",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/ortho-study-image-editor-commit.test.tsx",
+      "sourceSha256": "3424c3a71d70432e43b0131837213bddb1a2c204eaeb7e70cf20e95a7faef52a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "3424c3a71d70432e43b0131837213bddb1a2c204eaeb7e70cf20e95a7faef52a",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-study-image-editor.test.ts",
+      "sourceSha256": "d59343ccb0fbe54de7289a0a9f61db6489f00562f8e90bcb0b36e6edb0a575bb",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d59343ccb0fbe54de7289a0a9f61db6489f00562f8e90bcb0b36e6edb0a575bb",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/ortho-study-media.test.ts",
+      "sourceSha256": "2b4c46173059b24702d0a90819fb0078fb4adc41675735a296d8684dfe2e898a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "2b4c46173059b24702d0a90819fb0078fb4adc41675735a296d8684dfe2e898a",
+      "sourceChanged": false
+    },
+    {
+      "path": "__tests__/patient-ceph-post-lifetime.test.tsx",
+      "sourceSha256": "9f997b03b1de4a7f945e16368d39a02b8d1feb5addc908c8d37db63ed5a21382",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/patient-ceph-summary-context.test.tsx",
+      "sourceSha256": "ce51ed514cc567309b710744acd89295261eb6b4941db8ea982298d4c588ceeb",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/periodontal-candidate-chain.test.ts",
+      "sourceSha256": "8f6520248e76bd795aa227113807741be42eefebd3311ec75dc6ed9a375134b7",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/postgres/_reviewed-migration-chain.ts",
+      "sourceSha256": "9fdd07bc578b5c2ae5bede2b3c55329da18d082e40b263a4c8e4e2f0b439f4d9",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-common-writer-gates.test.ts",
+      "sourceSha256": "a66698c9fc25427464b89b26b1355c4a739d37c288b4068a3412fe218885b702",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "sourceSha256": "c6927b9679cfab5f24ae828a761c4072721183d4e7d8e619d90693a6bbfd76a8",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/security-http/_ortho-assessment-mount.ts",
+      "sourceSha256": "95a8e34ae22c681c6d1f83b464cf76bf372a84c384230a3371e617a6d8a5d6a9",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/_ortho-lifecycle-transaction-fault.ts",
+      "sourceSha256": "aec68c626bd5c7cb80d66280989939d64a68620e10f60388c5fe463fbb063c46",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/_ortho-retention-ack-fault.ts",
+      "sourceSha256": "8d4746d2ed1f72098cd22ff50fc80c50fe2dae7c87cb0eede2182c7671263275",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-intake-integrated-ui.test.ts",
+      "sourceSha256": "2e5f7a8d2d81720a8d01999ccf33ebf997e0175f2f6b6711e06da693ef56d31b",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-lifecycle-transactions.test.ts",
+      "sourceSha256": "47f4cb8fee4955509a19af99fe084d35686d90326928c71b413170df7709da90",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-lifecycle.test.ts",
+      "sourceSha256": "28bf21f40a4a4ad394a699d6bd3462fca16425e2be275c43e228dfb0210aebca",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-persistence.test.ts",
+      "sourceSha256": "a920ec37a0df6829f76f55d5278c8f886d9f46228ff7435c3e849eacb0a70f4a",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-v2-findings-ui.test.ts",
+      "sourceSha256": "16c6fdb4d2f98a0c595c0ca280277622adaca0a5239bcbe9d5a1fd7fba08e447",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-v2-integrated-ui.test.ts",
+      "sourceSha256": "f1a3d8240136788f2c7cda431c19cb92d253727ec6eb8131266d8265a34ab691",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-case-journey-navigation-real-react.test.ts",
+      "sourceSha256": "eb565fcaaf7a001e907a21e9d32ee0da10ba4d5884c9d7e9cf9bffb0226848e0",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "a9a9896f4bcdc82ed6f18d2df19d3c0643df22b75096425183866edb73f8b1d1",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/security-http/ortho-case-study-http.test.ts",
+      "sourceSha256": "ae68d5c53e8e5078450ac9bf7329e8721e42fb7bbf027d050722bc5f8f7135f5",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-case-study-integrated-ui.test.ts",
+      "sourceSha256": "c8b077031922d13b253f196283a86bd451b0de3503527c304e38a7a36c1b74b3",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-closed-case-progress-ui.test.ts",
+      "sourceSha256": "00352ff61fc276e77eb398b07724d0bbcb2b8e2817aabeb21f16cb84338a09d9",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-records-case-ui.test.ts",
+      "sourceSha256": "c6c08e5a4fa03d1302e6405785bee4e2c8a9aec74afce517c5001cbd69bbddd5",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-retention-ack-http.test.ts",
+      "sourceSha256": "8005b8aeb7f3b9d438873b71ee2435775a9eae95811c6011e11d59e7c8bc734f",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-retention-documents-ui.test.ts",
+      "sourceSha256": "67523c20f909bb042c84a6102d057e4c6263144497631a94083033a57b0cdea0",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-retention-integrated-ui.test.ts",
+      "sourceSha256": "f6d40f18b6ae0965449d4da6422b3910a2789055524a23f6ab7a8fa224e4ea0b",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/security-http/ortho-study-editor-real-react.test.ts",
+      "sourceSha256": "7768dfc8bd8730babfc54f7febdd9a8919598539a5b40d70035a030b2ee7ed64",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "6f777de5cfc51efec9a7ff310a784297e67fda4eece5f4fbd52242c89b9ab8c2",
+      "sourceChanged": true
+    },
+    {
+      "path": "__tests__/security-http/patient-ceph-post-built-page.test.ts",
+      "sourceSha256": "678fe7caeebc88f2a837e4ae393a8aa902e8c068f6827fc415c38e381e5b5f62",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "__tests__/session-actor-me.test.ts",
+      "sourceSha256": "bdf5aa8661b6f9b02cc514615dd34ddadcb5b5c58ea7d4dbb47c7175152302ff",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "__tests__/session-actor-projection.test.tsx",
+      "sourceSha256": "dbaa39f40a58648ae7b4e847d18a15ede4e87b32b63318d4eba032ad0682eed8",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/auth/login/route.ts",
+      "sourceSha256": "a0348ceeb53e58dbe285f4b32fe6ddc5a1c18fcb3ffe16e4c6663e881b6165b8",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "app/api/auth/me/route.ts",
+      "sourceSha256": "cf72cf4558ec91aaf172f102cd927e025304533fd78947cf1e5772a627da931d",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/assessment/route.ts",
+      "sourceSha256": "90b9064d70382ce993ebf7bb5de984a14461e1a3a815c6bcbe9dbdb62f7bd9c1",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/case-decisions/route.ts",
+      "sourceSha256": "b7126f13e36ec58d5ebf31985fdfcbbd4974b497967c56db87ab8a7625e54bc6",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/case-study/editor/route.ts",
+      "sourceSha256": "2295aad2e23136ac3c8fe3f0d486db6ccfbcc2a22ee0d58596e24dcf2f3d97b3",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/case-study/review/route.ts",
+      "sourceSha256": "9cd318d8ea0a748ad585d454740b577ebaec5abf232f62ad424bf07e09c7ef27",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/case-study/route.ts",
+      "sourceSha256": "db4cee724138d80c65bedd7d0a8b0bd66951c660a6af94b88b71ef9cf91742ef",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/case-study/sources/route.ts",
+      "sourceSha256": "93551a9277928c1feb6815ca3e53c293ad08dc054a321622b51d388c0acff38c",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/[id]/retention-events/route.ts",
+      "sourceSha256": "97f524cb52204c8203f7305153731e07a436d614db3f44853e2381de63801397",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/ortho/intake/route.ts",
+      "sourceSha256": "3e38075ac26df1185a25d2d4c729a25e475854ed7c9827e981ae69f8757b95f3",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "app/api/visits/[id]/clinical/route.ts",
+      "sourceSha256": "2d260ece2743eaff6316c9ad4ca617dee8a5b19646dc16401042807c87f77764",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "app/layout.tsx",
+      "sourceSha256": "b0aa19bb911093c11de0e033d903f7b3ec1f0b512c041ce8b43fe3484d1b2064",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "app/login/page.tsx",
+      "sourceSha256": "02dba7bab9287a6d1421e2c716fd378b7c39a1402f198f4331580e02cfa5a549",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "app/ortho/page.tsx",
+      "sourceSha256": "1b5bc2d48ca68891133813bd6729088f8f37987c3d5155b7de3d3eecff373766",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "components/OrthoAssessmentFindingsV2.tsx",
+      "sourceSha256": "7e97ceaa55625bc0dc8ba3f122b4e758d0c69cbaafef0698b44df33224f2bcd7",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7e97ceaa55625bc0dc8ba3f122b4e758d0c69cbaafef0698b44df33224f2bcd7",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoAssessmentIntake.tsx",
+      "sourceSha256": "5cf03d2029c51bde32b597ab5bba1f7730c6cd2ede9b9c5bab0557b9dfe699b1",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "5cf03d2029c51bde32b597ab5bba1f7730c6cd2ede9b9c5bab0557b9dfe699b1",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoAssessmentMeasurementsV2.tsx",
+      "sourceSha256": "db98ba9789b676c31f52e59929e8268a0b2163511fda591e22d52a11cec4c38f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "db98ba9789b676c31f52e59929e8268a0b2163511fda591e22d52a11cec4c38f",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoCaseAssessmentV2.tsx",
+      "sourceSha256": "009c9b791551852c0228c26fae4593a2ac1eac6aaccb5e7799c009bda068bbe7",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "009c9b791551852c0228c26fae4593a2ac1eac6aaccb5e7799c009bda068bbe7",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoCaseJourneyNavigation.tsx",
+      "sourceSha256": "5efa2854df4653842c5dc7971f0ec9174375c623677cdfe2a9d551e82f2d55dd",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "5efa2854df4653842c5dc7971f0ec9174375c623677cdfe2a9d551e82f2d55dd",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoCaseRecoveryProvider.tsx",
+      "sourceSha256": "ceea23ed70ce45b898769cc94f7a6313f9fd4c9467a41647c8ed6805434ffc37",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ceea23ed70ce45b898769cc94f7a6313f9fd4c9467a41647c8ed6805434ffc37",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoCaseStudy.tsx",
+      "sourceSha256": "2f0c34b10f0c90b7444f9953cd8688996f74d1bc694846b052721ff3203b99fe",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "49f29eb4b84512ebb8d2eda37343228f803edab4ce4fa0d2fa7802044c5649ef",
+      "sourceChanged": true
+    },
+    {
+      "path": "components/OrthoCaseStudyMount.tsx",
+      "sourceSha256": "7427e80f1a2994c760957c86823fcf36aa58250fafe82ec1e7716a69b5585fd0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7427e80f1a2994c760957c86823fcf36aa58250fafe82ec1e7716a69b5585fd0",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoRetentionDocumentPicker.tsx",
+      "sourceSha256": "b4479bd67faedf1faaf0ccd9b28dfed0ae2dacdfd4edc89a332bafb712b0daf9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b4479bd67faedf1faaf0ccd9b28dfed0ae2dacdfd4edc89a332bafb712b0daf9",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoRetentionEventEditor.tsx",
+      "sourceSha256": "fc57e4cf12e05d98e0595563c144c9ffb8cdd3b241ecfbe309436b13cbacc6ae",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "fc57e4cf12e05d98e0595563c144c9ffb8cdd3b241ecfbe309436b13cbacc6ae",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoRetentionEvents.tsx",
+      "sourceSha256": "5843c0e4152bcbdc466ad8ad50a378c2806d15af3c2bc67cf9748de1b7235c1d",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "5843c0e4152bcbdc466ad8ad50a378c2806d15af3c2bc67cf9748de1b7235c1d",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoSavedStudyReview.tsx",
+      "sourceSha256": "a8023ea3182e00bb7405b6c5858335ebd0e89afb4200c016e4a3fc7a3742fcf9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "a8023ea3182e00bb7405b6c5858335ebd0e89afb4200c016e4a3fc7a3742fcf9",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/OrthoStudyImageEditor.tsx",
+      "sourceSha256": "6971661d0e4f443ac258d816673ed6c91d6bac6099fdae3609b3a4eac10755a5",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "6971661d0e4f443ac258d816673ed6c91d6bac6099fdae3609b3a4eac10755a5",
+      "sourceChanged": false
+    },
+    {
+      "path": "components/PatientCeph.tsx",
+      "sourceSha256": "be9258afa315f13a99adcd86592b383620f4583073ef2a9a1fd043d91eb2282a",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "sourceSha256": "5922f17fdc60615074532d4dd9e3333241395d64eb0d8cfcffc1fcdf6b5d6593",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "components/SessionProvider.tsx",
+      "sourceSha256": "ddba765d08086eb9331c22d22029c7ec073f2385e22569ee97babbd9ee8c3f33",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "components/WebCephRecordsGrid.tsx",
+      "sourceSha256": "8189db327f290c996b5b1af25984c6ce28a789fddedf02af47c4388a421bb7a6",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "sourceSha256": "d8146d31684723e5123e82063a6bcdd91c2664639c7e29291facc949144c192b",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "docs/ORTHO_CEPH_IMPLEMENTATION_CHECKPOINT.md",
+      "sourceSha256": "ee0168285a6b77166ed4617415b2f869148999d240dca153868f47c055816e48",
+      "included": true,
+      "reason": "unchanged frozen requirements/checkpoint; new execution results recorded separately",
+      "currentSha256": "ee0168285a6b77166ed4617415b2f869148999d240dca153868f47c055816e48",
+      "sourceChanged": false
+    },
+    {
+      "path": "docs/ORTHO_CEPH_REQUIREMENTS_LEDGER.json",
+      "sourceSha256": "0e41995f040e36d52b31d66d9f4306c62c72143a9d928218d0e00d0629224ba3",
+      "included": true,
+      "reason": "unchanged frozen requirements/checkpoint; new execution results recorded separately",
+      "currentSha256": "0e41995f040e36d52b31d66d9f4306c62c72143a9d928218d0e00d0629224ba3",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/arrival-panel-db.ts",
+      "sourceSha256": "0088dd2118562b477e751881d1b7216edb50ec08cafb65ac8447cc163e062ba1",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/audit.ts",
+      "sourceSha256": "dea915826e7e4cbbd5c99dba79b49fbe096033d0bfa5f6c973892e4029bd79ec",
+      "included": true,
+      "reason": "additive Ortho audit events preserving all HR entries",
+      "currentSha256": "8bea48acb2bf68453c87842127002693a485a2f47b32ddaa43a56bd53604cc5b",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "sourceSha256": "93899e56087b84deeeb1d39f0997c54215dcab8c9a422e007a7bc275d906e405",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/db.ts",
+      "sourceSha256": "9ef6c533b74f99217f70ea778ca218f5d81bd2ea2d418e00415bf0b9171ba96f",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "sourceSha256": "5158a392e77697773ff660570b8ceec09d98cbfc7372f6f5235da1bc414a8f99",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/migrations.ts",
+      "sourceSha256": "43d4d2898eef55ca059a6f095601852705ec0470aec242009a11a1cc165dd2ab",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/ortho-assessment-arithmetic-2_1_0.ts",
+      "sourceSha256": "ec0ff7d102cd0e69c0454f5cc8c611acc9773f63e65252ba2150132759678dc0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ec0ff7d102cd0e69c0454f5cc8c611acc9773f63e65252ba2150132759678dc0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-arithmetic.ts",
+      "sourceSha256": "59ae0756001757752f08d9256955c498f42ba7b80f77030fa3c77773c1f09ea5",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "59ae0756001757752f08d9256955c498f42ba7b80f77030fa3c77773c1f09ea5",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-authority.ts",
+      "sourceSha256": "c4fffbfe048f84a97bb3e3a6e6e61dd97a40ba5b625eeadb6505c883f5dc3b39",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "c4fffbfe048f84a97bb3e3a6e6e61dd97a40ba5b625eeadb6505c883f5dc3b39",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-client-v2.ts",
+      "sourceSha256": "0a4e55556208570b4e52299bc2a03a529e7b7585cdec902eb08cc43d54ac946d",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "acdac2f15d9e55a5631845652fe6f08310cf865564dab1c3f15c89070d30f3ec",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-assessment-command-v2.ts",
+      "sourceSha256": "39af0214762273e2f28a97708a04257361693bdcec247eed9f284371f2851cc0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "39af0214762273e2f28a97708a04257361693bdcec247eed9f284371f2851cc0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-editor-v2.ts",
+      "sourceSha256": "b1b051fdc4958224799b81a2e5d62eef02b0b2286535d97695a2b7b308e98d9f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b1b051fdc4958224799b81a2e5d62eef02b0b2286535d97695a2b7b308e98d9f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-engine-2_1_0.ts",
+      "sourceSha256": "094e7c236fb7b8f3ac7988f0cc63e3f362a72b547252265851d4e3b45fbc237f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "094e7c236fb7b8f3ac7988f0cc63e3f362a72b547252265851d4e3b45fbc237f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-engine-v2.ts",
+      "sourceSha256": "da65f52d37b0cfbb2722f5d31dc2176368d3fab798a39717c079ba69d54bfac6",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "da65f52d37b0cfbb2722f5d31dc2176368d3fab798a39717c079ba69d54bfac6",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-findings-v2.ts",
+      "sourceSha256": "1d9f7e52665c230f3a17e5398197097b32873b80a3141a21df76da763dd9dbf0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1d9f7e52665c230f3a17e5398197097b32873b80a3141a21df76da763dd9dbf0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-intake-client.ts",
+      "sourceSha256": "bd30a6ec0445abef79ebedad288e9562552298b19209fab637cd86921f0f5295",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "bd30a6ec0445abef79ebedad288e9562552298b19209fab637cd86921f0f5295",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-intake-editor.ts",
+      "sourceSha256": "8c6e262d9eea37c5a315b903d23af7f9043bcaf44b1ebebeafa66b115b45b785",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "8c6e262d9eea37c5a315b903d23af7f9043bcaf44b1ebebeafa66b115b45b785",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-intake-owner.ts",
+      "sourceSha256": "317b1c68cb48b91ad6b108cbb406b8e3c781d18677591c5c747b3659a40d66e3",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "317b1c68cb48b91ad6b108cbb406b8e3c781d18677591c5c747b3659a40d66e3",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-lifecycle-authority.ts",
+      "sourceSha256": "d2f7a3d7f093b33d69d2d08f34d49c7ef7fd1652d9f28101c88e4994af3ae893",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d2f7a3d7f093b33d69d2d08f34d49c7ef7fd1652d9f28101c88e4994af3ae893",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-lifecycle-schema.ts",
+      "sourceSha256": "11a4d373e31e88fc51724814d03207d087ec6080411be1ba2d4facefba799eef",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "11a4d373e31e88fc51724814d03207d087ec6080411be1ba2d4facefba799eef",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-lifecycle-store.ts",
+      "sourceSha256": "e0a2aedea6644562d9f411a215dce826515f46a4170151369399b3d7b82e3c7f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e0a2aedea6644562d9f411a215dce826515f46a4170151369399b3d7b82e3c7f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-lifecycle.ts",
+      "sourceSha256": "08bf73051d978b60960457f0c766c27d11461c17310e537d4f55abe271fc551a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "08bf73051d978b60960457f0c766c27d11461c17310e537d4f55abe271fc551a",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-limits.ts",
+      "sourceSha256": "f1ef7299be4ac3c5a5051c994dd4c89eb38f2d6d5007c6e5d56e1f8214ccb13e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "f1ef7299be4ac3c5a5051c994dd4c89eb38f2d6d5007c6e5d56e1f8214ccb13e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-measurement-editor-v2.ts",
+      "sourceSha256": "b711dff3d17227b1b9aced3deae8133be3d54bb10c9813927643748cf09c9fda",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b711dff3d17227b1b9aced3deae8133be3d54bb10c9813927643748cf09c9fda",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-measurement-set-v2.ts",
+      "sourceSha256": "261c1b615d072edf6226ea22e1db0947b43d8fb97855145bee06bd950425c536",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "a47e58ea3a0590cb102bb628b13990d5c80f47df9f0389e4da4296ca41a391d0",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-assessment-model.ts",
+      "sourceSha256": "11e4ff499740e8d9a682dba75b1aa5c1e3f543ca6bebf1ae934418cbe6c904a1",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "11e4ff499740e8d9a682dba75b1aa5c1e3f543ca6bebf1ae934418cbe6c904a1",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-owner-v2.ts",
+      "sourceSha256": "2137233cad212d24d312fc3b25b1cbfd77f06d0366279ed531c15661129f9ef0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "2137233cad212d24d312fc3b25b1cbfd77f06d0366279ed531c15661129f9ef0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-persisted-v2.ts",
+      "sourceSha256": "bfa7aa582146e3b9f51b47428dd46fa50069f3a827b88646ca7f6bc4264a4881",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "bfa7aa582146e3b9f51b47428dd46fa50069f3a827b88646ca7f6bc4264a4881",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-read-v2.ts",
+      "sourceSha256": "834fddca7f4f8be2154e4ae05db175c986f850b5cbcb359c71283be185a81828",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "834fddca7f4f8be2154e4ae05db175c986f850b5cbcb359c71283be185a81828",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-response-v2.ts",
+      "sourceSha256": "e73bcc801adf3dbaf0fc33a41f3a19e2c974a2d27830b06e039af1e50b99730f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e73bcc801adf3dbaf0fc33a41f3a19e2c974a2d27830b06e039af1e50b99730f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-schema.ts",
+      "sourceSha256": "8494c2c3f42d3df3394228fd492aa72d81865f066bd8068c80ad84822b3777d9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "8494c2c3f42d3df3394228fd492aa72d81865f066bd8068c80ad84822b3777d9",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-store.ts",
+      "sourceSha256": "31dc4a1706d8bc4fcbde401c5e46c25c499cc4568962a76b894a084d5f9e2273",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "31dc4a1706d8bc4fcbde401c5e46c25c499cc4568962a76b894a084d5f9e2273",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-v2.ts",
+      "sourceSha256": "00f782b85852f422d7494fa3abe7263a509d69d19fe17e462467ed24fed7fd1f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "00f782b85852f422d7494fa3abe7263a509d69d19fe17e462467ed24fed7fd1f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-assessment-versioned-sources.ts",
+      "sourceSha256": "e016324c626abf40587124484b30be8a6808d15700b2437075a168366d205efc",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e016324c626abf40587124484b30be8a6808d15700b2437075a168366d205efc",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-decision-content.ts",
+      "sourceSha256": "e5a585f77d4bd1fc533f2428838f5d2421f686d45689cda2cdb1532e11728476",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e5a585f77d4bd1fc533f2428838f5d2421f686d45689cda2cdb1532e11728476",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-decision-store.ts",
+      "sourceSha256": "37b05e3e119e463a612582dc749dbdf3da4d34273a62a0a84e2ddebf47f7ffcb",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "37b05e3e119e463a612582dc749dbdf3da4d34273a62a0a84e2ddebf47f7ffcb",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-authority.ts",
+      "sourceSha256": "9363604bc97bec6b662ee94e1666056e2dbcda327fd8ee81f6bd6b469f6ccb7a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "9363604bc97bec6b662ee94e1666056e2dbcda327fd8ee81f6bd6b469f6ccb7a",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-clinical-sources.ts",
+      "sourceSha256": "974815800200ef887f3d464a92329234ec33e90da904d3270a0ea3f25658af54",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "974815800200ef887f3d464a92329234ec33e90da904d3270a0ea3f25658af54",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-hash.ts",
+      "sourceSha256": "1f7f362c6fdb24c8691cc9d57fe5cf5779f290251dabe7891234811984e8fbe6",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1f7f362c6fdb24c8691cc9d57fe5cf5779f290251dabe7891234811984e8fbe6",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-history.ts",
+      "sourceSha256": "28aeb90d7cefdbf3088a7ddbe4260810e23898499fe7884aa6f3326653d4e1f3",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "28aeb90d7cefdbf3088a7ddbe4260810e23898499fe7884aa6f3326653d4e1f3",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-json.ts",
+      "sourceSha256": "3c2f889e4ceb1c9dead1ac35cfee9cbd9824e56e90ae56166f6f1b0987b1a86c",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "3c2f889e4ceb1c9dead1ac35cfee9cbd9824e56e90ae56166f6f1b0987b1a86c",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-navigation.ts",
+      "sourceSha256": "f7081f866ef8b3b0f3c50184536de068fa27ae97879a4f8b4e247bd7bd8dd137",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "f7081f866ef8b3b0f3c50184536de068fa27ae97879a4f8b4e247bd7bd8dd137",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-plan-source.ts",
+      "sourceSha256": "b087f55d41f3f1f3cf15b4e4133b782e25b1b2425111c46d36ce0127a85a5e21",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b087f55d41f3f1f3cf15b4e4133b782e25b1b2425111c46d36ce0127a85a5e21",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-record-schema.ts",
+      "sourceSha256": "b71ec9136afacac0426b1ab79e5e5184cf9af5aa58ecb01d240b76999013fa83",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b71ec9136afacac0426b1ab79e5e5184cf9af5aa58ecb01d240b76999013fa83",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-records.ts",
+      "sourceSha256": "61fe1cb03d2dd0ea1d792c986946b4ddf9a62df320eb5a9ad047ca94616867b9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "61fe1cb03d2dd0ea1d792c986946b4ddf9a62df320eb5a9ad047ca94616867b9",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-journey-schema.ts",
+      "sourceSha256": "1c440086bb8b5369ebadaefab6b26ee2a44b2b537483bc3207d593f7d5537199",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1c440086bb8b5369ebadaefab6b26ee2a44b2b537483bc3207d593f7d5537199",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-occurrence.ts",
+      "sourceSha256": "b5666d844a8cf1321bcd5cabcd0441468713d2c01f8c1e5591ace112364f9048",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b5666d844a8cf1321bcd5cabcd0441468713d2c01f8c1e5591ace112364f9048",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-render-contract.ts",
+      "sourceSha256": "64b218be4f80513a16e57cfb4b1cb586311fce2a2c80663d923d62b253715b8f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "64b218be4f80513a16e57cfb4b1cb586311fce2a2c80663d923d62b253715b8f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-render-security.ts",
+      "sourceSha256": "da3ab2dfb174536c6c849a2827136211dd5e9ecf26b0ddeb9b2a9a95fb322b6b",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "b4b8cf0b5db7ccf5be23e9f06352fe3601ed35c29e9befbd0613928abfb1fb69",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-case-study-access.ts",
+      "sourceSha256": "2f7587bfcc0ea3e87c83ba09f9bc5d275e7dfce7529ebaea1c21e0759c2a942e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "2f7587bfcc0ea3e87c83ba09f9bc5d275e7dfce7529ebaea1c21e0759c2a942e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-artifact-chain.ts",
+      "sourceSha256": "1e599031d85292c57836a9b30c095712cb541c5f3c543ab40a0809733a1472d3",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1e599031d85292c57836a9b30c095712cb541c5f3c543ab40a0809733a1472d3",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-artifact-history.ts",
+      "sourceSha256": "9e956ee1467ac25a37c1369edc71696034203326f46b9bb86102a7176427fbcc",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "9e956ee1467ac25a37c1369edc71696034203326f46b9bb86102a7176427fbcc",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-artifact-store.ts",
+      "sourceSha256": "d0f0ce0323b2654cda815d6b380025b061d4aeeb5ca646d574e5287f5d3296f0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d0f0ce0323b2654cda815d6b380025b061d4aeeb5ca646d574e5287f5d3296f0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-assessment-access.ts",
+      "sourceSha256": "004ab29cd18a221e59fa05182e4d2ddb509b6074376753e2b86f79167f04c0ec",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "004ab29cd18a221e59fa05182e4d2ddb509b6074376753e2b86f79167f04c0ec",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-assessment-projection.ts",
+      "sourceSha256": "72c95688372a362929198c1d971b0dfdb66da5aec1dd61fbbe6b42dda465aa18",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "72c95688372a362929198c1d971b0dfdb66da5aec1dd61fbbe6b42dda465aa18",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-capture.ts",
+      "sourceSha256": "322335ee224b055345d294d6c2a1db36b866f9353451ed7135af8a7a16f8b444",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ea01ed0e3a732e6475470361d627242f4ea115608d7fca1f1190de2bfd798120",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-case-study-editor-contract.ts",
+      "sourceSha256": "64670beb0cf77cdd5559f3d611fcbf1f931cac743a8566a5ce770ca4cb3d09e4",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "64670beb0cf77cdd5559f3d611fcbf1f931cac743a8566a5ce770ca4cb3d09e4",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-editor-draft.ts",
+      "sourceSha256": "581d3639c525c8e331e6e109f136f11aeca3fc43326cfbcb9000739527212dd9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "581d3639c525c8e331e6e109f136f11aeca3fc43326cfbcb9000739527212dd9",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-editor-response.ts",
+      "sourceSha256": "e0be7be5d262b456b3172e24bcff5e8920206c5044384f217208d695085e3810",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e0be7be5d262b456b3172e24bcff5e8920206c5044384f217208d695085e3810",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-editor-store.ts",
+      "sourceSha256": "6e447e52c0b247cd428736a2da1e73d4f77bb657053d4011ffa730b485ab6f74",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "6e447e52c0b247cd428736a2da1e73d4f77bb657053d4011ffa730b485ab6f74",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-export-access.ts",
+      "sourceSha256": "cbb1509686f7bbb8d128b2942a29df72fdc159410b215801a7d2ff7c0ae218b3",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "cbb1509686f7bbb8d128b2942a29df72fdc159410b215801a7d2ff7c0ae218b3",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-export-schema.ts",
+      "sourceSha256": "705c69676f3bdba7b7d75d721fef100d34e341e3ad00cfd33f67343832be23dd",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "705c69676f3bdba7b7d75d721fef100d34e341e3ad00cfd33f67343832be23dd",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-export.ts",
+      "sourceSha256": "1ac2554a1cdf2c6621c226aa57aed5f5ef32452d224a22d1df7c8b0052417720",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "1ac2554a1cdf2c6621c226aa57aed5f5ef32452d224a22d1df7c8b0052417720",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-history.ts",
+      "sourceSha256": "764e2fbd028fd8ce2545947827c5cc9848ad4c2fd83340323427a0af1946a678",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "764e2fbd028fd8ce2545947827c5cc9848ad4c2fd83340323427a0af1946a678",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-inventory-client.ts",
+      "sourceSha256": "67388cd09f9c522c309fc6d0ecc8bda5e071954f8fdd34372bf49cd76bac7e15",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "67388cd09f9c522c309fc6d0ecc8bda5e071954f8fdd34372bf49cd76bac7e15",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-inventory.ts",
+      "sourceSha256": "4b3ec63f461d174c1b6316b7b2ce1f204367f9d50b1befdfb54ca77f225eb2bc",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4b3ec63f461d174c1b6316b7b2ce1f204367f9d50b1befdfb54ca77f225eb2bc",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-mount-owner.ts",
+      "sourceSha256": "586643de0531c332b9874285b27a96b8a667af5089982b4bd90826b9b26e7a58",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "586643de0531c332b9874285b27a96b8a667af5089982b4bd90826b9b26e7a58",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-owner.ts",
+      "sourceSha256": "85565b235e9b0e14d797aa222ce2ac89f238541fc61eb792574fcc328687369e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "85565b235e9b0e14d797aa222ce2ac89f238541fc61eb792574fcc328687369e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-pg-values.ts",
+      "sourceSha256": "5cdd4bb3eaa6eb3c322a648988e3ca3d9d78d4e6acd1e210e1e67d0be782110f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "5cdd4bb3eaa6eb3c322a648988e3ca3d9d78d4e6acd1e210e1e67d0be782110f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-recorded-facts.ts",
+      "sourceSha256": "8cb4c5a1a0b21344e223d201f229babfe19c752a23e2d67c18c0ab1fad9ff86a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "8cb4c5a1a0b21344e223d201f229babfe19c752a23e2d67c18c0ab1fad9ff86a",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-recovery.ts",
+      "sourceSha256": "822eb171a4624fd6c9de06cf269469331c79b9f9e104b93bef88c234ae50ed2e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "822eb171a4624fd6c9de06cf269469331c79b9f9e104b93bef88c234ae50ed2e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-render-manifest.ts",
+      "sourceSha256": "feb60a08d0887b9c213949fd95a1999dd39c724544e73e8b884470f851f5d305",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "feb60a08d0887b9c213949fd95a1999dd39c724544e73e8b884470f851f5d305",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-repository.ts",
+      "sourceSha256": "ac748b6540168571181c213245101ff818190db3065118fd4cab7211a2b656ab",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ac748b6540168571181c213245101ff818190db3065118fd4cab7211a2b656ab",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-review-contract.ts",
+      "sourceSha256": "f70841b50626226733e44d5cebd884475cb5ab16e28e0c09ce2ed727bf6cdbfd",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "f70841b50626226733e44d5cebd884475cb5ab16e28e0c09ce2ed727bf6cdbfd",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-review-store.ts",
+      "sourceSha256": "7512ddea50b57719967c2e3f5bf74b32bbff234a2a248f5bb562c6afbbb1c553",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "7512ddea50b57719967c2e3f5bf74b32bbff234a2a248f5bb562c6afbbb1c553",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-schema.ts",
+      "sourceSha256": "0eaed790ad98063291d48e809186453a6760f1ce18764980590602cd145c2d54",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "0eaed790ad98063291d48e809186453a6760f1ce18764980590602cd145c2d54",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-source-union.ts",
+      "sourceSha256": "4583dabce6bc23457cfaf534a7a7eb4ed8139c56404f06573e6943736f0b7ad9",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4583dabce6bc23457cfaf534a7a7eb4ed8139c56404f06573e6943736f0b7ad9",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-sources.ts",
+      "sourceSha256": "ae81c973867935aec1de75449d9d3e3c7b13f7b9c2aded42f1dbcb8c3271ad92",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ae81c973867935aec1de75449d9d3e3c7b13f7b9c2aded42f1dbcb8c3271ad92",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study-store.ts",
+      "sourceSha256": "7e92247490f289affdba5a1e9ae44d64d30a961ad954413a68f5eab05d11ef79",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "53369eeeaf2e868a554257ed4e3b884e2a4bf242ebe1a137afe45f2a8a41c983",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-case-study-template.ts",
+      "sourceSha256": "d4dd44c9b1b58ac63176fcd83fa765a57a586a8774c645573a833c246fa7d8ee",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d4dd44c9b1b58ac63176fcd83fa765a57a586a8774c645573a833c246fa7d8ee",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-study.ts",
+      "sourceSha256": "fca34fd4fbebc755d98d2a0baf828070ba6deca0a48d93f42a94891163d80b05",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "fca34fd4fbebc755d98d2a0baf828070ba6deca0a48d93f42a94891163d80b05",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-case-template.ts",
+      "sourceSha256": "c5bef0dad37cd653f245e165f9f5e1a0cf411e1b11c767558c90cf79d0cd5a8a",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "c5bef0dad37cd653f245e165f9f5e1a0cf411e1b11c767558c90cf79d0cd5a8a",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-followup-booking-context.ts",
+      "sourceSha256": "910e5586c6b35ca770c25d3a9d9bcfd380b5259b9bcab90c02df3f0c8168e045",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/ortho-followup.ts",
+      "sourceSha256": "1a5c2daaf2a480ce180179bb6a4807ca0935d2f854a940df050b4b0f0cee3e2c",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/ortho-journey-route.ts",
+      "sourceSha256": "792310da8e60e820b289f1758eb5bb091da0547a099f07fd9fac4f403c3ea7d0",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "792310da8e60e820b289f1758eb5bb091da0547a099f07fd9fac4f403c3ea7d0",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-photos.ts",
+      "sourceSha256": "2b279764f86c3aa17cd08a12c2249156a839cf051b266539ead07ada87010b16",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/ortho-retention-client.ts",
+      "sourceSha256": "4584310cf3724aa8f262b01ebc562f480d493cc33405df870955ccc4156446e5",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4584310cf3724aa8f262b01ebc562f480d493cc33405df870955ccc4156446e5",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-command-ack.ts",
+      "sourceSha256": "cd8c3850f7e30f3671a1d36a937cae5e2e1b73ccd416b901bf54aab884c26889",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "cd8c3850f7e30f3671a1d36a937cae5e2e1b73ccd416b901bf54aab884c26889",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-document-picker.ts",
+      "sourceSha256": "3402df0168af7982667357316187078248b313f694df9bf7836a54d2de4ca954",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "3402df0168af7982667357316187078248b313f694df9bf7836a54d2de4ca954",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-editor-document.ts",
+      "sourceSha256": "dc824d997488c815cf37a439d82f1d56f17e4450246f53a9263593e34c366b0d",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "dc824d997488c815cf37a439d82f1d56f17e4450246f53a9263593e34c366b0d",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-editor.ts",
+      "sourceSha256": "ca7d2f7e08050b5895e0fb86f9f9a3aa4bae2efa5933fce76e8b8a1a93e6532e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ca7d2f7e08050b5895e0fb86f9f9a3aa4bae2efa5933fce76e8b8a1a93e6532e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-event-history.ts",
+      "sourceSha256": "17a41975db844374dfc64250efa4bfec6b36e459d2b2cdf8393bef58514cf66c",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "bc1355888bf1ad7ee465067b93797c98ed1d262284b8e7257bf38c82d7b5c886",
+      "sourceChanged": true
+    },
+    {
+      "path": "lib/ortho-retention-event-store.ts",
+      "sourceSha256": "16b4bd72f177ec7f036b2ab70791f13f998add99e1fb590a7631cd71865bd701",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "16b4bd72f177ec7f036b2ab70791f13f998add99e1fb590a7631cd71865bd701",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-events.ts",
+      "sourceSha256": "da6419e6ef12f44a9075dbc238e66b8c71d599cda0d243f52bf2fb45d4bbe704",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "da6419e6ef12f44a9075dbc238e66b8c71d599cda0d243f52bf2fb45d4bbe704",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-history-store.ts",
+      "sourceSha256": "ede43e4df80b2293352a97221c55146a5064e5996976a09f5270478d1560b3e8",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "ede43e4df80b2293352a97221c55146a5064e5996976a09f5270478d1560b3e8",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-mount-owner.ts",
+      "sourceSha256": "4fb6d8ad1e5acb2826b50b1870489c9ff1a953dc3c8c67ee8fa37bdb191c8b0e",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "4fb6d8ad1e5acb2826b50b1870489c9ff1a953dc3c8c67ee8fa37bdb191c8b0e",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-owner.ts",
+      "sourceSha256": "d59f6d79bb7c3d10d5efa9c219b20572c8d916daab575298e5b3ce9316f34b4f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "d59f6d79bb7c3d10d5efa9c219b20572c8d916daab575298e5b3ce9316f34b4f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-recovery.ts",
+      "sourceSha256": "e20cf43d21dc3588d3bdda032ac502c457ce17d0a31ea5f5c866932ab16e01cb",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e20cf43d21dc3588d3bdda032ac502c457ce17d0a31ea5f5c866932ab16e01cb",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-retention-transport.ts",
+      "sourceSha256": "e9f863622224ac76eae0a24d972acc76e2658b69f1ffeaf0c62c979883471318",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "e9f863622224ac76eae0a24d972acc76e2658b69f1ffeaf0c62c979883471318",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-study-image-editor.ts",
+      "sourceSha256": "a2a90583308d90c826e8cb874307e8f2a96e9b5b451b54f93beae1c2262bfbbe",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "a2a90583308d90c826e8cb874307e8f2a96e9b5b451b54f93beae1c2262bfbbe",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-study-media.ts",
+      "sourceSha256": "df3f3780d3dfd15f42e89390a9ae8163a429edd697acf935d2751f34a30c803f",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "df3f3780d3dfd15f42e89390a9ae8163a429edd697acf935d2751f34a30c803f",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/ortho-treatment-strategy-store.ts",
+      "sourceSha256": "2995daa8d78fcd19272998b9741ae36f690abcefd5f45b82aa55b7ce77332bc8",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    },
+    {
+      "path": "lib/ortho.ts",
+      "sourceSha256": "9ed69d9b836c087b12065efec0a9e6c738cdc750495b03e4655e1a35b9c8c0a8",
+      "included": true,
+      "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
+      "currentSha256": "9ed69d9b836c087b12065efec0a9e6c738cdc750495b03e4655e1a35b9c8c0a8",
+      "sourceChanged": false
+    },
+    {
+      "path": "lib/session-actor.ts",
+      "sourceSha256": "a271c7e3aed230a5521133e9471586b40d1d1fba66ea6f128159c76715555fb1",
+      "included": true,
+      "reason": "independent new module/test",
+      "currentSha256": "a271c7e3aed230a5521133e9471586b40d1d1fba66ea6f128159c76715555fb1",
+      "sourceChanged": false
+    },
+    {
+      "path": "migrations/0052_ortho_case_assessments.sql",
+      "sourceSha256": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "migrations/0053_ortho_case_journey_records.sql",
+      "sourceSha256": "6f5b8590368c0a78e11f559bdfdbaf2647c80744000b1cd29ac50103155cf9c5",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "migrations/0054_ortho_assessment_lifecycle.sql",
+      "sourceSha256": "e8307b5f7330ad6c534eef23f8ba89809dbd3402b611900c6e9e4a4be5aa9745",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "scripts/verify-ortho-assessment-evidence.mjs",
+      "sourceSha256": "f56c5a9bf4f7729ea629aa61cbb22eb83878f9105c2660e94ffc9d08bdb2b645",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "scripts/verify-ortho-intake-evidence.mjs",
+      "sourceSha256": "f1f67f419c04c370522af4b8997ffe0a7245c8dd5cc9bab61fa7f8e0ef4fb5c0",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "scripts/verify-ortho-retention-evidence.mjs",
+      "sourceSha256": "2aa9ec85e0e59013038fa5c3bd04e4a72a24ab0ea7f8d7304ef23715ff7d33a3",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "scripts/verify-ortho-study-evidence.mjs",
+      "sourceSha256": "7f4c01e186ccbda62019f338bc869a720f7b18df386114f6fb8daff8a382fde4",
+      "included": false,
+      "reason": "migration/route/native mounted journey or integration-contract dependency deferred"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "sourceSha256": "5b6b2dae99713fcdf7e8f019fed83035ab1a2d72636ee6e5df3133f66adbb8cf",
+      "included": false,
+      "reason": "existing shared integration or source mutation deferred"
+    }
+  ]
+}

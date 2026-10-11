@@ -1,0 +1,111 @@
+
+> aqlan-center@0.1.0 typecheck
+> tsc --noEmit
+
+__tests__/ortho-assessment-intake-fixtures.ts(33,133): error TS2322: Type '"assessment"' is not assignable to type 'CaseStatus'.
+__tests__/ortho-assessment-lifecycle.test.ts(30,38): error TS2345: Argument of type '"assessment_cancelled"' is not assignable to parameter of type 'CaseStatus'.
+__tests__/ortho-assessment-lifecycle.test.ts(38,33): error TS2345: Argument of type '"assessment"' is not assignable to parameter of type 'CaseStatus'.
+__tests__/ortho-assessment-lifecycle.test.ts(38,93): error TS2345: Argument of type '"assessment_cancelled"' is not assignable to parameter of type 'CaseStatus'.
+__tests__/ortho-assessment-lifecycle.test.ts(42,41): error TS2322: Type '"assessment"' is not assignable to type 'CaseStatus'.
+__tests__/ortho-assessment-lifecycle.test.ts(54,43): error TS2322: Type '"active" | "assessment" | "assessment_cancelled"' is not assignable to type 'CaseStatus'.
+  Type '"assessment"' is not assignable to type 'CaseStatus'.
+__tests__/ortho-case-journey-navigation.test.ts(29,43): error TS2322: Type '"assessment"' is not assignable to type 'CaseStatus | null | undefined'.
+__tests__/ortho-case-journey-navigation.test.ts(30,43): error TS2322: Type '"assessment_cancelled"' is not assignable to type 'CaseStatus | null | undefined'.
+__tests__/ortho-case-journey-navigation.test.ts(31,43): error TS2322: Type '"assessment"' is not assignable to type 'CaseStatus | null | undefined'.
+__tests__/ortho-case-study-mount-owner.test.ts(13,16): error TS2322: Type '{ key: "full-orthodontic-case"; version: string; contentHash: string; }' is not assignable to type '{ key: "full-orthodontic-case"; version: "ortho-full-case-layout-v4-recovery"; contentHash: string; }'.
+  Types of property 'version' are incompatible.
+    Type 'string' is not assignable to type '"ortho-full-case-layout-v4-recovery"'.
+__tests__/ortho-retention-client.test.ts(4,96): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-document-picker-handlers.test.tsx(181,5): error TS2322: Type 'ReactNode' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | AwaitedReactNode'.
+  Type 'Promise<AwaitedReactNode>' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | AwaitedReactNode'.
+__tests__/ortho-retention-editor-document.test.ts(4,29): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-editor-handlers.test.tsx(6,44): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-editor.test.ts(3,56): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-mounted-handlers.test.tsx(10,51): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-owner.test.ts(6,78): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+__tests__/ortho-retention-transport.test.ts(6,36): error TS2307: Cannot find module './fixtures/ortho-retention-ui' or its corresponding type declarations.
+components/OrthoAssessmentIntake.tsx(97,69): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus | undefined' and '"assessment"' have no overlap.
+components/OrthoAssessmentIntake.tsx(117,6): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus | undefined' and '"assessment"' have no overlap.
+components/OrthoAssessmentIntake.tsx(118,6): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus | undefined' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-client-v2.ts(58,5): error TS2322: Type '{ state: "bridge_missing"; clinicalCaseId: null; revision: null; history: never[]; sourceStates: never[]; sources: { items: never[]; truncated: false; imaging: "allowed" | "restricted"; }; ok: true; ... 4 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadResponseV2 | null'.
+  Type '{ state: "bridge_missing"; clinicalCaseId: null; revision: null; history: never[]; sourceStates: never[]; sources: { items: never[]; truncated: false; imaging: "allowed" | "restricted"; }; ok: true; ... 4 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadCommon & { state: "bridge_missing"; clinicalCaseId: null; revision: null; }'.
+    Type '{ state: "bridge_missing"; clinicalCaseId: null; revision: null; history: never[]; sourceStates: never[]; sources: { items: never[]; truncated: false; imaging: "allowed" | "restricted"; }; ok: true; ... 4 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadCommon'.
+      Types of property 'recordingContext' are incompatible.
+        Type 'string' is not assignable to type '"current" | "retrospective"'.
+lib/ortho-assessment-client-v2.ts(92,3): error TS2322: Type '{ state: "ready"; revision: AnyAssessmentRevision | null; history: AssessmentHistoryEntryV2[]; sourceStates: AssessmentSourceStateV2[]; ... 7 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadResponseV2 | null'.
+  Type '{ state: "ready"; revision: AnyAssessmentRevision | null; history: AssessmentHistoryEntryV2[]; sourceStates: AssessmentSourceStateV2[]; ... 7 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadCommon & { state: "ready"; clinicalCaseId: number; revision: AnyAssessmentRevision | null; }'.
+    Type '{ state: "ready"; revision: AnyAssessmentRevision | null; history: AssessmentHistoryEntryV2[]; sourceStates: AssessmentSourceStateV2[]; ... 7 more ...; clinicalWritable: boolean; }' is not assignable to type 'AssessmentReadCommon'.
+      Types of property 'recordingContext' are incompatible.
+        Type 'string' is not assignable to type '"current" | "retrospective"'.
+lib/ortho-assessment-intake-client.ts(200,60): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-intake-client.ts(201,13): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-intake-client.ts(202,37): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-intake-client.ts(203,38): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-intake-client.ts(203,74): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-intake-client.ts(205,52): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-intake-client.ts(230,22): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-intake-editor.ts(36,27): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-lifecycle-store.ts(107,32): error TS2322: Type '"ortho.lifecycle.record"' is not assignable to type 'AuditAction'.
+lib/ortho-assessment-lifecycle.ts(2,37): error TS2305: Module '"./ortho"' has no exported member 'isOpenOrthoCase'.
+lib/ortho-assessment-lifecycle.ts(2,54): error TS2305: Module '"./ortho"' has no exported member 'isTreatmentOrthoCase'.
+lib/ortho-assessment-lifecycle.ts(13,3): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-lifecycle.ts(15,7): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment"' have no overlap.
+lib/ortho-assessment-lifecycle.ts(16,7): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus' and '"assessment_cancelled"' have no overlap.
+lib/ortho-assessment-measurement-set-v2.ts(29,32): error TS18046: 's.toothWidthObservationIds' is of type 'unknown'.
+lib/ortho-assessment-store.ts(111,34): error TS2322: Type '"ortho.assessment.append"' is not assignable to type 'AuditAction'.
+lib/ortho-case-journey-history.ts(113,34): error TS2322: Type '"ortho.journey_record"' is not assignable to type 'AuditAction'.
+lib/ortho-case-journey-navigation.ts(140,35): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus | null | undefined' and '"assessment"' have no overlap.
+lib/ortho-case-journey-navigation.ts(140,68): error TS2367: This comparison appears to be unintentional because the types 'CaseStatus | null | undefined' and '"assessment_cancelled"' have no overlap.
+lib/ortho-case-render-security.ts(28,23): error TS2550: Property 'toWellFormed' does not exist on type 'string'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2024' or later.
+lib/ortho-case-study-artifact-store.ts(37,34): error TS2322: Type '"ortho.study_artifact"' is not assignable to type 'AuditAction'.
+lib/ortho-case-study-capture.ts(44,56): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'CaseStatus'.
+lib/ortho-case-study-capture.ts(52,16): error TS2339: Property 'value' does not exist on type 'Checked<AnyAssessmentRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(52,44): error TS2339: Property 'value' does not exist on type 'Checked<AnyAssessmentRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(52,82): error TS2339: Property 'value' does not exist on type 'Checked<AnyAssessmentRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(53,20): error TS2339: Property 'value' does not exist on type 'Checked<AnyAssessmentRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(56,16): error TS2339: Property 'value' does not exist on type 'Checked<StrategyRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+lib/ortho-case-study-capture.ts(56,44): error TS2339: Property 'value' does not exist on type 'Checked<StrategyRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+lib/ortho-case-study-capture.ts(56,101): error TS2339: Property 'value' does not exist on type 'Checked<StrategyRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+lib/ortho-case-study-capture.ts(57,20): error TS2339: Property 'value' does not exist on type 'Checked<StrategyRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+lib/ortho-case-study-capture.ts(57,42): error TS2339: Property 'value' does not exist on type 'Checked<StrategyRevision>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; message: string; }'.
+lib/ortho-case-study-capture.ts(57,58): error TS7006: Parameter 'row' implicitly has an 'any' type.
+lib/ortho-case-study-capture.ts(72,30): error TS2339: Property 'value' does not exist on type 'Checked<DecisionSavedContent>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(72,54): error TS2339: Property 'value' does not exist on type 'Checked<DecisionSavedContent>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(72,97): error TS2339: Property 'value' does not exist on type 'Checked<DecisionSavedContent>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(75,30): error TS2339: Property 'value' does not exist on type 'Checked<RetentionSavedContent>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(75,54): error TS2339: Property 'value' does not exist on type 'Checked<RetentionSavedContent>'.
+  Property 'value' does not exist on type '{ ok: false; code: string; }'.
+lib/ortho-case-study-capture.ts(97,34): error TS18046: 'r.measurements' is of type 'unknown'.
+lib/ortho-case-study-capture.ts(101,17): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+lib/ortho-case-study-capture.ts(121,27): error TS18046: 'r.items' is of type 'unknown'.
+lib/ortho-case-study-capture.ts(145,43): error TS18046: 'c.sources' is of type 'unknown'.
+lib/ortho-case-study-capture.ts(145,58): error TS7006: Parameter 'rawSource' implicitly has an 'any' type.
+lib/ortho-case-study-capture.ts(145,69): error TS7006: Parameter 'index' implicitly has an 'any' type.
+lib/ortho-case-study-editor-store.ts(26,35): error TS2345: Argument of type 'StudyRevision<{ schemaVersion: number; capturedAt: string; recordedPatientId: number; orthoCaseId: number; clinicalCaseId: number; caseStatusAtCapture: CaseStatus; authored: StudyDraftContent; sources: StudySourceCapture[]; }>' is not assignable to parameter of type 'StudyRevision<StudySavedContent>'.
+  Type '{ schemaVersion: number; capturedAt: string; recordedPatientId: number; orthoCaseId: number; clinicalCaseId: number; caseStatusAtCapture: CaseStatus; authored: StudyDraftContent; sources: StudySourceCapture[]; }' is not assignable to type 'StudySavedContent'.
+    Types of property 'schemaVersion' are incompatible.
+      Type 'number' is not assignable to type '1'.
+lib/ortho-case-study-repository.ts(95,34): error TS2322: Type '"ortho.journey_record"' is not assignable to type 'AuditAction'.
+lib/ortho-retention-event-history.ts(62,162): error TS2322: Type 'RetentionEvent' is not assignable to type '(Base & Delivery & { kind: "device_delivery"; }) | (Base & Delivery & { kind: "device_replacement"; replaces: RetentionDeviceRef; })'.
+  Type 'Base & { kind: "debond"; extent: string; }' is not assignable to type '(Base & Delivery & { kind: "device_delivery"; }) | (Base & Delivery & { kind: "device_replacement"; replaces: RetentionDeviceRef; })'.
+    Type 'Base & { kind: "debond"; extent: string; }' is not assignable to type 'Base & Delivery & { kind: "device_replacement"; replaces: RetentionDeviceRef; }'.
+      Type 'Base & { kind: "debond"; extent: string; }' is missing the following properties from type 'Delivery': deviceType, description, labOrderId
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
