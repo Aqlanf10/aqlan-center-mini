@@ -456,8 +456,8 @@ function CreateTaskModal({ timeZone, session, oversight, pending, onPending, onC
   };
 
   return (
-    <Modal onClose={close} label="مهمة جديدة" initialFocus="input[maxlength='200']">
-      <div className="mx-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-raised">
+    <Modal onClose={close} label="مهمة جديدة" initialFocus="input[maxlength='200']" alignTop>
+      <div className="mx-auto w-full min-w-0 max-w-lg rounded-2xl bg-white p-5 shadow-raised [overflow-wrap:anywhere] [&_div]:min-w-0 [&_label]:min-w-0 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_textarea]:max-w-full">
         <h2 className="mb-4 text-lg font-bold text-navy-900">مهمة جديدة</h2>
         <div className="grid gap-3">
         <label className="grid gap-1 text-sm font-semibold text-navy-800">
@@ -470,7 +470,7 @@ function CreateTaskModal({ timeZone, session, oversight, pending, onPending, onC
           <textarea disabled={locked} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={4000}
             className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal" />
         </label>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             الأولوية
             <select disabled={locked} value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}
@@ -631,7 +631,7 @@ function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onRe
 
   return (
     <Modal onClose={() => void onRefresh()} label={`المهمة: ${task.title}`} alignTop>
-      <div className="mx-auto w-full max-w-2xl rounded-2xl bg-white p-5 shadow-raised">
+      <div className="mx-auto w-full min-w-0 max-w-2xl rounded-2xl bg-white p-5 shadow-raised [overflow-wrap:anywhere] [&_div]:min-w-0 [&_label]:min-w-0 [&_form]:min-w-0 [&_section]:min-w-0 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
         <h2 className="mb-4 text-lg font-bold text-navy-900">{task.title}</h2>
         <div className="grid gap-4">
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -661,7 +661,7 @@ function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onRe
               <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} maxLength={200}
                 className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal" />
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <label className="grid gap-1 text-sm font-semibold text-navy-800">
                 الأولوية
                 <select value={editPriority} onChange={(event) => setEditPriority(event.target.value as TaskPriority)}
@@ -774,7 +774,7 @@ function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onRe
               <input value={checklistLabel} onChange={(event) => setChecklistLabel(event.target.value)} maxLength={300}
                 placeholder="بند جديد…" className="flex-1 rounded-xl border border-navy-200 px-3 py-2 text-sm" />
               <button type="submit" disabled={busy || !checklistLabel.trim()}
-                className="rounded-xl bg-navy-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">إضافة</button>
+                className="shrink-0 rounded-xl bg-navy-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">إضافة</button>
             </form>
           )}
         </section>
@@ -804,7 +804,7 @@ function TaskDetailModal({ timeZone, detail, session, oversight, onRefresh, onRe
               <input value={comment} onChange={(event) => setComment(event.target.value)} maxLength={2000}
                 placeholder="اكتب تعليقًا — يُسجَّل باسمك" className="flex-1 rounded-xl border border-navy-200 px-3 py-2 text-sm" />
               <button type="submit" disabled={busy || !comment.trim()}
-                className="rounded-xl bg-navy-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">إرسال</button>
+                className="shrink-0 rounded-xl bg-navy-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">إرسال</button>
             </form>
           )}
         </section>
