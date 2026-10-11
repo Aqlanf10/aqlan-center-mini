@@ -30,7 +30,7 @@ async function confirmationFixture(month:string,label:string,width:number){
  const page=await ownContext.newPage();await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"المسير والصرف"}).click();
  await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(period.body.id));
  const row=page.locator("tbody tr").filter({hasText:name});await expect.poll(()=>row.count()).toBe(1);
- return {item,page,row,periodId:period.body.id,close:()=>ownContext.close()};
+ return {item,page,row,periodId:period.body.id,runId:calculated.body.id,close:()=>ownContext.close()};
 }
 async function api(method:string,path:string,body?:unknown,cookie=h.sessions.admin.cookie){
  const res=await fetch(`${baseUrl}${path}`,{method,headers:{cookie,origin:baseUrl,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
@@ -349,9 +349,34 @@ for(const change of ["role","credential"] as const){
  });
 }
 
+function payrollReplayCaptureDiagnostic(page:Page,key:string,expected:{runId:number;periodId:number;itemId:number;staffName:string}){
+ const dir=process.env.HR_UI_DIAGNOSTIC_DIR;
+ if(!dir)return {phase:(_value:string)=>{},close:async(_completed:boolean)=>{}};
+ let phase="opened-owned-fixture",active=true;const reads:Array<{kind:string;status?:number;detail:boolean}>=[];
+ const owned=(url:string)=>{const value=new URL(url);return value.pathname==="/api/hr/payroll/runs"&&(value.searchParams.get("id")===String(expected.runId)||value.searchParams.get("periodId")===String(expected.periodId));};
+ const response=(r:BrowserResponse)=>{if(active&&reads.length<32&&owned(r.url()))reads.push({kind:"response",status:r.status(),detail:new URL(r.url()).searchParams.has("id")});};
+ const finished=(r:import("playwright").Request)=>{if(active&&reads.length<32&&owned(r.url()))reads.push({kind:"finished",detail:new URL(r.url()).searchParams.has("id")});};
+ const failed=(r:import("playwright").Request)=>{if(active&&reads.length<32&&owned(r.url()))reads.push({kind:"failed",detail:new URL(r.url()).searchParams.has("id")});};
+ page.on("response",response);page.on("requestfinished",finished);page.on("requestfailed",failed);
+ return {phase:(value:string)=>{phase=value;},close:async(completed:boolean)=>{
+  const dom=await boundedReadinessObservation(page.evaluate(({staffName})=>{
+   const panel=document.querySelector('section[aria-label="إدارة المسير والصرف"]'),rows=Array.from(panel?.querySelectorAll("tbody tr")??[]).filter(row=>row.textContent?.includes(staffName));
+   return {period:(panel?.querySelector("select") as HTMLSelectElement|null)?.value??null,rowCount:rows.length,
+    rows:rows.map(row=>{const cells=row.querySelectorAll("td");return {paid:cells[7]?.textContent?.trim()??null,remaining:cells[4]?.textContent?.trim()??null,receiptHrefs:Array.from(row.querySelectorAll('a[href^="/print/voucher/"]')).map(a=>a.getAttribute("href"))};}),
+    runHref:panel?.querySelector('a[href^="/print/hr/payroll/"]')?.getAttribute("href")??null};
+  },{staffName:expected.staffName}));
+  let image:Record<string,unknown>|null=null;
+  if(!completed){const data=await boundedReadinessObservation(page.screenshot({fullPage:true,timeout:2000}));if(Buffer.isBuffer(data)){const png=`${key}-failure.png`;writeFileSync(join(dir,png),data);image={png,bytes:data.length,sha256:createHash("sha256").update(data).digest("hex")};}}
+  active=false;page.off("response",response);page.off("requestfinished",finished);page.off("requestfailed",failed);
+  const value={format:"hr-payroll-replay-capture-v1",acceptance:false,syntheticOnly:true,checkout:process.env.GITHUB_SHA??null,runId:process.env.GITHUB_RUN_ID??null,sourceSha256:createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex"),
+   key,phase,completed,expected:{runId:expected.runId,periodId:expected.periodId,itemId:expected.itemId,paidMinor:1000,remainingMinor:9000,currency:"YER"},reads,dom,image};
+  writeFileSync(join(dir,`${key}.json`),JSON.stringify(value,null,2)+"\n");console.log("HR_PAYROLL_REPLAY_READINESS "+JSON.stringify(value));
+ }};
+}
 for(const [index,[width,variant]] of ([[390,"missing"],[1280,"missing"],[390,"foreign"],[1280,"foreign"]] as const).entries()){
  it(`unverified payout ${variant} body retains the exact request after actual commit at ${width}px`,async()=>{
   const fixture=await confirmationFixture(`2026-0${7-index}`,variant,width),{page,item,row}=fixture;
+  const diagnostic=payrollReplayCaptureDiagnostic(page,`payroll-verified-replay-${variant}-${width}`,{runId:fixture.runId,periodId:fixture.periodId,itemId:item.id,staffName:item.staffName});let captureCompleted=false;
   try{
    await row.getByRole("button",{name:"صرف",exact:true}).click();await page.locator('input[type="number"]').fill("1000");
    let submitted:any,committedBody:any;
@@ -374,15 +399,40 @@ for(const [index,[width,variant]] of ([[390,"missing"],[1280,"missing"],[390,"fo
    await page.getByRole("button",{name:"التحقق من الصرف السابق"}).click();
    await expect.poll(()=>page.locator('section[aria-label="إدارة المسير والصرف"]').innerText()).toContain("ولا تبدأ عملية أخرى قبل التحقق");
    expect(await page.evaluate(id=>JSON.parse(localStorage.getItem(`hr:payroll:pending:${id}`)!).completed,item.id)).not.toBe(true);
-   const method=variant==="missing"?"POST":"GET";
+   const method=variant==="missing"?"POST":"GET";diagnostic.phase("single-verified-replay-action");
    const replay=page.waitForResponse(r=>r.url().includes("/api/hr/payroll/disburse")&&r.request().method()===method);
+   // Modal closure precedes loadRuns(). Bind the new read before the one replay
+   // action, then capture only the exact refreshed run/item/receipt below.
+   const refreshed=page.waitForResponse(r=>{const url=new URL(r.url());return url.origin===new URL(baseUrl).origin&&url.pathname==="/api/hr/payroll/runs"&&url.searchParams.get("id")===String(fixture.runId)&&r.request().method()==="GET";});
    await page.getByRole("button",{name:method==="POST"?"تأكيد الصرف وتسجيل المصروف":"التحقق من الصرف السابق"}).click();const response=await replay;expect(response.status()).toBe(200);
    expect((await response.json()).disbursement).toMatchObject({id:committedBody.disbursement.id,clientRequestId:submitted.clientRequestId,itemId:item.id});
    await expect.poll(()=>page.getByRole("button",{name:"تأكيد الصرف وتسجيل المصروف"}).isVisible()).toBe(false);
    expect((await db.query("SELECT count(*)::int AS n,sum(amount_minor)::text AS amount FROM hr_payroll_disbursements WHERE item_id=$1",[item.id])).rows[0]).toEqual({n:1,amount:"1000"});
    expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].n).toBe(1);
+   diagnostic.phase("await-owned-run-detail");const read=await refreshed;expect(read.status()).toBe(200);const loaded=await read.json();
+   expect(loaded).toMatchObject({id:fixture.runId,periodId:fixture.periodId,currency:"YER"});expect(Array.isArray(loaded.items)).toBe(true);
+   const owned=loaded.items.filter((value:{id:number})=>value.id===item.id);expect(owned).toHaveLength(1);
+   expect(item).toMatchObject({paidMinor:0,remainingMinor:10000,currency:"YER"});
+   expect(owned[0]).toMatchObject({id:item.id,staffId:item.staffId,paidMinor:1000,remainingMinor:9000,currency:"YER"});
+   expect(owned[0].disbursements).toHaveLength(1);
+   expect(owned[0].disbursements[0]).toMatchObject({id:committedBody.disbursement.id,clientRequestId:submitted.clientRequestId,itemId:item.id,amountMinor:1000,reversedAt:null,parts:committedBody.disbursement.parts});
+   const receiptPaths=committedBody.disbursement.parts.map((part:{expenseId:number})=>`/print/voucher/${part.expenseId}`);expect(receiptPaths).toHaveLength(1);
+   diagnostic.phase("assert-owned-row-money-and-receipt");const payroll=page.locator('section[aria-label="إدارة المسير والصرف"]');
+   await expect.poll(()=>row.count()).toBe(1);expect(await row.isVisible()).toBe(true);
+   expect(await payroll.locator("select").first().inputValue()).toBe(String(fixture.periodId));
+   expect(await payroll.getByRole("link",{name:"طباعة الكشف",exact:true}).getAttribute("href")).toBe(`/print/hr/payroll/${fixture.runId}`);
+   expect((await payroll.locator("thead th").allTextContents()).map(text=>text.trim()).slice(4,8)).toEqual(["المتبقي","خصم","الصافي","المصروف"]);
+   await expect.poll(async()=>((await row.locator("td").nth(4).textContent())??"").trim()).toBe(formatAmount(9000,"YER"));
+   await expect.poll(async()=>((await row.locator("td").nth(7).textContent())??"").trim()).toBe(formatAmount(1000,"YER"));
+   const receipt=row.getByRole("link",{name:`سند الراتب #${committedBody.disbursement.parts[0].expenseId}`,exact:true});
+   expect(await receipt.count()).toBe(1);expect(await receipt.isVisible()).toBe(true);expect(await receipt.getAttribute("href")).toBe(receiptPaths[0]);
+   expect(await row.getByRole("button",{name:`عكس الصرف #${committedBody.disbursement.id}`,exact:true}).count()).toBe(1);
+   const captureState=async()=>({period:await payroll.locator("select").first().inputValue(),runHref:await payroll.getByRole("link",{name:"طباعة الكشف",exact:true}).getAttribute("href"),rowCount:await row.count(),paid:((await row.locator("td").nth(7).textContent())??"").trim(),remaining:((await row.locator("td").nth(4).textContent())??"").trim(),receiptHref:await receipt.getAttribute("href")});
+   diagnostic.phase("capture-verified-owned-row");const beforeCapture=await captureState();
    await page.screenshot({path:join(evidence,`hr-verified-replay-${variant}-${width}.png`),fullPage:true});
-  }finally{await fixture.close();}
+   expect(await captureState()).toEqual(beforeCapture);
+   console.log("HR_PAYROLL_VERIFIED_REPLAY_CAPTURE "+JSON.stringify({variant,width,runId:fixture.runId,periodId:fixture.periodId,itemId:item.id,disbursementId:committedBody.disbursement.id,readStatus:read.status(),paidMinor:1000,remainingMinor:9000,currency:"YER",beforeCapture}));captureCompleted=true;diagnostic.phase("completed");
+  }finally{try{await diagnostic.close(captureCompleted);}finally{await fixture.close();}}
  });
 }
 for(const width of [390,1280]){
