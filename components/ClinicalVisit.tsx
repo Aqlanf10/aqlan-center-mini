@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicalContextHref } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
@@ -10,6 +12,7 @@ import { visitTotal, type ProcedureLine } from "@/lib/clinical";
 import { PrescriptionModal } from "./PrescriptionModal";
 import { PostOpModal } from "./PostOpModal";
 import { PatientDiagnosis } from "./PatientDiagnosis";
+import { OrthoTreatmentStrategy } from "./OrthoTreatmentStrategy";
 import {
   BILLING_RULE_LABEL, labWorkForCategory, priceForSession, sessionPriceNote,
   type BillingRule,
@@ -1334,8 +1337,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               </p>
                 <p className="mt-1 text-[11px] text-navy-800">
                   {visit.ortho.legacyBaseline ? "متابعة على خط أساس من العلاج السابق." : "تفاصيل خط الأساس محفوظة في ملف التقويم إن كانت مسجّلة."}
-                  {visit.patientId ? <a href={`/patients/${visit.patientId}?tab=ortho`}
-                onClick={(event) => { if (!currentOwner()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
+                  {visit.patientId ? <a href={clinicalContextHref(visit.patientId, { orthoCaseId: visit.ortho.caseId, ...(visit.ortho.visitAdjustmentId !== null ? { visitId: visit.id } : {}), pillar: "wires" }, "ortho")}
+                onClick={(event) => { if (!currentOwner() || !canLeave()) event.preventDefault(); }} className="ms-2 font-bold underline">عرض ملف التقويم وخط الأساس</a> : null}
                 </p>
               </div>
             ) : null}
@@ -1343,6 +1346,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
               <section className="mb-3 rounded-xl border border-slate-200 bg-white p-3" aria-label="تشخيص حالة التقويم للمرجع">
                 <PatientDiagnosis key={`${referenceOwner.key}:${referenceOwner.generation}`} patientId={visit.patientId}
                   orthoCaseId={visit.ortho.caseId} readOnly referenceVisitId={visitId} />
+                <OrthoTreatmentStrategy key={`strategy:${referenceOwner.key}:${referenceOwner.generation}`}
+                  patientId={visit.patientId} orthoCaseId={visit.ortho.caseId} referenceVisitId={visitId} />
               </section>
             ) : null}
             {visit.suggestions?.chiefComplaint ? <p className="mb-2 text-[11px] text-slate-600">سبب الموعد / الجلسة المخطّطة: {visit.suggestions.chiefComplaint}</p> : null}

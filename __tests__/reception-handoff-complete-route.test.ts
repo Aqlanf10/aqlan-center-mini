@@ -120,3 +120,13 @@ describe("walkout includes durable front-desk status", () => {
     expect((await get()).status).toBe(500);
   });
 });
+
+it("projects historical financial recheck flags into exact authorized signed checkout without changing decision status", async () => {
+  state.handoff.mockResolvedValue({ status: "deferred", handledReason: "قرار سابق",
+    financialReviewRequired: true, visitInvoiceSettled: false });
+  const response = await get(); expect(response.status).toBe(200);
+  expect((await response.json()).receptionHandoff).toEqual({ status: "deferred", handledReason: "قرار سابق",
+    financialReviewRequired: true, visitInvoiceSettled: false });
+  state.session = { username: "doctor", role: "doctor" };
+  expect((await (await get()).json()).receptionHandoff).toBeUndefined();
+});

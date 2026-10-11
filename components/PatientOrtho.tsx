@@ -20,8 +20,12 @@ import {
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
+import { canViewMoney } from "@/lib/roles";
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import { PatientCeph } from "./PatientCeph";
 import { PatientDiagnosis } from "./PatientDiagnosis";
+import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -137,6 +141,10 @@ interface SavedAdjustment {
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
+  /** Strategy presentation subscriptions belong to this draft, never an old view. */
+  strategyView: { readonly readVersion: number; subscribe: (listener: () => void) => () => void;
+    notify: (refresh?: boolean) => void; clear: () => void };
+  settleField: (name: string, value: unknown) => void;
   activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
@@ -200,7 +208,21 @@ function sameDraftValue(before: unknown, after: unknown) {
     && before.length === after.length && before.every((value, index) => Object.is(value, after[index])));
 }
 function makeDraft(): Draft {
+  const strategyListeners = new Set<() => void>();
+  let strategyReadVersion = 0;
   const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
+    strategyView: {
+      get readVersion() { return strategyReadVersion; },
+      subscribe: (listener) => { strategyListeners.add(listener); return () => { strategyListeners.delete(listener); }; },
+      notify: (refresh = false) => {
+        if (refresh) strategyReadVersion++;
+        for (const listener of [...strategyListeners]) listener();
+      },
+      clear: () => { strategyListeners.clear(); },
+    },
+    settleField: (name, value) => {
+      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0;
+    },
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
     trackEdit: (name, previous, next) => {
@@ -228,7 +250,7 @@ function disposeDraft(owner: OrthoOwner, key: string) {
   if (!draft) return;
   draft.active = false;
   for (const url of draft.urls) URL.revokeObjectURL(url);
-  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); owner.drafts.delete(key);
+  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); draft.strategyView.clear(); owner.drafts.delete(key);
 }
 function retireOwner(owner: OrthoOwner) {
   owner.active = false; owner.clinical = false; owner.contact = false;
@@ -290,6 +312,14 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
     && (caseId === undefined || owner.standalone || owner.cases.some((row) => row.id === caseId));
   return { owner, draft, session, editable, field, caseGranted,
     commit: (name: string, value: unknown) => { if (!owner.active || owner.denied || !draft.active) return; draft.values.set(name, value); redraw(); },
+    // A confirmed strategy field save/discard establishes a new clean baseline;
+    // other outstanding fields and other drafts remain untouched. A temporary
+    // pillar view may detach while its owner-bound command is still pending.
+    settle: (name: string, value: unknown) => {
+      if (!caseGranted() || !draft.active || draft.busy || draft.uncertain) return;
+      draft.settleField(name, value); redraw();
+    },
+    viewActive: () => lease.active && caseGranted(),
     begin: (allowed = true) => {
       if (!lease.active) return null;
       const operation = beginMutation(owner, draft, allowed && caseGranted());
@@ -334,8 +364,10 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
+  context?: ClinicalNavigationContext;
+  onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -343,9 +375,15 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   const session = useSession();
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
+  const childGuards = useRef(new Map<string, () => boolean>());
+  const registerChildGuard = useCallback((key: string, guard: () => boolean) => {
+    childGuards.current.set(key, guard);
+    return () => { if (childGuards.current.get(key) === guard) childGuards.current.delete(key); };
+  }, []);
   useLayoutEffect(() => { owner.activate(); return () => owner.retire(); }, [owner]);
   const canLeave = useCallback(() => {
     if (!owner.active) return false;
+    for (const guard of childGuards.current.values()) if (!guard()) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
     if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
     if (drafts.some((draft) => draft.uncertain)) {
@@ -359,11 +397,11 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} registerChildGuard={registerChildGuard} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, registerChildGuard, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; registerChildGuard: (key: string, guard: () => boolean) => () => void; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -388,6 +426,10 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const mayDiscard = (key: string) => { const draft = owner.drafts.get(key); return !draft?.busy && !draft?.uncertain; };
   const setPillarForCase = (caseId: number, pillar: OrthoPillar) => {
     if (!currentView()) return;
+    if (onContextChange) {
+      onContextChange({ ...(context?.orthoCaseId === caseId ? context : {}), patientId, orthoCaseId: caseId, pillar });
+      return;
+    }
     setActivePillars((prev) => ({ ...prev, [caseId]: pillar }));
   };
 
@@ -463,7 +505,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
-  const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
+  const unsignedTodayVisitId = cases.filter((row) => context?.orthoCaseId === undefined || row.id === context.orthoCaseId).flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
   const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
   const signVisitId = (savedCaseAvailable ? saved?.visitId : null) ?? unsignedTodayVisitId;
@@ -505,8 +547,24 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
     </div>;
   }
 
+  if (context?.patientId !== undefined && context.patientId !== patientId
+    || context?.orthoCaseId !== undefined && !cases.some((row) => row.id === context.orthoCaseId)
+    || context?.clinicalCaseId !== undefined && context.orthoCaseId === undefined) {
+    return <p role="alert" data-testid="ortho-context-unavailable">الحالة المطلوبة غير متاحة في كابينة التقويم. لم يتم اختيار حالة بديلة.</p>;
+  }
+  const visibleCases = context?.orthoCaseId === undefined ? cases : cases.filter((row) => row.id === context.orthoCaseId);
   return (
     <div className="space-y-4" data-testid="patient-ortho-workspace" data-read-state="ready">
+      {onContextChange && cases.length > 0 ? <label className="flex flex-wrap items-center gap-2 text-sm">حالة التقويم
+        <select aria-label="حالة التقويم المحددة" className="min-h-11 max-w-full rounded-lg border p-2" value={context?.orthoCaseId ?? ""}
+          onChange={(event) => { if (currentView()) onContextChange({ patientId, ...(event.target.value ? { orthoCaseId: Number(event.target.value), pillar: "wires" as const } : {}) }); }}>
+          <option value="">جميع الحالات، بما فيها المغلقة</option>
+          {cases.map((row) => <option key={row.id} value={row.id}>#{row.id} · {ARCHES_LABEL[row.arches]} · {CASE_STATUS_LABEL[row.status]}</option>)}
+        </select>
+      </label> : null}
+      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
+        onOpenClinicalContext={(reference) => onContextChange?.({ ...reference, pillar: context.pillar ?? "wires" })} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -615,7 +673,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                 يمكنك إجراء وتوثيق التتبع السيفالومتري لدراسة الحالة قبل تركيب الحاصرات وفتح ملف التقويم
               </p>
             </div>
-            <PatientCeph patientId={patientId} embedded={true} />
+            <PatientCeph patientId={patientId} embedded={true} onNavigationGuardChange={(guard) => registerChildGuard("ceph:unlinked", guard)} />
           </div>
         </div>
       )}
@@ -625,14 +683,15 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
       {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
       {cases.length > 0 && (
         <ul className="space-y-4">
-          {cases.map((row) => {
+          {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? "wires";
+            const currentPillar: OrthoPillar = context?.orthoCaseId === row.id && context.pillar ? context.pillar : activePillars[row.id] ?? context?.pillar ?? "wires";
 
             return (
               <li
                 key={row.id}
+                data-testid={`ortho-case-${row.id}`}
                 className={`rounded-2xl border shadow-xs overflow-hidden transition-all ${
                   live ? "border-navy-200 bg-white" : "border-slate-200 bg-slate-50/70 opacity-80"
                 }`}
@@ -941,6 +1000,8 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                         <PatientCeph
                           patientId={patientId}
                           orthoCaseId={row.id}
+                          navigationContext={context?.orthoCaseId === row.id ? context : { patientId, orthoCaseId: row.id }}
+                          onNavigationGuardChange={(guard) => registerChildGuard(`ceph:${row.id}`, guard)}
                           currentPhase={row.phase}
                           embedded={true}
                         />
@@ -1001,6 +1062,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                           </div>
                         )}
                       </div>
+                      <OrthoStrategyPanel patientId={patientId} caseRow={row} />
                     </div>
                   )}
 
@@ -2034,4 +2096,39 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
       </button>
     </form>
   );
+}
+
+
+/** The new planning UI shares the existing case-owner draft and mutation guard. */
+function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
+  const life = useOrthoDraft(`strategy:${caseRow.id}`, patientId, caseRow.id);
+  const [, redrawStrategy] = useState(0);
+  useLayoutEffect(() => {
+    const notify = () => { if (life.viewActive()) redrawStrategy(value => value + 1); };
+    return life.draft.strategyView.subscribe(notify);
+  }, [life]);
+  const notifyStrategy = (refresh = false) => {
+    if (!life.caseGranted() || !life.draft.active) return;
+    life.draft.strategyView.notify(refresh);
+  };
+  const [document, setDocument] = life.field("document", "");
+  const [problemLabel, setProblemLabel] = life.field("problemLabel", "");
+  const [problemSite, setProblemSite] = life.field("problemSite", "");
+  const lifetime: StrategyLifetime = {
+    identity: life.draft, active: life.viewActive, editable: life.editable, denied: () => life.owner.deny(),
+    busy: life.draft.busy, uncertain: life.draft.uncertain, dirty: life.draft.dirty,
+    readVersion: life.draft.strategyView.readVersion, refresh: () => notifyStrategy(true),
+    values: { document, problemLabel, problemSite },
+    change: (field, value) => ({ document: setDocument, problemLabel: setProblemLabel, problemSite: setProblemSite })[field](value),
+    settle: (field, value) => { life.settle(field, value); notifyStrategy(); },
+    begin: () => {
+      const operation = life.begin(life.session?.role === "doctor" || life.session?.role === "admin");
+      if (!operation) return null;
+      return { current: () => life.current(operation), checkHeaders: response => life.checkHeaders(response, operation),
+        markUncertain: () => { life.uncertain(); notifyStrategy(); },
+        finish: () => { life.finish(operation); notifyStrategy(); } };
+    },
+  };
+  return <OrthoTreatmentStrategy patientId={patientId} orthoCaseId={caseRow.id}
+    caseTitle={`تقويم ${APPLIANCE_LABEL[caseRow.appliance]} · ${ARCHES_LABEL[caseRow.arches]}`} lifetime={lifetime} />;
 }

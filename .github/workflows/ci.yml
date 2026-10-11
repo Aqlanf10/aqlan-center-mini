@@ -117,6 +117,7 @@ jobs:
       # يستعاد الملف الملتزم بشجرة العمل. مصدر minor للخادم (18.4 مقابل 18.6)
       # لا يُفشل وحده — البنية هي المقيس.
       - name: Generate current schema contract on PostgreSQL 18
+        id: current_schema_contract
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
@@ -127,6 +128,9 @@ jobs:
           git checkout -- schema/current-schema-contract.pg18.json
 
       - name: Upload PostgreSQL 18 schema contract
+        # Retain actual introspection after a failed strict drift comparison.
+        # The generator still fails CI; this upload never turns it into success.
+        if: ${{ always() && (steps.current_schema_contract.outcome == 'success' || steps.current_schema_contract.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: current-schema-contract-pg18
@@ -246,7 +250,36 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
 
       - name: HTTP security integration tests
+        id: linkage_http
         run: npm run test:security-http
+
+      # Exact intercepted synthetic strategy scenes and measured native bounds.
+      # No live clinic data, traces, cookies, storage, or broad directory uploads.
+      - name: Upload Ortho strategy synthetic UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-strategy-synthetic-ui
+          path: |
+            .settings-ui-artifacts/ortho-strategy-blank-explicit-draft-390.png
+            .settings-ui-artifacts/ortho-strategy-blank-explicit-draft-390.json
+            .settings-ui-artifacts/ortho-strategy-blank-explicit-draft-1280.png
+            .settings-ui-artifacts/ortho-strategy-blank-explicit-draft-1280.json
+            .settings-ui-artifacts/ortho-strategy-retrospective-revision-390.png
+            .settings-ui-artifacts/ortho-strategy-retrospective-revision-390.json
+            .settings-ui-artifacts/ortho-strategy-retrospective-revision-1280.png
+            .settings-ui-artifacts/ortho-strategy-retrospective-revision-1280.json
+            .settings-ui-artifacts/ortho-strategy-bridge-prerequisite-390.png
+            .settings-ui-artifacts/ortho-strategy-bridge-prerequisite-390.json
+            .settings-ui-artifacts/ortho-strategy-bridge-prerequisite-1280.png
+            .settings-ui-artifacts/ortho-strategy-bridge-prerequisite-1280.json
+            .settings-ui-artifacts/ortho-strategy-visit-readonly-390.png
+            .settings-ui-artifacts/ortho-strategy-visit-readonly-390.json
+            .settings-ui-artifacts/ortho-strategy-visit-readonly-1280.png
+            .settings-ui-artifacts/ortho-strategy-visit-readonly-1280.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
       # Exactly three intercepted synthetic report screenshots; no live clinic data,
       # traces, browser storage, or broad artifact directory uploads.
@@ -1009,5 +1042,51 @@ jobs:
             .settings-ui-artifacts/lab-status-refusal-390-bounds.json
             .settings-ui-artifacts/lab-status-refusal-1280-bounds.json
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+
+      # Exact synthetic fixture PNGs only. Retain partial evidence on failures;
+      # a separate gate requires every expected PNG once its suite has started.
+      - name: Verify unified linkage evidence completeness
+        if: always() && steps.linkage_http.outcome != 'skipped' && steps.linkage_http.outcome != ''
+        env:
+          LINKAGE_HTTP_OUTCOME: ${{ steps.linkage_http.outcome }}
+        run: node scripts/verify-unified-linkage-artifacts.mjs
+
+      - name: Upload unified-linkage-ui synthetic evidence
+        if: always() && hashFiles('artifacts/unified-linkage/closed-case-diagnostics-390.png', 'artifacts/unified-linkage/closed-case-diagnostics-1280.png', 'artifacts/unified-linkage/invalid-context-390.png', 'artifacts/unified-linkage/invalid-context-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-linkage-ui
+          path: |
+            artifacts/unified-linkage/closed-case-diagnostics-390.png
+            artifacts/unified-linkage/closed-case-diagnostics-1280.png
+            artifacts/unified-linkage/invalid-context-390.png
+            artifacts/unified-linkage/invalid-context-1280.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload invoice-explicit-selection-ui synthetic evidence
+        if: always() && hashFiles('artifacts/invoice-explicit-selection/fresh-plan-390.png', 'artifacts/invoice-explicit-selection/fresh-plan-1280.png', 'artifacts/invoice-explicit-selection/exact-item-390.png', 'artifacts/invoice-explicit-selection/exact-item-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: invoice-explicit-selection-ui
+          path: |
+            artifacts/invoice-explicit-selection/fresh-plan-390.png
+            artifacts/invoice-explicit-selection/fresh-plan-1280.png
+            artifacts/invoice-explicit-selection/exact-item-390.png
+            artifacts/invoice-explicit-selection/exact-item-1280.png
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload operational-checkout-ui synthetic evidence
+        if: always() && hashFiles('artifacts/operational-checkout/operational-checkout-ready-390.png', 'artifacts/operational-checkout/operational-checkout-ready-1280.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-checkout-ui
+          path: |
+            artifacts/operational-checkout/operational-checkout-ready-390.png
+            artifacts/operational-checkout/operational-checkout-ready-1280.png
           if-no-files-found: error
           retention-days: 7

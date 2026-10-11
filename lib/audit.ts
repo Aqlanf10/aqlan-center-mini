@@ -69,11 +69,12 @@ export type AuditAction =
   /* (CHAIR-1) إقرار الجاهزية للكرسي، وتجاوز الطوارئ بسببٍ مكتوب، وتأجيل الدفع عند الشبّاك. */
   | "visit.clear" | "visit.clearance_bypass" | "visit.payment_deferred"
   | "visit.reception_handoff_completed"
+  | "visit.operational_handoff_decided" | "visit.reception_handoff_verified"
   | "document.upload" | "document.remove"
   /* (P3-6) مرفق سند صرف — صورة إيصال أو فاتورة مورّد. */
   | "expense.attachment"
   | "document.upload.rejected_signature"
-  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard"
+  | "ceph.create" | "ceph.update" | "ceph.complete" | "ceph.discard" | "ceph.link"
   | "inventory.item" | "inventory.move"
   | "lab.create" | "lab.update" | "lab.delete"
   | "lab_order.cancel" | "lab_order.delete"
@@ -88,7 +89,7 @@ export type AuditAction =
   | "ai.settings.update" | "ai.test" | "ai.suggest" | "ai.chat"
   | "ai.provider.save" | "ai.provider.delete" | "ai.providers.reorder" | "ai.provider.test"
   | "ai.confirmation.execute"
-  | "diagnosis.create" | "ortho.book_next"
+  | "diagnosis.create" | "ortho.book_next" | "ortho.strategy_revision"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
@@ -211,6 +212,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "visit.clearance_bypass": "إدخال طوارئ قبل إقرار الجاهزية",
   "visit.payment_deferred": "تأجيل الدفع عند الشبّاك",
   "visit.reception_handoff_completed": "إنهاء متابعة الاستقبال للزيارة — دون إثبات سداد",
+  "visit.operational_handoff_decided": "تسجيل قرار متابعة زيارة انتهى جلوسها دون توقيع سريري — دون إثبات سداد",
+  "visit.reception_handoff_verified": "إعادة تحقق مالية لمتابعة استقبال سابقة — دون إثبات سداد",
   "document.upload": "رفع مستند",
   "expense.attachment": "إرفاق إيصال بسند صرف",
   "document.upload.rejected_signature": "رفع مرفوض — بصمة المحتوى لا تطابق النوع",
@@ -219,6 +222,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ceph.update": "تحديث تحليل سيفالومتري",
   "ceph.complete": "اعتماد تحليل سيفالومتري",
   "ceph.discard": "رفض مسودة سيفالومتري",
+  "ceph.link": "ربط دراسة سيفالومتري بحالة التقويم",
   "inventory.item": "إدارة بند مخزون",
   "inventory.move": "حركة مخزون",
   "lab.create": "إضافة مختبر جديد",
@@ -303,6 +307,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "backup.full_download": "تنزيل نسخة كاملة (بيانات وأشعّة)",
   "backup.complete": "اكتمال بثّ نسخة كاملة",
   "diagnosis.create": "فتح نسخة تشخيص",
+  "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",

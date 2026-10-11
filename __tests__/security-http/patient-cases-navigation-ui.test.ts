@@ -14,7 +14,7 @@ let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
 const HISTORICAL = 959101, ACTIVE = 959102, BRIDGE = 959201, STANDALONE = 959202, ENDO = 959203;
 const FIRST_ITEM = 959301, SECOND_ITEM = 959302;
-const OPEN = "عرض قسم التقويم للمريض";
+const OPEN = "فتح حالة التقويم المحددة";
 const DISCARD = "هناك عمل غير محفوظ في الحالات والمشاكل. هل تريد تجاهله؟";
 const REJECTED = "رفض حفظ اصطناعي؛ لم تُغيّر بيانات المريض";
 const UNCERTAIN_LEAVE = "نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟";
@@ -28,7 +28,7 @@ const SERVICE = "علاج جذور اصطناعي";
 const DRAFT = "مسودة اصطناعية يجب الاحتفاظ بها";
 const WORKFLOW_ASSESSMENT = "حالة تقييم من ملخص المريض الحالي";
 const WORKFLOW_LEGACY = "حالة تاريخية من ملخص المريض الحالي";
-const entry = () => `${baseUrl}/patients/${h.seeded.patientAId}?tab=treatment&sub=cases&caseProbe=retained&orthoCaseId=959999&visitId=959998#record`;
+const entry = (invalidContext = false) => `${baseUrl}/patients/${h.seeded.patientAId}?tab=treatment&sub=cases&caseProbe=retained${invalidContext ? "&orthoCaseId=959999&visitId=959998" : ""}#record`;
 const view = (page: Page) => page.getByTestId("patient-cases");
 const shortcut = (page: Page, id = HISTORICAL) => page.getByTestId(`cases-open-ortho-${id}`);
 const json = (route: Route, payload: unknown, status = 200) => route.fulfill({ status,
@@ -75,14 +75,14 @@ function orthoPayload() {
     adjustments: [], progress: { monthsElapsed: 9, monthsPlanned: 24, monthsRemaining: 15,
       percent: 37.5, overdue: false, adjustments: 0, lastAdjustment: null, daysSinceLast: null } };
   // The newest active case deliberately comes first. The historical shortcut
-  // must truthfully open this whole section, without promising exact selection.
+  // must select the exact historical case, never fall back to this active row.
   return { cases: [active, { ...active, id: HISTORICAL, bracketSystem: "SYNTHETIC-HISTORICAL-CASE",
     status: "completed", phase: "retention", startDate: "2023-01-01", closedAt: "2024-12-01T00:00:00.000Z",
     closedBy: "synthetic-cases-navigation", closedNote: "اكتمل العلاج الاصطناعي" }] };
 }
 
 type Write = { method: string; path: string; body: unknown; status: 409 | 500; release: () => void };
-async function fixture(width: number, options: { role?: "doctorA" | "reception"; planVisible?: boolean; malformed?: boolean } = {}) {
+async function fixture(width: number, options: { role?: "doctorA" | "reception"; planVisible?: boolean; malformed?: boolean; invalidContext?: boolean } = {}) {
   const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 },
     locale: "ar-YE", timezoneId: "Asia/Aden", serviceWorkers: "block" });
   const [name, ...value] = h.sessions[options.role ?? "doctorA"].cookie.split("=");
@@ -128,6 +128,21 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
         legacyCases: [{ id: 959206, patientId: h.seeded.patientAId, kind: "specialty", orthoCaseId: null,
           specialty: "orthodontics", title: WORKFLOW_LEGACY, site: null, status: "active", legacy: true }],
       }); return;
+    }
+    if (method === "GET" && url.pathname === `/api/patients/${h.seeded.patientAId}/clinical-context`) {
+      const query = Object.fromEntries(url.searchParams);
+      const historical = query.orthoCaseId === String(HISTORICAL);
+      const active = query.orthoCaseId === String(ACTIVE);
+      const allowedKeys = historical ? ["patientId", "orthoCaseId", "clinicalCaseId", "pillar"] : ["patientId", "orthoCaseId", "pillar"];
+      if ((!historical && !active) || query.patientId !== String(h.seeded.patientAId) || query.pillar !== "wires"
+        || historical && query.clinicalCaseId !== String(BRIDGE)
+        || [...url.searchParams.keys()].some(key => !allowedKeys.includes(key))
+        || allowedKeys.some(key => url.searchParams.getAll(key).length !== 1)) {
+        await json(route, { ok: false, code: "synthetic_exact_context_refusal" }, 404); return;
+      }
+      await json(route, { ok: true, context: { patientId: h.seeded.patientAId,
+        orthoCaseId: historical ? HISTORICAL : ACTIVE, ...(historical ? { clinicalCaseId: BRIDGE } : {}), pillar: "wires" },
+        specialty: "orthodontics", sub: "ortho" }); return;
     }
     if (method === "GET" && url.pathname === casePath && url.search === "") {
       reads.cases++;
@@ -190,10 +205,13 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
     },
     run: (body: () => Promise<void>) => routes.run(async () => {
       try {
-        const response = await page.goto(entry(), { waitUntil: "domcontentloaded" });
+        const response = await page.goto(entry(options.invalidContext), { waitUntil: "domcontentloaded" });
         expect(response?.status()).toBe(200);
-        await selected(page, "patient-subtab-cases");
-        if (!malformed) await shortcut(page).waitFor();
+        if (options.invalidContext) await page.getByTestId("clinical-context-state").waitFor();
+        else {
+          await selected(page, "patient-subtab-cases");
+          if (!malformed) await shortcut(page).waitFor();
+        }
         await body();
         expect(context.pages()).toHaveLength(1); assertIsolated();
       } finally {
@@ -231,14 +249,25 @@ async function retained(page: Page, url: string, length: number) {
     expect(await page.getByTestId("patient-treatment-section").inputValue()).toBe("cases");
   }
 }
-async function opened(page: Page, original: string, length: number) {
+async function opened(page: Page, original: string, length: number, expectedCase: number | null = HISTORICAL) {
   await selected(page, "patient-subtab-ortho");
-  const expected = new URL(original); expected.searchParams.set("tab", "treatment"); expected.searchParams.set("sub", "ortho");
-  expect(page.url()).toBe(expected.href); expect(await page.evaluate(() => history.length)).toBe(length);
+  const actual = new URL(page.url()), before = new URL(original);
+  expect(actual.pathname).toBe(before.pathname); expect(actual.hash).toBe(before.hash);
+  expect(Object.fromEntries(actual.searchParams)).toEqual({ tab: "treatment", sub: "ortho", caseProbe: "retained",
+    ...(expectedCase === null ? {} : { patientId: String(h.seeded.patientAId), orthoCaseId: String(expectedCase),
+      ...(expectedCase === HISTORICAL ? { clinicalCaseId: String(BRIDGE) } : {}), pillar: "wires" }) });
+  expect(await page.evaluate(() => history.length)).toBe(length);
   const ortho = page.getByTestId("patient-ortho-workspace");
   await expect.poll(() => ortho.getAttribute("data-read-state")).toBe("ready");
-  await expect.poll(() => ortho.innerText()).toContain("SYNTHETIC-ACTIVE-CASE");
-  expect(await ortho.innerText()).toContain("SYNTHETIC-HISTORICAL-CASE");
+  if (expectedCase === null) {
+    await expect.poll(() => ortho.innerText()).toContain("SYNTHETIC-ACTIVE-CASE");
+    expect(await ortho.innerText()).toContain("SYNTHETIC-HISTORICAL-CASE");
+  } else {
+    await expect.poll(() => ortho.getByLabel("حالة التقويم المحددة", { exact: true }).inputValue()).toBe(String(expectedCase));
+    const selectedLabel = expectedCase === HISTORICAL ? "SYNTHETIC-HISTORICAL-CASE" : "SYNTHETIC-ACTIVE-CASE";
+    const otherLabel = expectedCase === HISTORICAL ? "SYNTHETIC-ACTIVE-CASE" : "SYNTHETIC-HISTORICAL-CASE";
+    expect(await ortho.innerText()).toContain(selectedLabel); expect(await ortho.innerText()).not.toContain(otherLabel);
+  }
   expect(await ortho.getByLabel("ما نُفّذ في الشدّة", { exact: true }).count()).toBe(0);
 }
 
@@ -309,7 +338,22 @@ async function draft(page: Page, kind: DraftKind): Promise<Locator> {
 }
 
 describe("Cases to Ortho navigation on the real built RTL patient page", () => {
-  it.each([1280, 390])("offers a truthful patient-section shortcut for both linked and unbridged cases at %ipx", async width => {
+  it("does not fall back from invalid context to another case before explicit case selection", async () => {
+    const f = await fixture(390, { invalidContext: true });
+    await f.run(async () => {
+      const state = f.page.getByTestId("clinical-context-state");
+      await state.getByRole("button", { name: "اختيار حالة من ملف المريض", exact: true }).waitFor();
+      expect(await view(f.page).count()).toBe(0); expect(await f.page.getByTestId("patient-ortho-workspace").count()).toBe(0);
+      expect(f.reads.cases).toBe(0); expect(f.reads.ortho).toBe(0);
+      await state.getByRole("button", { name: "اختيار حالة من ملف المريض", exact: true }).click();
+      await shortcut(f.page).waitFor();
+      const original = f.page.url(), length = await f.page.evaluate(() => history.length);
+      await shortcut(f.page).click(); await opened(f.page, original, length);
+      expect(f.writes).toEqual([]);
+    });
+  });
+
+  it.each([1280, 390])("offers an exact-case shortcut for both linked and unbridged cases at %ipx", async width => {
     const f = await fixture(width);
     await f.run(async () => {
       expect(await view(f.page).getByRole("button", { name: OPEN, exact: true }).count()).toBe(2);
@@ -321,14 +365,14 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
       expect(await shortcut(f.page).getAttribute("href")).toBeNull();
       await capture(f.page, width);
       const original = f.page.url(), length = await f.page.evaluate(() => history.length), documents = f.documents.length;
-      // Keyboard activation of a historical row is section navigation, not a
-      // new visit, bridge, plan, adjustment, or hidden exact-case selection.
+      // Keyboard activation selects the historical case and preserves its bridge.
+      // It creates no visit, bridge, plan or adjustment.
       await shortcut(f.page).focus(); await f.page.keyboard.press("Enter");
       await opened(f.page, original, length); expect(f.documents).toHaveLength(documents);
       expect(f.writes).toEqual([]); expect(f.reads.ortho).toBeGreaterThan(0);
       await f.page.reload(); await opened(f.page, original, length);
       await chooseTreatment(f.page, "cases"); await shortcut(f.page, ACTIVE).waitFor();
-      await shortcut(f.page, ACTIVE).click(); await opened(f.page, original, length);
+      await shortcut(f.page, ACTIVE).click(); await opened(f.page, original, length, ACTIVE);
       expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(documents + 1);
     });
   });
@@ -418,7 +462,7 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
         expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
         if (role === "reception") {
           expect(await view(f.page).locator("input,textarea,select").count()).toBe(0);
-          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual([OPEN, OPEN]);
+          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
         } else expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
         const original = f.page.url(), length = await f.page.evaluate(() => history.length);
         await shortcut(f.page).click(); await opened(f.page, original, length);
@@ -520,7 +564,7 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
       expect(f.reads.cases).toBe(initialReads + 3);
       f.beginOrthoBannerReads();
       await withDiscard(f.page, true, () => chooseTreatment(f.page, "ortho"), UNCERTAIN_LEAVE);
-      await opened(f.page, original, length);
+      await opened(f.page, original, length, null);
       const settledReads = await f.pinOrthoBannerReads(initialReads + 3);
       // Retained native controls cannot revive either an old write or a read.
       // Captured React callback retirement remains covered by the component suite.

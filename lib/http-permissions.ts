@@ -71,6 +71,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/ceph/[id]/ai-analyze": { POST: CLINIC },
   "/api/ceph/[id]/complete": { POST: CLINIC },
   "/api/ceph/[id]/duplicate": { POST: CLINIC },
+  "/api/ceph/[id]/link-case": { POST: CLINIC },
   "/api/ceph/compare": { GET: CLINICAL },
   "/api/ceph/superimpose": { GET: CLINICAL },
   // الاستعلام العام عن الطابور (كشاشة الصالة) مفتوح؛ متابعة تذكرةٍ أو هاتفٍ والحضور الذاتي بجلسة البوابة.
@@ -126,6 +127,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/opening-balances/access": { GET: CLINIC },
   "/api/ortho": { GET: CLINIC, POST: CLINIC },
   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
+  "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
   "/api/ortho/baseline": { POST: CLINICAL },
   "/api/ortho/billing-decisions": { GET: CLINIC },
@@ -136,6 +138,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: CLINIC },
   "/api/patients/[id]": { GET: ["admin", "reception", "doctor", "assistant"], PATCH: CLINIC, DELETE: ADMIN },
   "/api/patients/[id]/arrival-panel": { GET: ["admin", "reception", "doctor", "cashier"] },
+  "/api/patients/[id]/clinical-context": { GET: CLINIC },
   "/api/patients/[id]/cases": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/ceph": { GET: CLINIC, POST: CLINIC },
   "/api/patients/[id]/chart": { GET: CLINIC, POST: CLINICAL },
@@ -161,6 +164,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/merge": { POST: ADMIN },
   "/api/patients/[id]/photo": { PUT: CLINIC },
   "/api/patients/[id]/plans": { GET: CLINIC },
+  "/api/patients/[id]/treatment-financial-context": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/patients/[id]/prescriptions": { GET: CLINICAL },
   "/api/patients/[id]/problems": { GET: CLINIC, POST: CLINICAL },
   "/api/patients/[id]/referrals": { GET: CLINIC, POST: CLINICAL },
@@ -243,6 +247,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/visits/[id]/clinical": { GET: ["admin", "reception", "doctor", "assistant"], POST: ["admin", "doctor", "assistant"] },
   "/api/visits/[id]/materials": { GET: CLINIC },
   "/api/visits/[id]/next": { POST: CLINIC },
+  "/api/visits/[id]/reception-verification": { GET: FRONT_DESK, POST: FRONT_DESK },
+  "/api/visits/[id]/operational-checkout": { GET: FRONT_DESK, POST: FRONT_DESK },
   "/api/visits/[id]/reception-handoff": { POST: FRONT_DESK },
   "/api/visits/[id]/walkout": { GET: CLINIC },
   "/api/visits/readiness": { GET: ["admin", "reception", "doctor", "assistant"] },
@@ -347,4 +353,5 @@ export function rolesAlwaysDenied(access: HttpAccess, roles: readonly Role[]): R
 
 export const API_ROUTE_UNKNOWN_MESSAGE = "هذا المسار غير موجود.";
 export const API_METHOD_NOT_ALLOWED_MESSAGE = "هذه العملية غير مدعومة على هذا المسار.";
+
 

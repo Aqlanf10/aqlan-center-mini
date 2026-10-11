@@ -14,7 +14,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { VisitWalkout, WalkoutLine } from "@/lib/db";
 
 /** (P0-G) ملخّص المغادرة كما يعيده الخادم مع ملخّصه المالي بكل عملة. */
-type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[]; signedAt?: string | null; receptionHandoff?: { status: ReceptionHandoffStatus; handledReason: string | null } };
+type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[]; signedAt?: string | null; receptionHandoff?: { status: ReceptionHandoffStatus; handledReason: string | null; financialReviewRequired?: boolean; visitInvoiceSettled?: boolean } };
 
 /** تسميات التصنيف القانوني — المصدر في الخادم، والواجهة تعرضه فقط. */
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -37,6 +37,8 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
   if (value.receptionHandoff !== undefined && (!record(value.receptionHandoff)
     || typeof value.receptionHandoff.status !== "string"
     || !["pending", "collected", "deferred", "handled"].includes(value.receptionHandoff.status)
+    || (value.receptionHandoff.financialReviewRequired !== undefined && typeof value.receptionHandoff.financialReviewRequired !== "boolean")
+    || (value.receptionHandoff.visitInvoiceSettled !== undefined && typeof value.receptionHandoff.visitInvoiceSettled !== "boolean")
     || !(value.receptionHandoff.handledReason === null || typeof value.receptionHandoff.handledReason === "string")
     || typeof value.signedAt !== "string" || !Number.isFinite(Date.parse(value.signedAt)))) return false;
   const fields = ["previousBalanceMinor", "newBillableMinor", "paymentsTodayMinor", "currentBalanceMinor", "todayRemainingMinor",
@@ -223,7 +225,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
     }
   };
 
-  const deferred = walkout?.deferred === true;
+  const deferred = walkout?.deferred === true || walkout?.receptionHandoff?.status === "deferred";
   const summary = financialVerified ? walkout?.summary ?? [] : [];
 
   return (
@@ -281,6 +283,12 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
           ) : null}
         </section>
       ))}
+      {walkout?.receptionHandoff?.financialReviewRequired && <section aria-label="إعادة تحقق متابعة الاستقبال" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs">
+        <p className="font-bold">الحالة المالية تحتاج إعادة تحقق. القرار السابق محفوظ ولا يثبت السداد الحالي.</p>
+        <a href={`/patients/${walkout.patientId}?tab=account`} className="inline-flex min-h-11 items-center rounded-xl border px-3">عرض الحساب الحالي</a>
+        <button type="button" onClick={() => void load()} disabled={busy} className="min-h-11 rounded-xl border px-3">تحديث حالة الزيارة</button>
+        <p>لتسجيل مراجعة جديدة، افتح قائمة التحصيل والخروج ثم «تحتاج إعادة تحقق مالية».</p>
+      </section>}
       <div className="flex flex-wrap gap-2">
         {walkout?.receptionHandoff?.status === "pending" && typeof walkout.signedAt === "string"
           && Number.isFinite(Date.parse(walkout.signedAt)) ? (

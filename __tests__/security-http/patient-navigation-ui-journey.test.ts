@@ -12,6 +12,8 @@ let db: Client;
 let h: Awaited<ReturnType<typeof harness>>;
 let patientId: number;
 let visitId: number;
+let caseId: number;
+let endoTreatmentId: number;
 const stamp = Date.now();
 
 beforeAll(async () => {
@@ -25,10 +27,10 @@ beforeAll(async () => {
   visitId = (await db.query<{ id: number }>(
     "INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ('مريض اختبار التنقل', $1, $2, 'in_chair') RETURNING id",
     [patientId, doctor])).rows[0].id;
-  const caseId = (await db.query<{ id: number }>(
+  caseId = (await db.query<{ id: number }>(
     "INSERT INTO clinical_cases (patient_id, specialty, title, responsible_party_id, created_by) VALUES ($1, 'endodontics', 'حالة اختبار التنقل', $2, 'secdoctora') RETURNING id",
     [patientId, doctor])).rows[0].id;
-  await db.query("INSERT INTO endo_treatments (patient_id, case_id, tooth_code, created_by) VALUES ($1, $2, 36, 'secdoctora')", [patientId, caseId]);
+  endoTreatmentId = (await db.query<{ id: number }>("INSERT INTO endo_treatments (patient_id, case_id, tooth_code, created_by) VALUES ($1, $2, 36, 'secdoctora') RETURNING id", [patientId, caseId])).rows[0].id;
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
@@ -275,8 +277,22 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
   });
 });
 
+  it("refuses fabricated mixed-specialty context instead of opening an unrelated Endo editor", async () => {
+    const { context, page } = await open("?tab=treatment&sub=endo&orthoCaseId=2147483647&visitId=2147483647#record");
+    try {
+      const blocked = page.getByTestId("clinical-context-state");
+      await expect.poll(() => blocked.getAttribute("role")).toBe("alert");
+      expect(await page.getByTestId("endo-record").count()).toBe(0);
+      expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe("2147483647");
+      expect(new URL(page.url()).searchParams.get("visitId")).toBe("2147483647");
+      // A refused reference is retained for explicit correction, never silently
+      // replaced with this patient's latest available episode.
+      expect(await blocked.getByRole("button", { name: "اختيار حالة من ملف المريض", exact: true }).count()).toBe(1);
+    } finally { await context.close(); }
+  });
+
   it.each([1280, 390])("explicit tab and specialty cancellation preserve the selected workspace and draft at %ipx", async width => {
-    const { context, page } = await open("?tab=treatment&sub=endo&orthoCaseId=123&visitId=456#record", width);
+    const { context, page } = await open(`?tab=treatment&sub=endo&clinicalCaseId=${caseId}&endoTreatmentId=${endoTreatmentId}#record`, width);
     try {
       await draft(page);
       const url = page.url(); const length = await page.evaluate(() => history.length);
@@ -287,8 +303,8 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
       expect(await page.evaluate(() => history.length)).toBe(length);
       await selected(page, "patient-subtab-endo");
       if (width === 390) expect(await page.getByTestId("patient-treatment-section").inputValue()).toBe("endo");
-      expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe("123");
-      expect(new URL(page.url()).searchParams.get("visitId")).toBe("456");
+      expect(new URL(page.url()).searchParams.get("clinicalCaseId")).toBe(String(caseId));
+      expect(new URL(page.url()).searchParams.get("endoTreatmentId")).toBe(String(endoTreatmentId));
       expect(new URL(page.url()).hash).toBe("#record");
       await mkdir(".settings-ui-artifacts", { recursive: true });
       for (const width of [1280, 390]) {
@@ -442,9 +458,16 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-today-${variant}-${width}.png`, fullPage: true });
           await page.getByTestId("patient-tab-treatment").click();
           await selected(page, "patient-subtab-endo");
-          await page.getByTestId("endo-record").waitFor();
-          expect(new URL(page.url()).searchParams.get("caseProbe")).toBe("retained");
+          // A patient visit alone does not select the latest Endo episode.
+          await page.getByTestId("endo-context-selection").waitFor();
+          expect(await page.getByTestId("endo-record").count()).toBe(0);
           expect(new URL(page.url()).searchParams.get("visitId")).toBe(String(visitId));
+          await page.getByTestId("endo-tooth-36").click();
+          await page.getByTestId("endo-record").waitFor();
+          expect(new URL(page.url()).searchParams.get("clinicalCaseId")).toBe(String(caseId));
+          expect(new URL(page.url()).searchParams.get("endoTreatmentId")).toBe(String(endoTreatmentId));
+          expect(new URL(page.url()).searchParams.has("visitId")).toBe(false);
+          expect(new URL(page.url()).searchParams.get("caseProbe")).toBe("retained");
           expect(new URL(page.url()).hash).toBe("#record");
           if (width === 390) {
             const selector = page.getByTestId("patient-treatment-section");
