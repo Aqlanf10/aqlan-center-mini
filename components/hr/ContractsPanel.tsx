@@ -5,8 +5,9 @@ import { Modal } from "@/components/Modal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { clinicDateString } from "@/lib/schedule";
 import {
-  HR_CONTRACT_KIND_LABELS,
+  HR_CONTRACT_KIND_LABELS, HR_CANONICAL_CONTRACT_KINDS, hrContractCompensationKind, hrContractPayMissing,
   HR_CONTRACT_STATUS_LABELS,
+  hrContractNextStatuses,hrContractHasApproval,hrContractEditable,
   type HrContractKind,
   type HrContractStatus,
 } from "@/lib/hr-contracts-attendance-shared";
@@ -24,16 +25,20 @@ interface ContractItem {
   startDate: string;
   endDate: string | null;
   probationEndDate: string | null;
-  baseSalaryMinor: number;
-  salaryCurrency: Currency;
-  commissionRatePercent: number;
+  compensationKind: "salary"|"commission"|"salary_commission";
+  salaryPeriod: string|null;
+  doctorPartyId: number|null;
+  baseSalaryMinor: number|null;
+  salaryCurrency: Currency|null;
+  commissionRatePercent: number|null;
   hourlyRate: number;
   workingHoursPerWeek: number;
-  termsPayload: { clauses?: string[] };
+  termsPayload: { clauses?: string[]; workingHoursPerWeek?:number|null; hourlyRateMinor?:number|null; [key:string]:unknown };
   approvedBy: string | null;
   approvedAt: string | null;
   addendaCount?: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface StaffOption {
@@ -66,6 +71,7 @@ export function HrContractsPanel() {
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingDraft,setEditingDraft] = useState<ContractItem|null>(null);
   const [selectedContract, setSelectedContract] = useState<ContractItem | null>(null);
   const [contractDetails, setContractDetails] = useState<{ contract: ContractItem; addenda: AddendumItem[] } | null>(null);
   const [addendumModalOpen, setAddendumModalOpen] = useState(false);
@@ -76,20 +82,21 @@ export function HrContractsPanel() {
   // Create form state
   const [formStaffId, setFormStaffId] = useState("");
   const [formTitle, setFormTitle] = useState("");
-  const [formKind, setFormKind] = useState<HrContractKind>("fixed_salary");
+  const [formKind, setFormKind] = useState<HrContractKind>("support_staff");
   const [formStartDate, setFormStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [formEndDate, setFormEndDate] = useState("");
   const [formProbationDate, setFormProbationDate] = useState("");
-  const [formCurrency, setFormCurrency] = useState("YER");
+  const [formCurrency, setFormCurrency] = useState("");
+  const [formSalaryPeriod,setFormSalaryPeriod] = useState("");
   const [doctorParties,setDoctorParties] = useState<Array<{id:number;name:string;commissionPercent:number}>>([]);
   const [formDoctorPartyId,setFormDoctorPartyId] = useState("");
   const [addendumSalary,setAddendumSalary] = useState("");
   const [addendumCurrency,setAddendumCurrency] = useState<Currency>("YER");
   useEffect(()=>{ void fetch("/api/parties?kind=doctor").then(async(r)=>{if(r.ok) setDoctorParties(await r.json());}).catch(()=>{}); },[]);
-  const [formBaseSalary, setFormBaseSalary] = useState("0");
-  const [formCommissionRate, setFormCommissionRate] = useState("0");
-  const [formHourlyRate, setFormHourlyRate] = useState("0");
-  const [formHoursWeek, setFormHoursWeek] = useState("48");
+  const [formBaseSalary, setFormBaseSalary] = useState("");
+  const [formCommissionRate, setFormCommissionRate] = useState("");
+  const [formHourlyRate, setFormHourlyRate] = useState("");
+  const [formHoursWeek, setFormHoursWeek] = useState("");
   const [formClauses, setFormClauses] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -145,35 +152,29 @@ export function HrContractsPanel() {
     }
   };
 
-  const applyTemplate = (template: "fixed" | "doctor_pct" | "hybrid" | "probation") => {
-    if (template === "fixed") {
-      setFormKind("fixed_salary");
-      setFormTitle("عقد عمل محدد المدة");
-      setFormBaseSalary("150000");
-      setFormCommissionRate("0");
-      setFormClauses("1. يلتزم الطرف الثاني بأداء مهام وظيفته وفقاً لتعليمات الإدارة واللوائح الداخلية.\n2. ساعات العمل 48 ساعة أسبوعياً مع راحة يوم واحد.\n3. الإجازة السنوية 30 يوماً مدفوعة الأجر بعد إكمال سنة عمل.");
-    } else if (template === "doctor_pct") {
-      setFormKind("percentage");
-      setFormTitle("عقد طبيب بنسبة معتمدة");
-      setFormBaseSalary("0");
-      setFormCommissionRate("40");
-      setFormClauses("1. يستحق الطبيب نسبة صافية عن الحالات المنجزة وفق سجلات النظام الآلية.\n2. يتم صرف المستحقات شهرياً بعد تدقيق ومطابقة فواتير المركز.\n3. يلتزم الطبيب بالحضور وفق جدول المواعيد المعتمد.");
-    } else if (template === "hybrid") {
-      setFormKind("hybrid");
-      setFormTitle("عقد مختلط (راتب أساسي ونسبة)");
-      setFormBaseSalary("100000");
-      setFormCommissionRate("20");
-      setFormClauses("1. يمنح الطرف الثاني راتباً أساسياً شهرياً بالإضافة إلى نسبة إنجاز محددة.\n2. يتم احتساب النسبة شهرياً وإضافتها لمسير الرواتب.");
-    } else if (template === "probation") {
-      setFormKind("probation");
-      setFormTitle("عقد تدريب وتجربة");
-      setFormBaseSalary("80000");
-      setFormCommissionRate("0");
-      const d = new Date();
-      d.setMonth(d.getMonth() + 3);
-      setFormProbationDate(clinicDateString(d, CLINIC_ZONE_FALLBACK));
-      setFormClauses("1. فترة تجربة مدتها 3 أشهر لتقييم الكفاءة والالتزام.\n2. يحق لأي من الطرفين إنهاء العقد خلال فترة التجربة مع إشعار كتابي.");
-    }
+  const applyTemplate = (template: "fixed" | "doctor_pct" | "doctor_salary" | "hybrid" | "probation") => {
+    const presets = {
+      fixed:{kind:"support_staff",title:"عقد موظف مساند براتب"},
+      doctor_pct:{kind:"doctor_percentage",title:"عقد طبيب بنسبة"},
+      doctor_salary:{kind:"doctor_salary",title:"عقد طبيب براتب"},
+      hybrid:{kind:"doctor_hybrid",title:"عقد طبيب براتب ونسبة"},
+      probation:{kind:"support_staff",title:"عقد موظف مساند خلال فترة التجربة"},
+    } as const;
+    setFormKind(presets[template].kind);setFormTitle(presets[template].title);
+    // Classification only: preserve explicitly entered terms; never invent pay,
+    // probation dates, working hours, or contractual clauses.
+  };
+
+  const openDraftEditor = (contract:ContractItem) => {
+    if(!hrContractEditable(contract))return;
+    setEditingDraft(contract);setFormStaffId(String(contract.staffId));setFormTitle(contract.title);setFormKind(contract.templateKind);
+    setFormStartDate(contract.startDate);setFormEndDate(contract.endDate??"");setFormProbationDate(contract.probationEndDate??"");
+    setFormCurrency(contract.salaryCurrency??"");setFormSalaryPeriod(contract.salaryPeriod??"");
+    setFormBaseSalary(contract.baseSalaryMinor!==null&&contract.salaryCurrency?toInputAmount(contract.baseSalaryMinor,contract.salaryCurrency):"");
+    setFormCommissionRate(contract.commissionRatePercent===null?"":String(contract.commissionRatePercent));setFormDoctorPartyId(contract.doctorPartyId===null?"":String(contract.doctorPartyId));
+    setFormHoursWeek(contract.termsPayload.workingHoursPerWeek==null?"":String(contract.termsPayload.workingHoursPerWeek));
+    setFormHourlyRate(contract.termsPayload.hourlyRateMinor!=null&&contract.salaryCurrency?toInputAmount(contract.termsPayload.hourlyRateMinor,contract.salaryCurrency):"");
+    setFormClauses(contract.termsPayload.clauses?.join("\n")??"");setSelectedContract(null);setContractDetails(null);setCreateModalOpen(true);
   };
 
   const handleCreateContract = async (e: React.FormEvent) => {
@@ -182,35 +183,35 @@ export function HrContractsPanel() {
       alert("يرجى تعبئة الحقول الإلزامية.");
       return;
     }
+    if ((formBaseSalary.trim() || formHourlyRate.trim()) && !formCurrency) { alert("اختر عملة المبلغ صراحةً."); return; }
     setSubmitting(true);
     try {
-      const res = await fetch("/api/hr/contracts", {
-        method: "POST",
+      const res = await fetch(editingDraft?`/api/hr/contracts/${editingDraft.id}`:"/api/hr/contracts", {
+        method: editingDraft?"PATCH":"POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(editingDraft?{expectedUpdatedAt:editingDraft.updatedAt}:{}),
           staffId: formStaffId,
 
           title: formTitle,
           templateKind: formKind,
-          compensationKind: ["doctor_percentage","percentage"].includes(formKind) ? "commission" : ["doctor_hybrid","hybrid"].includes(formKind) ? "salary_commission" : "salary",
+          compensationKind: hrContractCompensationKind(formKind),
           startDate: formStartDate,
           endDate: formEndDate || null,
           probationEndDate: formProbationDate || null,
-          salaryCurrency: formCurrency,
-          salaryPeriod: "monthly",
-          baseSalaryMinor: parseAmount(formBaseSalary, formCurrency as Currency),
-          commissionRatePercent: Number(formCommissionRate),
+          salaryCurrency: formCurrency || null,
+          salaryPeriod: formSalaryPeriod || null,
+          baseSalaryMinor: formBaseSalary.trim() ? parseAmount(formBaseSalary, formCurrency as Currency) : null,
+          commissionRatePercent: formCommissionRate.trim() ? Number(formCommissionRate) : null,
           doctorPartyId: formDoctorPartyId ? Number(formDoctorPartyId) : null,
-          hourlyRate: parseFloat(formHourlyRate) || 0,
-          workingHoursPerWeek: parseInt(formHoursWeek, 10) || 48,
-          termsPayload: { clauses: formClauses.split("\n").filter(Boolean), workingHoursPerWeek: Number(formHoursWeek) },
+          termsPayload: { ...editingDraft?.termsPayload, clauses: formClauses.split("\n").filter(Boolean), workingHoursPerWeek: formHoursWeek.trim() ? Number(formHoursWeek) : null, hourlyRateMinor: formHourlyRate.trim() ? parseAmount(formHourlyRate, formCurrency as Currency) : null },
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || "تعذّر إنشاء العقد.");
       }
-      setCreateModalOpen(false);
+      setCreateModalOpen(false);setEditingDraft(null);
       void loadContracts();
     } catch (err: any) {
       alert(err.message || "حدث خطأ أثناء حفظ العقد.");
@@ -221,6 +222,7 @@ export function HrContractsPanel() {
 
   const handleTransitionStatus = async () => {
     if (!selectedContract) return;
+    if(!hrContractNextStatuses(contractDetails?.contract??selectedContract).includes(targetStatus))return;
     setSubmitting(true);
     try {
       const res = await fetch(`/api/hr/contracts/${selectedContract.id}`, {
@@ -314,6 +316,7 @@ export function HrContractsPanel() {
           <button
             type="button"
             onClick={() => {
+              setEditingDraft(null);setFormTitle("");setFormStaffId("");setFormStartDate(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));setFormKind("support_staff");setFormBaseSalary("");setFormCommissionRate("");setFormCurrency("");setFormSalaryPeriod("");setFormDoctorPartyId("");setFormHoursWeek("");setFormHourlyRate("");setFormProbationDate("");setFormEndDate("");setFormClauses("");
               setCreateModalOpen(true);
             }}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-navy-800 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-navy-700"
@@ -351,9 +354,9 @@ export function HrContractsPanel() {
           className="rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
         >
           <option value="">جميع أنواع العقود</option>
-          {Object.entries(HR_CONTRACT_KIND_LABELS).map(([k, label]) => (
+          {HR_CANONICAL_CONTRACT_KINDS.map((k) => (
             <option key={k} value={k}>
-              {label}
+              {HR_CONTRACT_KIND_LABELS[k]}
             </option>
           ))}
         </select>
@@ -408,13 +411,13 @@ export function HrContractsPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
-                      {c.baseSalaryMinor > 0 && (
+                      {c.baseSalaryMinor !== null && c.salaryCurrency !== null && (
                         <div>
                           {formatAmount(c.baseSalaryMinor, c.salaryCurrency as Currency)}{" "}
                           {CURRENCY_SHORT[c.salaryCurrency as Currency] || c.salaryCurrency}
                         </div>
                       )}
-                      {c.commissionRatePercent > 0 && (
+                      {c.commissionRatePercent !== null && (
                         <div className="text-emerald-700">نسبة: {c.commissionRatePercent}%</div>
                       )}
                     </td>
@@ -477,18 +480,18 @@ export function HrContractsPanel() {
       {createModalOpen && (
         <Modal onClose={() => setCreateModalOpen(false)}>
           <form onSubmit={handleCreateContract} className="space-y-4">
-            <h3 className="text-lg font-bold text-navy-900">إنشاء عقد وظيفي جديد</h3>
+            <h3 className="text-lg font-bold text-navy-900">{editingDraft?"استكمال / تعديل المسودة":"إنشاء عقد وظيفي جديد"}</h3>
 
             {/* Template Selector */}
-            <div className="rounded-xl border border-navy-100 bg-navy-50/50 p-3">
-              <div className="mb-2 text-xs font-semibold text-navy-600">اختر قالباً جاهزاً لتعبئة البنود تلقائياً:</div>
+            <fieldset disabled={Boolean(editingDraft)} className="rounded-xl border border-navy-100 bg-navy-50/50 p-3">
+              <div className="mb-2 text-xs font-semibold text-navy-600">اختر تصنيف العقد؛ الأجر والبنود غير مسجلة حتى تدخلها صراحةً:</div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => applyTemplate("fixed")}
                   className="rounded-lg border border-navy-200 bg-white px-2.5 py-1 text-xs font-medium text-navy-800 hover:bg-navy-100"
                 >
-                  عقد محدد (راتب)
+                  عقد موظف مساند (راتب)
                 </button>
                 <button
                   type="button"
@@ -497,6 +500,7 @@ export function HrContractsPanel() {
                 >
                   عقد طبيب (نسبة)
                 </button>
+                <button type="button" onClick={() => applyTemplate("doctor_salary")} className="rounded-lg border border-navy-200 bg-white px-2.5 py-1 text-xs">عقد طبيب (راتب)</button>
                 <button
                   type="button"
                   onClick={() => applyTemplate("hybrid")}
@@ -512,14 +516,14 @@ export function HrContractsPanel() {
                   فترة تجربة
                 </button>
               </div>
-            </div>
+            </fieldset>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">الموظف *</label>
                 <select
                   required
-                  value={formStaffId}
+                  disabled={Boolean(editingDraft)} aria-label="الموظف" value={formStaffId}
                   onChange={(e) => setFormStaffId(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
@@ -535,7 +539,7 @@ export function HrContractsPanel() {
             </div>
 
             <label className="block text-xs font-semibold">جهة الطبيب في محرك العمولات
-              <select value={formDoctorPartyId} onChange={(e)=>{setFormDoctorPartyId(e.target.value);const doctor=doctorParties.find((d)=>String(d.id)===e.target.value);if(doctor)setFormCommissionRate(String(doctor.commissionPercent));}} required={["percentage","doctor_percentage","hybrid","doctor_hybrid"].includes(formKind)} className="w-full rounded-xl border p-2">
+              <select value={formDoctorPartyId} onChange={(e)=>setFormDoctorPartyId(e.target.value)} className="w-full rounded-xl border p-2">
                 <option value="">اختر جهة الطبيب للعقد بنسبة أو مختلط</option>{doctorParties.map((d)=><option key={d.id} value={d.id}>{d.name} ({d.commissionPercent}%)</option>)}
               </select>
             </label>
@@ -546,7 +550,7 @@ export function HrContractsPanel() {
                 <input
                   required
                   type="text"
-                  value={formTitle}
+                  aria-label="مسمى العقد" value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 />
@@ -554,13 +558,13 @@ export function HrContractsPanel() {
               <div>
                 <label className="mb-1 block text-xs font-semibold text-navy-700">نوع العقد *</label>
                 <select
-                  value={formKind}
+                  disabled={Boolean(editingDraft)} aria-label="نوع العقد" value={formKind}
                   onChange={(e) => setFormKind(e.target.value as HrContractKind)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 >
-                  {Object.entries(HR_CONTRACT_KIND_LABELS).map(([k, label]) => (
+                  {HR_CANONICAL_CONTRACT_KINDS.map((k) => (
                     <option key={k} value={k}>
-                      {label}
+                      {HR_CONTRACT_KIND_LABELS[k]}
                     </option>
                   ))}
                 </select>
@@ -573,7 +577,7 @@ export function HrContractsPanel() {
                 <input
                   required
                   type="date"
-                  value={formStartDate}
+                  aria-label="تاريخ البدء" value={formStartDate}
                   onChange={(e) => setFormStartDate(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 />
@@ -582,7 +586,7 @@ export function HrContractsPanel() {
                 <label className="mb-1 block text-xs font-semibold text-navy-700">تاريخ الانتهاء</label>
                 <input
                   type="date"
-                  value={formEndDate}
+                  aria-label="تاريخ الانتهاء" value={formEndDate}
                   onChange={(e) => setFormEndDate(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 />
@@ -591,13 +595,19 @@ export function HrContractsPanel() {
                 <label className="mb-1 block text-xs font-semibold text-navy-700">نهاية فترة التجربة</label>
                 <input
                   type="date"
-                  value={formProbationDate}
+                  aria-label="نهاية فترة التجربة" value={formProbationDate}
                   onChange={(e) => setFormProbationDate(e.target.value)}
                   className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
                 />
               </div>
             </div>
 
+            <p className="text-xs text-navy-600">يمكن حفظ المسودة ناقصة؛ يلزم إكمال شروط الأجر صراحةً قبل الاعتماد. اختيار جهة الطبيب لا يملأ نسبة العقد تلقائيًا.</p>
+            <label className="block text-xs font-semibold">دورية الراتب
+              <select aria-label="دورية الراتب" value={formSalaryPeriod} onChange={e=>setFormSalaryPeriod(e.target.value)} className="w-full rounded-xl border p-2">
+                <option value="">غير مسجلة</option><option value="monthly">شهري</option><option value="weekly">أسبوعي</option><option value="daily">يومي</option><option value="per_shift">لكل وردية</option>
+              </select>
+            </label>
             {/* Financials & Currency */}
             <div className="rounded-xl border border-navy-200 bg-navy-50/30 p-3">
               <div className="mb-2 text-xs font-bold text-navy-800">الأجر المالي والعملة:</div>
@@ -605,10 +615,11 @@ export function HrContractsPanel() {
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-navy-700">العملة *</label>
                   <select
-                    value={formCurrency}
+                    aria-label="عملة الأجر" value={formCurrency}
                     onChange={(e) => setFormCurrency(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   >
+                    <option value="">غير مسجلة</option>
                     {CURRENCIES.map((c) => (
                       <option key={c} value={c}>
                         {c} ({CURRENCY_SHORT[c]})
@@ -621,7 +632,7 @@ export function HrContractsPanel() {
                   <input
                     type="number"
                     step="any"
-                    value={formBaseSalary}
+                    aria-label="الراتب الأساسي" value={formBaseSalary}
                     onChange={(e) => setFormBaseSalary(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   />
@@ -631,7 +642,7 @@ export function HrContractsPanel() {
                   <input
                     type="number"
                     step="any"
-                    value={formCommissionRate}
+                    aria-label="نسبة الطبيب (%)" value={formCommissionRate}
                     onChange={(e) => setFormCommissionRate(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   />
@@ -641,7 +652,7 @@ export function HrContractsPanel() {
                   <input
                     type="number"
                     step="any"
-                    value={formHourlyRate}
+                    aria-label="أجر الساعة" value={formHourlyRate}
                     onChange={(e) => setFormHourlyRate(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   />
@@ -650,7 +661,7 @@ export function HrContractsPanel() {
                   <label className="mb-1 block text-xs font-semibold text-navy-700">ساعات العمل أسبوعياً</label>
                   <input
                     type="number"
-                    value={formHoursWeek}
+                    aria-label="ساعات العمل أسبوعياً" value={formHoursWeek}
                     onChange={(e) => setFormHoursWeek(e.target.value)}
                     className="w-full rounded-xl border border-navy-200 bg-white p-2 text-sm outline-none"
                   />
@@ -710,7 +721,8 @@ export function HrContractsPanel() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setStatusModalOpen(true)}
+                  disabled={hrContractNextStatuses(contractDetails.contract).length===0}
+                  onClick={() => {const next=hrContractNextStatuses(contractDetails.contract)[0];if(next){setTargetStatus(next);setStatusModalOpen(true);}}}
                   className="rounded-lg bg-navy-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-navy-700"
                 >
                   تغيير الحالة
@@ -718,6 +730,8 @@ export function HrContractsPanel() {
               </div>
             </div>
 
+            {hrContractPayMissing(contractDetails.contract).length>0 && <p role="status" className="text-sm text-amber-800">شروط الأجر غير مكتملة: {hrContractPayMissing(contractDetails.contract).join("، ")}. يلزم إكمالها قبل الاعتماد.</p>}
+            {hrContractEditable(contractDetails.contract) && <button type="button" onClick={()=>openDraftEditor(contractDetails.contract)} className="rounded-lg border px-3 py-2 text-sm">استكمال / تعديل المسودة</button>}
             {/* Contract Info */}
             <div className="grid grid-cols-2 gap-3 rounded-xl bg-navy-50/50 p-3 text-xs sm:grid-cols-4">
               <div>
@@ -733,10 +747,10 @@ export function HrContractsPanel() {
               <div>
                 <span className="text-navy-500">الراتب / النسبة:</span>
                 <div className="font-semibold text-navy-800">
-                  {contractDetails.contract.baseSalaryMinor > 0
+                  {contractDetails.contract.baseSalaryMinor !== null && contractDetails.contract.salaryCurrency !== null
                     ? formatAmount(contractDetails.contract.baseSalaryMinor, contractDetails.contract.salaryCurrency)
                     : ""}
-                  {contractDetails.contract.commissionRatePercent > 0
+                  {contractDetails.contract.commissionRatePercent !== null
                     ? ` (${contractDetails.contract.commissionRatePercent}%)`
                     : ""}
                 </div>
@@ -765,7 +779,8 @@ export function HrContractsPanel() {
                 <h4 className="text-xs font-bold text-navy-700">ملاحق العقد ({contractDetails.addenda.length}):</h4>
                 <button
                   type="button"
-                  onClick={() => { setAddendumSalary(selectedContract?.baseSalaryMinor ? toInputAmount(selectedContract.baseSalaryMinor,selectedContract.salaryCurrency) : ""); setAddendumCurrency(selectedContract?.salaryCurrency || "YER"); setAddendumModalOpen(true); }}
+                  disabled={!hrContractHasApproval(contractDetails.contract)}
+                  onClick={() => { setAddendumSalary(selectedContract?.baseSalaryMinor != null && selectedContract.salaryCurrency ? toInputAmount(selectedContract.baseSalaryMinor,selectedContract.salaryCurrency) : ""); setAddendumCurrency(selectedContract?.salaryCurrency || "YER"); setAddendumModalOpen(true); }}
                   className="rounded-lg border border-navy-200 bg-white px-2.5 py-1 text-xs font-semibold text-navy-800 hover:bg-navy-50"
                 >
                   + إضافة ملحق
@@ -885,12 +900,13 @@ export function HrContractsPanel() {
                 onChange={(e) => setTargetStatus(e.target.value as HrContractStatus)}
                 className="w-full rounded-xl border border-navy-200 p-2.5 text-sm outline-none"
               >
-                {Object.entries(HR_CONTRACT_STATUS_LABELS).map(([k, label]) => (
+                {hrContractNextStatuses(contractDetails?.contract??selectedContract).map(k => (
                   <option key={k} value={k}>
-                    {label}
+                    {HR_CONTRACT_STATUS_LABELS[k]}
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-navy-500">الاعتماد إداري ولا يسجل توقيعًا. بعد الاعتماد تُعدّل البنود بملحق، ولا يعود الأصل إلى مسودة.</p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold text-navy-700">سبب التغيير / ملاحظة</label>

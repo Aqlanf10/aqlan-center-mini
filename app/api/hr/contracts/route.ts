@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
 import {
   createContract,
+  HrContractMutationError,
   listContracts,
   type CreateContractInput,
 } from "@/lib/hr-contracts-attendance";
@@ -70,10 +71,10 @@ export async function POST(request: Request) {
       noticePeriodDays: payload.noticePeriodDays ? Number(payload.noticePeriodDays) : 30,
       termsPayload: payload.termsPayload || {},
       compensationKind: payload.compensationKind || "salary",
-      baseSalaryMinor: payload.baseSalaryMinor ? Number(payload.baseSalaryMinor) : null,
+      baseSalaryMinor: payload.baseSalaryMinor != null && payload.baseSalaryMinor !== "" ? Number(payload.baseSalaryMinor) : null,
       salaryCurrency: payload.salaryCurrency || payload.currency || null,
-      salaryPeriod: payload.salaryPeriod || "monthly",
-      commissionRatePercent: payload.commissionRatePercent ? Number(payload.commissionRatePercent) : null,
+      salaryPeriod: payload.salaryPeriod || null,
+      commissionRatePercent: payload.commissionRatePercent != null && payload.commissionRatePercent !== "" ? Number(payload.commissionRatePercent) : null,
       doctorPartyId: payload.doctorPartyId ? Number(payload.doctorPartyId) : null,
       notes: payload.notes || null,
     };
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     console.error("Failed to create contract:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر إنشاء العقد." },
-      { status: 400 }
+      { status: error instanceof HrContractMutationError ? error.status : 400 }
     );
   }
 }

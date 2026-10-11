@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  canUseTasks, createTask, isTaskPriority, listTasks, type TaskListFilters,
+  canUseTasks, createTask, isTaskPriority, listTasks, type TaskListFilters, type HrTaskWriteAuthorizer,
 } from "@/lib/hr";
 import { requireSession } from "@/lib/session";
 
@@ -55,6 +55,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  // Client owner is a fence, never authority. A changed signed session cannot
+  // submit another owner's retained draft after switching accounts.
+  if (source.expectedOwner !== undefined) {
+    const expected = source.expectedOwner as { username?: unknown; role?: unknown } | null;
+    if (!expected || expected.username !== session.username || expected.role !== session.role) {
+      return NextResponse.json({ message: "تغيّر صاحب الجلسة؛ لم يُنفّذ طلب الإنشاء المحفوظ." }, { status: 403 });
+    }
+  }
 
   const title = typeof source.title === "string" ? source.title.trim() : "";
   if (!title || title.length > 200) {
@@ -84,9 +92,11 @@ export async function POST(request: Request) {
     plannedFor = raw;
   }
   // مفتاح معاملة العميل لمنع تكرار الإنشاء عند فقدان الرد — طولٌ معقول ومضبوط.
-  const clientRequestId = typeof source.clientRequestId === "string" && source.clientRequestId.trim().length >= 8
-    ? source.clientRequestId.trim().slice(0, 100)
-    : null;
+  const clientRequestId = source.clientRequestId === undefined || source.clientRequestId === null
+    ? null : typeof source.clientRequestId === "string" ? source.clientRequestId.trim() : "";
+  if (clientRequestId !== null && (clientRequestId.length < 8 || clientRequestId.length > 100)) {
+    return NextResponse.json({ message: "مفتاح طلب الإنشاء غير صالح." }, { status: 400 });
+  }
   const rawAssignee = Number(source.assigneeStaffId);
   const assigneeStaffId = source.assigneeStaffId !== undefined && source.assigneeStaffId !== null
     && Number.isInteger(rawAssignee) && rawAssignee > 0 ? rawAssignee : null;
@@ -95,9 +105,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await createTask({ title, description, isPrivate, priority: priorityInput, dueAt, plannedFor, assigneeStaffId, clientRequestId }, session);
-    if (!result.ok) return NextResponse.json({ message: result.error }, { status: result.status });
-    return NextResponse.json(result.value, { status: 201 });
+    const authorize: HrTaskWriteAuthorizer = Object.assign(async (client: Parameters<HrTaskWriteAuthorizer>[0]) => {
+      const live = await requireSession(client);
+      return !!live && live.userId === session.userId && live.username === session.username
+        && live.role === session.role && canUseTasks(live.role);
+    }, { isCurrent: () => session.expiresAt >= Date.now() });
+    const result = await createTask({ title, description, isPrivate, priority: priorityInput, dueAt, plannedFor, assigneeStaffId, clientRequestId }, session, authorize);
+    if (!result.ok) return NextResponse.json({ message: result.error,
+      ...([400, 401, 403, 404].includes(result.status) ? { creationRefusal: {
+        clientRequestId, username: session.username, role: session.role, noWrite: true,
+      } } : {}),
+    }, { status: result.status });
+    return NextResponse.json({ ...result.value, creationReceipt: {
+      clientRequestId, username: session.username, role: session.role,
+    } }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر إنشاء المهمة." }, { status: 500 });
   }

@@ -16,6 +16,7 @@ import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
 import { CLINIC_TIME_ZONE } from "./db";
 import { governingContractToday, hasSalary } from "./hr-pay-terms";
+import { revalidateSessionInTransaction } from "./session";
 import {
   type HrContractTemplateKind,
   type HrContractStatus,
@@ -30,9 +31,38 @@ import {
   type HrLeaveTypeCode,
   type HrLeaveRequestStatus,
   calculateShiftAttendance,
+  hrContractEditable,hrContractHasApproval,hrContractNextStatuses,HR_CANONICAL_CONTRACT_KINDS,hrContractPayMissing,
 } from "./hr-contracts-attendance-shared";
 
 export * from "./hr-contracts-attendance-shared";
+
+export class HrContractMutationError extends Error {
+  constructor(message:string,readonly status:400|401|403|404|409){super(message);}
+}
+async function authorizeContractMutation(client:DbClient,session:SessionPayload):Promise<SessionPayload>{
+  const current=await revalidateSessionInTransaction(session,client);
+  if(!current)throw new HrContractMutationError("انتهت الجلسة أو تغيرت صلاحياتها.",401);
+  if(current.role!=="admin")throw new HrContractMutationError("إدارة العقود للمدير وحده.",403);
+  return current;
+}
+function assertContractSessionCurrent(session:SessionPayload):void{
+  if(session.expiresAt<Date.now())throw new HrContractMutationError("انتهت الجلسة أثناء العملية.",401);
+}
+function contractIdOf(value:number|string):number{
+  const id=Number(value);if(!Number.isSafeInteger(id)||id<1)throw new HrContractMutationError("رقم العقد أو الموظف غير صالح.",400);return id;
+}
+const lifecycleOf=(row:Record<string,any>)=>({status:row.status as HrContractStatus,approvedBy:row.approved_by,approvedAt:row.approved_at});
+async function lockContractStaff(client:DbClient,contractId:number){
+  const discovered=(await client.query<{staff_id:number}>("SELECT staff_id FROM hr_contracts WHERE id=$1",[contractId])).rows[0];
+  if(!discovered)throw new HrContractMutationError("العقد غير موجود.",404);
+  const staff=await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[discovered.staff_id]);
+  if(!staff.rows[0])throw new HrContractMutationError("الموظف غير موجود.",404);
+  return discovered.staff_id;
+}
+function verifyContractStaff(row:Record<string,any>|undefined,staffId:number){
+  if(!row)throw new HrContractMutationError("العقد غير موجود.",404);
+  if(row.staff_id!==staffId)throw new HrContractMutationError("تغير ارتباط العقد؛ أعد تحميله.",409);
+}
 
 /** Keep the profile a current projection of the governing contract, with an atomic change history. */
 async function synchronizeContractPayTerms(client: DbClient, staffId: number, session: SessionPayload) {
@@ -102,6 +132,7 @@ export interface CreateContractInput {
 }
 
 export interface UpdateContractInput {
+  expectedUpdatedAt?: string;
   title?: string;
   startDate?: string;
   endDate?: string | null;
@@ -187,21 +218,27 @@ export async function createContract(
   input: CreateContractInput,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const staffId = Number(input.staffId);
+  const staffId = contractIdOf(input.staffId);
   return withTransaction(getPool(), async (client) => {
-    // توليد رقم العقد تلقائيًا بشكل فريد
-    const countRes = await client.query(`SELECT COUNT(*)::int as count FROM hr_contracts`);
-    const nextSeq = (countRes.rows[0].count + 1).toString().padStart(4, "0");
+    session=await authorizeContractMutation(client,session);
+    if(!HR_CANONICAL_CONTRACT_KINDS.some(kind=>kind===input.templateKind))throw new HrContractMutationError("نوع قالب العقد غير صالح.",400);
+    const staff=await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
+    if(!staff.rows[0])throw new HrContractMutationError("الموظف غير موجود.",404);
+    assertContractSessionCurrent(session);
+    // Existing SERIAL is a concurrency-safe allocator, including after deletion.
+    // Allocation gaps after rollback are intentional; approved numbers are never renumbered.
+    const allocated=(await client.query<{id:number}>("SELECT nextval(pg_get_serial_sequence('hr_contracts','id'))::int AS id")).rows[0].id;
+    const nextSeq = allocated.toString().padStart(4, "0");
     const datePrefix = new Date().toISOString().slice(0, 7).replace("-", "");
     const contractNumber = `CTR-${datePrefix}-${nextSeq}`;
 
     const { rows } = await client.query(
       `INSERT INTO hr_contracts (
-        staff_id, contract_number, template_kind, title, status, start_date, end_date,
+        id, staff_id, contract_number, template_kind, title, status, start_date, end_date,
         probation_end_date, notice_period_days, terms_payload, compensation_kind,
         base_salary_minor, salary_currency, salary_period, commission_rate_percent,
         doctor_party_id, notes, created_by
-      ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ) VALUES ($18, $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *`,
       [
         staffId,
@@ -221,6 +258,7 @@ export async function createContract(
         input.doctorPartyId ?? null,
         input.notes ?? null,
         session.username,
+        allocated,
       ],
     );
 
@@ -235,6 +273,7 @@ export async function createContract(
       { staffId, templateKind: input.templateKind },
     );
 
+    assertContractSessionCurrent(session);
     return contract;
   });
 }
@@ -244,33 +283,37 @@ export async function updateContract(
   input: UpdateContractInput,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const contractId = Number(id);
+  const contractId = contractIdOf(id);
   return withTransaction(getPool(), async (client) => {
+    session=await authorizeContractMutation(client,session);
+    const staffId=await lockContractStaff(client,contractId);
     const { rows: currentRows } = await client.query(
       `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
       [contractId],
     );
     if (!currentRows[0]) throw new Error("العقد غير موجود.");
     const current = currentRows[0];
-
-    if (current.status !== "draft" && current.status !== "under_review") {
+    verifyContractStaff(current,staffId);assertContractSessionCurrent(session);
+    if (!hrContractEditable(lifecycleOf(current))) {
       throw new Error("لا يمكن تعديل بنود عقد معتمد أو نشط مباشرة؛ استخدم إنشاء ملحق عقد.");
     }
+
+    if(input.expectedUpdatedAt!==undefined && input.expectedUpdatedAt!==new Date(current.updated_at).toISOString())throw new HrContractMutationError("تغيّرت المسودة منذ فتحها. أعد فتحها لمراجعة القيم الحالية قبل الحفظ.",409);
 
     const { rows } = await client.query(
       `UPDATE hr_contracts
        SET title = COALESCE($1, title),
            start_date = COALESCE($2, start_date),
-           end_date = COALESCE($3, end_date),
-           probation_end_date = COALESCE($4, probation_end_date),
+           end_date = CASE WHEN $16::boolean THEN $3 ELSE end_date END,
+           probation_end_date = CASE WHEN $17::boolean THEN $4 ELSE probation_end_date END,
            notice_period_days = COALESCE($5, notice_period_days),
            terms_payload = CASE WHEN $6::jsonb IS NOT NULL THEN $6::jsonb ELSE terms_payload END,
-           base_salary_minor = COALESCE($7, base_salary_minor),
-           salary_currency = COALESCE($8, salary_currency),
-           salary_period = COALESCE($9, salary_period),
-           commission_rate_percent = COALESCE($10, commission_rate_percent),
-           doctor_party_id = COALESCE($11, doctor_party_id),
-           notes = COALESCE($12, notes),
+           base_salary_minor = CASE WHEN $18::boolean THEN $7 ELSE base_salary_minor END,
+           salary_currency = CASE WHEN $19::boolean THEN $8 ELSE salary_currency END,
+           salary_period = CASE WHEN $20::boolean THEN $9 ELSE salary_period END,
+           commission_rate_percent = CASE WHEN $21::boolean THEN $10 ELSE commission_rate_percent END,
+           doctor_party_id = CASE WHEN $22::boolean THEN $11 ELSE doctor_party_id END,
+           notes = CASE WHEN $23::boolean THEN $12 ELSE notes END,
            signed_by_staff = COALESCE($13, signed_by_staff),
            signed_by_center = COALESCE($14, signed_by_center),
            updated_at = NOW()
@@ -292,6 +335,14 @@ export async function updateContract(
         input.signedByStaff ?? null,
         input.signedByCenter ?? null,
         contractId,
+        Object.prototype.hasOwnProperty.call(input,"endDate"),
+        Object.prototype.hasOwnProperty.call(input,"probationEndDate"),
+        Object.prototype.hasOwnProperty.call(input,"baseSalaryMinor"),
+        Object.prototype.hasOwnProperty.call(input,"salaryCurrency"),
+        Object.prototype.hasOwnProperty.call(input,"salaryPeriod"),
+        Object.prototype.hasOwnProperty.call(input,"commissionRatePercent"),
+        Object.prototype.hasOwnProperty.call(input,"doctorPartyId"),
+        Object.prototype.hasOwnProperty.call(input,"notes"),
       ],
     );
 
@@ -306,25 +357,37 @@ export async function updateContract(
       { contractId },
     );
 
+    assertContractSessionCurrent(session);
     return contract;
   });
+}
+
+function assertContractPayComplete(current:Record<string,any>):void{
+    const missing=hrContractPayMissing({compensationKind:current.compensation_kind,baseSalaryMinor:current.base_salary_minor===null?null:Number(current.base_salary_minor),salaryCurrency:current.salary_currency,salaryPeriod:current.salary_period,commissionRatePercent:current.commission_rate_percent===null?null:Number(current.commission_rate_percent),doctorPartyId:current.doctor_party_id===null?null:Number(current.doctor_party_id)});
+    if(missing.length)throw new HrContractMutationError(`شروط الأجر غير مكتملة: ${missing.join("، ")}. أكمل المسودة قبل الاعتماد.`,409);
 }
 
 export async function approveContract(
   contractId: number | string,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const cId = Number(contractId);
+  const cId = contractIdOf(contractId);
   return withTransaction(getPool(), async (client) => {
+    session=await authorizeContractMutation(client,session);
+    const staffId=await lockContractStaff(client,cId);
     const { rows: currentRows } = await client.query(
       `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
       [cId],
     );
     if (!currentRows[0]) throw new Error("العقد غير موجود.");
     const current = currentRows[0];
-    if (current.status === "approved" || current.status === "active") {
+    verifyContractStaff(current,staffId);assertContractSessionCurrent(session);
+    if (current.status === "approved") {
       return mapContractRow(current);
     }
+    if(!hrContractNextStatuses(lifecycleOf(current)).includes("approved"))throw new HrContractMutationError("لا يمكن اعتماد العقد من حالته الحالية؛ العقد المعتمد يُعدّل بملحق.",409);
+
+    assertContractPayComplete(current);
 
     const { rows } = await client.query(
       `UPDATE hr_contracts
@@ -344,6 +407,7 @@ export async function approveContract(
       contract.id,
       contract.contractNumber,
     );
+    assertContractSessionCurrent(session);
     return contract;
   });
 }
@@ -354,17 +418,23 @@ export async function transitionContractStatus(
   reason: string,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const cId = Number(id);
+  const cId = contractIdOf(id);
   if (newStatus === "approved") {
     return approveContract(cId, session);
   }
 
   return withTransaction(getPool(), async (client) => {
+    session=await authorizeContractMutation(client,session);
+    const staffId=await lockContractStaff(client,cId);
     const { rows: currentRows } = await client.query(
       `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
       [cId],
     );
     if (!currentRows[0]) throw new Error("العقد غير موجود.");
+    verifyContractStaff(currentRows[0],staffId);assertContractSessionCurrent(session);
+    if(currentRows[0].status===newStatus)return mapContractRow(currentRows[0]);
+    if(!hrContractNextStatuses(lifecycleOf(currentRows[0])).includes(newStatus))throw new HrContractMutationError("انتقال الحالة غير مسموح. لا يُعاد العقد المعتمد إلى مسودة؛ استخدم ملحقًا لتعديل بنوده.",409);
+    if(newStatus==="active")assertContractPayComplete(currentRows[0]);
 
     const { rows } = await client.query(
       `UPDATE hr_contracts
@@ -386,6 +456,7 @@ export async function transitionContractStatus(
       `${contract.contractNumber} -> ${newStatus}`,
       { oldStatus: currentRows[0].status, newStatus, reason: reason.trim() },
     );
+    assertContractSessionCurrent(session);
     return contract;
   });
 }
@@ -395,16 +466,24 @@ export async function createContractAddendum(
   input: CreateAddendumInput,
   session: SessionPayload,
 ): Promise<HrContractView> {
-  const pId = Number(parentContractId);
+  const pId = contractIdOf(parentContractId);
   return withTransaction(getPool(), async (client) => {
+    session=await authorizeContractMutation(client,session);
+    const staffId=await lockContractStaff(client,pId);
     const { rows: parentRows } = await client.query(
       `SELECT * FROM hr_contracts WHERE id = $1 FOR UPDATE`,
       [pId],
     );
     if (!parentRows[0]) throw new Error("العقد الأصلي غير موجود.");
     const parent = parentRows[0];
-
-    const newVersion = parent.version_number + 1;
+    verifyContractStaff(parent,staffId);assertContractSessionCurrent(session);
+    if(!hrContractHasApproval(lifecycleOf(parent)))throw new HrContractMutationError("الملحق يرتبط بعقد معتمد؛ يمكن تعديل المسودة مباشرة.",409);
+    if(typeof input.addendumReason!=="string"||!input.addendumReason.trim())throw new HrContractMutationError("اكتب سبب الملحق.",400);
+    // Staff then parent lock is shared by every contract writer. Existing sibling
+    // addenda contribute to allocation; no second child reuses parent.version+1.
+    const latest=(await client.query<{version:number}>("SELECT MAX(version_number)::int AS version FROM hr_contracts WHERE id=$1 OR parent_contract_id=$1",[pId])).rows[0].version;
+    const newVersion = latest + 1;
+    if(!Number.isSafeInteger(newVersion)||newVersion<2||newVersion>2147483647)throw new HrContractMutationError("تجاوز تسلسل الملحقات الحد المسموح.",409);
     const addendumNumber = `${parent.contract_number}-A${newVersion}`;
 
     const { rows } = await client.query(
@@ -449,6 +528,7 @@ export async function createContractAddendum(
       `${contract.contractNumber} (ملحق للإصدار ${parent.version_number})`,
       { parentContractId: pId, reason: input.addendumReason },
     );
+    assertContractSessionCurrent(session);
     return contract;
   });
 }

@@ -12,7 +12,10 @@ beforeAll(async()=>{
  process.env.SKIP_SEED="false";
  db=await import("../../lib/db");hr=await import("../../lib/hr");work=await import("../../lib/hr-contracts-attendance");
  await db.resetPoolForTesting();await db.ensureSchema();
- await db.getPool().query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES (1,'work-admin','Admin','x','admin'),(2,'work-reviewer','Reviewer','x','admin') ON CONFLICT(id) DO NOTHING");
+ const actors=await db.getPool().query<{id:number;username:string;password_hash:string}>("INSERT INTO users(username,display_name,password_hash,role) VALUES ('work-admin','Admin','x','admin'),('work-reviewer','Reviewer','x','admin') RETURNING id,username,password_hash");
+ process.env.SESSION_SECRET ??= "synthetic-hr-workforce-session-secret-only";
+ const {sessionCredentialVersion}=await import("../../lib/auth");
+ for(const actor of actors.rows){const session=actor.username===admin.username?admin:reviewer;session.userId=actor.id;session.credentialVersion=sessionCredentialVersion(actor.password_hash);}
 },30000);
 beforeEach(async()=>{
  // Each case starts with no staff, contracts, attendance, leave or financial business rows.
@@ -112,7 +115,7 @@ it("legacy single-voucher HR payouts cannot be reversed through the generic expe
 it("an unreconciled legacy hybrid claim blocks unlinked doctor commission payments",async()=>{
  const payroll=await import("../../lib/hr-payroll"),pool=db.getPool();
  const party=(await pool.query("INSERT INTO parties(name,kind,commission_percent) VALUES ('Legacy hybrid doctor','doctor',30) RETURNING id")).rows[0];
- const contract=await work.createContract({staffId,templateKind:"doctor_hybrid",title:"Legacy hybrid fixture",startDate:"2026-01-01",compensationKind:"salary_commission",baseSalaryMinor:80000,salaryCurrency:"YER",salaryPeriod:"monthly",doctorPartyId:party.id,commissionRatePercent:30},admin);await work.transitionContractStatus(contract.id,"active","Explicit contract fixture",admin);
+ const contract=await work.createContract({staffId,templateKind:"doctor_hybrid",title:"Legacy hybrid fixture",startDate:"2026-01-01",compensationKind:"salary_commission",baseSalaryMinor:80000,salaryCurrency:"YER",salaryPeriod:"monthly",doctorPartyId:party.id,commissionRatePercent:30},admin);await work.approveContract(contract.id,admin);await work.transitionContractStatus(contract.id,"active","Explicit contract fixture",admin);
  const shift=await db.openShift({openedBy:admin.username,opening:{YER:0,SAR:0,USD:0}});
  const patient=(await pool.query("INSERT INTO patients(patient_number,full_name) VALUES ('LEGACY-HR','Synthetic legacy patient') RETURNING id")).rows[0];
  const invoice=(await pool.query("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at) VALUES ('LEGACY-HR-I',$1,40000,'YER','work-admin','2026-08-02 10:00+03') RETURNING id",[patient.id])).rows[0];

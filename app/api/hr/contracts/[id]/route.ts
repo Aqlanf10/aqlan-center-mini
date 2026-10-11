@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/session";
 import { canManageStaff } from "@/lib/hr";
 import {
   getContractById,
+  HrContractMutationError,
   updateContract,
   transitionContractStatus,
   createContractAddendum,
@@ -79,7 +80,7 @@ export async function PATCH(
     console.error("Failed to update contract:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر تحديث العقد." },
-      { status: 400 }
+      { status: error instanceof HrContractMutationError ? error.status : 400 }
     );
   }
 }
@@ -129,7 +130,7 @@ export async function POST(
     console.error("Failed to create contract addendum:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر إضافة الملحق." },
-      { status: 400 }
+      { status: error instanceof HrContractMutationError ? error.status : 400 }
     );
   }
 }

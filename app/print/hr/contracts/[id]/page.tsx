@@ -6,7 +6,7 @@ import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { getContractById, listContractAddenda } from "@/lib/hr-contracts-attendance";
 import {
-  HR_CONTRACT_TEMPLATE_LABEL,
+  HR_CONTRACT_TEMPLATE_LABEL, hrContractPayMissing,
   HR_CONTRACT_STATUS_LABEL,
   type HrContractView,
 } from "@/lib/hr-contracts-attendance-shared";
@@ -34,9 +34,11 @@ export default async function ContractPrintPage({
   const settings = await getSettingsSafe();
 
   const clinicName = settings["clinic.name"] || "مركز عقلان لطب وجراحة الأسنان";
-  const currency = (contract.salaryCurrency || "YER") as Currency;
-  const baseSalary = contract.baseSalaryMinor ?? 0;
-  const commissionRate = contract.commissionRatePercent || 0;
+  const currency = contract.salaryCurrency as Currency|null;
+  const baseSalary = contract.baseSalaryMinor;
+  const commissionRate = contract.commissionRatePercent;
+  const periodLabels:Record<string,string> = {monthly:"شهري",weekly:"أسبوعي",daily:"يومي",per_shift:"لكل وردية"};
+  const periodLabel=periodLabels[contract.salaryPeriod ?? ""] ?? "غير مسجلة";
   const jobTitle = contract.termsPayload?.jobDescription || contract.title;
   const clauses = contract.termsPayload?.clauses?.join("\n") || contract.notes;
 
@@ -46,7 +48,7 @@ export default async function ContractPrintPage({
         <PrintButton />
       </div>
 
-      <PrintHeader title="عقد عمل وظيفي رسمي" settings={settings} />
+      <PrintHeader title={contract.status==="draft"||contract.status==="under_review"?"مسودة عقد عمل غير معتمدة":"عقد عمل وظيفي"} settings={settings} />
 
       <div className="my-6 space-y-6 text-sm leading-relaxed text-gray-900">
         {/* Header summary */}
@@ -104,16 +106,17 @@ export default async function ContractPrintPage({
 
           <h3 className="font-bold text-base border-b pb-1 pt-2">ثالثاً: المقابل المالي والأجر</h3>
           <div className="space-y-1">
-            {baseSalary > 0 && (
+            {hrContractPayMissing(contract).length>0 && <p>شروط الأجر غير مكتملة: {hrContractPayMissing(contract).join("، ")}.</p>}
+            {baseSalary !== null && currency !== null && (
               <p>
-                - الراتب الأساسي الشهري:{" "}
+                - الراتب الأساسي ({periodLabel}):{" "}
                 <span className="font-bold font-mono">
                   {formatAmount(baseSalary, currency)} {CURRENCY_SHORT[currency] || currency}
                 </span>
                 .
               </p>
             )}
-            {commissionRate > 0 && (
+            {commissionRate !== null && (
               <p>
                 - نسبة الإنجاز المالي للأطباء:{" "}
                 <span className="font-bold text-emerald-800">{commissionRate}%</span> من صافي دخل العمليات المنجزة وفق سجلات النظام الآلي للمركز.

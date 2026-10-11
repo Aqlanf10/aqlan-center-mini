@@ -99,6 +99,7 @@ async function activeContract(input: {
     commissionRatePercent: input.kind === "salary" ? undefined : (input.percent ?? 30),
     doctorPartyId: input.partyId ?? undefined,
   } as never, admin);
+  await contracts.approveContract(c.id, admin);
   await contracts.transitionContractStatus(c.id, "active", "اعتماد للاختبار", admin);
   return c;
 }
@@ -139,13 +140,16 @@ const remainingOf = async (partyId: number, category: string) => {
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-  await q(`INSERT INTO users (id, username, display_name, password_hash, role) VALUES (1, 'hr-int-admin', 'مدير', 'x', 'admin') ON CONFLICT DO NOTHING`);
+  const [actor] = await q<{id:number;password_hash:string}>(`INSERT INTO users (username, display_name, password_hash, role) VALUES ('hr-int-admin', 'مدير', 'x', 'admin') RETURNING id,password_hash`);
+  process.env.SESSION_SECRET ??= 'synthetic-hr-payroll-session-secret-only';
+  const {sessionCredentialVersion} = await import('../../lib/auth');
+  admin.userId=actor.id;admin.credentialVersion=sessionCredentialVersion(actor.password_hash);
 }, 120_000);
 
 beforeEach(async () => {
   await q(`TRUNCATE hr_staff, hr_payroll_periods, payments, expenses, payables, invoice_items, lab_orders, visits, invoices, patients,
                     cashier_shifts, parties, doctor_commission_history RESTART IDENTITY CASCADE`);
-  await q(`DELETE FROM users WHERE id <> 1`);
+  await q(`DELETE FROM users WHERE id <> $1`, [admin.userId]);
   await openShiftNow();
 });
 
@@ -193,6 +197,7 @@ describe("١ — مصدر الأجر: العقد المعتمد والملف ل�
     const addendum = await contracts.createContractAddendum(c.id, {
       title: "ملحق زيادة", startDate: "2026-11-01", addendumReason: "زيادة", baseSalaryMinor: 150_000,
     } as never, admin);
+    await contracts.approveContract(addendum.id, admin);
     await contracts.transitionContractStatus(addendum.id, "active", "اعتماد الملحق", admin);
     const after = await payroll.listPayrollItems(run.id);
     expect(after[0].baseSalaryMinor).toBe(100_000);
@@ -207,6 +212,7 @@ describe("١ — مصدر الأجر: العقد المعتمد والملف ل�
     const addendum = await contracts.createContractAddendum(c.id, {
       title: "ملحق", startDate: "2026-10-15", addendumReason: "زيادة", baseSalaryMinor: 160_000,
     } as never, admin);
+    await contracts.approveContract(addendum.id, admin);
     await contracts.transitionContractStatus(addendum.id, "active", "اعتماد", admin);
     const { run, items } = await approvedRun();
     expect(items[0].blockerCodes).toContain("terms_changed_in_period");

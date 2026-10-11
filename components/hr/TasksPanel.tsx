@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
 import {
   TASK_LINK_KIND_LABEL, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
@@ -34,6 +34,30 @@ interface TaskView {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface PendingTaskCreation {
+  title: string; description: string; isPrivate: boolean; priority: TaskPriority;
+  dueAt: string | null; plannedFor: string | null; assigneeStaffId: number | null;
+  uncertain: boolean;
+  clientRequestId: string; expectedOwner: { username: string; role: string };
+}
+
+function confirmsTaskCreation(value: unknown, request: PendingTaskCreation): boolean {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  const receipt = result.creationReceipt as Record<string, unknown> | null;
+  return Number.isSafeInteger(result.id) && Number(result.id) > 0
+    && Number.isSafeInteger(result.ownerUserId) && Number(result.ownerUserId) > 0
+    && !!receipt && receipt.clientRequestId === request.clientRequestId
+    && receipt.username === request.expectedOwner.username && receipt.role === request.expectedOwner.role;
+}
+
+function confirmsFirstTaskRefusal(value: unknown, request: PendingTaskCreation, status: number): boolean {
+  if (request.uncertain || ![400, 403, 404].includes(status) || !value || typeof value !== "object") return false;
+  const refusal = (value as Record<string, unknown>).creationRefusal as Record<string, unknown> | null;
+  return !!refusal && refusal.noWrite === true && refusal.clientRequestId === request.clientRequestId
+    && refusal.username === request.expectedOwner.username && refusal.role === request.expectedOwner.role;
 }
 
 interface TaskCounts {
@@ -96,6 +120,15 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const owner = session ? `${session.username}\u0000${session.role}` : "";
+  // Private drafts stay in memory, scoped to the signed owner, across modal close/reopen.
+  const [pendingCreations, setPendingCreations] = useState<Record<string, PendingTaskCreation | undefined>>({});
+  useEffect(() => {
+    if (!pendingCreations[owner]) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [owner, pendingCreations]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -279,9 +312,15 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
         </div>
       )}
 
-      {createOpen && (
+      {createOpen && session && (
         <CreateTaskModal
+          key={owner}
           session={session}
+          pending={pendingCreations[owner]}
+          onPending={(request, expectedKey) => setPendingCreations((current) => {
+            if (expectedKey && current[owner]?.clientRequestId !== expectedKey) return current;
+            return { ...current, [owner]: request };
+          })}
           oversight={oversight}
           onClose={() => setCreateOpen(false)}
           onCreated={() => { setCreateOpen(false); void load(); }}
@@ -300,22 +339,39 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
   );
 }
 
-function CreateTaskModal({ session, oversight, onClose, onCreated }: {
-  session: SessionInfo | null;
+function CreateTaskModal({ session, oversight, pending, onPending, onClose, onCreated }: {
+  session: SessionInfo;
+  pending: PendingTaskCreation | undefined;
+  onPending: (request: PendingTaskCreation | undefined, expectedKey?: string) => void;
   oversight: boolean;
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [priority, setPriority] = useState<TaskPriority>("normal");
-  const [dueAt, setDueAt] = useState("");
-  const [plannedFor, setPlannedFor] = useState("");
-  const [assignee, setAssignee] = useState("");
+  const [title, setTitle] = useState(pending?.title ?? "");
+  const [description, setDescription] = useState(pending?.description ?? "");
+  const [isPrivate, setIsPrivate] = useState(pending?.isPrivate ?? false);
+  const [priority, setPriority] = useState<TaskPriority>(pending?.priority ?? "normal");
+  const [dueAt, setDueAt] = useState(pending?.dueAt ?? "");
+  const [plannedFor, setPlannedFor] = useState(pending?.plannedFor ?? "");
+  const [assignee, setAssignee] = useState(pending?.assigneeStaffId == null ? "" : String(pending.assigneeStaffId));
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const mounted = useRef(true);
+  const activeRequest = useRef(pending);
+  useEffect(() => { activeRequest.current = pending; }, [pending]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const locked = busy || !!pending;
+  const isCurrentRequest = (request: PendingTaskCreation) => mounted.current
+    && activeRequest.current?.clientRequestId === request.clientRequestId
+    && activeRequest.current.expectedOwner.username === request.expectedOwner.username
+    && activeRequest.current.expectedOwner.role === request.expectedOwner.role;
+  const close = () => {
+    const request = activeRequest.current;
+    if (request) onPending({ ...request, uncertain: true }, request.clientRequestId);
+    onClose();
+  };
 
   useEffect(() => {
     if (!oversight) return;
@@ -326,51 +382,65 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
   }, [oversight]);
 
   const submit = async () => {
-    setBusy(true);
-    setError(null);
+    if (submitting.current) return;
+    submitting.current = true;
+    setBusy(true); setError(null);
+    const request: PendingTaskCreation = pending ?? {
+      title: title.trim(), description: description.trim(), isPrivate, priority,
+      dueAt: dueAt || null, plannedFor: plannedFor || null,
+      assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
+      uncertain: false, clientRequestId: newRequestId(), expectedOwner: { username: session.username, role: session.role },
+    };
+    activeRequest.current = request;
+    onPending(request);
     try {
       const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title, description, isPrivate, priority,
-          dueAt: dueAt || null,
-          plannedFor: plannedFor || null,
-          assigneeStaffId: !isPrivate && assignee ? Number(assignee) : null,
-          clientRequestId: newRequestId(),
-        }),
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...request, uncertain: undefined }),
       });
+      const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        const payloadError = (await response.json().catch(() => null)) as { message?: string } | null;
-        throw new Error(payloadError?.message ?? "تعذّر إنشاء المهمة.");
+        const failure = payload as { message?: string } | null;
+        if (isCurrentRequest(request) && confirmsFirstTaskRefusal(payload, request, response.status)) {
+          // A matching first-attempt no-write refusal permits explicit correction.
+          // A previously uncertain attempt never becomes editable on a later refusal.
+          onPending(undefined, request.clientRequestId);
+          activeRequest.current = undefined;
+          setError(failure?.message ?? "لم تُنشأ المهمة؛ صحّح الطلب وأرسله من جديد.");
+          return;
+        }
+        throw new Error(failure?.message ?? "تعذّر تأكيد إنشاء المهمة.");
       }
-      onCreated();
+      if (!confirmsTaskCreation(payload, request)) throw new Error("لم تصل نتيجة مطابقة لطلب الإنشاء.");
+      if (isCurrentRequest(request)) { onPending(undefined, request.clientRequestId); onCreated(); }
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "تعذّر إنشاء المهمة.");
+      // Keep the exact key AND body. A retry cannot silently become another task.
+      onPending({ ...request, uncertain: true }, request.clientRequestId);
+      if (isCurrentRequest(request)) setError(submitError instanceof Error ? submitError.message : "تعذّر تأكيد إنشاء المهمة.");
     } finally {
-      setBusy(false);
+      submitting.current = false;
+      if (mounted.current) setBusy(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} label="مهمة جديدة" initialFocus="input[maxlength='200']">
+    <Modal onClose={close} label="مهمة جديدة" initialFocus="input[maxlength='200']">
       <div className="mx-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-raised">
         <h2 className="mb-4 text-lg font-bold text-navy-900">مهمة جديدة</h2>
         <div className="grid gap-3">
         <label className="grid gap-1 text-sm font-semibold text-navy-800">
           العنوان
-          <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200}
+          <input disabled={locked} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200}
             className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal" />
         </label>
         <label className="grid gap-1 text-sm font-semibold text-navy-800">
           الوصف
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={4000}
+          <textarea disabled={locked} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={4000}
             className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal" />
         </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             الأولوية
-            <select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}
+            <select disabled={locked} value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}
               className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
               {(Object.keys(TASK_PRIORITY_LABEL) as TaskPriority[]).map((p) => (
                 <option key={p} value={p}>{TASK_PRIORITY_LABEL[p]}</option>
@@ -379,23 +449,23 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
           </label>
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             تاريخ التخطيط
-            <input type="date" value={plannedFor} onChange={(event) => setPlannedFor(event.target.value)}
+            <input disabled={locked} type="date" value={plannedFor} onChange={(event) => setPlannedFor(event.target.value)}
               className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
           </label>
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             موعد الاستحقاق
-            <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)}
+            <input disabled={locked} type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)}
               className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal ltr-nums" />
           </label>
         </div>
         <label className="flex items-center gap-2 text-sm font-semibold text-navy-800">
-          <input type="checkbox" checked={isPrivate} onChange={(event) => { setIsPrivate(event.target.checked); if (event.target.checked) setAssignee(""); }} />
+          <input disabled={locked} type="checkbox" checked={isPrivate} onChange={(event) => { setIsPrivate(event.target.checked); if (event.target.checked) setAssignee(""); }} />
           مهمة خاصة — لا يراها غيري
         </label>
         {oversight && !isPrivate && (
           <label className="grid gap-1 text-sm font-semibold text-navy-800">
             المسؤول (من ملفات الطاقم)
-            <select value={assignee} onChange={(event) => setAssignee(event.target.value)}
+            <select disabled={locked} value={assignee} onChange={(event) => setAssignee(event.target.value)}
               className="rounded-xl border border-navy-200 px-3 py-2 text-sm font-normal">
               <option value="">— بلا إسناد —</option>
               {directory.map((entry) => (
@@ -406,12 +476,15 @@ function CreateTaskModal({ session, oversight, onClose, onCreated }: {
             </select>
           </label>
         )}
+        {pending && <p role="status" className="rounded-xl bg-warning-50 p-3 text-sm text-warning-900">
+          طلب الإنشاء محفوظ للتأكد من نتيجته. إعادة المحاولة ترسل الطلب نفسه؛ أغلق وافتح النموذج لاستعادته. تحديث الصفحة أو مغادرتها يفقد هذا الطلب المحفوظ؛ راجع قائمة مهامك قبل إنشاء طلب جديد.
+        </p>}
         {error && <p role="alert" className="rounded-xl bg-danger-50 p-3 text-sm text-danger-700">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-xl bg-navy-100 px-4 py-2 text-sm font-semibold text-navy-800">إلغاء</button>
+          <button onClick={close} className="rounded-xl bg-navy-100 px-4 py-2 text-sm font-semibold text-navy-800">إلغاء</button>
           <button onClick={() => void submit()} disabled={busy || !title.trim()}
             className="rounded-xl bg-accent-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
-            {busy ? "جارٍ الحفظ…" : "إنشاء"}
+            {busy ? "جارٍ الحفظ…" : pending ? "تحقق وأعد نفس الطلب" : "إنشاء"}
           </button>
         </div>
       </div>

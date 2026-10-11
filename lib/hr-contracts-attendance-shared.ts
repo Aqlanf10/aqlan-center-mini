@@ -20,6 +20,29 @@ export type HrContractTemplateKind =
   | "probation"
   | "fixed";
 
+export const HR_CANONICAL_CONTRACT_KINDS = ["doctor_percentage","doctor_salary","doctor_hybrid","support_staff"] as const;
+export function hrContractCompensationKind(kind:HrContractTemplateKind):"salary"|"commission"|"salary_commission"{
+  return kind==="doctor_percentage"?"commission":kind==="doctor_hybrid"?"salary_commission":"salary";
+}
+
+export interface HrContractPayWitness {
+ compensationKind:string;baseSalaryMinor:number|null;salaryCurrency:string|null;salaryPeriod:string|null;commissionRatePercent:number|null;doctorPartyId:number|null;
+}
+export function hrContractPayMissing(p:HrContractPayWitness):string[]{
+ const missing:string[]=[];
+ if(!["salary","commission","salary_commission"].includes(p.compensationKind))return ["نوع الأجر"];
+ if(p.compensationKind!=="commission"){
+  if(p.baseSalaryMinor===null||!Number.isSafeInteger(p.baseSalaryMinor)||p.baseSalaryMinor<0)missing.push("مبلغ الراتب");
+  if(!p.salaryCurrency||!["YER","SAR","USD"].includes(p.salaryCurrency))missing.push("عملة الراتب");
+  if(!p.salaryPeriod||!["monthly","weekly","daily","per_shift"].includes(p.salaryPeriod))missing.push("دورية الراتب");
+ }
+ if(p.compensationKind!=="salary"){
+  if(p.commissionRatePercent===null||!Number.isFinite(p.commissionRatePercent)||p.commissionRatePercent<0||p.commissionRatePercent>100)missing.push("نسبة الطبيب");
+  if(!Number.isSafeInteger(p.doctorPartyId)||Number(p.doctorPartyId)<=0)missing.push("جهة الطبيب");
+ }
+ return missing;
+}
+
 export type HrContractStatus =
   | "draft"
   | "under_review"
@@ -27,6 +50,24 @@ export type HrContractStatus =
   | "active"
   | "expired"
   | "terminated";
+
+export interface HrContractLifecycleWitness {status:HrContractStatus;approvedBy?:string|null;approvedAt?:string|null}
+export function hrContractHasApproval(witness:HrContractLifecycleWitness):boolean{
+  return witness.status==="approved"||witness.status==="active"||witness.status==="expired"||Boolean(witness.approvedBy||witness.approvedAt);
+}
+export function hrContractEditable(witness:HrContractLifecycleWitness):boolean{
+  return (witness.status==="draft"||witness.status==="under_review")&&!hrContractHasApproval(witness);
+}
+/** Administrative approval may be explicit directly from draft. Review is
+ * optional; activation always follows approval and never invents signatures. */
+export function hrContractNextStatuses(witness:HrContractLifecycleWitness):readonly HrContractStatus[]{
+  if((witness.status==="draft"||witness.status==="under_review")&&hrContractHasApproval(witness))return [];
+  const allowed:Record<HrContractStatus,readonly HrContractStatus[]>={
+    draft:["approved","under_review","terminated"],under_review:["approved","draft","terminated"],
+    approved:["active","expired","terminated"],active:["expired","terminated"],expired:[],terminated:[],
+  };
+  return Object.prototype.hasOwnProperty.call(allowed,witness.status)?allowed[witness.status]:[];
+}
 
 export const HR_CONTRACT_TEMPLATE_LABEL: Record<HrContractTemplateKind, string> = {
   doctor_percentage: "طبيب بالعمولة (نسبة)",

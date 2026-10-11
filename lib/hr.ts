@@ -13,6 +13,7 @@
  * بعد الالتزام (انظر updateStaff).
  */
 
+import { createHash } from "node:crypto";
 import { getPool, insertAuditRow, recordAudit, type DbClient, type DbPool } from "./db";
 import { withTransaction } from "./transactions";
 import { CLINIC_TIME_ZONE } from "./db";
@@ -676,6 +677,8 @@ export async function getTaskForSession(
       const field = event.field ? String(event.field) : null;
       let oldValue = event.old_value ? String(event.old_value) : null;
       let newValue = event.new_value ? String(event.new_value) : null;
+      // Internal replay evidence is not a user-facing previous field value.
+      if (action === "create" && oldValue?.startsWith(TASK_CREATE_FINGERPRINT)) oldValue = null;
       // أحداث الربط تحمل في قيمها وسم السجل المرتبط (رقم المريض واسمه…) —
       // تُطبَّق صلاحية السجل نفسها هنا: بمعرّف رابطٍ يُفحص وصوله لحظة القراءة
       // (سحب صلاحية المريض يسري على البيانات القديمة المعروضة)، وبلا معرّفٍ
@@ -779,7 +782,18 @@ export type TaskMutationResult<T> = { ok: true; value: T } | { ok: false; error:
  * (canAssignTasks) — صاحب المهمة يبدأها بلا مسؤولٍ وتديرها هو.
  * إعادة الإرسال بنفس clientRequestId تعيد المهمة الأصلية ولا تنشئ نسخة.
  */
-export async function createTask(input: CreateTaskInput, session: SessionPayload): Promise<TaskMutationResult<HrTaskView>> {
+export type HrTaskWriteAuthorizer = ((client: DbClient) => Promise<boolean>) & { isCurrent: () => boolean };
+class HrTaskAuthorityError extends Error {
+  constructor(public status: number) { super("تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية."); }
+}
+const taskRequestConflict = (): TaskMutationResult<never> => ({
+  ok: false, status: 409, error: "تعذّر تأكيد طلب الإنشاء بهذا المفتاح. راجع مهامك قبل إنشاء طلب آخر.",
+});
+const TASK_CREATE_FINGERPRINT = "task-create-sha256-v1:";
+
+export async function createTask(
+  input: CreateTaskInput, session: SessionPayload, authorize?: HrTaskWriteAuthorizer,
+): Promise<TaskMutationResult<HrTaskView>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
   if (input.isPrivate && input.assigneeStaffId !== null) {
     return { ok: false, error: "المهمة الخاصة لا تُسند إلى غيرك — حوّلها إلى مشتركة أولًا.", status: 400 };
@@ -787,69 +801,96 @@ export async function createTask(input: CreateTaskInput, session: SessionPayload
   if (!input.isPrivate && input.assigneeStaffId !== null && !canAssignTasks(session.role)) {
     return { ok: false, error: "إسناد المهام للإدارة المخولة (المدير والاستقبال) — أنشئ المهمة بلا مسؤولٍ وستتابعها الإدارة.", status: 403 };
   }
-  let assigneeStaffId: number | null = null;
-  let assigneeUserId: number | null = null;
-  let assigneeLabel = "";
-  if (!input.isPrivate && input.assigneeStaffId !== null) {
-    const staff = await getPool().query(
-      `SELECT id, full_name, user_id, work_status FROM hr_staff WHERE id = $1`, [input.assigneeStaffId],
-    );
-    if (!staff.rowCount) return { ok: false, error: "ملف الموظف المسند إليه غير موجود.", status: 404 };
-    if (String(staff.rows[0].work_status) !== "active") {
-      return { ok: false, error: "لا تُسند مهمة لموظف ليس على رأس العمل.", status: 400 };
-    }
-    assigneeStaffId = Number(staff.rows[0].id);
-    assigneeUserId = staff.rows[0].user_id === null ? null : Number(staff.rows[0].user_id);
-    assigneeLabel = String(staff.rows[0].full_name);
+  const key = input.clientRequestId ?? null;
+  if (key !== null && (key.trim() !== key || key.length < 8 || key.length > 100)) {
+    return { ok: false, status: 400, error: "مفتاح طلب الإنشاء غير صالح." };
   }
-
-  const displayName = await sessionDisplayName(session);
-  const { row: inserted, duplicate } = await withTransaction(getPool(), async (client) => {
-    const result = await client.query(
-      `INSERT INTO hr_tasks
-         (title, description, is_private, status, priority, due_at, planned_for, owner_user_id, owner_display_name,
-          assignee_staff_id, assignee_user_id, assignee_label, created_by, client_request_id)
-       VALUES ($1, $2, $3, 'planned', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       ON CONFLICT (client_request_id) WHERE client_request_id IS NOT NULL DO NOTHING
-       RETURNING *`,
-      [input.title, input.description, input.isPrivate, input.priority, input.dueAt, input.plannedFor,
-       session.userId, displayName, assigneeStaffId, assigneeUserId, assigneeLabel, session.username,
-       input.clientRequestId ?? null],
-    );
-    if (result.rows.length === 0) {
-      // فقدان الرد ثم إعادة الإرسال بنفس المفتاح: الصف الأصلي يعود ولا نسخة ثانية.
-      const existing = await client.query(
-        `SELECT * FROM hr_tasks WHERE client_request_id = $1`, [input.clientRequestId ?? null],
-      );
-      if (existing.rows.length > 0) {
-        return { row: taskRowMapper(existing.rows[0]), duplicate: true as const };
+  // Canonical creation intent is immutable even if the task is later edited.
+  // Only its digest is stored in the existing append-only create event; no schema rewrite.
+  const canonical = {
+    title: input.title.trim(), description: input.description.trim(), isPrivate: input.isPrivate,
+    priority: input.priority, dueAt: input.dueAt ? new Date(input.dueAt).toISOString() : null,
+    plannedFor: input.plannedFor, assigneeStaffId: input.assigneeStaffId,
+  };
+  const fingerprint = TASK_CREATE_FINGERPRINT + createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+  try {
+    return await withTransaction(getPool(), async (client): Promise<TaskMutationResult<HrTaskView>> => {
+      // Wait for this key before reading current authority. The signed route authorizer
+      // holds the live user FOR SHARE until COMMIT, after any prior key holder completes.
+      if (key !== null) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`hr-task-create:${key}`]);
+      if (authorize && !(await authorize(client))) throw new HrTaskAuthorityError(403);
+      const assertCurrent = () => {
+        if (session.expiresAt < Date.now() || (authorize && !authorize.isCurrent())) throw new HrTaskAuthorityError(401);
+      };
+      assertCurrent();
+      if (key !== null) {
+        const existing = await client.query("SELECT * FROM hr_tasks WHERE client_request_id = $1 FOR UPDATE", [key]);
+        if (existing.rows[0]) {
+          const row = taskRowMapper(existing.rows[0]);
+          // A globally unique key never grants visibility, even to a manager.
+          if (row.owner_user_id !== session.userId || !canSeeTask(row, session)) return taskRequestConflict();
+          const evidence = await client.query(
+            "SELECT old_value FROM hr_task_events WHERE task_id = $1 AND action = 'create' AND actor_user_id = $2 ORDER BY id LIMIT 1",
+            [row.id, session.userId],
+          );
+          // Historical keyed rows without immutable intent cannot safely be inferred
+          // from their mutable current fields. Keep them unchanged and fail closed.
+          if (evidence.rows[0]?.old_value !== fingerprint) return taskRequestConflict();
+          assertCurrent();
+          return { ok: true, value: taskToView(row) };
+        }
       }
-      // مفتاح طُعن فيه من مهمة أخرى؟ (مستحيل بندريًّا — الفهرس فريد عالميًّا)
-      return { row: null, duplicate: true as const };
-    }
-    const row = taskRowMapper(result.rows[0]);
-    await recordTaskEvent(client, {
-      taskId: row.id, actorUserId: session.userId, actorDisplayName: displayName,
-      action: "create",
-      field: input.isPrivate ? "is_private" : null,
-      newValue: input.isPrivate ? "خاصة" : assigneeLabel || null,
+      let assigneeStaffId: number | null = null;
+      let assigneeUserId: number | null = null;
+      let assigneeLabel = "";
+      if (!canonical.isPrivate && canonical.assigneeStaffId !== null) {
+        const staff = await client.query(
+          "SELECT id, full_name, user_id, work_status FROM hr_staff WHERE id = $1 FOR SHARE", [canonical.assigneeStaffId],
+        );
+        assertCurrent();
+        if (!staff.rows[0]) return { ok: false, error: "ملف الموظف المسند إليه غير موجود.", status: 404 };
+        if (staff.rows[0].work_status !== "active") return { ok: false, error: "لا تُسند مهمة لموظف ليس على رأس العمل.", status: 400 };
+        assigneeStaffId = Number(staff.rows[0].id);
+        assigneeUserId = staff.rows[0].user_id === null ? null : Number(staff.rows[0].user_id);
+        assigneeLabel = String(staff.rows[0].full_name);
+      }
+      const displayName = await sessionDisplayName(session, client);
+      const result = await client.query(
+        `INSERT INTO hr_tasks
+           (title, description, is_private, status, priority, due_at, planned_for, owner_user_id, owner_display_name,
+            assignee_staff_id, assignee_user_id, assignee_label, created_by, client_request_id)
+         VALUES ($1, $2, $3, 'planned', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (client_request_id) WHERE client_request_id IS NOT NULL DO NOTHING
+         RETURNING *`,
+        [canonical.title, canonical.description, canonical.isPrivate, canonical.priority, canonical.dueAt, canonical.plannedFor,
+         session.userId, displayName, assigneeStaffId, assigneeUserId, assigneeLabel, session.username, key],
+      );
+      // Defensive against a legacy writer which does not take the advisory lock.
+      if (!result.rows[0]) return taskRequestConflict();
+      const row = taskRowMapper(result.rows[0]);
+      await recordTaskEvent(client, {
+        taskId: row.id, actorUserId: session.userId, actorDisplayName: displayName, action: "create",
+        field: canonical.isPrivate ? "is_private" : null,
+        oldValue: key === null ? null : fingerprint,
+        newValue: canonical.isPrivate ? "خاصة" : assigneeLabel || null,
+      });
+      await insertAuditRow(client, {
+        action: "task.create", entity: "hr_task", entityId: String(row.id),
+        entityLabel: canonical.isPrivate ? "إنشاء مهمة خاصة" : `إنشاء مهمة مسندة إلى ${assigneeLabel || "لا أحد"}`,
+        details: { private: canonical.isPrivate }, actor: session.username, actorRole: session.role,
+      });
+      assertCurrent();
+      return { ok: true, value: taskToView(row) };
     });
-    return { row, duplicate: false as const };
-  });
-  if (inserted === null || duplicate) {
-    // لا حدث ولا تدقيق لعمليةٍ لم تقع — الأصل عاد كما هو.
-    if (inserted === null) return { ok: false, error: "تعذّر إنشاء المهمة — أعد المحاولة.", status: 500 };
-    return { ok: true, value: taskToView(inserted) };
+  } catch (error) {
+    if (error instanceof HrTaskAuthorityError) return { ok: false, error: error.message, status: error.status };
+    throw error;
   }
-  await auditTask("task.create", session, inserted.id,
-    input.isPrivate ? "إنشاء مهمة خاصة" : `إنشاء مهمة مسندة إلى ${assigneeLabel || "لا أحد"}`,
-    { private: input.isPrivate });
-  return { ok: true, value: taskToView(inserted) };
 }
 
 /** اسم صاحب الجلسة كما يُسجَّل في الأحداث — من الusers لا من العميل. */
-async function sessionDisplayName(session: SessionPayload): Promise<string> {
-  const result = await getPool().query(`SELECT display_name FROM users WHERE id = $1`, [session.userId]);
+async function sessionDisplayName(session: SessionPayload, client?: DbClient): Promise<string> {
+  const result = await (client ?? getPool()).query(`SELECT display_name FROM users WHERE id = $1`, [session.userId]);
   return result.rowCount && result.rowCount > 0 ? String(result.rows[0].display_name) : session.username;
 }
 
