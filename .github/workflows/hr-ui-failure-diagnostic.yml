@@ -5,6 +5,8 @@ on:
     branches: [feat/hr-staff-tasks-phase1]
     paths:
       - ".github/workflows/hr-ui-failure-diagnostic.yml"
+      - "__tests__/security-http/hr-payroll-journey.test.ts"
+      - "__tests__/security-http/hr-task-create-replay.test.ts"
   workflow_dispatch:
 
 # Additive diagnosis only. Mandatory full CI remains unchanged and required.
@@ -26,8 +28,10 @@ jobs:
         include:
           - group: contracts
             file: hr-payroll-journey.test.ts
+            pattern: "/USD amounts through UI save, reopen and print$"
           - group: tasks
             file: hr-task-create-replay.test.ts
+            pattern: ".*"
     services:
       postgres:
         image: postgres:18-alpine
@@ -83,13 +87,17 @@ jobs:
           git rev-parse HEAD^{tree} > "$HR_UI_DIAGNOSTIC_DIR/tree.txt"
           printf '%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$HR_DIAGNOSTIC_GROUP" > "$HR_UI_DIAGNOSTIC_DIR/run.txt"
           sha256sum __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-task-create-replay.test.ts components/hr/ContractsPanel.tsx components/hr/TasksPanel.tsx components/Modal.tsx .github/workflows/hr-ui-failure-diagnostic.yml > "$HR_UI_DIAGNOSTIC_DIR/source-sha256.txt"
-      - name: Run full owned file with original assertions and deadlines
+      - name: Diagnose selected original case with unchanged assertions and deadlines
         env:
           HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
+          HR_DIAGNOSTIC_PATTERN: ${{ matrix.pattern }}
           HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
         run: |
           set -o pipefail
-          npm run test:security-http -- "__tests__/security-http/$HR_DIAGNOSTIC_FILE" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
+          # Contract diagnosis selects one original money case; mandatory CI still
+          # executes all 31 cases. The tasks job executes its complete 16-case file.
+          printf '%s\n' "$HR_DIAGNOSTIC_PATTERN" > "$HR_UI_DIAGNOSTIC_DIR/test-name-pattern.txt"
+          npm run test:security-http -- "__tests__/security-http/$HR_DIAGNOSTIC_FILE" --testNamePattern "$HR_DIAGNOSTIC_PATTERN" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
       - name: Retain bounded synthetic failure witnesses
         if: always()
         uses: actions/upload-artifact@v4

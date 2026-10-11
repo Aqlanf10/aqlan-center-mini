@@ -1,5 +1,5 @@
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
-import {chromium,type APIResponse,type Browser,type BrowserContext,type Page} from "playwright";
+import {chromium,type APIResponse,type Browser,type BrowserContext,type Page,type Response as BrowserResponse,type CDPSession} from "playwright";
 import {Pool} from "pg";
 import {mkdirSync,readFileSync,writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -503,7 +503,7 @@ async function openContractsPanel(page:Page){
 // altered deadlines, or application behavior. Files contain synthetic UI data only.
 async function contractUiDiagnostic(page:Page,caseKey:string){
  const directory=process.env.HR_UI_DIAGNOSTIC_DIR;
- if(!directory)return {phase:(_name:string)=>{},witness:async(_label:string)=>{},capture:async(_reason:string)=>{},finish:()=>{},beforeClose:async()=>{},onFailure:async()=>{}};
+ if(!directory)return {phase:(_name:string)=>{},witness:async(_label:string)=>{},capture:async(_reason:string)=>{},observeReceipt:(_response:BrowserResponse)=>{},finish:()=>{},beforeClose:async()=>{},onFailure:async()=>{}};
  const reportPath=join(directory,`${caseKey}.json`),imagePath=join(directory,`${caseKey}.png`);
  const events:Array<Record<string,unknown>>=[];
  const report:Record<string,unknown>={protocol:1,synthetic:true,acceptance:false,caseKey,sourceBaseBlob:"325b63eec2b75af373655710fd480ea67db12f8f",sourceSha256:createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex"),githubSha:process.env.GITHUB_SHA??null,runId:process.env.GITHUB_RUN_ID??null,runAttempt:process.env.GITHUB_RUN_ATTEMPT??null,viewport:page.viewportSize(),phase:"page-created",completed:false,events};
@@ -520,10 +520,28 @@ async function contractUiDiagnostic(page:Page,caseKey:string){
   record("request",{method:request.method(),path:new URL(request.url()).pathname,payload});
  });
  page.on("response",response=>{if(owns(response.url()))record("response",{method:response.request().method(),path:new URL(response.url()).pathname,status:response.status()});});
+ page.on("requestfinished",request=>{if(owns(request.url()))record("request-finished",{method:request.method(),path:new URL(request.url()).pathname});});
  page.on("requestfailed",request=>{if(owns(request.url()))record("request-failed",{method:request.method(),path:new URL(request.url()).pathname,error:short(request.failure()?.errorText??"unknown")});});
+ let session:CDPSession|undefined;
+ const createRequests=new Set<string>();
+ const bodySummary=(bytes:Buffer)=>{let validJson=false,jsonObject=false;try{const value=JSON.parse(bytes.toString("utf8"));validJson=true;jsonObject=value!==null&&typeof value==="object"&&!Array.isArray(value);}catch{}return {bytes:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex"),validJson,jsonObject};};
+ const cdpBody=async(requestId:string,trigger:string)=>{if(!session)return;try{const result=await bounded(session.send("Network.getResponseBody",{requestId}),5000);record("cdp-post-body",{trigger,requestId,...bodySummary(Buffer.from(result.body,result.base64Encoded?"base64":"utf8"))});}catch(error){record("cdp-post-body-unavailable",{trigger,requestId,error:short(error)});}};
  // A passive CDP observer preserves Playwright's existing dialog handling.
  // A page.on('dialog') listener would itself stop automatic dismissal.
- try{const session=await bounded(page.context().newCDPSession(page),1500);session.on("Page.javascriptDialogOpening",event=>record("javascript-dialog",{type:event.type,message:short(event.message)}));await bounded(session.send("Page.enable"),1500);}catch(error){record("dialog-observer-unavailable",{error:short(error)});}
+ try{session=await bounded(page.context().newCDPSession(page),1500);session.on("Page.javascriptDialogOpening",event=>record("javascript-dialog",{type:event.type,message:short(event.message)}));await bounded(session.send("Page.enable"),1500);
+  session.on("Network.requestWillBeSent",event=>{if(owns(event.request.url)&&event.request.method==="POST"&&createRequests.size<8){createRequests.add(event.requestId);record("cdp-post-started",{requestId:event.requestId,path:new URL(event.request.url).pathname});}});
+  session.on("Network.responseReceived",event=>{if(createRequests.has(event.requestId))record("cdp-post-response",{requestId:event.requestId,status:event.response.status,mimeType:event.response.mimeType});});
+  session.on("Network.dataReceived",event=>{if(createRequests.has(event.requestId))record("cdp-post-data",{requestId:event.requestId,dataLength:event.dataLength,encodedDataLength:event.encodedDataLength});});
+  session.on("Network.loadingFinished",event=>{if(createRequests.has(event.requestId)){record("cdp-post-finished",{requestId:event.requestId,encodedDataLength:event.encodedDataLength});void cdpBody(event.requestId,"loading-finished");}});
+  session.on("Network.loadingFailed",event=>{if(createRequests.has(event.requestId))record("cdp-post-failed",{requestId:event.requestId,error:short(event.errorText),canceled:event.canceled??false});});
+  await bounded(session.send("Network.enable"),1500);
+ }catch(error){record("passive-observer-unavailable",{error:short(error)});}
+ const observeReceipt=(response:BrowserResponse)=>{
+  record("native-post-body-probes-started");
+  void bounded(response.finished(),5000).then(error=>record("playwright-post-finished",{error:error?short(error):null})).catch(error=>record("playwright-post-finished-unavailable",{error:short(error)}));
+  void bounded(response.text(),5000).then(body=>record("playwright-post-text",bodySummary(Buffer.from(body,"utf8")))).catch(error=>record("playwright-post-text-unavailable",{error:short(error)}));
+  for(const requestId of createRequests)void cdpBody(requestId,"native-response-json-start");
+ };
  const witness=async(label:string)=>{
   try{const geometry=await bounded(page.evaluate(()=>{
    const rect=(element:Element|null)=>{if(!element)return null;const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,top:r.top,bottom:r.bottom,left:r.left,right:r.right};};
@@ -537,7 +555,7 @@ async function contractUiDiagnostic(page:Page,caseKey:string){
  };
  const capture=(reason:string)=>{if(!capturePromise){failed=true;report.failurePhase=report.phase;capturePromise=(async()=>{record("failure-capture",{reason});await witness("failureGeometry");try{await page.screenshot({path:imagePath,fullPage:false,timeout:3000});report.image=`${caseKey}.png`;record("failure-image-saved");}catch(error){record("failure-image-unavailable",{error:short(error)});}persist();})();}return capturePromise;};
  persist();
- return {phase:(name:string)=>{if(failed)return;report.phase=name;record("phase");},witness,capture,finish:()=>{if(failed)return;completed=true;report.completed=true;record("complete");},beforeClose:async()=>{if(!completed)await capture("test did not reach completion before finally");},onFailure:async()=>{await capture("Vitest onTestFailed");try{await page.close();}catch(error){record("failure-cleanup-unavailable",{error:short(error)});}}};
+ return {phase:(name:string)=>{if(failed)return;report.phase=name;record("phase");},witness,capture,observeReceipt,finish:()=>{if(failed)return;completed=true;report.completed=true;record("complete");},beforeClose:async()=>{if(!completed)await capture("test did not reach completion before finally");},onFailure:async()=>{await capture("Vitest onTestFailed");try{await page.close();}catch(error){record("failure-cleanup-unavailable",{error:short(error)});}}};
 }
 
 // Real template buttons -> canonical writer -> browser reopen -> print.
@@ -559,7 +577,7 @@ for(const [index,template] of contractTemplateCases.entries()){
    expect(await form.getByLabel("نوع العقد",{exact:true}).inputValue()).toBe(template.kind);
    for(const label of ["الراتب الأساسي","نسبة الطبيب (%)","أجر الساعة","ساعات العمل أسبوعياً","عملة الأجر","دورية الراتب","نهاية فترة التجربة"])expect(await form.getByLabel(label,{exact:true}).inputValue()).toBe("");
    diagnostic.phase("select-staff");await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));diagnostic.phase("fill-title");await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
-   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response");expect(response.status()).toBe(201);const contract=await response.json();
+   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response-status");expect(response.status()).toBe(201);diagnostic.phase("await-create-response-json");diagnostic.observeReceipt(response);const contract=await response.json();diagnostic.phase("assert-created-contract");
    expect(contract.templateKind).toBe(template.kind);expect(contract.compensationKind).toBe(template.pay);
    for(const key of ["baseSalaryMinor","salaryCurrency","salaryPeriod","commissionRatePercent","doctorPartyId","probationEndDate"])expect(contract[key]).toBeNull();
    expect(contract.status).toBe("draft");expect(contract.termsPayload.clauses).toEqual([]);expect(contract.termsPayload.workingHoursPerWeek).toBeNull();
@@ -602,7 +620,7 @@ for(const scenario of [
    const form=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"إنشاء عقد وظيفي جديد",exact:true})});diagnostic.phase("choose-template");await form.getByRole("button",{name:scenario.button,exact:true}).click();diagnostic.phase("select-staff");await form.getByLabel("الموظف",{exact:true}).selectOption(String(staff.body.staff?.id??staff.body.id));diagnostic.phase("fill-title");await form.getByLabel("مسمى العقد",{exact:true}).fill(name);
    diagnostic.phase("fill-explicit-money");if(scenario.amount){await form.getByLabel("عملة الأجر",{exact:true}).selectOption(scenario.currency);await form.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await form.getByLabel("الراتب الأساسي",{exact:true}).fill(scenario.amount);}
    if(scenario.rate)await form.getByLabel("نسبة الطبيب (%)",{exact:true}).fill(scenario.rate);
-   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response");expect(response.status()).toBe(201);const contract=await response.json();
+   await diagnostic.witness("beforeSaveGeometry");diagnostic.phase("click-save");const saved=page.waitForResponse(r=>r.url().endsWith("/api/hr/contracts")&&r.request().method()==="POST");await form.getByRole("button",{name:"حفظ العقد",exact:true}).click();diagnostic.phase("await-create-response");const response=await saved;diagnostic.phase("verify-create-response-status");expect(response.status()).toBe(201);diagnostic.phase("await-create-response-json");diagnostic.observeReceipt(response);const contract=await response.json();diagnostic.phase("assert-created-contract");
    const minor=scenario.amount?parseAmount(scenario.amount,scenario.currency as Currency):null;
    expect(contract.baseSalaryMinor).toBe(minor);expect(contract.salaryCurrency).toBe(scenario.currency||null);expect(contract.commissionRatePercent).toBe(scenario.rate?Number(scenario.rate):null);
    diagnostic.phase("reload-contract-list");await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();

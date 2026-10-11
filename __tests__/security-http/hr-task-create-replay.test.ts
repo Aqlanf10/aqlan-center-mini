@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Page, type Locator } from "playwright";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -168,6 +168,19 @@ async function taskFailureEvidence(page: Page, id: string) {
   return { at:(next:string)=>{if (!finished) { phase=next;persist(); }}, failed:finish };
 }
 
+// A controlled textarea's value and a select's options can enter a wrapping
+// label's textContent. Bind each unique native control to the exact own text of
+// its real associated label; never weaken the content or locked-state assertions.
+async function taskNativeField(modal: Locator, selector: "textarea" | "select", labelText: string) {
+  const control = modal.locator(selector);
+  expect(await control.count()).toBe(1);
+  expect(await control.evaluate(element => Array.from((element as HTMLTextAreaElement | HTMLSelectElement).labels ?? []).map(label =>
+    Array.from(label.childNodes).filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent ?? "").join("").trim()))).toEqual([labelText]);
+  expect(await control.isVisible()).toBe(true);
+  return control;
+}
+
 function cookieParts(raw: string) {
   const [name, ...parts] = raw.split("="); return { name, value: parts.join("=") };
 }
@@ -183,7 +196,7 @@ for (const width of [390, 1280]) {
       diagnostic.at("open-create"); await page.getByRole("button", { name: "مهمة جديدة", exact: true }).click();
       const modal = page.getByRole("dialog", { name: "مهمة جديدة", exact: true });
       diagnostic.at("fill-title"); await modal.getByLabel("العنوان", { exact: true }).fill(title);
-      diagnostic.at("fill-description"); await modal.getByLabel("الوصف", { exact: true }).fill("Synthetic immutable private detail");
+      diagnostic.at("fill-description"); const description = await taskNativeField(modal, "textarea", "الوصف"); await description.fill("Synthetic immutable private detail");
       diagnostic.at("check-private"); await modal.getByLabel(/مهمة خاصة/).check();
       let release!: () => void, fail!: (error: unknown) => void;
       const committed = new Promise<void>((resolve, reject) => { release = resolve; fail = reject; });
@@ -201,14 +214,18 @@ for (const width of [390, 1280]) {
       diagnostic.at("wait-uncertainty-alert"); await expect.poll(() => modal.getByRole("alert").count()).toBe(1);
       expect(sent).toHaveLength(1); expect(await count(String(sent[0].clientRequestId))).toBe(1);
       expect(await modal.getByLabel("العنوان", { exact: true }).isDisabled()).toBe(true);
-      expect(await modal.getByLabel("الوصف", { exact: true }).isDisabled()).toBe(true);
-      expect(await modal.getByLabel("الأولوية", { exact: true }).isDisabled()).toBe(true);
+      expect(await description.isDisabled()).toBe(true);
+      expect(await description.inputValue()).toBe("Synthetic immutable private detail");
+      const priority = await taskNativeField(modal, "select", "الأولوية");
+      expect(await priority.isDisabled()).toBe(true); expect(await priority.inputValue()).toBe("normal");
       expect(await modal.getByLabel(/مهمة خاصة/).isDisabled()).toBe(true);
       expect(await modal.getByRole("status").innerText()).toContain("راجع قائمة مهامك قبل إنشاء طلب جديد");
       diagnostic.at("close-modal"); await modal.getByRole("button", { name: "إلغاء", exact: true }).click();
       diagnostic.at("open-create"); await page.getByRole("button", { name: "مهمة جديدة", exact: true }).click();
       expect(await modal.getByLabel("العنوان", { exact: true }).inputValue()).toBe(title);
-      expect(await modal.getByLabel("الوصف", { exact: true }).inputValue()).toBe("Synthetic immutable private detail");
+      expect(await (await taskNativeField(modal, "textarea", "الوصف")).inputValue()).toBe("Synthetic immutable private detail");
+      expect(await description.isDisabled()).toBe(true);
+      expect(await priority.isDisabled()).toBe(true); expect(await priority.inputValue()).toBe("normal");
       expect(await modal.getByLabel("العنوان", { exact: true }).isDisabled()).toBe(true);
       page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname === "/api/tasks") sent.push(request.postDataJSON()); });
       const replayed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/tasks" && response.request().method() === "POST");
@@ -228,6 +245,11 @@ for (const width of [390, 1280]) {
   });
 
   it(`a foreign receipt remains pending and a changed signed owner cannot resend the retained draft at ${width}px`, async () => {
+    const ownerWitnessTitle = `Synthetic current owner B witness ${width}`;
+    const ownerWitnessKey = `http-task-owner-b-witness-${width}`;
+    const ownerWitness = await post(h.sessions.doctorB.cookie, { ...body(ownerWitnessKey), title: ownerWitnessTitle });
+    expect(ownerWitness.status).toBe(201);
+    expect(ownerWitness.body.creationReceipt).toEqual({ clientRequestId: ownerWitnessKey, username: "secdoctorb", role: "doctor" });
     const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "ar-YE" });
     await context.addCookies([{ ...cookieParts(h.sessions.doctorA.cookie), url: owned.baseUrl }]);
     const page = await context.newPage(), title = `Synthetic owner-fenced task ${width}`;
@@ -256,12 +278,21 @@ for (const width of [390, 1280]) {
       let unsolicited = 0;
       page.on("request", request => { if (request.method() === "POST" && new URL(request.url()).pathname === "/api/tasks") unsolicited++; });
       page.on("dialog", dialog => dialog.accept());
-      const currentOwner = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/me");
       const currentTasks = page.waitForResponse(response => new URL(response.url()).pathname === "/api/tasks" && response.request().method() === "GET");
-      diagnostic.at("reload-new-owner"); await page.reload({ waitUntil: "domcontentloaded" });
-      diagnostic.at("wait-new-owner-read"); expect((await (await currentOwner).json()).username).toBe("secdoctorb");
+      diagnostic.at("reload-new-owner"); const reloaded = await page.reload({ waitUntil: "domcontentloaded" });
+      expect(reloaded?.status()).toBe(200);
+      // RootLayout supplies the signed session directly; SessionProvider need not
+      // issue /api/auth/me on reload. This explicit context request independently
+      // verifies the cookie identity; the actual application GET below proves its
+      // positive B-owned private view as well as absence of A's retained task.
+      diagnostic.at("verify-new-owner-cookie"); const currentOwner = await context.request.get(`${owned.baseUrl}/api/auth/me`);
+      expect(currentOwner.status()).toBe(200);
+      expect(await currentOwner.json()).toMatchObject({ username: "secdoctorb", role: "doctor" });
       diagnostic.at("wait-new-tasks-read"); const visible = await currentTasks; expect(visible.status()).toBe(200);
-      expect(JSON.stringify(await visible.json())).not.toContain(title);
+      const visibleTasks = await visible.json();
+      expect(JSON.stringify(visibleTasks)).not.toContain(title);
+      expect(visibleTasks.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id: ownerWitness.body.id, title: ownerWitnessTitle, isPrivate: true })]));
+      await expect.poll(() => page.locator("section[aria-label='المهام']").getByText(ownerWitnessTitle, { exact: true }).isVisible()).toBe(true);
       diagnostic.at("open-create"); await page.getByRole("button", { name: "مهمة جديدة", exact: true }).click();
       expect(await modal.getByLabel("العنوان", { exact: true }).inputValue()).toBe("");
       expect(await modal.getByRole("status").count()).toBe(0); expect(unsolicited).toBe(0);
