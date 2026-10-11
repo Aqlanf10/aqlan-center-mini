@@ -58,3 +58,7 @@ The setup script is local environment configuration, not a tracked secret or dep
 Final literal head and completed exact-head full CI links belong in PR #308, never inferred from old cfa CI. Dot still owns `staging-web` / `staging`; no combined source or deployed SHA is claimed verified here. Dot must compose/review/test a compatible source with main/ceph/ortho, inspect the actual staging migration ledger and publish only that exact reviewed combined SHA. Staging screenshots and post-deployment cases remain unexecuted.
 
 The 16 declared schema convergence findings and `applicationSchemaEqual=false` remain disclosed. Unsupported proration/nonmonthly/partial-period wage policies, unallocated paid leave, commission-policy conflicts and unreconciled legacy claims stay explicit approval blockers rather than guessed financial rules. Patient-finance relations remain a separate design-only packet pinned to ab3218c2; no patient migration or PR #322 modification was authorized or performed.
+
+## Final CI readiness
+
+The first b9db push run failed an unrelated pre-existing modal focus assertion. A clock-controlled browser diagnostic reproduced the initial-focus race; the original six-case file passes after waiting for the existing initial focus, with all assertions and deadlines unchanged. [Exact evidence and limits](CI_FOCUS_SYNC.md). Final exact-head CI status is recorded in PR #308 and the downloadable handoff, not inferred from that failed run.

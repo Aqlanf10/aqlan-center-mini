@@ -136,6 +136,10 @@ describe("actual visit workspace choices and review", () => {
       expect(await add.count()).toBe(1); expect(await page.getByRole("combobox", { name: "أضف إجراءً", exact: true }).count()).toBe(0);
       await add.click();
       const picker = page.getByRole("dialog", { name: "أضف إجراءً للزيارة", exact: true });
+      const search = picker.getByRole("textbox", { name: "بحث في الخدمات" });
+      // Let the modal finish its existing initial focus before testing Tab wrapping.
+      // Otherwise its 30ms focus timer can replace a correctly wrapped focus.
+      await expect.poll(() => search.evaluate((node) => document.activeElement === node)).toBe(true);
       for (const service of services.filter((row) => row.isActive !== false)) expect(await picker.getByText(service.name, { exact: true }).count()).toBe(1);
       expect(await picker.getByText(services[3].name, { exact: true }).count()).toBe(0);
       const close = picker.getByRole("button", { name: "إغلاق", exact: true });
@@ -148,7 +152,6 @@ describe("actual visit workspace choices and review", () => {
       await page.keyboard.press("Shift+Tab");
       expect(await finalLink.evaluate((node) => document.activeElement === node)).toBe(true);
       expect(await picker.evaluate((node) => node.contains(document.activeElement))).toBe(true);
-      const search = picker.getByRole("textbox", { name: "بحث في الخدمات" });
       await search.fill(services[1].name);
       const custom = picker.getByRole("button").filter({ hasText: services[1].name });
       await custom.focus(); await custom.press("Enter");
