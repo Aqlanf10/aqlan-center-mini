@@ -79,3 +79,23 @@ for(const deviceZone of ['Asia/Aden','America/Los_Angeles'])it(`clinic deadline 
   expect(stored).toBe('2026-10-12T11:00:00.000Z');await modal.waitFor({state:'hidden'});await page.getByRole('button',{name:new RegExp(deviceZone)}).first().waitFor();await page.getByRole('button',{name:new RegExp(deviceZone)}).first().click();await page.getByRole('button',{name:/تعديل/}).last().click();expect(await page.locator('input[type=\"datetime-local\"]').inputValue()).toBe('2026-10-12T14:00');await page.screenshot({path:join(EVIDENCE_DIR,'fixed-task-timezone-'+deviceZone.replaceAll('/','-')+'-1280.png'),fullPage:false});const saved=page.waitForResponse(r=>r.request().method()==='PATCH'&&new URL(r.url()).pathname===`/api/tasks/${task.id}`);await page.getByRole('button',{name:'حفظ التعديل',exact:true}).click();expect((await saved).status()).toBe(200);expect((await owned.db.query('SELECT due_at FROM hr_tasks WHERE id=$1',[task.id])).rows[0].due_at.toISOString()).toBe('2026-10-12T11:00:00.000Z');
  }finally{await context.close();}
 });
+
+it('refuses an old UTC writer receipt under new clinic-local semantics without duplicating the task',async()=>{
+ const input={title:'Historical UTC writer receipt — synthetic',description:'',isPrivate:true,priority:'normal',plannedFor:null,assigneeStaffId:null,clientRequestId:'legacy-utc-deadline-upgrade-2026'};
+ // The old UTC route normalized local 14:00 to this instant. Seed that exact
+ // normalized intent through the unchanged receipt/fingerprint writer, not a fabricated digest.
+ const oldIntent={...input,dueAt:'2026-10-12T14:00:00.000Z'};
+ const original=await api('admin','POST','/api/tasks',oldIntent);expect(original.status).toBe(201);
+ const before=(await owned.db.query("SELECT old_value FROM hr_task_events WHERE task_id=$1 AND action='create'",[original.body.id])).rows;
+ const replay=await api('admin','POST','/api/tasks',{...input,dueAt:'2026-10-12T14:00'});
+ expect(replay.status).toBe(409);
+ const rows=(await owned.db.query('SELECT id,due_at FROM hr_tasks WHERE client_request_id=$1',[input.clientRequestId])).rows;
+ expect(rows).toHaveLength(1);expect(rows[0].id).toBe(original.body.id);expect(rows[0].due_at.toISOString()).toBe('2026-10-12T14:00:00.000Z');
+ expect((await owned.db.query("SELECT old_value FROM hr_task_events WHERE task_id=$1 AND action='create'",[original.body.id])).rows).toEqual(before);
+ const unchangedReplay=await api('admin','POST','/api/tasks',oldIntent);expect(unchangedReplay.status).toBe(201);expect(unchangedReplay.body.id).toBe(original.body.id);
+ const newIntent={...input,title:'Current writer replay — synthetic',clientRequestId:'current-clinic-deadline-replay-2026',dueAt:'2026-10-12T14:00'};
+ const current=await api('admin','POST','/api/tasks',newIntent);expect(current.status).toBe(201);
+ const repeated=await api('admin','POST','/api/tasks',newIntent);expect(repeated.status).toBe(201);expect(repeated.body.id).toBe(current.body.id);
+ expect((await owned.db.query('SELECT id,due_at FROM hr_tasks WHERE client_request_id=$1',[newIntent.clientRequestId])).rows).toMatchObject([{id:current.body.id,due_at:new Date('2026-10-12T11:00:00.000Z')}]);
+ evidence.deadlineUpgrade={oldNormalizedUtc:rows[0].due_at.toISOString(),newLocalReplayStatus:replay.status,oldTaskCount:rows.length,sameWriterReplayId:repeated.body.id};
+});
