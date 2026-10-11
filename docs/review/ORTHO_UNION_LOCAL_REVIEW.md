@@ -4,6 +4,8 @@ This is a resumable local implementation packet for dot/root review, not accepta
 of the 349 requirements or 52 scenarios and not a deployment. No remote branch,
 main, Staging, Production, real patient data, or outbound patient message was used.
 
+The financial-seam successor is documented in [ORTHO_UNION_FINANCIAL_SEAM.md](ORTHO_UNION_FINANCIAL_SEAM.md), code checkpoint `6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b`. Earlier run counts below retain their original scope.
+
 ## Source identity
 
 - Invoice/HR parent: `2eda4f5bcec6d604ec6a4156d04b4d87ec388ac9`, tree `880030f12d6fc718fcf98720327f9ba8969478b8`.

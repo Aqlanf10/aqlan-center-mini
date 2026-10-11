@@ -2799,12 +2799,13 @@
       "scope_detail": "canonical_integration_in_progress_no_duplicate_engine",
       "blocker": null,
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -3105,12 +3106,13 @@
       "scope_detail": "canonical_integration_in_progress_no_duplicate_engine",
       "blocker": null,
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -3430,12 +3432,13 @@
       "scope_detail": "canonical_integration_in_progress_no_duplicate_engine",
       "blocker": null,
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -3527,12 +3530,13 @@
       "scope_detail": "canonical_integration_in_progress_no_duplicate_engine",
       "blocker": null,
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -6695,12 +6699,13 @@
       "execution_status": "not executed",
       "source_progress": "New existing-case assessment and assessment-only intake sources exist with bounded reviews and authored real-writer/native tests; exact combined bootstrap/runtime evidence remains pending.",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "connected"
+          "connected",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -6714,13 +6719,14 @@
       "execution_status": "not executed",
       "source_progress": "New existing-case assessment and assessment-only intake sources exist with bounded reviews and authored real-writer/native tests; exact combined bootstrap/runtime evidence remains pending.",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
           "connected",
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -7149,12 +7155,13 @@
       "blocker": "SAR agreement paid in YER is unsupported by current canonical writers; no substitute Ortho conversion/ledger.",
       "execution_status": "not executed",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -7384,12 +7391,13 @@
       "blocker": "Canonical schedule/allocation/FX extension not implemented; readonly display/refusal foundations do not complete this scenario.",
       "execution_status": "not executed",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
         "evidence_packets": [
-          "financial_preservation"
+          "financial_preservation",
+          "financial_seam"
         ],
-        "status": "partial evidence"
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -7434,10 +7442,12 @@
       "blocker": "Canonical schedule/allocation/FX extension not implemented; readonly display/refusal foundations do not complete this scenario.",
       "execution_status": "not executed",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
-        "evidence_packets": [],
-        "status": "not executed as a full scenario in this packet"
+        "evidence_packets": [
+          "financial_seam"
+        ],
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -7498,10 +7508,12 @@
       "blocker": "Canonical schedule/allocation/FX extension not implemented; readonly display/refusal foundations do not complete this scenario.",
       "execution_status": "not executed",
       "local_union_review": {
-        "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
         "acceptance": "not accepted",
-        "evidence_packets": [],
-        "status": "not executed as a full scenario in this packet"
+        "evidence_packets": [
+          "financial_seam"
+        ],
+        "status": "partially evidenced; full scenario remains open"
       }
     },
     {
@@ -8108,7 +8120,7 @@
     ]
   },
   "latest_local_union": {
-    "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+    "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
     "branch": "local/ortho-finance-union-20261011",
     "review": "docs/review/ORTHO_UNION_LOCAL_REVIEW.md",
     "requirements_retained": 349,
@@ -8190,6 +8202,24 @@
           "__tests__/security-http/ortho-connected-union-browser.test.ts"
         ],
         "limit": "Saved internal study/revision proof; no editable PPTX/PDF or complete connected media/crop/export proof."
+      },
+      "financial_seam": {
+        "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
+        "paths": [
+          "lib/invoice-linkage-db.ts",
+          "lib/legacy-treatment-db.ts",
+          "components/OrthoPackageLink.tsx",
+          "components/PatientOrtho.tsx",
+          "app/patients/[id]/page.tsx"
+        ],
+        "tests": [
+          "__tests__/postgres/ortho-connected-union.test.ts",
+          "__tests__/security-http/invoice-clinic-continuity-journey.test.ts",
+          "__tests__/security-http/ortho-package-read-state-ui.test.ts",
+          "__tests__/patient-alert-page.test.tsx"
+        ],
+        "results": "PG seam12 + financial regressions75 (10 seam overlap); native16; targeted unit139; build and lint0 errors. Exact logs in review artifact.",
+        "limit": "Outside-contract adjustment remains pending with no financial decision; all eight independent scenarios only partially evidenced; not acceptance of all52."
       }
     },
     "owner_addenda": {
@@ -8215,6 +8245,21 @@
         "Downs": "FH (Po-Or) with Go-Me; requested landmark implementation, original tangent equivalence not verified",
         "historical": "Versioned successor required; never reinterpret existing sealed values."
       }
-    }
+    },
+    "financial_seam_review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+    "independent_reviews": [
+      {
+        "path": "docs/review/ortho-union-science/BILINGUAL_STATIC_AUDIT.md",
+        "library_id": "libfile_a9a9561999d48191bf3f4b2ae15b28f5",
+        "sha256": "cddc3a9a38513ad025632945e70b93a7c6fae28f1269f43148e37c9afdbf63ab",
+        "status": "full text read; implementation incomplete"
+      },
+      {
+        "path": "docs/review/ortho-union-science/FINANCIAL_SEAM_STATIC_REVIEW.md",
+        "library_id": "libfile_c02be2d4bca08191a5669cb30538af3e",
+        "sha256": "870b4ab15d7d00fbbe5e64015bf87b5f9438f574a49fd0f819c3dd383c1159a8",
+        "status": "full text read; eight scenarios mapped in financial-seam review"
+      }
+    ]
   }
 }

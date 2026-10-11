@@ -1,6 +1,6 @@
 {
   "base": "2eda4f5bcec6d604ec6a4156d04b4d87ec388ac9",
-  "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+  "code_checkpoint": "6d3a4d363bba043dd1c1ffa1d9b29633e4f9bc8b",
   "functions": [
     {
       "function": "itemsFor",
@@ -497,10 +497,6 @@
       "sha256": "20019b7f49bb83452753ebd7464b5921dde60310e6ec6ce810ab920ce16f9cfc"
     },
     {
-      "path": "lib/invoice-linkage-db.ts",
-      "sha256": "b113db0fcf5b3f5a3b5888fce3a7c401d888238cdd162665f81c1bc9769dea26"
-    },
-    {
       "path": "lib/invoice-linkage-schema.ts",
       "sha256": "ea6cfe54a94a6f57b1293864d2992cfa6ff86465f65bacdc23f8528a64cdf820"
     },
@@ -550,5 +546,42 @@
     }
   ],
   "reset_hr_table_set_identical": true,
-  "note": "Content comparison, not a claim that every HR/finance behavior was exercised."
+  "note": "Content comparison, not a claim that every HR/finance behavior was exercised.",
+  "reviewed_shared_exceptions": [
+    {
+      "path": "lib/invoice-linkage-db.ts",
+      "base_sha256": "b113db0fcf5b3f5a3b5888fce3a7c401d888238cdd162665f81c1bc9769dea26",
+      "current_sha256": "bafac6340b4ae097d04987d403c8852bf7776578cd9d141c432f65a185371084",
+      "review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+      "approval": "pending dot/root review; local only"
+    },
+    {
+      "path": "lib/legacy-treatment-db.ts",
+      "base_sha256": "7ce1c0c451b0859d35fa8c27c8fb089466809d6d2539b18e49fe828236882844",
+      "current_sha256": "3945e6c92fba23efc1b5d6b1e65f360d379ad320bab121aef9dd6918e8ba0c6a",
+      "review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+      "approval": "pending dot/root review; local only"
+    },
+    {
+      "path": "components/OrthoPackageLink.tsx",
+      "base_sha256": "08f76dd80286e13b8011cb139b441180788c70a1ad6aa79ae395fdbb87160d25",
+      "current_sha256": "d290f962ce99d9582ebb5b2ba87fea5b379ddb4d39f19793c3422cb9d4f11245",
+      "review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+      "approval": "pending dot/root review; local only"
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "base_sha256": "649e0d1908c16d23ba3f81fedf8c607fb9099cb9c343198fd5d7798f033aa2f9",
+      "current_sha256": "3079d4a21d78cc43ed51d90faa4a8062714cd2ae5db6677747afab6c5a190505",
+      "review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+      "approval": "pending dot/root review; local only"
+    },
+    {
+      "path": "app/patients/[id]/page.tsx",
+      "base_sha256": "565910a574e6b490a3fdd1f86deaa47bc6f729cfceac2eeaef340304adf601d6",
+      "current_sha256": "bd512f375145d76d3dec76733d7bee7041e31e91817faec729bb2d1f3b5953af",
+      "review": "docs/review/ORTHO_UNION_FINANCIAL_SEAM.md",
+      "approval": "pending dot/root review; local only"
+    }
+  ]
 }
