@@ -12,15 +12,25 @@ let created = false;
 let db: typeof import("../../lib/db") | undefined;
 let fixtureNumber = 0;
 
+function throwCollectedFailures(errors: unknown[], message: string): void {
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, message);
+}
+
 beforeAll(async () => {
   const target = validateOwnershipHarnessEnvironment();
   if ([...target.testUrl.searchParams.keys()].some(key => key !== "sslmode")) throw new Error("Unexpected connection override.");
   if (!/^aqlan_ceph_dto_[a-f0-9]{32}$/.test(database)) throw new Error("Unsafe owned fixture name.");
   maintenanceUrl = target.maintenanceUrl.toString();
   const admin = new Client({ connectionString: maintenanceUrl, ssl: false });
-  await admin.connect();
-  try { await admin.query(`CREATE DATABASE ${database}`); created = true; }
-  finally { await admin.end(); }
+  const setupErrors: unknown[] = [];
+  try {
+    await admin.connect();
+    await admin.query(`CREATE DATABASE ${database}`);
+    created = true;
+  } catch (error) { setupErrors.push(error); }
+  try { await admin.end(); } catch (error) { setupErrors.push(error); }
+  throwCollectedFailures(setupErrors, "Ceph fixture creation and connection cleanup failed.");
   target.testUrl.pathname = `/${database}`;
   vi.stubEnv("DATABASE_URL", target.testUrl.toString());
   vi.stubEnv("DATABASE_ENVIRONMENT", "test");
@@ -34,26 +44,30 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  try { await db?.resetPoolForTesting(); }
-  finally {
-    vi.unstubAllEnvs();
-    if (created) {
-      const admin = new Client({ connectionString: maintenanceUrl, ssl: false });
+  const cleanupErrors: unknown[] = [];
+  try { await db?.resetPoolForTesting(); } catch (error) { cleanupErrors.push(error); }
+  try { vi.unstubAllEnvs(); } catch (error) { cleanupErrors.push(error); }
+  if (created) {
+    let admin: Client | undefined;
+    try {
+      admin = new Client({ connectionString: maintenanceUrl, ssl: false });
       await admin.connect();
-      try {
-        const deadline = Date.now() + 5_000;
-        while (true) {
-          const { rows: [row] } = await admin.query<{ count: number }>(
-            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = $1", [database]);
-          if (row.count === 0) break;
-          if (Date.now() >= deadline) throw new Error("Owned fixture connections did not drain.");
-          await delay(25);
-        }
-        // Unexpected new connections refuse cleanup; no forced termination.
-        await admin.query(`DROP DATABASE ${database}`);
-      } finally { await admin.end(); }
-    }
+      const deadline = Date.now() + 5_000;
+      while (true) {
+        const { rows: [row] } = await admin.query<{ count: number }>(
+          "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname = $1", [database]);
+        if (row.count === 0) break;
+        if (Date.now() >= deadline) throw new Error("Owned fixture connections did not drain.");
+        await delay(25);
+      }
+      // Unexpected new connections refuse cleanup; no forced termination.
+      await admin.query(`DROP DATABASE ${database}`);
+    } catch (error) { cleanupErrors.push(error); }
+    try { await admin?.end(); } catch (error) { cleanupErrors.push(error); }
   }
+  // Report only after every permitted cleanup attempt; never overwrite an
+  // earlier reset/drain/drop failure with a later connection-close failure.
+  throwCollectedFailures(cleanupErrors, "Ceph fixture teardown encountered multiple failures.");
 });
 
 async function fixture() {
