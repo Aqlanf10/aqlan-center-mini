@@ -1,3 +1,32 @@
+# Current integration status — PR #308, 2026-10-11
+
+This section supersedes the historical delivery status below. The branch remains `feat/hr-staff-tasks-phase1`; the literal current published head and its exact-head CI links are maintained in [PR #308](https://github.com/Aqlanf10/aqlan-center-mini/pull/308). Source review alone does not establish merge or deployment readiness.
+
+## Verified ancestry and evidence
+
+- Ordinary integration commit `f180a6db990a956e62e5c15abc6f46335066f928` has ordered parents `78d484590895fd73209021383700b8a142f17238` and main `148fcbeac229cb279848e6ea37049d1599a4fafe`; its tree is `d8f7bc94818cc185122e65c63e192e816d0778fa`. Main's native-control clinical visit workspace test and independent HR changes were preserved. [Integration CI 38104085125](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38104085125) completed successfully. This is the pre-P1-repair combined baseline.
+- P1 repair commit `1dd5dd9f67bdadcf32f5161b3983373d2d18d8c7`, tree `5685ec4ae119de7dd1798effd93046c91b6550f0`, was published on that integration. [PR CI 38105815224](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38105815224) and [push CI 38105812642](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38105812642) failed Typecheck: TS2305, missing `revalidateSessionInTransaction` export in `lib/session.ts`. Subsequent lint, unit, PostgreSQL, build and HTTP gates were skipped. Artifact upload errors are secondary. No new runtime success is claimed from those runs.
+- This successor adds the missing canonical session wrapper and the mounted-owner task read boundary with focused regression tests. These source changes were independently reviewed before publication. Their execution result must be read from the current exact-head CI linked in the PR; at source preparation they have not run. Earlier green results cannot prove this successor.
+
+## Current source repairs
+
+- Task creation replay is bound to the original actor, current read authority and canonical original request. Foreign keys or changed payloads fail without exposing private task content. Per-key locking, current session and assignee checks after waits, and atomic task/event/audit writes keep replay and creation in one transaction.
+- The task form preserves its original key and immutable body through uncertain replies and modal close/reopen. Only a matching first-attempt no-write refusal unlocks editing; an earlier ambiguous operation stays protected. Receipt admission requires the expected owner and request key. Private pending data is held only in mounted parent memory. Reload/full navigation recovery is not claimed; the warning and before-unload guard tell the user to review existing tasks before starting another request.
+- The successor keys list/detail state to the current owner and admits responses only for the current request generation. Same-role owner changes synchronously retire the old private view; delayed list/detail or creation responses cannot restore a retired owner's content or clear a newer form. Four real-React mounted browser cases exercise synthetic transport without a reload-only shortcut. They complement the signed HTTP and PostgreSQL task tests, rather than replacing them.
+- Contract lifecycle repair enforces draft completion and allowed transitions, preserves approved terms, revalidates the admitted session within transactions, and allocates unique contract/addendum identifiers under the intended locking. Contract API, UI, print and fixtures were updated together. The successor session helper delegates to the existing canonical current-account checks; it does not authenticate arbitrary client objects.
+
+## Required before acceptance
+
+The final exact-head Typecheck, lint, unit, PostgreSQL, schema, audit, build and HTTP gates must pass, including task replay, mounted owner privacy, contract lifecycle/concurrent addenda, payroll and attendance coverage. Any remaining substantive review finding must be resolved. The historical schema/policy limitations below remain disclosed unless current evidence explicitly resolves them. Combined Staging compatibility and native evidence review remain outstanding; no current Production verification or deployment is claimed. Main merge and deployment have not been approved by this handoff.
+
+No CI timeout, permission matrix, financial assertion or migration gate was relaxed. The successor uses the already locked esbuild 0.28.2 dependency; no dependency installation or local application/test/build/SQL execution formed this source review.
+
+---
+
+# Historical HR delivery record retained verbatim
+
+The following record describes earlier delivered source and earlier test/deployment states. Its uses of “current” or “final” belong to that historical work, not the successor above.
+
 # Integrated HR repair handoff — PR #308
 
 ## Current follow-up: verified payouts, reversal recovery and transaction authority

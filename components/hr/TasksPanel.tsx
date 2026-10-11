@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { Modal } from "@/components/Modal";
 import {
   TASK_LINK_KIND_LABEL, TASK_PRIORITY_LABEL, TASK_STATUS_LABEL,
@@ -106,7 +106,27 @@ function newRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
+const emptyTaskList = ():TaskListPayload => ({tasks:[],counts:{planned:0,in_progress:0,blocked:0,completed:0,cancelled:0},overdueCount:0});
+type PendingTaskChange = (request:PendingTaskCreation|undefined,expectedKey?:string)=>void;
+
 export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
+  const owner=session?`${session.username}\u0000${session.role}`:"";
+  // Retain immutable uncertain requests across owner changes, never read views.
+  const [pendingCreations,setPendingCreations]=useState<Record<string,PendingTaskCreation|undefined>>({});
+  const onPending:PendingTaskChange=(request,expectedKey)=>setPendingCreations(current=>{
+    if(expectedKey&&current[owner]?.clientRequestId!==expectedKey)return current;
+    return {...current,[owner]:request};
+  });
+  useEffect(()=>{
+    if(!Object.values(pendingCreations).some(Boolean))return;
+    const beforeUnload=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};
+    window.addEventListener("beforeunload",beforeUnload);
+    return ()=>window.removeEventListener("beforeunload",beforeUnload);
+  },[pendingCreations]);
+  return <OwnerTaskPanel key={owner} session={session} pending={pendingCreations[owner]} onPending={onPending}/>;
+}
+
+function OwnerTaskPanel({session,pending,onPending}:{session:SessionInfo|null;pending:PendingTaskCreation|undefined;onPending:PendingTaskChange}){
   const oversight = canAssignTasks(session?.role);
   const allowed = canUseTasks(session?.role);
   const [scope, setScope] = useState<"mine" | "team">(oversight ? "team" : "mine");
@@ -115,20 +135,14 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
   const [priorityFilter, setPriorityFilter] = useState<"" | TaskPriority>("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [payload, setPayload] = useState<TaskListPayload>({ tasks: [], counts: { planned: 0, in_progress: 0, blocked: 0, completed: 0, cancelled: 0 }, overdueCount: 0 });
+  const [listRead,setListRead]=useState<{query:string;epoch:number;value:TaskListPayload}|null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [detailRead,setDetailRead]=useState<{epoch:number;value:TaskDetail}|null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const owner = session ? `${session.username}\u0000${session.role}` : "";
-  // Private drafts stay in memory, scoped to the signed owner, across modal close/reopen.
-  const [pendingCreations, setPendingCreations] = useState<Record<string, PendingTaskCreation | undefined>>({});
-  useEffect(() => {
-    if (!pendingCreations[owner]) return;
-    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", beforeUnload);
-    return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [owner, pendingCreations]);
+  const live=useRef(true),listEpoch=useRef(0),detailEpoch=useRef(0);
+  useLayoutEffect(()=>{live.current=true;return ()=>{live.current=false;listEpoch.current++;detailEpoch.current++;};},[]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -140,35 +154,39 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
     return params.toString();
   }, [scope, statusFilter, priorityFilter, overdueOnly, search]);
 
+  const currentQuery=useRef(query);
+  if(currentQuery.current!==query){currentQuery.current=query;listEpoch.current++;detailEpoch.current++;}
+  const payload=listRead?.query===query&&listRead.epoch===listEpoch.current?listRead.value:emptyTaskList();
+  const detail=detailRead?.epoch===detailEpoch.current?detailRead.value:null;
   const load = useCallback(async () => {
+    if(!live.current||currentQuery.current!==query)return;
+    const epoch=++listEpoch.current;
+    const current=()=>live.current&&currentQuery.current===query&&listEpoch.current===epoch;
+    setLoading(true);
     try {
-      const response = await fetch(`/api/tasks?${query}`, { cache: "no-store" });
-      if (!response.ok) {
-        const payloadError = (await response.json().catch(() => null)) as { message?: string } | null;
-        throw new Error(payloadError?.message ?? "تعذّر تحميل المهام.");
-      }
-      setPayload((await response.json()) as TaskListPayload);
-      setError(null);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل المهام.");
-    } finally {
-      setLoading(false);
-    }
-  }, [query]);
+      const response=await fetch(`/api/tasks?${query}`,{cache:"no-store"});
+      const value=await response.json();
+      if(!current())return;
+      if(!response.ok)throw new Error(value?.message??"تعذّر تحميل المهام.");
+      setListRead({query,epoch,value:value as TaskListPayload});setError(null);
+    } catch(readError){
+      if(current()){setListRead(null);setError(readError instanceof Error?readError.message:"تعذّر تحميل المهام.");}
+    } finally {if(current())setLoading(false);}
+  },[query]);
+  useEffect(()=>{if(allowed)void load();},[allowed,load]);
 
-  useEffect(() => {
-    if (!allowed) return;
-    void load();
-  }, [allowed, load]);
-
-  const openDetail = useCallback(async (taskId: number) => {
-    const response = await fetch(`/api/tasks/${taskId}`, { cache: "no-store" });
-    if (!response.ok) {
-      setError("تعذّر فتح المهمة — قد تكون خاصةً لغيرك.");
-      return;
-    }
-    setDetail((await response.json()) as TaskDetail);
-  }, []);
+  const openDetail=useCallback(async(taskId:number)=>{
+    if(!live.current||currentQuery.current!==query)return;
+    const epoch=++detailEpoch.current;
+    const current=()=>live.current&&currentQuery.current===query&&detailEpoch.current===epoch;
+    setDetailRead(null);
+    try{
+      const response=await fetch(`/api/tasks/${taskId}`,{cache:"no-store"});const value=await response.json();
+      if(!current())return;
+      if(!response.ok){setError("تعذّر فتح المهمة — قد تكون خاصةً لغيرك.");return;}
+      setDetailRead({epoch,value:value as TaskDetail});
+    }catch{if(current())setError("تعذّر فتح المهمة.");}
+  },[query]);
 
   if (!allowed) {
     return <p className="rounded-xl bg-white p-4 text-sm text-navy-700 shadow-card">المهام خارج صلاحيات دورك.</p>;
@@ -316,11 +334,8 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
         <CreateTaskModal
           key={owner}
           session={session}
-          pending={pendingCreations[owner]}
-          onPending={(request, expectedKey) => setPendingCreations((current) => {
-            if (expectedKey && current[owner]?.clientRequestId !== expectedKey) return current;
-            return { ...current, [owner]: request };
-          })}
+          pending={pending}
+          onPending={onPending}
           oversight={oversight}
           onClose={() => setCreateOpen(false)}
           onCreated={() => { setCreateOpen(false); void load(); }}
@@ -331,8 +346,8 @@ export function HrTasksPanel({ session }: { session: SessionInfo | null }) {
           detail={detail}
           session={session}
           oversight={oversight}
-          onRefresh={async () => { setDetail(null); await load(); }}
-          onReloadDetail={async () => { const response = await fetch(`/api/tasks/${detail.task.id}`, { cache: "no-store" }); if (response.ok) setDetail((await response.json()) as TaskDetail); }}
+          onRefresh={async () => { detailEpoch.current++;setDetailRead(null); await load(); }}
+          onReloadDetail={() => openDetail(detail.task.id)}
         />
       )}
     </section>
@@ -360,8 +375,13 @@ function CreateTaskModal({ session, oversight, pending, onPending, onClose, onCr
   const submitting = useRef(false);
   const mounted = useRef(true);
   const activeRequest = useRef(pending);
+  const pendingChange=useRef(onPending);pendingChange.current=onPending;
   useEffect(() => { activeRequest.current = pending; }, [pending]);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useLayoutEffect(() => { mounted.current = true; return () => {
+    mounted.current = false;
+    const request=activeRequest.current;
+    if(request)pendingChange.current({...request,uncertain:true},request.clientRequestId);
+  }; }, []);
   const locked = busy || !!pending;
   const isCurrentRequest = (request: PendingTaskCreation) => mounted.current
     && activeRequest.current?.clientRequestId === request.clientRequestId
