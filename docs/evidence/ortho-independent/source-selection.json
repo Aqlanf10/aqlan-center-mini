@@ -623,7 +623,7 @@
       "sourceSha256": "7768dfc8bd8730babfc54f7febdd9a8919598539a5b40d70035a030b2ee7ed64",
       "included": true,
       "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
-      "currentSha256": "6f777de5cfc51efec9a7ff310a784297e67fda4eece5f4fbd52242c89b9ab8c2",
+      "currentSha256": "f7dddedf47970d5a2685d9f9a5c1d70a55d4abb5d5060a598e5cb7a8d2a31455",
       "sourceChanged": true
     },
     {
@@ -821,8 +821,8 @@
       "sourceSha256": "a8023ea3182e00bb7405b6c5858335ebd0e89afb4200c016e4a3fc7a3742fcf9",
       "included": true,
       "reason": "independent new module/test",
-      "currentSha256": "a8023ea3182e00bb7405b6c5858335ebd0e89afb4200c016e4a3fc7a3742fcf9",
-      "sourceChanged": false
+      "currentSha256": "58d636f5a55d650e654afeb13c3fece572b67fcbc4d61828f42e882bff5e0174",
+      "sourceChanged": true
     },
     {
       "path": "components/OrthoStudyImageEditor.tsx",

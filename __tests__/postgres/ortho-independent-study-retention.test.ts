@@ -58,7 +58,7 @@ beforeAll(async () => {
   retention = await import("../../lib/ortho-retention-event-store");
 }, 180_000);
 beforeEach(async () => {
-  await fixture.pool.query("UPDATE users SET role='admin',is_active=true WHERE id=$1", [actor.id]);
+  await fixture.pool.query("UPDATE users SET role='admin',is_active=true,party_id=NULL,permissions=NULL WHERE id=$1", [actor.id]);
   transport.token = createSessionToken({ userId: actor.id, username: actor.username, role: "admin",
     expiresAt: Date.now() + 600_000, credentialVersion: sessionCredentialVersion(actor.passwordHash) });
   const admitted = await (await import("../../lib/session")).requireSession();
@@ -142,5 +142,33 @@ describe("independent study and retention real writers on the approved HR base",
     expect(await study.saveOrthoCaseStudy({ ...scope, patientId: other.id, session, command: draft() })).toMatchObject({ ok: false, status: 404 });
     expect(await counts()).toEqual(before);
     const read = await study.getOrthoCaseStudy({ ...scope, session }); expect(read).toMatchObject({ ok: true, revision: null, history: [] });
+  });
+  it("allows reception to read permitted empty history but refuses both clinical writers", async () => {
+    await fixture.pool.query("UPDATE users SET role='reception' WHERE id=$1", [actor.id]);
+    transport.token = createSessionToken({ userId: actor.id, username: actor.username, role: "reception",
+      expiresAt: Date.now() + 600_000, credentialVersion: sessionCredentialVersion(actor.passwordHash) });
+    const current = await (await import("../../lib/session")).requireSession();
+    if (!current) throw new Error("Synthetic reception session not admitted");
+    const before = await counts();
+    expect(await study.getOrthoCaseStudy({ ...scope, session: current })).toMatchObject({ ok: true, history: [] });
+    expect(await study.saveOrthoCaseStudy({ ...scope, session: current, command: draft() })).toMatchObject({ ok: false, status: 403 });
+    expect(await retention.appendOrthoRetentionEvent({ ...scope, session: current, command: delivery() })).toMatchObject({ ok: false, status: 403 });
+    expect(await counts()).toEqual(before);
+  });
+  it("checks a doctor's current patient assignment inside the real writer", async () => {
+    const { rows: [doctor] } = await fixture.pool.query<{ id: number }>("INSERT INTO parties(kind,name,is_active) VALUES('doctor','Synthetic independent doctor',true) RETURNING id");
+    await fixture.pool.query("UPDATE users SET role='doctor',party_id=$2,permissions=$3 WHERE id=$1", [actor.id, doctor.id,
+      JSON.stringify({ canViewAllPatients: false, canViewPlans: true, canEditPlans: true, canViewXrays: true })]);
+    transport.token = createSessionToken({ userId: actor.id, username: actor.username, role: "doctor", partyId: doctor.id,
+      expiresAt: Date.now() + 600_000, credentialVersion: sessionCredentialVersion(actor.passwordHash) });
+    const current = await (await import("../../lib/session")).requireSession();
+    if (!current) throw new Error("Synthetic doctor session not admitted");
+    const command = draft();
+    expect(await study.saveOrthoCaseStudy({ ...scope, session: current, command })).toMatchObject({ ok: false, status: 403 });
+    await fixture.pool.query("UPDATE patients SET primary_doctor_id=$2 WHERE id=$1", [scope.patientId, doctor.id]);
+    expect(await study.saveOrthoCaseStudy({ ...scope, session: current, command })).toMatchObject({ ok: true, replayed: false });
+    await fixture.pool.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [scope.patientId]);
+    expect(await study.saveOrthoCaseStudy({ ...scope, session: current, command })).toMatchObject({ ok: false, status: 403 });
+    expect((await fixture.pool.query("SELECT count(*)::int AS count FROM ortho_case_study_revisions WHERE ortho_case_id=$1", [scope.orthoCaseId])).rows[0].count).toBe(1);
   });
 });

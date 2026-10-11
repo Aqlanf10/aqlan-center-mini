@@ -59,6 +59,10 @@ describe("real study React editor with strictly synthetic transport", () => {
       await expect.poll(async () => (await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).uncertain).toBe(false);
       await expect.poll(() => f.page.getByLabel("تعليق الدراسة", { exact: true }).inputValue()).toBe("Synthetic retained A narrative");
       snapshot = await f.page.evaluate(() => window.__studyEditorFixture.snapshot()); expect(snapshot.count).toBe(1); expect(snapshot.unload).toBe(false); expect(snapshot.unexpected).toEqual([]);
+      const timestamp = f.page.getByRole("region", { name: "مراجعة الدراسة المحفوظة", exact: true }).locator("time");
+      await expect.poll(() => timestamp.textContent()).toBe("2026-10-01T00:00:00.000Z");
+      expect(await timestamp.getAttribute("datetime")).toBe("2026-10-01T00:00:00.000Z");
+      expect(await timestamp.evaluate(node => getComputedStyle(node).direction)).toBe("ltr");
       await retainIndependentOrthoEvidence(f.page, `ortho-independent-study-recovered-${width}`);
     } finally { await f.context.close(); }
     expect(f.outside).toEqual([]);

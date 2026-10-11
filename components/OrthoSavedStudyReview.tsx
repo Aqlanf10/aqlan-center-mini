@@ -6,7 +6,7 @@ import { caseLayout } from "@/lib/ortho-case-template";
 import { readStudyPanelReview, type StudyPanelReview } from "@/lib/ortho-case-study-review-contract";
 interface Props { owner: StudyOwner; readVersion: number; revision: StudyEditorRevision }
 export default function OrthoSavedStudyReview(props: Props) {
-  const { revision, owner, readVersion } = props;
+  const { revision, readVersion } = props;
   const [selected, setSelected] = useState("");
   const panel = revision.authored.panels.find(value => value.instanceId === selected) ?? revision.authored.panels[0];
   return <section className="min-w-0 rounded border p-3 space-y-2" aria-label="مراجعة الدراسة المحفوظة">
@@ -48,7 +48,7 @@ function SavedPanel({ owner, readVersion, revision, panelId }: Props & { panelId
   if (error) return <p role="alert">تعذّرت مراجعة هذا القسم أو تغيّرت صلاحية مصدره. لا تعني النتيجة خلو السجل ولا تعرض نسخة بديلة.</p>;
   if (!value) return <p role="status">جارٍ قراءة القسم المحفوظ…</p>;
   return <div className="min-w-0 space-y-3">
-    <h4>{value.title}</h4><p>وقت التقاط النسخة: {value.capturedAt} — {value.included ? "مضمّن في العرض المختار" : "مستبعد من العرض المختار؛ محفوظ للمراجعة"}</p>
+    <h4>{value.title}</h4><p>وقت التقاط النسخة: <time dateTime={value.capturedAt} dir="ltr" className="inline-block">{value.capturedAt}</time> — {value.included ? "مضمّن في العرض المختار" : "مستبعد من العرض المختار؛ محفوظ للمراجعة"}</p>
     <p role="status">حالة القسم المحفوظة: {{ available: "متاح", not_recorded: "غير مسجل", unavailable: "غير متاح", restricted: "مقيّد" }[value.panelState]}</p>
     {value.panelState !== "available" && <p>لا تُعرض حقائق سريرية أو صور لهذا القسم وفق حالته المحفوظة. بقيت المراجع والتعليقات في النسخة دون تغيير؛ هذه الحالة لا تمنح صلاحية وصول.</p>}
     {value.blocks.map((block, index) => block.kind === "paragraph" ? <p key={index} className="whitespace-pre-wrap break-words">{block.text}</p>
