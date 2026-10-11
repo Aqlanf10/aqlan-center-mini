@@ -286,7 +286,7 @@ describe("السجلات المغلقة والتفسير", () => {
     const all = computeAll(CASE, SCALE);
     const s = summarize(all);
     expect(s.skeletal).toContain("صنف أول");
-    expect(s.vertical).toContain("متوازن");
+    expect(s.vertical).toContain("حالة النمو غير مقيمة");
 
     const classTwo = summarize(computeAll({ ...CASE, B: img(53.84, -79.85) }, SCALE));
     expect(classTwo.skeletal).toContain("ثانٍ");

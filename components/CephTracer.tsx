@@ -1,13 +1,16 @@
 "use client";
 
+import { cephAcquisitionAge, createCephSuggestionLifetime, matchesCephSuggestionIdentity } from "@/lib/ceph-suggestion-safety";
+import { useSession } from "@/components/SessionProvider";
+
 import { cephReturnHref, cephStudyHref, readClinicalContext } from "@/lib/patient-navigation";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
-  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
-  suggestDiagnosis, suggestLandmarks, summarize,
+  CEPH_SCHOOLS, computeAll, enrichWithRefs, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
+  suggestDiagnosis, summarize,
   type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
 
@@ -142,16 +145,7 @@ interface DxState {
   finalDx: string;
 }
 
-export function CephTracer({
-  patientName,
-  patientBirthYear,
-  analysis,
-  initialLandmarks,
-  stamped,
-  refValues,
-  refSetName,
-  diagnosis,
-}: {
+interface CephTracerProps {
   patientName: string;
   patientBirthYear: number | null;
   analysis: AnalysisProp;
@@ -160,7 +154,29 @@ export function CephTracer({
   refValues: Record<string, { mean: number; sd: number }> | null;
   refSetName: string | null;
   diagnosis: DiagnosisProp | null;
-}) {
+}
+
+/** React owns the entire editor lifetime, including already accepted previews.
+ * A different principal/study/source snapshot cannot retain editable coordinates.
+ */
+export function CephTracer(props: CephTracerProps) {
+  const session = useSession();
+  const owner = JSON.stringify({ principal: session ? { username: session.username, role: session.role,
+    permissions: session.permissions ?? null } : null, source: props });
+  return <CephTracerBody key={owner} {...props} sourceOwner={owner} />;
+}
+
+function CephTracerBody({
+  patientName,
+  patientBirthYear,
+  analysis,
+  initialLandmarks,
+  stamped,
+  refValues,
+  refSetName,
+  diagnosis,
+  sourceOwner,
+}: CephTracerProps & { sourceOwner: string }) {
   const [returnSearch, setReturnSearch] = useState("");
   useEffect(() => { setReturnSearch(window.location.search); }, []);
   const returnHref = cephReturnHref(analysis, returnSearch);
@@ -177,8 +193,24 @@ export function CephTracer({
     for (const lm of initialLandmarks) map[lm.code] = lm.source;
     return map;
   });
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiDxLoading, setAiDxLoading] = useState(false);
+  // New geometric previews are not saved evidence. Historical source flags are
+  // preserved; this list contains only previews generated in this open draft.
+  const [unreviewedPreviewCodes, setUnreviewedPreviewCodes] = useState<LandmarkCode[]>([]);
+  const hasUnreviewedPreview = unreviewedPreviewCodes.some(code => points[code] != null);
+  const suggestionSession = useSession();
+  const suggestionOwnerKey = sourceOwner;
+  const suggestionLifetime = useMemo(() => {
+    const owner = createCephSuggestionLifetime();
+    owner.setOwner(suggestionOwnerKey);
+    return owner;
+  }, [suggestionOwnerKey]);
+  const currentSuggestionLifetime = useRef(suggestionLifetime);
+  currentSuggestionLifetime.current = suggestionLifetime;
+  useLayoutEffect(() => { suggestionLifetime.mount(); return () => suggestionLifetime.unmount(); }, [suggestionLifetime]);
+  const [aiLoadingOwner, setAiLoadingOwner] = useState<typeof suggestionLifetime | null>(null);
+  const [aiDxLoadingOwner, setAiDxLoadingOwner] = useState<typeof suggestionLifetime | null>(null);
+  const aiLoading = aiLoadingOwner === suggestionLifetime;
+  const aiDxLoading = aiDxLoadingOwner === suggestionLifetime;
   const [scale, setScale] = useState<number | null>(analysis.mmPerPixel);
   const [calibration, setCalibration] = useState<AnalysisProp["calibration"]>(analysis.calibration);
   const [active, setActive] = useState<LandmarkCode | null>(null);
@@ -226,6 +258,10 @@ export function CephTracer({
   });
   const dragging = useRef<LandmarkCode | null>(null);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useLayoutEffect(() => () => {
+    if (nudgeTimer.current !== null) clearTimeout(nudgeTimer.current);
+    nudgeTimer.current = null;
+  }, []);
 
   const [dx, setDx] = useState<DxState>(() => ({
     skeletal: diagnosis?.skeletal ?? "",
@@ -235,34 +271,49 @@ export function CephTracer({
     finalDx: diagnosis?.finalDx ?? "",
   }));
   const [dxDirty, setDxDirty] = useState(false);
-  const canLeaveStudy = () => !saving && nudgeTimer.current === null
-    && (!(dxDirty || calMode) || window.confirm("هناك تشخيص أو معايرة غير محفوظين. هل تريد مغادرة الدراسة؟"));
+  const suggestionInputs = JSON.stringify({ points, scale, dx });
+  const currentSuggestionInputs = useRef(suggestionInputs);
+  currentSuggestionInputs.current = suggestionInputs;
+  const currentPoints = useRef(points);
+  currentPoints.current = points;
+  const canLeaveStudy = () => !saving && !suggestionLifetime.busy() && nudgeTimer.current === null
+    && (!(dxDirty || calMode || hasUnreviewedPreview) || window.confirm("هناك تشخيص أو معايرة أو معالم مقترحة غير محفوظة. هل تريد مغادرة الدراسة؟"));
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (saving || dxDirty || calMode || nudgeTimer.current !== null) { event.preventDefault(); event.returnValue = ""; } };
+    const warn = (event: BeforeUnloadEvent) => { if (saving || aiLoading || aiDxLoading || dxDirty || calMode || hasUnreviewedPreview || nudgeTimer.current !== null) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [saving, dxDirty, calMode]);
+  }, [saving, aiLoading, aiDxLoading, dxDirty, calMode, hasUnreviewedPreview]);
 
   /** حفظ نقطة واحدة — كتابةٌ فوقية برمزها، والخادم يرفض إن كان المعتمد. */
-  const savePoint = useCallback(async (code: LandmarkCode, pt: Pt) => {
+  const savePoint = useCallback(async (code: LandmarkCode, pt: Pt, reviewedPreview = false) => {
+    // Editing/undoing a new geometric preview is local until its explicit review.
+    // Existing historical/manual landmarks retain their existing save behavior.
+    const isPreview = unreviewedPreviewCodes.includes(code);
+    if (isPreview && !reviewedPreview) return;
+    const owner = suggestionLifetime;
+    const stillCurrent = () => owner.active() && currentSuggestionLifetime.current === owner;
+    if (!stillCurrent() || !suggestionSession || analysis.status !== "draft") return;
     setSaving(true);
-    setSources((s) => ({ ...s, [code]: "manual" }));
     try {
       const res = await fetch(`/api/ceph/${analysis.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ landmarks: [{ code, x: pt.x, y: pt.y, source: "manual" }] }),
       });
+      if (!stillCurrent()) return;
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setMessage(data.message ?? "تعذّر الحفظ.");
+        if (stillCurrent()) setMessage(data.message ?? "تعذّر الحفظ.");
+      } else if (currentPoints.current[code]?.x === pt.x && currentPoints.current[code]?.y === pt.y) {
+        setSources((s) => ({ ...s, [code]: "manual" }));
+        setUnreviewedPreviewCodes(previous => previous.filter(candidate => candidate !== code));
       }
     } catch {
-      setMessage("تعذّر الاتصال — النقطة على الشاشة فقط ولم تُحفَظ.");
+      if (stillCurrent()) setMessage("تعذّر الاتصال — لم يتأكد حفظ النقطة. راجع الحالة قبل إعادة المحاولة.");
     } finally {
-      setSaving(false);
+      if (stillCurrent()) setSaving(false);
     }
-  }, [analysis.id]);
+  }, [analysis.id, analysis.status, suggestionSession, suggestionLifetime, unreviewedPreviewCodes]);
 
   const pushHistory = useCallback((snap: LandmarkMap) => {
     setHistory((h) => [...h.slice(-39), snap]);
@@ -497,11 +548,13 @@ export function CephTracer({
 
   const requiredMissing = REQUIRED_LANDMARKS.filter((c) => points[c] == null);
   const missing = LANDMARK_ORDER.filter((c) => points[c] == null);
-  const canComplete = !completed && scale != null && requiredMissing.length === 0;
+  const canComplete = !completed && scale != null && Number.isFinite(scale) && scale > 0
+    && requiredMissing.length === 0 && !hasUnreviewedPreview;
   const completionPct = Math.round(((REQUIRED_LANDMARKS.length - requiredMissing.length) / REQUIRED_LANDMARKS.length) * 100);
   const optionalMissing = LANDMARK_ORDER.filter((c) => points[c] == null && !REQUIRED_LANDMARKS.includes(c));
 
   const complete = async () => {
+    if (!canComplete) { setMessage("راجع المعايرة والمعالم المطلوبة؛ المعالم الهندسية غير المراجعة لا تصلح للاعتماد."); return; }
     if (!window.confirm("اعتماد التحليل يقفل التعديل ويختم القياسات والتشخيص. هل تريد الاعتماد؟")) return;
     setSaving(true);
     try {
@@ -551,7 +604,12 @@ export function CephTracer({
   // جدول المسودة يجري حيًّا؛ وجدول المعتمد يقرأ اللقطة: القيم من ceph_measurements
   // وحدها مع تفسيرها على سجل التعريفات نفسه — لا رقم معتمد يُعاد حسابه.
   const table = useMemo((): MeasurementResult[] => {
-    if (!(completed && stamped)) return results;
+    if (!(completed && stamped)) {
+      if (!hasUnreviewedPreview) return results;
+      const reviewed: LandmarkMap = { ...points };
+      for (const code of unreviewedPreviewCodes) delete reviewed[code];
+      return computeAll(reviewed, scale ?? NaN);
+    }
     const snap = new Map(stamped.map((s) => [s.code, s.value]));
     return results.map((r) => {
       const v = snap.get(r.code);
@@ -561,7 +619,7 @@ export function CephTracer({
       const def = MEASUREMENTS.find((d) => d.code === r.code);
       return { ...r, value: v, display: String(v), status: def ? interpret(v, def) : r.status };
     });
-  }, [completed, stamped, results]);
+  }, [completed, stamped, results, hasUnreviewedPreview, points, scale, unreviewedPreviewCodes]);
 
   const enriched = useMemo(() => enrichWithRefs(table, refValues), [table, refValues]);
 
@@ -604,108 +662,108 @@ export function CephTracer({
   };
 
   const autoLocateAi = async () => {
-    if (completed) return;
-    setAiLoading(true);
-    setMessage("جاري استقراء واقتراح المعالم بالذكاء الاصطناعي وفق المعايير السيفالومترية…");
+    if (!suggestionSession || analysis.status !== "draft" || saving || !natural) return;
+    const lease = suggestionLifetime.begin();
+    if (!lease) return;
+    const identity = { analysisId: analysis.id, patientId: analysis.patientId, documentId: analysis.documentId };
+    const inputs = suggestionInputs;
+    const current = () => lease.current() && currentSuggestionLifetime.current === suggestionLifetime
+      && currentSuggestionInputs.current === inputs;
+    setAiLoadingOwner(suggestionLifetime);
+    setMessage("جاري تجهيز توزيع هندسي مقترح للمراجعة؛ هذه الأداة لا ترصد المعالم من محتوى الصورة.");
     try {
-      const w = natural?.w || 1600;
-      const h = natural?.h || 1600;
       const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "suggest-landmarks", imageWidth: w, imageHeight: h, save: true }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "suggest-landmarks", imageWidth: natural.w, imageHeight: natural.h, save: false }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const nextPoints: LandmarkMap = { ...points };
-        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
-        for (const lm of data.landmarks) {
-          nextPoints[lm.code as LandmarkCode] = { x: lm.x, y: lm.y };
-          nextSources[lm.code] = "suggested";
-        }
-        pushHistory(points);
-        setPoints(nextPoints);
-        setSources(nextSources);
-        setResults(computeAll(nextPoints, scale ?? NaN));
-        setMessage("🔮 تم اقتراح المعالم بنجاح (ZONE_B: المعالم مقترحة بلون بنفسجي للمراجعة والاعتماد).");
-      } else {
-        const suggested = suggestLandmarks(w, h, points);
-        const nextPoints = { ...suggested };
-        const nextSources: Record<string, "manual" | "suggested"> = { ...sources };
-        for (const code of Object.keys(suggested) as LandmarkCode[]) {
-          if (!sources[code]) nextSources[code] = "suggested";
-        }
-        pushHistory(points);
-        setPoints(nextPoints);
-        setSources(nextSources);
-        setResults(computeAll(nextPoints, scale ?? NaN));
-        setMessage("🔮 تم استقراء المعالم وفق النسب التشريحية القياسية للشععة.");
+      if (!current()) return;
+      if (!res.ok) {
+        setMessage(res.status === 401 || res.status === 403
+          ? "لم يسمح الخادم بالاقتراح. حدّث صلاحيتك قبل المحاولة؛ لم يُستخدم بديل محلي."
+          : "تعذر الحصول على الاقتراح؛ لم تتغير المعالم ولم يُستخدم بديل محلي.");
+        return;
       }
-    } catch {
-      const w = natural?.w || 1600;
-      const h = natural?.h || 1600;
-      const suggested = suggestLandmarks(w, h, points);
+      const data = await res.json();
+      if (!current()) return;
+      if (!matchesCephSuggestionIdentity(data.provenance, identity)
+        || data.provenance.source !== "geometric-placement" || data.saved !== false
+        || !Array.isArray(data.landmarks) || data.landmarks.length > LANDMARK_ORDER.length
+        || data.landmarks.some((lm: { code?: unknown; x?: unknown; y?: unknown }) => !lm
+          || !LANDMARK_ORDER.includes(lm.code as LandmarkCode) || typeof lm.x !== "number" || !Number.isFinite(lm.x)
+          || typeof lm.y !== "number" || !Number.isFinite(lm.y)
+          || lm.x < 0 || lm.y < 0 || lm.x > natural.w || lm.y > natural.h)
+        || new Set(data.landmarks.map((lm: { code: string }) => lm.code)).size !== data.landmarks.length) {
+        setMessage("رد الاقتراح غير صالح أو لا يخص هذه الدراسة؛ لم تتغير المعالم.");
+        return;
+      }
+      const nextPoints: LandmarkMap = { ...points };
+      const nextSources = { ...sources };
+      const newPreviewCodes: LandmarkCode[] = [];
+      for (const lm of data.landmarks as { code: LandmarkCode; x: number; y: number }[]) {
+        if (nextPoints[lm.code]) continue;
+        nextPoints[lm.code] = { x: lm.x, y: lm.y };
+        nextSources[lm.code] = "suggested";
+        newPreviewCodes.push(lm.code);
+      }
       pushHistory(points);
-      setPoints(suggested);
-      setResults(computeAll(suggested, scale ?? NaN));
-      setMessage("🔮 تم وضع المعالم المقترحة (الذكاء الاصطناعي يقترح ولا يعتمد).");
+      setPoints(nextPoints);
+      setSources(nextSources);
+      setUnreviewedPreviewCodes(previous => [...new Set([...previous, ...newPreviewCodes])]);
+      setResults(computeAll(nextPoints, scale ?? NaN));
+      setMessage("توزيع هندسي مقترح وغير محفوظ. راجع موضع كل نقطة ثم استخدم زر مراجعة الموضع لحفظها؛ لا تُعد هذه النقاط رصدًا فعليًا أو اعتمادًا.");
+    } catch {
+      if (current()) setMessage("تعذر الاتصال أو قراءة الاقتراح؛ لم تُنشأ معالم بديلة ولم يُحفظ شيء.");
     } finally {
-      setAiLoading(false);
+      if (lease.current() && currentSuggestionLifetime.current === suggestionLifetime) setAiLoadingOwner(null);
+      lease.finish();
     }
   };
 
   const generateIntelligentDiagnosis = async () => {
-    setAiDxLoading(true);
-    setMessage("جاري توليد التشخيص التقويمي السردي وخطة العلاج الموجهة…");
+    if (!suggestionSession || analysis.status !== "draft" || saving) return;
+    const lease = suggestionLifetime.begin();
+    if (!lease) return;
+    const identity = { analysisId: analysis.id, patientId: analysis.patientId, documentId: analysis.documentId };
+    const inputs = suggestionInputs;
+    const current = () => lease.current() && currentSuggestionLifetime.current === suggestionLifetime
+      && currentSuggestionInputs.current === inputs;
+    setAiDxLoadingOwner(suggestionLifetime);
+    setMessage("جاري إعداد مسودة وصف محلية للقياسات المحفوظة؛ لا تُقيّم النمو أو تعتمد خطة العلاج.");
     try {
       const res = await fetch(`/api/ceph/${analysis.id}/ai-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate-diagnosis", useAiChat: true }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate-diagnosis", useAiChat: false, saveToDiagnosis: false }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setDx({
-          skeletal: data.suggestion.skeletal,
-          dental: data.suggestion.dental,
-          softTissue: data.suggestion.softTissue,
-          finalDx: data.suggestion.finalDx,
-          note: data.suggestion.recommendationsText,
-        });
-        setDxDirty(true);
-        setMessage("🧠 تم توليد التشخيص التقويمي الذكي وخطة العلاج السردية — يرجى مراجعة الحقول والضغط على 'حفظ التشخيص'.");
-      } else {
-        const expert = generateCephExpertDiagnosis(table ?? results);
-        setDx({
-          skeletal: expert.formatted.skeletal,
-          dental: expert.formatted.dental,
-          softTissue: expert.formatted.softTissue,
-          finalDx: expert.formatted.finalDx,
-          note: expert.formatted.recommendationsText,
-        });
-        setDxDirty(true);
-        setMessage("🧠 تم استنتاج التشخيص وخطة العلاج من محرك الخبير السيفالومتري المدمج.");
+      if (!current()) return;
+      if (!res.ok) {
+        setMessage(res.status === 401 || res.status === 403
+          ? "لم يسمح الخادم بالاقتراح. لم يُستبدل التشخيص ولم يُستخدم بديل محلي."
+          : "تعذر إنشاء المسودة؛ التشخيص الحالي محفوظ كما هو، ولا توجد نتيجة بديلة.");
+        return;
       }
-    } catch {
-      const expert = generateCephExpertDiagnosis(table ?? results);
-      setDx({
-        skeletal: expert.formatted.skeletal,
-        dental: expert.formatted.dental,
-        softTissue: expert.formatted.softTissue,
-        finalDx: expert.formatted.finalDx,
-        note: expert.formatted.recommendationsText,
-      });
+      const data = await res.json();
+      if (!current()) return;
+      if (!matchesCephSuggestionIdentity(data.provenance, identity)
+        || data.provenance.source !== "local-measurement-summary" || !data.suggestion
+        || ["skeletal", "dental", "softTissue", "finalDx", "recommendationsText"].some((key) =>
+          typeof data.suggestion[key] !== "string" || data.suggestion[key].length > 20000)) {
+        setMessage("رد الاقتراح غير صالح أو لا يخص هذه الدراسة؛ لم يتغير التشخيص.");
+        return;
+      }
+      setDx((previous) => ({ skeletal: data.suggestion.skeletal, dental: data.suggestion.dental,
+        softTissue: data.suggestion.softTissue, finalDx: data.suggestion.finalDx, note: previous.note }));
       setDxDirty(true);
-      setMessage("🧠 تم توليد التشخيص من محرك التحليل المدمج.");
+      setMessage("المصدر: وصف محلي للقياسات، مسودة غير معتمدة. راجع الحقول ثم احفظ؛ لم تتغير ملاحظاتك ولم تُنشأ خطة علاج. تقييم النمو غير محدد.");
+    } catch {
+      if (current()) setMessage("تعذر الاتصال أو قراءة المسودة؛ لم يتغير التشخيص ولم يُستخدم بديل محلي.");
     } finally {
-      setAiDxLoading(false);
+      if (lease.current() && currentSuggestionLifetime.current === suggestionLifetime) setAiDxLoadingOwner(null);
+      lease.finish();
     }
   };
 
   const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
-  const ageAtXray = analysis.xrayDate && patientBirthYear
-    ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
-    : null;
+  const ageAtXray = cephAcquisitionAge(patientBirthYear, analysis.xrayDate);
 
   return (
     <div className="space-y-3">
@@ -739,12 +797,12 @@ export function CephTracer({
             <button
               type="button"
               onClick={() => void autoLocateAi()}
-              disabled={aiLoading || saving}
+              disabled={!suggestionSession || aiLoading || aiDxLoading || saving || !natural || analysis.status !== "draft"}
               className="rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
-              title="يقترح مواقع المعالم الـ 25 بالذكاء الاصطناعي مع وسمها بـ 'suggested' (ZONE_B: اقتراح يتطلب تدقيق الطبيب)"
+              title="توزيع هندسي من أبعاد الصورة والمعالم الموجودة؛ ليس رصدًا آليًا من محتوى الصورة، وكل نقطة تحتاج مراجعة"
             >
               <span>🔮</span>
-              <span>{aiLoading ? "جاري الاقتراح…" : "اقتراح المعالم الذكي (AI Auto-Locate)"}</span>
+              <span>{aiLoading ? "جاري الاقتراح…" : "توزيع هندسي للمعالم للمراجعة"}</span>
             </button>
             <button
               type="button"
@@ -932,6 +990,17 @@ export function CephTracer({
 
       {message && (
         <p className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">{message}</p>
+      )}
+      {hasUnreviewedPreview && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          <p>المعالم الهندسية الجديدة مسودة غير محفوظة، ومستبعدة من القياسات والاعتماد حتى مراجعتها وحفظ كل موضع.</p>
+          {selected && unreviewedPreviewCodes.includes(selected) && points[selected] && (
+            <button type="button" disabled={saving} className="mt-2 min-h-11 rounded border border-amber-600 px-3 py-2"
+              onClick={() => { const point = points[selected]; if (point) void savePoint(selected, point, true); }}>
+              راجعت موضع {selected}؛ احفظ هذه النقطة
+            </button>
+          )}
+        </div>
       )}
 
       {tracerStep === "report" ? (
@@ -1390,7 +1459,7 @@ export function CephTracer({
                     const pt = points[code];
                     if (!pt) return null;
                     const isDragging = dragging.current === code;
-                    const isSuggested = sources[code] === "suggested";
+                    const isSuggested = sources[code] === "suggested" || unreviewedPreviewCodes.includes(code);
                     const isHovered = hoveredPoint === code;
                     const pointFill = isDragging || isHovered
                       ? "#dc2626"
@@ -1505,7 +1574,7 @@ export function CephTracer({
           {!completed && (
             <div className="mt-2 flex flex-wrap gap-1">
               {LANDMARK_ORDER.map((code) => {
-                const isSuggested = sources[code] === "suggested";
+                const isSuggested = sources[code] === "suggested" || unreviewedPreviewCodes.includes(code);
                 return (
                   <button
                     key={code}
@@ -1514,7 +1583,7 @@ export function CephTracer({
                       setActive(code);
                       setSelected(code);
                     }}
-                    title={`${landmarkDef(code).hint}${landmarkDef(code).required ? "" : " (اختياري)"}${isSuggested ? " [مقترح AI]" : ""}`}
+                    title={`${landmarkDef(code).hint}${landmarkDef(code).required ? "" : " (اختياري)"}${isSuggested ? " [مصدر مقترح؛ راجع التوثيق]" : ""}`}
                     className={`rounded-md border px-2 py-0.5 text-xs ${
                       points[code]
                         ? isSuggested
@@ -1839,12 +1908,12 @@ export function CephTracer({
                     <button
                       type="button"
                       onClick={() => void generateIntelligentDiagnosis()}
-                      disabled={aiDxLoading}
+                      disabled={!suggestionSession || aiDxLoading || aiLoading || saving || analysis.status !== "draft"}
                       className="rounded-md border border-purple-300 bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-40 inline-flex items-center gap-1"
-                      title="يولد تشخيصاً تقويمياً سردياً شاملاً وخطة علاج موجهة بالذكاء الاصطناعي ومحرك الخبير"
+                      title="وصف محلي للقياسات المحفوظة للمراجعة؛ لا يقيّم النمو أو يختار العلاج ولا يرسل البيانات لخدمة خارجية"
                     >
                       <span>🧠</span>
-                      <span>{aiDxLoading ? "جاري التوليد…" : "توليد التشخيص الذكي"}</span>
+                      <span>{aiDxLoading ? "جاري التوليد…" : "مسودة وصف القياسات المحلية"}</span>
                     </button>
                     <button
                       type="button"

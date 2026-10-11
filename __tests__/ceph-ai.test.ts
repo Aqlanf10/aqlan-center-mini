@@ -180,13 +180,13 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     expect(dx.sagittalSkeletal.classification).toBe("Class I");
     expect(dx.sagittalSkeletal.severity).toBe("normal");
     expect(dx.verticalSkeletal.pattern).toBe("Normodivergent");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("non-extraction");
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
     expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(false);
     expect(dx.formatted.skeletal).toContain("صنف أول");
     expect(dx.formatted.finalDx).toContain("Class I");
   });
 
-  it("تشخيص صنف ثانٍ نموذج 1 شديد مع بروز ثنائي واستطباب قلع الضواحك", () => {
+  it("تشخيص صنف ثانٍ نموذج 1 شديد مع بروز ثنائي دون استنتاج قرار القلع", () => {
     // تراجع الفك السفلي + بروز مفرط للقواطع
     const classTwoCase: LandmarkMap = {
       ...balancedCase,
@@ -203,12 +203,12 @@ describe("محرك التشخيص التقويمي السردي والخبير g
 
     expect(dx.sagittalSkeletal.classification).toBe("Class II div 1");
     expect(dx.sagittalSkeletal.severity).toBe("moderate");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("extraction-indicated");
-    expect(dx.treatmentRecommendations.growthModification).toBe(true);
-    expect(dx.formatted.recommendationsText).toContain("قلع");
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
+    expect(dx.treatmentRecommendations.growthModification).toBe(false);
+    expect(dx.formatted.recommendationsText).toContain("ليست خطة علاج معتمدة");
   });
 
-  it("تشخيص صنف ثانٍ نموذج 2 مع ارتداد القواطع العلوية وخطة غير قالعة مع توسيع", () => {
+  it("تشخيص صنف ثانٍ نموذج 2 مع ارتداد القواطع العلوية دون استنتاج خطة أو توسيع", () => {
     const classTwoDivTwoCase: LandmarkMap = {
       ...balancedCase,
       B: img(57, -80), // ANB > 4
@@ -221,11 +221,11 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const dx = generateCephExpertDiagnosis(results, { age: 12 });
 
     expect(dx.sagittalSkeletal.classification).toBe("Class II div 2");
-    expect(dx.treatmentRecommendations.extractionDecision).toBe("non-extraction");
-    expect(dx.treatmentRecommendations.expansion).toBe(true);
+    expect(dx.treatmentRecommendations.extractionDecision).toBe("not-specified");
+    expect(dx.treatmentRecommendations.expansion).toBe(false);
   });
 
-  it("تشخيص صنف ثالث مع قصور الفك العلوي في طفل صغير يستدعي Facemask", () => {
+  it("تشخيص صنف ثالث مع قصور الفك العلوي دون افتراض نضج أو جهاز من العمر", () => {
     const classThreeChild: LandmarkMap = {
       ...balancedCase,
       A: img(57, -51.98), // SNA = 74° (تراجع فك علوي)
@@ -237,11 +237,11 @@ describe("محرك التشخيص التقويمي السردي والخبير g
 
     expect(dx.sagittalSkeletal.classification).toBe("Class III");
     expect(dx.sagittalSkeletal.maxilla).toBe("retrognathic");
-    expect(dx.treatmentRecommendations.growthModification).toBe(true);
-    expect(dx.treatmentRecommendations.growthModificationAr).toContain("Facemask");
+    expect(dx.treatmentRecommendations.growthModification).toBe(false);
+    expect(dx.treatmentRecommendations.growthModificationAr).toBeUndefined();
   });
 
-  it("تشخيص صنف ثالث هيكلي شديد لدى شخص بالغ يستدعي جراحة تقويمية للفكين", () => {
+  it("تشخيص صنف ثالث هيكلي شديد دون استنتاج جراحة من العمر والقياسات", () => {
     const severeAdultClassThree: LandmarkMap = {
       ...balancedCase,
       A: img(58, -51.98),
@@ -253,11 +253,11 @@ describe("محرك التشخيص التقويمي السردي والخبير g
 
     expect(dx.sagittalSkeletal.classification).toBe("Class III");
     expect(dx.sagittalSkeletal.severity).toBe("severe");
-    expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(true);
-    expect(dx.treatmentRecommendations.orthognathicSurgeryAr).toContain("جراحة تقويمية");
+    expect(dx.treatmentRecommendations.orthognathicSurgery).toBe(false);
+    expect(dx.treatmentRecommendations.orthognathicSurgeryAr).toBeUndefined();
   });
 
-  it("تشخيص النمط العمودي المنفتح Hyperdivergent واستطباب زرعات TADs", () => {
+  it("تشخيص النمط العمودي المنفتح Hyperdivergent دون استنتاج زرعات TADs", () => {
     const hyperCase: LandmarkMap = {
       ...balancedCase,
       // زاوية الفك مفتوحة جداً
@@ -269,7 +269,7 @@ describe("محرك التشخيص التقويمي السردي والخبير g
     const dx = generateCephExpertDiagnosis(results);
 
     expect(dx.verticalSkeletal.pattern).toBe("Hyperdivergent");
-    expect(dx.treatmentRecommendations.anchorageOrTADs).toBe(true);
+    expect(dx.treatmentRecommendations.anchorageOrTADs).toBe(false);
   });
 
   it("اقتراح التشخيص suggestDiagnosis يدعم قسم الأنسجة الرخوة عند توفر قياساتها", () => {
