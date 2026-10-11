@@ -27,13 +27,17 @@ const sameAsReviewed = (study: UnlinkedStudy | undefined, reviewed: Reviewed): b
   !!study && study.phase === reviewed.phase && study.xrayDate === reviewed.xrayDate && study.status === reviewed.status;
 
 export function CephUnlinkedStudiesPanel({
-  patientId, orthoCaseId, authority, studies, onLinked, onRefresh,
+  patientId, orthoCaseId, authority, studies, refreshing, canReview, onLinked, onRefresh,
 }: {
   patientId: number;
   orthoCaseId: number;
   /** هوية الجلسة وصلاحياتها: تغيّرها تُسقط أي تأكيد مفتوح. */
   authority: string;
   studies: UnlinkedStudy[];
+  /** Previous same-owner rows are displayed inert until the current read is accepted. */
+  refreshing: boolean;
+  /** Live read lease also refuses handlers captured before refresh or owner change. */
+  canReview: () => boolean;
   /** يُستدعى بعد ربطٍ ناجح أو بعد رفضٍ يوجب إعادة القراءة. */
   onLinked: () => void;
   /** تحديثٌ يدوي للقائمة (قد تكون تغيّرت من تبويبٍ آخر). */
@@ -80,9 +84,14 @@ export function CephUnlinkedStudiesPanel({
     return `${stage?.labelAr ?? study.phase} — ${study.xrayDate ? friendlyDateLong(study.xrayDate) : "تاريخ الأشعة غير معروف"} — ${study.status === "completed" ? "معتمدة" : "مسودة"}`;
   };
 
+  // Layout activation can make the new owner's live lease valid without a
+  // second render. Paint the explicit read state; validate the lease on action.
+  const readBlocked = refreshing;
+  const canAct = () => !refreshing && canReview();
+
   const link = async (study: UnlinkedStudy) => {
     const studyId = Number(study.id);
-    if (busy.current || !pending || pending.studyId !== studyId || !pending.confirmed) return;
+    if (!canAct() || busy.current || !pending || pending.studyId !== studyId || !pending.confirmed) return;
     // آخر فحصٍ قبل الإرسال: ما راجعه الطبيب يجب أن يكون ما تعرضه القائمة الآن.
     if (!sameAsReviewed(latest.current.find((item) => Number(item.id) === studyId), pending.reviewed)) {
       setPending(null);
@@ -129,10 +138,10 @@ export function CephUnlinkedStudiesPanel({
   };
 
   return (
-    <section aria-labelledby="ceph-unlinked-title" className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 text-right">
+    <section aria-labelledby="ceph-unlinked-title" aria-busy={refreshing} className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 text-right">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 id="ceph-unlinked-title" className="text-xs font-extrabold text-sky-900">دراسات سابقة غير مرتبطة بأي حالة</h4>
-        <button type="button" onClick={onRefresh} disabled={pending?.saving === true}
+        <button type="button" onClick={() => { if (canAct() && !busy.current) onRefresh(); }} disabled={readBlocked || pending?.saving === true}
           className="rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-900 hover:bg-sky-100 disabled:opacity-40">
           تحديث القائمة
         </button>
@@ -140,6 +149,7 @@ export function CephUnlinkedStudiesPanel({
       <p className="mt-0.5 text-[11px] text-sky-800">
         الربط اختيارك الصريح: لا تُربط دراسة تلقائيًا، ولا يتغير أي قياس أو اعتماد أو تاريخ. اختر الدراسة المقصودة لهذه الحالة (#{orthoCaseId}) ثم أكّد.
       </p>
+      {refreshing && <p role="status" className="mt-2 text-xs font-bold text-sky-900">جارٍ تحديث قائمة الدراسات… يتوقف الربط حتى اكتمال القراءة.</p>}
       {message && (
         <p role={message.kind === "error" ? "alert" : "status"}
           className={`mt-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${message.kind === "error"
@@ -158,8 +168,8 @@ export function CephUnlinkedStudiesPanel({
                   <span className="font-mono">#{studyId}</span> · {describe(study)}
                 </p>
                 {!open && (
-                  <button type="button" disabled={pending?.saving === true}
-                    onClick={() => { setMessage(null); setPending({ studyId, reviewed: snapshotOf(study), confirmed: false, saving: false }); }}
+                  <button type="button" disabled={readBlocked || pending?.saving === true}
+                    onClick={() => { if (!canAct() || busy.current) return; setMessage(null); setPending({ studyId, reviewed: snapshotOf(study), confirmed: false, saving: false }); }}
                     className="shrink-0 rounded-lg border border-navy-800 px-3 py-1 text-[11px] font-extrabold text-navy-800 hover:bg-navy-50 disabled:opacity-40">
                     ربط بهذه الحالة
                   </button>
@@ -171,12 +181,12 @@ export function CephUnlinkedStudiesPanel({
                     ما راجعتَه: {describe(pending.reviewed)}. ستُربط هذه الدراسة بحالة التقويم #{orthoCaseId}، ولا تتغير قياساتها ولا اعتمادها ولا تاريخها.
                   </p>
                   <label className="flex items-start gap-2 text-[11px] font-bold text-slate-800">
-                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-navy-800" checked={pending.confirmed} disabled={pending.saving}
-                      onChange={(event) => setPending({ studyId, reviewed: pending.reviewed, confirmed: event.target.checked, saving: false })} />
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-navy-800" checked={pending.confirmed} disabled={readBlocked || pending.saving}
+                      onChange={(event) => { if (!canAct() || busy.current) return; setPending({ studyId, reviewed: pending.reviewed, confirmed: event.target.checked, saving: false }); }} />
                     <span>راجعتُ الدراسة وأؤكد أنها المقصودة بهذه الحالة</span>
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={!pending.confirmed || pending.saving} onClick={() => void link(study)}
+                    <button type="button" disabled={readBlocked || !pending.confirmed || pending.saving} onClick={() => void link(study)}
                       className="rounded-lg bg-navy-800 px-4 py-1.5 text-[11px] font-black text-white hover:bg-navy-900 disabled:opacity-40">
                       {pending.saving ? "جارٍ الربط…" : "تأكيد الربط"}
                     </button>

@@ -194,6 +194,9 @@ export function PatientCeph({
   useLayoutEffect(() => readOwner.retire, [readOwner]);
   const [analysisSnapshot, setAnalysisSnapshot] = useState<{ owner: typeof readOwner; operation: AbortController; rows: CephAnalysis[] } | null>(null);
   const analyses = analysisSnapshot?.owner === readOwner && readOwner.current(analysisSnapshot.operation) ? analysisSnapshot.rows : null;
+  // Keep only this owner's previous rows inert while a refresh is in flight.
+  const ownedAnalysisRows = analysisSnapshot?.owner === readOwner ? analysisSnapshot.rows : null;
+  const [, setReadRevision] = useState(0);
   const [imageSelection, setImageSelection] = useState<ImageSelection | null>(null);
   const images = imageSelection?.owner === readOwner ? imageSelection.images : [];
   const selectedDoc = imageSelection?.owner === readOwner ? imageSelection.selectedDoc : null;
@@ -294,6 +297,16 @@ export function PatientCeph({
     return readOwner.retire;
   }, [load, readOwner]);
 
+  const currentLinkRead = () => owner.isActive() && mayLink && analysisSnapshot?.owner === readOwner
+    && readOwner.current(analysisSnapshot.operation);
+  const refreshAnalyses = () => {
+    if (!currentLinkRead()) return;
+    const operation = readOwner.begin();
+    // begin() revokes the old lease immediately; render that refusal now too.
+    setReadRevision(value => value + 1);
+    void load(operation);
+  };
+
   const canOpenStudies = (ids: readonly number[]) => owner.isActive() && analysisSnapshot?.owner === readOwner
     && readOwner.current(analysisSnapshot.operation) && ids.every((id) => analysisSnapshot.rows.some((row) => row.id === id && row.patientId === patientId)) && canLeave();
 
@@ -316,8 +329,8 @@ export function PatientCeph({
 
   // دراسات المريض التي لا حالة لها — تُعرض للربط الصريح داخل حالة التقويم الحالية فقط.
   const unlinkedStudies = useMemo(
-    () => (analyses ?? []).filter((a) => a.orthoCaseId == null && a.status !== "discarded"),
-    [analyses],
+    () => (ownedAnalysisRows ?? []).filter((a) => a.orthoCaseId == null && a.status !== "discarded"),
+    [ownedAnalysisRows],
   );
 
   const openStudyForm = () => {
@@ -671,14 +684,16 @@ export function PatientCeph({
         </div>
       )}
 
-      {propOrthoCaseId && mayLink && analyses != null && (
+      {propOrthoCaseId && mayLink && ownedAnalysisRows != null && (
         <CephUnlinkedStudiesPanel
           patientId={patientId}
           orthoCaseId={propOrthoCaseId}
           authority={authority}
           studies={unlinkedStudies}
-          onLinked={() => void load(readOwner.begin())}
-          onRefresh={() => void load(readOwner.begin())}
+          refreshing={analyses == null}
+          canReview={currentLinkRead}
+          onLinked={refreshAnalyses}
+          onRefresh={refreshAnalyses}
         />
       )}
 

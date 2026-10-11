@@ -4,6 +4,7 @@ import { Client } from "pg";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { authedMutation, baseUrl, harness } from "./_server";
+import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 
 /**
  * (ORTHO-ID-2) رحلة هوية دراسات السيفالو في المتصفح على التطبيق المبني وقاعدةٍ حقيقية معزولة (بيانات اصطناعية):
@@ -67,6 +68,63 @@ async function open(who: "admin" | "doctorA" | "doctorB", width: number): Promis
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   return { context, page, errors };
+}
+const REFRESHING_STUDIES = "جارٍ تحديث قائمة الدراسات… يتوقف الربط حتى اكتمال القراءة.";
+async function gateStudyRefresh(context: BrowserContext, patientId: number) {
+  const url = `${baseUrl}/api/patients/${patientId}/ceph`;
+  const unexpected: string[] = [];
+  let gate: { wait: Promise<void>; release: () => void; reads: number } | null = null;
+  const guard = await guardBrowserRoutes(context, baseUrl, unexpected, async route => {
+    if (route.request().method() === "GET" && route.request().url() === url && gate) {
+      const owned = gate; owned.reads += 1; await owned.wait;
+    }
+    await route.continue();
+  });
+  return {
+    url,
+    arm() {
+      expect(gate).toBeNull();
+      let release!: () => void;
+      const wait = new Promise<void>(resolve => { release = resolve; });
+      const owned = { wait, release, reads: 0 }; gate = owned;
+      return { started: () => owned.reads, release: () => { owned.release(); if (gate === owned) gate = null; } };
+    },
+    run: (body: () => Promise<void>) => guard.run(async () => {
+      try { await body(); } finally { gate?.release(); gate = null; }
+    }, () => expect(unexpected).toEqual([])),
+  };
+}
+async function clickDisabledControl(page: Page, control: Locator) {
+  expect(await control.isDisabled()).toBe(true);
+  const box = await control.boundingBox(); expect(box).not.toBeNull();
+  const height = page.viewportSize()!.height;
+  // Native wheel and mouse input: disabled controls cannot be clicked through
+  // Playwright's enabled-actionability shortcut or by a forced DOM action.
+  await page.mouse.move(Math.min(page.viewportSize()!.width - 24, Math.max(24, box!.x + box!.width / 2)), height / 2);
+  await page.mouse.wheel(0, box!.y + box!.height / 2 - height / 2);
+  expect(await control.evaluate(async node => {
+    let previous = "", identical = 0;
+    for (let frame = 0; frame < 120; frame++) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      const r = node.getBoundingClientRect();
+      const value = JSON.stringify([r.x, r.y, r.width, r.height, scrollX, scrollY]);
+      identical = value === previous ? identical + 1 : 0; previous = value;
+      if (identical >= 6) return true;
+    }
+    return false;
+  })).toBe(true);
+  await expect.poll(() => control.evaluate(node => {
+    const r = node.getBoundingClientRect();
+    const points = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + r.width / 4, r.top + r.height / 2],
+      [r.left + r.width * 3 / 4, r.top + r.height / 2], [r.left + r.width / 2, r.top + r.height / 4],
+      [r.left + r.width / 2, r.top + r.height * 3 / 4]];
+    return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth
+      && r.top >= 0 && r.bottom <= innerHeight && points.every(([x, y]) => {
+        const hit = document.elementFromPoint(x, y); return !!hit && (hit === node || node.contains(hit));
+      });
+  })).toBe(true);
+  const target = await control.boundingBox(); expect(target).not.toBeNull();
+  await page.mouse.click(target!.x + target!.width / 2, target!.y + target!.height / 2);
 }
 const SHOTS = process.env.CEPH_ID_SCREENSHOT_DIR;
 async function shot(page: Page, name: string, target?: Locator) {
@@ -142,11 +200,14 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 explicit T1 link �
   it("refuses a stale preview with an Arabic message and writes nothing; a failed save keeps the doctor's confirmation open", async () => {
     const f = await seed(`stale${width}`);
     const { context, page, errors } = await open("admin", width);
-    try {
+    const reads = await gateStudyRefresh(context, f.patientId);
+    await reads.run(async () => {
       const { panel } = await openRecords(page, f.patientId, `stale${width}`);
       const row = panel.getByRole("listitem").filter({ hasText: `#${f.oldT1}` });
 
       // Failed save (500): the error is shown and the confirmation stays open for a retry.
+      const posts: string[] = [];
+      page.on("request", request => { if (request.method() === "POST" && request.url() === `${baseUrl}/api/ceph/${f.oldT1}/link-case`) posts.push(request.postData() ?? ""); });
       let failOnce = true;
       await page.route("**/api/ceph/*/link-case", async (route) => {
         if (failOnce) { failOnce = false; await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "تعذّر ربط الدراسة بالحالة. أعد المحاولة." }) }); }
@@ -161,19 +222,38 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 explicit T1 link �
 
       // Someone changed the study after the doctor saw it: the server refuses the stale context.
       await db.query(`UPDATE ceph_analyses SET phase = 'followup' WHERE id = $1`, [f.oldT1]);
+      const held = reads.arm();
       await row.getByRole("button", { name: "تأكيد الربط" }).click();
       await panel.getByRole("alert").filter({ hasText: "تغيّرت الدراسة منذ المعاينة" }).waitFor();
       expect((await state(f.oldT1)).ortho_case_id).toBeNull();
       expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'ceph.link' AND entity_id = $1`, [String(f.oldT1)])).rows).toHaveLength(0);
-      // The list was re-read: the refreshed row carries the new stage and can be linked after a fresh confirmation.
+      await expect.poll(held.started).toBe(1);
+      await panel.getByRole("status").filter({ hasText: REFRESHING_STUDIES }).waitFor();
+      expect(posts).toHaveLength(2);
+      const reopen = row.getByRole("button", { name: "ربط بهذه الحالة" });
+      await clickDisabledControl(page, reopen);
+      expect(await row.getByRole("checkbox").count()).toBe(0);
+      expect(await row.getByRole("button", { name: "تأكيد الربط" }).count()).toBe(0);
+      expect(posts).toHaveLength(2); expect((await state(f.oldT1)).ortho_case_id).toBeNull();
+      const responseWait = page.waitForResponse(response => response.request().method() === "GET" && response.url() === reads.url);
+      held.release(); const response = await responseWait;
+      expect(response.status()).toBe(200); expect(await response.finished()).toBeNull();
+      const refreshed: { analyses: Array<{ id: number; patientId: number; phase: string; orthoCaseId: number | null }> } = await response.json();
+      expect(refreshed.analyses.find(study => study.id === Number(f.oldT1))).toMatchObject({ id: Number(f.oldT1), patientId: f.patientId, phase: "followup", orthoCaseId: null });
+      // A completed authoritative list, rather than the earlier409 alert, permits a fresh review.
       const fresh = panel.getByRole("listitem").filter({ hasText: `#${f.oldT1}` });
+      await expect.poll(() => fresh.innerText()).toContain("متابعة");
+      expect(await panel.getByText(REFRESHING_STUDIES, { exact: true }).count()).toBe(0);
       await fresh.getByRole("button", { name: "ربط بهذه الحالة" }).click();
+      expect(await fresh.innerText()).toContain("ما راجعتَه: المتابعة");
       await fresh.getByRole("checkbox").check();
       await fresh.getByRole("button", { name: "تأكيد الربط" }).click();
       await page.getByText(`تم ربط الدراسة #${f.oldT1} بحالة التقويم #${f.caseId}.`).waitFor();
       expect((await state(f.oldT1)).ortho_case_id).toBe(f.caseId);
+      expect(posts).toHaveLength(3);
+      expect((await db.query(`SELECT 1 FROM audit_log WHERE action = 'ceph.link' AND entity_id = $1`, [String(f.oldT1)])).rows).toHaveLength(1);
       expect(errors).toEqual([]);
-    } finally { await context.close(); }
+    });
   });
 });
 
@@ -181,7 +261,8 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 confirmation is bou
   it("a study that changes after the doctor ticked the box cancels the confirmation instead of linking the new data", async () => {
     const f = await seed(`late${width}`);
     const { context, page, errors } = await open("admin", width);
-    try {
+    const reads = await gateStudyRefresh(context, f.patientId);
+    await reads.run(async () => {
       const { panel } = await openRecords(page, f.patientId, `late${width}`);
       const posts: string[] = [];
       page.on("request", (request) => { if (request.url().includes("/link-case")) posts.push(request.url()); });
@@ -192,7 +273,18 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 confirmation is bou
 
       // Another user/tab changes the study while the confirmation is open; the doctor refreshes the list.
       await db.query(`UPDATE ceph_analyses SET phase = 'followup' WHERE id = $1`, [f.oldT1]);
+      const held = reads.arm();
       await panel.getByRole("button", { name: "تحديث القائمة" }).click();
+      await expect.poll(held.started).toBe(1);
+      await panel.getByRole("status").filter({ hasText: REFRESHING_STUDIES }).waitFor();
+      const checked = row().getByRole("checkbox"), confirm = row().getByRole("button", { name: "تأكيد الربط" });
+      expect(await checked.isChecked()).toBe(true);
+      await clickDisabledControl(page, checked); await clickDisabledControl(page, confirm);
+      expect(await checked.isChecked()).toBe(true); expect(posts).toHaveLength(0);
+      expect((await state(f.oldT1)).ortho_case_id).toBeNull();
+      const responseWait = page.waitForResponse(response => response.request().method() === "GET" && response.url() === reads.url);
+      held.release(); const response = await responseWait;
+      expect(response.status()).toBe(200); expect(await response.finished()).toBeNull();
       await panel.getByRole("alert").filter({ hasText: "تغيّرت الدراسة أثناء المراجعة" }).waitFor();
       await expect.poll(() => row().getByRole("checkbox").count()).toBe(0); // the tick did not survive the changed data
       expect(posts).toHaveLength(0);
@@ -208,7 +300,7 @@ describe.each([{ width: 1280 }, { width: 390 }])("ORTHO-ID-2 confirmation is bou
       expect(posts).toHaveLength(1);
       expect((await state(f.oldT1)).ortho_case_id).toBe(f.caseId);
       expect(errors).toEqual([]);
-    } finally { await context.close(); }
+    });
   });
 
   it("a study linked from another tab disappears from this tab's open confirmation on refresh — no second link is sent", async () => {

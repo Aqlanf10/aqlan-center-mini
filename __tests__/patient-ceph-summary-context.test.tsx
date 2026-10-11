@@ -1,6 +1,7 @@
-import type { ReactElement, ReactNode } from "react";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientCeph, type CephAnalysis, type PatientCephProps } from "../components/PatientCeph";
+import { CephUnlinkedStudiesPanel } from "../components/CephUnlinkedStudiesPanel";
 
 // Execute PatientCeph itself, its memo dependencies and rendered handlers. Only
 // hook storage and fetch are synthetic; this does not substitute for DOM/HTTP QA.
@@ -236,3 +237,90 @@ describe("PatientCeph signed summary follows the displayed scope", () => {
     expect(writes()).toEqual([]);
   });
 });
+
+describe("PatientCeph unlinked-study current-read lease", () => {
+  const panel = () => nodes(render()).find(node => node.type === CephUnlinkedStudiesPanel);
+  const panelProps = () => {
+    const found = panel(); expect(found).toBeDefined();
+    return found!.props as ComponentProps<typeof CephUnlinkedStudiesPanel>;
+  };
+  function holdRead() {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>(done => { resolve = done; });
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      url === `/api/patients/${PATIENT}/ceph` ? pending : original(url, init));
+    return { resolve, restore: () => fetchMock.mockImplementation(original) };
+  }
+
+  it("revokes captured handlers before paint and keeps only inert same-owner rows until the full refreshed body arrives", async () => {
+    analyses = [study({ orthoCaseId: null })]; await ready();
+    const old = panelProps(), held = holdRead(), readsBefore = fetchMock.mock.calls.length;
+    expect(old.canReview()).toBe(true);
+    old.onRefresh();
+    expect(old.canReview()).toBe(false); // no React rerender needed to revoke it
+    expect(fetchMock).toHaveBeenCalledTimes(readsBefore + 4);
+    old.onRefresh(); old.onLinked();
+    expect(fetchMock).toHaveBeenCalledTimes(readsBefore + 4);
+    const busy = panelProps();
+    expect(busy.refreshing).toBe(true); expect(busy.canReview()).toBe(false);
+    expect(busy.studies).toEqual(old.studies); expect(summary()).toBeUndefined();
+    const fresh = study({ orthoCaseId: null, phase: "followup" });
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { bodyController = controller; } });
+    held.restore(); held.resolve(new Response(body, { status: 200 }));
+    await ready(); // response headers alone cannot re-enable the previous list
+    expect(panelProps().refreshing).toBe(true); expect(panelProps().canReview()).toBe(false);
+    expect(old.canReview()).toBe(false); expect(writes()).toEqual([]);
+    bodyController.enqueue(new TextEncoder().encode(JSON.stringify({ analyses: [fresh] }))); bodyController.close();
+    await ready();
+    const current = panelProps();
+    expect(current.refreshing).toBe(false); expect(current.canReview()).toBe(true);
+    expect(current.studies).toEqual([fresh]);
+    expect(old.canReview()).toBe(false); expect(busy.canReview()).toBe(false);
+    old.onRefresh(); old.onLinked();
+    expect(fetchMock).toHaveBeenCalledTimes(readsBefore + 4); expect(writes()).toEqual([]);
+  });
+
+  it("never re-enables a failed refresh from its previous snapshot", async () => {
+    analyses = [study({ orthoCaseId: null })]; await ready();
+    const old = panelProps(), held = holdRead();
+    old.onRefresh(); expect(panelProps().refreshing).toBe(true);
+    held.restore(); held.resolve(new Response("{}", { status: 503 })); await ready();
+    expect(panel()).toBeUndefined(); expect(old.canReview()).toBe(false);
+    expect(text(render())).toContain("تعذّر تحميل دراسات السيفالو.");
+    const count = fetchMock.mock.calls.length;
+    old.onRefresh(); old.onLinked();
+    expect(fetchMock).toHaveBeenCalledTimes(count); expect(writes()).toEqual([]);
+  });
+
+  it("does not revive a captured case A lease after A → B → A with the same patient-wide data", async () => {
+    analyses = [study({ orthoCaseId: null })]; await ready();
+    const old = panelProps(), count = fetchMock.mock.calls.length;
+    props = { ...props, orthoCaseId: CASE_B };
+    expect(panelProps().canReview()).toBe(true); expect(old.canReview()).toBe(false);
+    props = { ...props, orthoCaseId: CASE_A };
+    const fresh = panelProps();
+    expect(fresh.canReview()).toBe(true); expect(old.canReview()).toBe(false);
+    old.onRefresh(); old.onLinked();
+    expect(fetchMock).toHaveBeenCalledTimes(count); expect(writes()).toEqual([]);
+  });
+
+  it("does not render another patient's old rows while the new patient read is held", async () => {
+    analyses = [study({ orthoCaseId: null })]; await ready();
+    const old = panelProps();
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>(done => { resolve = done; });
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      url === "/api/patients/12/ceph" ? pending : original(url, init));
+    props = { ...props, patientId: 12, orthoCaseId: CASE_B };
+    expect(panel()).toBeUndefined(); expect(old.canReview()).toBe(false);
+    resolve(new Response(JSON.stringify({ analyses: [study({ patientId: 12, orthoCaseId: null })] }), { status: 200 }));
+    await ready();
+    expect(panelProps().patientId).toBe(12); expect(panelProps().canReview()).toBe(true);
+    const count = fetchMock.mock.calls.length; old.onRefresh(); old.onLinked();
+    expect(fetchMock).toHaveBeenCalledTimes(count); expect(writes()).toEqual([]);
+  });
+});
+
