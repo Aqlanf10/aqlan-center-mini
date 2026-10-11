@@ -1,0 +1,36 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-task-modal-width-ui.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-task-modal-before[39m
+
+[security-http] الخادم جاهز على http://127.0.0.1:3367 — قاعدة aqlan_sec_http معزولة
+ [31m❯[39m __tests__/security-http/hr-task-modal-width-ui.test.ts [2m([22m[2m4 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 10002[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps native create fields and actions contained in RTL and preserves values at 390 [33m 1151[2mms[22m[39m
+[31m   [31m×[31m adds checklist/comment, saves deadline and closes through fully reachable RTL controls at 390[39m[33m 788[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps native create fields and actions contained in RTL and preserves values at 1280 [33m 1005[2mms[22m[39m
+   [33m[2m✓[22m[39m adds checklist/comment, saves deadline and closes through fully reachable RTL controls at 1280 [33m 2292[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m __tests__/security-http/hr-task-modal-width-ui.test.ts[2m > [22madds checklist/comment, saves deadline and closes through fully reachable RTL controls at 390
+[31m[1mAssertionError[22m: expected 415 to be less than or equal to 391[39m
+[36m [2m❯[22m inspectLayout __tests__/security-http/hr-task-modal-width-ui.test.ts:[2m33:30[22m[39m
+    [90m 31|[39m   expect(layout.direction).toBe('rtl'); expect(layout.pageX).toBe(0); …
+    [90m 32|[39m   expect(layout.pageWidth).toBeLessThanOrEqual(layout.pageClientWidth …
+    [90m 33|[39m   expect(layout.dialogWidth).toBeLessThanOrEqual(layout.dialogClientWi…
+    [90m   |[39m                              [31m^[39m
+    [90m 34|[39m   [35mfor[39m ([35mconst[39m control [35mof[39m layout[33m.[39mcontrols) {
+    [90m 35|[39m     expect(control.left, `${control.tag} ${control.label} left edge`).…
+[90m [2m❯[22m __tests__/security-http/hr-task-modal-width-ui.test.ts:[2m107:7[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (4)[39m
+[2m   Start at [22m 21:31:25
+[2m   Duration [22m 13.24s[2m (transform 88ms, setup 0ms, import 431ms, tests 10.00s, environment 0ms)[22m
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

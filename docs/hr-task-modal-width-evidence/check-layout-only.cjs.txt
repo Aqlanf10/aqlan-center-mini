@@ -1,0 +1,18 @@
+const fs=require('node:fs'),cp=require('node:child_process'),crypto=require('node:crypto');
+const ts=require('/workspace/hr-task-modal-width/node_modules/typescript');
+const file='components/hr/TasksPanel.tsx';
+const before=cp.execFileSync('git',['show','f31e0083e161b79577476fd7e962dc3647c2eb45:'+file],{cwd:'/workspace/hr-task-modal-width',encoding:'utf8'});
+const after=fs.readFileSync('/workspace/hr-task-modal-width/'+file,'utf8');
+function normalized(code){
+ const source=ts.createSourceFile(file,code,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const result=ts.transform(source,[context=>{
+  const visit=node=>{
+   if(ts.isJsxAttributes(node))return ts.factory.updateJsxAttributes(node,node.properties.filter(attribute=>!(ts.isJsxAttribute(attribute)&&['className','alignTop'].includes(attribute.name.getText(source)))));
+   return ts.visitEachChild(node,visit,context);
+  };return node=>ts.visitNode(node,visit);
+ }]);
+ try{return ts.createPrinter({removeComments:true,newLine:ts.NewLineKind.LineFeed}).printFile(result.transformed[0]);}finally{result.dispose();}
+}
+const a=normalized(before),b=normalized(after);
+if(a!==b)throw new Error('Change exceeds JSX className/alignTop presentation attributes');
+console.log(JSON.stringify({source:'f31e0083e161b79577476fd7e962dc3647c2eb45',file,allowedChangedAttributes:['className','alignTop'],normalizedAstEqual:true,beforeSha256:crypto.createHash('sha256').update(before).digest('hex'),afterSha256:crypto.createHash('sha256').update(after).digest('hex')},null,2));

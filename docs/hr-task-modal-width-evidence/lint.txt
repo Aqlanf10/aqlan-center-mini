@@ -1,0 +1,7 @@
+
+/workspace/hr-task-modal-width/components/hr/TasksPanel.tsx
+  148:83   warning  The ref value 'listEpoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'listEpoch.current' to a variable inside the effect, and use that variable in the cleanup function      react-hooks/exhaustive-deps
+  148:105  warning  The ref value 'detailEpoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'detailEpoch.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+✖ 2 problems (0 errors, 2 warnings)
+

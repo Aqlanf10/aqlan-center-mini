@@ -1,0 +1,108 @@
+{
+  "direction": "rtl",
+  "viewport": 1280,
+  "pageWidth": 1280,
+  "pageClientWidth": 1280,
+  "pageX": 0,
+  "dialogWidth": 1280,
+  "dialogClientWidth": 1280,
+  "dialogX": 0,
+  "panel": {
+    "left": 304,
+    "right": 976,
+    "width": 672
+  },
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "label": "تعديل العنوان والأولوية والمواعيد…",
+      "left": 759.46875,
+      "right": 956,
+      "width": 196.53125
+    },
+    {
+      "tag": "BUTTON",
+      "label": "مخططة",
+      "left": 894.484375,
+      "right": 956,
+      "width": 61.515625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "جارية",
+      "left": 838.921875,
+      "right": 888.484375,
+      "width": 49.5625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "متعطلة",
+      "left": 774.28125,
+      "right": 832.921875,
+      "width": 58.640625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "مكتملة",
+      "left": 711.421875,
+      "right": 768.28125,
+      "width": 56.859375
+    },
+    {
+      "tag": "BUTTON",
+      "label": "ملغاة",
+      "left": 656.5625,
+      "right": 705.421875,
+      "width": 48.859375
+    },
+    {
+      "tag": "INPUT",
+      "label": "",
+      "left": 935,
+      "right": 948,
+      "width": 13
+    },
+    {
+      "tag": "BUTTON",
+      "label": "حذف",
+      "left": 332,
+      "right": 372.796875,
+      "width": 40.796875
+    },
+    {
+      "tag": "INPUT",
+      "label": "بند جديد…",
+      "left": 397.390625,
+      "right": 956,
+      "width": 558.609375
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إضافة",
+      "left": 324,
+      "right": 389.390625,
+      "width": 65.390625
+    },
+    {
+      "tag": "INPUT",
+      "label": "اكتب تعليقًا — يُسجَّل باسمك",
+      "left": 395.21875,
+      "right": 956,
+      "width": 560.78125
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إرسال",
+      "left": 324,
+      "right": 387.21875,
+      "width": 63.21875
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إغلاق",
+      "left": 324,
+      "right": 385.921875,
+      "width": 61.921875
+    }
+  ]
+}

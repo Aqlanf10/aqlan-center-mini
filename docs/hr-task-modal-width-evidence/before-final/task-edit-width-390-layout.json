@@ -1,0 +1,136 @@
+{
+  "direction": "rtl",
+  "viewport": 390,
+  "pageWidth": 390,
+  "pageClientWidth": 390,
+  "pageX": 0,
+  "dialogWidth": 415,
+  "dialogClientWidth": 390,
+  "dialogX": 0,
+  "panel": {
+    "left": 16,
+    "right": 374,
+    "width": 358
+  },
+  "controls": [
+    {
+      "tag": "INPUT",
+      "label": "",
+      "left": -12.390625,
+      "right": 341,
+      "width": 353.390625
+    },
+    {
+      "tag": "SELECT",
+      "label": "منخفضةعاديةعاليةعاجلة",
+      "left": 168.3125,
+      "right": 341,
+      "width": 172.6875
+    },
+    {
+      "tag": "INPUT",
+      "label": "",
+      "left": -12.390625,
+      "right": 160.3125,
+      "width": 172.703125
+    },
+    {
+      "tag": "INPUT",
+      "label": "",
+      "left": 117,
+      "right": 341,
+      "width": 224
+    },
+    {
+      "tag": "SELECT",
+      "label": "— بلا إسناد —",
+      "left": -12.390625,
+      "right": 160.3125,
+      "width": 172.703125
+    },
+    {
+      "tag": "BUTTON",
+      "label": "حفظ التعديل",
+      "left": 246.921875,
+      "right": 341,
+      "width": 94.078125
+    },
+    {
+      "tag": "BUTTON",
+      "label": "تراجع",
+      "left": 181.5,
+      "right": 238.921875,
+      "width": 57.421875
+    },
+    {
+      "tag": "BUTTON",
+      "label": "مخططة",
+      "left": 292.484375,
+      "right": 354,
+      "width": 61.515625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "جارية",
+      "left": 236.921875,
+      "right": 286.484375,
+      "width": 49.5625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "متعطلة",
+      "left": 172.28125,
+      "right": 230.921875,
+      "width": 58.640625
+    },
+    {
+      "tag": "BUTTON",
+      "label": "مكتملة",
+      "left": 109.421875,
+      "right": 166.28125,
+      "width": 56.859375
+    },
+    {
+      "tag": "BUTTON",
+      "label": "ملغاة",
+      "left": 54.5625,
+      "right": 103.421875,
+      "width": 48.859375
+    },
+    {
+      "tag": "INPUT",
+      "label": "بند جديد…",
+      "left": 48,
+      "right": 354,
+      "width": 306
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إضافة",
+      "left": -25.390625,
+      "right": 40,
+      "width": 65.390625
+    },
+    {
+      "tag": "INPUT",
+      "label": "اكتب تعليقًا — يُسجَّل باسمك",
+      "left": 45.828125,
+      "right": 354,
+      "width": 308.171875
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إرسال",
+      "left": -25.390625,
+      "right": 37.828125,
+      "width": 63.21875
+    },
+    {
+      "tag": "BUTTON",
+      "label": "إغلاق",
+      "left": -25.390625,
+      "right": 36.53125,
+      "width": 61.921875
+    }
+  ]
+}

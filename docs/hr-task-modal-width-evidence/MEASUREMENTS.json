@@ -1,0 +1,146 @@
+{
+  "390": {
+    "beforeDialogWidth": 415,
+    "beforePanel": {
+      "left": 16,
+      "right": 374,
+      "width": 358
+    },
+    "beforeButtons": [
+      {
+        "tag": "BUTTON",
+        "label": "إضافة",
+        "left": -25.390625,
+        "right": 40,
+        "width": 65.390625
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إرسال",
+        "left": -25.390625,
+        "right": 37.828125,
+        "width": 63.21875
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إغلاق",
+        "left": -25.390625,
+        "right": 36.53125,
+        "width": 61.921875
+      }
+    ],
+    "afterDialogWidth": 390,
+    "afterPanel": {
+      "left": 16,
+      "right": 374,
+      "width": 358
+    },
+    "afterButtons": [
+      {
+        "tag": "BUTTON",
+        "label": "إضافة",
+        "left": 36,
+        "right": 101.390625,
+        "width": 65.390625
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إرسال",
+        "left": 36,
+        "right": 99.21875,
+        "width": 63.21875
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إغلاق",
+        "left": 36,
+        "right": 97.921875,
+        "width": 61.921875
+      }
+    ],
+    "actions": {
+      "width": 390,
+      "forceClick": false,
+      "syntheticOnly": true,
+      "checklistStatus": 200,
+      "commentStatus": 201,
+      "deadlineStatus": 200,
+      "dialogScrollTop": 184,
+      "closed": true,
+      "escapeClosed": true,
+      "completed": true
+    }
+  },
+  "1280": {
+    "beforeDialogWidth": 1280,
+    "beforePanel": {
+      "left": 304,
+      "right": 976,
+      "width": 672
+    },
+    "beforeButtons": [
+      {
+        "tag": "BUTTON",
+        "label": "إضافة",
+        "left": 324,
+        "right": 389.390625,
+        "width": 65.390625
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إرسال",
+        "left": 324,
+        "right": 387.21875,
+        "width": 63.21875
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إغلاق",
+        "left": 324,
+        "right": 385.921875,
+        "width": 61.921875
+      }
+    ],
+    "afterDialogWidth": 1280,
+    "afterPanel": {
+      "left": 304,
+      "right": 976,
+      "width": 672
+    },
+    "afterButtons": [
+      {
+        "tag": "BUTTON",
+        "label": "إضافة",
+        "left": 324,
+        "right": 389.390625,
+        "width": 65.390625
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إرسال",
+        "left": 324,
+        "right": 387.21875,
+        "width": 63.21875
+      },
+      {
+        "tag": "BUTTON",
+        "label": "إغلاق",
+        "left": 324,
+        "right": 385.921875,
+        "width": 61.921875
+      }
+    ],
+    "actions": {
+      "width": 1280,
+      "forceClick": false,
+      "syntheticOnly": true,
+      "checklistStatus": 200,
+      "commentStatus": 201,
+      "deadlineStatus": 200,
+      "dialogScrollTop": 128,
+      "closed": true,
+      "escapeClosed": true,
+      "completed": true
+    }
+  }
+}

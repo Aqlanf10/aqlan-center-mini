@@ -1,0 +1,11 @@
+{
+  "source": "f31e0083e161b79577476fd7e962dc3647c2eb45",
+  "file": "components/hr/TasksPanel.tsx",
+  "allowedChangedAttributes": [
+    "className",
+    "alignTop"
+  ],
+  "normalizedAstEqual": true,
+  "beforeSha256": "f46bbcad09e716185e443755c47ae85c2b72ad7f277c3545fb57c7a523676805",
+  "afterSha256": "5fd6774be06bed76b56cb746d426d61705a262ea93fb7f738af492ae260c1d28"
+}

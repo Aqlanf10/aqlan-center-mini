@@ -1,0 +1,31 @@
+{
+  "base": "f31e0083e161b79577476fd7e962dc3647c2eb45",
+  "baseTree": "1ee2e33275749fc60d548b33556316b335ba05d6",
+  "head": "ae316190fc0e7464b262374b3d3d63c006896f77",
+  "tree": "b530c0d33f09c441133b55b0c240675c75350840",
+  "testSha256": "753977dd5d9476f814b8cfbdbd888a72940d204ffb1c3319324a98c1f625a502",
+  "canonicalBefore": "before-final-test.txt",
+  "beforeTests": {
+    "passed": 3,
+    "failed": 1,
+    "failure": "detail modal horizontal overflow at390:415>391"
+  },
+  "afterTests": {
+    "widthAndDeadlineBrowser": 6,
+    "existingBrowserRegression": 30,
+    "units": 24
+  },
+  "build": "passed",
+  "typecheck": "passed",
+  "lint": {
+    "errors": 0,
+    "warnings": 2,
+    "existingAtBase": true
+  },
+  "scope": "Only TasksPanel JSX layout attributes and one added browser test; AST equal after removing className and alignTop",
+  "syntheticOnly": true,
+  "pushed": false,
+  "remotePR325NotModified": true,
+  "historyHeadUnchanged": "556f928aca4d474bf7e0e0e59307311b267ad8e9",
+  "preliminaryLogs": "before-test and before-verified-test are test-development attempts; only before-final uses final identical test in independent exact-base worktree"
+}

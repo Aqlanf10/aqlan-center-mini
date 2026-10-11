@@ -1,0 +1,12 @@
+{
+  "width": 1280,
+  "forceClick": false,
+  "syntheticOnly": true,
+  "checklistStatus": 200,
+  "commentStatus": 201,
+  "deadlineStatus": 200,
+  "dialogScrollTop": 128,
+  "closed": true,
+  "escapeClosed": true,
+  "completed": true
+}

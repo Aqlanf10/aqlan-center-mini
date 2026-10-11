@@ -1,0 +1,6 @@
+[
+  {
+    "from": "check-layout-only.cjs",
+    "to": "check-layout-only.cjs.txt"
+  }
+]

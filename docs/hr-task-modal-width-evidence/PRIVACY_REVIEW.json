@@ -1,0 +1,12 @@
+{
+  "scope": "Explicitly allowlisted 2 native PNGs and task-layout measurements/results/logs only",
+  "syntheticFixtureOnly": true,
+  "imagesVisuallyReviewed": true,
+  "knownSecretPatternMatches": [],
+  "urlHostsInLogs": [
+    "127.0.0.1:3367"
+  ],
+  "realPatientOrEmployeeData": false,
+  "signedUrlsIncluded": false,
+  "sourceOrTestsChangedForPublication": false
+}

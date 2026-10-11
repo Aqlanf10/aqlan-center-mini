@@ -1,0 +1,35 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-task-create-replay.test.ts __tests__/security-http/hr-task-owner-read.test.ts __tests__/security-http/hr-ui-journey.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-task-modal-width[39m
+
+[security-http] الخادم جاهز على http://127.0.0.1:3367 — قاعدة aqlan_sec_http معزولة
+ [32m✓[39m __tests__/security-http/hr-ui-journey.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 14302[2mms[22m[39m
+     [33m[2m✓[22m[39m admin creates a guard with a human-unit salary (1,500,000 ر.ي) — input, table and print all agree (مراجعة دوت №6) [33m 2965[2mms[22m[39m
+     [33m[2m✓[22m[39m edits an existing employee's work status through the UI and it really saves (مراجعة دوت №7) [33m 2457[2mms[22m[39m
+     [33m[2m✓[22m[39m creates an assigned task, then edits its title and priority through the UI (مراجعة دوت №7) [33m 3317[2mms[22m[39m
+     [33m[2m✓[22m[39m stale save answers 409 with a visible reason, and the draft survives to retry (مراجعة دوت №7) [33m 1699[2mms[22m[39m
+     [33m[2m✓[22m[39m reception cannot see the staff tab, and the doctor's private task never reaches reception's own page (الملحق) [33m 1336[2mms[22m[39m
+     [33m[2m✓[22m[39m fits a 390px phone without horizontal overflow, with evidence screenshots [33m 596[2mms[22m[39m
+     [33m[2m✓[22m[39m produces real print files: staff report PDF shows the same 1,500,000 ر.ي — money print is unit-true (مراجعة دوت №6) [33m 731[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-create-replay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 8817[2mms[22m[39m
+   [33m[2m✓[22m[39m actual committed-response loss retains one owner/key/body through double click and modal reopening at 390px [33m 982[2mms[22m[39m
+   [33m[2m✓[22m[39m a foreign receipt remains pending and a changed signed owner cannot resend the retained draft at 390px [33m 882[2mms[22m[39m
+   [33m[2m✓[22m[39m actual committed-response loss retains one owner/key/body through double click and modal reopening at 1280px [33m 1066[2mms[22m[39m
+   [33m[2m✓[22m[39m a foreign receipt remains pending and a changed signed owner cannot resend the retained draft at 1280px [33m 1090[2mms[22m[39m
+   [33m[2m✓[22m[39m a matching first no-write 400 lets the operator correct the inactive assignee and create once at 390px [33m 614[2mms[22m[39m
+   [33m[2m✓[22m[39m a matching first no-write 400 lets the operator correct the inactive assignee and create once at 1280px [33m 740[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-owner-read.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 2947[2mms[22m[39m
+   [33m[2m✓[22m[39m hides A synchronously before B's first list response and rejects a retired A list response [33m 487[2mms[22m[39m
+   [33m[2m✓[22m[39m retires cached list/detail immediately and refuses an older detail when a different owner is mounted [33m 650[2mms[22m[39m
+   [33m[2m✓[22m[39m admits only the newest query, including a repeated A query after A→B→A [33m 620[2mms[22m[39m
+   [33m[2m✓[22m[39m retains exact uncertain A and B commands without retired completions clearing another mounted form [33m 918[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m30 passed[39m[22m[90m (30)[39m
+[2m   Start at [22m 21:32:03
+[2m   Duration [22m 29.30s[2m (transform 153ms, setup 0ms, import 516ms, tests 26.07s, environment 0ms)[22m
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

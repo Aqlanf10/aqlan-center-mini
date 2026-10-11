@@ -1,0 +1,23 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-task-modal-width-ui.test.ts __tests__/security-http/hr-task-deadline-validation-ui.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-task-modal-width[39m
+
+[security-http] الخادم جاهز على http://127.0.0.1:3367 — قاعدة aqlan_sec_http معزولة
+ [32m✓[39m __tests__/security-http/hr-task-modal-width-ui.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 10590[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps native create fields and actions contained in RTL and preserves values at 390 [33m 1101[2mms[22m[39m
+   [33m[2m✓[22m[39m adds checklist/comment, saves deadline and closes through fully reachable RTL controls at 390 [33m 1802[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps native create fields and actions contained in RTL and preserves values at 1280 [33m 1050[2mms[22m[39m
+   [33m[2m✓[22m[39m adds checklist/comment, saves deadline and closes through fully reachable RTL controls at 1280 [33m 2068[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-deadline-validation-ui.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 4912[2mms[22m[39m
+   [33m[2m✓[22m[39m invalid deadline sends no write and both forms recover after correction at 390 [33m 1005[2mms[22m[39m
+   [33m[2m✓[22m[39m invalid deadline sends no write and both forms recover after correction at 1280 [33m 1225[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 21:30:38
+[2m   Duration [22m 19.21s[2m (transform 136ms, setup 0ms, import 625ms, tests 15.50s, environment 0ms)[22m
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

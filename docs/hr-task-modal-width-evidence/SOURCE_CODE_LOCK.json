@@ -1,0 +1,11 @@
+{
+  "testedCodeCommit": "ae316190fc0e7464b262374b3d3d63c006896f77",
+  "testedTree": "b530c0d33f09c441133b55b0c240675c75350840",
+  "testResultsReusedWithoutRerun": true,
+  "publicationAddsOnly": "docs/hr-task-modal-width-evidence/",
+  "libraryAttempt": "One supported helper attempt failed at network discovery before any upload; no retry",
+  "files": {
+    "components/hr/TasksPanel.tsx": "5fd6774be06bed76b56cb746d426d61705a262ea93fb7f738af492ae260c1d28",
+    "__tests__/security-http/hr-task-modal-width-ui.test.ts": "753977dd5d9476f814b8cfbdbd888a72940d204ffb1c3319324a98c1f625a502"
+  }
+}
