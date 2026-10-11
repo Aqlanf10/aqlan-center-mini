@@ -1,0 +1,23 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/hr-contract-lifecycle.test.ts __tests__/hr-contract-save-receipt.test.ts __tests__/hr-contracts-attendance.test.ts __tests__/hr-financial-print.test.tsx __tests__/hr-modal-panel-containers.test.ts __tests__/hr-payroll-confirmation.test.ts __tests__/hr-payroll.test.ts __tests__/hr-privacy.test.ts __tests__/hr-schema.test.ts __tests__/hr-task-time.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-pr325-verification[39m
+
+ [32m✓[39m __tests__/hr-modal-panel-containers.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 302[2mms[22m[39m
+ [32m✓[39m __tests__/hr-task-time.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m __tests__/hr-financial-print.test.tsx [2m([22m[2m7 tests[22m[2m)[22m[32m 74[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contract-save-receipt.test.ts [2m([22m[2m38 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m __tests__/hr-schema.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m __tests__/hr-privacy.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contract-lifecycle.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m __tests__/hr-payroll-confirmation.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m __tests__/hr-contracts-attendance.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m __tests__/hr-payroll.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m10 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[32m113 passed[39m[22m[90m (113)[39m
+[2m   Start at [22m 20:59:51
+[2m   Duration [22m 3.40s[2m (transform 412ms, setup 0ms, import 1.09s, tests 466ms, environment 1ms)[22m
+

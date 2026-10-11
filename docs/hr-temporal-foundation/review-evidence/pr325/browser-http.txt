@@ -1,0 +1,164 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/hr-operational-integrity-ui.test.ts __tests__/security-http/hr-leave-reference-legacy-ui.test.ts __tests__/security-http/hr-task-deadline-validation-ui.test.ts __tests__/security-http/hr-payroll-journey.test.ts __tests__/security-http/hr-contract-save-receipt-ui.test.ts __tests__/security-http/hr-task-create-replay.test.ts __tests__/security-http/hr-ui-journey.test.ts __tests__/security-http/hr-task-owner-read.test.ts __tests__/security-http/hr-contract-save-admission-real-react.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-pr325-verification[39m
+
+[security-http] الخادم جاهز على http://127.0.0.1:3357 — قاعدة aqlan_sec_http معزولة
+ [32m✓[39m __tests__/security-http/hr-contract-save-receipt-ui.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 57956[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement lost preserves one committed intent through double click, close and tab reopen at 390px [33m 2221[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement truncated preserves one committed intent through double click, close and tab reopen at 390px [33m 1998[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-staff preserves one committed intent through double click, close and tab reopen at 390px [33m 2212[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-number preserves one committed intent through double click, close and tab reopen at 390px [33m 2178[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-patch-id preserves one committed intent through double click, close and tab reopen at 390px [33m 2130[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-patch-number preserves one committed intent through double click, close and tab reopen at 390px [33m 2392[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement hung-body preserves one committed intent through double click, close and tab reopen at 390px [33m 14037[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement lost preserves one committed intent through double click, close and tab reopen at 1280px [33m 2123[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement truncated preserves one committed intent through double click, close and tab reopen at 1280px [33m 2218[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-staff preserves one committed intent through double click, close and tab reopen at 1280px [33m 2257[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-number preserves one committed intent through double click, close and tab reopen at 1280px [33m 2071[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-patch-id preserves one committed intent through double click, close and tab reopen at 1280px [33m 2161[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement foreign-patch-number preserves one committed intent through double click, close and tab reopen at 1280px [33m 2074[2mms[22m[39m
+   [33m[2m✓[22m[39m contract acknowledgement hung-body preserves one committed intent through double click, close and tab reopen at 1280px [33m 14010[2mms[22m[39m
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: submitting form
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: form clicked
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: response received
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: submitted correction
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: checking self approval
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: self approval denied
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: role and spoofing checks passed
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: reviewer logged in
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 390px
+[22m[39mnight 390: reviewer correction card opened
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: submitting form
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: form clicked
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: response received
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: submitted correction
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: checking self approval
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: self approval denied
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: role and spoofing checks passed
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: reviewer logged in
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2mexplicit next-day correction and second-admin approval preserve evidence at 1280px
+[22m[39mnight 1280: reviewer correction card opened
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2munverified payout missing body retains the exact request after actual commit at 390px
+[22m[39mHR_PAYROLL_VERIFIED_REPLAY_CAPTURE {"variant":"missing","width":390,"runId":4,"periodId":4,"itemId":24,"disbursementId":3,"readStatus":200,"paidMinor":1000,"remainingMinor":9000,"currency":"YER","beforeCapture":{"period":"4","runHref":"/print/hr/payroll/4","rowCount":1,"paid":"1,000","remaining":"9,000","receiptHref":"/print/voucher/6"}}
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2munverified payout missing body retains the exact request after actual commit at 1280px
+[22m[39mHR_PAYROLL_VERIFIED_REPLAY_CAPTURE {"variant":"missing","width":1280,"runId":5,"periodId":5,"itemId":33,"disbursementId":4,"readStatus":200,"paidMinor":1000,"remainingMinor":9000,"currency":"YER","beforeCapture":{"period":"5","runHref":"/print/hr/payroll/5","rowCount":1,"paid":"1,000","remaining":"9,000","receiptHref":"/print/voucher/7"}}
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2munverified payout foreign body retains the exact request after actual commit at 390px
+[22m[39mHR_PAYROLL_VERIFIED_REPLAY_CAPTURE {"variant":"foreign","width":390,"runId":6,"periodId":6,"itemId":43,"disbursementId":5,"readStatus":200,"paidMinor":1000,"remainingMinor":9000,"currency":"YER","beforeCapture":{"period":"6","runHref":"/print/hr/payroll/6","rowCount":1,"paid":"1,000","remaining":"9,000","receiptHref":"/print/voucher/8"}}
+
+[90mstdout[2m | __tests__/security-http/hr-payroll-journey.test.ts[2m > [22m[2munverified payout foreign body retains the exact request after actual commit at 1280px
+[22m[39mHR_PAYROLL_VERIFIED_REPLAY_CAPTURE {"variant":"foreign","width":1280,"runId":7,"periodId":7,"itemId":54,"disbursementId":6,"readStatus":200,"paidMinor":1000,"remainingMinor":9000,"currency":"YER","beforeCapture":{"period":"7","runHref":"/print/hr/payroll/7","rowCount":1,"paid":"1,000","remaining":"9,000","receiptHref":"/print/voucher/9"}}
+
+ [32m✓[39m __tests__/security-http/hr-payroll-journey.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 53666[2mms[22m[39m
+     [33m[2m✓[22m[39m salary, percentage and hybrid show their real components, on desktop and mobile [33m 998[2mms[22m[39m
+     [33m[2m✓[22m[39m lost response, reload, double click and stale second tab reuse one partial payout [33m 10212[2mms[22m[39m
+   [33m[2m✓[22m[39m actual attendance and leave APIs preserve raw events, pending decisions and private reasons [33m 633[2mms[22m[39m
+   [33m[2m✓[22m[39m a doctor sees personal tasks and leave without an unusable team attendance tab [33m 368[2mms[22m[39m
+   [33m[2m✓[22m[39m explicit next-day correction and second-admin approval preserve evidence at 390px [33m 2769[2mms[22m[39m
+   [33m[2m✓[22m[39m explicit next-day correction and second-admin approval preserve evidence at 1280px [33m 2987[2mms[22m[39m
+   [33m[2m✓[22m[39m queued real payout rejects a role revoked after HTTP admission [33m 725[2mms[22m[39m
+   [33m[2m✓[22m[39m queued real payout rejects a credential revoked after HTTP admission [33m 725[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified payout missing body retains the exact request after actual commit at 390px [33m 1155[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified payout missing body retains the exact request after actual commit at 1280px [33m 1304[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified payout foreign body retains the exact request after actual commit at 390px [33m 1221[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified payout foreign body retains the exact request after actual commit at 1280px [33m 1486[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified reversal preserves the confirmed request until the original voucher is verified at 390px [33m 1624[2mms[22m[39m
+   [33m[2m✓[22m[39m unverified reversal preserves the confirmed request until the original voucher is verified at 1280px [33m 1618[2mms[22m[39m
+   [33m[2m✓[22m[39m an older payroll fetch cannot replace the newly selected period at 390px [33m 1486[2mms[22m[39m
+   [33m[2m✓[22m[39m an older payroll fetch cannot replace the newly selected period at 1280px [33m 1427[2mms[22m[39m
+   [33m[2m✓[22m[39m every synthetic payroll row survives a multi-page PDF at 390px [33m 1561[2mms[22m[39m
+   [33m[2m✓[22m[39m every synthetic payroll row survives a multi-page PDF at 1280px [33m 1755[2mms[22m[39m
+   [33m[2m✓[22m[39m a confirmed keyless legacy reversal is recovered without inventing a request key at 390px [33m 1581[2mms[22m[39m
+   [33m[2m✓[22m[39m a confirmed keyless legacy reversal is recovered without inventing a request key at 1280px [33m 1717[2mms[22m[39m
+   [33m[2m✓[22m[39m shows the allowed administrative approval journey and preserves the approved original through an addendum [33m 892[2mms[22m[39m
+   [33m[2m✓[22m[39m creates and reopens the actual support_staff/0 template with unknown wages intact [33m 2290[2mms[22m[39m
+   [33m[2m✓[22m[39m creates and reopens the actual doctor_percentage/1 template with unknown wages intact [33m 1101[2mms[22m[39m
+   [33m[2m✓[22m[39m creates and reopens the actual doctor_salary/2 template with unknown wages intact [33m 1144[2mms[22m[39m
+   [33m[2m✓[22m[39m creates and reopens the actual doctor_hybrid/3 template with unknown wages intact [33m 1081[2mms[22m[39m
+   [33m[2m✓[22m[39m creates and reopens the actual support_staff/4 template with unknown wages intact [33m 1176[2mms[22m[39m
+   [33m[2m✓[22m[39m retains explicit عقد موظف مساند (راتب)/YER amounts through UI save, reopen and print [33m 1071[2mms[22m[39m
+   [33m[2m✓[22m[39m retains explicit عقد طبيب (نسبة)/ amounts through UI save, reopen and print [33m 1104[2mms[22m[39m
+   [33m[2m✓[22m[39m retains explicit عقد مختلط (راتب ونسبة)/SAR amounts through UI save, reopen and print [33m 1094[2mms[22m[39m
+   [33m[2m✓[22m[39m retains explicit عقد طبيب (راتب)/USD amounts through UI save, reopen and print [33m 1249[2mms[22m[39m
+   [33m[2m✓[22m[39m HR tabs are honestly disabled before hydration and one native click opens payroll after release [33m 833[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-ui-journey.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 11578[2mms[22m[39m
+     [33m[2m✓[22m[39m admin creates a guard with a human-unit salary (1,500,000 ر.ي) — input, table and print all agree (مراجعة دوت №6) [33m 1902[2mms[22m[39m
+     [33m[2m✓[22m[39m edits an existing employee's work status through the UI and it really saves (مراجعة دوت №7) [33m 2193[2mms[22m[39m
+     [33m[2m✓[22m[39m creates an assigned task, then edits its title and priority through the UI (مراجعة دوت №7) [33m 2957[2mms[22m[39m
+     [33m[2m✓[22m[39m stale save answers 409 with a visible reason, and the draft survives to retry (مراجعة دوت №7) [33m 1616[2mms[22m[39m
+     [33m[2m✓[22m[39m reception cannot see the staff tab, and the doctor's private task never reaches reception's own page (الملحق) [33m 1213[2mms[22m[39m
+     [33m[2m✓[22m[39m fits a 390px phone without horizontal overflow, with evidence screenshots [33m 526[2mms[22m[39m
+     [33m[2m✓[22m[39m produces real print files: staff report PDF shows the same 1,500,000 ر.ي — money print is unit-true (مراجعة دوت №6) [33m 701[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-create-replay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 8496[2mms[22m[39m
+   [33m[2m✓[22m[39m actual committed-response loss retains one owner/key/body through double click and modal reopening at 390px [33m 937[2mms[22m[39m
+   [33m[2m✓[22m[39m a foreign receipt remains pending and a changed signed owner cannot resend the retained draft at 390px [33m 916[2mms[22m[39m
+   [33m[2m✓[22m[39m actual committed-response loss retains one owner/key/body through double click and modal reopening at 1280px [33m 999[2mms[22m[39m
+   [33m[2m✓[22m[39m a foreign receipt remains pending and a changed signed owner cannot resend the retained draft at 1280px [33m 1086[2mms[22m[39m
+   [33m[2m✓[22m[39m a matching first no-write 400 lets the operator correct the inactive assignee and create once at 390px [33m 586[2mms[22m[39m
+   [33m[2m✓[22m[39m a matching first no-write 400 lets the operator correct the inactive assignee and create once at 1280px [33m 697[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-operational-integrity-ui.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 7043[2mms[22m[39m
+   [33m[2m✓[22m[39m native split attendance and schedule editor at 390 [33m 791[2mms[22m[39m
+   [33m[2m✓[22m[39m native split attendance and schedule editor at 1280 [33m 825[2mms[22m[39m
+   [33m[2m✓[22m[39m HTTP rejects invalid policies, applies a saved grace default, and requires a structured leave document reference [33m 651[2mms[22m[39m
+   [33m[2m✓[22m[39m clinic deadline remains 14:00 through create and edit on Asia/Aden device [33m 914[2mms[22m[39m
+   [33m[2m✓[22m[39m clinic deadline remains 14:00 through create and edit on America/Los_Angeles device [33m 903[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-deadline-validation-ui.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 4823[2mms[22m[39m
+   [33m[2m✓[22m[39m invalid deadline sends no write and both forms recover after correction at 390 [33m 1016[2mms[22m[39m
+   [33m[2m✓[22m[39m invalid deadline sends no write and both forms recover after correction at 1280 [33m 1090[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-leave-reference-legacy-ui.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 3827[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps other leave rows readable with object-valued legacy references at 390 [33m 713[2mms[22m[39m
+   [33m[2m✓[22m[39m keeps other leave rows readable with object-valued legacy references at 1280 [33m 616[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-task-owner-read.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 2910[2mms[22m[39m
+   [33m[2m✓[22m[39m hides A synchronously before B's first list response and rejects a retired A list response [33m 468[2mms[22m[39m
+   [33m[2m✓[22m[39m retires cached list/detail immediately and refuses an older detail when a different owner is mounted [33m 642[2mms[22m[39m
+   [33m[2m✓[22m[39m admits only the newest query, including a repeated A query after A→B→A [33m 582[2mms[22m[39m
+   [33m[2m✓[22m[39m retains exact uncertain A and B commands without retired completions clearing another mounted form [33m 957[2mms[22m[39m
+ [32m✓[39m __tests__/security-http/hr-contract-save-admission-real-react.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 2298[2mms[22m[39m
+   [33m[2m✓[22m[39m rejects a real retained form handler after owner-A-B-A with zero fresh reservation or fetch [33m 685[2mms[22m[39m
+   [33m[2m✓[22m[39m rejects a real retained form handler after tab-detach with zero fresh reservation or fetch [33m 712[2mms[22m[39m
+   [33m[2m✓[22m[39m rejects a real retained form handler after admin-revoked with zero fresh reservation or fetch [33m 636[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m      Tests [22m [1m[32m89 passed[39m[22m[90m (89)[39m
+[2m   Start at [22m 21:01:22
+[2m   Duration [22m 156.20s[2m (transform 313ms, setup 0ms, import 695ms, tests 152.60s, environment 0ms)[22m
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

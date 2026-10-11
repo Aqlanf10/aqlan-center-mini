@@ -1,0 +1,53 @@
+{
+  "source": "f31e0083e161b79577476fd7e962dc3647c2eb45",
+  "tree": "1ee2e33275749fc60d548b33556316b335ba05d6",
+  "build": "passed",
+  "unit": {
+    "passed": 113,
+    "log": "unit.txt"
+  },
+  "postgres": {
+    "passed": 143,
+    "first_valid_target_run": {
+      "passed": 121,
+      "setup_skipped": 22,
+      "reason": "missing synthetic SESSION_SECRET",
+      "log": "postgres.txt"
+    },
+    "retry": {
+      "passed": 22,
+      "log": "postgres-operational-retry.txt"
+    }
+  },
+  "initial_target_refusal": "PostgreSQL guard correctly required aqlan_p1_test; a new database with that name was created in the owned local container. No guard/source edits.",
+  "browser_http": {
+    "passed": 89,
+    "log": "browser-http.txt"
+  },
+  "source_edits": false,
+  "overlays": false,
+  "live_database_access": false,
+  "external_messages_or_payments": false,
+  "temporal_checkpoint": "c9499fb1147b051fce56f405ef7c1cdb0eee13d8",
+  "finished_utc": "2026-10-11T21:04:43.024870+00:00",
+  "total_passed": 345,
+  "native_png": 55,
+  "native_pdf": 5,
+  "source_clean_after": true,
+  "owned_container_removed": true,
+  "reviewed_images": [
+    "hr-payroll-390.png",
+    "hr-nextday-result-1280.png",
+    "hr-phone-390.png",
+    "fixed-split-record-1280.png",
+    "task-edit-invalid-deadline-390.png"
+  ],
+  "visual_findings": [
+    {
+      "priority": "P2",
+      "image": "task-edit-invalid-deadline-390.png",
+      "observation": "Some task edit fields extend past the modal left edge with synthetic invalid year 10000; rejection and recovery passed.",
+      "scope": "Observed usability limit; HR files unchanged from b55; no fix applied."
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-operational-integrity.test.ts __tests__/postgres/hr-workforce-integrity.test.ts __tests__/postgres/hr-staff-tasks.test.ts __tests__/postgres/hr-payroll-integrity.test.ts __tests__/postgres/hr-contract-lifecycle.test.ts __tests__/postgres/hr-payroll-financial.test.ts __tests__/postgres/hr-task-create-replay.test.ts __tests__/postgres/hr-backup-roundtrip.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-pr325-verification[39m
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ [31m❯[39m __tests__/postgres/hr-operational-integrity.test.ts [2m([22m[2m22 tests[22m[2m | [22m[33m22 skipped[39m[2m)[22m[33m 2529[2mms[22m[39m
+   [2m[90m↓[39m[22m counts both split-shift pairs without the unpaid gap or duplicate punches
+   [2m[90m↓[39m[22m anchors a first after-midnight night punch to the preceding clinic date
+   [2m[90m↓[39m[22m refuses undated suspension recalculation and approval without deleting the previous draft
+   [2m[90m↓[39m[22m required attachment blocks leave approval atomically until a reference is supplied
+   [2m[90m↓[39m[22m rejects invalid settings atomically and keeps the canonical previous policy
+   [2m[90m↓[39m[22m freezes a used schedule and keeps exact punch replay from reinterpreting stored history
+   [2m[90m↓[39m[22m new schedules snapshot the saved default grace while existing schedules and explicit overrides remain unchanged
+   [2m[90m↓[39m[22m split missing punches stay incomplete, late arrival of evidence repairs only the aggregate, and one-pair correction is refused
+   [2m[90m↓[39m[22m concurrent split events preserve all evidence and converge to the same result
+   [2m[90m↓[39m[22m policy patches preserve sibling values, reject null/unknown fields and roll back the entire multi-policy write
+   [2m[90m↓[39m[22m a new schedule does not reassign an existing attendance day on a new evidence upload
+   [2m[90m↓[39m[22m invalid legacy policy can be repaired only with a complete valid replacement
+   [2m[90m↓[39m[22m split second-period early entry is actual work and does not make the two pairs ambiguous
+   [2m[90m↓[39m[22m touching split shifts keep both boundary events with chronological arrival and replay
+   [2m[90m↓[39m[22m touching split shifts keep both boundary events with reverse arrival and replay
+   [2m[90m↓[39m[22m touching split shifts keep both boundary events with concurrent arrival and replay
+   [2m[90m↓[39m[22m touching split shifts never invent a missing boundary check_in
+   [2m[90m↓[39m[22m touching split shifts never invent a missing boundary check_out
+   [2m[90m↓[39m[22m a legacy rejected split correction uses decision status when later raw evidence arrives
+   [2m[90m↓[39m[22m a legacy approved split correction uses decision status when later raw evidence arrives
+   [2m[90m↓[39m[22m policy grace accepts the schema limit 120 and refuses 121 without persisting an unusable default
+   [2m[90m↓[39m[22m explicit schedule grace over the schema limit is rejected before the database constraint
+(node:39022) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-payroll-integrity.test.ts [2m([22m[2m40 tests[22m[2m)[22m[33m 5442[2mms[22m[39m
+(node:39040) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-workforce-integrity.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 7159[2mms[22m[39m
+(node:39079) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-payroll-financial.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 3824[2mms[22m[39m
+     [33m[2m✓[22m[39m creates valid employment contracts for support staff and doctor [33m 623[2mms[22m[39m
+     [33m[2m✓[22m[39m calculates payroll run and enforces approval immutability [33m 585[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses disbursement without an open cashier shift [33m 580[2mms[22m[39m
+     [33m[2m✓[22m[39m disburses payroll item under open shift, creates compliant expense, and verifies idempotency [33m 1041[2mms[22m[39m
+     [33m[2m✓[22m[39m handles leave balance lifecycle, self-approval refusal, and cancellation rollback [33m 990[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-backup-roundtrip.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 3153[2mms[22m[39m
+     [33m[2m✓[22m[39m SKIP_SEED permits exact HR restoration and advancing every affected sequence [33m 746[2mms[22m[39m
+     [33m[2m✓[22m[39m a pre-HR backup restores onto the current empty schema [33m 795[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-contract-lifecycle.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 1256[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-staff-tasks.test.ts [2m([22m[2m25 tests[22m[2m)[22m[33m 940[2mms[22m[39m
+ [32m✓[39m __tests__/postgres/hr-task-create-replay.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 731[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m __tests__/postgres/hr-operational-integrity.test.ts[2m [ __tests__/postgres/hr-operational-integrity.test.ts ][22m
+[31m[1mError[22m: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.[39m
+[36m [2m❯[22m secret lib/auth.ts:[2m64:11[22m[39m
+    [90m 62|[39m   [90m// هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.[39m
+    [90m 63|[39m   [35mif[39m ([33m![39mvalue [33m||[39m value[33m.[39mlength [33m<[39m [34m32[39m) {
+    [90m 64|[39m     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+    [90m   |[39m           [31m^[39m
+    [90m 65|[39m   }
+    [90m 66|[39m   [35mreturn[39m value[33m;[39m
+[90m [2m❯[22m sessionCredentialVersion lib/auth.ts:[2m74:31[22m[39m
+[90m [2m❯[22m __tests__/postgres/hr-operational-integrity.test.ts:[2m14:124[22m[39m
+[90m [2m❯[22m __tests__/postgres/hr-operational-integrity.test.ts:[2m14:24[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m7 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m121 passed[39m[22m[2m | [22m[33m22 skipped[39m[90m (143)[39m
+[2m   Start at [22m 21:00:38
+[2m   Duration [22m 27.81s[2m (transform 1.49s, setup 0ms, import 1.58s, tests 25.03s, environment 1ms)[22m
+

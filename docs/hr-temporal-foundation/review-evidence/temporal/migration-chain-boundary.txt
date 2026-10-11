@@ -1,0 +1,17 @@
+{
+  "result": "expected_closed_guard",
+  "newIdentities": [
+    {
+      "filename": "0056_hr_employment_history.sql",
+      "version": "0056",
+      "checksum": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112"
+    },
+    {
+      "filename": "0057_hr_schedule_policy_versions.sql",
+      "version": "0057",
+      "checksum": "d0586f05f3421d40243cff642edb7f02e38ab2aacc640c0492d6bb5c0395c3b9"
+    }
+  ],
+  "error": "Unreviewed shipped migration baseline for fixture.",
+  "guardEdited": false
+}

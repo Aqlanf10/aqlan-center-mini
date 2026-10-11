@@ -1,0 +1,262 @@
+[
+  {
+    "file": "__tests__/hr-temporal-contracts.test.ts",
+    "line": 17,
+    "declaration": "describe('effective-date history and immutable revisions', () => {"
+  },
+  {
+    "file": "__tests__/hr-temporal-contracts.test.ts",
+    "line": 62,
+    "declaration": "describe('policy gaps block only the affected calculation', () => {"
+  },
+  {
+    "file": "__tests__/hr-temporal-contracts.test.ts",
+    "line": 94,
+    "declaration": "describe('anchored segments, raw evidence and reasoned corrections', () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 65,
+    "declaration": "it('does not backfill old effective dates, alter current staff, or rewrite any approved monetary snapshot', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 74,
+    "declaration": "it('applies 0056 before 0057 without placeholder migrations and admits policy streams only after 0057', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 83,
+    "declaration": "it('preserves unknown observations and selects only documented effective history', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 93,
+    "declaration": "it('rolls back an overlapping change and refuses a stale revision without deleting history', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 99,
+    "declaration": "it('serializes simultaneous first writes over separate PostgreSQL connections with exactly one winner', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 107,
+    "declaration": "it('serializes competing corrections and preserves every recorded pre-correction snapshot', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 114,
+    "declaration": "it('enforces the same concurrent revision exclusion for direct SQL callers', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 124,
+    "declaration": "it('database constraints independently reject overlap, dated unknowns, malformed dates and duplicate IDs', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 135,
+    "declaration": "it('requires real employee and actor identities and rejects changes to stream identity or recorded history', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 141,
+    "declaration": "it('does not recycle a retired fact identity or modify its old meaning via direct SQL', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 148,
+    "declaration": "it('keeps draft or future policy from authorizing the affected salary/leave interval while attendance remains available', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 161,
+    "declaration": "it('selects versioned overnight schedules without changing an already captured prior occurrence', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 172,
+    "declaration": "it('checks direct SQL schedule and policy shapes without treating a numeric setting as approval', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 180,
+    "declaration": "it('roundtrips all recorded revisions with microsecond audit timestamps into a separately owned schema', async () => {"
+  },
+  {
+    "file": "__tests__/postgres/hr-temporal-foundation.test.ts",
+    "line": 193,
+    "declaration": "it('leaves legacy liabilities and every independent currency unchanged after all temporal writes, then permits a real partial-payment reversal', async () => {"
+  },
+  {
+    "file": "lib/hr-effective-policy.ts",
+    "line": 15,
+    "declaration": "export function validateEffectivePolicy(value: HrEffectivePolicy, key: HrEffectivePolicyKey): HrEffectivePolicy {"
+  },
+  {
+    "file": "lib/hr-effective-policy.ts",
+    "line": 23,
+    "declaration": "export function selectApprovedHrPolicy(timeline: TemporalTimeline<HrEffectivePolicy> | undefined, key: HrEffectivePolicyKey, day: string) {"
+  },
+  {
+    "file": "lib/hr-effective-policy.ts",
+    "line": 33,
+    "declaration": "export function assessHrCalculation(input: {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 17,
+    "declaration": "export function validateEffectiveSchedule(value: HrEffectiveSchedule): HrEffectiveSchedule {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 30,
+    "declaration": "export function validateScheduleSegments(segments: readonly HrScheduleSegment[]): readonly HrScheduleSegment[] {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 62,
+    "declaration": "export function materializeScheduleSegments(anchorDay: string, timeZone: string, segments: readonly HrScheduleSegment[]) {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 71,
+    "declaration": "export function selectHrSchedule(timeline: TemporalTimeline<HrEffectiveSchedule>, anchorDay: string) {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 108,
+    "declaration": "export function collectSegmentEvidence(id: string, punches: readonly HrSegmentPunch[], version = 1): HrSegmentEvidence {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 123,
+    "declaration": "export function collectOccurrenceEvidence(windows: readonly HrSegmentWindow[], assignments: readonly { segmentId: string; punches: readonly HrSegmentPunch[] }[]) {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 146,
+    "declaration": "export function correctOccurrenceSegment(current: ReturnType<typeof collectOccurrenceEvidence>, correction: HrSegmentCorrection) {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 150,
+    "declaration": "export function correctSegmentEvidence(current: HrSegmentEvidence, correction: HrSegmentCorrection): HrSegmentEvidence {"
+  },
+  {
+    "file": "lib/hr-schedule-segments.ts",
+    "line": 162,
+    "declaration": "export function appendSegmentEvidence(current: HrSegmentEvidence, punches: readonly HrSegmentPunch[]): HrSegmentEvidence {"
+  },
+  {
+    "file": "lib/hr-temporal-store.ts",
+    "line": 23,
+    "declaration": "export async function readHrTimeline<T>(source: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>, stream: HrTemporalStream, revision?: number): Promise<TemporalTimeline<T>> {"
+  },
+  {
+    "file": "lib/hr-temporal-store.ts",
+    "line": 38,
+    "declaration": "export async function appendHrTimeline<T>(pool: Pick<Pool, 'connect'>, stream: HrTemporalStream, change: TemporalChange<T>, actorUserId: number): Promise<TemporalTimeline<T>> {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 5,
+    "declaration": "export function temporalFail(code: string, message: string): never { throw new HrTemporalError(code, message); }"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 6,
+    "declaration": "export function assertDay(value: unknown): asserts value is string {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 11,
+    "declaration": "export function addCalendarDays(day: string, days: number): string {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 18,
+    "declaration": "export function assertRange(from: string, to: string | null): void {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 22,
+    "declaration": "export function immutableJson<T>(value: T): T {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 49,
+    "declaration": "export function validateTimeline<T>(timeline: TemporalTimeline<T>): TemporalTimeline<T> {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 63,
+    "declaration": "export function reviseTimeline<T>(current: TemporalTimeline<T>, change: TemporalChange<T>): TemporalTimeline<T> {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 75,
+    "declaration": "export function selectTemporal<T>(timeline: TemporalTimeline<T>, day: string): TemporalSelection<T> {"
+  },
+  {
+    "file": "lib/hr-temporal.ts",
+    "line": 82,
+    "declaration": "export function partitionTemporal<T>(timeline: TemporalTimeline<T>, from: string, to: string) {"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 4,
+    "declaration": "CREATE TABLE hr_effective_streams ("
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 14,
+    "declaration": "CREATE TABLE hr_effective_revisions ("
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 25,
+    "declaration": "CREATE FUNCTION aqlan_hr_validate_effective_value(domain TEXT, subject TEXT, payload JSONB, fact_kind TEXT)"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 34,
+    "declaration": "CREATE FUNCTION aqlan_hr_validate_effective_revision() RETURNS trigger LANGUAGE plpgsql AS $$"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 89,
+    "declaration": "CREATE TRIGGER hr_effective_revision_validate BEFORE INSERT ON hr_effective_revisions"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 91,
+    "declaration": "CREATE FUNCTION aqlan_hr_effective_append_only() RETURNS trigger LANGUAGE plpgsql AS $$"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 94,
+    "declaration": "CREATE TRIGGER hr_effective_revision_immutable BEFORE UPDATE OR DELETE ON hr_effective_revisions"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 96,
+    "declaration": "CREATE TRIGGER hr_effective_stream_immutable BEFORE UPDATE OR DELETE ON hr_effective_streams"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 98,
+    "declaration": "CREATE TRIGGER hr_effective_revision_no_truncate BEFORE TRUNCATE ON hr_effective_revisions"
+  },
+  {
+    "file": "migrations/0056_hr_employment_history.sql",
+    "line": 100,
+    "declaration": "CREATE TRIGGER hr_effective_stream_no_truncate BEFORE TRUNCATE ON hr_effective_streams"
+  },
+  {
+    "file": "migrations/0057_hr_schedule_policy_versions.sql",
+    "line": 8,
+    "declaration": "CREATE OR REPLACE FUNCTION aqlan_hr_validate_effective_value(domain TEXT, subject TEXT, payload JSONB, fact_kind TEXT)"
+  }
+]

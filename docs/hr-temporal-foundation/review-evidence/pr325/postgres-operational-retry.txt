@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/hr-operational-integrity.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/hr-pr325-verification[39m
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+(node:39640) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ [32m✓[39m __tests__/postgres/hr-operational-integrity.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 9769[2mms[22m[39m
+   [33m[2m✓[22m[39m touching split shifts keep both boundary events with concurrent arrival and replay [33m 303[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m22 passed[39m[22m[90m (22)[39m
+[2m   Start at [22m 21:01:34
+[2m   Duration [22m 10.31s[2m (transform 1.52s, setup 0ms, import 120ms, tests 9.77s, environment 0ms)[22m
+

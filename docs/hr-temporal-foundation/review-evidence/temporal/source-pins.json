@@ -1,0 +1,32 @@
+{
+  "base": "b55b0500e9ef4963145f3e6b68f487d2ed544a2e",
+  "tested_source": "412e2ececde59e44f3d3ac187ca09f8d982025cb",
+  "tested_tree": "79a92d4e894f76f7edd23ee8a94faac2f1e875c1",
+  "final_report_head": "d54a423ca56dc32b45255319089a7e97bb676e4f",
+  "final_report_tree": "8dbacbc881f3442ea1fa111e627f0a1641e5d080",
+  "branch": "feat/hr-temporal-foundation",
+  "clean": true,
+  "pushed": false,
+  "deployed": false,
+  "files_sha256": {
+    "__tests__/hr-temporal-contracts.test.ts": "edda5b7932c19fb4d4d0fa57b8f62ec35e4c9dcb3aeb65448d628dce51d80977",
+    "__tests__/postgres/hr-temporal-foundation.test.ts": "27c621db0e3d93663e2c18800e51751ff18366aaa39bade8cb2e13a5844cae23",
+    "docs/hr-temporal-foundation/IMPLEMENTATION_AR.md": "ae1172030dbc6f58e349d0ca846eaa4162ba9e33b9577b8708a1a989b961c9cf",
+    "lib/hr-effective-policy.ts": "15aee97399beff51837f8ae93856615b8703538cf578266e993bbfce8e62d1bf",
+    "lib/hr-schedule-segments.ts": "e9e376deb37c7689b3b4f0dcffebc290f29fc639b49f7ed321fb2179d64967cf",
+    "lib/hr-temporal-store.ts": "557798a269d97e67469dd4b0f48a1ca8cf39f6060036b0e7653698530a8a665d",
+    "lib/hr-temporal.ts": "d3feffb3bb6d2f3587ad42d830603066ed1d856edd7642da8c2884820fde1a5e",
+    "migrations/0056_hr_employment_history.sql": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112",
+    "migrations/0057_hr_schedule_policy_versions.sql": "d0586f05f3421d40243cff642edb7f02e38ab2aacc640c0492d6bb5c0395c3b9"
+  },
+  "migration_reservation": {
+    "source": "parent: dot review",
+    "utc": "2026-10-11T20:55:00Z",
+    "0056": "employment history",
+    "0057": "schedule and policy versions",
+    "0052-0055": "calendar",
+    "0044": "administrative invoice discount",
+    "0045-0051": "unchanged"
+  },
+  "remote_heads_read_only": "f31e0083e161b79577476fd7e962dc3647c2eb45\trefs/heads/feat/unified-invoice-agreement-entry\nb55b0500e9ef4963145f3e6b68f487d2ed544a2e\trefs/heads/fix/hr-operational-integrity\n148fcbeac229cb279848e6ea37049d1599a4fafe\trefs/heads/main"
+}

@@ -1,0 +1,41 @@
+{
+  "finished_utc": "2026-10-11T21:16:14.965818+00:00",
+  "source": "412e2ececde59e44f3d3ac187ca09f8d982025cb",
+  "report_head": "d54a423ca56dc32b45255319089a7e97bb676e4f",
+  "unit": {
+    "passed": 138,
+    "new_contracts": 25,
+    "log": "unit-final.txt"
+  },
+  "postgres": {
+    "passed": 158,
+    "new_contracts": 15,
+    "logs": [
+      "postgres-fourth.txt",
+      "postgres-regression.txt"
+    ]
+  },
+  "total": 296,
+  "typecheck": "passed",
+  "eslint": "passed: zero errors/warnings",
+  "schema_scope": "0056/0057 explicitly applied only in owned synthetic PostgreSQL18.6 fixtures",
+  "migration_chain": "unchanged guard correctly refuses unreviewed integration chain; recorded separately",
+  "application_integration": false,
+  "production_or_staging_database_access": false,
+  "source_clean": true,
+  "protected_files_unchanged": true,
+  "owned_container_removed": true,
+  "outstanding": [
+    "Final migration-chain ownership/registration and shared db.ts integration by parent",
+    "Transaction-time authorization and approved policy decisions before enabling callers",
+    "Actual payroll snapshot wiring and stored segment/correction lifecycle",
+    "Application-wide backup/restore integration",
+    "UI/HTTP integration and subsequent browser acceptance"
+  ],
+  "pr325_evidence": {
+    "head": "f31e0083e161b79577476fd7e962dc3647c2eb45",
+    "tree": "1ee2e33275749fc60d548b33556316b335ba05d6",
+    "passed": 345,
+    "archive_sha256": "dc16d9eba28180fdc839467fca124be451064b93520800ba939efbf1fa464ac7"
+  }
+}
