@@ -1,4 +1,4 @@
-import { addCalendarDays, assertDay, immutableJson, selectTemporal, temporalFail, type TemporalTimeline } from './hr-temporal';
+import { addCalendarDays, assertDay, immutableJson, selectTemporal, temporalFail, validateTimeline, type TemporalTimeline } from './hr-temporal';
 
 export interface HrScheduleSegment {
   readonly id: string;
@@ -20,7 +20,18 @@ export function validateEffectiveSchedule(value: HrEffectiveSchedule): HrEffecti
   try { new Intl.DateTimeFormat('en', { timeZone: copy.timeZone }); } catch { temporalFail('invalid_timezone', 'Invalid time zone.'); }
   if (!Array.isArray(copy.workingDays) || !copy.workingDays.length || copy.workingDays.length > 7 || new Set(copy.workingDays).size !== copy.workingDays.length || copy.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) temporalFail('invalid_schedule', 'Working days must be distinct weekday numbers.');
   if (!Number.isInteger(copy.graceMins) || copy.graceMins < 0 || copy.graceMins > 120) temporalFail('invalid_schedule', 'Grace must match the supported 0–120 minute range.');
-  validateScheduleSegments(copy.segments); return copy;
+  validateScheduleSegments(copy.segments);
+  // Offsets are 0/1, so only consecutive anchor days can overlap in one zone.
+  // Include Saturday→Sunday; compare segments, not the envelope around split shifts.
+  for (const day of copy.workingDays) if (copy.workingDays.includes((day + 1) % 7)) {
+    for (const left of copy.segments) for (const right of copy.segments) {
+      if (minute(left.start) + left.startDayOffset * 1440 < minute(right.end) + (right.endDayOffset + 1) * 1440
+          && minute(right.start) + (right.startDayOffset + 1) * 1440 < minute(left.end) + left.endDayOffset * 1440) {
+        temporalFail('occurrence_overlap', 'occurrence_overlap: recurring schedule segments overlap across anchor days.');
+      }
+    }
+  }
+  return copy;
 }
 function minute(clock: string): number {
   if (typeof clock !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)) temporalFail('invalid_clock', 'Use HH:MM and an explicit day offset.');
@@ -57,6 +68,8 @@ function uniqueWallInstant(day: string, clock: string, timeZone: string): string
   }));
   const matches = [...offsets].map(offset => nominal - offset).filter(candidate => local(candidate) === wall);
   if (matches.length !== 1) temporalFail(matches.length ? 'ambiguous_wall_time' : 'nonexistent_wall_time', 'This wall time requires explicit time-zone resolution; no punch is inferred.');
+  // A technical search bound for version transitions, not a maximum shift length.
+  if (Math.abs(nominal - matches[0]) >= 86400000) temporalFail('timezone_offset_unresolved', 'An offset outside the supported ±24-hour bound requires review.');
   return new Date(matches[0]).toISOString();
 }
 export function materializeScheduleSegments(anchorDay: string, timeZone: string, segments: readonly HrScheduleSegment[]) {
@@ -68,8 +81,39 @@ export function materializeScheduleSegments(anchorDay: string, timeZone: string,
   for (const [i, window] of windows.entries()) if (window.end <= window.start || (i > 0 && window.start < windows[i - 1].end)) temporalFail('segment_overlap', 'Materialized windows overlap or reverse.');
   return immutableJson({ anchorDay, timeZone, calculationVersion: 'hr-segments-v1', windows });
 }
+/** Validate dated versions as well as each repeating value, before writing or calculating. */
+export function validateScheduleTimeline(timeline: TemporalTimeline<HrEffectiveSchedule>): TemporalTimeline<HrEffectiveSchedule> {
+  const saved = validateTimeline(timeline);
+  const facts = saved.facts.filter(fact => fact.kind === 'known').sort((a, b) => a.from.localeCompare(b.from));
+  for (const fact of facts) validateEffectiveSchedule(fact.value);
+  for (let i = 0; i < facts.length; i++) for (let j = i + 1; j < facts.length; j++) {
+    const left = facts[i], right = facts[j];
+    // Local endpoints are in [anchor, anchor+2 days), offsets strictly within ±24h.
+    // Anchors >=4 days apart cannot overlap in UTC, even when the zone changes.
+    if (Date.parse(`${right.from}T00:00:00Z`) - Date.parse(`${left.to}T00:00:00Z`) >= 3 * 86400000) break;
+    const prior: HrSegmentWindow[] = [], next: HrSegmentWindow[] = [];
+    for (let offset = 1; offset <= 3; offset++) {
+      const epoch = Date.parse(`${left.to}T00:00:00Z`) - offset * 86400000;
+      if (epoch >= Date.parse(`${left.from}T00:00:00Z`)) {
+        const day = new Date(epoch).toISOString().slice(0, 10);
+        if (left.value.workingDays.includes(new Date(epoch).getUTCDay())) prior.push(...materializeScheduleSegments(day, left.value.timeZone, left.value.segments).windows);
+      }
+    }
+    for (let offset = 0; offset < 3; offset++) {
+      const epoch = Date.parse(`${right.from}T00:00:00Z`) + offset * 86400000;
+      if (epoch <= Date.parse('9999-12-31T00:00:00Z') && (right.to === null || epoch < Date.parse(`${right.to}T00:00:00Z`))) {
+        const day = new Date(epoch).toISOString().slice(0, 10);
+        if (right.value.workingDays.includes(new Date(epoch).getUTCDay())) next.push(...materializeScheduleSegments(day, right.value.timeZone, right.value.segments).windows);
+      }
+    }
+    for (const a of prior) for (const b of next) if (a.start < b.end && b.start < a.end) {
+      temporalFail('occurrence_overlap', 'occurrence_overlap: dated schedule versions overlap in UTC.');
+    }
+  }
+  return saved;
+}
 export function selectHrSchedule(timeline: TemporalTimeline<HrEffectiveSchedule>, anchorDay: string) {
-  const selected = selectTemporal(timeline, anchorDay);
+  const selected = selectTemporal(validateScheduleTimeline(timeline), anchorDay);
   if (selected.kind === 'unknown') return immutableJson({ kind: 'blocked' as const, code: 'schedule_history_unknown', selection: selected });
   const value = validateEffectiveSchedule(selected.fact.value);
   const identity = { timelineRevision: selected.revision, factId: selected.fact.id, graceMins: value.graceMins, workingDays: value.workingDays };
@@ -165,4 +209,40 @@ export function appendSegmentEvidence(current: HrSegmentEvidence, punches: reado
   return immutableJson({ ...next, corrections: current.corrections,
     ...(current.state === 'corrected' ? { state: current.state, actualIn: current.actualIn, actualOut: current.actualOut, workMinutes: current.workMinutes } : {}),
   });
+}
+
+/** One employee / one calculation batch. Durable event ownership still requires integration. */
+export function collectScheduleEvidence(timeline: TemporalTimeline<HrEffectiveSchedule>, assignments: readonly {
+  anchorDay: string; segments: readonly { segmentId: string; punches: readonly HrSegmentPunch[] }[];
+}[]) {
+  const days = new Set<string>();
+  const occurrences = assignments.map(assignment => {
+    if (days.has(assignment.anchorDay)) temporalFail('duplicate_occurrence', 'An anchor day can be assigned only once.');
+    days.add(assignment.anchorDay);
+    const selected = selectHrSchedule(timeline, assignment.anchorDay);
+    if (selected.kind !== 'selected') temporalFail(selected.kind === 'blocked' ? selected.code : 'not_scheduled', 'The occurrence is not resolved; no work total can be calculated.');
+    return { anchorDay: assignment.anchorDay, timelineRevision: selected.timelineRevision, factId: selected.factId,
+      evidence: collectOccurrenceEvidence(selected.windows, assignment.segments) };
+  });
+  return summarizeScheduleEvidence(occurrences);
+}
+function summarizeScheduleEvidence(occurrences: readonly { anchorDay: string; timelineRevision: number; factId: string; evidence: ReturnType<typeof collectOccurrenceEvidence> }[]) {
+  const rawIds = new Set<string>(), actual: { start: number; end: number }[] = [];
+  for (const occurrence of occurrences) for (const segment of occurrence.evidence.segments) {
+    for (const punch of segment.rawPunches) {
+      if (rawIds.has(punch.id)) temporalFail('reused_punch', 'A raw event cannot belong to two occurrences.');
+      rawIds.add(punch.id);
+    }
+    if (segment.actualIn && segment.actualOut) actual.push({ start: instant(segment.actualIn), end: instant(segment.actualOut) });
+  }
+  actual.sort((a, b) => a.start - b.start);
+  for (let i = 1; i < actual.length; i++) if (actual[i].start < actual[i - 1].end) temporalFail('actual_occurrence_overlap', 'Actual work overlaps across occurrences and requires review.');
+  const complete = occurrences.length > 0 && occurrences.every(occurrence => occurrence.evidence.complete);
+  const provenWorkMinutes = occurrences.reduce((sum, occurrence) => sum + occurrence.evidence.provenWorkMinutes, 0);
+  return immutableJson({ occurrences, complete, provenWorkMinutes, totalWorkMinutes: complete ? provenWorkMinutes : null });
+}
+export function correctScheduleSegment(current: ReturnType<typeof collectScheduleEvidence>, anchorDay: string, correction: HrSegmentCorrection) {
+  if (!current.occurrences.some(occurrence => occurrence.anchorDay === anchorDay)) temporalFail('invalid_assignment', 'Unknown occurrence.');
+  return summarizeScheduleEvidence(current.occurrences.map(occurrence => occurrence.anchorDay === anchorDay
+    ? { ...occurrence, evidence: correctOccurrenceSegment(occurrence.evidence, correction) } : occurrence));
 }

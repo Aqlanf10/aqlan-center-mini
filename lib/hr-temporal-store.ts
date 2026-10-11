@@ -2,7 +2,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { reviseTimeline, temporalFail, validateTimeline, type TemporalChange, type TemporalTimeline } from './hr-temporal';
 import { validateEffectivePolicy, type HrEffectivePolicy, type HrEffectivePolicyKey } from './hr-effective-policy';
-import { validateEffectiveSchedule, type HrEffectiveSchedule } from './hr-schedule-segments';
+import { validateScheduleTimeline, type HrEffectiveSchedule } from './hr-schedule-segments';
 
 export interface HrTemporalStream { readonly kind: 'employment' | 'policy' | 'schedule'; readonly subjectKey: string }
 function streamKey(stream: HrTemporalStream): void {
@@ -16,8 +16,8 @@ function validateValues<T>(timeline: TemporalTimeline<T>, stream: HrTemporalStre
   for (const fact of copy.facts) {
     if (stream.kind === 'employment' && (!fact.value || typeof fact.value !== 'object' || !('status' in fact.value) || typeof fact.value.status !== 'string' || !['active', 'suspended', 'ended'].includes(fact.value.status))) temporalFail('invalid_employment', 'Unknown employment status.');
     if (stream.kind === 'policy') validateEffectivePolicy(fact.value as HrEffectivePolicy, stream.subjectKey as HrEffectivePolicyKey);
-    if (stream.kind === 'schedule' && fact.kind === 'known') validateEffectiveSchedule(fact.value as HrEffectiveSchedule);
   }
+  if (stream.kind === 'schedule') validateScheduleTimeline(copy as TemporalTimeline<HrEffectiveSchedule>);
   return copy;
 }
 export async function readHrTimeline<T>(source: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>, stream: HrTemporalStream, revision?: number): Promise<TemporalTimeline<T>> {

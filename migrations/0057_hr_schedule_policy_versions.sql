@@ -62,6 +62,93 @@ BEGIN
     IF EXISTS(SELECT 1 FROM jsonb_array_elements(payload->'segments') s GROUP BY s->>'id' HAVING count(*)>1) THEN
       RAISE EXCEPTION 'duplicate_segment' USING ERRCODE='23514';
     END IF;
+    -- With day offsets 0/1 only consecutive weekday anchors can overlap.
+    -- Check actual segment intervals, including Saturday→Sunday, not split-shift envelopes.
+    IF EXISTS (
+      SELECT 1 FROM jsonb_array_elements_text(payload->'workingDays') d
+        CROSS JOIN jsonb_array_elements(payload->'segments') a
+        CROSS JOIN jsonb_array_elements(payload->'segments') b
+      WHERE payload->'workingDays' @> to_jsonb(ARRAY[(d::int+1)%7])
+        AND extract(epoch FROM (a->>'start')::time) + (a->>'startDayOffset')::int * 86400
+          < extract(epoch FROM (b->>'end')::time) + ((b->>'endDayOffset')::int+1) * 86400
+        AND extract(epoch FROM (b->>'start')::time) + ((b->>'startDayOffset')::int+1) * 86400
+          < extract(epoch FROM (a->>'end')::time) + (a->>'endDayOffset')::int * 86400
+    ) THEN RAISE EXCEPTION 'occurrence_overlap' USING ERRCODE='23514'; END IF;
   ELSE RAISE EXCEPTION 'invalid_domain' USING ERRCODE='23514'; END IF;
 END;
 $$;
+
+-- AT TIME ZONE alone silently chooses a DST fold/gap. Require a unique round trip,
+-- mirroring the source materializer. This is resolution evidence, not worked time.
+CREATE FUNCTION aqlan_hr_unique_wall_instant(day DATE, clock TEXT, zone TEXT)
+RETURNS TIMESTAMPTZ LANGUAGE plpgsql AS $$
+DECLARE wall TIMESTAMP; nominal TIMESTAMPTZ; matches INTEGER; resolved TIMESTAMPTZ;
+BEGIN
+  IF day<DATE '0001-01-01' OR day>DATE '9999-12-31' THEN
+    RAISE EXCEPTION 'invalid_date' USING ERRCODE='23514';
+  END IF;
+  wall:=day+clock::time; nominal:=wall AT TIME ZONE 'UTC';
+  WITH offsets AS (
+    SELECT DISTINCT ((nominal+h*interval '1 hour') AT TIME ZONE zone)
+      - ((nominal+h*interval '1 hour') AT TIME ZONE 'UTC') AS delta
+    FROM unnest(ARRAY[-36,-24,-12,0,12,24,36]) h
+  ), candidates AS (
+    SELECT DISTINCT nominal-delta AS value FROM offsets
+    WHERE (nominal-delta) AT TIME ZONE zone=wall
+  ) SELECT count(*),min(value) INTO matches,resolved FROM candidates;
+  IF matches=0 THEN RAISE EXCEPTION 'nonexistent_wall_time' USING ERRCODE='23514'; END IF;
+  IF matches<>1 THEN RAISE EXCEPTION 'ambiguous_wall_time' USING ERRCODE='23514'; END IF;
+  IF abs(extract(epoch FROM nominal-resolved))>=86400 THEN
+    RAISE EXCEPTION 'timezone_offset_unresolved' USING ERRCODE='23514';
+  END IF;
+  RETURN resolved;
+END;
+$$;
+CREATE FUNCTION aqlan_hr_schedule_windows(payload JSONB, anchor_day DATE)
+RETURNS TABLE(bounds TSTZRANGE) LANGUAGE plpgsql AS $$
+DECLARE segment JSONB; starts TIMESTAMPTZ; ends TIMESTAMPTZ;
+BEGIN
+  IF NOT payload->'workingDays' @> to_jsonb(ARRAY[extract(dow FROM anchor_day)::int]) THEN RETURN; END IF;
+  FOR segment IN SELECT value FROM jsonb_array_elements(payload->'segments') LOOP
+    starts:=aqlan_hr_unique_wall_instant(anchor_day+(segment->>'startDayOffset')::int,segment->>'start',payload->>'timeZone');
+    ends:=aqlan_hr_unique_wall_instant(anchor_day+(segment->>'endDayOffset')::int,segment->>'end',payload->>'timeZone');
+    IF ends<=starts THEN RAISE EXCEPTION 'segment_overlap' USING ERRCODE='23514'; END IF;
+    bounds:=tstzrange(starts,ends,'[)'); RETURN NEXT;
+  END LOOP;
+END;
+$$;
+CREATE FUNCTION aqlan_hr_validate_schedule_occurrences() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE domain TEXT; pair RECORD; left_day DATE; right_day DATE; left_offset INTEGER; right_offset INTEGER;
+BEGIN
+  SELECT kind INTO STRICT domain FROM hr_effective_streams WHERE id=NEW.stream_id;
+  IF domain<>'schedule' THEN RETURN NEW; END IF;
+  -- The generic revision validator runs first alphabetically and holds the stream lock.
+  -- Each endpoint is in local [anchor,anchor+2 days), with an offset strictly within
+  -- ±24h. Anchors >=4 days apart cannot overlap, including a change of time zone.
+  FOR pair IN
+    SELECT a.f AS left_fact,b.f AS right_fact
+    FROM jsonb_array_elements(NEW.snapshot->'facts') a(f)
+      CROSS JOIN jsonb_array_elements(NEW.snapshot->'facts') b(f)
+    WHERE a.f->>'kind'='known' AND b.f->>'kind'='known'
+      AND (a.f->>'from')::date<(b.f->>'from')::date
+      AND (b.f->>'from')::date-(a.f->>'to')::date BETWEEN 0 AND 2
+  LOOP
+    FOR left_offset IN 1..3 LOOP
+      left_day:=(pair.left_fact->>'to')::date-left_offset;
+      IF left_day<(pair.left_fact->>'from')::date THEN CONTINUE; END IF;
+      FOR right_offset IN 0..2 LOOP
+        right_day:=(pair.right_fact->>'from')::date+right_offset;
+        IF right_day>DATE '9999-12-31' OR right_day>=(pair.right_fact->>'to')::date THEN CONTINUE; END IF;
+        IF EXISTS (
+          SELECT 1 FROM aqlan_hr_schedule_windows(pair.left_fact->'value',left_day) a
+            CROSS JOIN aqlan_hr_schedule_windows(pair.right_fact->'value',right_day) b
+          WHERE a.bounds && b.bounds
+        ) THEN RAISE EXCEPTION 'occurrence_overlap' USING ERRCODE='23514'; END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER hr_effective_schedule_occurrences_validate BEFORE INSERT ON hr_effective_revisions
+  FOR EACH ROW EXECUTE FUNCTION aqlan_hr_validate_schedule_occurrences();
