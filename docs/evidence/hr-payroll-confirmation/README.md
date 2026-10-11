@@ -1,5 +1,15 @@
 # HR payout, authority and period-selection evidence — PR #308
 
+## Final compatibility follow-up
+
+Review of the new confirmation reader found a regression on `2112b61f`: a legitimate original payout without a request key was reconstructed as an empty string, so a real successful reversal with its unchanged `null` key could not be confirmed. [Browser before](browser-keyless-before.txt): both 390/1280 cases failed after the real server returned 200 with a committed reversal; [unit before](unit-keyless-before.txt) also failed.
+
+The reader now compares the original nullable key exactly. It does not invent a key or permit a new keyless payout: the new-payment and stored-request validators still require their existing string key, and missing/changed reversal identity is rejected. The fixture preserves a real payout/voucher/payable written through the API, changing only the two nullable request metadata fields to reproduce historical shape. Actual reversal uses the real HTTP and canonical expense writers.
+
+[Browser after](browser-keyless-after.txt): both cases passed, the interface reaches the reversed state, the database key stays `null`, one reversal voucher exists and net cash is zero. [Unit after](unit-keyless-after.txt): all 9 payroll/confirmation cases passed. [Final compatibility build](build-keyless-after.txt) and [runtime proof](runtime-keyless-after.txt) passed on `F0JzezMjq1EwAvEGTh3Qm`, with 6712 verified provenance files / 321 traces; changed-file lint passed without errors or warnings. The final application hashes replace `application-source-frozen.json`; the earlier 2112 snapshot remains in `application-source-2112.json`.
+
+Full CI must be completed on the later final head, not attributed from the preceding 2112 run. Final literal head/status/links are recorded in PR #308 and the download handoff report. The source/backend/migrations used by the preceding PostgreSQL evidence are unchanged; this final source change is confined to the client receipt reader.
+
 All financial writes, role/credential changes and browser accounts below belong to synthetic isolated PostgreSQL 18.6 fixtures. No external payment, message, production/staging database change or permanent account was used. Existing CI gates, assertions and deadlines remain mandatory.
 
 ## Failure before the repair

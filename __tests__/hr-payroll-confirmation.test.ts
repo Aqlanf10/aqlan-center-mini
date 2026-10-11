@@ -35,4 +35,14 @@ describe("payroll receipt confirmation",()=>{
       expect(readPendingPayrollPayment({...request,...changed},item.id)).toBeNull();
     }
   });
+  it("confirms the unchanged null identity of a legitimate keyless legacy reversal",()=>{
+    const old={...receipt,clientRequestId:null};
+    const reversed={...old,reversedAt:"2026-10-01T10:00:00.000Z",reversedBy:"second-admin",reversalReason:"legacy correction"};
+    expect(readPayrollReversalConfirmation({success:true,disbursement:reversed},old,"legacy correction")).toEqual(reversed);
+    expect(readPayrollReversalConfirmation({success:true,disbursement:{...reversed,clientRequestId:"invented-key"}},old,"legacy correction")).toBeNull();
+    expect(readPayrollPaymentConfirmation({success:true,disbursement:old},item,request)).toBeNull();
+    expect(readPendingPayrollPayment({...request,clientRequestId:null},item.id)).toBeNull();
+    const missing={...old,clientRequestId:undefined} as unknown as HrPayrollDisbursementView;
+    expect(readPayrollReversalConfirmation({success:true,disbursement:{...reversed,clientRequestId:undefined}},missing,"legacy correction")).toBeNull();
+  });
 });

@@ -13,6 +13,7 @@ export interface PendingPayrollPayment {
   notes: string | null;
 }
 type PayrollIdentity = { id: number; staffId: number; currency: Currency };
+type PayrollReceiptExpectation = Omit<PendingPayrollPayment, "clientRequestId"> & { clientRequestId: string | null };
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
@@ -38,8 +39,9 @@ export function readPendingPayrollPayment(value: unknown, itemId: number): Pendi
 
 /** Confirm the actual item, request, native currency and underlying vouchers. HTTP status alone is insufficient. */
 export function readPayrollDisbursement(
-  value: unknown, item: PayrollIdentity, request: PendingPayrollPayment,
+  value: unknown, item: PayrollIdentity, request: PayrollReceiptExpectation,
 ): HrPayrollDisbursementView | null {
+  if (request.clientRequestId !== null && typeof request.clientRequestId !== "string") return null;
   if (!record(value) || !positive(value.id) || value.itemId !== item.id || value.itemId !== request.itemId
     || value.staffId !== item.staffId || !positive(value.staffId) || value.currency !== item.currency
     || value.clientRequestId !== request.clientRequestId || value.amountMinor !== request.amountMinor
@@ -77,8 +79,8 @@ export function readPayrollReversalConfirmation(
   payload: unknown, original: HrPayrollDisbursementView, reason: string,
 ): HrPayrollDisbursementView | null {
   if (!record(payload) || payload.success !== true) return null;
-  const request: PendingPayrollPayment = { itemId: original.itemId, amountMinor: original.amountMinor,
-    clientRequestId: original.clientRequestId ?? "", remainingBefore: original.amountMinor,
+  const request: PayrollReceiptExpectation = { itemId: original.itemId, amountMinor: original.amountMinor,
+    clientRequestId: original.clientRequestId, remainingBefore: original.amountMinor,
     paymentMethod: original.paymentMethod, referenceNumber: original.referenceNumber, notes: original.notes,
     components: { salaryMinor: 0, commissionMinor: 0 } };
   for (const part of original.parts) {

@@ -425,3 +425,28 @@ for(const width of [390,1280]){
   }finally{await page.close();}
  });
 }
+
+for(const width of [390,1280]){
+ it(`a confirmed keyless legacy reversal is recovered without inventing a request key at ${width}px`,async()=>{
+  const fixture=await confirmationFixture(width===390?"2026-12":"2027-03","keyless",width),{page,item,row}=fixture;
+  try{
+   const created=await api("POST","/api/hr/payroll/disburse",{itemId:item.id,amountMinor:1000,components:{salaryMinor:1000,commissionMinor:0},clientRequestId:`fixture-keyless-${width}-001`});expect(created.status).toBe(201);
+   const paid=created.body.disbursement;
+   // Historical fixture shape: preserve the real payout, vouchers and links; old writers had no request key.
+   await db.query("UPDATE hr_payroll_disbursements SET client_request_id=NULL,request_fingerprint=NULL WHERE id=$1",[paid.id]);
+   await page.reload({waitUntil:"domcontentloaded"});await page.getByRole("tab",{name:"المسير والصرف"}).click();
+   await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(fixture.periodId));
+   await expect.poll(()=>row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:true}).count()).toBe(1);
+   page.on("dialog",dialog=>dialog.accept("Synthetic keyless legacy reversal"));
+   const result=page.waitForResponse(r=>r.url().endsWith("/api/hr/payroll/disburse")&&r.request().method()==="POST");
+   await row.getByRole("button",{name:`عكس الصرف #${paid.id}`,exact:true}).click();const response=await result;expect(response.status()).toBe(200);
+   const reversed=(await response.json()).disbursement;expect(reversed.clientRequestId).toBeNull();expect(reversed.reversedAt).toBeTruthy();
+   await expect.poll(()=>row.innerText()).toContain("معكوس:");
+   await expect.poll(()=>page.evaluate(id=>localStorage.getItem(`hr:payroll:pending-reversal:${id}`),item.id)).toBeNull();
+   expect((await db.query("SELECT client_request_id FROM hr_payroll_disbursements WHERE id=$1",[paid.id])).rows[0].client_request_id).toBeNull();
+   expect((await db.query("SELECT count(*)::int AS n FROM expenses WHERE reversal_of_id=$1",[paid.expenseId])).rows[0].n).toBe(1);
+   expect((await db.query("SELECT sum(amount_minor)::text AS total FROM expenses WHERE payable_id=$1",[item.payableId])).rows[0].total).toBe("0");
+   await page.screenshot({path:join(evidence,`hr-keyless-reversal-${width}.png`),fullPage:true});
+  }finally{await fixture.close();}
+ });
+}

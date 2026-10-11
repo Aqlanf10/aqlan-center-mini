@@ -2,6 +2,8 @@
 
 ## Current follow-up: verified payouts, reversal recovery and transaction authority
 
+Final compatibility review additionally fixes confirmation of a legitimate original keyless payout's reversal. Its original `null` key is preserved exactly, with no invented key; new payouts retain mandatory stable keys. Real browser cases at both widths failed on `2112b61f` despite a committed 200 reversal, then passed with one reversal voucher, unchanged database key and zero net cash. This client-reader correction adds no schema/backend/financial-policy change. See the final compatibility section in the current evidence packet and the literal final head/CI links in PR #308.
+
 The current work starts at `cfa1dda16da25ebdd5530bfd881578455428d808`, verified against PR #308 before edits. It continues on `feat/hr-staff-tasks-phase1`. The final head and completed exact-head CI links are recorded in PR #308. This follow-up adds no migration and does not change the financial policies, financial engines, CI rules or test deadlines.
 
 - The UI verifies the actual payout identity, employee, item, request key, native currency, amount and salary/commission voucher components before marking a stored operation completed. An HTTP success with a missing or unrelated receipt keeps the original immutable request. Explicit verification uses the same key; an unrelated lookup response cannot clear the pending operation. Retrying a committed request returns its existing receipt without another expense.
