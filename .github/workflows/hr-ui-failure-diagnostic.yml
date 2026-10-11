@@ -47,7 +47,6 @@ jobs:
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
-      HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
     steps:
       - name: Check out exact diagnostic source
         uses: actions/checkout@v7
@@ -77,6 +76,7 @@ jobs:
       - name: Record exact source provenance
         env:
           HR_DIAGNOSTIC_GROUP: ${{ matrix.group }}
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
         run: |
           mkdir -p "$HR_UI_DIAGNOSTIC_DIR"
           git rev-parse HEAD > "$HR_UI_DIAGNOSTIC_DIR/checkout.txt"
@@ -86,6 +86,7 @@ jobs:
       - name: Run full owned file with original assertions and deadlines
         env:
           HR_DIAGNOSTIC_FILE: ${{ matrix.file }}
+          HR_UI_DIAGNOSTIC_DIR: ${{ runner.temp }}/hr-ui-diagnostic
         run: |
           set -o pipefail
           npm run test:security-http -- "__tests__/security-http/$HR_DIAGNOSTIC_FILE" --reporter=verbose 2>&1 | tee "$HR_UI_DIAGNOSTIC_DIR/test-output.log"
