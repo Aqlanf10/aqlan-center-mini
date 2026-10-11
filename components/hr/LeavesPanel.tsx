@@ -19,6 +19,15 @@ interface StaffOption {
   jobTitle: string;
 }
 
+function leaveReferenceLabel(value: unknown): string {
+  const invalid = "مرجع قديم يحتاج مراجعة (غير صالح)";
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid;
+  const { id, name } = value as Record<string, unknown>;
+  if (typeof id !== "string" || !id.trim() || id.length > 200
+    || typeof name !== "string" || !name.trim() || name.length > 200) return invalid;
+  return `${name} (${id})`;
+}
+
 export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [requests, setRequests] = useState<LeaveRequestItem[]>([]);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
@@ -305,7 +314,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
                     <div className="text-navy-500">إلى: {r.endDate}</div>
                   </td>
                   <td className="px-4 py-3 font-semibold text-navy-800">{r.daysCount} يوم</td>
-                  <td className="px-4 py-3 text-xs text-navy-700 max-w-xs">{r.reason}{r.attachmentRefs?.length>0 && <ul aria-label="مراجع مستندات مقدمة للمراجعة" className="mt-1 text-navy-500">{r.attachmentRefs.map((ref,index)=><li key={index}>{ref?.name || "مرجع قديم يحتاج مراجعة"} ({ref?.id || "غير مكتمل"})</li>)}</ul>}</td>
+                  <td className="px-4 py-3 text-xs text-navy-700 max-w-xs">{r.reason}{r.attachmentRefs?.length>0 && <ul aria-label="مراجع مستندات مقدمة للمراجعة" className="mt-1 text-navy-500">{r.attachmentRefs.map((ref,index)=><li key={index}>{leaveReferenceLabel(ref)}</li>)}</ul>}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-block rounded-lg px-2.5 py-1 text-xs font-semibold ${
