@@ -288,15 +288,20 @@ async function decideLegacyTreatment(client: DbClient, input: {
     if (request.caseId !== null) {
       const { rows: [chosen] } = await client.query<{ id: number; title: string | null; site: string | null }>(
         `SELECT id, title, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND status IN ('active', 'waiting')
-          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('active', 'retention')))${forUpdate}`,
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('assessment', 'active', 'retention')))${forUpdate}`,
         [request.caseId, patientId, specialty]);
       if (!chosen || !caseSiteFits(specialty, chosen.site, site)) throw new Refusal("bad_case");
       casePlan = { mode: "existing", id: chosen.id, title: chosen.title };
     } else {
       const { rows: sameSpecialty } = await client.query<{ id: number; title: string | null; site: string | null }>(
         `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND status IN ('active', 'waiting')
-          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
           ORDER BY id${forUpdate}`, [patientId, specialty]);
+      // An assessment with unknown arches is still an existing identity. It must
+      // block automatic shell creation until its scope is explicitly recorded.
+      if (specialty === "orthodontics" && sameSpecialty.some((row) => !(row.site ?? "").trim())) {
+        throw new Refusal("ortho_scope_mismatch");
+      }
       const open = sameSpecialty.filter((row) => caseSiteFits(specialty, row.site, site));
       if (open.length > 1) {
         casePlan = { mode: "choose", options: open.map((row) => ({ id: row.id, title: row.title ?? `#${row.id}` })) };
@@ -309,7 +314,7 @@ async function decideLegacyTreatment(client: DbClient, input: {
           // requested arch scope exactly. Several are ambiguous; a different, blank or unknown scope is refused.
           const { rows: orthos } = await client.query<{ id: number; arches: string | null }>(
             `SELECT o.id, o.arches FROM ortho_cases o
-              WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+              WHERE o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')
                 AND NOT EXISTS (SELECT 1 FROM clinical_cases cc WHERE cc.ortho_case_id = o.id)
               ORDER BY o.id${forUpdate}`, [patientId]);
           if (orthos.length > 1) throw new Refusal("ambiguous_case");

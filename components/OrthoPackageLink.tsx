@@ -14,6 +14,8 @@ interface PlanOption {
 type ReadState = { phase: "ready"; plans: PlanOption[] } | { phase: "loading" | "error" | "denied" };
 interface Props {
   caseId: number; patientId: number; planId: number | null; canLink: boolean; onChanged: () => void;
+  /** The parent owns navigation and every pending/dirty clinical guard. */
+  onOpenTreatmentEntry?: () => unknown;
 }
 
 /** Keep only the fields needed for this reference; never retain payment amounts. */
@@ -52,7 +54,7 @@ export function OrthoPackageLink(props: Props) {
   return <ScopedOrthoPackageLink key={scope} {...props} />;
 }
 
-function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged }: Props) {
+function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged, onOpenTreatmentEntry }: Props) {
   const [read, setRead] = useState<ReadState>({ phase: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [choice, setChoice] = useState("");
@@ -195,10 +197,12 @@ function ScopedOrthoPackageLink({ caseId, patientId, planId, canLink, onChanged 
                 اربط
               </button>
             </>
-          ) : canLink ? (
-            <a href={`/patients/${patientId}?tab=plans`} className="font-bold text-navy-800 underline underline-offset-4">
-              أنشئ اتفاق تقويم من تبويب الخطط
-            </a>
+          ) : canLink && onOpenTreatmentEntry ? (
+            <button type="button" disabled={busy} onClick={() => {
+              if (mounted.current && !writing.current) onOpenTreatmentEntry();
+            }} className="font-bold text-navy-800 underline underline-offset-4 disabled:opacity-50">
+              افتح إدخال العلاج المالي الموحّد
+            </button>
           ) : null}
         </div>
       )}

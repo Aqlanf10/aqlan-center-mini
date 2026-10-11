@@ -218,7 +218,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const [contextNavigationError, setContextNavigationError] = useState<string | null>(null);
   const contextRequest = useRef(0);
   const pillarHandoff = useRef<{ source: PatientLocation; target: PatientLocation;
-    owner: typeof alertOwner; verified: VerifiedPillarContext } | null>(null);
+    owner: typeof alertOwner; retainsOwner: boolean; verified: VerifiedPillarContext } | null>(null);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
   const compactWorkspace = tab === "today" || tab === "treatment" || tab === "account";
@@ -267,7 +267,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         if (plans?.owner.active && !plans.guard()) return false;
         const ortho = orthoLeaveGuard.current;
         const handoff = pillarHandoff.current;
-        const retainsOrthoOwner = !!handoff?.owner.active && ortho?.owner === handoff.owner && from !== undefined && to !== undefined
+        const retainsOrthoOwner = !!handoff?.owner.active && handoff.retainsOwner && ortho?.owner === handoff.owner && from !== undefined && to !== undefined
           && samePatientLocation(from, handoff.source) && samePatientLocation(to, handoff.target);
         if (ortho?.owner.active && !retainsOrthoOwner && !ortho.guard()) return false;
         return endoLeaveGuard.current ? endoLeaveGuard.current()
@@ -299,13 +299,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       const accepted = await readVerifiedClinicalContext(Number(id), { ...context, patientId: Number(id) });
       if (!capturedOwner.active || ticket !== contextRequest.current) return false;
       const destination = patientDestination(target ?? accepted.sub, { ...location, contextError: undefined }, accepted.context);
-      // A same-case pillar is not departure from the owning workspace. Reuse this
-      // exact successful lookup once, so a redundant hook read cannot unmount its
-      // pending command/draft. Every other identity transition keeps canLeave.
+      // Reuse this exact verified response for the accepted Ortho destination so
+      // a redundant hook read does not discard the requested section. Only an
+      // unchanged case's pillar can bypass departure; case changes still ask all
+      // current guards and retire their case-scoped children after admission.
       const retainsOwner = clinicalContext.ready && !clinicalContext.error && clinicalContext.context !== undefined
         && samePatientLocation(readPatientLocation(window.location.search), location)
         && isSameOrthoPillarTransition({ ...location, context: clinicalContext.context }, destination);
-      const handoff = retainsOwner ? { source: location, target: destination, owner: capturedOwner,
+      const handoff = destination.tab === "treatment" && destination.sub === "ortho" && accepted.context.orthoCaseId !== undefined
+        ? { source: location, target: destination, owner: capturedOwner, retainsOwner,
         verified: { owner: capturedOwner, patientId: Number(id), authority: contextAuthority, context: accepted.context } } : null;
       if (handoff) pillarHandoff.current = handoff;
       try { return navigation.current?.navigate(destination) ?? false; }

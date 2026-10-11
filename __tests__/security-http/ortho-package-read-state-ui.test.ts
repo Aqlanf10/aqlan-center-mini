@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { chromium, type Browser, type Locator, type Page, type Route } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -46,11 +46,15 @@ beforeAll(async () => {
         `INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
          VALUES ($1, 1, CURRENT_DATE, 30000), ($1, 2, CURRENT_DATE + 30, 30000)`, [planId]);
     } else emptyPatientId = id;
-    await db.query(
+    const ortho = await db.query<{ id: number }>(
       `INSERT INTO ortho_cases (patient_id, created_by, baseline_kind, baseline_recorded_at,
          legacy_financial_mode, start_date, phase, responsible_doctor_id, plan_id)
        VALUES ($1, 'secadmin', 'legacy', NOW(), 'installments', CURRENT_DATE - 365,
-         'working', $2, $3)`, [id, doctor.party_id, linked ? planId : null]);
+         'working', $2, $3) RETURNING id`, [id, doctor.party_id, linked ? planId : null]);
+    // A saved-study owner requires the actual same-patient bridge. These are
+    // read-only synthetic fixtures; omitting it would exercise a denied owner.
+    await db.query(`INSERT INTO clinical_cases(patient_id,specialty,title,site,ortho_case_id,status,created_by)
+      VALUES($1,'orthodontics','Synthetic existing episode','الفكّان',$2,'active','secadmin')`, [id, ortho.rows[0].id]);
   }
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   await mkdir(".settings-ui-artifacts", { recursive: true });
@@ -273,8 +277,27 @@ describe("orthodontic agreement read state in the real RTL UI", () => {
       const payload = await f.realRead();
       expect(payload.plans).toEqual([]);
       await f.panel.getByText("لا اتفاق مالي مربوط بالحالة", { exact: true }).waitFor();
-      const create = f.panel.getByRole("link", { name: "أنشئ اتفاق تقويم من تبويب الخطط", exact: true });
-      expect(await create.getAttribute("href")).toBe(`/patients/${emptyPatientId}?tab=plans`);
+      const create = f.panel.getByRole("button", { name: "افتح إدخال العلاج المالي الموحّد", exact: true });
+      expect(await f.panel.locator('a[href*="tab=plans"]').count()).toBe(0);
+      await f.page.getByLabel("القسم", { exact: true }).selectOption("presentation");
+      const study = f.page.getByTestId("ortho-case-study");
+      try {
+        await study.getByLabel("تعليق الدراسة", { exact: true }).fill("Synthetic unsaved study must survive rejected financial navigation", { timeout: 8_000 });
+      } catch (error) {
+        await writeFile(".settings-ui-artifacts/ortho-financial-guard-failure.txt", await f.page.locator("body").innerText());
+        await f.page.screenshot({ path: ".settings-ui-artifacts/ortho-financial-guard-failure.png", fullPage: true });
+        throw error;
+      }
+      const beforeNavigation = f.page.url();
+      f.page.once("dialog", dialog => dialog.dismiss());
+      await create.click();
+      expect(f.page.url()).toBe(beforeNavigation);
+      expect(await study.getByLabel("تعليق الدراسة", { exact: true }).inputValue()).toBe("Synthetic unsaved study must survive rejected financial navigation");
+      expect(await f.page.getByRole("button", { name: "علاج جديد", exact: true }).count()).toBe(0);
+      f.page.once("dialog", dialog => dialog.accept());
+      await create.click();
+      await f.page.getByRole("button", { name: "علاج جديد", exact: true }).waitFor();
+      expect(new URL(f.page.url()).searchParams.get("tab")).toBe("account");
       expect(await f.panel.getByRole("button", { name: retryText, exact: true }).count()).toBe(0);
       f.assertIsolated();
       expect(await financialState()).toEqual(before);

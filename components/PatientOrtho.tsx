@@ -148,6 +148,9 @@ type OrthoOwner = {
   studies: Map<number, StudyMountOwner>;
   retentions: Map<number, RetentionMountOwner>;
   journeySelections: Map<number, OrthoJourneySelection>; journeyNavigationTicket: number;
+  journeySelectedCase: number | null;
+  journeyTransition: { ticket: number; fromCase: number | null; toCase: number; arrived: boolean } | null;
+  acknowledgeJourneySelection: (caseId: number | null) => void;
   deny: () => void;
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
   bindDenial: (deny: () => void) => void; denyRead: () => void;
@@ -157,13 +160,28 @@ type OrthoOwner = {
   grantClinical: (cases: OrthoCase[]) => void; withdrawClinical: () => void; setContact: (granted: boolean) => void;
 };
 const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
-type IntakeSelectionLifetime = { active: boolean };
+type IntakeSelectionLifetime = { readonly active: boolean; activate(): void; retire(): void };
 const IntakeSelectionContext = createContext<IntakeSelectionLifetime | null>(null);
+function makeIntakeSelectionLifetime(): IntakeSelectionLifetime {
+  let active = false;
+  return { get active() { return active; }, activate() { active = true; }, retire() { active = false; } };
+}
 /** Mutable lifecycle storage owns its transitions; hooks only read it or call its methods. */
 function makeOwner(standalone = false): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), mutations: new Set(), assessments: new Map(), intakes: new Map(), studies: new Map(), retentions: new Map(), journeySelections: new Map(), journeyNavigationTicket: 0, deny: () => {},
+    cases: [], drafts: new Map(), mutations: new Set(), assessments: new Map(), intakes: new Map(), studies: new Map(), retentions: new Map(), journeySelections: new Map(), journeyNavigationTicket: 0, journeySelectedCase: null, journeyTransition: null, deny: () => {},
+    acknowledgeJourneySelection(selectedIntakeCase) {
+      if (owner.journeySelectedCase === selectedIntakeCase) return;
+      const transition = owner.journeyTransition;
+      // A section clicked from "all cases" selects its exact canonical case.
+      // Acknowledge that one transition; every other case switch retires it.
+      if (transition && !transition.arrived && transition.ticket === owner.journeyNavigationTicket
+        && transition.fromCase === owner.journeySelectedCase && transition.toCase === selectedIntakeCase) {
+        transition.arrived = true;
+      } else owner.journeyNavigationTicket++;
+      owner.journeySelectedCase = selectedIntakeCase;
+    },
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
       owner.active = true; owner.clinical = true; owner.contact = true;
@@ -406,19 +424,20 @@ export function PatientOrtho({ patientId, context, onContextChange, onClinicalCh
   const authority = sessionScope(session);
   const owner = useMemo(() => makeOwner(), [patientId, authority]);
   const selectedIntakeCase = context?.orthoCaseId ?? null;
-  const intakeSelection = useMemo<IntakeSelectionLifetime>(() => ({ active: false }), [owner, selectedIntakeCase]);
+  const intakeSelection = useMemo(() => makeIntakeSelectionLifetime(), [owner, selectedIntakeCase]);
   useLayoutEffect(() => {
-    intakeSelection.active = true;
+    owner.acknowledgeJourneySelection(selectedIntakeCase);
+    intakeSelection.activate();
     return () => {
-      intakeSelection.active = false;
+      intakeSelection.retire();
       for (const slot of owner.intakes.values()) slot.retire();
       owner.intakes.clear();
       for (const retention of owner.retentions.values()) retention.retire();
       owner.retentions.clear();
       for (const study of owner.studies.values()) study.retire();
-      owner.studies.clear(); owner.journeyNavigationTicket++;
+      owner.studies.clear();
     };
-  }, [owner, intakeSelection]);
+  }, [owner, intakeSelection, selectedIntakeCase]);
   const childGuards = useRef(new Map<string, () => boolean>());
   const registerChildGuard = useCallback((key: string, guard: () => boolean) => {
     childGuards.current.set(key, guard);
@@ -513,9 +532,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, registerCh
     if (request.scope !== scope || !currentView() || !owner.cases.some(value => value.id === row.id)
       || !sameOrthoJourneySelection(request.from, journeyFor(row, pillar))) return;
     const ticket = ++owner.journeyNavigationTicket, sequence = owner.readSequence;
+    const transition = { ticket, fromCase: context?.orthoCaseId ?? null, toCase: row.id, arrived: false };
+    owner.journeyTransition = transition;
     const current = () => owner.active && !owner.denied && owner.clinical && owner.readSequence === sequence
       && owner.journeyNavigationTicket === ticket && owner.cases.some(value => value.id === row.id);
-    if (onContextChange) {
+    try { if (onContextChange) {
       let accepted: unknown;
       try { accepted = await onContextChange({ ...(context?.orthoCaseId === row.id ? context : {}), patientId, orthoCaseId: row.id, pillar: request.route.pillar }); }
       catch { if (current()) setError("تعذّر فتح القسم في سياق الحالة الحالي. بقيت المسودة في مكانها."); return; }
@@ -523,6 +544,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, registerCh
     } else if (!current()) return;
     owner.journeySelections.set(row.id, request.to);
     setActivePillars(previous => ({ ...previous, [row.id]: request.route.pillar })); redrawJourney(value => value + 1);
+    } finally { if (owner.journeyTransition === transition) owner.journeyTransition = null; }
   };
 
   const deny = useCallback(() => {
@@ -834,6 +856,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, registerCh
                   {(row.status === "active" || row.status === "retention")
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
+                        onOpenTreatmentEntry={onOpenTreatmentEntry ? () => { if (currentView()) onOpenTreatmentEntry(); } : undefined}
                         canLink={session?.role === "admin" || session?.role === "reception"
                           || (session?.role === "doctor" && session.permissions?.canEditPlans !== false)}
                         onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />

@@ -496,7 +496,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       if (item.caseId !== null || caseId !== null) {
         const { rows: [chosen] } = await client.query<{ id: number; site: string | null }>(
           `SELECT id, site FROM clinical_cases WHERE id = $1 AND patient_id = $2 AND specialty = $3 AND ${OPEN_CASE}
-            AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('active', 'retention')))
+            AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $2 AND o.status IN ('assessment', 'active', 'retention')))
             FOR UPDATE`, [item.caseId ?? caseId, input.patientId, specialty]);
         if (!chosen) throw new Refusal("bad_case", line);
         if (!caseSiteFits(specialty, chosen.site, sites[line]!)) throw new Refusal("bad_site", line);
@@ -511,7 +511,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           /* حالةٌ مفتوحة للتخصص تُعاد فقط إن وافق موضعُها سنَّ البند (للتخصص الموضعي): علاج عصب 36 لا يُلحق بحالة 11. */
           const { rows: sameSpecialty } = await client.query<{ id: number; site: string | null }>(
             `SELECT id, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
-              AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+              AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
               ORDER BY id FOR UPDATE`,
             [input.patientId, specialty]);
           if (sameSpecialty.some((row) => !(row.site ?? "").trim())) throw new Refusal("bad_site", line);
@@ -523,9 +523,9 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
             // التقويم: حالة تقويمٍ جارية غير مجسورة تُجسَر — لا حالةٌ ثانية للمريض نفسه.
             let orthoCaseId: number | null = null;
             if (specialty === "orthodontics") {
-              const { rows: orthos } = await client.query<{ id: number; arches: string }>(
+              const { rows: orthos } = await client.query<{ id: number; arches: string | null }>(
                 `SELECT o.id, o.arches FROM ortho_cases o
-                  WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+                  WHERE o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')
                     AND NOT EXISTS (SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id = o.id)
                   ORDER BY o.id FOR UPDATE`, [input.patientId]);
               if (orthos.length > 1) throw new Refusal("ambiguous_case", line);
@@ -724,7 +724,7 @@ export async function previewInvoiceLinkage(input: {
     if (linkage.kind === "clinical" && linkage.needsCase) {
       const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(
         `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
-          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
+          AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')))
           ORDER BY id`,
         [input.patientId, linkage.specialty]);
       if (item.caseId === null && linkedCase === null && sameSpecialty.some((row) => !(row.site ?? "").trim())) {
@@ -755,8 +755,8 @@ export async function previewInvoiceLinkage(input: {
         if (sameSpecialty.some((row) => !(row.site ?? "").trim())) preview.refusal = preview.refusal ?? "bad_site";
         let bridge = false;
         if (linkage.specialty === "orthodontics") {
-          const { rows: orthos } = await pool.query<{ arches: string }>(
-            `SELECT o.arches FROM ortho_cases o WHERE o.patient_id = $1 AND o.status IN ('active', 'retention')
+          const { rows: orthos } = await pool.query<{ arches: string | null }>(
+            `SELECT o.arches FROM ortho_cases o WHERE o.patient_id = $1 AND o.status IN ('assessment', 'active', 'retention')
                 AND NOT EXISTS (SELECT 1 FROM clinical_cases c WHERE c.ortho_case_id = o.id) ORDER BY o.id`, [input.patientId]);
           if (orthos.length > 1) preview.refusal = preview.refusal ?? "ambiguous_case";
           if (orthos.length === 1 && orthos[0].arches !== site.scope) preview.refusal = preview.refusal ?? "bad_site";

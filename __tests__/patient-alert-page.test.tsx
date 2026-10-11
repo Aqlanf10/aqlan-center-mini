@@ -481,6 +481,20 @@ describe("verified same-case pillar handoff", () => {
     const latest = url.href; release(reply({ ...exact, pillar: "prescription" }));
     expect(await old).toBe(false); expect(url.href).toBe(latest); expect(guard).not.toHaveBeenCalled(); cleanup();
   });
+  it("reuses the exact verified case response only after the current departure guard admits the case change", async () => {
+    const target = { ...exact, orthoCaseId: 124, clinicalCaseId: 457, pillar: "diagnostics" as const };
+    const { guard, cleanup } = await enter([target]);
+    const before = url.href;
+    expect(await change(ortho(), target)).toBe(false); expect(url.href).toBe(before);
+    guard.mockReturnValue(true);
+    const reads = vi.mocked(fetch).mock.calls.length;
+    expect(await change(ortho(), target)).toBe(true);
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(ortho().props.context).toEqual(target);
+    expect(render().some(node => node.props["data-testid"] === "clinical-context-state")).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.slice(reads).filter(([input]) => String(input).includes("/clinical-context?"))).toHaveLength(1);
+    cleanup();
+  });
   it("does not reuse the accepted pillar receipt across a permission change", async () => {
     const { cleanup } = await enter();
     expect(await change(ortho(), { ...exact, pillar: "prescription" })).toBe(true);

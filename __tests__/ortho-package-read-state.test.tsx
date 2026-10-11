@@ -144,11 +144,16 @@ describe("orthodontic agreement read states", () => {
     fetchMock.mockResolvedValue(response([])); render(); await settle(); unknown(render());
     expect(text(render())).toContain("تعذّر العثور على الخطة المربوطة");
   });
-  it("shows confirmed no-link only after a successful empty read, preserving the existing Plans link", async () => {
-    fetchMock.mockResolvedValue(response([])); render({ planId: null }); await settle();
-    const tree = render({ planId: null }); expect(text(tree)).toContain("لا اتفاق مالي مربوط بالحالة");
-    const links = nodes(tree).filter((node) => node.type === "a"); expect(links).toHaveLength(1);
-    expect(links[0].props.href).toBe("/patients/19?tab=plans"); expect(writes()).toEqual([]);
+  it("uses only the parent's guarded financial-entry callback after a confirmed empty read", async () => {
+    const onOpenTreatmentEntry = vi.fn(), props = { planId: null, onOpenTreatmentEntry };
+    fetchMock.mockResolvedValue(response([])); render(props); await settle();
+    const tree = render(props); expect(text(tree)).toContain("لا اتفاق مالي مربوط بالحالة");
+    expect(nodes(tree).filter((node) => node.type === "a")).toEqual([]);
+    const action = nodes(tree).find((node) => node.type === "button" && text(node).includes("افتح إدخال العلاج المالي الموحّد"))!;
+    (action.props.onClick as () => void)(); expect(onOpenTreatmentEntry).toHaveBeenCalledTimes(1);
+    authority.current = null; render(props);
+    (action.props.onClick as () => void)(); expect(onOpenTreatmentEntry).toHaveBeenCalledTimes(1);
+    expect(writes()).toEqual([]);
   });
   it("shows no-installments only for the verified linked plan, ignoring other agreements", async () => {
     fetchMock.mockResolvedValue(response([fixture({ installments: [] }), fixture({ id: 52 })])); render(); await settle();

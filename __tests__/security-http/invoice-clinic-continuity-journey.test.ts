@@ -334,6 +334,79 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
 async function openEndo(patientId: number, source: Invoice, tooth: number) {
   return mutate<{ id: number }>("doctorA", "POST", `/api/patients/${patientId}/endo`, { toothCode: tooth, caseId: source.clinical.links[0].caseId }, 201);
 }
+async function activateOrthoThroughIntake(patientId: number, source: Invoice) {
+  const { page, context } = await open("doctorA", patientId, "treatment&sub=ortho");
+  try {
+    const intake = page.getByRole("region", { name: "بداية حالة التقويم", exact: true }).first();
+    await intake.getByLabel("سياق التقييم", { exact: true }).selectOption("new");
+    await intake.getByLabel("الحالة السريرية للتقييم", { exact: true }).selectOption(String(source.clinical.links[0].caseId));
+    await intake.getByLabel("سبب تدوين بداية الحالة", { exact: true }).fill("Synthetic invoice-origin assessment");
+    let response = page.waitForResponse(r => r.url().includes("/api/ortho/intake") && r.request().method() === "POST");
+    await intake.getByRole("button", { name: "حفظ بداية التقييم", exact: true }).click();
+    expect((await response).status()).toBe(201);
+    const [{ id }] = await q<{ id: number }>("SELECT id FROM ortho_cases WHERE patient_id=$1", [patientId]);
+    await page.waitForURL(url => url.searchParams.get("orthoCaseId") === String(id));
+    const activation = page.getByTestId(`ortho-case-${id}`).getByRole("region", { name: "بداية حالة التقويم", exact: true });
+    await activation.getByLabel("الجهاز", { exact: true }).selectOption("fixed_metal");
+    await activation.getByLabel("نطاق العلاج", { exact: true }).selectOption("both");
+    await activation.getByLabel("مرحلة العلاج", { exact: true }).selectOption("aligning");
+    await activation.getByLabel("دليل تاريخ بدء العلاج", { exact: true }).selectOption("unknown");
+    await activation.getByLabel("سبب جهل تاريخ البدء", { exact: true }).fill("No source start date in this synthetic fixture");
+    await activation.getByLabel("الاتفاق المالي عند البدء", { exact: true }).selectOption(String(source.clinical.planId));
+    await activation.getByLabel("سبب تدوين بداية الحالة", { exact: true }).fill("Synthetic explicit decision to start treatment");
+    response = page.waitForResponse(r => r.url().includes("/api/ortho/intake") && r.request().method() === "POST");
+    await activation.getByRole("button", { name: "توثيق بداية العلاج", exact: true }).click();
+    expect((await response).status()).toBe(201);
+    expect(await q("SELECT id, status, plan_id, start_date FROM ortho_cases WHERE patient_id=$1", [patientId]))
+      .toEqual([{ id, status: "active", plan_id: source.clinical.planId, start_date: null }]);
+    return { id };
+  } finally { await close(context); }
+}
+async function financialSnapshot(patientId: number) {
+  return {
+    invoices: await q("SELECT id,total_minor,discount_minor FROM invoices WHERE patient_id=$1 ORDER BY id", [patientId]),
+    payments: await q("SELECT id,amount_minor,kind FROM payments WHERE patient_id=$1 ORDER BY id", [patientId]),
+    opening: await q("SELECT currency,amount_minor FROM patient_opening_balances WHERE patient_id=$1 ORDER BY currency", [patientId]),
+  };
+}
+async function signAdjustmentThroughUi(patientId: number, visitId: number, caseId: number, itemId: number, plannedSession: Planned) {
+  const before = await read<Clinical & { ortho: { adjustmentBillingClass: string } }>("doctorA", `/api/visits/${visitId}/clinical`);
+  // An invoice-linked item does not imply an installment package for every adjustment.
+  expect(before.ortho.adjustmentBillingClass).toBe("OUTSIDE_CONTRACT");
+  const { page, context } = await open("doctorA", patientId, "today");
+  let signed: Clinical | null = null, body: string | null = null;
+  try {
+    await page.goto(`${baseUrl}/visits/${visitId}`);
+    await page.getByRole("button", { name: "+ شدّة هذه الزيارة (تُحفظ مع التوقيع)", exact: true }).click();
+    await page.getByRole("textbox", { name: "ما نُفّذ في الشدّة", exact: true }).fill("Synthetic second-visit adjustment, billing decision remains pending");
+    await page.getByLabel("مطاطات هذه الشدّة", { exact: true }).selectOption("none");
+    await page.getByLabel("أسابيع حتى الشدّة القادمة", { exact: true }).fill("6");
+    await page.getByRole("button", { name: "مراجعة وإنهاء الزيارة", exact: true }).click();
+    const review = page.getByRole("dialog", { name: "مراجعة وإنهاء الزيارة", exact: true });
+    await review.getByTestId("ortho-session-review").waitFor();
+    await page.route(`**/api/visits/${visitId}/clinical`, async route => {
+      if (route.request().method() !== "POST" || route.request().postDataJSON()?.action !== "sign") { await route.continue(); return; }
+      body = route.request().postData()!;
+      const responses = await Promise.all([route.fetch(), authedMutation(`/api/visits/${visitId}/clinical`, h.sessions.doctorA, "POST", body)]);
+      const statuses = responses.map(response => typeof response.status === "function" ? response.status() : response.status);
+      expect([...statuses].sort()).toEqual([200, 409]);
+      signed = await responses[statuses.indexOf(200)].json() as Clinical;
+      await route.abort("failed"); // Both requests reached the real transaction; only acknowledgement is lost.
+    });
+    await review.getByRole("button", { name: /وقّع الزيارة|تأكيد إنهاء الزيارة/ }).click();
+    await page.getByText("تعذّر تأكيد نتيجة التوقيع. قد تكون الزيارة وُقّعت؛ أعد تحميل السجل قبل أي محاولة أخرى.", { exact: true }).waitFor();
+    expect(body).not.toBeNull(); expect(signed).not.toBeNull();
+    expect(JSON.parse(body!)).toMatchObject({ outsideContractDecision: null, orthoSession: { caseId, elastics: "none", nextWeeks: 6 } });
+    expect((await authedMutation(`/api/visits/${visitId}/clinical`, h.sessions.doctorA, "POST", body!)).status).toBe(409);
+    await page.unroute(`**/api/visits/${visitId}/clinical`);
+    await page.reload(); await page.getByRole("textbox", { name: "ملحق", exact: true }).waitFor();
+    expect(await q("SELECT case_id,visit_id,billing_class,billing_decision FROM ortho_adjustments WHERE visit_id=$1", [visitId]))
+      .toEqual([{ case_id: caseId, visit_id: visitId, billing_class: "OUTSIDE_CONTRACT", billing_decision: null }]);
+    expect((await planned(itemId)).find(session => session.sequence === plannedSession.sequence))
+      .toEqual({ id: plannedSession.id, sequence: plannedSession.sequence, status: "completed", sessionStatus: "done", visitId });
+    return signed as unknown as Clinical;
+  } finally { await close(context); }
+}
 async function recordEndo(patientId: number, treatmentId: number, visitId: number, stage: "assessment" | "shaping" | "obturation", staleWitness = false) {
   const path = `/api/patients/${patientId}/endo/${treatmentId}/visits`;
   const body = { visitId, stage, pulpalDiagnosis: "pulp_necrosis", apicalDiagnosis: "chronic_apical_abscess",
@@ -354,9 +427,9 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
   it("Ortho: one invoice identity → actual specialty intake → waiting/chair → linked clinical work → sign → collection → checkout → next appointment", async () => {
     const patientId = await patient("ortho");
     const created = await invoice(patientId, "ortho", null, "double_click");
-    const ortho = await mutate<{ id: number }>("doctorA", "POST", "/api/ortho", {
-      patientId, planId: created.clinical.planId, appliance: "fixed_metal", arches: "both", slot: "022", plannedMonths: 18,
-    }, 201);
+    const beforeIntake = await financialSnapshot(patientId);
+    const ortho = await activateOrthoThroughIntake(patientId, created);
+    expect(await financialSnapshot(patientId)).toEqual(beforeIntake);
     expect(await q(`SELECT id, ortho_case_id FROM clinical_cases WHERE patient_id = $1`, [patientId]))
       .toEqual([{ id: created.clinical.links[0].caseId, ortho_case_id: ortho.id }]);
     await consent(created.clinical.planId);
@@ -368,7 +441,19 @@ describe("Reception to next appointment: three invoice-origin clinical journeys"
     const signed = await signOnce(patientId, visitId, 1, created.clinical.links[0].planItemId, first);
     const next = await nextAfterSign(created.clinical.links[0].planItemId, 2, first.id, signed);
     await collectThroughUi(patientId, created);
-    await checkoutAndNext(patientId, visitId, next.id, 1);
+    const beforeSecond = await financialSnapshot(patientId);
+    const secondVisit = await arriveAndSeat(patientId, next.id);
+    await stageThroughUi(patientId, secondVisit, created.clinical.links[0].planItemId, "ortho", null);
+    const secondSigned = await signAdjustmentThroughUi(patientId, secondVisit, ortho.id, created.clinical.links[0].planItemId, next);
+    // The retry is rejected as already signed, with the original session identity intact.
+    await mutate("doctorA", "POST", `/api/visits/${secondVisit}/clinical`, { action: "sign" }, 409);
+    expect(await financialSnapshot(patientId)).toEqual(beforeSecond);
+    expect(await q("SELECT visit_id FROM treatment_sessions WHERE plan_item_id=$1 AND status='done' ORDER BY sequence", [created.clinical.links[0].planItemId]))
+      .toEqual([{ visit_id: visitId }, { visit_id: secondVisit }]);
+    expect(await q("SELECT id,ortho_case_id FROM clinical_cases WHERE patient_id=$1", [patientId]))
+      .toEqual([{ id: created.clinical.links[0].caseId, ortho_case_id: ortho.id }]);
+    const third = await nextAfterSign(created.clinical.links[0].planItemId, 3, next.id, secondSigned);
+    await checkoutAndNext(patientId, secondVisit, third.id, 1);
   }, 240_000);
 
   it("Endo tooth 36: lost invoice response, stale clinical tab and addendum preserve one treatment through collection and the next appointment", async () => {
