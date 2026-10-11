@@ -12,6 +12,14 @@ export interface HrEffectivePolicy {
 export type HrPolicyTimelines = Partial<Record<HrEffectivePolicyKey, TemporalTimeline<HrEffectivePolicy>>>;
 export interface HrCalculationBlocker { readonly code: string; readonly from: string; readonly to: string; readonly policyKey?: HrEffectivePolicyKey }
 
+export function validateEffectivePolicy(value: HrEffectivePolicy, key: HrEffectivePolicyKey): HrEffectivePolicy {
+  const copy = immutableJson(value);
+  if (!copy || copy.key !== key || !['employment_pay_effect', 'proration', 'leave_entitlement'].includes(key) || !copy.parameters || typeof copy.parameters !== 'object' || Array.isArray(copy.parameters)) temporalFail('invalid_policy', 'Policy key and plain terms must match the stream.');
+  if (!copy.approval || !['unapproved', 'approved'].includes(copy.approval.state)) temporalFail('invalid_policy', 'Approval state must be explicit.');
+  if (copy.approval.state === 'approved' && (typeof copy.approval.decisionRef !== 'string' || !copy.approval.decisionRef.trim() || copy.approval.decisionRef.trim().length > 1000)) temporalFail('invalid_policy', 'Approval requires a bounded decision reference.');
+  return copy;
+}
+
 export function selectApprovedHrPolicy(timeline: TemporalTimeline<HrEffectivePolicy> | undefined, key: HrEffectivePolicyKey, day: string) {
   const selected = selectTemporal(timeline ?? { revision: 0, facts: [] }, day);
   if (selected.kind === 'unknown') return { kind: 'blocked' as const, code: 'policy_history_unknown', key };

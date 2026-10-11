@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addCalendarDays, immutableJson, partitionTemporal, reviseTimeline, selectTemporal, validateTimeline, type TemporalFact, type TemporalTimeline } from '../lib/hr-temporal';
 import { assessHrCalculation, selectApprovedHrPolicy, type EmploymentFact, type HrEffectivePolicy } from '../lib/hr-effective-policy';
-import { appendSegmentEvidence, collectOccurrenceEvidence, collectSegmentEvidence, correctSegmentEvidence, materializeScheduleSegments, selectHrSchedule, validateScheduleSegments, type HrScheduleSegment } from '../lib/hr-schedule-segments';
+import { appendSegmentEvidence, collectOccurrenceEvidence, collectSegmentEvidence, correctOccurrenceSegment, correctSegmentEvidence, materializeScheduleSegments, selectHrSchedule, validateScheduleSegments, type HrScheduleSegment } from '../lib/hr-schedule-segments';
 
 const known = <T>(id: string, from: string, to: string | null, value: T): TemporalFact<T> => ({ id, kind: 'known', from, to, value });
 const employment: TemporalTimeline<EmploymentFact> = { revision: 1, facts: [
@@ -48,6 +48,7 @@ describe('effective-date history and immutable revisions', () => {
   it('handles leap dates and year boundaries without using the device time zone', () => {
     expect(addCalendarDays('2028-02-28', 1)).toBe('2028-02-29');
     expect(addCalendarDays('2026-12-31', 1)).toBe('2027-01-01');
+    expect(() => addCalendarDays('2026-12-31', Number.MAX_SAFE_INTEGER)).toThrow(/supported calendar/);
   });
   it('copies and deeply freezes snapshots, rejecting non-JSON identity objects', () => {
     const value = { details: { amount: 100 } }, state = validateTimeline({ revision: 1, facts: [known('a', '2026-01-01', null, value)] });
@@ -96,9 +97,10 @@ describe('anchored segments, raw evidence and reasoned corrections', () => {
     expect(snapshot.windows).toEqual([{ id: 'first', start: '2026-12-31T19:00:00.000Z', end: '2026-12-31T23:00:00.000Z' }, { id: 'second', start: '2026-12-31T23:00:00.000Z', end: '2027-01-01T03:00:00.000Z' }]);
   });
   it('selects the dated schedule revision and retains the source fact in the snapshot', () => {
-    const timeline = { revision: 3, facts: [known('night-v2', '2026-10-01', null, { timeZone: 'Asia/Aden', segments: night })] };
+    const timeline = { revision: 3, facts: [known('night-v2', '2026-10-01', null, { timeZone: 'Asia/Aden', workingDays: [4], graceMins: 15, segments: night })] };
     expect(selectHrSchedule(timeline, '2026-09-30')).toMatchObject({ kind: 'blocked', code: 'schedule_history_unknown' });
     expect(selectHrSchedule(timeline, '2026-10-01')).toMatchObject({ kind: 'selected', timelineRevision: 3, factId: 'night-v2', calculationVersion: 'hr-segments-v1' });
+    expect(selectHrSchedule(timeline, '2026-10-02')).toMatchObject({ kind: 'not_scheduled', timelineRevision: 3, factId: 'night-v2' });
   });
   it('requires day offsets and refuses actual overlap while allowing the exact shared boundary', () => {
     expect(validateScheduleSegments(night)).toEqual(night);
@@ -129,5 +131,19 @@ describe('anchored segments, raw evidence and reasoned corrections', () => {
     expect(appendSegmentEvidence(fixed, [late])).toMatchObject({ state: 'corrected', workMinutes: 480, rawPunches: [...partial.rawPunches, late] });
     const rejected = correctSegmentEvidence(partial, { ...decision, status: 'rejected' });
     expect(rejected.workMinutes).toBeNull(); expect(appendSegmentEvidence(rejected, [late])).toMatchObject({ state: 'complete', workMinutes: 420 });
+  });
+  it('changes only the corrected segment and refuses double-counted actual work across a boundary', () => {
+    const { windows } = materializeScheduleSegments('2026-12-31', 'Asia/Aden', night);
+    const current = collectOccurrenceEvidence(windows, windows.map((w, i) => ({ segmentId: w.id, punches: [{ id: `in${i}`, type: 'check_in', at: w.start }, { id: `out${i}`, type: 'check_out', at: w.end }] })));
+    const decision = { segmentId: 'first', status: 'approved' as const, expectedSegmentVersion: 1, newIn: windows[0].start, newOut: '2026-12-31T22:45:00Z', reason: 'Documented exit before the next segment', requestedBy: 1, decidedBy: 2 };
+    const fixed = correctOccurrenceSegment(current, decision);
+    expect(fixed.totalWorkMinutes).toBe(465); expect(fixed.segments[1]).toEqual(current.segments[1]);
+    expect(fixed.segments[0].rawPunches).toEqual(current.segments[0].rawPunches);
+    expect(() => correctOccurrenceSegment(current, { ...decision, newOut: '2026-12-31T23:15:00Z' })).toThrow(/overlap/);
+    expect(() => collectOccurrenceEvidence(windows, windows.map((w, i) => ({ segmentId: w.id, punches: [{ id: `in${i}`, type: 'check_in', at: w.start }, { id: `out${i}`, type: 'check_out', at: i ? w.end : '2026-12-31T23:15:00Z' }] })))).toThrow(/overlap/);
+    expect(current.totalWorkMinutes).toBe(480);
+  });
+  it('rejects normalized 24:00 punches rather than moving the supplied day silently', () => {
+    expect(() => collectSegmentEvidence('night', [{ id: 'a', type: 'check_in', at: '2026-10-01T24:00:00Z' }])).toThrow(/instant/);
   });
 });

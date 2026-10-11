@@ -8,6 +8,20 @@ export interface HrScheduleSegment {
   readonly endDayOffset: 0 | 1;
 }
 export interface HrSegmentWindow { readonly id: string; readonly start: string; readonly end: string }
+export interface HrEffectiveSchedule {
+  readonly timeZone: string;
+  readonly workingDays: readonly number[];
+  readonly graceMins: number;
+  readonly segments: readonly HrScheduleSegment[];
+}
+export function validateEffectiveSchedule(value: HrEffectiveSchedule): HrEffectiveSchedule {
+  const copy = immutableJson(value);
+  if (!copy || typeof copy.timeZone !== 'string') temporalFail('invalid_schedule', 'An explicit time zone is required.');
+  try { new Intl.DateTimeFormat('en', { timeZone: copy.timeZone }); } catch { temporalFail('invalid_timezone', 'Invalid time zone.'); }
+  if (!Array.isArray(copy.workingDays) || !copy.workingDays.length || copy.workingDays.length > 7 || new Set(copy.workingDays).size !== copy.workingDays.length || copy.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) temporalFail('invalid_schedule', 'Working days must be distinct weekday numbers.');
+  if (!Number.isInteger(copy.graceMins) || copy.graceMins < 0 || copy.graceMins > 120) temporalFail('invalid_schedule', 'Grace must match the supported 0–120 minute range.');
+  validateScheduleSegments(copy.segments); return copy;
+}
 function minute(clock: string): number {
   if (typeof clock !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)) temporalFail('invalid_clock', 'Use HH:MM and an explicit day offset.');
   return Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
@@ -54,11 +68,14 @@ export function materializeScheduleSegments(anchorDay: string, timeZone: string,
   for (const [i, window] of windows.entries()) if (window.end <= window.start || (i > 0 && window.start < windows[i - 1].end)) temporalFail('segment_overlap', 'Materialized windows overlap or reverse.');
   return immutableJson({ anchorDay, timeZone, calculationVersion: 'hr-segments-v1', windows });
 }
-export function selectHrSchedule(timeline: TemporalTimeline<{ timeZone: string; segments: readonly HrScheduleSegment[] }>, anchorDay: string) {
+export function selectHrSchedule(timeline: TemporalTimeline<HrEffectiveSchedule>, anchorDay: string) {
   const selected = selectTemporal(timeline, anchorDay);
   if (selected.kind === 'unknown') return immutableJson({ kind: 'blocked' as const, code: 'schedule_history_unknown', selection: selected });
-  return immutableJson({ kind: 'selected' as const, timelineRevision: selected.revision, factId: selected.fact.id,
-    ...materializeScheduleSegments(anchorDay, selected.fact.value.timeZone, selected.fact.value.segments) });
+  const value = validateEffectiveSchedule(selected.fact.value);
+  const identity = { timelineRevision: selected.revision, factId: selected.fact.id, graceMins: value.graceMins, workingDays: value.workingDays };
+  if (!value.workingDays.includes(new Date(`${anchorDay}T00:00:00Z`).getUTCDay())) return immutableJson({ kind: 'not_scheduled' as const, ...identity, anchorDay });
+  return immutableJson({ kind: 'selected' as const, ...identity,
+    ...materializeScheduleSegments(anchorDay, value.timeZone, value.segments) });
 }
 
 export interface HrSegmentPunch { readonly id: string; readonly type: 'check_in' | 'check_out'; readonly at: string }
@@ -73,7 +90,7 @@ export interface HrSegmentCorrection {
   readonly decidedBy: number | null;
 }
 function instant(value: string): number {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) temporalFail('invalid_instant', 'An explicit offset-bearing instant is required.');
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/.test(value)) temporalFail('invalid_instant', 'An explicit offset-bearing instant is required.');
   assertDay(value.slice(0, 10)); const epoch = Date.parse(value);
   if (!Number.isFinite(epoch)) temporalFail('invalid_instant', 'The instant is invalid.'); return epoch;
 }
@@ -113,9 +130,22 @@ export function collectOccurrenceEvidence(windows: readonly HrSegmentWindow[], a
     assigned.set(assignment.segmentId, assignment.punches);
   }
   const segments = windows.map(window => collectSegmentEvidence(window.id, assigned.get(window.id) ?? []));
-  const complete = segments.every(segment => segment.state === 'complete');
+  return summarizeOccurrence(windows, segments);
+}
+function summarizeOccurrence(windows: readonly HrSegmentWindow[], segments: readonly HrSegmentEvidence[]) {
+  // Early/late evidence is allowed, but overlapping actual work cannot be counted twice.
+  let previousEnd = -Infinity;
+  for (const segment of segments) if (segment.actualIn && segment.actualOut) {
+    if (instant(segment.actualIn) < previousEnd) temporalFail('actual_segment_overlap', 'Actual segment intervals overlap and require review.');
+    previousEnd = instant(segment.actualOut);
+  }
+  const complete = segments.every(segment => segment.state === 'complete' || segment.state === 'corrected');
   const provenWorkMinutes = segments.reduce((sum, segment) => sum + (segment.workMinutes ?? 0), 0);
   return immutableJson({ windows, segments, complete, provenWorkMinutes, totalWorkMinutes: complete ? provenWorkMinutes : null });
+}
+export function correctOccurrenceSegment(current: ReturnType<typeof collectOccurrenceEvidence>, correction: HrSegmentCorrection) {
+  if (!current.segments.some(segment => segment.id === correction.segmentId)) temporalFail('invalid_assignment', 'Correction refers to an unknown segment.');
+  return summarizeOccurrence(current.windows, current.segments.map(segment => segment.id === correction.segmentId ? correctSegmentEvidence(segment, correction) : segment));
 }
 export function correctSegmentEvidence(current: HrSegmentEvidence, correction: HrSegmentCorrection): HrSegmentEvidence {
   if (correction.segmentId !== current.id || correction.expectedSegmentVersion !== current.version) temporalFail('stale_revision', 'The segment changed before the correction decision.');

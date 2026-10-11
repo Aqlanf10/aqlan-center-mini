@@ -12,6 +12,7 @@ export function addCalendarDays(day: string, days: number): string {
   assertDay(day);
   if (!Number.isSafeInteger(days)) temporalFail('invalid_date', 'Day offset must be integral.');
   const date = new Date(`${day}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days);
+  if (!Number.isFinite(date.getTime())) temporalFail('invalid_date', 'Day offset exceeds the supported calendar.');
   const result = date.toISOString().slice(0, 10); assertDay(result); return result;
 }
 export function assertRange(from: string, to: string | null): void {
