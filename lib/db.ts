@@ -23099,7 +23099,7 @@ export async function completeCephAnalysis(
       await client.query("ROLLBACK");
       return { ok: false, message: "التحليل مرفوض — لا يُعتمد." };
     }
-    if (analysis.mm_per_pixel == null) {
+    if (analysis.mm_per_pixel == null || !Number.isFinite(analysis.mm_per_pixel) || analysis.mm_per_pixel <= 0) {
       await client.query("ROLLBACK");
       return { ok: false, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." };
     }

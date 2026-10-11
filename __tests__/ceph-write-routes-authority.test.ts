@@ -58,6 +58,8 @@ const patient: NonNullable<Awaited<ReturnType<typeof getPatient>>> = {
   medicalAlert: null, note: null, createdAt: "2025-11-20T12:00:00.000Z",
 };
 const localExpert: ReturnType<typeof generateCephExpertDiagnosis> = {
+  review: { state: "draft", source: "local-measurement-summary", engineVersion: "ceph-draft-safety-v1",
+    growthAssessment: "not-assessed", suppliedAgeYears: null },
   sagittalSkeletal: { classification: "Indeterminate", severity: "normal", descriptionAr: "اصطناعي",
     detailsAr: [], maxilla: "normal", mandible: "normal" },
   verticalSkeletal: { pattern: "Indeterminate", descriptionAr: "اصطناعي", detailsAr: [], growthTendencyAr: "اصطناعي" },
@@ -72,7 +74,7 @@ const localExpert: ReturnType<typeof generateCephExpertDiagnosis> = {
     finalDx: "تشخيص اصطناعي", recommendationsText: "توصية اصطناعية محلية" },
 };
 // suggestLandmarks returns all 27 codes. Keep a complete synthetic result so the
-// save assertions exercise the full persistence contract without an external provider.
+// preview assertions cover all coordinates without an external provider.
 const suggestedLandmarks: ReturnType<typeof suggestLandmarks> = {
   S: { x: 12, y: 34 }, N: { x: 20, y: 30 }, A: { x: 30, y: 40 }, B: { x: 40, y: 50 },
   Pog: { x: 50, y: 60 }, Me: { x: 60, y: 70 }, Gn: { x: 70, y: 80 }, Go: { x: 80, y: 90 },
@@ -94,16 +96,14 @@ const routes = {
   calibration: { run: () => patch(req({ calibration }, "PATCH"), ctx), fn: () => vi.mocked(updateCephCalibration), optionsAt: 3 },
   landmarks: { run: () => patch(req({ landmarks }, "PATCH"), ctx), fn: () => vi.mocked(updateCephLandmarks), optionsAt: 3 },
   diagnosis: { run: () => patch(req({ diagnosis }, "PATCH"), ctx), fn: () => vi.mocked(updateCephDiagnosis), optionsAt: 3 },
-  aiLandmarks: { run: () => analyze(req({ action: "suggest-landmarks", save: true }), ctx),
-    fn: () => vi.mocked(updateCephLandmarks), optionsAt: 3 },
-  aiDiagnosis: { run: () => analyze(req({ action: "generate-diagnosis", saveToDiagnosis: true, useAiChat: false }), ctx),
-    fn: () => vi.mocked(updateCephDiagnosis), optionsAt: 3 },
 } as const;
 type Name = keyof typeof routes;
 const names = Object.keys(routes) as Name[];
+let expectedProviderSettingsReads = 0;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  expectedProviderSettingsReads = 0;
   vi.mocked(requireSession).mockResolvedValue(session);
   vi.mocked(revalidateSessionInTransaction).mockResolvedValue(session);
   vi.mocked(canAccessPatient).mockResolvedValue(true);
@@ -126,7 +126,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   expect(aiChat).not.toHaveBeenCalled();
-  expect(getAiSettings).not.toHaveBeenCalled();
+  expect(getAiSettings).toHaveBeenCalledTimes(expectedProviderSettingsReads);
   vi.restoreAllMocks();
 });
 
@@ -202,7 +202,7 @@ describe("Every existing Ceph write route uses in-transaction authority", () => 
     });
 });
 
-describe("Existing AI save branches have the same write boundary; local previews stay read-only", () => {
+describe("All generation is preview-only; ordinary manual write routes retain authority", () => {
   const actions = [
     { name: "landmarks", body: { action: "suggest-landmarks", save: true }, write: () => vi.mocked(updateCephLandmarks) },
     { name: "diagnosis", body: { action: "generate-diagnosis", saveToDiagnosis: true, useAiChat: false }, write: () => vi.mocked(updateCephDiagnosis) },
@@ -220,33 +220,150 @@ describe("Existing AI save branches have the same write boundary; local previews
     expect(getSettingsSafe).not.toHaveBeenCalled();
   });
 
-  it.each(actions)("$name reports a completed-study refusal rather than claiming a requested save succeeded", async ({ body, write }) => {
-    vi.mocked(getCephStudy).mockResolvedValue({ ...study, analysis: { ...study.analysis, status: "completed" } });
-    write().mockResolvedValueOnce({ ok: false, message: "التحليل المعتمد لا يُعدَّل." });
+  it.each(actions)("$name direct autosave refuses before reading/calculating or modifying any diagnosis", async ({ body, write }) => {
     const response = await analyze(req(body), ctx);
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ message: "التحليل المعتمد لا يُعدَّل." });
-    expect(write()).toHaveBeenCalledTimes(1);
-    expect(write().mock.calls[0][3]).toEqual({ authorize: expect.any(Function) });
+    expect((await response.json()).message).toContain("معاينة فقط");
+    expect(write()).not.toHaveBeenCalled();
+    expect(getPatient).not.toHaveBeenCalled();
+    expect(generateCephExpertDiagnosis).not.toHaveBeenCalled();
+    expect(getSettingsSafe).not.toHaveBeenCalled();
   });
 
   it.each(actions)("$name preview needs only view permission and never calls a write helper", async ({ body }) => {
     vi.mocked(canAccessPatient).mockImplementation(async (_session, _patient, permission) => permission === "canViewXrays");
-    const response = await analyze(req({ ...body, save: false, saveToDiagnosis: false, useAiChat: false }), ctx);
+    const response = await analyze(req({ ...body, imageWidth: 1600, imageHeight: 1600, save: false, saveToDiagnosis: false, useAiChat: false }), ctx);
     expect(response.status).toBe(200);
     expect((await response.json()).ok).toBe(true);
-    expect(canAccessPatient).toHaveBeenCalledTimes(1);
+    expect(canAccessPatient).toHaveBeenCalledTimes(2);
     expect(canAccessPatient).toHaveBeenCalledWith(session, 101, "canViewXrays");
     expect(updateCephLandmarks).not.toHaveBeenCalled();
     expect(updateCephDiagnosis).not.toHaveBeenCalled();
   });
 
-  it("saved suggestions retain their suggested source and never invoke completion", async () => {
-    const response = await routes.aiLandmarks.run();
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, saved: true });
-    expect(updateCephLandmarks).toHaveBeenCalledWith(41,
-      savedSuggestions, session.username, { authorize: expect.any(Function) });
+  it.each([true, 1, "true"])("a direct geometric autosave request (%s) is refused, never silently downgraded", async (save) => {
+    const response = await analyze(req({ action: "suggest-landmarks", save }), ctx);
+    expect(response.status).toBe(409);
+    expect((await response.json()).message).toContain("معاينة فقط");
+    expect(updateCephLandmarks).not.toHaveBeenCalled();
+    expect(suggestLandmarks).not.toHaveBeenCalled();
     expect(completeCephAnalysis).not.toHaveBeenCalled();
+  });
+  it.each([true, 1, "true"])("a direct generated-diagnosis autosave request (%s) is refused without a clinical write", async (saveToDiagnosis) => {
+    const response = await analyze(req({ action: "generate-diagnosis", saveToDiagnosis, useAiChat: true }), ctx);
+    expect(response.status).toBe(409);
+    expect((await response.json()).message).toContain("معاينة فقط");
+    expect(updateCephDiagnosis).not.toHaveBeenCalled();
+    expect(getSettingsSafe).not.toHaveBeenCalled();
+    expect(generateCephExpertDiagnosis).not.toHaveBeenCalled();
+  });
+  it.each([{}, { imageWidth: 1600 }, { imageWidth: 0, imageHeight: 1600 },
+    { imageWidth: -1, imageHeight: 1600 }, { imageWidth: 99, imageHeight: 1600 }, { imageWidth: "Infinity", imageHeight: 1600 },
+    { imageWidth: 1.5, imageHeight: 1600 }, { imageWidth: 16385, imageHeight: 1 },
+    { imageWidth: 16384, imageHeight: 16384 }, { imageWidth: "1600", imageHeight: 1600 }])("invalid geometric dimensions %j refuse without an invented image size", async (dimensions) => {
+    const response = await analyze(req({ action: "suggest-landmarks", save: false, ...dimensions }), ctx);
+    expect(response.status).toBe(400);
+    expect(suggestLandmarks).not.toHaveBeenCalled();
+    expect(updateCephLandmarks).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("existing Ceph suggestion provenance and historical age safety", () => {
+  it("unknown acquisition date never substitutes today's age", async () => {
+    vi.mocked(getCephStudy).mockResolvedValue({ ...study, analysis: { ...study.analysis, xrayDate: null } });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(200);
+    expect(generateCephExpertDiagnosis).toHaveBeenCalledWith([], { age: undefined, gender: "male" });
+    expect(await response.json()).toMatchObject({ provenance: { analysisId: 41, patientId: 101, documentId: 5,
+      state: "draft", source: "local-measurement-summary", acquisitionAgeYears: null, agePrecision: "unknown", growthAssessment: "not-assessed" } });
+    expect(updateCephDiagnosis).not.toHaveBeenCalled();
+  });
+  it("known historical acquisition date is explicit and does not establish growth", async () => {
+    vi.mocked(getCephStudy).mockResolvedValue({ ...study, analysis: { ...study.analysis, xrayDate: "2010-04-06" } });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(generateCephExpertDiagnosis).toHaveBeenCalledWith([], { age: 10, gender: "male" });
+    expect(await response.json()).toMatchObject({ provenance: { acquisitionAgeYears: 10, agePrecision: "birth-year-approximate", growthAssessment: "not-assessed" } });
+  });
+  it("geometric placement is labeled as geometry and preview does not persist or complete", async () => {
+    const response = await analyze(req({ action: "suggest-landmarks", imageWidth: 1600, imageHeight: 1600, save: false }), ctx);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ saved: false, provenance: { source: "geometric-placement", state: "draft" } });
+    expect(updateCephLandmarks).not.toHaveBeenCalled();
+    expect(completeCephAnalysis).not.toHaveBeenCalled();
+  });
+  it("a default request never opts into an external provider, even when the setting is enabled", async () => {
+    vi.mocked(getSettingsSafe).mockResolvedValue(withDefaults({ "ai.clinical_external": "true" }));
+    const response = await analyze(req({ action: "generate-diagnosis" }), ctx);
+    expect(response.status).toBe(200);
+    expect(aiChat).not.toHaveBeenCalled();
+    expect(getAiSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("Ceph preview revalidates before returning clinical content", () => {
+  it("revoked image authority after computation yields refusal without suggestion content", async () => {
+    vi.mocked(canAccessPatient).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(403);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+    expect(updateCephDiagnosis).not.toHaveBeenCalled();
+  });
+  it("changed principal during preview yields refusal without old clinical content", async () => {
+    vi.mocked(requireSession).mockResolvedValueOnce(session).mockResolvedValueOnce({ ...session, userId: 8, username: "other-doctor" });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(403);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+  });
+  it("a patient merge while preview waits refuses the old owner projection", async () => {
+    vi.mocked(getCephStudy).mockResolvedValueOnce(study)
+      .mockResolvedValueOnce({ ...study, analysis: { ...study.analysis, patientId: 999 } });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+  });
+  it("a changed calibration while preview waits refuses the stale measurement draft", async () => {
+    vi.mocked(getCephStudy).mockResolvedValueOnce(study)
+      .mockResolvedValueOnce({ ...study, analysis: { ...study.analysis, mmPerPixel: 0.5 } });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+  });
+  it("a newly saved point while geometry waits refuses the stale preview", async () => {
+    vi.mocked(getCephStudy).mockResolvedValueOnce(study)
+      .mockResolvedValueOnce({ ...study, landmarks: [{ code: "S", x: 25, y: 40, source: "manual", confirmedBy: "synthetic-doctor" }] });
+    const response = await analyze(req({ action: "suggest-landmarks", imageWidth: 1600, imageHeight: 1600, save: false }), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).not.toHaveProperty("landmarks");
+  });
+  it("a clinician diagnosis edit while generation waits refuses the stale preview and never overwrites it", async () => {
+    vi.mocked(getCephStudy).mockResolvedValueOnce(study).mockResolvedValueOnce({ ...study,
+      diagnosis: { skeletal: null, dental: null, softTissue: null, note: "New clinical note", finalDx: "New authored diagnosis",
+        createdBy: session.username, updatedAt: "2026-01-01T00:00:00Z" } });
+    const response = await analyze(req({ action: "generate-diagnosis", saveToDiagnosis: false, useAiChat: false }), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+    expect(updateCephDiagnosis).not.toHaveBeenCalled();
+  });
+  it.each([
+    { orthoCaseId: 202 }, { phase: "during" as const }, { refSet: "new-reference" }, { correctsAnalysisId: 20 },
+  ])("a changed study context %j refuses a delayed preview", async (changed) => {
+    vi.mocked(getCephStudy).mockResolvedValueOnce(study).mockResolvedValueOnce({ ...study, analysis: { ...study.analysis, ...changed } });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: false }), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).not.toHaveProperty("suggestion");
+  });
+  it("revocation during awaited provider settings prevents transmission, not only the response", async () => {
+    expectedProviderSettingsReads = 1;
+    vi.mocked(getSettingsSafe).mockResolvedValue(withDefaults({ "ai.clinical_external": "true" }));
+    vi.mocked(getAiSettings).mockImplementationOnce(async () => {
+      vi.mocked(canAccessPatient).mockResolvedValue(false);
+      return { enabled: true, hasKey: true } as Awaited<ReturnType<typeof getAiSettings>>;
+    });
+    const response = await analyze(req({ action: "generate-diagnosis", useAiChat: true }), ctx);
+    expect(response.status).toBe(403);
+    expect(aiChat).not.toHaveBeenCalled();
+    expect(updateCephDiagnosis).not.toHaveBeenCalled();
+    expect(getAiSettings).toHaveBeenCalledTimes(1);
   });
 });

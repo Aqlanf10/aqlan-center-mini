@@ -1,3 +1,5 @@
+import { CEPH_SUGGESTION_ENGINE_VERSION, finiteCephValue } from "./ceph-suggestion-safety";
+
 /**
  * السيفالومتري — المنطق الخالص.
  *
@@ -197,7 +199,7 @@ export function computeMmPerPixel(p1: Pt, p2: Pt, realMm: number): number {
  * فهو رقمٌ يُقرأ ويُعتمد ولم يُقس أصلًا.
  */
 export function pixelsToMm(pixels: number, mmPerPixel: number): number {
-  if (!Number.isFinite(mmPerPixel) || !Number.isFinite(pixels)) return NaN;
+  if (!Number.isFinite(mmPerPixel) || mmPerPixel <= 0 || !Number.isFinite(pixels)) return NaN;
   return pixels * mmPerPixel;
 }
 
@@ -348,7 +350,8 @@ export type LandmarkMap = Partial<Record<LandmarkCode, Pt>>;
  */
 export function measure(code: string, L: LandmarkMap, mmPerPixel: number): number {
   const p = (c: LandmarkCode): Pt => L[c] as Pt;
-  const has = (...cs: LandmarkCode[]): boolean => cs.every((c) => L[c] != null);
+  const has = (...cs: LandmarkCode[]): boolean => cs.every((c) => L[c] != null
+    && Number.isFinite(L[c]!.x) && Number.isFinite(L[c]!.y));
 
   switch (code) {
     case "SNA": {
@@ -664,7 +667,7 @@ export function getSeverityStars(value: number | null | undefined, mean: number,
 }
 
 /**
- * التفسير السريري الفوري التلقائي لكل قياس سيفالومتري (يطابق WebCeph بالعربية والإنجليزية).
+ * وصف قياس بحدود تعليمية قديمة؛ ليس اعتمادًا سريريًا أو تقييمًا للنمو.
  */
 export function getClinicalInterpretation(code: string, value: number | null | undefined): { en: string; ar: string } {
   if (value == null || !Number.isFinite(value)) return { en: "—", ar: "—" };
@@ -683,16 +686,16 @@ export function getClinicalInterpretation(code: string, value: number | null | u
       if (value < 0) return { en: "Skeletal Class III", ar: "صنف هيكلي ثالث" };
       return { en: "Skeletal Class I", ar: "صنف هيكلي أول" };
     case "BJORK_SUM":
-      if (value > 400) return { en: "Hyperdivergent (Clockwise)", ar: "نمط نمو عمودي منفتح (دوران مع عقارب الساعة)" };
-      if (value < 390) return { en: "Hypodivergent (Counter-clockwise)", ar: "نمط نمو أفقي منغلق (دوران عكس عقارب الساعة)" };
-      return { en: "Normodivergent skeletal pattern", ar: "نمط نمو هيكلي متوازن" };
+      if (value > 400) return { en: "High angular sum; growth not assessed", ar: "مجموع زوايا مرتفع؛ النمو غير مقيم" };
+      if (value < 390) return { en: "Low angular sum; growth not assessed", ar: "مجموع زوايا منخفض؛ النمو غير مقيم" };
+      return { en: "Angular sum within teaching limits; growth not assessed", ar: "مجموع زوايا ضمن الحدود التعليمية؛ النمو غير مقيم" };
     case "FMA":
       if (value > 29) return { en: "Hyperdivergent facial pattern", ar: "نمط وجهي منفتح الزاوية (وجه طويل)" };
       if (value < 21) return { en: "Hypodivergent facial pattern", ar: "نمط وجهي منخفض الزاوية (وجه قصير)" };
       return { en: "Normodivergent facial pattern", ar: "نمط وجهي متناسق وطبيعي" };
     case "GONIAL":
-      if (value > 127) return { en: "Large gonial angle (Downward growth)", ar: "زاوية فك منفرجة (نمو خلفي هابط)" };
-      if (value < 117) return { en: "Small gonial angle (Horizontal growth)", ar: "زاوية فك حادة (نمو أفقي)" };
+      if (value > 127) return { en: "Large gonial angle; growth not assessed", ar: "زاوية فك منفرجة؛ النمو غير مقيم" };
+      if (value < 117) return { en: "Small gonial angle; growth not assessed", ar: "زاوية فك حادة؛ النمو غير مقيم" };
       return { en: "Normal gonial angle", ar: "زاوية الفك السفلي طبيعية" };
     case "APDI":
       if (value > 90) return { en: "Skeletal Class III", ar: "صنف هيكلي ثالث (APDI مرتفع)" };
@@ -853,9 +856,9 @@ export function summarize(results: MeasurementResult[]): CephSummary {
 
   let vertical = "— أكمل قياس FMA —";
   if (fma != null && Number.isFinite(fma) && sngogn != null && Number.isFinite(sngogn)) {
-    if (fma > 31 || sngogn > 39) vertical = "نموّ عمودي مائل للأفقي (زاوية الفك مفتوحة)";
-    else if (fma < 19 || sngogn < 27) vertical = "نموّ عمودي مائل للعمقي (زاوية الفك مغمدة)";
-    else vertical = "نموّ عمودي متوازن تقريبًا";
+    if (fma > 31 || sngogn > 39) vertical = "قراءات زوايا عمودية مرتفعة؛ لا تحدد حالة النمو";
+    else if (fma < 19 || sngogn < 27) vertical = "قراءات زوايا عمودية منخفضة؛ لا تحدد حالة النمو";
+    else vertical = "قراءات زوايا عمودية داخل الحدود التعليمية؛ حالة النمو غير مقيمة";
   }
 
   return { skeletal, vertical };
@@ -1006,13 +1009,14 @@ export function suggestDiagnosis(results: MeasurementResult[]): DiagnosisSuggest
 /* ─────────────────── محرك التشخيص واقتراح المعالم الذكي ─────────────────── */
 
 export interface CephExpertDiagnosis {
+  review: { state: "draft"; source: "local-measurement-summary"; engineVersion: string; growthAssessment: "not-assessed"; suppliedAgeYears: number | null };
   sagittalSkeletal: {
-    classification: "Class I" | "Class II div 1" | "Class II div 2" | "Class III" | "Indeterminate";
-    severity: "normal" | "mild" | "moderate" | "severe";
+    classification: "Class I" | "Class II" | "Class II div 1" | "Class II div 2" | "Class III" | "Indeterminate";
+    severity: "normal" | "mild" | "moderate" | "severe" | "unknown";
     descriptionAr: string;
     detailsAr: string[];
-    maxilla: "normal" | "prognathic" | "retrognathic";
-    mandible: "normal" | "prognathic" | "retrognathic";
+    maxilla: "normal" | "prognathic" | "retrognathic" | "unknown";
+    mandible: "normal" | "prognathic" | "retrognathic" | "unknown";
   };
   verticalSkeletal: {
     pattern: "Normodivergent" | "Hyperdivergent" | "Hypodivergent" | "Indeterminate";
@@ -1023,8 +1027,8 @@ export interface CephExpertDiagnosis {
   dentalAnalysis: {
     descriptionAr: string;
     detailsAr: string[];
-    upperIncisor: "normal" | "proclined" | "retroclined";
-    lowerIncisor: "normal" | "proclined" | "retroclined";
+    upperIncisor: "normal" | "proclined" | "retroclined" | "unknown";
+    lowerIncisor: "normal" | "proclined" | "retroclined" | "unknown";
     compensationAr: string;
     interincisalAr: string;
   };
@@ -1057,22 +1061,15 @@ export interface CephExpertDiagnosis {
   };
 }
 
-/**
- * محرك التوليد التشخيصي التقويمي الشامل الخالص.
- *
- * يصنف بدقة وبناءً على كافة المعايير السيفالومترية المعتمدة (Steiner, Tweed,
- * Downs, McNamara, Ricketts, Holdaway):
- * - الهيكل السهمي (Class I, Class II div 1/2, Class III) ومصدر الخلل الفكي
- * - الهيكل العمودي واتجاه النمو (Hyperdivergent / Hypodivergent / Normodivergent)
- * - موضع القواطع والتعويض السني السنخي (Dentoalveolar Compensation)
- * - بروفايل الأنسجة الرخوة وخط ريكتس والزاوية الأنفية الشفوية
- * - توصيات خطة العلاج الموجهة (القلع، أجهزة النمو، التوسيع، الزرعات العظمية TADs، الجراحة)
+/** Descriptive draft from existing measurements. Missing evidence stays unknown.
+ * Fixed legacy interpretation thresholds are not treatment orders or growth assessments.
+ * The clinician reviews this draft and the applicable reference before saving.
  */
 export function generateCephExpertDiagnosis(
   results: MeasurementResult[],
   patientInfo?: { age?: number; gender?: string },
 ): CephExpertDiagnosis {
-  const get = (code: string): number | null => results.find((r) => r.code === code)?.value ?? null;
+  const get = (code: string): number | null => finiteCephValue(results.find((r) => r.code === code)?.value);
 
   // 1. التحليل الهيكلي السهمي
   const anb = get("ANB");
@@ -1080,25 +1077,25 @@ export function generateCephExpertDiagnosis(
   const sna = get("SNA");
   const snb = get("SNB");
   const conv = get("CONV");
-  const convAngle = get("CONV_ANGLE");
-  const abPlane = get("AB_PLANE");
   const u1naA = get("U1NA_A");
   const u1sn = get("U1SN");
 
-  let maxilla: "normal" | "prognathic" | "retrognathic" = "normal";
+  let maxilla: "normal" | "prognathic" | "retrognathic" | "unknown" = "unknown";
   if (sna != null) {
+    maxilla = "normal";
     if (sna > 84) maxilla = "prognathic";
     else if (sna < 80) maxilla = "retrognathic";
   }
 
-  let mandible: "normal" | "prognathic" | "retrognathic" = "normal";
+  let mandible: "normal" | "prognathic" | "retrognathic" | "unknown" = "unknown";
   if (snb != null) {
+    mandible = "normal";
     if (snb > 82) mandible = "prognathic";
     else if (snb < 78) mandible = "retrognathic";
   }
 
-  let classification: "Class I" | "Class II div 1" | "Class II div 2" | "Class III" | "Indeterminate" = "Indeterminate";
-  let severity: "normal" | "mild" | "moderate" | "severe" = "normal";
+  let classification: "Class I" | "Class II" | "Class II div 1" | "Class II div 2" | "Class III" | "Indeterminate" = "Indeterminate";
+  let severity: "normal" | "mild" | "moderate" | "severe" | "unknown" = "unknown";
   let sagittalDesc = "تعذر تحديد العلاقة الهيكلية السهمية بدقة";
   const sagittalDetails: string[] = [];
 
@@ -1124,9 +1121,11 @@ export function generateCephExpertDiagnosis(
   if (anb != null) {
     if (anb > 4) {
       const isRetroUpper = (u1naA != null && u1naA < 17) || (u1sn != null && u1sn < 99);
-      classification = isRetroUpper ? "Class II div 2" : "Class II div 1";
+      classification = u1naA == null && u1sn == null ? "Class II" : isRetroUpper ? "Class II div 2" : "Class II div 1";
       severity = anb <= 6 ? "mild" : anb <= 8.5 ? "moderate" : "severe";
-      sagittalDesc = classification === "Class II div 2"
+      sagittalDesc = classification === "Class II"
+        ? `قراءة ANB مرتفعة (${anb}°)؛ معلومات القواطع غير مكتملة ولا يحدد التقسيم`
+        : classification === "Class II div 2"
         ? `علاقة هيكلية صنف ثانٍ نموذج 2 (Class II div 2) — ANB = ${anb}°`
         : `علاقة هيكلية صنف ثانٍ نموذج 1 (Class II div 1) — ANB = ${anb}°`;
       sagittalDetails.push(`فارق ANB مرتفع (${anb}°) يشير لتقدم نسبي في الفك العلوي أو تراجع الفك السفلي`);
@@ -1143,7 +1142,7 @@ export function generateCephExpertDiagnosis(
     }
   } else if (wits != null) {
     if (wits > 1.5) {
-      classification = "Class II div 1";
+      classification = "Class II";
       severity = wits <= 4 ? "mild" : "moderate";
       sagittalDesc = `علاقة هيكلية صنف ثانٍ على مستوى الإطباق (Wits = ${wits} mm)`;
     } else if (wits < -3) {
@@ -1184,24 +1183,20 @@ export function generateCephExpertDiagnosis(
   }
 
   let verticalPattern: "Normodivergent" | "Hyperdivergent" | "Hypodivergent" | "Indeterminate" = "Indeterminate";
-  let verticalDesc = "نمو عمودي متوازن";
-  let growthTendency = "نمط نمو عمودي متناسق ومتوازن (Mesofacial)";
+  let verticalDesc = "العلاقة العمودية غير محددة لعدم اكتمال القياسات اللازمة";
   const verticalDetails: string[] = [];
 
   if (hyperScore >= 2 && hyperScore > hypoScore) {
     verticalPattern = "Hyperdivergent";
-    verticalDesc = "نمط نمو عمودي منفتح (Hyperdivergent / High Angle)";
-    growthTendency = "نمو عمودي مائل للاتجاه العمودي مع زاوية فكية مفتوحة وميل لانفتاح العضة وضعف العضلات الماضغة";
+    verticalDesc = "نمط عمودي منفتح (Hyperdivergent / High Angle)";
     verticalDetails.push("زاوية مستوى الفك السفلي مفتوحة تزيد من ميلان الوجه الطويل (Dolichofacial)");
   } else if (hypoScore >= 2 && hypoScore > hyperScore) {
     verticalPattern = "Hypodivergent";
-    verticalDesc = "نمط نمو أفقي منغلق (Hypodivergent / Low Angle)";
-    growthTendency = "نمو أفقي مائل للاتجاه الأفقي مع زاوية فكية مغمدة وميل للعضة العميقة وقوة عضلية ماضغة";
+    verticalDesc = "نمط عمودي منغلق (Hypodivergent / Low Angle)";
     verticalDetails.push("زاوية مستوى الفك السفلي مغلقة تزيد من نمط الوجه القصير (Brachyfacial)");
   } else if (fma != null || sngogn != null || bjorkSum != null) {
     verticalPattern = "Normodivergent";
-    verticalDesc = "نمط نمو عمودي متوازن (Normodivergent / Normal Angle)";
-    growthTendency = "تناسق عمودي متوازن بين ارتفاع الوجه الأمامي والخلفي";
+    verticalDesc = "نمط عمودي متوازن (Normodivergent / Normal Angle)";
   }
 
   if (fma != null) verticalDetails.push(`FMA = ${fma}° (المعدل 25°±3°)`);
@@ -1213,7 +1208,7 @@ export function generateCephExpertDiagnosis(
         ? `مجموع مضلع بيورك مرتفع (${bjorkSum}° — المعدل 396°±6°) يشير لدوران الفك باتجاه عقارب الساعة (Clockwise / Open bite)`
         : bjorkSum < 390
         ? `مجموع مضلع بيورك منخفض (${bjorkSum}° — المعدل 396°±6°) يشير لدوران الفك عكس اتجاه عقارب الساعة (Counter-clockwise / Deep bite)`
-        : `مجموع مضلع بيورك متوازن (${bjorkSum}° — المعدل 396°±6°) يؤكد نمط النمو الحيادي المتناسق`,
+        : `مجموع مضلع بيورك متوازن (${bjorkSum}° — المعدل 396°±6°) وصف هندسي أولي يحتاج مراجعة المرجع`,
     );
   }
 
@@ -1221,44 +1216,52 @@ export function generateCephExpertDiagnosis(
   const l1nbA = get("L1NB_A");
   const impa = get("IMPA");
   const inter = get("INTER");
-  const u1Apog = get("U1_APOG");
 
-  let upperIncisor: "normal" | "proclined" | "retroclined" = "normal";
+  let upperIncisor: "normal" | "proclined" | "retroclined" | "unknown" = "unknown";
   if (u1naA != null) {
+    upperIncisor = "normal";
     if (u1naA > 27) upperIncisor = "proclined";
     else if (u1naA < 17) upperIncisor = "retroclined";
   } else if (u1sn != null) {
+    upperIncisor = "normal";
     if (u1sn > 109) upperIncisor = "proclined";
     else if (u1sn < 99) upperIncisor = "retroclined";
   }
 
-  let lowerIncisor: "normal" | "proclined" | "retroclined" = "normal";
+  let lowerIncisor: "normal" | "proclined" | "retroclined" | "unknown" = "unknown";
   if (impa != null) {
+    lowerIncisor = "normal";
     if (impa > 95) lowerIncisor = "proclined";
     else if (impa < 85) lowerIncisor = "retroclined";
   } else if (l1nbA != null) {
+    lowerIncisor = "normal";
     if (l1nbA > 31) lowerIncisor = "proclined";
     else if (l1nbA < 19) lowerIncisor = "retroclined";
   }
 
   const dentalDetails: string[] = [];
   dentalDetails.push(
-    upperIncisor === "proclined"
+    upperIncisor === "unknown"
+      ? "ميل القاطع العلوي غير مقاس"
+      : upperIncisor === "proclined"
       ? `القاطع العلوي مائل للأمام بشكل ملحوظ (U1-NA = ${u1naA ?? "—"}°)`
       : upperIncisor === "retroclined"
       ? `القاطع العلوي مائل للخلف وللحنك (U1-NA = ${u1naA ?? "—"}°)`
       : `ميل القاطع العلوي متناسق (U1-NA = ${u1naA ?? "—"}°)`,
   );
   dentalDetails.push(
-    lowerIncisor === "proclined"
+    lowerIncisor === "unknown"
+      ? "ميل القاطع السفلي غير مقاس"
+      : lowerIncisor === "proclined"
       ? `القاطع السفلي مائل للشفة (IMPA = ${impa ?? "—"}°)`
       : lowerIncisor === "retroclined"
       ? `القاطع السفلي مائل للخلف وللسان (IMPA = ${impa ?? "—"}°)`
       : `ميل القاطع السفلي متناسق (IMPA = ${impa ?? "—"}°)`,
   );
 
-  let interincisalAr = "الزاوية القاطعية ضمن المدى المتناسق";
+  let interincisalAr = "الزاوية القاطعية غير مقاسة";
   if (inter != null) {
+    interincisalAr = `الزاوية القاطعية ${inter}°؛ مراجعة المرجع والتفسير للطبيب`;
     if (inter < 124) {
       interincisalAr = `الزاوية القاطعية حادة (${inter}°) تدل على بروز قاطعي ثنائي متبادل (Bimaxillary Proclination)`;
     } else if (inter > 136) {
@@ -1267,7 +1270,7 @@ export function generateCephExpertDiagnosis(
     dentalDetails.push(interincisalAr);
   }
 
-  let compensationAr = "لا يوجد تعويض سني سنخي حرج ملحوظ";
+  let compensationAr = "تقييم التعويض السني السنخي يحتاج مراجعة الطبيب للأدلة السنية والهيكلية";
   if (classification === "Class III" && (upperIncisor === "proclined" || lowerIncisor === "retroclined")) {
     compensationAr = "تعويض سني سنخي للصنف الثالث: بروز معاوض في القواطع العلوية وارتداد في السفلية لتغطية التراجع الهيكلي";
   } else if (classification.startsWith("Class II") && lowerIncisor === "proclined") {
@@ -1279,15 +1282,11 @@ export function generateCephExpertDiagnosis(
   const eLl = get("E_LINE_LL");
   const naso = get("NASOLABIAL");
 
-  let profileTypeAr = "مستقيم ومتناسق";
+  let profileTypeAr = "البروفايل غير مقاس";
   if (conv != null) {
     if (conv > 2) profileTypeAr = "بروفايل وجهي محدب (Convex)";
     else if (conv < -2) profileTypeAr = "بروفايل وجهي مقعر (Concave)";
     else profileTypeAr = "بروفايل وجهي مستقيم (Orthognathic / Straight)";
-  } else if (classification.startsWith("Class II")) {
-    profileTypeAr = "بروفايل وجهي محدب";
-  } else if (classification === "Class III") {
-    profileTypeAr = "بروفايل وجهي مقعر";
   }
 
   let nasolabialAr = "الزاوية الأنفية الشفوية غير مقاسة بعد";
@@ -1302,79 +1301,24 @@ export function generateCephExpertDiagnosis(
     eLineAr = `الشفة العليا: ${eUl > -2 ? "بارزة" : eUl < -6 ? "متراجعة" : "متناسقة"} (${eUl} مم) · الشفة السفلى: ${eLl > 0 ? "بارزة" : eLl < -4 ? "متراجعة" : "متناسقة"} (${eLl} مم)`;
   }
 
-  const lipCompetenceAr = (eUl != null && eUl > 0) || (eLl != null && eLl > 1)
-    ? "بروز شريطي وبروفايل شفوي مندفع يستدعي مراجعة إغلاق الشفاه العفوي (Incompetent lips tendency)"
-    : "انطباق شفوي متوازن ومظهر بروفايلي طبيعي";
+  const lipCompetenceAr = "كفاءة إغلاق الشفتين تحتاج فحصًا سريريًا؛ لا يثبتها قياس خط ريكتس";
 
   const softTissueSummary = `${profileTypeAr} · ${nasolabialAr} · ${eLineAr}`;
 
-  // 5. توصيات خطة العلاج الموجهة
-  const age = patientInfo?.age;
-  const isGrowing = age != null ? age < 15 : true;
-  const isAdult = age != null ? age >= 18 : false;
-
-  let growthModification = false;
-  let growthModificationAr: string | undefined;
-  if (isGrowing) {
-    if (classification.startsWith("Class II") && mandible === "retrognathic") {
-      growthModification = true;
-      growthModificationAr = "تعديل نمو وظيفي (Functional Appliances مثل Twin Block أو Herbst) لتحفيز النمو السهمي للفك السفلي قبل اكتمال طفرة النمو.";
-    } else if (classification === "Class III" && maxilla === "retrognathic") {
-      growthModification = true;
-      growthModificationAr = "تعديل نمو الفك العلوي (قناع شد وجه عكسي Facemask مع توسيع حنكي سريع RPE) لتقديم الفك العلوي سهميًا.";
-    }
-  }
-
-  let expansion = false;
-  let expansionAr: string | undefined;
-  if (verticalPattern === "Hypodivergent" || classification === "Class III" || classification === "Class II div 2") {
-    expansion = true;
-    expansionAr = "توسيع هيكلي أو سنخي للفك العلوي (RPE / Quad-Helix) لتحسين التناسق العرضي وتأمين مسافات لتسوية الأسنان.";
-  }
-
-  let anchorageOrTADs = false;
-  let anchorageOrTADsAr: string | undefined;
-  if (verticalPattern === "Hyperdivergent" || (upperIncisor === "proclined" && lowerIncisor === "proclined")) {
-    anchorageOrTADs = true;
-    anchorageOrTADsAr = "استخدام زرعات تقويمية مؤقتة (TADs) كإرساء هيكلي مطلق لإرجاع القواطع دون فقدان المسافة الخلفية، أو لإغراس الطواحين لضبط البعد العمودي.";
-  }
-
-  let orthognathicSurgery = false;
-  let orthognathicSurgeryAr: string | undefined;
-  if (isAdult && severity === "severe") {
-    orthognathicSurgery = true;
-    orthognathicSurgeryAr = "استطباب جراحة تقويمية للفكين (Orthognathic Surgery): تقويم تمهيدي جراحي لفك التعويضات (Decompensation) متبوع بجراحة فكين (Le Fort I / BSSO).";
-  }
-
-  let extractionDecision: "non-extraction" | "borderline" | "extraction-indicated" | "not-specified" = "not-specified";
-  let extractionRationaleAr = "تحديد خطة القلع يتطلب استكمال دراسة القواطع والبروفايل وتزاحم الأقواس السنية.";
-
-  if (upperIncisor === "proclined" && lowerIncisor === "proclined" && (eUl == null || eUl > -2)) {
-    extractionDecision = "extraction-indicated";
-    extractionRationaleAr = "استطباب قلع الضواحك الأربعة (Four Premolars Extraction) لإرجاع القواطع المندفعة وضبط البروفايل الجمالي وتأمين إغلاق الشفاه.";
-  } else if (classification === "Class II div 2" || (conv != null && conv < -1) || (eUl != null && eUl < -5)) {
-    extractionDecision = "non-extraction";
-    extractionRationaleAr = "خطة غير قالعة (Non-Extraction) للحفاظ على امتلاء الشفاه والبروفايل، مع فتح العضة وتصحيح ميلان القواطع العلوية والسفلية.";
-  } else if (upperIncisor === "proclined" || lowerIncisor === "proclined") {
-    extractionDecision = "borderline";
-    extractionRationaleAr = "حالة حدية (Borderline): يُوصى بدراسة أمثلة الجبس وحساب التزاحم (Bolton / Model analysis) واللجوء للبرد السني (IPR) أو القلع وفق تقدير الطبيب.";
-  } else {
-    extractionDecision = "non-extraction";
-    extractionRationaleAr = "خطة غير قالعة مع رصف وتسوية وتنسيق الإطباق.";
-  }
-
-  const recommendationsParts: string[] = [];
-  recommendationsParts.push(`• قرار القلع: ${extractionRationaleAr}`);
-  if (growthModificationAr) recommendationsParts.push(`• تعديل النمو: ${growthModificationAr}`);
-  if (expansionAr) recommendationsParts.push(`• التوسيع: ${expansionAr}`);
-  if (anchorageOrTADsAr) recommendationsParts.push(`• التثبيت والإرساء: ${anchorageOrTADsAr}`);
-  if (orthognathicSurgeryAr) recommendationsParts.push(`• الجراحة التقويمية: ${orthognathicSurgeryAr}`);
-
-  const narrativePlanAr = recommendationsParts.join("\n");
+  // This engine documents measurements, never selects irreversible treatment.
+  const extractionDecision = "not-specified" as const;
+  const extractionRationaleAr = "قرار القلع أو عدمه وخيارات العلاج يحددها الطبيب بعد تقييم الحالة الكامل؛ لا تصدر من هذه القياسات وحدها.";
+  const growthModification = false;
+  const expansion = false;
+  const anchorageOrTADs = false;
+  const orthognathicSurgery = false;
+  const narrativePlanAr = "مسودة وصف للقياسات للمراجعة، وليست خطة علاج معتمدة. تقييم النمو يحتاج طريقة وتاريخًا وتوثيقًا سريريًا؛ العمر وحده لا يحدد حالة النمو.";
 
   const formattedFinalDx = `${sagittalDesc} · ${verticalDesc} · ${profileTypeAr}`;
 
   return {
+    review: { state: "draft", source: "local-measurement-summary", engineVersion: CEPH_SUGGESTION_ENGINE_VERSION,
+      growthAssessment: "not-assessed", suppliedAgeYears: finiteCephValue(patientInfo?.age) },
     sagittalSkeletal: {
       classification,
       severity,
@@ -1387,7 +1331,7 @@ export function generateCephExpertDiagnosis(
       pattern: verticalPattern,
       descriptionAr: verticalDesc,
       detailsAr: verticalDetails,
-      growthTendencyAr: growthTendency,
+      growthTendencyAr: "حالة النمو غير مقيمة؛ تحتاج تقييم الطبيب الموثق بطريقة وتاريخ، ولا تستنتج من العمر أو زوايا الصورة وحدها.",
     },
     dentalAnalysis: {
       descriptionAr: dentalDetails.join(" · "),
@@ -1408,13 +1352,9 @@ export function generateCephExpertDiagnosis(
       extractionDecision,
       extractionRationaleAr,
       growthModification,
-      growthModificationAr,
       expansion,
-      expansionAr,
       anchorageOrTADs,
-      anchorageOrTADsAr,
       orthognathicSurgery,
-      orthognathicSurgeryAr,
       narrativePlanAr,
     },
     formatted: {
@@ -1627,4 +1567,3 @@ export function suggestLandmarks(
 
   return result as Record<LandmarkCode, Pt>;
 }
-
