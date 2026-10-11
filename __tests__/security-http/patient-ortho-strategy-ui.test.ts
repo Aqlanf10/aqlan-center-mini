@@ -299,8 +299,19 @@ describe("Ortho problem → objective → strategy on the real patient page", ()
       await openPrescription(f.page); expect(await begin(f.page).count()).toBe(0); expect(await draft(f.page).count()).toBe(0);
       const bridge = editor(f.page).getByRole("button", { name: "ربط هذه الحالة بالمشاكل وبنود الخطة", exact: true });
       expect(await bridge.isEnabled()).toBe(true);
-      await editor(f.page).getByRole("button", { name: "تحديث سجل الخطة", exact: true }).click();
-      await expect.poll(() => f.reads.length).toBe(2); expect(f.writes).toEqual([]);
+      const [refreshResponse] = await Promise.all([
+        f.page.waitForResponse(response => response.request().method() === "GET" && response.url() === `${baseUrl}${PATH}`),
+        editor(f.page).getByRole("button", { name: "تحديث سجل الخطة", exact: true }).click(),
+      ]);
+      expect(refreshResponse.status()).toBe(200);
+      expect(await refreshResponse.finished()).toBeNull();
+      expect(await refreshResponse.json()).toEqual(missingBridge(f.patientIds.a));
+      await bridge.waitFor({ state: "visible" });
+      expect(await bridge.isEnabled()).toBe(true);
+      expect(await editor(f.page).getByText("جارٍ التحقق من خطة الحالة…", { exact: true }).count()).toBe(0);
+      expect(await editor(f.page).getByRole("alert").count()).toBe(0);
+      expect(await begin(f.page).count()).toBe(0); expect(await draft(f.page).count()).toBe(0);
+      expect(f.reads).toEqual([PATH, PATH]); expect(f.writes).toEqual([]);
       await assertStrategyControlBounds(f.page, width, "bridge-prerequisite", [bridge]);
     });
   });
