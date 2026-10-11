@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PatientFilePage from "../app/patients/[id]/page";
+import { PatientLedger } from "../components/PatientLedger";
 import { PatientCases } from "../components/PatientCases";
 import { PatientEndo } from "../components/PatientEndo";
 import { PatientOrtho } from "../components/PatientOrtho";
@@ -498,6 +499,13 @@ describe("verified same-case pillar handoff", () => {
 });
 
 describe("compact patient account header and Account details", () => {
+  const accountDetails = () => {
+    const ledgers = render().filter(element => element.type === PatientLedger);
+    expect(ledgers).toHaveLength(1);
+    expect(ledgers[0].props.patientId).toBe(Number(hooks.patientId));
+    return ledgers[0].props.accountDetails as ReactNode;
+  };
+  const accountBanners = () => nodes(accountDetails()).filter(element => element.props["data-testid"] === "patient-account-currency-banner");
   it("keeps signed ledger totals compact and moves agreement and historical details to Account", async () => {
     const zero = { balanceMinor: 0, invoicedMinor: 0, paidMinor: 0, openingMinor: 0,
       agreedMinor: 0, treatmentDoneMinor: 0, remainingTreatmentMinor: 0,
@@ -505,7 +513,7 @@ describe("compact patient account header and Account details", () => {
     const progress = { historicalItems: 1, knownItems: 0, knownDoneItems: 0, knownDoneMinor: 0, knownRemainingMinor: 0 };
     const financial = { ...zero, byCurrency: {
       YER: { ...zero, agreementRemainingMinor: 900000, clinicalProgress: progress },
-      SAR: { ...zero, balanceMinor: 2300, openingMinor: 2300 },
+      SAR: { ...zero, balanceMinor: 25000000, openingMinor: 25000000, remainingTreatmentMinor: 25250000 },
       USD: { ...zero, balanceMinor: -500, paidMinor: 500 },
     } };
     const originalValue = JSON.stringify(financial);
@@ -519,7 +527,7 @@ describe("compact patient account header and Account details", () => {
     await vi.waitFor(() => expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(3));
     const totals = render().filter(element => element.props["data-testid"] === "patient-account-currency-total");
     expect(totals).toHaveLength(3);
-    expect(text(totals.find(element => element.props["data-currency"] === "SAR"))).toContain(`إجمالي المستحق (${CURRENCY_LABEL.SAR}): ${formatMoney(2300, "SAR")}`);
+    expect(text(totals.find(element => element.props["data-currency"] === "SAR"))).toContain(`إجمالي المستحق (${CURRENCY_LABEL.SAR}): ${formatMoney(25000000, "SAR")}`);
     expect(text(totals.find(element => element.props["data-currency"] === "USD"))).toContain(`رصيد دائن للمريض (${CURRENCY_LABEL.USD}): ${formatMoney(500, "USD")}`);
     expect(text(totals.find(element => element.props["data-currency"] === "YER"))).toContain(`لا مبلغ مستحق (${CURRENCY_LABEL.YER})`);
     expect(text(totals)).not.toContain("المتبقي من الاتفاق");
@@ -527,27 +535,37 @@ describe("compact patient account header and Account details", () => {
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-banner")).toHaveLength(0);
     click("patient-tab-account");
     await vi.waitFor(() => {
-      const banners = render().filter(element => element.props["data-testid"] === "patient-account-currency-banner");
+      const banners = accountBanners();
       expect(banners).toHaveLength(3);
     });
-    const banners = render().filter(element => element.props["data-testid"] === "patient-account-currency-banner");
+    const banners = accountBanners();
+    expect(text(accountDetails())).toContain("القيمة المخططة وتقدم العمل منفصلان عن الدَّين");
+    expect(text(accountDetails())).toContain("لا تجمع هذه الأرقام مع المستحق");
     for (const currency of ["YER", "SAR", "USD"] as const) {
       const banner = banners.find(element => element.props["data-currency"] === currency)!;
-      expect(text(banner)).toContain(`رصيد الحساب (${CURRENCY_LABEL[currency]}): ${formatMoney(financial.byCurrency[currency].balanceMinor, currency)}`);
+      expect(text(banner)).toContain(`تفاصيل العمل (${CURRENCY_LABEL[currency]})`);
+      expect(text(banner)).not.toContain("رصيد الحساب (");
       expect(text(banner)).not.toContain("المستحق الحالي مسدّد");
-      expect(text(banner).includes("لا مبلغ مستحق بهذه العملة")).toBe(currency === "YER");
+      expect(text(banner)).not.toContain("لا مبلغ مستحق بهذه العملة");
     }
+    const planned = banners.find(element => element.props["data-currency"] === "SAR")!;
+    expect(text(planned)).toContain(`قيمة العمل المخطط المتبقي (ليست رصيد الحساب): ${formatMoney(25250000, "SAR")}`);
+    expect(text(planned)).not.toContain(formatMoney(25000000, "SAR"));
+    expect(text(totals)).not.toContain(formatMoney(25250000, "SAR"));
     const historical = banners.find(element => element.props["data-currency"] === "YER")!;
-    expect(text(historical)).toContain(`المتبقي من الاتفاق: ${formatMoney(900000, "YER")}`);
+    expect(text(historical)).toContain(`باقي الاتفاق (ليس المستحق الحالي): ${formatMoney(900000, "YER")}`);
     expect(nodes(historical).find(element => element.type === HistoricalClinicalNote)?.props)
       .toMatchObject({ progress, currency: "YER" });
     expect(JSON.stringify(financial)).toBe(originalValue);
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
     hooks.username = "new-financial-owner";
+    expect(render().filter(element => element.type === PatientLedger)).toHaveLength(0);
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
   });
 
   it("does not invent a zero-balance banner without verified workflow financial data", () => {
+    click("patient-tab-account");
+    expect(accountBanners()).toHaveLength(0);
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-banner")).toHaveLength(0);
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
   });
@@ -561,6 +579,8 @@ describe("compact patient account header and Account details", () => {
         financial: { byCurrency: { YER: { balanceMinor: 500 }, SAR: { balanceMinor: 0 }, USD: { balanceMinor: kind === "malformed" ? "0" : 0 } } } });
     });
     await mount();
+    click("patient-tab-account");
+    expect(accountBanners()).toHaveLength(0);
     expect(render().filter(element => element.props["data-testid"] === "patient-account-currency-total")).toHaveLength(0);
   });
 });

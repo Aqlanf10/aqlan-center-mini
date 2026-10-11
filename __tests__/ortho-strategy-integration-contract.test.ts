@@ -13,8 +13,8 @@ const boundaries = [
   ["Ortho owner", ortho, "function makeOwner(", "function sameDraftValue", "b8ae3da315cde570ccc2a3b4c463dfb644692725f781501bcecdd922664c157e"],
   ["Ortho retirement", ortho, "function retireOwner(", "function sessionScope", "256983951910e914e0084b53d4b1fd25a9b9efd006d5d0c8d209e97a4f3f12d1"],
   ["Ortho mutation admission", ortho, "function beginMutation(", "function endMutation", "15c0f2e29b6a017dc3f0b40c03398011f7ddad2f28fbbbf763f3758720d5b056"],
-  // Reviewed canonical-context wrapper from integrated navigation; all other5ae authority pins remain unchanged.
-  ["Ortho scoped navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "635ac672fa20149d15e44962d47e083bda130a617b4fc87caab1c3cf9280a79d"],
+  // Reviewed invoice-entry callback addition; owner/child/mutation/draft authority above remains unchanged.
+  ["Ortho scoped navigation", ortho, "export function PatientOrtho(", "function PatientOrthoWorkspace(", "d634abadbc7ead9e9e9dd110b007321ae44f37b79bf0d313a02f2c0edda0f392"],
 ] as const;
 describe("strategy integration preserves released5ae authority boundaries", () => {
   it.each(boundaries)("keeps %s byte-identical", (_label, source, start, end, hash) => {
@@ -28,6 +28,11 @@ describe("strategy integration preserves released5ae authority boundaries", () =
     expect(wrapper).toContain("context?: ClinicalNavigationContext");
     expect(wrapper).toContain("onContextChange?: (context: ClinicalNavigationContext) => unknown");
     expect(wrapper).toContain("context={context} onContextChange={onContextChange}");
+    expect(wrapper).toContain("onOpenTreatmentEntry?: () => unknown");
+    expect(wrapper).toContain("onOpenTreatmentEntry={onOpenTreatmentEntry ? () => { if (!onNavigationGuardChange && !canLeave()) return; onOpenTreatmentEntry(); } : undefined}");
+    const workspace = ortho.slice(ortho.indexOf("function PatientOrthoWorkspace("));
+    expect(workspace).toContain("onOpenTreatmentEntry?: () => unknown");
+    expect(workspace).toContain('onOpenTreatmentEntry ? <button type="button" onClick={() => { if (currentView()) onOpenTreatmentEntry(); }}');
     expect(wrapper).toContain("if (!owner.active) return false;");
     expect(wrapper).toContain("for (const guard of childGuards.current.values()) if (!guard()) return false;");
     expect(wrapper).toContain("if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;");
