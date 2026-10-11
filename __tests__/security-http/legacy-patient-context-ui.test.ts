@@ -146,7 +146,17 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
       await expect.poll(() => f.page.url()).toBe(orthoUrl);
       await f.page.getByTestId(`ortho-case-${caseId}`).waitFor();
       await f.page.getByText("بدأ قبل النظام", { exact: true }).waitFor();
-      await f.page.getByTestId("patient-subtab-plans").click();
+      if (width === 390) {
+        const sections = f.page.getByTestId("patient-treatment-section");
+        expect(await sections.isVisible()).toBe(true);
+        expect(await sections.inputValue()).toBe("ortho");
+        await sections.selectOption("plans");
+        expect(await sections.inputValue()).toBe("plans");
+      } else {
+        const plans = f.page.getByTestId("patient-subtab-plans");
+        expect(await plans.isVisible()).toBe(true);
+        await plans.click();
+      }
       await f.page.getByRole("region", { name: "التقويم السابق ضمن خطة المريض" }).getByText(`حالة #${caseId}`, { exact: false }).waitFor();
       const returned = new URL(f.page.url());
       expect(returned.pathname).toBe(`/patients/${patientId}`);
