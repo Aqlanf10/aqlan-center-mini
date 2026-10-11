@@ -1,4 +1,13 @@
-# Source-only HR + current PR #322 integration preparation, 2026-10-11
+# Current local Ortho union review, 2026-10-11
+
+The local activation packet composes exact PR325 `2eda4f5bcec6d604ec6a4156d04b4d87ec388ac9`
+with PR324 `476f374b33e996bcf2909cbdb9449d25fffcc6c0`. See
+[`review/ORTHO_UNION_LOCAL_REVIEW.md`](review/ORTHO_UNION_LOCAL_REVIEW.md) for actual
+source identity, synthetic PostgreSQL evidence, open convergence findings and the
+0052–0054 suffix. 0055–0057 remain reserved. The earlier preparation text below is
+historical and does not describe the current local execution state.
+
+# Source-only HR + current PR #322 integration preparation, 2026-10-11 (historical)
 
 This is unexecuted source composition, not a deployed or accepted release. The pinned
 parents are HR `e92b733f709efb42af9541d266ce1e22fe61e10c` and current PR #322

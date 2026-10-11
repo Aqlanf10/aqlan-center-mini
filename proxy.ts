@@ -314,7 +314,7 @@ function unregisteredApiResponse(pathname: string, method: string): NextResponse
   return null;
 }
 
-export async function proxy(request: NextRequest) {
+async function handleProxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get("authorization");
   const hasAuthHeader = Boolean(authHeader && authHeader.startsWith("Bearer "));
@@ -387,6 +387,16 @@ export async function proxy(request: NextRequest) {
   }
 
   return securedNext(request);
+}
+
+/** API denials can return before the route handler (session, role, CSRF,
+ * size or registration). Keep those responses as private as successful reads. */
+export async function proxy(request: NextRequest) {
+  const response = await handleProxy(request);
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
+  return response;
 }
 
 export const config = {

@@ -1,0 +1,554 @@
+{
+  "base": "2eda4f5bcec6d604ec6a4156d04b4d87ec388ac9",
+  "code_checkpoint": "9259dc6f5a56d6e40e3fc1d3d8bf0e310fc132fa",
+  "functions": [
+    {
+      "function": "itemsFor",
+      "same_as_PR325": true,
+      "sha256": "074f5f94010ec7af91944ac7dc04dc75663fe3aab173ff7e754dc3aa2ba008dc",
+      "optional_client_preserved": true
+    },
+    {
+      "function": "getInvoice",
+      "same_as_PR325": true,
+      "sha256": "357355f1179807bf5e122727fede0b15c061a0579837ad8c2259f61aef4fd812",
+      "optional_client_preserved": true
+    }
+  ],
+  "unchanged_protected_files": [
+    {
+      "path": ".github/workflows/hr-ui-failure-diagnostic.yml",
+      "sha256": "6dd6dc37d513277cac0bfae5d8f5dde712cc65d80f1cff0bb14d8e6186e07f09"
+    },
+    {
+      "path": ".github/workflows/hr-union-catalog-candidate.yml",
+      "sha256": "b10ff343cc45c8fdc6ff8ebd45f018a7fea1ece01ba6650f4f1ed599bec29eea"
+    },
+    {
+      "path": "app/api/hr/attendance/corrections/route.ts",
+      "sha256": "656f84494712cf46b1568b3fdf35460e91d2d776013e130b9c6b175fc11d65a3"
+    },
+    {
+      "path": "app/api/hr/attendance/route.ts",
+      "sha256": "75c5663bfb5f1317bdb1ce1433a480d615bf47c8f57246942fd3d53db6c28387"
+    },
+    {
+      "path": "app/api/hr/contracts/[id]/route.ts",
+      "sha256": "87eaff656499c85a816862a6c923bed28e344adef6dcc09837e2bc4326d98f01"
+    },
+    {
+      "path": "app/api/hr/contracts/route.ts",
+      "sha256": "239440f51c8f474bac513bc2c8d4462ef6dc1c21fe442b933bef5eedc9503963"
+    },
+    {
+      "path": "app/api/hr/directory/route.ts",
+      "sha256": "466e906005e0e4a0769bac94c852f5cd836a9f8c410ca2fa29c854bfe1af962d"
+    },
+    {
+      "path": "app/api/hr/leaves/[id]/route.ts",
+      "sha256": "77f19c11cffa9e8bf9a65d2b7a045b1a9a78b2117c788997f319e3525014d31c"
+    },
+    {
+      "path": "app/api/hr/leaves/balances/route.ts",
+      "sha256": "8d8610b783a2fba42ba62598fb01248cae1ba94ff3cae76262243e04a4b7815c"
+    },
+    {
+      "path": "app/api/hr/leaves/route.ts",
+      "sha256": "f9b518691382843f311ed158664fec94daa0d3fe80ccf5b2c062489fbebe86e4"
+    },
+    {
+      "path": "app/api/hr/payroll/disburse/route.ts",
+      "sha256": "2841bbb1949cd4139e4655e895b65d4f418777a33c4ad9f9eb4866e469465463"
+    },
+    {
+      "path": "app/api/hr/payroll/periods/route.ts",
+      "sha256": "0bd7f3bb334e2084d7f43499d829f7542c2dd72d59251b7f22f7381ae903453b"
+    },
+    {
+      "path": "app/api/hr/payroll/runs/route.ts",
+      "sha256": "16de91ec4bb9b9a01fa244f6a384b1876075c5e9469a71521d81d6a65192d15a"
+    },
+    {
+      "path": "app/api/hr/reports/route.ts",
+      "sha256": "8983e55d7f01bbebc2355190be93e0af5eee071a92a18cd4670d138cb7a37462"
+    },
+    {
+      "path": "app/api/hr/schedules/[id]/route.ts",
+      "sha256": "08ab4dd1d5a7d01927efe0f644edede70ba1e5f0f7a1fd7d3975ebc01db37646"
+    },
+    {
+      "path": "app/api/hr/schedules/route.ts",
+      "sha256": "605e526a793336c9456e086601dbb091ad79c3de28b6bbc7bf290d71f206a986"
+    },
+    {
+      "path": "app/api/hr/settings/route.ts",
+      "sha256": "a730dc8f2f5304553e8c2352841ea0cce6846d9f1eece4717a78440bb75c796e"
+    },
+    {
+      "path": "app/api/hr/staff/[id]/route.ts",
+      "sha256": "19c041b3c43b9f188361dd5205d6c3adba414a8b4a62b7dfad13986f41411c39"
+    },
+    {
+      "path": "app/api/hr/staff/route.ts",
+      "sha256": "5a5bfe5321d53bc7878b0c2495fccd24ef276b2cca365d5ce019e53703da73a2"
+    },
+    {
+      "path": "app/hr/page.tsx",
+      "sha256": "4bb81481b819f013ba92e2be64da391ac29e7d164e3033307d7d4a2eb667efb8"
+    },
+    {
+      "path": "app/print/hr/contracts/[id]/page.tsx",
+      "sha256": "f6ec356dd2639f285500b7fd36c5afb3b702afb2cdc2824dee83f3a582ce9a1b"
+    },
+    {
+      "path": "app/print/hr/payroll/[id]/page.tsx",
+      "sha256": "03a442b5d6540f8eaac300d24932367e62b0abbae889590d7dd078b10eda3f7c"
+    },
+    {
+      "path": "app/print/hr/staff/page.tsx",
+      "sha256": "8511eb2ea6a13338db04289f08e0b3a68c098d8550480cd5d0be651d6e390ec2"
+    },
+    {
+      "path": "app/print/hr/tasks/page.tsx",
+      "sha256": "e16024a6555c300b94908338f6fb8543bf6e4b71cb68eeb3ab504028c5c09284"
+    },
+    {
+      "path": "components/dental/invoice-preview-state.ts",
+      "sha256": "ba60edea2e1deccb02859512a798ea44fadff0958cd7d384b9108799753dd7e2"
+    },
+    {
+      "path": "components/dental/invoice-selection-state.ts",
+      "sha256": "a5533779f495e9780d04cd5b1378d8874e9aca8e9a1d5b95a62331ba894db478"
+    },
+    {
+      "path": "components/dental/invoice-template-preview.ts",
+      "sha256": "5d9456674daa4aeaf5afda8fdf339b9b8417f7ee236e02c71e79ff4f746aa314"
+    },
+    {
+      "path": "components/dental/invoice-tooth-selection.ts",
+      "sha256": "8edb7a5442f9c0a0deaa53f9ff2e46cf8e80a82be77c4bf1bc64414fa1153a24"
+    },
+    {
+      "path": "components/hr/AttendancePanel.tsx",
+      "sha256": "eceac4a2501ea374174d0b799aa35eedd53c3d12a20b269147880f6e472a20b1"
+    },
+    {
+      "path": "components/hr/ContractsPanel.tsx",
+      "sha256": "508619c387ec96e04ea30ab57f4d00c7788f8f131aa96c72bcdbc0c427c0d650"
+    },
+    {
+      "path": "components/hr/LeavesPanel.tsx",
+      "sha256": "370748d321306009787ca9a525e5f00b8c8f4444386a25e4526b43ca454adc68"
+    },
+    {
+      "path": "components/hr/PayrollPanel.tsx",
+      "sha256": "bf66337b9e1a06e8776e266b5b944ac6357722978cedbe24faa8cce7d32d32b6"
+    },
+    {
+      "path": "components/hr/ReportsPanel.tsx",
+      "sha256": "8603d6ae294fcdb76ba72938d0ffc4fc0643e94423761550705eb410c4d02520"
+    },
+    {
+      "path": "components/hr/StaffPanel.tsx",
+      "sha256": "f5451abbf3ff7350b0e3916d62f17ed5937f6a050809a6cc611b63e6990a3318"
+    },
+    {
+      "path": "components/hr/StaffProfileModal.tsx",
+      "sha256": "24c03391e5285331dcef958387839d2c3b63f38b7c3ca95c24bedf55e58edab1"
+    },
+    {
+      "path": "components/hr/TasksPanel.tsx",
+      "sha256": "5fd6774be06bed76b56cb746d426d61705a262ea93fb7f738af492ae260c1d28"
+    },
+    {
+      "path": "components/invoice-clinical-readiness.ts",
+      "sha256": "de973fe05b6f4465bf1395aefc6d3a181f4f2f763a6dde05ec8b6659eac7fd3e"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-migrations.sha256",
+      "sha256": "8361ac985c29459528594396008e3d1a8828f68a7cc16edd450a89d3ce076b35"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-approved-1280.png",
+      "sha256": "d900b787096719524771e8440323cf96ce93be25ec3c0dd828389d91461fb56b"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-approved-390.png",
+      "sha256": "d265b9e767cfcc312115ee4a98b8d9bca25dd1d56b0bd4ffc1106eb33290a1a4"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-doctor-1280.png",
+      "sha256": "d0584f14976a6adf0ed011d2093a2576468da46def4b2b09d52f9f11e6fe9f55"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-doctor-390.png",
+      "sha256": "d344bdc6d3d55117f083ffad338d97e732a69e00d20ed6cdf16db20391e45882"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-form-1280.png",
+      "sha256": "bc32124643078d2591d80448969fefb19f580e0696bc10c587bbea78c3eae19a"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-form-390.png",
+      "sha256": "455236c36e61d9ef98aecce6951efe0a3050957b6b8bd295a4bec84f4dc518ef"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-reception-1280.png",
+      "sha256": "435c6874ceac7b86591a17c32490331c2d930efe30fdbe28dcf62902c4268549"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-reception-390.png",
+      "sha256": "11b56a872a1600d0286edb40eff6863a00b0e88e4e2bf90408fea89ac6dbbb3e"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-result-1280.png",
+      "sha256": "6a6653e2ef39668e01798c743b32ab1db2de82abdaa02333008a9832fca2ccb4"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-result-390.png",
+      "sha256": "4d9a9c9d9fac58c1bd502dc0e6a8d943a2d02340ae9055ec242c94cdbd507c41"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-self-denied-1280.png",
+      "sha256": "1b11738dcd1be4b7c9d2eba23cd70b2c05b53a3d65178cef2566dabb2a47ca89"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-nextday-self-denied-390.png",
+      "sha256": "813533c8600f1e99cdb9ae4a645b5510a6096b8f683f9c2b8db50f1e5d9d900c"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-payroll-1280.png",
+      "sha256": "2b4106412b895037229013988dd7cb8193feeb19db285e3b824359e787deeee9"
+    },
+    {
+      "path": "docs/evidence/hr-attendance-followup/hr-payroll-390.png",
+      "sha256": "17860e9fe0b8fd4317f718070dca8c40dbae52ce584e9cd7f4d89f766e6d23bc"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-desktop-1280.png",
+      "sha256": "f9de84b60897b7e2259a31e2563672c97cefe17c4a9101378b5ee11d379bc00d"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-keyless-reversal-1280.png",
+      "sha256": "adf5ee7c494795652a45e1ad51501091f0cf956b6c7dc19059382abebba4932c"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-keyless-reversal-390.png",
+      "sha256": "760b304a84bcbf6e4089689a9136b83be9616122f50e31c8b7460e1d7608b5b4"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-approved-1280.png",
+      "sha256": "6b3c09d235482c9a56050c1272284b03ffecc861ae0cff4707d138251930861a"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-approved-390.png",
+      "sha256": "d265b9e767cfcc312115ee4a98b8d9bca25dd1d56b0bd4ffc1106eb33290a1a4"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-doctor-1280.png",
+      "sha256": "d10e3ad246487e1c83197ff93f51a9969cdd91ee003b2172ab867109d8cef5d2"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-doctor-390.png",
+      "sha256": "d344bdc6d3d55117f083ffad338d97e732a69e00d20ed6cdf16db20391e45882"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-form-1280.png",
+      "sha256": "0662ead55846c987d08259da41d675cfbc3fe741a4898427b5e758d3575e1170"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-form-390.png",
+      "sha256": "455236c36e61d9ef98aecce6951efe0a3050957b6b8bd295a4bec84f4dc518ef"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-reception-1280.png",
+      "sha256": "e51e9a0cc2af6dec5b4c079c30d9edd55503d95e516343f186dfd2316b4b3eec"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-reception-390.png",
+      "sha256": "11b56a872a1600d0286edb40eff6863a00b0e88e4e2bf90408fea89ac6dbbb3e"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-result-1280.png",
+      "sha256": "354cdc7a156558ceb3fd8d0dfa422e43d59da41cff075bc651d4460ef9023dfa"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-result-390.png",
+      "sha256": "4d9a9c9d9fac58c1bd502dc0e6a8d943a2d02340ae9055ec242c94cdbd507c41"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-self-denied-1280.png",
+      "sha256": "c874373b08a9be6d5897f2e00d1e666b12aa688ea84681fc236fd11e8139c3b4"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-nextday-self-denied-390.png",
+      "sha256": "813533c8600f1e99cdb9ae4a645b5510a6096b8f683f9c2b8db50f1e5d9d900c"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-1280.png",
+      "sha256": "df94841e028beea6c5f3c69d687205884dfd63a294a958a5a2bbbd4ff87b7a6d"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-390.png",
+      "sha256": "17860e9fe0b8fd4317f718070dca8c40dbae52ce584e9cd7f4d89f766e6d23bc"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-all-rows.pdf",
+      "sha256": "f2691dac9e33f72f00e7ff752459ca93050ee0f3329b9dd6cdd847ad83d68204"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-multipage-1280.pdf",
+      "sha256": "ce842b65e07818c96ebc05a3b865693b70290d064846be9d81c84ba771c117a7"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-multipage-1280.png",
+      "sha256": "7a17ed4fd3177547f24f28cdc73bb454c351fccee44a46e410cb358c65d03c63"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-multipage-390.pdf",
+      "sha256": "d389c5d223f313a0ee107582705a27a638907e0a917da5ccc58a36f2a8903932"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-multipage-390.png",
+      "sha256": "f8aba2cf70a209cc4982f52d1ab3edb69d83b9961a56ec6e8ccb58b3582e8494"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-period-race-1280.png",
+      "sha256": "ab103fe5a0335ad8a76c3b1d881fd20a42ca790762b3d8c77153fdad08e1e4a5"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-payroll-period-race-390.png",
+      "sha256": "0a1d1766d3dd3cc0eba22a82b0dc7931439186068957e81f259521bd769b9a4d"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-phone-390.png",
+      "sha256": "a92b1d6813c86834a69dd6632ec211b189dfa3ff9e682a984becb8c5f1423e0f"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-phone-board-390.png",
+      "sha256": "3fddd4f96f22f0586db6b09d667f032b8620696a2278e5d0e7892bae8e66bc1a"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-reception-desktop-1280.png",
+      "sha256": "f9b0ad5744e10e7c804ede7ff6363c773d11dcdf7d979e27d3077add5b97a4ef"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-staff-desktop-1280.png",
+      "sha256": "b83f30e7c58834c7b6860b182110aea5d97c294a718d8f1db3e6a9273a2f18b9"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-staff-print-preview.png",
+      "sha256": "f35424e8b9d8e19d88f96cf7c19b8af962a5bcb4d43f883473229363ba51b952"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-staff-report.pdf",
+      "sha256": "110b733ee6b13479f9ea4260efcd62b0549844c08e76d725055bd9a9ee5d9aeb"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-task-edit-1280.png",
+      "sha256": "5e9b129abea7d805ce001db06620ff39c1bf90aff8ee340294665eec11a8be93"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-task-stale-409-1280.png",
+      "sha256": "e4c4f1aceecb2620ca78bdaf53853d4ced2124b1a8c3fe4d26f269afafe60ed1"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-tasks-desktop-1280.png",
+      "sha256": "c55af804747072ac684cb046308f63871dfaf932f2209f30d2c72c9a109ed563"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-tasks-print-preview.png",
+      "sha256": "830b4f8ffcf4a85c27b535d4abd965e17e882fd5591b084cf98a9a69c66cffef"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-tasks-report.pdf",
+      "sha256": "6236b5661b80faab525b1130f3ebd4a3222919f8610f26b3ba07913da769956c"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-foreign-1280.png",
+      "sha256": "7940acfbb1c49e154d586dc91222332e2c569e2c32e83464ca27c52c8000ffd7"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-foreign-390.png",
+      "sha256": "5c7707f9f41ebf2dde72eb137638b2c0fafaebb60da750d1b75dddc044dc8993"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-missing-1280.png",
+      "sha256": "94279b52ec1645725a6b6369af3fa95a1bb40a8b15ee015db20d97a5af87d619"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-missing-390.png",
+      "sha256": "bad41647ecea331d566ec3d704d5084bea2c566f49b9831040df8ab943056183"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-reversal-1280.png",
+      "sha256": "0397c3c69a59e4ecf8f6c10928cdb1b74d8fe8dc8f8e58aabe1cd98e597292d3"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-unverified-reversal-390.png",
+      "sha256": "2f53de1651e533750960d0f95de3cf15460b72e8bbc6ea8f05aa88601b556b40"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-verified-replay-foreign-1280.png",
+      "sha256": "0b7660f1be7e238cc15f60873ddba12a903c71697cdf3e0cf264ba019814e509"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-verified-replay-foreign-390.png",
+      "sha256": "207b0a3e23c08762d40ee5a245dfa9581ccf72a0f2391fc192be0b7168cc61a8"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-verified-replay-missing-1280.png",
+      "sha256": "c45429e1420c4a1b5335edc1527457ff9eb2abaab08f3e4fa0687e1a2bc754ac"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-verified-replay-missing-390.png",
+      "sha256": "7049c00c09b95c38974b320933ca4455482c5193fc979514c7ca96c8f2452e89"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-workforce-1280.png",
+      "sha256": "684afce27a5314a98dda15fc9adf1f4664c18b6164a7cca9f775cae417d516f9"
+    },
+    {
+      "path": "docs/evidence/hr-payroll-confirmation/hr-workforce-390.png",
+      "sha256": "a4b221334bf267e4bd512fd490fb91d08794750c5849bef01e67202355a04b87"
+    },
+    {
+      "path": "lib/hr-contract-save-receipt.ts",
+      "sha256": "867a9957043b3173b25d1b5ae3f6aa4e62eeed332bc2107cc523a6f7dca08ccc"
+    },
+    {
+      "path": "lib/hr-contracts-attendance-schema.ts",
+      "sha256": "fb21f8681f00357ee0430888a03f53ae41b67ce3e17fd5c415ea0a60ffb24c89"
+    },
+    {
+      "path": "lib/hr-contracts-attendance-shared.ts",
+      "sha256": "c86a8d32f138666f5f338ef3cbe4a7b233497a7392041af76b59a966cd6c8dc1"
+    },
+    {
+      "path": "lib/hr-contracts-attendance.ts",
+      "sha256": "c3141b41f1eefed1240ea49a99e837e88d9d0af8ce8dcfe90e5e21af92abe0f2"
+    },
+    {
+      "path": "lib/hr-pay-terms.ts",
+      "sha256": "416fb693048089dcd0cab18406a680a59731149cb56932d80512287673a4a80b"
+    },
+    {
+      "path": "lib/hr-payroll-authority.ts",
+      "sha256": "ee7f295c6171c14ed212e9e1722ccde1ea91afd62ae31bda5f61b49e6e6cab4e"
+    },
+    {
+      "path": "lib/hr-payroll-confirmation.ts",
+      "sha256": "d2b1f1a7df5a6c17ce6d58ddc1ff0f80de59419dc02fd680c896e71be1567bb9"
+    },
+    {
+      "path": "lib/hr-payroll-integrity-schema.ts",
+      "sha256": "617bfabdbcf014dce2bcf4117b0b5e63934dccedd6e4c4bf8dfaccda84719ea6"
+    },
+    {
+      "path": "lib/hr-payroll-schema.ts",
+      "sha256": "832c98d222d13cabe3efac9baf34a1cc08f4df5146d952704a05f5224dc38419"
+    },
+    {
+      "path": "lib/hr-payroll-shared.ts",
+      "sha256": "b83a0253aaeaefbeb8f37b910dec2a8d661495db379ecf5b26f309e74e5f5c46"
+    },
+    {
+      "path": "lib/hr-payroll.ts",
+      "sha256": "2790914315d19f8ce34c385eee80f8b9890498c0e3d74ed19c81cdcdea886bdc"
+    },
+    {
+      "path": "lib/hr-schema.ts",
+      "sha256": "1bd392fdbbddf885655be0b1456b59b542f74fa28594e8d7b77d721a18054e49"
+    },
+    {
+      "path": "lib/hr-settings-policy.ts",
+      "sha256": "cbe4285a3b1320970a3f5efbe03db41e0d7503a4a441dd4cfb08310b45af0956"
+    },
+    {
+      "path": "lib/hr-shared.ts",
+      "sha256": "ee46d1d1279fa8d65121a7754a9cc2e60063266be723edcf696af04a40caf161"
+    },
+    {
+      "path": "lib/hr-task-time.ts",
+      "sha256": "aa1450a33016d333c02c159a79e97927a33aa77a1835542026454bca507986e2"
+    },
+    {
+      "path": "lib/hr-tasks-schema.ts",
+      "sha256": "f9443e9f4d4cadf69f352ddd35854a5634f0ef41c0c499e6b95605ade07ab856"
+    },
+    {
+      "path": "lib/invoice-clinical-linkage.ts",
+      "sha256": "04c929429213cb20df5f17a2dd696654970786ef4f60fa70257e8deb807c95d5"
+    },
+    {
+      "path": "lib/invoice-command-recovery.ts",
+      "sha256": "193edc5bb5aa5699496327655233afd3927644ccb99d469c492253e6704ec6ce"
+    },
+    {
+      "path": "lib/invoice-command-transport.ts",
+      "sha256": "97b79a78c05ca2a6f8bc2c57165a4e32cf3b40b077f07817855762ba9b9270d9"
+    },
+    {
+      "path": "lib/invoice-correction.ts",
+      "sha256": "487e6e7233977f36f34c6590c1a42a27e30257c37caadbf906037d37b69cc60c"
+    },
+    {
+      "path": "lib/invoice-input.ts",
+      "sha256": "20019b7f49bb83452753ebd7464b5921dde60310e6ec6ce810ab920ce16f9cfc"
+    },
+    {
+      "path": "lib/invoice-linkage-db.ts",
+      "sha256": "b113db0fcf5b3f5a3b5888fce3a7c401d888238cdd162665f81c1bc9769dea26"
+    },
+    {
+      "path": "lib/invoice-linkage-schema.ts",
+      "sha256": "ea6cfe54a94a6f57b1293864d2992cfa6ff86465f65bacdc23f8528a64cdf820"
+    },
+    {
+      "path": "lib/invoice-pricing.ts",
+      "sha256": "accd2efea3b1585f9e96f513a7b30591eb89639f5b7329c42c21b18c968b7f5a"
+    },
+    {
+      "path": "lib/invoice-template-db.ts",
+      "sha256": "8f89181f966187a985a855d7c415c2ccc4c878ed30601cadf15dc7017a94127c"
+    },
+    {
+      "path": "lib/invoice-template-receipt.ts",
+      "sha256": "c35ee9022683aab59f2dfa7bd7e2d87e541cd86704dab41ad09570f1f9450dcc"
+    },
+    {
+      "path": "lib/invoice-template.ts",
+      "sha256": "84e999c91811a5e8b9d4aeb84d75d8d7690f567085609632f22f5177703af61c"
+    },
+    {
+      "path": "migrations/0045_hr_staff.sql",
+      "sha256": "c3ef983b19de9b33eb8d6c4460b8acbfe8a087321eb77252a6aece5b43b78970"
+    },
+    {
+      "path": "migrations/0046_hr_tasks.sql",
+      "sha256": "b56c20c66b7b9616d67b2abc48823d4c27c7935e6da39088f1859eedae9db8ff"
+    },
+    {
+      "path": "migrations/0047_ceph_correction_lineage.sql",
+      "sha256": "543ec31b8bb13679abaa19ecd46e2aaea6690f94129bfdfe10bd9f15d9437e10"
+    },
+    {
+      "path": "migrations/0048_hr_contracts_attendance_leaves.sql",
+      "sha256": "1b5d7a87e0d53d455b73363d0af45c0940c03a9fe10125ab9128eefab85eb241"
+    },
+    {
+      "path": "migrations/0049_hr_payroll_disbursements.sql",
+      "sha256": "7bdeeaf170029c845d56ca21e2836db746040a8490291b8fae3b2d3ad4b01e62"
+    },
+    {
+      "path": "migrations/0050_hr_payroll_integrity.sql",
+      "sha256": "f273b970554c11aca74d65a9926a68f324d47d87d3e2983489715c16d6454075"
+    },
+    {
+      "path": "migrations/0051_ortho_treatment_strategy.sql",
+      "sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e"
+    }
+  ],
+  "reset_hr_table_set_identical": true,
+  "note": "Content comparison, not a claim that every HR/finance behavior was exercised."
+}
