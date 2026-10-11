@@ -1,4 +1,4 @@
-import { normalizeHrPolicy } from "./hr-settings-policy";
+import { MAX_ATTENDANCE_GRACE_MINS, normalizeHrPolicy } from "./hr-settings-policy";
 /**
  * (HR-3 / HR-4) العقود، جداول العمل، الحضور والانصراف، والإجازات — **طبقة الخادم وقاعدة البيانات**.
  *
@@ -618,7 +618,7 @@ function validateSchedule(input: CreateScheduleInput): void {
   if (!Array.isArray(input.workingDays) || !input.workingDays.length || input.workingDays.some(day=>!Number.isInteger(day)||day<0||day>6)) throw new Error("حدد أيام عمل صالحة.");
   const start=minute(input.shiftStartTime), end=minute(input.shiftEndTime);
   if (start===end || (end<start && !input.crossesMidnight)) throw new Error("حدد عبور منتصف الليل للوردية الليلية.");
-  if (input.gracePeriodMins !== undefined && (!Number.isInteger(input.gracePeriodMins)||input.gracePeriodMins<0||input.gracePeriodMins>1440)) throw new Error("سماح الحضور غير صالح.");
+  if (input.gracePeriodMins !== undefined && (!Number.isInteger(input.gracePeriodMins)||input.gracePeriodMins<0||input.gracePeriodMins>MAX_ATTENDANCE_GRACE_MINS)) throw new Error("سماح الحضور غير صالح.");
   if (input.expectedDailyHours !== undefined && (!Number.isFinite(input.expectedDailyHours)||input.expectedDailyHours<=0||input.expectedDailyHours>24)) throw new Error("ساعات العمل اليومية غير صالحة.");
   if (input.scheduleType === "split" || input.secondShiftStart || input.secondShiftEnd) {
     const secondStart=minute(input.secondShiftStart),secondEnd=minute(input.secondShiftEnd);

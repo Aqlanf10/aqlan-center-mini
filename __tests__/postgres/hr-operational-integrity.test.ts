@@ -176,3 +176,18 @@ it.each(['rejected','approved'] as const)('a legacy %s split correction uses dec
  expect((await db.getPool().query('SELECT * FROM hr_attendance_punch_events WHERE staff_id=$1',[staffId])).rows).toHaveLength(4);
  expect((await db.getPool().query('SELECT * FROM hr_attendance_corrections WHERE id=$1',[correction.id])).rows[0]).toEqual(decided);
 });
+
+it('policy grace accepts the schema limit 120 and refuses 121 without persisting an unusable default',async()=>{
+ await pay.updateHrSettings({attendancePolicy:{lateGraceMins:120} as any},admin);
+ const before=await pay.getHrSettings();
+ await expect(pay.updateHrSettings({attendancePolicy:{lateGraceMins:121} as any},admin)).rejects.toMatchObject({code:'invalid_setting',status:400});
+ expect(await pay.getHrSettings()).toEqual(before);
+ expect((await work.createSchedule({staffId,name:'Schema grace boundary',scheduleType:'morning',effectiveFrom:'2026-01-01',workingDays:[0,1,2,3,4,5,6],shiftStartTime:'08:00',shiftEndTime:'16:00'},admin)).gracePeriodMins).toBe(120);
+});
+it('explicit schedule grace over the schema limit is rejected before the database constraint',async()=>{
+ const input={staffId,name:'Explicit grace boundary',scheduleType:'morning' as const,effectiveFrom:'2026-01-01',workingDays:[0,1,2,3,4,5,6],shiftStartTime:'08:00',shiftEndTime:'16:00'};
+ await expect(work.createSchedule({...input,gracePeriodMins:121},admin)).rejects.toThrow('سماح الحضور غير صالح');
+ const valid=await work.createSchedule({...input,gracePeriodMins:120},admin);
+ await expect(work.updateWorkSchedule(valid.id,{gracePeriodMins:121},admin)).rejects.toThrow('سماح الحضور غير صالح');
+ expect((await work.getWorkScheduleById(valid.id))?.gracePeriodMins).toBe(120);
+});
