@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatientOrtho, type AdjustmentForm } from "../components/PatientOrtho";
 import type { SessionInfo } from "../components/SessionProvider";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../lib/doctor-permissions";
+import type { OrthoStrategyReadResult } from "../lib/ortho-treatment-strategy-store";
 
 // STATUS: UNRUN. Source-authored deterministic regressions. Actual parent,
 // workspace, local forms, read guards and mutation guards execute. The hook
@@ -99,6 +100,10 @@ const fixture = (id = patientId, changes: Partial<Case> = {}): Case & { patientI
 });
 const contact = (id = patientId) => ({ patient: { id, fullName: "Synthetic patient", phone: "700000001" } });
 let patientId: number; let requests: Pending[]; let unexpected: string[];
+// Enabled only by the bracket-prescription scenarios that explicitly mount the
+// existing prescription pillar. Every other strategy URL/method stays denied.
+type StrategyBridgeFixture = Extract<OrthoStrategyReadResult, { state: "bridge_missing" }>;
+let strategyReadFixture: StrategyBridgeFixture | null = null;
 let scopes = new Map<string, Scope>(); let componentIds = new Map<unknown, number>(); let seen = new Set<string>();
 let executed = new Set<string>();
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<ResponseLike>>();
@@ -233,6 +238,7 @@ beforeEach(() => {
   unmount(); scopes = new Map(); componentIds = new Map(); executed = new Set(); hooks.changed = false; hooks.retiredWrites = 0;
   patientId = 19; hooks.session = principalA(); hooks.existingRefresh = null; requests = []; unexpected = []; fetchMock.mockReset(); createURL.mockReset(); revokeURL.mockReset();
   navigationRegistration = null; navigationRegistrations = []; delayNavigationCleanup = false; delayedNavigationCleanup = [];
+  strategyReadFixture = null;
   confirmLeave.mockReset(); confirmLeave.mockReturnValue(false);
   vi.stubGlobal("window", { confirm: confirmLeave, prompt: vi.fn() });
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-04T06:00:00Z"));
@@ -242,7 +248,9 @@ beforeEach(() => {
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 71, name: "Synthetic responsible doctor" }] });
-    const isRead = method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
+    const isStrategyRead = method === "GET" && url === "/api/ortho/41/strategy"
+      && patientId === 19 && strategyReadFixture?.patientId === 19 && strategyReadFixture.orthoCaseId === 41;
+    const isRead = isStrategyRead || method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
     const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline",
       "/api/appointments", "/api/visits/61/clinical", "/api/patients/19/documents", "/api/patients/20/documents"].includes(url);
     if (!isRead && !isWrite) { unexpected.push(`${method} ${url}`); return Promise.reject(new Error("Unexpected synthetic request")); }
@@ -506,21 +514,40 @@ describe("PatientOrtho outstanding-change navigation guard (source gate, UNRUN)"
 });
 
 describe("PatientOrtho recorded bracket prescription truth", () => {
-  // Uses the actual parent/workspace and the existing semantic label, so these
-  // assertions also execute against the pre-fix render without new selectors.
+  // Uses the actual parent/workspace and existing bracket label. Only explicit
+  // prescription-pillar mounting admits the separate exact-case strategy read.
   function prescriptionValue() {
     const cell = one((node) => node.type === "div" && Array.isArray(node.props.children)
       && node.props.children.some((child: ReactNode) => child && typeof child === "object"
         && "props" in child && child.type === "span" && text(child) === "فلسفة البراكيت"));
     return elements(cell).filter((node) => node.type === "span").at(-1)!;
   }
+  async function acceptStrategyRead(expectedCount: number) {
+    const strategyReads = reads().filter(request => request.url === "/api/ortho/41/strategy");
+    expect(strategyReads).toHaveLength(expectedCount);
+    expect(strategyReadFixture).not.toBeNull();
+    const request = strategyReads.at(-1)!;
+    expect(request.init).toMatchObject({ cache: "no-store" });
+    respond(request, strategyReadFixture); await flush();
+    expect(request.json).toHaveBeenCalledTimes(1);
+    expect(executed.has("OrthoTreatmentStrategy")).toBe(true);
+    expect(text(render())).toContain("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.");
+  }
   async function openPrescription(changes: Partial<Case>) {
     const row = fixture(19, changes);
+    const strategyReply: StrategyBridgeFixture = { ok: true, state: "bridge_missing", patientId: 19, orthoCaseId: 41,
+      clinicalCaseId: null, recordingContext: row.status === "completed" || row.status === "discontinued" ? "retrospective" : "current",
+      planVisible: true, clinicalWritable: true, planLinksWritable: true, canRevise: false,
+      history: [], revision: null, choices: { problems: [], planItems: [] } };
     const before = structuredClone(row);
     render(); const current = pair();
     respond(current.ortho, { cases: [row] }); respond(current.patient, contact()); await flush();
+    expect(reads().map(request => request.url)).toEqual(["/api/ortho?patientId=19", "/api/patients/19"]);
+    strategyReadFixture = strategyReply;
     click(one((node) => node.type === "button" && elements(node)
       .some((child) => child.type === "span" && text(child) === "خطة العلاج والميكانيكا")));
+    await acceptStrategyRead(1);
+    expect(reads().map(request => request.url)).toEqual(["/api/ortho?patientId=19", "/api/patients/19", "/api/ortho/41/strategy"]);
     return { row, before };
   }
 
@@ -530,7 +557,7 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(text(render())).not.toContain("Roth / MBT");
     expect(row).toEqual(before);
     expect(writes()).toEqual([]);
-    expect(reads()).toHaveLength(2);
+    expect(reads()).toHaveLength(3);
   });
 
   it.each(["Roth", "MBT 022", "Roth / MBT", "وصفة خاصة مسجّلة", "  Custom / prescribed  "])(
@@ -550,6 +577,8 @@ describe("PatientOrtho recorded bracket prescription truth", () => {
     expect(text(render())).not.toContain("Prior recorded prescription");
     respond(current.ortho, { cases: [fixture(19, { bracketSystem: null, planId: 73 })] });
     respond(current.patient, contact()); await flush();
+    await acceptStrategyRead(2);
+    expect(reads()).toHaveLength(6);
     expect(text(prescriptionValue())).toBe("غير مسجّلة");
     expect(text(render())).not.toMatch(/Prior recorded prescription|Roth \/ MBT/);
     expect(writes()).toEqual([]);

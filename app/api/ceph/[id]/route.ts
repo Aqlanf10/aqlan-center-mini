@@ -8,6 +8,7 @@ import {
 import { isCephLandmarkCode } from "@/lib/ceph";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -83,8 +84,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         );
       }
       const cal: CephCalibrationInput = { x1, y1, x2, y2, mm };
-      const done = await updateCephCalibration(id, cal, session.username);
-      if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+      const done = await updateCephCalibration(id, cal, session.username, { authorize: cephWriteAuthorizer(session) });
+      if (!done.ok) return NextResponse.json({ message: done.message }, { status: done.status ?? 409 });
     }
 
     // المعالم: دفعة نقاط برموز معلومة.
@@ -100,8 +101,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         }))
         .filter((p): p is { code: NonNullable<typeof p.code>; x: number; y: number; source: "manual" | "suggested" } =>
           p.code != null && p.x != null && p.y != null);
-      const done = await updateCephLandmarks(id, points, session.username);
-      if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+      const done = await updateCephLandmarks(id, points, session.username, { authorize: cephWriteAuthorizer(session) });
+      if (!done.ok) return NextResponse.json({ message: done.message }, { status: done.status ?? 409 });
     }
 
     // التشخيص المنظم: النظام يقترح والطبيب يحرر ويعتمد — على المسودة حصراً.
@@ -116,8 +117,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         softTissue: typeof d.softTissue === "string" ? d.softTissue : null,
         note: typeof d.note === "string" ? d.note : null,
         finalDx: d.finalDx,
-      }, session.username);
-      if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+      }, session.username, { authorize: cephWriteAuthorizer(session) });
+      if (!done.ok) return NextResponse.json({ message: done.message }, { status: done.status ?? 409 });
     }
 
     return NextResponse.json({ ok: true });
@@ -145,8 +146,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; /* الرفض بلا ملاحظة جائز */ }
 
   try {
-    const done = await discardCephAnalysis(id, session.username, note);
-    if (!done.ok) return NextResponse.json({ message: done.message }, { status: 409 });
+    const done = await discardCephAnalysis(id, session.username, note, { authorize: cephWriteAuthorizer(session) });
+    if (!done.ok) return NextResponse.json({ message: done.message }, { status: done.status ?? 409 });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ message: "تعذّر رفض المسودة." }, { status: 500 });

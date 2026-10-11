@@ -1,18 +1,28 @@
-# HR modal visual repair candidate (2026-10-11)
+# Current prospective HR / clinical union — 2026-10-11
 
-Base: c0f97c035109b88267fad58d023230c8eb0a21fc.
+Source-only candidate parents: HR `e867989d068edd77eafe87d56c1b7c6545ee6342` and clinical PR322 `443fd28f330f5f9bdda0ba6cfc67cfe30b12cff1`. Main was independently re-read at `148fcbeac229cb279848e6ea37049d1599a4fafe` during this preparation. If PR322 merges first, re-pin the ordinary second parent to actual main and re-review any intervening source.
 
-The exact base focused run 38119182473 passed all 48 contract cases (31 unchanged original, 14 actual-commit acknowledgement negatives and 3 mounted admission cases) and all 16 task cases. Both mandatory base CI events remain separate required checks. Their latest observation is still in progress.
+This refresh takes eight non-document HR changes byte-for-byte from the published e867 tree and adds only this status prefix to the exact prior union handoff. It preserves all other prior union leaves, both reviewed migration-fixture setup corrections, and all50 SQL migrations: the45-file accepted clinical/Staging chain including0047/0051 plus HR0045/0046/0048/0049/0050. No migration byte or registry history is removed or rewritten.
 
-Independent inspection of all 14 negative PNGs and all 32 original positive PNGs found a real visual blocker: transparent unbounded child forms on the shared native dialog backdrop, including clipped mobile contract content, payroll disbursement and attendance correction. All 11 pages across three payroll PDFs were inspected with no separate PDF blocker.
+HR focused runs5/6/7 each passed48 contract and16 task cases. Independent visual review found bare HR dialog surfaces, corrected in22818eef, then proved a403px native contract filter overflowing a390px RTL document by38px. Exact read-only52bb metrics showed stable document/body428px, CDP layout pageX38 versus visual pageX0, while the separate observational no-clip native screenshot fit. Current e867 adds only two bounded filter class strings and strict before-modal/global viewport/capture-equality regression checks. Focused8 and mandatory1886/1887 are still pending/running; its new original42 contract PNGs require independent review. Prior positive32PNG/threePDF reviews are scoped to their original heads and do not automatically accept e867.
 
-This successor gives all 12 previously bare HR Modal callers a consistent opaque responsive panel, without modifying the shared Modal or transaction/authority/receipt logic. The other three callers already own bounded white panels. Eight source-level inventory cases cover all 15 callers. Native contract proof now measures the entire form and each control/group horizontally and retains three viewport frames for each of the 14 existing acknowledgement cases: heading/uncertainty, retained identity and retained terms/actions. Each frame is hash/source/run bound and emitted only after the complete existing journey and cleanup succeed. The focused artifact requires exactly 42 negative PNGs plus 14 JSON records, alongside the original 32 PNGs and three PDFs.
+No publication, merge, application execution, deployment or catalog generation is performed by this union preparation. PostgreSQL schema/disclosure catalogs remain exact clinical-parent bytes and are deliberately stale for the combined50-migration source. Genuine isolated CI generation/artifact recovery, review, final catalog commit and final-source full CI are mandatory. Both final parent gates and all substantive/native review blockers must clear before any authorized union publication/deployment. Plain HR must never replace the accepted Staging migration ledger.
 
-No local application tests, builds, database work or dependency installation were performed. This source candidate is not visually accepted until exact-head isolated CI and independent native review pass. Existing original 31 contract cases, task 16 cases, all receipt assertions/deadlines and the mandatory CI workflow are preserved. No claim of durable private draft recovery across a page reload is added; the existing memory-only warning/uncertainty policy remains.
-
-The historical handoff below is retained unchanged and does not override the current gates. HR must also be composed with the accepted patient/main migration chain and genuine PostgreSQL catalog outputs before any shared Staging deployment. No main merge or deployment is approved by this source packet.
+The previous union handoff below is retained byte-for-byte as historical context and does not override these current gates.
 
 ---
+
+# Prospective compatible HR / clinical source union — 2026-10-11
+
+This is source preparation only. Proposed ordinary parents are HR `c0f97c035109b88267fad58d023230c8eb0a21fc` and clinical PR322 `443fd28f330f5f9bdda0ba6cfc67cfe30b12cff1`, with original merge base `148fcbeac229cb279848e6ea37049d1599a4fafe`. Main was still that merge base at preparation. If clinical source merges first, re-pin to the actual main commit before publication.
+
+The prior reviewed union and its two migration-fixture corrections are retained. This refresh takes nine non-document HR successor paths and six clinical successor paths byte-for-byte from their published parent trees. There is no new code conflict. It retains task replay, receipt-safe contract intent, current-owner admission, and both clinical Ceph refresh-read action gates. All 50 migration SQL files and the reviewed migration setup assertions remain unchanged.
+
+The PostgreSQL schema/disclosure catalog files are deliberately preserved from the clinical parent and remain stale for this combined migration union. They must be generated by genuine isolated PostgreSQL CI, reviewed, and included in a final-source full CI. No catalog value is fabricated here.
+
+Both final parent gates and native reviews remain required. Current HR focused tasks pass16/16; its repaired full contract/receipt/admission run and both mandatory checks are still in progress at this preparation. Clinical exact-head status is owned by its publisher/root. Source composition alone grants no main merge, Staging publication or Production acceptance. The accepted Staging branch and migration ledger must not be replaced by plain HR.
+
+## Current HR receipt source boundary
 
 # Receipt-safe HR successor status — 2026-10-11
 
@@ -28,7 +38,34 @@ Final exact-head mandatory checks, independent native image/PDF review, substant
 
 ---
 
-# Earlier integration status retained verbatim
+
+# Earlier prospective union status retained verbatim
+
+# Source-only HR + current PR #322 integration preparation, 2026-10-11
+
+This is unexecuted source composition, not a deployed or accepted release. The pinned
+parents are HR `1470028dcf9e21ebec056e9ab32a37a42f43d671` and current PR #322
+`81e142b70d5b709ea6b84cc36cecb846ad977094`, with verified merge-base
+`148fcbeac229cb279848e6ea37049d1599a4fafe`. The proposed ordinary merge retains both
+parents and all newer PR #322 source. Accepted Staging
+`98a64c0240acbe2b973ef16d9c7cecf960a2578b` remains the unchanged deployed-baseline
+comparison; its fixed `staging/accepted-98a64c0` branch must never advance.
+
+No branch, commit, CI, migration, application, build or deployment was created or
+executed by this preparation. HR e92 full CI1861 passed all29 preceding gates, including the repaired PostgreSQL gate, then failed HTTP. Ten visible annotations show a shared exact contract-tab-name mismatch; exhaustive HTTP totals were unavailable through the attempted supported retrieval routes. HR1470028 preserves runtime source and adds one reviewed test-only navigation/readiness repair; CI1865 is pending. PR322 d261 also failed its HTTP gate. Its test-only d22 successor CI1863 finished with 1405 HTTP tests passed and two mobile browser failures caused by selecting desktop-only hidden controls. The reviewed 81e142b7 successor changes only those two test files to use the visible native mobile control; its full CI1867/run38112130610 is pending. This refresh retains the two separately reviewed migration-fixture setup corrections. Both final parent CIs and exact final-source full CI must pass with no substantive review blockers before acceptance.
+
+All 50 original migration files are preserved: 0001–0043 and 0045–0051. Only 0044
+remains reserved. The periodontal candidate remains inactive and test-only. Both
+PG18 catalogs require source/run-bound regeneration from the exact final union on
+isolated official CI; no parent catalog proves this union and no fingerprint was
+edited by hand. Existing convergence findings remain disclosed.
+
+Publication/deployment requires the root/publisher's final source selection,
+independent review, verified exact-source generated catalogs and the separately
+authorized Staging ledger/checksum/read-only preflight and deployment gates.
+Historical success or deployment claims below refer only to their original source.
+
+# Historical HR record, retained verbatim
 
 # Current integration status — PR #308, 2026-10-11
 
@@ -135,3 +172,85 @@ Before changing the service, dot must provide/confirm the currently deployed sta
 Staging handoff: the user supplied https://staging-web-staging-0d39.up.railway.app, service `staging-web`, environment `staging`, and last verified deployed reference `eadd750` from ceph. Dot is updating it with main while preserving 0047. **Publishing remains dot's responsibility; it has not been transferred.** There is no direct cross-session channel: this report is delivered to the user for forwarding to dot. No staging source, database, service or permanent account was changed.
 
 A read-only public health request was blocked by the environment's outbound proxy (403 tunnel rejection). No Railway CLI/connector or deployment credential binding is available. Current deployed SHA, applied migration ledger and live screens therefore remain independently unverified; `eadd750` is the user's last verified reference, not a newly observed deployment. No combined-version CI or post-deployment scenario is claimed. Dot must compose, review, test and publish the compatible source before shared staging acceptance. Production is not a fallback and this PR has no merge authorization.
+
+# Historical accepted Staging record carried by PR #322, retained verbatim
+
+# HANDOFF_TO_DOT — ORTHO-ID-2: Ceph study identity, correction origin (0047), explicit T1 link
+
+**الحالة: Draft — غير جاهز للدمج.** لا CI شُغّل على هذا الرأس بعد (لا نتيجة CI لديّ)، ولم تعمل كل فحوص CI محليًا (انظر «لم يعمل»). لا دمج ولا نشر ولا Railway ولا تغيير في قواعد CI.
+
+- الفرع: `claude/ceph-study-identity-followup` (من `main` بعد دمج #314؛ حُدّث بدمج عادي من `main` عند `5d1df1f` = #312، بلا تعارض)
+- base: `origin/main` `5d1df1f`
+- head الشفرة والاختبارات: `d7afcf3` (يليه commit يحدّث هذا الملف فقط — راجع رأس الـPR)
+- PR: Draft واحد على هذا الفرع (الرابط في وصف التسليم)
+
+## 1. الجرد: الموجود / العيب المثبت / الإصلاح / الاختبار
+
+| الموجود | العيب المثبت | الإصلاح | الاختبار |
+|---|---|---|---|
+| تصحيح الدراسة `duplicateCephAnalysis` (من #314: يحفظ الحالة/المرحلة/التاريخ/الجهاز/المرجع) | لا رابط بنيوي للأصل — الأصل نص في `note` فقط؛ لا إعادة آمنة عند الضغط المزدوج (الثاني يعود بخطأ)؛ التدقيق بعد الالتزام لا داخله | عمود `corrects_analysis_id` (هجرة **0047** المحجوزة) + قيد «الأصل أقدم» (لا ذاتي/دورة) + مفتاح أجنبي مركّب (نفس المريض)؛ الإدراج والتدقيق في معاملة واحدة؛ الطلب المكرر لنفس الأصل يعيد المسودة نفسها (200) | `postgres/ceph-correction-lineage.test.ts`، `postgres/ceph-correction-lineage-migration.test.ts`، `ceph-correction-lineage-schema.test.ts` |
+| إنشاء دراسة `POST /api/patients/[id]/ceph` | مرحلة غائبة/غير معروفة تُصنَّف «قبل العلاج» بصمت؛ تاريخ أشعة خاطئ يُخزَّن «غير معروف» بصمت؛ `2026-02-30` كان يمرّ | المرحلة إلزامية بخطأ عربي 400؛ التاريخ المكتوب الخاطئ 400 (الغائب يبقى غير معروف) | `ceph-create-route.test.ts` (11 اختبارًا فشلت قبل الإصلاح) |
+| لا مسار لربط دراسة سابقة بالحالة | T1 التي سبقت الحالة لا يمكن ربطها إلا بـSQL | `linkCephStudyToCase` + `POST /api/ceph/[id]/link-case`: طبيب/مدير فقط، تأكيد صريح، يعيد ما عاينه (مرحلة/تاريخ/اعتماد) فيُرفض السياق القديم، دراسة/حالة مريض آخر = «غير موجود»، لا نقل بين حالتين، إعادة بلا أثر ثانٍ، تدقيق في المعاملة، **تفويض يُعاد داخل المعاملة** | `postgres/ceph-study-case-link.test.ts` (17)، `ceph-link-case-route.test.ts` |
+| لوحة السجلات في `PatientCeph` | — | `CephUnlinkedStudiesPanel` داخل التبويب نفسه: القائمة، تأكيد صريح مربوط بلقطة ما راجعه الطبيب، «تحديث القائمة»، شارات الأصل/التصحيحات، التاريخ غير المعروف يُعرض «غير معروف»، «تصحيح هذه الدراسة» | `security-http/ceph-study-identity-ui-journey.test.ts` (13، عند 390 و1280) |
+| صفحة `/ceph/[id]` | تعرض أي دراسة لأي مستخدم مسجّل (لا `canAccessPatient` كالـAPI والطباعة) | الفحص نفسه `canViewXrays`؛ الجواب نفسه للمفقود والممنوع | الرحلة (طبيب آخر) |
+| تفويض الربط (مراجعتك على `047500a`) | الفحص في المسار قبل المعاملة فقط؛ ثم نسخة أولى داخلها تتحقق من الدور لا من **إصدار بيانات الدخول** | `cephLinkAuthorizer` يستدعي `revalidateSessionInTransaction` (= مُحقِّق `requireSession` على اتصال المعاملة: المعرّف، فعّال، الدور، credentialVersion، إصدار الصلاحيات) ثم `canAccessPatient(..., client)`؛ تغيّر كلمة المرور أثناء الانتظار ⇒ 403 | `postgres/ceph-study-case-link.test.ts` «credential version» (اختباران؛ يفشلان عند تعطيل الفحص) |
+| ترتيب الأقفال مع دمج المرضى | الربط يأخذ شاهد ملكية (زيارة…) قبل قفل الدراسة، والدمج يعدّل الدراسة ثم الزيارة؛ و`duplicateCephAnalysis` يقفل الدراسة ثم يدرج (قفل المريض ضمنيًا بالمفتاح الأجنبي) ⇒ دورة محتملة | المريض `FOR KEY SHARE` أولًا (اصطلاح الدمج/الحذف الموثّق في `db.ts`) ثم الحساب والشهود ثم الدراسة ثم الحالة؛ نفس البدء للتصحيح | «patient and dependent-row locks follow the patient-merge order» (3 اختبارات: ربط×دمج، تصحيح×دمج، دمج سلسلة تصحيح) — الأولان يفشلان بعد ~1.1 ث عند الترتيب القديم |
+| `CephTracer` | تاريخ الاعتماد/التشخيص بتوقيت الجهاز → فرق خادم(UTC)/متصفح(عدن) = React #418 بين 21:00 و24:00 UTC | `timeZone: CLINIC_ZONE_FALLBACK` في الموضعين | الرحلة بزرع وقت اعتماد يقع في يومين مختلفين (يفشل القديم في أي ساعة) |
+
+## 2. تقرير تنسيق الهجرة (لدوت)
+
+- المحجوز: **0047 فقط** (تعليق التنسيق على #314، 2026-10-09). هجرة إضافية واحدة: `migrations/0047_ceph_correction_lineage.sql`.
+- جسدها = `CEPH_CORRECTION_LINEAGE_SQL` حرفيًا (`lib/ceph-correction-lineage-schema.ts`)، وهو ما ينفّذه `ensureSchema()`؛ اختبار تطابق + اختبار حرفية الإعادة.
+- أثرها: عمود واحد nullable بلا default، قيدان مسمّيان (`ceph_analyses_corrects_older_chk`، `ceph_analyses_corrects_same_patient_fk`)، فهرس فريد `(patient_id, id)` يستلزمه المفتاح المركّب، وفهرس بحث جزئي. بلا حذف/إعادة تسمية/تعبئة: النسخ القديمة تبقى بلا أصل ولا يُخمَّن لها من الملاحظة.
+- **لم أستخدم 0044 ولا 0045–0046 ولم أنسخ ملفات الفروع الأخرى.** على `main` 0001–0043 فقط. الفجوة 0044–0046 **معلنة** في `COORDINATED_MIGRATION_VERSIONS` (`lib/migrations.ts`) = `[0001..0043, "0047"]`، وتستهلكها الحراس (ownership، periodontal fixture، preflight-cli، اختبارات العدّ).
+- **نقاط الدمج مع #301/#308 (تحتاج يدك):**
+  1. `COORDINATED_MIGRATION_VERSIONS` معرَّف أيضًا في #308 بالاسم والموضع نفسهما (`[0001..0043, "0045","0046"]`) → تعارض سطر واحد؛ الصحيح عند اكتمال الدمج المتصل 0001..0047 أو إبقاء الفجوات المعلنة.
+  2. `_periodontal-fixture.ts` يختار رقمًا تجريبيًا للمرشّح البيريودنتالي (`0044` هنا للسلسلة 44 ملفًا) — **اختباري فقط ولا يُشحن**، لكنه يتصادم رقميًّا مع 0044 الحقيقي لـ#301 عند الدمج؛ تعدّله أنت.
+  3. `schema/current-schema-contract.pg18.json` و`preflight-disclosure.pg18.json` أُعيد توليدهما على PostgreSQL **18.4** (حقل `generatedOnServerVersion` صار 18.4 بعد أن كان 18.6؛ CI يقارن البنية لا الإصدار الفرعي). كل منهما فرق إضافي فقط (37/17 سطرًا)؛ الأرجح أن تتعارض مع #301/#308 فتُعاد توليدهما على السلسلة المتكاملة.
+  4. `docs/DATABASE_MIGRATIONS.md`: سطر 0047 مضاف بعد 0043 (حارس الوثائق يشترطه).
+
+## 3. نتائج الفحوص على `d7afcf3` (محلي، PostgreSQL 18.4 اصطناعي معزول، لا Railway)
+
+| الفحص | النتيجة |
+|---|---|
+| `tsc --noEmit`، `eslint .` | نجحا (0 أخطاء؛ تحذيرات قديمة فقط) |
+| `scan:money`، `ci:scan:body` | نجحا |
+| `npm run build` | نجح |
+| الوحدات `npx vitest run` | **471 ملفًا / 8389 اختبارًا — نجحت** |
+| `test:postgres` الكاملة | 166 ملفًا نجحت (1614 اختبارًا)؛ **4 ملفات تفشل في التشغيل الكامل** لأنها تشترط قاعدة فارغة جديدة (حارس مقصود): expense-category-history-containment، expense-void-close-race، manual-cash-containment، payment-shift-admission |
+| الملفات الأربعة كلٌّ على قاعدة `aqlan_p1_test` فارغة جديدة | **نجحت** (94 اختبارًا) |
+| `schema:contract` + `schema:contract:verify` (مقابل الملتزم) | نجح |
+| `db:baseline:manifest` + `…:verify --fresh` | نجح |
+| `schema:ownership:verify` | نجح (سلسلة الهجرات = ensureSchema) |
+| رحلة المتصفح الجديدة (بناء Next حقيقي، قاعدة معزولة) | **13/13** عند 390 و1280 (أُعيدت بعد تعديل التفويض): الربط والتأكيد المزدوج، السياق القديم، فشل الحفظ، تحديث متأخر من تبويب آخر، التصحيح وتبويبان، صلاحيات الوصول |
+| تحقق بصري بلقطات عند 390 و1280 | فُحصت لوحة الربط وإلغاء التأكيد وشريط الأصل: لا التفاف سيئ ولا تمرير أفقي. **لا ادّعاء تصميم تفصيلي**: مبنية على أنماط الواجهة الحالية |
+| فحص تعطيل متعمَّد (mutation) | تفويض المعاملة: 6 من 17 فشلت؛ إصدار بيانات الدخول: اختباران فشلا؛ ترتيب الأقفال: اختباران فشلا (الترتيب القديم) |
+| `test:security-http` **الكامل** | 161 ملفًا نجحت؛ **9 ملفات فشلت (7 اختبارات) — المجموعة مطابقة تمامًا لما يفشل على `main` النظيف `9e8f496`** (أسماؤها في القسم أدناه) |
+
+### لم يعمل / معلّق (لا يُعدّ نجاحًا)
+- **CI على GitHub لهذا الرأس: انظر وصف الـPR/حالة الفحوص — لا أعدّه ناجحًا قبل اكتماله.**
+- `test:security-http`: الملفات التسعة الفاشلة هي نفسها على `main` النظيف في هذه البيئة (lab-read-state، lab-status-refusal، service-raw-category-display، collections-native-currency، patient-invoice-recovery-labels، patient-workflow-clinical-draft، print-toolbar-media، receipt-provenance، report-page-design). أسباب ظاهرة بيئية (مسار Chromium في 3 ملفات، مطابقة خطوط PDF العربية، مهلات نقر) **لم أحلّلها ولم أُصلحها**؛ وفرق بسيط: collections يفشل كمجموعة على main وكاختبار على رأسي.
+- `ci:audit`، `build:preflight`، `verify-braces-runtime`، `verify:ci` (13 من 20 تُتخطى بلا قاعدة فعلية)، رحلات Playwright في CI بأسرار حقيقية: لم تعمل محليًا.
+- لا قبول Staging ولا بيانات حقيقية.
+
+## 4. المخاطر والقرارات المفتوحة
+1. **الربط يعدّل مؤشر `ortho_case_id` على دراسة قد تكون معتمدة** (المؤشر فقط؛ القياسات/الاعتماد/التاريخ/المرحلة غير ملموسة ومُثبت باختبار). قرار طبيب/مالك: هل هذا مقبول أم يُفضَّل جدول ربط؟
+2. حالة التقويم **المغلقة** مرفوضة للربط (تحفظ). دراسة قديمة لحالة منتهية تحتاج مسارًا/قرارًا مستقلًا.
+3. **Idempotency** هنا طبيعي بلا مفتاح مخزَّن: التصحيح لنفس الأصل يعيد المسودة نفسها، والربط لنفس (دراسة، حالة) إعادة بلا أثر، ومحتوى مختلف (حالة أخرى/سياق مختلف) يُرفض 409. لا عمود مفتاح إعادة (لم يُحجز له رقم).
+4. `WebCephRecordsGrid` ما زال ينشئ دراسة فورًا بمرحلة **مقترحة** من الواجهة بلا تأكيد مرحلة من الطبيب (الخادم يشترط مرحلة صريحة لكنه لا يعرف أنها اقتراح). لم أغيّره.
+5. **الأقفال:** لم أفحص باقي كتّاب Ceph (`createCephAnalysis`، الاعتماد، الرفض) بالنسبة لترتيب الدمج؛ أصلحتُ فقط ما أضفته أو لمسته (الربط والتصحيح). `createCephAnalysis` يقرأ بلا قفل ثم يدرج (قفل المريض ضمنيًا بالمفتاح الأجنبي) — لم أُثبت عيبًا فيه ولم أغيّره.
+6. تفويض الربط يأخذ أقفال قراءة مشتركة على صف المستخدم وشهود الملكية؛ تعديل الصلاحية/الملكية المتزامن ينتظر نهاية معاملة الربط (مُثبت باختبار PostgreSQL)، وهي معاملة قصيرة.
+7. `ensureSchema` يضيف الفهرس الفريد `(patient_id, id)` على كل إقلاع (idempotent) — لم أقس أثره على قاعدة إنتاج كبيرة.
+8. نقاط الدمج في القسم 2.
+
+## 5. لم يُنفَّذ (مؤجل صراحةً)
+مرحلة المثبّت، الرحلة المنظمة، snapshot/PPTX/PDF، وصفة الطبيب للمثبّت. لم أبدأها.
+
+## 6. الخطوة التالية الدقيقة
+1. شغّل CI على رأس الـPR وفسّر أي فشل (خاصة ما لا يظهر محليًا: `ci:audit`، `build:preflight`، رحلات بأسرار).
+2. حلّ نقاط الدمج في القسم 2 مع #301/#308 (ثابت `COORDINATED_MIGRATION_VERSIONS`، رقم المرشّح التجريبي، إعادة توليد العقدين).
+3. قرّر البنود 1–2 من المخاطر مع الطبيب.
+4. قبول Staging بعد تأكيدك الجاهزية.
+
+## 7. بيئة الفحص
+PostgreSQL 18.4 من حزمة `@embedded-postgres/linux-x64` خارج المستودع؛ Chromium مثبَّت مسبقًا. لا أسرار ولا بيانات مرضى؛ كل المرضى والملفات اصطناعية. ملاحظة تقنية: هذا الاستنساخ سطحي أحادي الفرع فمرجع التتبّع المحلي يتأخر عن `ls-remote` — البعيد هو المرجع.

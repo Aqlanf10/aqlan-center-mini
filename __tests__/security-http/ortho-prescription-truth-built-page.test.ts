@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { baseUrl, harness } from "./_server";
+import { assertOrthoViewportBounds, orthoViewportProof, revealOrthoControlByWheel, settleStrategy } from "./_ortho-strategy-ui-fixture";
 
 // CI-only built Next page acceptance. All rows are isolated synthetic fixtures;
 // browser writes and external requests are blocked before reaching a server.
@@ -67,26 +68,57 @@ async function openPrescription(card: Locator) {
   await card.locator("button").filter({ hasText: "خطة العلاج والميكانيكا" }).click();
   await prescription(card).waitFor({ state: "visible" });
 }
+async function selectPrescriptionCase(page: Page, fixture: Fixture, id: number) {
+  const selector = workspace(page).getByRole("combobox", { name: "حالة التقويم المحددة", exact: true });
+  if (await selector.inputValue() !== "") {
+    await selector.selectOption("");
+    await expect.poll(() => new URL(page.url()).searchParams.has("orthoCaseId")).toBe(false);
+    await ready(page);
+    await expect.poll(() => selector.inputValue()).toBe("");
+    await caseCard(page, fixture.activeId).waitFor(); await caseCard(page, fixture.closedId).waitFor();
+    expect(new URL(page.url()).searchParams.has("orthoCaseId")).toBe(false);
+  }
+  await selector.selectOption(String(id));
+  await expect.poll(() => new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(id));
+  await ready(page);
+  await expect.poll(() => selector.inputValue()).toBe(String(id));
+  expect(new URL(page.url()).searchParams.get("orthoCaseId")).toBe(String(id));
+  expect(new URL(page.url()).searchParams.get("patientId")).toBe(String(fixture.patientId));
+  const card = caseCard(page, id); await card.waitFor();
+  expect(await caseCard(page, id === fixture.activeId ? fixture.closedId : fixture.activeId).count()).toBe(0);
+  await openPrescription(card);
+  return card;
+}
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
   await card.page().evaluate(async () => { await document.fonts.ready; });
-  // Keep the complete case card below the app's fixed top bar. Scrolling only
-  // its prescription into view allowed the header to cover case identity/status
-  // in the first CI screenshots even though the changed value remained readable.
-  await card.evaluate((element) => {
-    window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - 80), behavior: "instant" });
-  });
-  const frame = await card.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    const identifier = Array.from(element.querySelectorAll("span")).find((span) => /^#\d+$/.test(span.textContent ?? ""))!;
-    const label = identifier.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, viewportHeight: innerHeight, caseLabel: identifier.textContent,
-      identityExposed: identifier.contains(document.elementFromPoint(label.left + label.width / 2, label.top + label.height / 2)) };
-  });
-  expect(frame.top).toBeGreaterThanOrEqual(79);
-  expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+  const identifier = card.locator("span").filter({ hasText: /^#\d+$/ });
+  const panel = card.getByRole("heading", { name: "وصفة الجهاز والمواصفات الميكانيكية", exact: true }).locator("..");
+  expect(await identifier.count()).toBe(1); expect(await panel.count()).toBe(1);
+  const initialCard = await card.evaluate(orthoViewportProof), initialPanel = await panel.evaluate(orthoViewportProof);
+  // Only this bounded synthetic fixture must fit identity through prescription
+  // in one frame. A longer real case may need scrolling; never silently crop it
+  // and label the result a whole-panel witness. Strategy is a separate state.
+  const requiredHeight = initialPanel.bottom - initialCard.top;
+  expect(requiredHeight, "synthetic identity-and-prescription span must fit between measured shell bars")
+    .toBeLessThanOrEqual(initialCard.availableViewport.height - 4);
+  await card.evaluate((element, top) => {
+    window.scrollTo({ top: Math.max(0, scrollY + element.getBoundingClientRect().top - top), behavior: "instant" });
+  }, initialCard.availableViewport.top + 2);
+  await settleStrategy(card.page());
+  const cardProof = await card.evaluate(orthoViewportProof);
+  const identityProof = await identifier.evaluate(orthoViewportProof), panelProof = await panel.evaluate(orthoViewportProof);
+  assertOrthoViewportBounds(identityProof, width); assertOrthoViewportBounds(panelProof, width);
+  const frame = { scope: "case-identity-and-prescription-panel", framingMethod: "programmatic-measured-shell-insets",
+    top: cardProof.top, bottom: panelProof.bottom, requiredHeight, availableViewport: cardProof.availableViewport,
+    caseBottom: cardProof.bottom, viewportHeight: cardProof.viewportHeight, caseLabel: identityProof.label,
+    identityExposed: identityProof.unobscured, identity: identityProof, panel: panelProof };
+  expect(frame.top).toBeGreaterThanOrEqual(frame.availableViewport.top);
+  expect(frame.bottom).toBeLessThanOrEqual(frame.availableViewport.bottom);
   expect(frame.identityExposed).toBe(true);
-  const geometry = await value.evaluate((element) => {
+  const valueProof = await value.evaluate(orthoViewportProof);
+  assertOrthoViewportBounds(valueProof, width);
+  const geometry = { ...await value.evaluate((element) => {
     const box = element.getBoundingClientRect(); const cell = element.parentElement!.getBoundingClientRect();
     const range = document.createRange(); range.selectNodeContents(element); const text = range.getBoundingClientRect();
     const style = getComputedStyle(element);
@@ -94,8 +126,8 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
       cell: { left: cell.left, right: cell.right, top: cell.top, bottom: cell.bottom },
       text: { left: text.left, right: text.right, top: text.top, bottom: text.bottom },
       fontSize: style.fontSize, display: style.display, visibility: style.visibility,
-      viewportWidth: innerWidth, documentWidth: document.documentElement.scrollWidth };
-  });
+      viewportWidth: innerWidth, viewportHeight: innerHeight, documentWidth: document.documentElement.scrollWidth };
+  }), availableViewport: valueProof.availableViewport, hitPoints: valueProof.hitPoints, unobscured: valueProof.unobscured };
   expect(geometry.label).toBe(kind === "unrecorded" ? "غير مسجّلة" : custom);
   expect(geometry.box.width).toBeGreaterThan(0); expect(geometry.box.height).toBeGreaterThan(0);
   expect(geometry.display).not.toBe("none"); expect(geometry.visibility).toBe("visible");
@@ -106,9 +138,25 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(geometry.text.bottom).toBeLessThanOrEqual(geometry.cell.bottom + 1);
   expect(geometry.cell.left).toBeGreaterThanOrEqual(-1);
   expect(geometry.cell.right).toBeLessThanOrEqual(width + 1);
+  expect(geometry.cell.top).toBeGreaterThanOrEqual(geometry.availableViewport.top);
+  expect(geometry.cell.bottom).toBeLessThanOrEqual(geometry.availableViewport.bottom);
+  expect(geometry.unobscured).toBe(true);
   expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
-  await card.screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png` });
-  return { ...geometry, frame };
+  await card.page().screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png`, fullPage: false });
+  const strategy = card.getByTestId("ortho-strategy-editor");
+  await strategy.getByText("هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.", { exact: true }).waitFor();
+  const bridge = strategy.getByRole("button", { name: "ربط هذه الحالة بالمشاكل وبنود الخطة", exact: true });
+  expect(await bridge.count()).toBe(1); expect(await bridge.isEnabled()).toBe(true);
+  // The PNG above is the prescription frame. This later native-wheel state
+  // separately proves access to the important action below that frame.
+  const strategyAccess = await revealOrthoControlByWheel(card.page(), bridge);
+  assertOrthoViewportBounds(strategyAccess, width);
+  expect(strategyAccess.width).toBeGreaterThan(0); expect(strategyAccess.height).toBeGreaterThanOrEqual(44);
+  expect(strategyAccess.left).toBeGreaterThanOrEqual(-1); expect(strategyAccess.right).toBeLessThanOrEqual(width + 1);
+  expect(strategyAccess.top).toBeGreaterThanOrEqual(strategyAccess.availableViewport.top);
+  expect(strategyAccess.bottom).toBeLessThanOrEqual(strategyAccess.availableViewport.bottom);
+  expect(strategyAccess.unobscured).toBe(true);
+  return { ...geometry, frame, strategyAccess };
 }
 
 describe("built orthodontic prescription truth", () => {
@@ -143,9 +191,9 @@ describe("built orthodontic prescription truth", () => {
       const [initial] = await Promise.all([waitForOrtho(),
         page.goto(`${baseUrl}/patients/${fixture.patientId}?tab=ortho`, { waitUntil: "domcontentloaded" })]);
       await verifyRead(initial, null);
-      const active = caseCard(page, fixture.activeId); const closed = caseCard(page, fixture.closedId);
-      await openPrescription(active); await openPrescription(closed);
+      let active = await selectPrescriptionCase(page, fixture, fixture.activeId);
       expect(await prescription(active).textContent()).toBe("غير مسجّلة");
+      let closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
       expect(await prescription(closed).textContent()).toBe(custom);
       expect(await closed.textContent()).toContain(objectives);
       expect(await closed.textContent()).toContain(planNote);
@@ -157,15 +205,20 @@ describe("built orthodontic prescription truth", () => {
         await db.query("UPDATE ortho_cases SET bracket_system=$1 WHERE id=$2 AND patient_id=$3",
           [recorded, fixture.activeId, fixture.patientId]);
         before = await storedState(fixture.patientId);
+        active = await selectPrescriptionCase(page, fixture, fixture.activeId);
         const [response] = await Promise.all([waitForOrtho(),
           workspace(page).getByRole("button", { name: "تحديث كابينة التقويم", exact: true }).click()]);
         await verifyRead(response, recorded);
         expect(await prescription(active).textContent()).toBe(recorded?.trim() ? recorded : "غير مسجّلة");
+        closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
         expect(await prescription(closed).textContent()).toBe(custom);
         expect(await closed.textContent()).toContain(objectives);
         expect(await storedState(fixture.patientId)).toEqual(before);
       }
-      const bounds = { width, active: await capture(active, "unrecorded", width), closed: await capture(closed, "closed-custom", width) };
+      active = await selectPrescriptionCase(page, fixture, fixture.activeId);
+      const activeBounds = await capture(active, "unrecorded", width);
+      closed = await selectPrescriptionCase(page, fixture, fixture.closedId);
+      const bounds = { width, active: activeBounds, closed: await capture(closed, "closed-custom", width) };
       await writeFile(`.settings-ui-artifacts/ortho-prescription-${width}-bounds.json`, `${JSON.stringify(bounds, null, 2)}\n`);
       expect(await storedState(fixture.patientId)).toEqual(before);
       expect(unexpected).toEqual([]); expect(errors).toEqual([]);

@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephWriteAuthorizer } from "@/lib/ceph-link-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -46,10 +47,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 const PHASES: CephPhase[] = ["pretreatment", "during", "posttreatment", "followup"];
 
+/** تاريخ تقويمي حقيقي فقط: `2026-02-30` يتدحرج إلى مارس في Date فلا يكفي فحص NaN. */
 const dateOrNull = (v: unknown): string | null => {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
   const d = new Date(`${v}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? null : v;
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : null;
 };
 
 const textOrNull = (v: unknown, cap: number): string | null => {
@@ -77,7 +79,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "اختر الشععة التي سيُرسم عليها." }, { status: 400 });
   }
 
-  const phase = PHASES.includes(source.phase as CephPhase) ? (source.phase as CephPhase) : "pretreatment";
+  // (ORTHO-ID-2) دراسة المتابعة تذكر مرحلتها وتاريخ أشعتها الفعليين: لا تُصنَّف «قبل العلاج» بصمت، ولا يُحوَّل
+  // تاريخٌ مكتوب خاطئ إلى «غير معروف». التاريخ الغائب وحده يبقى غير معروف.
+  if (!PHASES.includes(source.phase as CephPhase)) {
+    return NextResponse.json({ message: "اختر مرحلة الدراسة: قبل العلاج أو أثناءه أو بعده أو متابعة." }, { status: 400 });
+  }
+  const phase = source.phase as CephPhase;
+  const statedDate = source.xrayDate;
+  const xrayDate = dateOrNull(statedDate);
+  if (statedDate !== undefined && statedDate !== null && statedDate !== "" && xrayDate === null) {
+    return NextResponse.json({ message: "تاريخ الأشعة غير صالح — اكتبه بصيغة سنة-شهر-يوم أو اتركه فارغًا إن كان غير معروف." }, { status: 400 });
+  }
   const orthoCaseId = Number.isInteger(source.orthoCaseId) && Number(source.orthoCaseId) > 0
     ? Number(source.orthoCaseId) : null;
 
@@ -94,11 +106,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       patientId, documentId, createdBy: session.username,
       orthoCaseId,
       phase,
-      xrayDate: dateOrNull(source.xrayDate),
+      xrayDate,
       device: textOrNull(source.device, 120),
       refSet: textOrNull(source.refSet, 60),
+      authorize: cephWriteAuthorizer(session),
     });
-    if (!created.ok) return NextResponse.json({ message: created.message }, { status: 409 });
+    if (!created.ok) return NextResponse.json({ message: created.message }, { status: created.status ?? 409 });
     return NextResponse.json({ id: created.id, duplicateWarning }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح التحليل. تأكد من المستند." }, { status: 500 });

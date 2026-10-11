@@ -12,7 +12,8 @@ import {
 } from "../lib/schema-manifest";
 import { SUPPORTED_POSTGRES_MAJOR } from "../lib/env-contract";
 import { validateLocalVerificationTarget } from "../lib/verification-target-policy.mjs";
-import { COORDINATED_MIGRATION_VERSIONS, loadMigrationFiles, migrate } from "../lib/migrations";
+import { loadMigrationFiles, migrate } from "../lib/migrations";
+import { checksumOf } from "../lib/migration-files";
 import { classifyOpenFindings, parseOpenFindingsManifest } from "../lib/schema-ownership-open-findings";
 
 export const OPEN_FINDINGS_MANIFEST_PATH = fileURLToPath(new URL("../schema/schema-ownership-open-findings.pg18.json", import.meta.url));
@@ -201,23 +202,74 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
   }));
 }
 
-function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
-  const expected = COORDINATED_MIGRATION_VERSIONS;
-  const actual = files.map((file) => file.version);
-  // لاحقة المراجعة خارج قاعدة 0001–0040: فواتير 0041–0043 المدمجة، ثم لاحقة هذه
-  // المرحلة 0045–0049 — والفجوتان 0044 و 0047 معلنتان (مرشّحا #301 و #319).
-  const reviewedSuffixes = [
+export function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
+  // Exact reviewed filenames, not a contiguous range of reserved branch numbers.
+  // Only 0044 remains reserved; retain the complete original HR and accepted Staging files.
+  const expectedFilenames = [
+    "0001_baseline_schema.sql",
+    "0002_confirmation_claim_ttl_index.sql",
+    "0003_payment_idempotency_and_reversal.sql",
+    "0004_material_rate_history.sql",
+    "0005_financial_append_only.sql",
+    "0006_appointment_lifecycle.sql",
+    "0007_appointment_services_and_capacity.sql",
+    "0008_appointment_chair_and_new_patient_snapshots.sql",
+    "0009_waiting_list.sql",
+    "0010_waiting_list_completion.sql",
+    "0011_appointment_waiting_link.sql",
+    "0012_doctor_commission_history.sql",
+    "0013_supplier_payment_settlement.sql",
+    "0014_shift_close_expected_difference.sql",
+    "0015_saved_reports.sql",
+    "0016_finance_controls.sql",
+    "0017_stock_supplier_link.sql",
+    "0018_patient_demographics.sql",
+    "0019_audit_source.sql",
+    "0020_expense_attachments.sql",
+    "0021_patient_referrals.sql",
+    "0022_patient_referral_source.sql",
+    "0023_opening_balance_currency.sql",
+    "0024_legacy_archive.sql",
+    "0025_messaging_channels.sql",
+    "0026_visit_currency.sql",
+    "0027_medical_history.sql",
+    "0028_patient_identity.sql",
+    "0029_planned_visit_interval.sql",
+    "0030_party_opening_balances.sql",
+    "0031_journal_line_currency.sql",
+    "0032_specialty_cases.sql",
+    "0033_internal_referrals.sql",
+    "0034_ortho_legacy_baseline.sql",
+    "0035_commission_case_overrides.sql",
+    "0036_visit_clearance.sql",
+    "0037_patient_families.sql",
+    "0038_legacy_balance_arrangements.sql",
+    "0039_ortho_adjustment_billing_decision.sql",
+    "0040_endodontics.sql",
     "0041_invoice_clinical_linkage.sql",
     "0042_legacy_treatment_agreements.sql",
     "0043_legacy_treatment_coverage.sql",
     "0045_hr_staff.sql",
     "0046_hr_tasks.sql",
+    "0047_ceph_correction_lineage.sql",
     "0048_hr_contracts_attendance_leaves.sql",
     "0049_hr_payroll_disbursements.sql",
     "0050_hr_payroll_integrity.sql",
-  ];
-  if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
+    "0051_ortho_treatment_strategy.sql",
+  ] as const;
+  const expected = expectedFilenames.map((filename) => filename.slice(0, 4));
+  const actual = files.map((file) => file.version);
+  if (files.length !== expectedFilenames.length || files.some((file, index) => {
+    const filename = expectedFilenames[index];
+    return file.filename !== filename || file.version !== filename.slice(0, 4)
+      || file.name !== filename.slice(5, -4);
+  })) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
+  }
+  for (const file of files) {
+    if (file.checksum !== checksumOf(file.sql)) {
+      throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHECKSUM: ${file.version}.`);
+    }
   }
 }
 

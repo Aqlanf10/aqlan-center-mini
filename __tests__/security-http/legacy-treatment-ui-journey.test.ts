@@ -146,7 +146,8 @@ describe("pre-system treatment through the built form", () => {
       const account = await open(patientId, width, "?tab=account");
       try {
         await account.getByTestId("legacy-agreements").waitFor();
-        const header = account.locator("header").filter({ has: account.getByTestId("historical-clinical-note") });
+        const header = account.getByTestId("patient-account-currency-banner").filter({ has: account.getByTestId("historical-clinical-note") });
+        expect(await header.getAttribute("data-currency")).toBe("YER");
         const headerHistory = header.getByTestId("historical-clinical-note");
         await headerHistory.waitFor();
         expect(await headerHistory.count()).toBe(1);

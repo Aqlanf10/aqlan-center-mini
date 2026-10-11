@@ -28,7 +28,7 @@ beforeAll(async () => {
   doctor = (await q<{ id: number }>(`INSERT INTO parties (kind, name) VALUES ('doctor', 'د. أحمد') RETURNING id`))[0].id;
   patient = (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ('P-E3-1', 'مريض') RETURNING id`))[0].id;
   const caseId = (await q<{ id: number }>(
-    `INSERT INTO clinical_cases (patient_id, specialty, title, created_by) VALUES ($1, 'endodontics', 'علاج جذور ٣٦', 'a') RETURNING id`, [patient]))[0].id;
+    `INSERT INTO clinical_cases (patient_id, specialty, title, site, created_by) VALUES ($1, 'endodontics', 'علاج جذور ٣٦', '36', 'a') RETURNING id`, [patient]))[0].id;
   const opened = await endo.openEndoTreatment({ actor: "dr", patientId: patient, caseId, toothCode: 36, kind: "initial" });
   if (!opened.ok) throw new Error("open");
   treatmentId = opened.treatment.id;
