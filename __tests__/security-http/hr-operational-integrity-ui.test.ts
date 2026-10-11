@@ -1,16 +1,20 @@
 /** Owner audit: real HTTP and unmodified production bundle, disposable owned HR DB. */
 import {beforeAll,afterAll,it,expect} from 'vitest';
 import {chromium,type Browser} from 'playwright';
-import {writeFileSync} from 'node:fs';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {harness} from './_server';
 import {openHrJourneyServer} from './_hr-isolated-server';
 let h:Awaited<ReturnType<typeof harness>>,owned:Awaited<ReturnType<typeof openHrJourneyServer>>,browser:Browser;
 const evidence:Record<string,unknown>={};let staffId:number;
+// Match the existing HR journeys: an explicit artifact directory or this checkout's local default.
+const EVIDENCE_DIR=process.env.HR_EVIDENCE_DIR ?? join(process.cwd(),'.hr-evidence');
 async function api(role:keyof typeof h.sessions,method:string,path:string,body?:unknown){
  const response=await fetch(owned.baseUrl+path,{method,headers:{cookie:h.sessions[role].cookie,origin:owned.baseUrl,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
  return {status:response.status,body:await response.json()};
 }
 beforeAll(async()=>{
+ mkdirSync(EVIDENCE_DIR,{recursive:true});
  h=await harness();owned=await openHrJourneyServer(h);browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
  const made=await api('admin','POST','/api/hr/staff',{fullName:'استقبال الفترتين — اصطناعي',jobTitle:'سكرتارية',department:'secretariat',workStatus:'active',hireDate:'2026-01-01',endDate:null,phone:null,note:null,contractKind:'salary',salaryAmountMinor:100000,salaryCurrency:'YER',salaryPeriod:'monthly',salaryEffectiveOn:'2026-01-01'});
  expect(made.status,JSON.stringify(made.body)).toBe(201);staffId=made.body.id;
@@ -19,7 +23,10 @@ beforeAll(async()=>{
   const punch=await api('admin','POST','/api/hr/attendance',{staffId,punchType,punchTime:`2026-08-01T${time}:00+03:00`});expect(punch.status).toBe(201);evidence.splitLastResponse=punch;
  }
 },240000);
-afterAll(async()=>{writeFileSync('/workspace/hr-p1-evidence/acceptance-http.json',JSON.stringify(evidence,null,2));await browser?.close();await owned?.close();});
+afterAll(async()=>{
+ try{writeFileSync(join(EVIDENCE_DIR,'acceptance-http.json'),JSON.stringify(evidence,null,2));}
+ finally{try{await browser?.close();}finally{await owned?.close();}}
+});
 for(const width of [390,1280])it(`native split attendance and schedule editor at ${width}`,async()=>{
  const context=await browser.newContext({viewport:{width,height:900},locale:'ar-YE'});
  const [name,...value]=h.sessions.admin.cookie.split('=');await context.addCookies([{name,value:value.join('='),url:owned.baseUrl}]);
@@ -29,14 +36,14 @@ for(const width of [390,1280])it(`native split attendance and schedule editor at
   await page.locator('input[type=date]').first().fill('2026-08-01');
   await page.waitForFunction(()=>document.querySelector('tbody')?.textContent?.includes('استقبال الفترتين'));
   evidence[`attendanceText${width}`]=await page.locator('tbody').innerText();
-  await page.screenshot({path:`/workspace/hr-p1-evidence/screenshots/fixed-split-record-${width}.png`,fullPage:false});
+  await page.screenshot({path:join(EVIDENCE_DIR,`fixed-split-record-${width}.png`),fullPage:false});
   await page.locator('select').filter({has:page.locator(`option[value="${staffId}"]`)}).first().selectOption(String(staffId));
   await page.getByRole('button',{name:'جداول الدوام والورديات'}).click();
   await page.getByRole('button',{name:/إنشاء جدول وردية/}).click();
   const modal=page.getByRole('dialog');await modal.locator('select').selectOption('split');
   expect(await modal.locator('input[type=time]').count()).toBe(4);expect(await modal.getByRole('checkbox').count()).toBe(7);
   evidence[`splitEditor${width}`]={timeInputs:await modal.locator('input[type=time]').count(),text:await modal.innerText(),documentOverflow:await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)};
-  await page.screenshot({path:`/workspace/hr-p1-evidence/screenshots/fixed-split-editor-${width}.png`,fullPage:false});
+  await page.screenshot({path:join(EVIDENCE_DIR,`fixed-split-editor-${width}.png`),fullPage:false});
  }finally{await context.close();}
 });
 it('HTTP rejects invalid policies, applies a saved grace default, and requires a structured leave document reference',async()=>{
@@ -58,7 +65,7 @@ it('HTTP rejects invalid policies, applies a saved grace default, and requires a
  try{
   const page=await context.newPage();await page.goto(owned.baseUrl+'/hr');await page.getByRole('tab',{name:'الإجازات'}).click();await page.getByText('مرجع قديم يحتاج مراجعة',{exact:false}).waitFor();await page.getByRole('button',{name:'تقديم طلب إجازة'}).click();
   const modal=page.getByRole('dialog');await modal.locator('select').nth(1).selectOption('sick');expect(await modal.getByLabel('مرجع المستند المقدم للمراجع',{exact:false}).getAttribute('required')).not.toBeNull();
-  expect(await modal.innerText()).toContain('لا يرفع ملفًا');await page.screenshot({path:'/workspace/hr-p1-evidence/screenshots/leave-document-reference-390.png',fullPage:false});
+  expect(await modal.innerText()).toContain('لا يرفع ملفًا');await page.screenshot({path:join(EVIDENCE_DIR,'leave-document-reference-390.png'),fullPage:false});
  }finally{await context.close();}
 });
 for(const deviceZone of ['Asia/Aden','America/Los_Angeles'])it(`clinic deadline remains 14:00 through create and edit on ${deviceZone} device`,async()=>{
@@ -69,6 +76,6 @@ for(const deviceZone of ['Asia/Aden','America/Los_Angeles'])it(`clinic deadline 
   const reply=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/tasks');await modal.getByRole('button',{name:'إنشاء',exact:true}).click();
   const response=await reply;expect(response.status()).toBe(201);const task=await response.json();const stored=(await owned.db.query('SELECT due_at FROM hr_tasks WHERE id=$1',[task.id])).rows[0].due_at.toISOString();
   evidence.deadlineTimezone={input:'2026-10-12T14:00',browserTimezone:deviceZone,expectedUtc:'2026-10-12T11:00:00.000Z',storedUtc:stored,request:response.request().postDataJSON()};
-  expect(stored).toBe('2026-10-12T11:00:00.000Z');await modal.waitFor({state:'hidden'});await page.getByRole('button',{name:new RegExp(deviceZone)}).first().waitFor();await page.getByRole('button',{name:new RegExp(deviceZone)}).first().click();await page.getByRole('button',{name:/تعديل/}).last().click();expect(await page.locator('input[type=\"datetime-local\"]').inputValue()).toBe('2026-10-12T14:00');await page.screenshot({path:'/workspace/hr-p1-evidence/screenshots/fixed-task-timezone-'+deviceZone.replaceAll('/','-')+'-1280.png',fullPage:false});const saved=page.waitForResponse(r=>r.request().method()==='PATCH'&&new URL(r.url()).pathname===`/api/tasks/${task.id}`);await page.getByRole('button',{name:'حفظ التعديل',exact:true}).click();expect((await saved).status()).toBe(200);expect((await owned.db.query('SELECT due_at FROM hr_tasks WHERE id=$1',[task.id])).rows[0].due_at.toISOString()).toBe('2026-10-12T11:00:00.000Z');
+  expect(stored).toBe('2026-10-12T11:00:00.000Z');await modal.waitFor({state:'hidden'});await page.getByRole('button',{name:new RegExp(deviceZone)}).first().waitFor();await page.getByRole('button',{name:new RegExp(deviceZone)}).first().click();await page.getByRole('button',{name:/تعديل/}).last().click();expect(await page.locator('input[type=\"datetime-local\"]').inputValue()).toBe('2026-10-12T14:00');await page.screenshot({path:join(EVIDENCE_DIR,'fixed-task-timezone-'+deviceZone.replaceAll('/','-')+'-1280.png'),fullPage:false});const saved=page.waitForResponse(r=>r.request().method()==='PATCH'&&new URL(r.url()).pathname===`/api/tasks/${task.id}`);await page.getByRole('button',{name:'حفظ التعديل',exact:true}).click();expect((await saved).status()).toBe(200);expect((await owned.db.query('SELECT due_at FROM hr_tasks WHERE id=$1',[task.id])).rows[0].due_at.toISOString()).toBe('2026-10-12T11:00:00.000Z');
  }finally{await context.close();}
 });
