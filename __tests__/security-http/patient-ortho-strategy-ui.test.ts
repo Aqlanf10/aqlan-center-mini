@@ -63,6 +63,26 @@ async function retained(page: Page, url: string, length: number, snapshot: Await
 }
 
 describe("Ortho problem → objective → strategy on the real patient page", () => {
+  it.each([390, 1280])("refuses wrong-patient and stale-case navigation replies without selecting or writing at %ipx", async width => {
+    const f = await strategyFixture(browser, h, width);
+    await f.run(async () => {
+      const original = f.page.url();
+      for (const fault of ["wrong_patient", "wrong_case"] as const) {
+        f.armContextFault(fault);
+        const count = f.contextReads.length;
+        await orthoWorkspace(f.page).getByRole("button").filter({ hasText: "خطة العلاج والميكانيكا" }).click();
+        await f.page.getByRole("alert").filter({ hasText: "تعذّر فتح العلاج المحدد. لم يتم اختيار حالة بديلة." }).waitFor();
+        expect(f.contextReads).toHaveLength(count + 1);
+        expect(f.page.url()).toBe(original); expect(await editor(f.page).count()).toBe(0);
+        expect(f.writes).toEqual([]); await readyOrtho(f.page, "a");
+      }
+      await openPrescription(f.page);
+      expect(new URL(f.page.url()).searchParams.get("orthoCaseId")).toBe(String(ids.orthoCaseId));
+      expect(new URL(f.page.url()).searchParams.get("clinicalCaseId")).toBe(String(ids.clinicalCaseId));
+      expect(f.contextReads.every(read => read.patientId === f.patientIds.a && read.status === 200)).toBe(true);
+      expect(f.writes).toEqual([]);
+    });
+  });
   it.each([390, 1280])("starts explicitly blank, searches without choosing, preserves clinician text and fits every control at %ipx", async width => {
     const f = await strategyFixture(browser, h, width);
     await f.run(async () => {

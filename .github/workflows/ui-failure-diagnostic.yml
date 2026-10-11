@@ -1,0 +1,101 @@
+name: UI failure diagnostic
+
+on:
+  push:
+    branches: [hardening/ortho-draft-navigation-guard]
+    paths:
+      - ".github/workflows/ui-failure-diagnostic.yml"
+      - "scripts/ui-failure-diagnostic/**"
+      - "__tests__/fixtures/strategy-clinical-context.ts"
+      - "__tests__/security-http/_ortho-strategy-ui-fixture.ts"
+      - "__tests__/security-http/patient-ortho-strategy-ui.test.ts"
+  workflow_dispatch:
+
+# This additive diagnostic never cancels or replaces the mandatory CI workflow.
+concurrency:
+  group: ui-failure-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: Diagnostic ${{ matrix.mode }} / ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        mode: [baseline, candidate]
+        group: [strategy, clinical, account]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: source
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      UI_DIAGNOSTIC_MODE: ${{ matrix.mode }}
+      UI_DIAGNOSTIC_GROUP: ${{ matrix.group }}
+      UI_DIAGNOSTIC_OUTPUT: ${{ runner.temp }}/ui-failure-${{ matrix.mode }}-${{ matrix.group }}
+    steps:
+      - name: Check out the exact trial source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.mode == 'baseline' && '85334d79cd7b1fb1e28bf494e7fb53c611b11817' || github.sha }}
+          path: source
+          persist-credentials: false
+      - name: Check out the exact diagnostic control source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: diagnostic-control
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm install -g npm@11
+          npm ci
+      - name: Verify unchanged environment contract
+        run: npm run verify:environment
+      - name: Build exact source
+        run: npm run build
+      - name: Install browser and PDF inspection tools
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends poppler-utils
+      - name: Run bounded real HTTP trials with immediate failure evidence
+        run: node ../diagnostic-control/scripts/ui-failure-diagnostic/run.mjs
+      - name: Retain exact diagnostic evidence even after test failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-diagnostic-${{ matrix.mode }}-${{ matrix.group }}
+          path: ${{ env.UI_DIAGNOSTIC_OUTPUT }}/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+

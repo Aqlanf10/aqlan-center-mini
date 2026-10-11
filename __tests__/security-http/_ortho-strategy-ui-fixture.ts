@@ -4,6 +4,7 @@ import type { Browser, Dialog, Locator, Page, Route } from "playwright";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { baseUrl, harness } from "./_server";
 import { emptyStrategy, STRATEGY_IDS, type StrategyOwner } from "../fixtures/ortho-strategy";
+import { strategyClinicalContext } from "../fixtures/strategy-clinical-context";
 
 // Source-only fixture. Real page, session and navigation; synthetic data only.
 // Every mutation must be explicitly armed once and is fulfilled in memory.
@@ -38,6 +39,8 @@ export async function strategyFixture(browser: Browser, h: Harness, width: numbe
   const writes: StrategyFixtureWrite[] = [], reads: string[] = [];
   const strategy = new Map<string, { body: unknown; status: number }>();
   const closed = new Set<number>();
+  const contextReads: Array<{ patientId: number; search: string; status: number }> = [];
+  let contextFault: "wrong_patient" | "wrong_case" | null = null;
   let armed: { path: string; method: string; body: unknown; status: number } | null = null;
   let expectedDialog: { message: string; accept: boolean; seen: boolean } | null = null;
   const dialogWork = new Set<Promise<void>>(), releases = new Set<() => void>();
@@ -66,6 +69,23 @@ export async function strategyFixture(browser: Browser, h: Harness, width: numbe
       const reply = strategy.get(`${path}${url.search}`);
       if (!reply) { unexpected.push(`unconfigured strategy GET ${path}${url.search}`); await route.abort(); return; }
       await json(route, reply.body, reply.status); return;
+    }
+    const contextOwner = (["a", "b"] as const).find(one => path === `/api/patients/${patientIds[one]}/clinical-context`);
+    if (method === "GET" && contextOwner) {
+      const id = patientIds[contextOwner], ids = STRATEGY_IDS[contextOwner];
+      const current = strategy.get(`/api/ortho/${ids.orthoCaseId}/strategy`)?.body as { clinicalCaseId?: unknown } | undefined;
+      expect(current?.clinicalCaseId === null || current?.clinicalCaseId === ids.clinicalCaseId).toBe(true);
+      const result = strategyClinicalContext(id, contextOwner, url.searchParams, current!.clinicalCaseId as number | null);
+      const status = result.ok ? 200 : 409;
+      contextReads.push({ patientId: id, search: url.search, status });
+      if (!result.ok) { await json(route, result, status); return; }
+      const fault = contextFault; contextFault = null;
+      const other = contextOwner === "a" ? "b" : "a";
+      await json(route, fault ? { ...result, context: { ...result.context,
+        ...(fault === "wrong_patient" ? { patientId: patientIds[other] }
+          : { orthoCaseId: STRATEGY_IDS[other].orthoCaseId, clinicalCaseId: STRATEGY_IDS[other].clinicalCaseId }),
+      } } : result);
+      return;
     }
     const patientId = Number(url.searchParams.get("patientId"));
     const owner = patientId === patientIds.a ? "a" : patientId === patientIds.b ? "b" : null;
@@ -98,8 +118,10 @@ export async function strategyFixture(browser: Browser, h: Harness, width: numbe
   const assertIsolated = () => {
     expect(unexpected).toEqual([]); expect(errors).toEqual([]); expect(downloads).toEqual([]);
     expect(armed).toBeNull(); expect(expectedDialog).toBeNull();
+    expect(contextFault).toBeNull();
   };
-  return { page, context, writes, reads, dialogs, documents, patientIds,
+  return { page, context, writes, reads, dialogs, documents, patientIds, contextReads,
+    armContextFault: (fault: "wrong_patient" | "wrong_case") => { expect(contextFault).toBeNull(); contextFault = fault; },
     closeCase: (owner: StrategyOwner) => closed.add(patientIds[owner]),
     response: (body: unknown, owner: StrategyOwner = "a", revisionId?: number, status = 200) => {
       const path = `/api/ortho/${STRATEGY_IDS[owner].orthoCaseId}/strategy${revisionId === undefined ? "" : `?revisionId=${revisionId}`}`;
