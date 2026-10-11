@@ -69,6 +69,7 @@ describe("real controlled five-section journey navigation", () => {
       await selectSection(f.page, "presentation", "عرض الحالة"); await selected(f.page, "study");
       expect(await f.page.getByRole("button", { name: "الخطوة التالية", exact: true }).isDisabled()).toBe(true);
       await f.page.getByRole("button", { name: "الخطوة السابقة", exact: true }).tap(); await selected(f.page, "outcome_retention");
+      expect(await f.page.locator('[role="tab"][aria-selected="true"]').allTextContents()).toEqual(["الإنهاء والتثبيت"]);
       expect(f.page.url()).toBe(url); expect(f.outside).toEqual([]); expect(f.errors).toEqual([]);
       await retainIndependentOrthoEvidence(f.page, `ortho-independent-navigation-${width}`);
     } finally { await f.context.close(); }

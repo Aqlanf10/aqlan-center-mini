@@ -8,6 +8,13 @@ import type { Page } from "playwright";
 export async function retainIndependentOrthoEvidence(page: Page, name: string) {
   if (!/^[a-z0-9-]+$/.test(name)) throw new Error("Invalid evidence filename");
   const dir = process.env.ORTHO_INDEPENDENT_EVIDENCE_DIR ?? ".settings-ui-artifacts";
+  // Let finite CSS transitions finish naturally so a screenshot cannot retain
+  // the previous tab's highlight after React has committed the new selection.
+  await page.evaluate(async () => {
+    await Promise.all(document.getAnimations()
+      .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => undefined)));
+  });
   const bounds = await page.evaluate(() => ({ width: innerWidth, height: innerHeight,
     scrollWidth: document.documentElement.scrollWidth, text: document.body.innerText }));
   if (bounds.scrollWidth > bounds.width) throw new Error("Independent Ortho component overflows the viewport");

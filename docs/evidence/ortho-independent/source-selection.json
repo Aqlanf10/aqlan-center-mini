@@ -573,7 +573,7 @@
       "sourceSha256": "eb565fcaaf7a001e907a21e9d32ee0da10ba4d5884c9d7e9cf9bffb0226848e0",
       "included": true,
       "reason": "independent domain lifecycle helpers and complete synthetic test fixture dependencies; reviewed against current base",
-      "currentSha256": "a9a9896f4bcdc82ed6f18d2df19d3c0643df22b75096425183866edb73f8b1d1",
+      "currentSha256": "f7aae5efafcb35b3808ae533f3fcfe1a5d8569904e44f496a3c4c406e2730de1",
       "sourceChanged": true
     },
     {
