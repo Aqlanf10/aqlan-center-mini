@@ -778,7 +778,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 disabled={busyAction}
                 className="inline-flex items-center gap-1.5 rounded-xl bg-brand-orange px-4 py-2.5 text-xs font-extrabold text-white shadow-card transition-colors hover:bg-accent-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 disabled:opacity-50"
               >
-                <Icon name="calendar" className="h-4 w-4" /> {primaryAction.label}
+                🪑 {primaryAction.label}
               </button>
             ) : null}
 
