@@ -2,11 +2,14 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser, type Page, type Locator } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { authedGet, baseUrl, harness } from "./_server";
 import { readOperationalCheckoutQueue, readSignedReceptionProof, type OperationalCheckoutRead, type SignedReceptionProof } from "../../lib/operational-checkout";
 
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser, doctorId: number;
-const ARTIFACTS = ".settings-ui-artifacts/reception-followon";
+// Native pixels stay internal, outside the repository's broad CI artifact directory.
+const ARTIFACTS = join(tmpdir(), "aqlan-reception-internal-evidence", "followon");
 type Role = "admin" | "reception" | "doctorA" | "cashier" | "accountant";
 let serial = 0;
 beforeAll(async () => {
@@ -93,7 +96,7 @@ function decisionBody(value: OperationalCheckoutRead, status: "handled" | "defer
   return { patientId: value.item.patientId, finishVersion: value.item.finishVersion, receivable: value.receivable, status, reason: " مراجعة تشغيلية اصطناعية موثّقة " };
 }
 
-it.each(["YER", "SAR", "USD"] as const)("real manager → unsigned finish → receipts → reasoned decision → later signature → refund/review isolates %s", async currency => {
+it.each(["YER", "SAR", "USD"] as const)("real unsigned checkout → no-charge signature link-loss review → former-invoice refund preserves %s debt", async currency => {
   const f = await fixture(currency), initial = await read(f);
   expect(initial.item).toMatchObject({ signedAt: null, status: "pending", visitInvoiceSettled: false });
   expect((await queue()).filter(row => row.visitId === f.visitId)).toHaveLength(1);
@@ -115,14 +118,22 @@ it.each(["YER", "SAR", "USD"] as const)("real manager → unsigned finish → re
   expect(await accepted(await write("reception", path, "POST", { ...finalBody, status: "deferred", reason: "إعادة لا تغيّر السبب الأول" }))).toEqual(decision);
   expect(await ledger(f)).toEqual(beforeDecision);
   await sign(f);
-  expect((await queue()).filter(row => row.visitId === f.visitId)).toMatchObject([{ eligibility: "signed", status: finalBody.status }]);
+  // Link loss itself must flag review before any later refund. Never infer a replacement invoice.
+  expect((await db.query(`SELECT invoice_id FROM visits WHERE id = $1`, [f.visitId])).rows[0].invoice_id).toBeNull();
+  const afterSign = (await queue()).filter(row => row.visitId === f.visitId);
+  expect(afterSign).toHaveLength(1);
+  expect(afterSign[0]).toMatchObject({ eligibility: "signed", status: finalBody.status,
+    financialReviewRequired: true, visitInvoiceSettled: false });
+  expect((await proof(f)).receivable).toBeNull();
+  expect(await ledger(f)).toEqual(beforeDecision);
   const originalAudit = (await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1`, [String(f.visitId)])).rows;
   const oldProof = { ...await proof(f), receivable: paid.receivable };
-  // A no-charge late signature clears the synthetic visit link in the existing writer.
-  // The original decision/reference remains in audit and correctly flags financial review.
+  // The former-invoice refund changes account debt; it is not the cause of the already-raised link-loss flag.
   await collect(f, "100", "admin", partial.id);
   const flagged = (await queue()).find(row => row.visitId === f.visitId)!;
   expect(flagged).toMatchObject({ status: finalBody.status, financialReviewRequired: true, visitInvoiceSettled: false });
+  const debtBeforeReview = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
+  expect(debtBeforeReview.balances).toEqual([{ currency, balanceMinor: currency === "YER" ? 100 : 10000 }]);
   expect((await write("reception", `/api/visits/${f.visitId}/reception-verification`, "POST", { ...oldProof, reason: "قراءة قديمة يجب رفضها" })).status).toBe(409);
   const fresh = await proof(f), review = { ...fresh, reason: "مراجعة استرداد اصطناعية مع بقاء المستحق" };
   const beforeReview = await ledger(f);
@@ -132,7 +143,7 @@ it.each(["YER", "SAR", "USD"] as const)("real manager → unsigned finish → re
   expect((await queue()).find(row => row.visitId === f.visitId)).toMatchObject({ status: finalBody.status, financialReviewRequired: false });
   expect((await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1`, [String(f.visitId)])).rows).toEqual(originalAudit);
   const walkout = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
-  expect(walkout.balances).toEqual([{ currency, balanceMinor: currency === "YER" ? 100 : 10000 }]);
+  expect(walkout.balances).toEqual(debtBeforeReview.balances);
   expect((await authedGet(`/api/invoices?patientId=${f.patientId}`, h.sessions.accountant)).status).toBe(200);
 });
 
