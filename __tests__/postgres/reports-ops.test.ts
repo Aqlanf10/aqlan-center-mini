@@ -133,7 +133,7 @@ describe("(Slice 7) chair-flow", () => {
 
     const p3 = await patient();
     const { visitId } = await signedFilling(p3);
-    expect(await deferVisitPayment(visitId, reception)).toMatchObject({ ok: true, already: false });
+    expect(await deferVisitPayment(visitId, reception, "متابعة اصطناعية للتحصيل", (await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visitId, p3))!)).toMatchObject({ ok: true, already: false });
 
     const report = await buildReport("chair-flow", todayFilters());
     const kpi = (key: string) => report.kpis.find((one) => one.key === key)?.count ?? 0;

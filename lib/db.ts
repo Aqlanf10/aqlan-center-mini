@@ -28121,39 +28121,13 @@ export function seatVisitGated(
   return gatedVisitMove("seat", id, chair, actor, emergency);
 }
 
-export type DeferPaymentResult =
-  | { ok: true; already: boolean; invoiceId: number | null }
-  | { ok: false; reason: "not_found" | "not_signed" };
+export type DeferPaymentResult = import("./reception-handoff-db").CompleteReceptionHandoffResult;
 
-/**
- * (CHAIR-1 Slice 5) «تأجيل الدفع» عند الشبّاك — قرارٌ يُسجَّل لا حركةٌ مالية.
- *
- * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
- * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
- */
-export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
-  return inVisitTransaction(async (client) => {
-    const { rows } = await client.query<ReadinessFactsRow>(
-      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
-      [CLINIC_TIME_ZONE, id],
-    );
-    const row = rows[0];
-    if (!row) return { ok: false, reason: "not_found" };
-    if (!row.signed_at) return { ok: false, reason: "not_signed" };
-    if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
-    await insertAuditRow(client, {
-      action: "visit.payment_deferred", entity: "visit", entityId: id, entityLabel: row.patient_name,
-      details: {
-        الفاتورة: row.invoice_id,
-        "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
-        العملة: row.invoice_currency,
-        /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
-        ...(reason ? { السبب: reason } : {}),
-      },
-      actor: actor.actor, actorRole: actor.actorRole ?? null,
-    });
-    return { ok: true, already: false, invoiceId: row.invoice_id };
-  });
+/** Reasoned operational decision only: no invoice, receipt or ledger mutation. */
+export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null,
+  proof?: import("./operational-checkout").SignedReceptionProof): Promise<DeferPaymentResult> {
+  const { decideSignedReceptionHandoff } = await import("./reception-handoff-db");
+  return decideSignedReceptionHandoff({ ...proof, visitId: id, reason } as import("./reception-handoff-db").CompleteReceptionHandoffInput, actor, "deferred");
 }
 
 /** سطر عملٍ في ملخّص المغادرة. */
@@ -28193,6 +28167,7 @@ export interface VisitWalkout {
   deferred: boolean;
   /** (P0-G) الملخص المالي بكل عملة — قبل اليوم (المحرك الكانوني على الدفتر بلا حركات اليوم) وبعده. */
   checkout: {
+    financialAsOfDate?: string;
     previous: Partial<Record<Currency, number>>;
     current: Partial<Record<Currency, number>>;
     invoicePaidMinor: number;
@@ -28286,7 +28261,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];
   let nextAppointment: VisitWalkout["nextAppointment"] = null;
-  const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
+  const checkout: VisitWalkout["checkout"] = { financialAsOfDate: visit.today, previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
     const [ledger, planCurrencies, appointments] = await Promise.all([
       patientLedger(visit.patient_id),
@@ -28304,10 +28279,10 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
       .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
       .filter((row) => row.balanceMinor !== 0);
 
-    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات يومها — لا حسابٌ
+    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات تاريخ القراءة المالية — لا حسابٌ
        في الواجهة ولا طرحٌ عابرٌ للعملات. */
     const todayPayment = (payment: Payment) =>
-      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.today;
     const before = ledgerBalancesByCurrency(visit.patient_id, {
       invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
       payments: ledger.payments.filter((payment) => !todayPayment(payment)),

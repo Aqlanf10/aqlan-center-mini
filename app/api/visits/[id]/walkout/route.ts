@@ -1,3 +1,5 @@
+import { sameVisitReceivable } from "@/lib/operational-checkout";
+import { readSignedReceptionVerification } from "@/lib/operational-checkout-db";
 import { NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getVisitOwner, visitWalkout } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
@@ -30,6 +32,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (!(await canSeeWalkout(session, owner.patientId))) {
       return NextResponse.json({ message: "ملخّص المغادرة فيه أرقامٌ مالية — للاستقبال والمدير." }, { status: 403 });
     }
+    const proofBefore = canReadReceptionHandoff(session.role) && owner.patientId !== null
+      ? await readSignedReceptionVerification(id, owner.patientId) : null;
     const walkout = await visitWalkout(id);
     if (!walkout) return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     /* (P0-G) الملخص المالي بكل عملة + قسط الرصيد السابق المقترح (P0-C) — من الخادم لا من الواجهة. */
@@ -39,8 +43,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
       ? await readReceptionHandoff(id, walkout) : null;
-    return NextResponse.json({ ...walkout, summary, signedToday,
-      ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
+    const proof = handoff && walkout.patientId ? await readSignedReceptionVerification(id, walkout.patientId) : null;
+    if (handoff && (!proof || proof.signedAt !== walkout.signedAt || proof.signatureVersion !== handoff.signatureVersion
+      || !proofBefore || proof.patientId !== proofBefore.patientId || proof.signatureVersion !== proofBefore.signatureVersion
+      || !sameVisitReceivable(proof.receivable, proofBefore.receivable))) {
+      return NextResponse.json({ message: "تغيّرت الزيارة؛ أعد القراءة." }, { status: 409 });
+    }
+    return NextResponse.json({ ...walkout, summary, signedToday, receptionProof: proof,
+      ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason, financialReviewRequired: handoff.financialReviewRequired, visitInvoiceSettled: handoff.visitInvoiceSettled } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });

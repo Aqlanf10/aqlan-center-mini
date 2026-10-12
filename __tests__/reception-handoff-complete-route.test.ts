@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ session: { username: "desk", role: "reception" } as { username: string; role: string } | null,
-  authorize: vi.fn(), see: vi.fn(), complete: vi.fn(), handoff: vi.fn(), walkout: vi.fn(), owner: vi.fn(), summary: vi.fn() }));
+  authorize: vi.fn(), see: vi.fn(), complete: vi.fn(), handoff: vi.fn(), walkout: vi.fn(), owner: vi.fn(), summary: vi.fn(), proof: vi.fn() }));
 vi.mock("../lib/session", () => ({ requireSession: async () => state.session }));
 vi.mock("../lib/operational-access", () => ({ authorizeVisit: state.authorize }));
 vi.mock("../lib/walkout-access", () => ({ canSeeWalkout: state.see }));
@@ -9,11 +9,12 @@ vi.mock("../lib/reception-handoff-db", () => ({ completeReceptionHandoff: state.
   isHandoffSignature: (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", visitWalkout: state.walkout, getVisitOwner: state.owner }));
+vi.mock("../lib/operational-checkout-db", () => ({ readSignedReceptionVerification: state.proof }));
 vi.mock("../lib/checkout-db", () => ({ visitCheckoutSummary: state.summary }));
 const { POST } = await import("../app/api/visits/[id]/reception-handoff/route");
 const { GET } = await import("../app/api/visits/[id]/walkout/route");
 const signedAt = "2026-10-10T09:00:00.000Z";
-const payload = { patientId: 7, signedAt, reason: "موعد متابعة للتحصيل" };
+const payload = { patientId: 7, signedAt, signatureVersion: "2026-10-10T09:00:00.000123Z", receivable: null, reason: "موعد متابعة للتحصيل" };
 const post = (body: unknown = payload, id = "41", extraHeaders: Record<string, string> = {}) => POST(
   new Request(`http://localhost/api/visits/${id}/reception-handoff`, { method: "POST", body: JSON.stringify(body),
     headers: { "content-type": "application/json", ...extraHeaders } }), { params: Promise.resolve({ id }) });
@@ -24,10 +25,11 @@ beforeEach(() => {
   state.authorize.mockReset().mockResolvedValue({ ok: true, patientId: 7 });
   state.see.mockReset().mockResolvedValue(true);
   state.complete.mockReset().mockResolvedValue({ ok: true, visitId: 41, patientId: 7, signedAt, status: "handled", handledReason: payload.reason });
-  state.handoff.mockReset().mockResolvedValue({ status: "handled", handledReason: payload.reason });
+  state.handoff.mockReset().mockResolvedValue({ status: "handled", signatureVersion: payload.signatureVersion, handledReason: payload.reason });
   state.walkout.mockReset().mockResolvedValue({ visitId: 41, patientId: 7, signedAt });
   state.owner.mockResolvedValue({ found: true, patientId: 7 });
   state.summary.mockResolvedValue({});
+  state.proof.mockReset().mockResolvedValue({ ...payload, visitId: 41 });
 });
 
 describe("POST exact reception handoff completion", () => {
@@ -119,4 +121,27 @@ describe("walkout includes durable front-desk status", () => {
     state.handoff.mockRejectedValue(new Error("private audit details"));
     expect((await get()).status).toBe(500);
   });
+});
+
+it("projects historical financial recheck flags into exact authorized signed checkout without changing decision status", async () => {
+  state.handoff.mockResolvedValue({ status: "deferred", signatureVersion: payload.signatureVersion, handledReason: "قرار سابق",
+    financialReviewRequired: true, visitInvoiceSettled: false });
+  const response = await get(); expect(response.status).toBe(200);
+  expect((await response.json()).receptionHandoff).toEqual({ status: "deferred", handledReason: "قرار سابق",
+    financialReviewRequired: true, visitInvoiceSettled: false });
+  state.session = { username: "doctor", role: "doctor" };
+  expect((await (await get()).json()).receptionHandoff).toBeUndefined();
+});
+
+it("refuses a financial revision changed while the signed checkout summary was being read", async () => {
+  state.proof.mockResolvedValueOnce({ ...payload, visitId: 41 }).mockResolvedValueOnce({ ...payload, visitId: 41,
+    receivable: { revision: "a".repeat(32), invoiceId: 81, currency: "YER", status: "open", netMinor: 1000, paidMinor: 0 } });
+  expect((await get()).status).toBe(409);
+});
+
+it("refuses patient ownership changed while the signed checkout summary was being read", async () => {
+  state.walkout.mockResolvedValue({ visitId: 41, patientId: 8, signedAt });
+  state.proof.mockResolvedValueOnce({ ...payload, visitId: 41 })
+    .mockResolvedValueOnce({ ...payload, visitId: 41, patientId: 8 });
+  expect((await get()).status).toBe(409);
 });
