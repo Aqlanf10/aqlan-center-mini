@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Pool } from 'pg';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { fullBackupBlocks } from '../../lib/fullBackup';
@@ -20,13 +22,6 @@ let db: typeof import('../../lib/db'), actor: SessionPayload, directory: string,
 let originalReceipt: Awaited<ReturnType<typeof recordHrHistory>>;
 let originalCommand: ReturnType<typeof parseHrHistoryCommand>;
 const originalUrl = process.env.DATABASE_URL, originalSeed = process.env.SKIP_SEED;
-const temporalFiles = ['migrations/0056_hr_employment_history.sql', 'migrations/0057_hr_schedule_policy_versions.sql', 'docs/hr-temporal-foundation/proposals/hr-temporal-write-receipts.sql'];
-
-async function installPendingFixtureSchema(pool: Pool) {
-  // Temporary explicit fixture installation while allocation/runtime registration is unresolved.
-  // This is NOT evidence of production bootstrap or final migration registration.
-  for (const file of temporalFiles) await pool.query(await readFile(file, 'utf8'));
-}
 async function rows(pool: Pool) {
   const tables = (await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'schema_migrations' ORDER BY tablename")).rows;
   const result: Record<string, unknown> = {};
@@ -39,7 +34,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = fixture.source.options.connectionString!;
   process.env.SKIP_SEED = 'true';
   db = await import('../../lib/db'); await db.resetPoolForTesting(); await db.ensureSchema();
-  await installPendingFixtureSchema(fixture.source);
+  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0056', '0057', '0058']);
   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(710,'composed-admin','Synthetic administrator','synthetic-hash','admin')");
   await fixture.source.query("INSERT INTO hr_staff(id,full_name,created_by,contract_kind,salary_amount_minor,salary_currency,salary_period,salary_effective_on,hire_date) VALUES(810,'Synthetic receptionist','test','salary',90000,'YER','monthly','2020-01-01','2020-01-01')");
   await fixture.source.query("SELECT setval(pg_get_serial_sequence('hr_effective_streams','id'),91000,true)");
@@ -58,6 +53,7 @@ beforeAll(async () => {
     archive=gzipSync(Buffer.concat(blocks));
   } finally {client.release();}
   await writeFile(join(directory,'synthetic-full-backup.tar.gz'),archive);
+  await writeFile(join(directory, 'synthetic-backup.sql'), sql);
 });
 afterAll(async () => {
   try {await db?.resetPoolForTesting();} finally {
@@ -68,8 +64,11 @@ afterAll(async () => {
 
 it('SQL backup restores every application table, explicit identities, revision order and exact durable receipt replay',async()=>{
   process.env.DATABASE_URL=fixture.sqlTarget.options.connectionString!;
-  await db.resetPoolForTesting();await db.ensureSchema();await installPendingFixtureSchema(fixture.sqlTarget);
-  try {await fixture.sqlTarget.query(sql);} catch(e) {await fixture.sqlTarget.query('ROLLBACK');throw e;}
+  await db.resetPoolForTesting();await db.ensureSchema();
+  // Exercise the supported SQL restore CLI against a runtime-owned target registry.
+  const restored = await promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'synthetic-backup.sql')], { env: { ...process.env } });
+  expect(restored.stdout).toContain('تمت الاستعادة');
+  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0056', '0057', '0058']);
   expect(await rows(fixture.sqlTarget)).toEqual(await rows(fixture.source));
   expect(await recordHrHistory(db.getPool(),hrTemporalAuthority(actor),originalCommand)).toEqual(originalReceipt);
   expect((await fixture.sqlTarget.query('SELECT count(*)::int AS n FROM hr_effective_revisions')).rows[0].n).toBe(2);

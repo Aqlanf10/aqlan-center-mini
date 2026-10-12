@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { sessionCredentialVersion, type SessionPayload } from '../../lib/auth';
@@ -19,7 +18,6 @@ beforeAll(async () => {
   fixture = await openBackupTimestampFixture({ ...process.env });
   process.env.DATABASE_URL = fixture.source.options.connectionString!;
   runtime = await import('../../lib/db'); await runtime.resetPoolForTesting(); await runtime.ensureSchema();
-  for (const file of ['migrations/0056_hr_employment_history.sql', 'migrations/0057_hr_schedule_policy_versions.sql', 'docs/hr-temporal-foundation/proposals/hr-temporal-write-receipts.sql']) await fixture.source.query(await readFile(file, 'utf8'));
   const row = (await fixture.source.query("INSERT INTO users(username,display_name,password_hash,role) VALUES('history-manager','Synthetic manager','synthetic-hash','admin') RETURNING id")).rows[0];
   actor = { userId: row.id, username: 'history-manager', role: 'admin', expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion('synthetic-hash') };
   writers = new Pool({ connectionString: fixture.source.options.connectionString, max: 8, ssl: false, application_name: 'hr-temporal-writer-tests' });

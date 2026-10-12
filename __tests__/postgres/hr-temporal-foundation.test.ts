@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
@@ -30,7 +30,12 @@ beforeAll(async () => {
   fixture = await openBackupTimestampFixture({ ...process.env });
   process.env.DATABASE_URL = fixture.source.options.connectionString!;
   process.env.SESSION_SECRET = 'temporal-synthetic-session-secret-0123456789'; process.env.SKIP_SEED = 'false';
-  db = await import('../../lib/db'); await db.resetPoolForTesting(); await db.ensureSchema();
+  // This additive-migration test deliberately starts before the temporal extension.
+  // Only fixture bootstrap is withheld; all original financial/history assertions remain.
+  const migrationRuntime = await import('../../lib/migrations');
+  const legacyBootstrap = vi.spyOn(migrationRuntime, 'applyRuntimeMigrationFiles').mockResolvedValueOnce([]);
+  db = await import('../../lib/db'); await db.resetPoolForTesting();
+  try { await db.ensureSchema(); } finally { legacyBootstrap.mockRestore(); }
   const { sessionCredentialVersion } = await import('../../lib/auth');
   const { rows: [user] } = await fixture.source.query("INSERT INTO users(username,display_name,password_hash,role) VALUES ('temporal-manager','Temporal Manager','synthetic','admin') RETURNING *");
   actor = { userId: user.id, username: user.username, role: 'admin', expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion(user.password_hash) };

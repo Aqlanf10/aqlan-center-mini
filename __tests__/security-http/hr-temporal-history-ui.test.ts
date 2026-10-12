@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { chromium, type Browser, type BrowserContext, type Page, type Locator } from 'playwright';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { harness } from './_server';
 import { openHrJourneyServer } from './_hr-isolated-server';
@@ -19,10 +19,13 @@ async function staff(name: string, currency = 'YER') {
 }
 beforeAll(async () => {
   h = await harness(); owned = await openHrJourneyServer(h); mkdirSync(evidence, { recursive: true });
-  // Unintegrated deployment must fail closed. The numbered migrations remain unregistered.
+  // Withhold only the receipt table in this owned fixture to retain the original
+  // partial-schema refusal assertion; the real runtime already registered0056–0058.
   const id = await staff('اختبار بوابة الإدماج');
-  expect((await api('GET', `/api/hr/staff/${id}/history`))).toMatchObject({ status: 503, body: { code: 'integration_pending' } });
-  for (const file of ['migrations/0056_hr_employment_history.sql', 'migrations/0057_hr_schedule_policy_versions.sql', 'docs/hr-temporal-foundation/proposals/hr-temporal-write-receipts.sql']) await owned.db.query(readFileSync(file, 'utf8'));
+  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0056','0057','0058']);
+  await owned.db.query('ALTER TABLE hr_temporal_write_receipts RENAME TO synthetic_withheld_receipts');
+  try { expect((await api('GET', `/api/hr/staff/${id}/history`))).toMatchObject({ status: 503, body: { code: 'integration_pending' } }); }
+  finally { await owned.db.query('ALTER TABLE synthetic_withheld_receipts RENAME TO hr_temporal_write_receipts'); }
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 });
 afterAll(async () => { try { await browser?.close(); } finally { await owned?.close(); } });

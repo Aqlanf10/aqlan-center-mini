@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { readFile } from 'node:fs/promises';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { sessionCredentialVersion, type SessionPayload } from '../../lib/auth';
 import type { DbClient, DbPool } from '../../lib/db';
@@ -23,9 +22,8 @@ beforeAll(async () => {
   process.env.SESSION_SECRET = 'rollover-synthetic-session-secret-0123456789';
   fixture = await openBackupTimestampFixture({ ...process.env }); process.env.DATABASE_URL = fixture.source.options.connectionString!;
   runtime = await import('../../lib/db'); await runtime.resetPoolForTesting(); await runtime.ensureSchema(); native = runtime.getPool();
-  // The unintegrated schema retains the explicitly labeled legacy observation.
+  // Runtime installs the schema but creates no undocumented employment history.
   expect((await readOperationalEmployment(native, [])).timeline(999)).toEqual({ revision: 0, facts: [] });
-  for (const file of ['migrations/0056_hr_employment_history.sql','migrations/0057_hr_schedule_policy_versions.sql','docs/hr-temporal-foundation/proposals/hr-temporal-write-receipts.sql']) await fixture.source.query(await readFile(file, 'utf8'));
   const user = (await fixture.source.query("INSERT INTO users(username,display_name,password_hash,role) VALUES('rollover-admin','Synthetic manager','synthetic-hash','admin') RETURNING id")).rows[0];
   actor = { userId: user.id, username: 'rollover-admin', role: 'admin', expiresAt: Date.now()+3600000, credentialVersion: sessionCredentialVersion('synthetic-hash') };
   const controlled: DbPool = { connect: async () => wrap(await native.connect()), query: native.query.bind(native) };

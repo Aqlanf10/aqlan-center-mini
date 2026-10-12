@@ -25,7 +25,11 @@ if (!file || !url.trim()) {
   process.exit(1);
 }
 
-const sql = readFileSync(file, "utf8");
+// As with full archive restore, schema ownership belongs to the target's
+// bootstrap/migrator, not the source backup's historical registry snapshot.
+// Application rows still use plain INSERT and reject an occupied target.
+const sql = readFileSync(file, "utf8").split('\n')
+  .filter(line => !/^INSERT INTO schema_migrations\s/.test(line)).join('\n');
 if (!sql.includes("COMMIT;")) {
   console.error("الملف ناقص: لا يحمل خاتمة سليمة. لا تُستعاد منه قاعدة.");
   process.exit(1);

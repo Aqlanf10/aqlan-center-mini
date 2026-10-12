@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { chromium, type Browser } from 'playwright';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { harness } from './_server';
 import { openHrJourneyServer } from './_hr-isolated-server';
@@ -13,7 +13,6 @@ async function api(method: string, path: string, body?: unknown) {
 }
 beforeAll(async()=>{
   h=await harness();owned=await openHrJourneyServer(h);mkdirSync(evidence,{recursive:true});
-  for(const file of ['migrations/0056_hr_employment_history.sql','migrations/0057_hr_schedule_policy_versions.sql','docs/hr-temporal-foundation/proposals/hr-temporal-write-receipts.sql'])await owned.db.query(readFileSync(file,'utf8'));
   day=(await owned.db.query("SELECT (clock_timestamp() AT TIME ZONE 'Asia/Aden')::date::text AS day")).rows[0].day;
   browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});
 });
