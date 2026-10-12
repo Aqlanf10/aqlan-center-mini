@@ -4,6 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
+import { canViewMoney } from "@/lib/roles";
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
@@ -334,8 +337,11 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
+  context?: ClinicalNavigationContext;
+  onContextChange?: (context: ClinicalNavigationContext) => unknown;
+  onOpenTreatmentEntry?: () => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -359,11 +365,11 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -463,7 +469,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
-  const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
+  const unsignedTodayVisitId = cases.filter((row) => context?.orthoCaseId === undefined || row.id === context.orthoCaseId).flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
   const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
   const signVisitId = (savedCaseAvailable ? saved?.visitId : null) ?? unsignedTodayVisitId;
@@ -505,8 +511,21 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
     </div>;
   }
 
+  if (context?.patientId !== undefined && context.patientId !== patientId
+    || context?.orthoCaseId !== undefined && !cases.some((row) => row.id === context.orthoCaseId)
+    || context?.clinicalCaseId !== undefined && context.orthoCaseId === undefined) {
+    return <p role="alert" data-testid="ortho-context-unavailable">الحالة المطلوبة غير متاحة في كابينة التقويم. لم يتم اختيار حالة بديلة.</p>;
+  }
+  const visibleCases = context?.orthoCaseId === undefined ? cases : cases.filter((row) => row.id === context.orthoCaseId);
   return (
     <div className="space-y-4" data-testid="patient-ortho-workspace" data-read-state="ready">
+      {onOpenTreatmentEntry ? <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm">
+        <p>لإضافة علاج جديد أو اتفاق سابق، ابدأ من الحساب لربط الخطة والفاتورة أو الرصيد السابق.</p>
+        <button type="button" onClick={() => onOpenTreatmentEntry()} className="mt-2 min-h-11 rounded-lg bg-sky-800 px-3 text-white">إضافة علاج أو اتفاق</button>
+      </div> : null}
+      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
+        onOpenClinicalContext={(reference) => onContextChange?.(reference)} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -625,10 +644,10 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
       {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
       {cases.length > 0 && (
         <ul className="space-y-4">
-          {cases.map((row) => {
+          {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? "wires";
+            const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
 
             return (
               <li

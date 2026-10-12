@@ -43,9 +43,12 @@ describe("(SPEC-T1) tooth picker", () => {
     expect(render([55])).toContain(">55</button>");
   });
 
-  it("the template plan form picks teeth on the chart, no free-text tooth numbers", () => {
-    const source = readFileSync(resolve(process.cwd(), "components/TemplatePlanForm.tsx"), "utf8");
-    expect(source).toContain("<ToothPicker value={teeth} onChange={setTeeth} />");
+  it("the canonical invoice template picks teeth on the shared chart, no free-text tooth numbers", () => {
+    const source = readFileSync(resolve(process.cwd(), "components/InvoiceTemplatePicker.tsx"), "utf8");
+    expect(source).toContain("<ToothSelectionDialog");
+    expect(source).toContain('data-testid="invoice-template-teeth"');
+    expect(source).toContain("teeth: [...new Set(chosen.teeth)].sort((a,b) => a-b)");
+    expect(source).not.toContain("<ToothPicker");
     expect(source).not.toContain("teethText");
   });
 
@@ -76,9 +79,12 @@ describe("(SPEC-T1) tooth picker", () => {
     expect(visit).toContain("<ToothField value={draft.toothCode}");
     expect(visit).not.toContain('placeholder="رقم السن"');
     const plans = read("components/PatientPlans.tsx");
-    expect(plans).toContain("<ToothField value={row.tooth}");
     expect(plans).toContain("<ToothField value={tooth} onChange={setTooth}");
     expect(plans).not.toContain('placeholder="السن"');
+    const invoice = read("components/PatientLedger.tsx");
+    expect(invoice).toContain("<ToothSelectionDialog");
+    expect(invoice).toContain("onConfirm={(selection) => confirmTeeth(");
+    expect(invoice).not.toContain('placeholder="رقم السن"');
     const referrals = read("components/PatientReferrals.tsx");
     expect(referrals).toContain("<ToothPicker value={parseTeethText(form.teeth)}");
     expect(referrals).not.toContain('placeholder="14, 24, 34, 44"');

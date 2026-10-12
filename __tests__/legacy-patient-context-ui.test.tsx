@@ -125,7 +125,12 @@ describe("read-only legacy orthodontic context in Plans", () => {
     expect(content).not.toMatch(/987654|876543|PRIVATE_DETAIL|45/);
     const links = nodes(tree).filter((node) => node.type === "a");
     expect(links).toHaveLength(4);
-    for (const link of links) expect(link.props.href).toBe("/patients/19?tab=ortho");
+    expect(links.map(link => {
+      const url = new URL(String(link.props.href), "http://synthetic.test");
+      expect(url.pathname).toBe("/patients/19");
+      return Object.fromEntries(url.searchParams);
+    })).toEqual([41, 42, 43, 44].map(id => ({ patientId: "19", orthoCaseId: String(id),
+      pillar: "wires", tab: "treatment", sub: "ortho" })));
     expect(nodes(tree).filter((node) => ["input", "form", "button"].includes(String(node.type)))).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/ortho?patientId=19");

@@ -1,8 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
+import { ALL_TEETH } from "../../lib/dental";
+import { revealInvoiceControlByWheel, settleBrowser } from "./_invoice-browser-geometry";
 
 /**
  * (INV-LINK TOOTH) أسنان بند الفاتورة العلاجية تُختار بالنقر على **مخطط الأسنان نفسه** (Odontogram المشترك مع
@@ -50,7 +52,8 @@ async function openInvoice(patientId: number, viewport = { width: 1280, height: 
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "فاتورة يدوية" }).click();
+  await page.getByTestId("treatment-entry-open").click();
+  await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
   return { context, page };
 }
 
@@ -84,7 +87,163 @@ const planItems = async (patientId: number) => (await db.query<{ tooth_code: num
 const cases = async (patientId: number) => (await db.query<{ specialty: string; site: string | null }>(
   `SELECT specialty, site FROM clinical_cases WHERE patient_id = $1 ORDER BY site NULLS FIRST, id`, [patientId])).rows;
 
+// Measure the entire target against every clipping ancestor, including the
+// chart's horizontal scrollport. Background shell bars do not reduce a modal's
+// viewport; hit witnesses still catch an actual overlay over the modal itself.
+function dialogControlProof(node: Element) {
+  const rect = node.getBoundingClientRect();
+  const available = { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+  const clips = [];
+  for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect();
+    const clipX = /auto|scroll|hidden|clip/.test(style.overflowX);
+    const clipY = /auto|scroll|hidden|clip/.test(style.overflowY);
+    const left = box.left + ancestor.clientLeft, top = box.top + ancestor.clientTop;
+    const right = left + ancestor.clientWidth, bottom = top + ancestor.clientHeight;
+    if (clipX) { available.left = Math.max(available.left, left); available.right = Math.min(available.right, right); }
+    if (clipY) { available.top = Math.max(available.top, top); available.bottom = Math.min(available.bottom, bottom); }
+    if (clipX || clipY) clips.push({ testId: ancestor.dataset.testid ?? null, left, top, right, bottom,
+      clipX, clipY, scrollLeft: ancestor.scrollLeft, scrollTop: ancestor.scrollTop });
+    // The viewport-positioned modal escapes overflow clips on the page behind it.
+    if (style.position === "fixed") break;
+  }
+  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+  const cornerX = Math.min(8, rect.width / 4), cornerY = Math.min(8, rect.height / 4);
+  const points = [[cx, cy], [cx, rect.top + 2], [rect.right - 2, cy], [cx, rect.bottom - 2], [rect.left + 2, cy],
+    [rect.left + cornerX, rect.top + cornerY], [rect.right - cornerX, rect.top + cornerY],
+    [rect.right - cornerX, rect.bottom - cornerY], [rect.left + cornerX, rect.bottom - cornerY]];
+  const hits = points.map(([x, y]) => ({ x, y, clear: node.contains(document.elementFromPoint(x, y)) }));
+  return { tooth: node.getAttribute("data-testid"), rect: { left: rect.left, right: rect.right, top: rect.top,
+    bottom: rect.bottom, width: rect.width, height: rect.height }, available, clips, hits,
+    fits: rect.left >= available.left && rect.right <= available.right && rect.top >= available.top && rect.bottom <= available.bottom,
+    clear: hits.every(hit => hit.clear), pageWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth };
+}
+
+async function revealDialogControlByWheel(page: Page, control: Locator) {
+  await control.waitFor();
+  const wheels = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const proof = await control.evaluate(dialogControlProof);
+    if (proof.fits && proof.clear) return { ...proof, wheels };
+    const wheel = await control.evaluate(node => {
+      const target = node.getBoundingClientRect();
+      for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect();
+        const left = box.left + ancestor.clientLeft, top = box.top + ancestor.clientTop;
+        const right = left + ancestor.clientWidth, bottom = top + ancestor.clientHeight;
+        const dx = /auto|scroll/.test(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth
+          && (target.left < left || target.right > right) ? (target.left + target.right - left - right) / 2 : 0;
+        const dy = /auto|scroll/.test(style.overflowY) && ancestor.scrollHeight > ancestor.clientHeight
+          && (target.top < top || target.bottom > bottom) ? (target.top + target.bottom - top - bottom) / 2 : 0;
+        if (dx || dy) {
+          const x = (Math.max(0, left) + Math.min(innerWidth, right)) / 2;
+          const y = (Math.max(0, top) + Math.min(innerHeight, bottom)) / 2;
+          const hit = document.elementFromPoint(x, y);
+          return { x, y, dx, dy, hitsScrollport: ancestor.contains(hit),
+            nativeField: hit?.closest("input,textarea,select")?.tagName ?? null };
+        }
+      }
+      return null;
+    });
+    expect(wheel, `clipped target must have a user-scrollable ancestor: ${JSON.stringify(proof)}`).not.toBeNull();
+    expect(wheel!.hitsScrollport).toBe(true); expect(wheel!.nativeField).toBeNull();
+    await page.mouse.move(wheel!.x, wheel!.y); await page.mouse.wheel(wheel!.dx, wheel!.dy);
+    wheels.push(wheel); await settleBrowser(page);
+    await expect.poll(async () => JSON.stringify((await control.evaluate(dialogControlProof)).clips)).not.toBe(JSON.stringify(proof.clips));
+  }
+  throw new Error(`Native scrolling did not expose the whole target: ${await control.getAttribute("data-testid")}`);
+}
+
 describe("INV-LINK TOOTH — invoice tooth selection through the shared dental chart", () => {
+  it.each([390, 1280])("every permanent and primary tooth is reachable by native wheel and full-target clicks at %i×844", async width => {
+    const patientId = await newPatient(`all-teeth-${width}`);
+    const { context, page } = await openInvoice(patientId, { width, height: 844 });
+    const geometry = [];
+    const writes: string[] = [];
+    page.on("request", request => {
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method())
+        && new URL(request.url()).pathname !== "/api/invoices/clinical-preview") writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+    try {
+      await chooseService(page, services.filling);
+      const opener = page.getByTestId("invoice-tooth-button-0");
+      const openerProof = await revealInvoiceControlByWheel(page, opener);
+      await page.mouse.click(openerProof.left + openerProof.width / 2, openerProof.top + openerProof.height / 2);
+      const dialog = page.getByTestId("tooth-dialog");
+      await dialog.waitFor();
+      await page.evaluate(async () => { await document.fonts.ready; });
+      const navigation = dialog.getByTestId("tooth-chart-navigation");
+      const navigationProof = await revealDialogControlByWheel(page, navigation);
+      expect(await navigation.innerText()).toContain("اسحب المخطط أفقيًا");
+      const chart = dialog.getByTestId("tooth-dialog-chart");
+      const hasHorizontalOverflow = await chart.evaluate(node => node.scrollWidth > node.clientWidth);
+      for (const direction of ["اليمين", "اليسار"]) {
+        const arrow = navigation.getByRole("button", { name: `تمرير مخطط الأسنان نحو ${direction}`, exact: true });
+        const arrowProof = await revealDialogControlByWheel(page, arrow);
+        expect(arrowProof.rect.height).toBeGreaterThanOrEqual(44); expect(arrowProof.rect.width).toBeGreaterThanOrEqual(44);
+        await page.mouse.click((arrowProof.rect.left + arrowProof.rect.right) / 2, (arrowProof.rect.top + arrowProof.rect.bottom) / 2);
+        if (hasHorizontalOverflow) {
+          if (direction === "اليمين") await expect.poll(() => chart.evaluate(node => node.scrollLeft)).toBeGreaterThan(0);
+          else await expect.poll(() => chart.evaluate(node => node.scrollLeft)).toBe(0);
+        }
+      }
+      mkdirSync(".settings-ui-artifacts", { recursive: true });
+      await page.screenshot({ path: `.settings-ui-artifacts/invoice-chart-navigation-${width}.png`, fullPage: false });
+      const primary = dialog.locator("label").filter({ hasText: "إظهار الأسنان اللبنية" });
+      const primaryProof = await revealDialogControlByWheel(page, primary);
+      await page.mouse.click((primaryProof.rect.left + primaryProof.rect.right) / 2, (primaryProof.rect.top + primaryProof.rect.bottom) / 2);
+      expect(await primary.getByRole("checkbox").isChecked()).toBe(true);
+      expect(await dialog.locator('[data-testid^="odontogram-tooth-"]').count()).toBe(52);
+      for (const code of ALL_TEETH) {
+        const tooth = dialog.getByTestId(`odontogram-tooth-${code}`);
+        const proof = await revealDialogControlByWheel(page, tooth);
+        expect(proof.fits).toBe(true); expect(proof.clear).toBe(true); expect(proof.hits).toHaveLength(9);
+        expect(proof.rect.width).toBeGreaterThanOrEqual(44); expect(proof.rect.height).toBeGreaterThanOrEqual(44);
+        expect(proof.pageWidth).toBeLessThanOrEqual(width + 1);
+        // Coordinates are already proven visible: no locator auto-scroll, force,
+        // DOM scroll mutation or JavaScript click can manufacture reachability.
+        await page.mouse.click((proof.rect.left + proof.rect.right) / 2, (proof.rect.top + proof.rect.bottom) / 2);
+        await expect.poll(() => tooth.getAttribute("aria-pressed")).toBe("true");
+        expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(1);
+        geometry.push({ code, ...proof });
+      }
+      expect(geometry.map(one => one.code)).toEqual(ALL_TEETH);
+      const confirmControl = page.getByTestId("tooth-dialog-confirm");
+      const confirmProof = await revealDialogControlByWheel(page, confirmControl);
+      expect(confirmProof.rect.height).toBeGreaterThanOrEqual(44);
+      const selectedTooth = dialog.getByTestId(`odontogram-tooth-${ALL_TEETH.at(-1)}`);
+      // The aria state precedes the CSS color transition. Wait for its actual end.
+      await selectedTooth.evaluate(async node => {
+        await Promise.all(node.getAnimations({ subtree: true }).map(animation => animation.finished));
+      });
+      const selectedAppearance = await selectedTooth.evaluate(node => ({
+        pressed: node.getAttribute("aria-pressed"), background: getComputedStyle(node).backgroundColor,
+        labelColor: getComputedStyle(node.querySelector("span")!).color,
+        otherBackground: getComputedStyle(node.closest('[data-testid="tooth-dialog"]')!
+          .querySelector('[data-testid^="odontogram-tooth-"][aria-pressed="false"]')!).backgroundColor,
+        activeAnimations: node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running").length,
+      }));
+      expect(selectedAppearance.pressed).toBe("true"); expect(selectedAppearance.activeAnimations).toBe(0);
+      expect(selectedAppearance.background).not.toBe(selectedAppearance.otherBackground);
+      const selectedProof = await selectedTooth.evaluate(dialogControlProof);
+      expect(selectedProof.fits).toBe(true); expect(selectedProof.clear).toBe(true);
+      mkdirSync(".settings-ui-artifacts", { recursive: true });
+      writeFileSync(`.settings-ui-artifacts/invoice-all-teeth-${width}.json`, `${JSON.stringify({ width, height: 844, openerProof, navigationProof, hasHorizontalOverflow, primaryProof, geometry, confirmProof, selectedAppearance, selectedProof }, null, 2)}\n`);
+      await page.screenshot({ path: `.settings-ui-artifacts/invoice-all-teeth-${width}.png`, fullPage: false });
+      await page.mouse.click((confirmProof.rect.left + confirmProof.rect.right) / 2, (confirmProof.rect.top + confirmProof.rect.bottom) / 2);
+      await dialog.waitFor({ state: "detached" });
+      expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(ALL_TEETH.at(-1)));
+      expect(writes).toEqual([]);
+      for (const table of ["invoices", "payments", "treatment_plans", "clinical_cases"]) {
+        expect((await db.query(`SELECT 1 FROM ${table} WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
+      }
+    } catch (error) {
+      mkdirSync(".settings-ui-artifacts", { recursive: true });
+      await page.screenshot({ path: `.settings-ui-artifacts/invoice-all-teeth-failure-${width}.png`, fullPage: false });
+      throw error;
+    } finally { await context.close(); }
+  }, 120_000);
+
   it("RCT: clicking 36 and 46 on the chart splits into two lines, each previewing its own case; saved as two items and two cases", async () => {
     const patientId = await newPatient("rct");
     const { context, page } = await openInvoice(patientId);

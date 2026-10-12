@@ -2,6 +2,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page, type Route } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { isTreatmentFinancialContext } from "../../lib/treatment-financial-context-validation";
+import type { TreatmentFinancialContext } from "../../lib/treatment-financial-context";
 import type { Patient } from "@/lib/patient";
 import { previewTextLineHasOwnedHits } from "../fixtures/preview-label-text-boundary";
 import { baseUrl, harness } from "./_server";
@@ -80,6 +82,16 @@ function ledger(patientId: number, mode: "standard" | "aggregate" | "missing" = 
     ],
   };
 }
+// This sibling uses the very same controlled ledger snapshot, never a zero
+// account substituted for the historical balance under examination.
+function financialReferences(patientId: number, value: ReturnType<typeof ledger>): TreatmentFinancialContext {
+  const result: TreatmentFinancialContext = { patientId, references: [], documents: [], plans: [],
+    accountPositions: value.balances,
+    openingPositions: (value.legacyOpeningPositions ?? []).map(position => ({ ...position, currency: "SAR" as const,
+      scope: "patient_currency" as const, agreementIds: [], allocationState: "not_allocated" as const })) };
+  expect(isTreatmentFinancialContext(result, patientId)).toBe(true);
+  return result;
+}
 const settle = (page: Page) => page.evaluate(() => new Promise<void>(resolve =>
   requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 const events = (page: Page) => page.evaluate(() => (window.__legacyPreviewStorageEvents ?? []).map(event => ({ ...event })));
@@ -110,6 +122,9 @@ async function fixture(width: number) {
   const reads: string[] = [];
   const pending: Array<{ patientId: number; route: Route }> = [];
   const active = new Set<object>();
+  const financialPending: Array<{ patientId: number; route: Route }> = [];
+  let financialReply: { patientId: number; body: unknown; status: number } | null = null;
+  const resetFinancialRead = () => { financialReply = null; };
   const ids = [h.seeded.patientAId, h.seeded.patientBId];
   const allowedDocuments = new Set(ids.map(id => `${baseUrl}/patients/${id}?tab=account`));
   const background = (path: string) => path === "/api/visits" || path.startsWith("/api/visits/readiness?patientId=")
@@ -134,6 +149,11 @@ async function fixture(width: number) {
       if (target === prefix) { await json(route, { patient: patient(id), visits: [], appointments: [] }); return; }
       if (target === prefix + "/workflow") { await json(route, workflow(id)); return; }
       if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
+      if (target === prefix + "/treatment-financial-context") {
+        if (financialReply?.patientId === id) await json(route, financialReply.body, financialReply.status);
+        else financialPending.push({ patientId: id, route });
+        return;
+      }
       // The existing Account sibling performs this read, independently of the preview.
       if (target === prefix + "/legacy") { await json(route, { treatments: [], orphanPayments: [] }); return; }
       // (INV-LEGACY) The historical-agreement panel is another independent Account sibling read.
@@ -173,7 +193,7 @@ async function fixture(width: number) {
   };
   const close = async () => {
     const before = snapshot();
-    try { assertIsolation(before, 1); expect(pending).toHaveLength(0); }
+    try { assertIsolation(before, 1); expect(pending).toHaveLength(0); expect(financialPending).toHaveLength(0); }
     finally {
       await context.close();
       const after = snapshot(); assertIsolation(after, 0);
@@ -189,7 +209,15 @@ async function fixture(width: number) {
   };
   const respond = async (body?: unknown, status = 200) => {
     const next = pending.shift(); if (!next) throw new Error("No exact synthetic ledger GET is pending");
-    await json(next.route, body === undefined ? ledger(next.patientId) : body, status); await finish();
+    const value = body === undefined ? ledger(next.patientId) : body;
+    financialReply = { patientId: next.patientId, status,
+      body: status === 200 ? financialReferences(next.patientId, value as ReturnType<typeof ledger>) : value };
+    await json(next.route, value, status);
+    for (const pendingRead of financialPending.splice(0)) {
+      expect(pendingRead.patientId).toBe(next.patientId);
+      await json(pendingRead.route, financialReply.body, financialReply.status);
+    }
+    await finish();
   };
   const storageBaseline = async () => {
     const result = await events(page);
@@ -207,11 +235,12 @@ async function fixture(width: number) {
     assertIsolation(snapshot(), 1);
   };
   const go = async (id: number) => {
-    expect(pending).toHaveLength(0);
+    expect(pending).toHaveLength(0); resetFinancialRead();
     const response = await page.goto(`${baseUrl}/patients/${id}?tab=account`, { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBe(200); await waitRead(id);
   };
   const remountAccount = async (id: number) => {
+    resetFinancialRead();
     await page.getByTestId("patient-tab-files").click();
     await expect.poll(() => panel(page).count()).toBe(0); await finish();
     expect(new URL(page.url()).searchParams.get("tab")).toBe("files");
@@ -220,7 +249,7 @@ async function fixture(width: number) {
   try {
     await go(h.seeded.patientAId);
     return { page, context, respond, finish, waitRead, go, remountAccount, installCookie,
-      storageBaseline, quietMark, assertQuiet, close };
+      storageBaseline, quietMark, assertQuiet, close, resetFinancialRead };
   } catch (error) { await close(); throw error; }
 }
 
@@ -532,7 +561,7 @@ describe("read-only legacy comparison on the actual built Account page", () => {
       // Genuine cookie replacement + reload proves cross-session REMOUNT reset only.
       // Production exposes no read-only retained-root session-switch control.
       for (const role of ["reception", "admin"] as const) {
-        await f.installCookie(role);
+        await f.installCookie(role); f.resetFinancialRead();
         const response = await page.reload({ waitUntil: "domcontentloaded" }); expect(response?.status()).toBe(200);
         await f.waitRead(h.seeded.patientAId); await f.respond(); await f.storageBaseline(); await freshDraft(f);
       }

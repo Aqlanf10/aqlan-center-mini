@@ -111,21 +111,62 @@ async function assertTextReadable(locator: Locator) {
 describe("legacy patient entry and plan context in the real RTL UI", () => {
   it.each([1280, 390])("shows existing old ortho without a financial plan or write at %ipx", async (width) => {
     const before = await financialState();
-    const f = await open(width, "plans");
+    const f = await open(width, "account");
     try {
+      // In-page workspaces replace the current entry. Make the preceding real
+      // page explicit, so Back/Forward tests page history rather than inventing
+      // a Plans history entry for the canonical clinical-context callback.
+      await f.page.getByTestId("account-treatment-details").locator("summary").click();
+      await f.page.locator('[data-testid="patient-account-currency-banner"][data-currency="SAR"]').waitFor();
+      const accountUrl = f.page.url();
+      await f.page.goto(`${baseUrl}/patients/${patientId}?tab=plans`, { waitUntil: "domcontentloaded" });
       const panel = f.page.getByRole("region", { name: "التقويم السابق ضمن خطة المريض" });
       await panel.getByText(`حالة #${caseId}`, { exact: false }).waitFor();
       expect(await panel.innerText()).toContain("المرحلة العاملة");
       expect(await panel.innerText()).not.toMatch(/350\.00|35,000|المدفوع|المتبقي.*350/);
       const link = panel.getByRole("link", { name: "متابعة الحالة من ملف التقويم" });
-      expect(await link.getAttribute("href")).toBe(`/patients/${patientId}?tab=ortho`);
+      const referenceUrl = new URL((await link.getAttribute("href"))!, baseUrl);
+      expect(referenceUrl.pathname).toBe(`/patients/${patientId}`);
+      expect(Object.fromEntries(referenceUrl.searchParams)).toEqual({ patientId: String(patientId), orthoCaseId: String(caseId),
+        pillar: "wires", tab: "treatment", sub: "ortho" });
       await f.page.getByText("لا توجد خطط علاج جديدة مسجّلة هنا", { exact: false }).waitFor();
       await fits(f.page);
       await screenshotFromTop(f.page, `.settings-ui-artifacts/legacy-patient-plan-${width}.png`);
+      const historyLength = await f.page.evaluate(() => window.history.length);
       await link.click();
       await f.page.getByText("بدأ قبل النظام", { exact: true }).waitFor();
+      await expect.poll(() => new URL(f.page.url()).searchParams.get("sub")).toBe("ortho");
+      const orthoUrl = f.page.url();
+      expect(new URL(orthoUrl).pathname).toBe(referenceUrl.pathname);
+      expect(Object.fromEntries(new URL(orthoUrl).searchParams)).toEqual(Object.fromEntries(referenceUrl.searchParams));
+      expect(await f.page.evaluate(() => window.history.length)).toBe(historyLength);
       await f.page.goBack();
+      await expect.poll(() => f.page.url()).toBe(accountUrl);
+      const accountDetails = f.page.getByTestId("account-treatment-details");
+      if (await accountDetails.getAttribute("open") === null) await accountDetails.locator("summary").click();
+      await f.page.locator('[data-testid="patient-account-currency-banner"][data-currency="SAR"]').waitFor();
+      await f.page.goForward();
+      await expect.poll(() => f.page.url()).toBe(orthoUrl);
+      // The bounded port retains main's case cards, without donor-only test IDs.
+      const exactCase = f.page.getByTestId("patient-ortho-workspace").getByText(`#${caseId}`, { exact: true });
+      await exactCase.waitFor({ state: "visible" });
+      expect(await exactCase.count()).toBe(1);
+      await f.page.getByText("بدأ قبل النظام", { exact: true }).waitFor();
+      if (width === 390) {
+        const sections = f.page.getByTestId("patient-treatment-section");
+        expect(await sections.isVisible()).toBe(true);
+        expect(await sections.inputValue()).toBe("ortho");
+        await sections.selectOption("plans");
+        expect(await sections.inputValue()).toBe("plans");
+      } else {
+        const plans = f.page.getByTestId("patient-subtab-plans");
+        expect(await plans.isVisible()).toBe(true);
+        await plans.click();
+      }
       await f.page.getByRole("region", { name: "التقويم السابق ضمن خطة المريض" }).getByText(`حالة #${caseId}`, { exact: false }).waitFor();
+      const returned = new URL(f.page.url());
+      expect(returned.pathname).toBe(`/patients/${patientId}`);
+      expect(Object.fromEntries(returned.searchParams)).toEqual({ patientId: String(patientId), orthoCaseId: String(caseId), pillar: "wires", tab: "treatment", sub: "plans" });
       expect(f.writes).toEqual([]); expect(f.external).toEqual([]); expect(f.errors).toEqual([]);
       expect(await financialState()).toEqual(before);
     } finally { await f.context.close(); }
@@ -135,6 +176,7 @@ describe("legacy patient entry and plan context in the real RTL UI", () => {
     const before = await financialState();
     const f = await open(width, "account");
     try {
+      await f.page.getByTestId("account-secondary-actions").locator("summary").click();
       await f.page.getByRole("button", { name: "تعديل الرصيد السابق", exact: true }).click();
       const opening = f.page.getByRole("region", { name: "رصيد افتتاحي", exact: true });
       await opening.getByText("الرصيد السابق المتبقي", { exact: true }).waitFor();
