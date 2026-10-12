@@ -177,6 +177,8 @@ export function SummaryTab({
         </ul>
       ) : null}
 
+      <PatientIntakeHistory patientId={patientId} />
+
       {/*
         * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ
         * رحلة الاستقبال مع المريض: البطاقة في جيبه تختصر البحث إلى رقم،
@@ -440,7 +442,6 @@ export function SummaryTab({
 
       {/* الخط الزمني الموحَّد (§٢٩-٣٠) — يُحمَّل عند فتحه، والفلترة تُجيب تاريخ
           العلاج وتاريخ المال من مكان واحد. */}
-      <PatientIntakeHistory patientId={patientId} />
       <PatientTimeline patientId={patientId} base={base} />
 
       <CollectPaymentModal
