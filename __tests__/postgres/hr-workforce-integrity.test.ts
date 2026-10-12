@@ -12,15 +12,17 @@ beforeAll(async()=>{
  process.env.SKIP_SEED="false";
  db=await import("../../lib/db");hr=await import("../../lib/hr");work=await import("../../lib/hr-contracts-attendance");
  await db.resetPoolForTesting();await db.ensureSchema();
+
+},30000);
+beforeEach(async()=>{
+ // Recreate only this identity-checked disposable fixture, without disabling a history trigger.
+ await db.resetPoolForTesting();
+ await fixture.source.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
+ await db.ensureSchema();
  const actors=await db.getPool().query<{id:number;username:string;password_hash:string}>("INSERT INTO users(username,display_name,password_hash,role) VALUES ('work-admin','Admin','x','admin'),('work-reviewer','Reviewer','x','admin') RETURNING id,username,password_hash");
  process.env.SESSION_SECRET ??= "synthetic-hr-workforce-session-secret-only";
  const {sessionCredentialVersion}=await import("../../lib/auth");
  for(const actor of actors.rows){const session=actor.username===admin.username?admin:reviewer;session.userId=actor.id;session.credentialVersion=sessionCredentialVersion(actor.password_hash);}
-},30000);
-beforeEach(async()=>{
- // Each case starts with no staff, contracts, attendance, leave or financial business rows.
- // Bootstrap the real schema once; fixed users/default types/settings are never changed by a case.
- await fixture.source.query("TRUNCATE hr_staff, hr_payroll_periods, cashier_shifts, expenses, payables, patients RESTART IDENTITY CASCADE");
  staffId=(await hr.createStaff({fullName:"Workforce fixture",department:"secretariat",jobTitle:"Reception",hireDate:"2026-01-01",workStatus:"active",contractKind:"salary",endDate:null,phone:null,note:null,payTerms:{amountMinor:80000,currency:"YER",period:"monthly",effectiveOn:"2026-01-01"}},admin)).id;
 },30000);
 afterAll(async()=>{await db?.resetPoolForTesting();await fixture?.close();});

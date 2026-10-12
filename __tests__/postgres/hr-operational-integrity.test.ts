@@ -9,12 +9,16 @@ beforeAll(async()=>{
  fixture=await openBackupTimestampFixture(process.env);process.env.DATABASE_URL=fixture.source.options.connectionString!;process.env.SKIP_SEED='false';
  db=await import('../../lib/db');await db.resetPoolForTesting();await db.ensureSchema();
  hr=await import('../../lib/hr');work=await import('../../lib/hr-contracts-attendance');pay=await import('../../lib/hr-payroll');
+
+},30000);
+beforeEach(async()=>{
+ // Fresh schema only in this identity-checked disposable fixture; append-only triggers stay enabled.
+ await db.resetPoolForTesting();
+ await fixture.source.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
+ await db.ensureSchema();
  const {sessionCredentialVersion}=await import('../../lib/auth');
  const {rows}=await db.getPool().query("INSERT INTO users(username,display_name,password_hash,role) VALUES ('audit-manager','Audit Manager','synthetic-only','admin'),('audit-reviewer','Audit Reviewer','synthetic-only','admin') RETURNING *");
  [admin,reviewer]=rows.map(r=>({userId:r.id,username:r.username,role:r.role,expiresAt:Date.now()+3600000,credentialVersion:sessionCredentialVersion(r.password_hash)}));
-},30000);
-beforeEach(async()=>{
- await fixture.source.query('TRUNCATE hr_staff,hr_payroll_periods,cashier_shifts,expenses,payables,patients RESTART IDENTITY CASCADE');
  await fixture.source.query("UPDATE hr_settings SET value='{\"late_grace_mins\":15,\"overtime_rate_multiplier\":1.5,\"late_deduction_rate_per_hour\":1}'::jsonb WHERE key='attendance_policy'");
  staffId=(await hr.createStaff({fullName:'موظف تدقيق اصطناعي',department:'secretariat',jobTitle:'استقبال',hireDate:'2026-01-01',endDate:null,workStatus:'active',contractKind:'salary',phone:null,note:null,payTerms:{amountMinor:100000,currency:'YER',period:'monthly',effectiveOn:'2026-01-01'}},admin)).id;
 });

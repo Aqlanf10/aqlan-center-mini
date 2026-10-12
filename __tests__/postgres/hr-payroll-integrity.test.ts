@@ -144,9 +144,11 @@ beforeAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await q(`TRUNCATE hr_staff, hr_payroll_periods, payments, expenses, payables, invoice_items, lab_orders, visits, invoices, patients,
-                    cashier_shifts, parties, doctor_commission_history RESTART IDENTITY CASCADE`);
-  // parties CASCADE truncates users too, even for an admin with no linked party.
+  // This supplied target already passed the isolated PostgreSQL test guard.
+  // Rebuild between cases instead of cascading TRUNCATE into append-only history.
+  await resetPoolForTesting();
+  await dropPublicSchema(process.env.DATABASE_URL!);
+  await ensureSchema();
   // Admit this case's actor only after the reset, from the actual current row.
   const [actor] = await q<{id:number;password_hash:string}>(`INSERT INTO users (username, display_name, password_hash, role) VALUES ('hr-int-admin', 'مدير', 'x', 'admin') RETURNING id,password_hash`);
   const {sessionCredentialVersion} = await import('../../lib/auth');
