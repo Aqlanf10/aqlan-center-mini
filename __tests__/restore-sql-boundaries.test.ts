@@ -38,6 +38,14 @@ describe('writer backup SQL boundaries', () => {
     expect(prepareBackupSql(sql).skippedMigrationRecordLines).toBe(0);
   });
 
+  it('retains predecessor ledger filtering for INSERTs without an explicit column list', () => {
+    const metadata = "INSERT INTO schema_migrations VALUES ('9999', 'historical', 'checksum', NOW(), FALSE);";
+    const result = prepareBackupSql(`BEGIN;\n${metadata}\nCOMMIT;`);
+    expect(result.sql).toBe('BEGIN;\n\nCOMMIT;');
+    expect(result.skippedMigrationRecordLines).toBe(1);
+    expect(result.sqlRowsStatementLines).toBe(0);
+  });
+
   it.each([
     "BEGIN; INSERT INTO hr_staff (note) VALUES ('missing quote); COMMIT;",
     "BEGIN; /* missing comment close COMMIT;",
