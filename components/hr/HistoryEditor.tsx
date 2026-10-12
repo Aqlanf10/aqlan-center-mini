@@ -7,6 +7,7 @@ import type { HrRecordedHistory } from '@/lib/hr-temporal-read';
 import type { HrHistoryLease } from '@/lib/hr-history-drafts';
 import type { HrScheduleSegment } from '@/lib/hr-schedule-segments';
 import { HR_WORK_STATUS_LABEL } from '@/lib/hr-shared';
+import { CLINIC_ZONE_FALLBACK } from '@/lib/clinicZone';
 
 const field = 'w-full min-w-0 max-w-full rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm';
 const button = 'shrink-0 rounded-xl border border-navy-200 px-3 py-2 text-sm font-semibold disabled:opacity-50';
@@ -26,7 +27,7 @@ function HistoryEditor({ staffId, kind, label, onClose }: { staffId: number; kin
   const [from, setFrom] = useState(initial?.kind === 'known' ? initial.from : ''), [to, setTo] = useState(initial?.kind === 'known' ? initial.to ?? '' : '');
   const [status, setStatus] = useState(initialValue && 'status' in initialValue ? initialValue.status : 'active');
   const [reason, setReason] = useState(pending?.reason ?? '');
-  const [zone, setZone] = useState(initialValue && 'timeZone' in initialValue ? initialValue.timeZone : 'Asia/Aden');
+  const [zone, setZone] = useState(initialValue && 'timeZone' in initialValue ? initialValue.timeZone : CLINIC_ZONE_FALLBACK);
   const [days, setDays] = useState<readonly number[]>(initialValue && 'workingDays' in initialValue ? initialValue.workingDays : []);
   const [grace, setGrace] = useState(initialValue && 'graceMins' in initialValue ? String(initialValue.graceMins) : '0');
   const [segments, setSegments] = useState<readonly HrScheduleSegment[]>(initialValue && 'segments' in initialValue ? initialValue.segments : [{ id: 'segment-1', start: '08:00', startDayOffset: 0, end: '16:00', endDayOffset: 0 }]);

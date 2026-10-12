@@ -166,11 +166,12 @@ export function insertStatement(
   columns: string[],
   row: Record<string, unknown>,
   columnTypes?: Map<string, string>,
+  identityInsert = false,
 ): string {
   const values = columns.map((column) =>
     sqlValueForColumn(row[column], columnTypes?.get(column)),
   ).join(", ");
-  return `INSERT INTO ${table} (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${values});`;
+  return `INSERT INTO ${table} (${columns.map((c) => `"${c}"`).join(", ")}) ${identityInsert ? "OVERRIDING SYSTEM VALUE " : ""}VALUES (${values});`;
 }
 
 /**

@@ -118,6 +118,9 @@ export const RESET_KEEP_TABLES = [
   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
   "hr_staff",
   "hr_staff_changes",
+  "hr_effective_streams",
+  "hr_effective_revisions",
+  "hr_temporal_write_receipts",
   "hr_contracts",
   "hr_work_schedules",
   "hr_leave_types",

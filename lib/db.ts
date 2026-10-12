@@ -15406,11 +15406,11 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
 
   for (const table of ordered) {
     const { rows: columnRows } = (await pool.query(
-      `SELECT column_name, data_type, column_default FROM information_schema.columns
+      `SELECT column_name, data_type, column_default, is_identity FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = $1
         ORDER BY ordinal_position`,
       [table],
-    )) as { rows: { column_name: string; data_type: string; column_default: string | null }[] };
+    )) as { rows: { column_name: string; data_type: string; column_default: string | null; is_identity: string }[] };
     const columns = columnRows.map((row) => row.column_name);
     if (columns.length === 0) continue;
     /* (P1.14) التسلسل واعٍ بأنواع الأعمدة: jsonb يُكتب JSON، وARRAY literal
@@ -15421,21 +15421,23 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     const idColumn = columnRows.find((row) => row.column_name === "id");
     if (idColumn
         && ["smallint", "integer", "bigint"].includes(idColumn.data_type)
-        && (idColumn.column_default ?? "").startsWith("nextval")) {
+        && ((idColumn.column_default ?? "").startsWith("nextval") || idColumn.is_identity === "YES")) {
       withSerialId.push(table);
     }
 
-    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"`);
+    const identityInsert = columnRows.some(row => row.is_identity === "YES");
+    const orderBy = table === "hr_effective_revisions" ? ' ORDER BY "stream_id", "revision"' : "";
+    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${orderBy}`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
       if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {
         familyGuarantorLinks.push({ familyId: row.id, patientId: row.guarantor_patient_id });
-        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType)}\n`;
+        yield `${insertStatement(table, columns, { ...row, guarantor_patient_id: null }, columnType, identityInsert)}\n`;
       } else if (table === "patients" && typeof row.id === "number" && typeof row.photo_document_id === "number") {
         patientPhotoLinks.push({ patientId: row.id, documentId: row.photo_document_id });
-        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType)}\n`;
+        yield `${insertStatement(table, columns, { ...row, photo_document_id: null }, columnType, identityInsert)}\n`;
       } else {
-        yield `${insertStatement(table, columns, row, columnType)}\n`;
+        yield `${insertStatement(table, columns, row, columnType, identityInsert)}\n`;
       }
     }
   }
