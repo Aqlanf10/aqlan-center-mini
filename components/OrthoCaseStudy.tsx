@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { readStudyDisplayLocale, STUDY_DISPLAY_LOCALE_KEY, studyDirection, studyLayoutTitle, studySourceName, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { readStudyDisplayLocale, STUDY_DISPLAY_LOCALE_KEY, studyDirection, studyLayoutTitle, studySourceName, studySourceReason, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
 import { CASE_LAYOUTS, CASE_PAGE, caseLayout } from "@/lib/ortho-case-template";
 import { canonicalJourneyJSON } from "@/lib/ortho-case-journey-json";
 import { STUDY_SOURCE_KINDS, type StudySourceKind, type StudySourceSelection } from "@/lib/ortho-case-study";
@@ -32,6 +32,7 @@ export default function OrthoCaseStudy(props: OrthoCaseStudyProps) {
 }
 function StudyWorkspace(props: OrthoCaseStudyProps) {
   const { owner, patientId, orthoCaseId, clinicalCaseId } = props;
+  const labelId = useId();
   const [locale, setLocale] = useState<StudyDisplayLocale>("ar");
   const t = (message: StudyMessage) => studyText(locale, message);
   useEffect(() => {
@@ -139,10 +140,10 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
   return <section lang={locale} dir={studyDirection(locale)} aria-label={t("دراسة حالة التقويم")} className="min-w-0 space-y-4" data-testid="ortho-case-study">
     <label className="flex flex-wrap items-center gap-2">{t("لغة العرض")}
       <select aria-label="لغة العرض / Display language" className={control} value={locale} onChange={event => changeLocale(event.currentTarget.value)}>
-        <option value="ar">العربية</option><option value="en">English</option>
+        <option lang="ar" value="ar">العربية</option><option lang="en" value="en">English</option>
       </select>
     </label>
-    <header><h2 className="text-lg font-semibold break-words">{t("دراسة حالة تقويم")} — <bdi>{props.patientName}</bdi></h2>
+    <header><h2 className="text-lg font-semibold break-words">{t("دراسة حالة تقويم")} — <bdi lang="">{props.patientName}</bdi></h2>
       <p>{t("تُحفظ الدراسة داخل الملف مستقلة عن التصدير. توثيق نسخة لا يوقع موافقة علاجية ولا يغيّر العلاج أو الحساب.")}</p></header>
     {notice && <p role="status">{t(notice)}</p>}
     {owner.recoveryBlocked && <p role="alert">{t("توجد تعديلات محلية محفوظة لسياق سابق لهذه الحالة. لن يُكشف محتواها لحساب أو مريض أو رابط مختلف، ولن تُستبدل تلقائيًا. عُد للسياق الأصلي بعد التحقق من الصلاحية.")}</p>}
@@ -158,14 +159,14 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
         <button type="button" className={control} disabled={owner.busy} onClick={() => owner.refresh()}>{t("تحديث القراءة دون حذف المسودة")}</button></div>
       {!draft ? <p role="alert">{t("تعذّر فك المسودة المحلية؛ لم تُستبدل بمحتوى فارغ.")}</p> : <>
         {!ready.canAppend && <p>{t("عرض فقط حسب الصلاحية الحالية.")}</p>}
-        <label className="block">{t("سبب حفظ النسخة")}<input dir="auto" aria-label={t("سبب حفظ النسخة")} className={`${control} w-full`} maxLength={500} value={draft.reason} disabled={!editable} onChange={event => change({ ...draft!, reason: event.currentTarget.value })} /></label>
-        <label className="block">{t("تعليق الدراسة")}<textarea dir="auto" aria-label={t("تعليق الدراسة")} className={`${control} w-full`} maxLength={4000} value={draft.content.comment} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, comment: event.currentTarget.value } })} /></label>
+        <label className="block"><span id={`${labelId}-reason`}>{t("سبب حفظ النسخة")}</span><input lang="" dir="auto" aria-labelledby={`${labelId}-reason`} className={`${control} w-full`} maxLength={500} value={draft.reason} disabled={!editable} onChange={event => change({ ...draft!, reason: event.currentTarget.value })} /></label>
+        <label className="block"><span id={`${labelId}-comment`}>{t("تعليق الدراسة")}</span><textarea lang="" dir="auto" aria-labelledby={`${labelId}-comment`} className={`${control} w-full`} maxLength={4000} value={draft.content.comment} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, comment: event.currentTarget.value } })} /></label>
         <div className="flex flex-wrap gap-2"><select aria-label={t("قسم جديد للدراسة")} className={control} value={layout} onChange={event => setLayout(event.currentTarget.value)} disabled={!editable}>{CASE_LAYOUTS.map(item => <option key={item.key} value={item.key}>{studyLayoutTitle(item.key, locale)}</option>)}</select>
           <button type="button" className={control} onClick={addPanel} disabled={!editable}>{t("إضافة القسم")}</button></div>
         <ol className="space-y-3">{draft.content.panels.map((panel, index) => <li key={panel.instanceId} className="min-w-0 rounded border p-3 space-y-2">
           <h3>{studyLayoutTitle(panel.layoutKey, locale)}</h3><label><input type="checkbox" checked={panel.included} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, included: event.currentTarget.checked } : value) } })} />{t("تضمين القسم في العرض")}</label>
-          <textarea dir="auto" aria-label={`${t("تعليق")} ${studyLayoutTitle(panel.layoutKey, locale)}`} className={`${control} w-full`} value={panel.comment} maxLength={4000} disabled={!editable}
-            onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, comment: event.currentTarget.value } : value) } })} />
+          <label className="block"><span id={`${labelId}-panel-${panel.instanceId}`}>{t("تعليق")} {studyLayoutTitle(panel.layoutKey, locale)}</span><textarea lang="" dir="auto" aria-labelledby={`${labelId}-panel-${panel.instanceId}`} className={`${control} w-full`} value={panel.comment} maxLength={4000} disabled={!editable}
+            onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, comment: event.currentTarget.value } : value) } })} /></label>
           <p className="break-words">{t("المراجع المختارة:")} {panel.sourceKeys.length ? panel.sourceKeys.join("، ") : t("لم يُختر مصدر. لا تُفترض نتائج طبيعية.")}</p>
           <div className="flex flex-wrap gap-2">{([-1, 1] as const).map(direction => <button key={direction} type="button" className={control} disabled={!editable || index + direction < 0 || index + direction >= draft!.content.panels.length}
             onClick={() => { const panels = [...draft!.content.panels]; [panels[index], panels[index + direction]] = [panels[index + direction], panels[index]]; change({ ...draft!, content: { ...draft!.content, panels } }); }}>{t(direction < 0 ? "نقل للأعلى" : "نقل للأسفل")}</button>)}</div>
@@ -216,7 +217,7 @@ function SourcePicker(props: OrthoCaseStudyProps & { locale: StudyDisplayLocale;
     {error && <p role="alert">{t(error)}</p>}{current?.state === "restricted" && <p>{t("هذا النوع من المصادر مقيّد بالصلاحية الحالية.")}</p>}
     {current?.state === "available" && <><ul>{current.choices.map(choice => <li key={choice.id} className="flex flex-wrap gap-2 items-center"><span>{studySourceName(kind, props.locale)} #{choice.id}{choice.version === null ? "" : ` — ${t("نسخة")} ${choice.version}`}</span>
       <button type="button" className={control} disabled={!props.editable || !choice.selection} onClick={() => choice.selection && props.onChoose(choice.selection)}>{t("اختيار")}</button>
-      {!choice.selection && <span>{t("المصدر غير متاح بهذه النسخة؛ لا تُفترض بيانات بديلة.")}</span>}</li>)}</ul>
+      {!choice.selection && <span>{t("المصدر غير متاح بهذه النسخة؛ لا تُفترض بيانات بديلة.")} {studySourceReason(choice.unavailableReason ?? "", props.locale)}</span>}</li>)}</ul>
       {!current.choices.length && <p>{t("لا توجد مراجع من هذا النوع في الصفحة الحالية.")}</p>}
       <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={after === null} onClick={() => setAfter(null)}>{t("الصفحة الأولى")}</button>
         <button type="button" className={control} disabled={current.nextAfterId === null} onClick={() => setAfter(current.nextAfterId)}>{t("المراجع التالية")}</button></div></>}

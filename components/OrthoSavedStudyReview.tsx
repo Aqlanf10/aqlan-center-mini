@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import type { StudyOwner } from "@/lib/ortho-case-study-owner";
 import type { StudyEditorRevision } from "@/lib/ortho-case-study-editor-contract";
-import { studyLayoutTitle, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
+import { studyLayoutTitle, studySourceReason, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
 import { readStudyPanelReview, type StudyPanelReview } from "@/lib/ortho-case-study-review-contract";
 interface Props { locale?: StudyDisplayLocale; owner: StudyOwner; readVersion: number; revision: StudyEditorRevision }
 export default function OrthoSavedStudyReview(props: Props) {
@@ -54,14 +54,20 @@ function SavedPanel({ owner, readVersion, revision, panelId, locale = "ar" }: Pr
     <p role="status">{t("حالة القسم المحفوظة:")} {t(({ available: "متاح", not_recorded: "غير مسجل", unavailable: "غير متاح", restricted: "مقيّد" } as const)[value.panelState])}</p>
     {value.panelState !== "available" && <p>{t("لا تُعرض حقائق سريرية أو صور لهذا القسم وفق حالته المحفوظة. بقيت المراجع والتعليقات في النسخة دون تغيير؛ هذه الحالة لا تمنح صلاحية وصول.")}</p>}
     {!!value.blocks.length && <p>{t("المحتوى المحفوظ أدناه معروض بلغته الأصلية دون ترجمة أو تعديل.")}</p>}
-    {value.blocks.map((block, index) => block.kind === "paragraph" ? <p key={index} dir="auto" className="whitespace-pre-wrap break-words">{block.text}</p>
-      : <div key={index} className="max-w-full overflow-x-auto" tabIndex={0} aria-label={`${t("جدول محفوظ")} ${index + 1}`}><table className="w-full border-collapse text-sm"><thead><tr>{block.headers.map((header, col) => <th key={col} scope="col" className="border p-2 text-start">{header}</th>)}</tr></thead>
-        <tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.cells.map((cell, col) => <td key={col} dir="auto" className="border p-2 whitespace-pre-wrap break-words align-top">{cell}</td>)}</tr>)}</tbody></table></div>)}
+    {/* The saved envelope has no content-language metadata. Explicitly unknown
+        language prevents UI locale inheritance without guessing from the script. */}
+    {value.blocks.map((block, index) => block.kind === "paragraph" ? <p key={index} lang="" dir="auto" className="whitespace-pre-wrap break-words">{block.text}</p>
+      : <div key={index} className="max-w-full overflow-x-auto" tabIndex={0} aria-label={`${t("جدول محفوظ")} ${index + 1}`}><table className="w-full border-collapse text-sm"><thead><tr>{block.headers.map((header, col) => <th key={col} scope="col" lang="" dir="auto" className="border p-2 text-start">{header}</th>)}</tr></thead>
+        <tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.cells.map((cell, col) => <td key={col} lang="" dir="auto" className="border p-2 whitespace-pre-wrap break-words align-top">{cell}</td>)}</tr>)}</tbody></table></div>)}
     {value.panelState === "available" && !value.blocks.length && !value.unavailable.length && !value.unmapped.length && <p>{t("لا توجد حقائق نصية مسجلة ومطابقة لهذا القسم. لا تُفترض نتائج طبيعية.")}</p>}
-    {!!value.unavailable.length && <div role="status"><p>{t("مصادر غير متاحة في الالتقاط المحفوظ:")}</p><ul>{value.unavailable.map(issue => <li key={issue.sourceKey}>{issue.sourceKey} — {issue.reason}</li>)}</ul></div>}
-    {!!value.unmapped.length && <div role="status"><p>{t("مصادر محفوظة لم يكتمل عرضها في هذا القسم:")}</p><ul>{value.unmapped.map(issue => <li key={issue.sourceKey}>{issue.sourceKey} — {issue.reason}</li>)}</ul></div>}
+    {!!value.unavailable.length && <div role="status"><p>{t("مصادر غير متاحة في الالتقاط المحفوظ:")}</p><ul>{value.unavailable.map(issue => <li className="break-words" key={issue.sourceKey}><bdi lang="">{issue.sourceKey}</bdi> — <SourceReason reason={issue.reason} locale={locale} /></li>)}</ul></div>}
+    {!!value.unmapped.length && <div role="status"><p>{t("مصادر محفوظة لم يكتمل عرضها في هذا القسم:")}</p><ul>{value.unmapped.map(issue => <li className="break-words" key={issue.sourceKey}><bdi lang="">{issue.sourceKey}</bdi> — <SourceReason reason={issue.reason} locale={locale} /></li>)}</ul></div>}
     {!!value.pendingMediaCount && value.panelState === "available" && <p role="status">{t("الصور المختارة لهذا القسم:")} {value.pendingMediaCount}. {t("المعاينة المتحققة غير متاحة هنا بعد؛ لم تُستبدل الصور بصور افتراضية.")}</p>}
     {!!value.pendingMediaCount && value.panelState !== "available" && <p>{t("مراجع الصور المحتفظ بها دون عرض:")} {value.pendingMediaCount}.</p>}
-    {!!value.comments.length && <aside><h5>{t("تعليقات مؤلف الدراسة المحفوظة")}</h5>{value.comments.map((comment, index) => <p key={index} dir="auto" className="whitespace-pre-wrap break-words">{comment}</p>)}</aside>}
+    {!!value.comments.length && <aside><h5>{t("تعليقات مؤلف الدراسة المحفوظة")}</h5>{value.comments.map((comment, index) => <p key={index} lang="" dir="auto" className="whitespace-pre-wrap break-words">{comment}</p>)}</aside>}
   </div>;
+}
+function SourceReason({ reason, locale }: { reason: string; locale: StudyDisplayLocale }) {
+  const description = studySourceReason(reason, locale);
+  return description ?? <>{studyText(locale, "وصف السبب غير متاح؛ الرمز المحفوظ:")} <bdi lang="">{reason}</bdi></>;
 }

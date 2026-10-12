@@ -72,7 +72,7 @@ function Editor(props: OrthoStudyImageEditorProps) {
   const previewKey = JSON.stringify([view, canonicalOrthoMediaRecipe(previewRecipe), frame.width, frame.height, retry]);
   const request = captureStudyImagePreviewRequest({ ownerKey: props.ownerKey, useId: props.use.useId, documentId: props.use.documentId, sourceSha256: props.use.sourceSha256,
     purpose: view, recipe: previewRecipe, frame, signal: new AbortController().signal });
-  return <section dir="rtl" aria-label="محرر استخدام الصورة" className="min-w-0 space-y-3 rounded border p-3">
+  return <section lang="ar" dir="rtl" aria-label="محرر استخدام الصورة" className="min-w-0 space-y-3 rounded border p-3">
     <h3 className="font-semibold">تعديل صورة الدراسة</h3>
     <p className="text-sm">التعديلات تخص هذا الاستخدام فقط؛ الأصل وقياسات السيفالومتري لا تتغير. المعاينة ليست مراجعة سريرية.</p>
     <div role="group" aria-label="وضع المعاينة" className="flex flex-wrap gap-2">{([['selected-use','إطار العرض'],['editor-canvas','تحديد القص'],['original-comparison','مقارنة بالأصل']] as const).map(([value,label]) => <button key={value} type="button" className={control} aria-pressed={view === value} onClick={() => { setView(value); setZoom(1); }}>{label}</button>)}</div>

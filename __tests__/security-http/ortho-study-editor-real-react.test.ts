@@ -18,8 +18,9 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 120000);
 afterAll(async () => { await browser?.close(); });
-async function open(width: number) {
+async function open(width: number, populated = false) {
   const context = await browser.newContext({ viewport: { width, height: 900 } }), outside: string[] = [];
+  if (populated) await context.addInitScript(() => { window.__studyEditorScenario = "populated-readonly"; });
   await context.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin === "http://127.0.0.1:47891" && url.pathname === "/fixture.js") return route.fulfill({ contentType: "text/javascript", body: script });
@@ -31,6 +32,86 @@ async function open(width: number) {
   return { page, context, outside };
 }
 describe("real study React editor with strictly synthetic transport", () => {
+  it.each([390, 1280])("preserves populated read-only tables/media and language semantics across switching and hard reload at %s", async width => {
+    const f = await open(width, true);
+    try {
+      const study = f.page.getByTestId("ortho-case-study"), language = f.page.getByLabel("لغة العرض / Display language", { exact: true });
+      const review = study.locator("section").filter({ has: f.page.getByRole("heading", { name: /(?:مراجعة النسخة المحفوظة|Review saved revision)/ }) }).first();
+      const table = review.getByRole("table");
+      await table.getByText("fixture-analysis-17", { exact: true }).waitFor();
+      const witness = await f.page.evaluate(() => window.__studyEditorFixture.populatedWitness());
+      const rows = witness.blocks.find(block => block.kind === "table")!;
+      expect(rows.kind).toBe("table");
+      const expectedCells = rows.kind === "table" ? rows.rows.flatMap(row => row.cells) : [];
+      const checkAuthoredSemantics = async () => {
+        expect(await table.getByRole("cell").allTextContents()).toEqual(expectedCells);
+        expect(await table.getByRole("columnheader").evaluateAll(nodes => nodes.map(node => ({
+          text: node.textContent, lang: node.getAttribute("lang"), dir: getComputedStyle(node).direction, scope: node.getAttribute("scope"),
+        })))).toEqual([
+          { text: "الحقل المسجل", lang: "", dir: "rtl", scope: "col" }, { text: "Recorded value", lang: "", dir: "ltr", scope: "col" },
+        ]);
+        for (const locator of [table.getByRole("cell"), review.locator("aside p"), review.getByText("ملاحظة الطبيب الأصلية — texte original, 12.5 mm", { exact: true }), study.locator("textarea")]) {
+          expect(await locator.evaluateAll(nodes => nodes.every(node => node.getAttribute("lang") === "" && node.getAttribute("dir") === "auto"))).toBe(true);
+        }
+        expect(await study.getByRole("textbox", { name: /^(?:تعليق الدراسة|Study comment)$/ }).inputValue()).toBe(witness.revision!.authored.comment);
+        expect(await f.page.evaluate(() => window.__studyEditorFixture.populatedWitness())).toEqual(witness);
+        expect(await study.getByRole("button", { name: /^(?:حفظ مسودة الدراسة|Save study draft)$/ }).isDisabled()).toBe(true);
+        expect((await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests).toEqual([]);
+      };
+      await checkAuthoredSemantics();
+      await language.selectOption("en");
+      await review.getByText("document_83 — The document was removed. No replacement was substituted.", { exact: true }).waitFor();
+      await review.getByText("decision_92 — Presentation of this source type in this section is not implemented yet.", { exact: true }).waitFor();
+      await review.getByText("future_reason_<b>literal</b>", { exact: true }).waitFor();
+      expect(await review.locator("b").count()).toBe(0);
+      await checkAuthoredSemantics();
+      await retainIndependentOrthoEvidence(f.page, `ortho-populated-table-en-${width}`);
+      await study.getByLabel("Study source type", { exact: true }).selectOption("document");
+      const picker = study.getByRole("group", { name: "Select an existing source", exact: true });
+      await picker.getByText(/The document was removed/).waitFor();
+      expect(await picker.getByRole("button", { name: "Select", exact: true }).isDisabled()).toBe(true);
+      await review.getByRole("combobox", { name: "Displayed saved section", exact: true }).selectOption("media_panel");
+      await review.getByText(/Images selected for this section: 1/).waitFor();
+      const media = study.getByRole("region", { name: "محرر استخدام الصورة", exact: true });
+      // Current production mount supplies no preview callback. Exercise that
+      // boundary honestly: populated recipes remain visible, no fake image URL.
+      await media.getByText("المعاينة غير متاحة الآن. يمكنك متابعة تعديل المسودة وحفظها في دراسة الحالة.", { exact: true }).waitFor();
+      expect(await media.getAttribute("lang")).toBe("ar");
+      expect(await media.getByRole("img").count()).toBe(0);
+      expect(await media.getByLabel("زاوية الميل بالدرجات", { exact: true }).inputValue()).toBe("90");
+      expect(await media.getByLabel("اليسار %", { exact: true }).inputValue()).toBe("10");
+      expect(await media.getByRole("button", { name: "تطبيق حدود القص", exact: true }).isDisabled()).toBe(true);
+      await language.selectOption("ar");
+      await review.getByText(/الصور المختارة لهذا القسم: 1/).waitFor();
+      await media.scrollIntoViewIfNeeded();
+      await retainIndependentOrthoEvidence(f.page, `ortho-populated-media-ar-${width}`);
+      expect(await f.page.evaluate(() => window.__studyEditorFixture.populatedWitness())).toEqual(witness);
+      await review.getByRole("combobox", { name: "القسم المحفوظ المعروض", exact: true }).selectOption("analysis_panel");
+      await table.waitFor();
+      await checkAuthoredSemantics();
+      await review.getByText("document_83 — أُزيل المستند؛ لم يُستبدل بمستند آخر.", { exact: true }).waitFor();
+      await study.scrollIntoViewIfNeeded();
+      await retainIndependentOrthoEvidence(f.page, `ortho-populated-table-ar-${width}`);
+      await language.selectOption("en");
+      // Reload replays the deterministic synthetic GET data. Only displayLocale
+      // is browser-persisted; this assertion is NOT real clinical persistence.
+      await f.page.reload();
+      await table.getByText("fixture-analysis-17", { exact: true }).waitFor();
+      await expect.poll(() => study.getAttribute("lang")).toBe("en");
+      await checkAuthoredSemantics();
+      expect(await f.page.evaluate(() => Object.keys(localStorage))).toEqual(["aqlan.orthoStudy.displayLocale"]);
+      expect(await f.page.evaluate(() => localStorage.getItem("aqlan.orthoStudy.displayLocale"))).toBe("en");
+      await review.getByRole("combobox", { name: "Displayed saved section", exact: true }).selectOption("media_panel");
+      await review.getByText(/Images selected for this section: 1/).waitFor();
+      await media.getByText("المعاينة غير متاحة الآن. يمكنك متابعة تعديل المسودة وحفظها في دراسة الحالة.", { exact: true }).waitFor();
+      await media.scrollIntoViewIfNeeded();
+      await retainIndependentOrthoEvidence(f.page, `ortho-populated-media-en-${width}`);
+      expect(await f.page.evaluate(() => window.__studyEditorFixture.populatedWitness())).toEqual(witness);
+      expect((await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).unexpected).toEqual([]);
+      expect((await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests).toEqual([]);
+    } finally { await f.context.close(); }
+    expect(f.outside).toEqual([]);
+  });
   it.each([390, 1280])("switches display language without rewriting clinical text or a pending command at %s", async width => {
     const f = await open(width);
     const narrative = "شكوى اصطناعية بنص الطبيب — authored text 12.5 mm";

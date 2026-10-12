@@ -78,6 +78,7 @@ export const STUDY_ENGLISH = {
   "لا توجد حقائق نصية مسجلة ومطابقة لهذا القسم. لا تُفترض نتائج طبيعية.": "No recorded textual facts match this section. Normal findings are not assumed.",
   "مصادر غير متاحة في الالتقاط المحفوظ:": "Sources unavailable in the saved capture:",
   "مصادر محفوظة لم يكتمل عرضها في هذا القسم:": "Saved sources not yet fully displayed in this section:",
+  "وصف السبب غير متاح؛ الرمز المحفوظ:": "Reason description unavailable; recorded code:",
   "الصور المختارة لهذا القسم:": "Images selected for this section:",
   "المعاينة المتحققة غير متاحة هنا بعد؛ لم تُستبدل الصور بصور افتراضية.": "Verified previews are not yet available here. No placeholder images were substituted.",
   "مراجع الصور المحتفظ بها دون عرض:": "Image references retained without display:",
@@ -131,3 +132,19 @@ const sourceNames: Record<StudySourceKind, readonly [string, string]> = {
   ]
 };
 export const studySourceName = (kind: StudySourceKind, locale: StudyDisplayLocale): string => sourceNames[kind][locale === "en" ? 1 : 0];
+
+/** Display-only descriptions of codes emitted by the existing source readers.
+ * Unknown codes remain unknown. Never translate authored prose by matching it here. */
+const sourceReasons = {
+  source_missing_or_outside_case: ["المصدر غير موجود أو لا يتبع هذه الحالة.", "The source is missing or does not belong to this case."],
+  source_schema_unavailable: ["بنية المصدر غير متاحة لهذه القراءة.", "The source schema is unavailable for this read."],
+  document_removed: ["أُزيل المستند؛ لم يُستبدل بمستند آخر.", "The document was removed. No replacement was substituted."],
+  ceph_review_projection_unavailable: ["عرض مراجعة السيفالومتري غير متاح لهذا المصدر.", "The cephalometric review projection is unavailable for this source."],
+  source_unavailable: ["المصدر غير متاح.", "The source is unavailable."],
+  assessment_layout_not_mapped: ["لم يُربط التقييم بعرض هذا القسم.", "The assessment has not been mapped to this section."],
+  retention_event_not_debond: ["الحدث المختار ليس حدث فك الجهاز.", "The selected event is not an appliance removal event."],
+  layout_source_projection_not_implemented: ["عرض هذا النوع من المصادر في هذا القسم غير مفعّل بعد.", "Presentation of this source type in this section is not implemented yet."],
+} as const;
+export function studySourceReason(reason: string, locale: StudyDisplayLocale): string | null {
+  return Object.hasOwn(sourceReasons, reason) ? sourceReasons[reason as keyof typeof sourceReasons][locale === "en" ? 1 : 0] : null;
+}

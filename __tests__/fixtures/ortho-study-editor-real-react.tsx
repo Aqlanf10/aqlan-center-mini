@@ -7,6 +7,8 @@ import { CASE_TEMPLATE_IDENTITY, CASE_TEMPLATE_VERSION, caseLayout } from "../..
 import { studyBrowserHash } from "../../lib/ortho-case-study-editor-response";
 import type { StudyEditorRevision } from "../../lib/ortho-case-study-editor-contract";
 import { STUDY_SOURCE_KINDS, type StudySaveCommand } from "../../lib/ortho-case-study";
+import { defaultOrthoMediaRecipe } from "../../lib/ortho-study-media";
+import type { StudyPanelReview } from "../../lib/ortho-case-study-review-contract";
 const root = createRoot(document.getElementById("root")!);
 const ledger = makeStudyRecoveryLedger();
 let current: StudyOwner, actorId = 7, writable = true, mounted = true, generation = 0, templateHash = "";
@@ -17,6 +19,20 @@ let scope = { patientId: 19, orthoCaseId: 41, clinicalCaseId: 51 };
 const stored = new Map<number, StudyEditorRevision[]>(), commands = new Map<string, StudyEditorRevision>();
 const requests: { path: string; body: string; actorId: number; resolve(response: Response): void; reject(error: Error): void }[] = [];
 const unexpected: string[] = [];
+// Deterministic synthetic server read fixture on each page load, NOT database
+// persistence or browser storage of clinical records. Uses existing GET envelopes.
+const populated = window.__studyEditorScenario === "populated-readonly";
+const populatedBlocks: StudyPanelReview["blocks"] = [
+  { kind: "paragraph", text: "ملاحظة الطبيب الأصلية — texte original, 12.5 mm", sourceKeys: ["assessment_81"], review: "draft" },
+  { kind: "table", headers: ["الحقل المسجل", "Recorded value"], rows: [
+    ["معرف التحليل المختار", "fixture-analysis-17"],
+    ["هوية الحساب المحفوظة", "bolton-overall:v1 / fixture-measurements-31"],
+    ["قيمة محفوظة اصطناعية", "12.5 mm — غير معتمد"],
+    ["بصمة النتيجة المحفوظة", "f".repeat(64)],
+    ["تاريخ غير مسجل", "غير مسجل"],
+    ["نص مؤلف يشبه رمزًا", "document_removed"],
+  ].map(cells => ({ cells, sourceKeys: ["assessment_81"], review: "draft" })) },
+];
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 function render() { root.render(<React.StrictMode>{mounted && <OrthoCaseStudy {...scope} patientName={`Synthetic ${scope.patientId}`} ownerKey={`scope_${generation}`}
   owner={current} confirmDiscard={() => false} />}</React.StrictMode>); }
@@ -40,7 +56,8 @@ window.fetch = async (input, init) => {
     const kind = url.searchParams.get("kind");
     if (!STUDY_SOURCE_KINDS.some(value => value === kind)) { unexpected.push(url.pathname + url.search); throw new Error("unexpected source kind"); }
     const choiceId = caseId === 41 ? 91 : 92;
-    const choices = kind === "diagnosis" ? [{ id: choiceId, version: 1, kind, state: "available", unavailableReason: null,
+    const choices = populated && kind === "document" ? [{ id: 83, version: null, kind, state: "unavailable", unavailableReason: "document_removed", selection: null }]
+      : kind === "diagnosis" ? [{ id: choiceId, version: 1, kind, state: "available", unavailableReason: null,
       selection: { key: `diagnosis_${choiceId}`, kind, id: choiceId, version: 1, contentHash: "d".repeat(64) } }] : [];
     return response({ ok: true, ...own, kind, state: "available", choices, nextAfterId: null });
   }
@@ -51,10 +68,14 @@ window.fetch = async (input, init) => {
     if (failReviewAuth) return response({ ok: false, code: "study_source_restricted" }, 403);
     const panelId = url.searchParams.get("panelId"), panel = revision?.authored.panels.find(value => value.instanceId === panelId);
     if (!selectedId || !revision || !panel || [...url.searchParams.keys()].some(key => !["patientId", "revisionId", "panelId"].includes(key))) return response({ ok: false, code: "invalid_review" }, 400);
+    const populatedTable = populated && panel.instanceId === "analysis_panel";
     const body = { ok: true, ...own, revisionId: revision.id, revisionHash: wrongReviewHash ? "f".repeat(64) : revision.contentHash,
       kind: revision.kind, panelId: panel.instanceId, layoutKey: panel.layoutKey, panelState: panel.state, title: caseLayout(panel.layoutKey)!.titleAr,
-      included: panel.included, capturedAt: revision.createdAt, blocks: injectPanelFacts ? [{ kind: "paragraph", text: "Synthetic clinical facts forbidden by panel state", sourceKeys: [...panel.sourceKeys], review: revision.kind }] : [], comments: [revision.authored.comment, panel.comment].filter(Boolean),
-      unavailable: [], unmapped: (panel.state === "available" ? panel.sourceKeys : []).map(sourceKey => ({ sourceKey, kind: revision.authored.sources.find(source => source.key === sourceKey)!.kind,
+      included: panel.included, capturedAt: revision.createdAt, blocks: populatedTable ? populatedBlocks : injectPanelFacts ? [{ kind: "paragraph", text: "Synthetic clinical facts forbidden by panel state", sourceKeys: [...panel.sourceKeys], review: revision.kind }] : [], comments: [revision.authored.comment, panel.comment].filter(Boolean),
+      unavailable: populatedTable ? [{ sourceKey: "document_83", reason: "document_removed" }] : [],
+      unmapped: populatedTable ? [{ sourceKey: "decision_92", kind: "decision", reason: "layout_source_projection_not_implemented" },
+        { sourceKey: "diagnosis_91", kind: "diagnosis", reason: "future_reason_<b>literal</b>" }]
+        : (panel.state === "available" ? panel.sourceKeys : []).map(sourceKey => ({ sourceKey, kind: revision.authored.sources.find(source => source.key === sourceKey)!.kind,
         reason: "synthetic_fixture_has_no_clinical_capture" })), pendingMediaCount: panel.images.length };
     if (holdReview) return new Promise<Response>(resolve => heldReviews.push({ body, resolve }));
     return response(body);
@@ -96,6 +117,29 @@ async function seedAuthoredState(state: "not_recorded" | "unavailable" | "restri
     createdAt: "2026-10-01T00:00:00.000Z", reason: "Synthetic pre-existing state" }]);
   injectPanelFacts = malformed; replace(own);
 }
+async function seedPopulatedReadOnly() {
+  const authored: StudyEditorRevision["authored"] = { template: { key: "full-orthodontic-case", version: CASE_TEMPLATE_VERSION, contentHash: templateHash },
+    identityDisclosure: "case_only", sources: [
+      { key: "assessment_81", kind: "assessment", id: 81, version: 3, contentHash: "c".repeat(64) },
+      { key: "document_82", kind: "document", id: 82, version: null, contentHash: "a".repeat(64) },
+      { key: "document_83", kind: "document", id: 83, version: null, contentHash: "b".repeat(64) },
+      { key: "diagnosis_91", kind: "diagnosis", id: 91, version: 1, contentHash: "d".repeat(64) },
+      { key: "decision_92", kind: "decision", id: 92, version: 2, contentHash: "e".repeat(64) },
+    ], groups: [], comment: "تعليق اصطناعي محفوظ حرفيًا — commentaire clinique",
+    panels: [
+      { instanceId: "analysis_panel", layoutKey: "model-measurements", state: "available", included: true,
+        sourceKeys: ["assessment_81", "document_83", "diagnosis_91", "decision_92"], images: [], comment: "Clinical author text — ليس ترجمة آلية" },
+      { instanceId: "media_panel", layoutKey: "panoramic", state: "available", included: true,
+        sourceKeys: ["document_82"], images: [{ slot: "panoramic", useId: "fixture_image_82" }], comment: "وصف صورة اصطناعية محفوظ" },
+    ], mediaUses: [{ useId: "fixture_image_82", documentId: 82, sourceSha256: "a".repeat(64), groupId: null, slotId: "panoramic", order: 0,
+      view: "panoramic", caption: "الصورة الأصلية الاصطناعية — original caption", recipe: { ...defaultOrthoMediaRecipe(640, 480, 1), rotationMilliDegrees: 90000,
+        cropPpm: { left: 100000, top: 200000, right: 900000, bottom: 800000 }, brightnessPermille: 1010 } }],
+  };
+  stored.set(41, [{ ...scope, id: 141, actorId: 7, version: 1, kind: "draft", contentHash: await studyBrowserHash({ authored, blocks: populatedBlocks }),
+    authored, authoredHash: await studyBrowserHash(authored), predecessorId: null, documentedFromId: null, baseDocumentedId: null,
+    createdAt: "2026-10-01T00:00:00.000Z", reason: "Synthetic pre-existing populated read" }]);
+  writable = false;
+}
 const api = {
   seedAuthoredState,
   snapshot: () => ({ requests: requests.map(({ path, body, actorId }) => ({ path, body, actorId })), unexpected: [...unexpected],
@@ -110,7 +154,9 @@ const api = {
   forceB: () => replace({ patientId: 20, orthoCaseId: 42, clinicalCaseId: 52 }),
   readonly: () => { writable = false; current.invalidateRead(); render(); },
   otherActor: () => replace(scope, 8),
+  // Explicit test witness, not part of production transport or the old snapshot.
+  populatedWitness: () => ({ revision: stored.get(41)?.[0], blocks: populatedBlocks, draft: current.document }),
 };
-declare global { interface Window { __studyEditorFixture: typeof api } }
+declare global { interface Window { __studyEditorFixture: typeof api; __studyEditorScenario?: "populated-readonly" } }
 window.__studyEditorFixture = api;
-void studyBrowserHash(CASE_TEMPLATE_IDENTITY).then(hash => { templateHash = hash; replace(scope); });
+void studyBrowserHash(CASE_TEMPLATE_IDENTITY).then(async hash => { templateHash = hash; if (populated) await seedPopulatedReadOnly(); replace(scope); });
