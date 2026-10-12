@@ -47,7 +47,8 @@ async function insertSnapshot(client: DbPool | DbClient, agreement: Agreement, p
 
 beforeAll(async () => {
   fixture = await openPeriodontalFixture(process.env, { pristine: true });
-  const files = await loadMigrationFiles();
+  // This proof intentionally exercises the historic0042 ->0043 upgrade only.
+  const files = (await loadMigrationFiles()).filter(file=>file.version<="0043");
   expect(files).toHaveLength(43);
   expect(files.slice(40).map((file) => file.filename)).toEqual([
     "0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",

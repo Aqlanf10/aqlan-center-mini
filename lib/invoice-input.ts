@@ -3,6 +3,7 @@ import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
 import type { InvoiceLineAuthorityInput } from "./invoice-pricing";
 import { INVOICE_IDEMPOTENCY_PATTERN, parseLineSiteFields } from "./invoice-clinical-linkage";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
+import { invoiceCatalogPrice } from "./invoice-catalog-price";
 
 export type ParsedInvoiceInput = {
   patientId: number; baseCurrency: Currency; existingPlanId: number | null; items: LinkedInvoiceLineInput[];
@@ -56,6 +57,12 @@ export function parseInvoiceInput(
 
     const serviceId = Number(raw.serviceId);
     const service = Number.isInteger(serviceId) ? services.get(serviceId) : undefined;
+    if (raw.serviceId !== undefined && raw.serviceId !== null && raw.serviceId !== "" && (!service || !service.isActive)) {
+      return { ok: false, message: "الخدمة المختارة غير متاحة؛ اختر خدمة نشطة من الدليل." };
+    }
+    if (service && Object.hasOwn(raw, "catalogPriceMinor") && raw.catalogPriceMinor !== invoiceCatalogPrice(service, base)) {
+      return { ok: false, message: "تغيّر سعر الخدمة منذ اختيارها؛ أعد تحميل الدليل وراجع قيمة الاتفاق قبل الحفظ." };
+    }
 
     const description = service
       ? service.name
@@ -74,12 +81,15 @@ export function parseInvoiceInput(
       if (base !== CLINIC_BASE_CURRENCY) {
         return { ok: false, message: `سعر البند «${description}» بعملة الفاتورة (${base}) إلزامي — سعر الدليل بالعملة الأساسية لا يدخل فاتورةً بعملة اتفاق.`, };
       }
-      unitPriceMinor = service ? service.priceMinor : null;
+      unitPriceMinor = service ? invoiceCatalogPrice(service, base) : null;
     } else {
       unitPriceMinor = parseAmount(String(priceRaw), base);
     }
     if (unitPriceMinor === null) {
       return { ok: false, message: `اكتب سعرًا صحيحًا لبند «${description}».` };
+    }
+    if (service && invoiceCatalogPrice(service, base) === null && unitPriceMinor <= 0) {
+      return { ok: false, message: `لا يوجد سعر مقرر لـ «${description}» بهذه العملة؛ اكتب قيمة الاتفاق صراحةً أو اطلب تسعير الخدمة.` };
     }
 
     const doctorIdRaw = Number(raw.doctorId);

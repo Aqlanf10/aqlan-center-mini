@@ -11,8 +11,9 @@
  * البند اليدوي بلا خدمة يبقى حرًّا — سعرٌ يُكتب لا يُقارن بشيء (ويُدقَّق في invoice.create).
  */
 import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
-import { catalogPriceIn, type ForeignRates, type PricedService } from "./service-pricing";
+import { type ForeignRates, type PricedService } from "./service-pricing";
 import { CLINIC_BASE_CURRENCY, type Currency } from "./money";
+import { invoiceCatalogPrice } from "./invoice-catalog-price";
 
 export interface InvoiceLineAuthorityInput {
   description: string;
@@ -58,11 +59,8 @@ export function checkInvoiceAuthority(input: {
       referenceMinor += quantity * Math.max(0, line.requestedMinor);
       continue;
     }
-    const priced = catalogPriceIn(line.service, input.currency, input.rates);
-    // سعرٌ خاص بعملةٍ أجنبية قرّره المالك مقرَّرٌ بذاته؛ والمحوَّل يتبع تقرير السعر اليمني.
-    const configured = priced.minor === null ? false
-      : priced.source === "catalog" && input.currency !== CLINIC_BASE_CURRENCY ? true
-        : line.service.priceConfigured;
+    const priced = { minor: invoiceCatalogPrice(line.service, input.currency) };
+    const configured = priced.minor !== null;
     const decision = decideProcedurePrice({
       serviceName: line.description,
       catalogMinor: priced.minor ?? 0,

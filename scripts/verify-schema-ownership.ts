@@ -202,9 +202,10 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 }
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
-  const expected = Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0"));
+  // 0059 and0060 are root-allocated; the intervening branch reservations must not be filled.
+  const expected = [...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")), "0059", "0060"];
   const actual = files.map((file) => file.version);
-  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
+  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql", "0059_invoice_debt_installments.sql", "0060_historical_treatment_documents.sql"];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }

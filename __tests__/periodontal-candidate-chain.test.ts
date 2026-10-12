@@ -33,4 +33,11 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(() => periodontalCandidateMigrationVersion([...baseline(), { ...invoice, filename: "0041_unreviewed.sql" }])).toThrow();
     expect(() => periodontalCandidateMigrationVersion([...baseline(), invoice, legacy, { version: "0043", filename: "0043_future.sql" }])).toThrow();
   });
+  it("recognizes only the root-allocated0059 extension without filling reserved gaps",()=>{
+    const files=[...baseline(),invoice,legacy,coverage,{version:"0059",filename:"0059_invoice_debt_installments.sql"}];
+    expect(periodontalCandidateMigrationVersion(files)).toBe("0060");
+    expect(periodontalCandidateMigrationVersion([...files,{version:"0060",filename:"0060_historical_treatment_documents.sql"}])).toBe("0061");
+    expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0060",filename:"0060_unreviewed.sql"}])).toThrow();
+    expect(()=>periodontalCandidateMigrationVersion([...files.slice(0,43),{version:"0059",filename:"0059_unreviewed.sql"}])).toThrow();
+  });
 });

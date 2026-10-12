@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
@@ -16,16 +16,22 @@ import { LegacyBalanceArrangementPanel, type LegacyArrangementView, type LegacyO
 import { OpeningBalanceGuidance } from "./LegacyMoneyGuidance";
 import { LegacyReconciliationPreview } from "./LegacyReconciliationPreview";
 import { AccountSecondaryActions } from "./AccountSecondaryActions";
-import { readInvoiceTemplateReceipt, type InvoiceTemplateReceiptExpectation, type InvoiceTemplateReceiptExpectedLine } from "@/lib/invoice-template-receipt";
+import { readInvoiceCommandReceipt, type InvoiceTemplateReceiptExpectation, type InvoiceTemplateReceiptExpectedLine } from "@/lib/invoice-template-receipt";
 import { readInvoiceCommandResponse } from "@/lib/invoice-command-transport";
 import { canLeaveTreatmentEntry } from "@/lib/treatment-entry-navigation";
-import { invoiceCommandForOwner, invoiceCommandOutcome, retainInvoiceCommand, type InvoiceCommandLease, type InvoiceCommandOutcome } from "@/lib/invoice-command-recovery";
+import { invoiceCommandForOwner, invoiceCommandHasTemplate, invoiceCommandOutcome, retainInvoiceCommand, type InvoiceCommandLease, type InvoiceCommandOutcome } from "@/lib/invoice-command-recovery";
 import { InvoiceTemplatePicker, type InvoiceTemplateDraft } from "./InvoiceTemplatePicker";
 import type { InvoiceTemplatePreview } from "@/lib/invoice-template";
 import { readInvoiceTemplatePreview, type InvoiceTemplatePreviewRow } from "./dental/invoice-template-preview";
 import { TreatmentEntryChoice } from "./TreatmentEntryChoice";
-import { LegacyTreatmentForm } from "./LegacyTreatmentForm";
+import { HistoricalDocuments } from "./HistoricalDocuments";
+import { parseHistoricalDocument } from "@/lib/legacy-treatment-document";
+import { readHistoricalPreview, readHistoricalReceipt, type HistoricalPreview, type HistoricalReceiptExpectation } from "@/lib/historical-document-receipt";
 import { LegacyTreatmentAgreements } from "./LegacyTreatmentAgreements";
+import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
+import { DebtRepaymentPanel, type DebtRepaymentCommand } from "./DebtRepaymentPanel";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, validateLineSite, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
 import { invoiceLineInputProblem, previewForRow } from "./dental/invoice-preview-state";
@@ -39,6 +45,8 @@ import {
   type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
+import { invoiceCatalogPrice, type InvoiceCatalogService } from "@/lib/invoice-catalog-price";
+import workspace from "./InvoiceWorkspace.module.css";
 
 /**
  * حساب المريض: الرصيد والفواتير والدفعات، وإنشاء فاتورة وقبض دفعة.
@@ -47,7 +55,7 @@ import { newIdempotencyKey } from "@/lib/idempotency-key";
  * والدفعات — لأن رقمًا بلا تفصيل يُجادَل عليه ولا يُثبَت.
  */
 
-interface Service { id: number; name: string; category: string | null; priceMinor: number }
+interface Service extends InvoiceCatalogService { id: number; name: string; category: string | null; priceMinor: number; priceProvisional?: boolean }
 interface InvoiceItem { id: number; description: string; quantity: number; unitPriceMinor: number; totalMinor: number }
 interface Invoice {
   id: number; invoiceNumber: string; status: "open" | "paid" | "cancelled";
@@ -281,8 +289,9 @@ function activeBalances(ledger: Ledger): { currency: Currency; bucket: Balance }
       || bucket.openingMinor !== 0 || bucket.dueMinor !== 0);
 }
 
-type InvoiceSubmission = { lease: InvoiceCommandLease; expected: InvoiceTemplateReceiptExpectation; netMinor: number };
+type InvoiceSubmission = { lease: InvoiceCommandLease; expected: InvoiceTemplateReceiptExpectation | HistoricalReceiptExpectation; netMinor: number };
 type InvoiceCommandState = { submission: InvoiceSubmission; original: InvoiceSubmission; outcome: InvoiceCommandOutcome | "pending"; editing: boolean };
+const isHistoricalRecovery = (value: InvoiceCommandState | null) => !!value && "kind" in value.original.expected && value.original.expected.kind === "historical";
 type RetainedInvoiceRecovery = { patientId: number; principal: string; command: InvoiceCommandState };
 
 interface PatientLedgerProps {
@@ -301,6 +310,7 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
   const scope = JSON.stringify([patientId, session]);
   const principal = JSON.stringify([session?.username, session?.role]);
   const [recoveries, setRecoveries] = useState<ReadonlyMap<string, RetainedInvoiceRecovery>>(() => new Map());
+  const [debtRecoveries,setDebtRecoveries]=useState<ReadonlyMap<string,DebtRepaymentCommand>>(()=>new Map());
   const recoveryKey = JSON.stringify([patientId, principal]);
   const recoveryOwner = useMemo(() => ({ scope }), [scope]);
   const recoveryLifetime = useRef<{ owner: object | null; active: boolean }>({ owner: null, active: false });
@@ -312,6 +322,11 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
   return <PatientLedgerContent key={scope} patientId={patientId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
     accountDetails={accountDetails}
+    debtRecovery={debtRecoveries.get(recoveryKey)??null}
+    onDebtRecoveryChange={command=>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setDebtRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+    }}
     recovery={recovery?.patientId === patientId && recovery.principal === principal ? recovery.command : null}
     onRecoveryChange={command => {
       if (recoveryLifetime.current.owner !== recoveryOwner || !recoveryLifetime.current.active) return;
@@ -319,7 +334,7 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
     }} />;
 }
 
-function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, accountDetails }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void }) {
+function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,accountDetails }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -353,35 +368,37 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
   const readRef = useRef({ active: false, authorized: false, generation: 0, controller: null as AbortController | null });
   const writePending = useRef(false);
   const invoiceUnresolved = useRef(false);
+  const debtHeld=useRef(false);
+  const holdDebt=useCallback((held:boolean)=>{debtHeld.current=held;},[]);
   const consumedEntryRequest = useRef(0);
   const hasEntryDraft = mode === "invoice" || mode === "legacy" || mode === "opening";
   const canLeave = useCallback(() => {
-    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: hasEntryDraft },
+    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: debtHeld.current || !!debtRecovery&&debtRecovery.outcome!=="refused" || writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: hasEntryDraft },
       () => window.confirm("هناك مسودة فاتورة أو اتفاق غير محفوظة. مغادرة الشاشة لا تلغي طلبًا سبق إرساله. هل تريد المغادرة؟"));
-  }, [busy, hasEntryDraft, recovery]);
+  }, [busy, hasEntryDraft, recovery,debtRecovery]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
     if (entryRequestKey <= consumedEntryRequest.current) return;
     consumedEntryRequest.current = entryRequestKey;
     setLinkNotice(null); setNotice(null);
-    setMode(recovery ? "invoice" : "entry");
+    setMode(recovery ? isHistoricalRecovery(recovery) ? "legacy" : "invoice" : "entry");
     onEntryRequestConsumed?.(entryRequestKey);
   }, [entryRequestKey, onEntryRequestConsumed, recovery]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
+      if (!debtHeld.current&&!debtRecovery&&!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
       event.preventDefault(); event.returnValue = "";
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [hasEntryDraft, recovery]);
+  }, [hasEntryDraft, recovery,debtRecovery]);
   const changeMode = (next: typeof mode) => {
-    if (!readRef.current.active || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
+    if (!readRef.current.active || debtHeld.current || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
     if (next === mode) return;
     if (hasEntryDraft && !canLeave()) return;
     // A newly admitted draft may stop at preview refusal without ever sending a write.
     if (next !== "none") { setLinkNotice(null); setNotice(null); }
-    setMode(next === "entry" && recovery ? "invoice" : next);
+    setMode(next === "entry" && recovery ? isHistoricalRecovery(recovery) ? "legacy" : "invoice" : next);
   };
 
   const load = useCallback(async () => {
@@ -516,7 +533,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
           className="min-h-11 rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
           {mode === "entry" || mode === "invoice" || mode === "legacy" ? "إغلاق الفاتورة / الاتفاق" : "فاتورة / اتفاق علاج"}
         </button>
-        <button onClick={() => setCollectOpen(true)}
+        <button onClick={() => {if(!debtHeld.current&&!debtRecovery&&!invoiceUnresolved.current)setCollectOpen(true);}}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
         </button>
@@ -552,17 +569,16 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
           onRecoveryHold={value => { invoiceUnresolved.current = value; }}
           recovery={recovery} onRecoveryChange={onRecoveryChange}
           onSubmit={async (body, validateReceipt) => {
-            const templated = body.templateSelection != null;
-            // A retained template command must never escape through the ordinary writer.
-            if (!templated && recovery) return "uncertain";
+            // Every invoice uses its retained actor/patient command and complete acknowledgement.
+            if (!validateReceipt) return "uncertain";
             let outcome: InvoiceCommandOutcome = "uncertain";
             const created = await send(signal => fetch("/api/invoices", {
               method: "POST", headers: { "Content-Type": "application/json" }, signal,
               body: JSON.stringify({ patientId, ...body }),
-            }), templated ? (response, payload) => {
+            }), (response, payload) => {
               outcome = invoiceCommandOutcome(response.status, payload, validateReceipt?.(payload) === true, response.redirected);
               return outcome === "saved";
-            } : undefined, true) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] } } | null;
+            }, true) as { clinical?: { links: { kind: string; planItemCreated: boolean; caseCreated: boolean; caseId: number | null }[] } } | null;
             if (readRef.current.active && created) {
               onClinicalChange?.();
               setMode("none");
@@ -572,37 +588,35 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
                 : `رُبطت الفاتورة بالعلاج: ${clinical.length} بند خطة${clinical.some((l) => l.planItemCreated) ? " (منها جديد)" : ""}`
                   + `${clinical.some((l) => l.caseCreated) ? " — وفُتحت حالة أولية تحتاج تقييم الطبيب" : clinical.some((l) => l.caseId) ? " — مربوطة بحالتها القائمة" : ""}.`);
             }
-            return templated ? outcome : created ? "saved" : "uncertain";
+            return outcome;
           }}
         />
       ) : null}
 
-      {mode === "legacy" && canAddLegacy ? (
-        <LegacyTreatmentForm
-          patientId={patientId} base={base} services={services} busy={busy}
-          positions={ledger?.legacyOpeningPositions}
-          onCancel={() => changeMode("entry")}
-          onSubmit={async (body) => {
-            if (!canAddLegacy || !readRef.current.active) return;
-            const saved = await send(() => fetch(`/api/patients/${patientId}/legacy-treatments`, {
-              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-            })) as { agreement?: { remainingMinor: number; caseId: number | null } } | null;
-            if (readRef.current.active && saved?.agreement) {
-              onClinicalChange?.();
-              setMode("none");
-              setLegacyRefresh((value) => value + 1);
-              setLinkNotice(`سُجّل العلاج السابق للنظام: ${saved.agreement.remainingMinor > 0
-                ? "المتبقي وحده دخل الحساب رصيدًا سابقًا" : "مسدَّد تاريخيًّا بلا رصيد"} — لا سند للمدفوع سابقًا`
-                + `${saved.agreement.caseId ? "، والحالة موسومة «حالة بدأت قبل النظام»" : ""}.`);
-            }
-          }}
-        />
-      ) : null}
+      {mode === "legacy" && canAddLegacy ? <InvoiceForm key={`historical-${patientId}`}
+        historical patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
+        canChangeDraft={() => readRef.current.active && readRef.current.authorized && !writePending.current}
+        recovery={recovery} onRecoveryHold={value=>{invoiceUnresolved.current=value;}} onRecoveryChange={onRecoveryChange}
+        onSubmit={async(body,validateReceipt)=>{
+          if(!validateReceipt)return "uncertain";
+          let outcome:InvoiceCommandOutcome="uncertain";
+          const saved=await send(signal=>fetch(`/api/patients/${patientId}/historical-documents`,{method:"POST",headers:{"Content-Type":"application/json"},signal,body:JSON.stringify(body)}),
+            (response,payload)=>{outcome=invoiceCommandOutcome(response.status,payload,validateReceipt(payload),response.redirected);return outcome==="saved";},true);
+          if(readRef.current.active&&saved){onClinicalChange?.();setMode("none");setLegacyRefresh(value=>value+1);
+            setLinkNotice("حُفظ الاتفاق التاريخي وربطت بنوده بالخطة والحالات. المتبقي وحده أضيف إلى الرصيد السابق، دون فاتورة أو سند للمدفوع القديم.");}
+          return outcome;
+        }}/>:null}
 
       {ledger && !loading && !error ? (
         <LegacyReconciliationPreview patientId={patientId} ready
           positions={ledger.legacyOpeningPositions} payments={ledger.payments} />
       ) : null}
+
+      {session&&canHandleMoney(session.role)?<DebtRepaymentPanel patientId={patientId} refreshKey={ledger}
+        recovery={debtRecovery} onRecoveryChange={onDebtRecoveryChange} onHold={holdDebt}
+        enabled={!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();}}/>:null}
+
+      {ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} />:null}
 
       {ledger ? (
         <LegacyBalanceArrangementPanel
@@ -632,9 +646,9 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
       ) : null}
 
       {ledger && !loading && !error ? (
-        <LegacyTreatmentAgreements patientId={patientId} refreshKey={legacyRefresh} onChanged={() => {
+        <div id="saved-historical-agreements"><LegacyTreatmentAgreements patientId={patientId} refreshKey={legacyRefresh} onChanged={() => {
           if (!readRef.current.active) return; onClinicalChange?.(); void load();
-        }} />
+        }} /></div>
       ) : null}
 
       {/* التحصيل الموحّد — نفس مكون التحصيل من كل الأبواب (المواصفة §٢٦) */}
@@ -788,7 +802,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
         </details>
       ) : null}
 
-      <section className="mb-4" aria-label="الفواتير">
+      <section id="saved-invoices" className="mb-4" aria-label="الفواتير">
         <h3 className="mb-2 text-sm font-bold">الفواتير ({ledger?.invoices.length ?? 0})</h3>
         {!ledger?.invoices.length ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-4 text-center text-sm text-slate-400">لا فواتير.</p>
@@ -924,11 +938,12 @@ const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
-function InvoiceForm({ patientId, base, services, busy, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit }: {
+function InvoiceForm({ patientId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit }: {
   patientId: number;
   base: Currency;
   services: Service[];
   busy: boolean;
+  historical?: boolean;
   selectionContextKey?: string;
   canChangeDraft: () => boolean;
   onRecoveryHold: (hold: boolean) => void;
@@ -936,6 +951,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   onRecoveryChange: (command: InvoiceCommandState | null) => void;
   onSubmit: (body: Record<string, unknown>, validateReceipt?: (payload: unknown) => boolean) => Promise<InvoiceCommandOutcome>;
 }) {
+  const summaryId = useId();
   const formSession = useSession();
   const canSubmit = canHandleMoney(formSession?.role);
   const authorityKey = JSON.stringify(formSession);
@@ -944,6 +960,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   const rowSeq = useRef(0);
   const nextRowKey = () => `row-${++rowSeq.current}`;
   const [rows, setRows] = useState<InvoiceRow[]>(() => [blankInvoiceRow("row-0")]);
+  const [repaymentDraft,setRepaymentDraft] = useState<DebtRepaymentDraft>({mode:"full",rows:[]});
   /* (INV-LINK TOOTH) نافذة «تحديد الأسنان» مفتوحة لهذا السطر (بمفتاحه). */
   const [toothDialogFor, setToothDialogFor] = useState<string | null>(null);
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
@@ -963,7 +980,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   const recordCommand = (next: InvoiceCommandState) => {
     commandRef.current = next; setCommandState(next); onRecoveryChange(next.outcome === "saved" ? null : next);
   };
-  const submitCommand = async (body: Record<string, unknown>, expected: InvoiceTemplateReceiptExpectation | null, retry: false | "current" | "original" = false) => {
+  const submitCommand = async (body: Record<string, unknown>, expected: InvoiceTemplateReceiptExpectation | HistoricalReceiptExpectation | null, retry: false | "current" | "original" = false) => {
     if (!canSubmit || !canChangeDraft() || busy || commandRef.current?.outcome === "pending") return;
     if (!retry && commandRef.current && !commandRef.current.editing) return;
     const previous = commandRef.current;
@@ -976,7 +993,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
     recordCommand(pending); onRecoveryHold(true); setToothDialogFor(null);
     let outcome: InvoiceCommandOutcome = "uncertain";
     try { outcome = await onSubmit(exact, payload => commandRef.current === pending
-      && readInvoiceTemplateReceipt(payload, submission.expected, authority) !== null); }
+      && ("kind" in submission.expected ? readHistoricalReceipt(payload, submission.expected, authority) : readInvoiceCommandReceipt(payload, submission.expected, authority)) !== null); }
     catch { /* Retain both original and edited intent after a lost acknowledgement. */ }
     if (commandRef.current !== pending) return;
     recordCommand({ ...pending, outcome }); onRecoveryHold(outcome !== "saved");
@@ -998,12 +1015,29 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
       }).catch(() => { if (!controller.signal.aborted) setDoctorCatalog(null); });
     return () => controller.abort();
   }, [patientId, authority, canSubmit]);
+  const [historicalPaid, setHistoricalPaid] = useState("");
+  const [historicalDate, setHistoricalDate] = useState("");
   const [discount, setDiscount] = useState("");
   /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
   const [discountReason, setDiscountReason] = useState("");
-  /* (TD-05) عملة الفاتورة — اختيارٌ صريح (YER/SAR/USD) والافتراضي هو الأساس.
-     سعر الدليل أساسيّ فلا يُقترح تلقائيًا بعملةٍ مختلفة. */
+  // Agreement currency changes replace each amount with its own catalogue price.
+  // A manual amount belongs to its original currency and is never reinterpreted.
   const [currency, setCurrency] = useState<Currency>(base);
+  const changeCurrency = (next: Currency) => {
+    if (!editorEnabled() || next === currency) return;
+    setCurrency(next); setDiscount(""); setDiscountReason(""); setHistoricalPaid("");
+    setRepaymentDraft({mode:"full",rows:[]});
+    setRows(current => current.map(row => {
+      const service = services.find(one => String(one.id) === row.serviceId);
+      const price = service ? invoiceCatalogPrice(service, next) : null;
+      return { ...row, price: price === null ? "" : formatAmount(price, next), priceReason: "" };
+    }));
+  };
+  const selectorServices = services.map(service => {
+    const price = invoiceCatalogPrice(service, currency);
+    return { ...service, priceConfigured: price !== null,
+      priceIn: { [currency]: { minor: price, source: price === null ? "none" as const : "catalog" as const } } };
+  });
 
 
   // الحساب هنا بنفس دالة القراءة التي يستعملها الخادم: حسابٌ محلي بقواعد أخرى
@@ -1011,16 +1045,16 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   const manualTotal = useMemo(() => rows.reduce((sum, row) => {
     const service = services.find((item) => String(item.id) === row.serviceId);
     const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
+    const unit = typed ?? (service ? invoiceCatalogPrice(service, currency) : null) ?? 0;
     const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
     return sum + unit * quantity;
-  }, 0), [rows, services, base, currency]);
+  }, 0), [rows, services, currency]);
 
   const previewAmount = (index: number) => {
     const row = rows[index];
     const service = services.find((item) => String(item.id) === row.serviceId);
     const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
+    const unit = typed ?? (service ? invoiceCatalogPrice(service, currency) : null) ?? 0;
     return unit * Math.max(1, Math.round(Number(row.quantity) || 1));
   };
 
@@ -1032,21 +1066,28 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   };
   /* (INV-LINK TOOTH) كيف يُحدَّد سن البند — من فئة خدمته وحدها (المصدر نفسه الذي يفرضه الخادم). */
   const modeOf = (row: InvoiceRow): ToothScopeMode => invoiceToothMode(serviceOf(row.serviceId)?.category);
-  const inputProblems = rows.map((row) => row.serviceId || row.description.trim()
-    ? invoiceLineInputProblem({ price: row.price, quantity: row.quantity, currency,
-      servicePriceMinor: serviceOf(row.serviceId)?.priceMinor ?? null }) : null);
+  const inputProblems = rows.map(row => {
+    if (!row.serviceId && !row.description.trim()) return null;
+    const service = serviceOf(row.serviceId);
+    const catalogue = service ? invoiceCatalogPrice(service, currency) : null;
+    if (service && catalogue === null && (!row.price.trim() || (parseAmount(row.price, currency) ?? 0) <= 0)) {
+      return "لا يوجد سعر مقرر بهذه العملة؛ اكتب قيمة الاتفاق صراحةً أو اطلب تسعير الخدمة. لا يُحفظ سعر صفري تلقائيًا.";
+    }
+    return invoiceLineInputProblem({ price: row.price, quantity: row.quantity, currency, servicePriceMinor: catalogue });
+  });
   // Keep text/price/tooth drafts; only explicit identity selections expire on changed work/context.
   const selectionScope = JSON.stringify({ patientId, currency, base, selectionContextKey, templateDraft,
-    catalog: services.map((service) => [service.id, service.name, service.category, service.priceMinor]), rows });
+    catalog: services.map((service) => [service.id, service.name, service.category, invoiceCatalogPrice(service, currency), service.isActive]), rows });
   const selectionOwner = useMemo(() => ({ selectionScope, authority }), [selectionScope, authority]);
   const selected = selectionForOwner(selection, selectionOwner);
   // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
-  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, idempotencyKey, base, retry: previewRetry,
+  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, historicalPaid, historicalDate, idempotencyKey, base, retry: previewRetry,
     authorityKey, selectionContextKey, existingPlanId: selected.existingPlanId, templateDraft,
-    catalog: services.map((service) => [service.id, service.name, service.category, service.priceMinor]),
+    catalog: services.map((service) => [service.id, service.name, service.category, invoiceCatalogPrice(service, currency), service.isActive]),
     rows: rows.map((row, index) => ({ row, index })).filter(({ row }) => row.serviceId || row.description.trim())
       .map(({ row, index }) => ({ key: row.key, clinical: isClinical(row.serviceId), inputProblem: inputProblems[index],
         serviceId: row.serviceId ? Number(row.serviceId) : undefined, description: row.description,
+        catalogPriceMinor: serviceOf(row.serviceId) ? invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) : undefined,
         price: row.price, priceReason: row.priceReason, quantity: Number(row.quantity) || 1,
         caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
         planItemId: isClinical(row.serviceId) ? selected.itemIds.get(row.key) ?? null : null,
@@ -1061,7 +1102,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   // Forget old evidence rather than reviving it if inputs later return to an earlier value.
   if (previewState && (previewState.requestKey !== previewKey || previewState.owner !== previewOwner)) setPreviewState(null);
   useEffect(() => {
-    if (!canSubmit || commandLocked) return;
+    if (historical || !canSubmit || commandLocked) return;
     const request = JSON.parse(previewKey) as {
       patientId: number; currency: Currency; discount: string; discountReason: string; idempotencyKey: string;
       existingPlanId: number | null;
@@ -1106,7 +1147,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
       }).catch(unavailable).finally(() => clearTimeout(deadline));
     }, 350);
     return () => { controller.abort(); clearTimeout(timer); clearTimeout(deadline); };
-  }, [previewKey, previewOwner, canSubmit, commandLocked, services]);
+  }, [previewKey, previewOwner, canSubmit, commandLocked, services, historical]);
   const currentPreview = previewState?.owner === previewOwner ? previewState : null;
   const selectionEvidence = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.selections : undefined;
   const currentTemplate = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.template ?? null : null;
@@ -1119,18 +1160,52 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
   const discountInvalid = parsedDiscount === null;
   const discountMinor = parsedDiscount ?? 0;
   const net = Math.max(0, total - discountMinor);
-  const clinicalPreviewBlocked = rows.some((row) => isClinical(row.serviceId)
+  const historicalPaidMinor = historicalPaid.trim() ? parseAmount(historicalPaid, currency) : 0;
+  const historicalRemaining = historicalPaidMinor !== null && historicalPaidMinor >= 0 && historicalPaidMinor <= net ? net - historicalPaidMinor : null;
+  const historicalSource = {
+    patientId,currency,discount,discountReason,idempotencyKey,previouslyPaidAmount:historicalPaid,historicalAsOf:historicalDate,note:null,
+    items:(JSON.parse(previewKey) as {rows:Record<string,unknown>[]}).rows.map(row=>{
+      const {key,clinical,inputProblem,planItemId,...item}=row;void key;void clinical;void inputProblem;void planItemId;return item;
+    }),repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null,
+  };
+  const historicalKey=JSON.stringify(historicalSource);
+  const historicalServices=new Map(services.map(service=>[service.id,{...service,priceSarMinor:service.priceSarMinor??null,priceUsdMinor:service.priceUsdMinor??null,
+    priceConfigured:service.priceConfigured??false,priceProvisional:service.priceProvisional??false,isActive:service.isActive===true,sortOrder:0}]));
+  const historicalParsed=historical?parseHistoricalDocument(historicalSource,historicalServices,new Set(doctors.map(doctor=>doctor.id)),
+    {today:clinicDateString(new Date(),CLINIC_ZONE_FALLBACK),role:formSession?.role??"",maxDiscountPercent:100}):null;
+  const [historicalState,setHistoricalState]=useState<{owner:object;status:"ready"|"unavailable"|"refused";message?:string;preview?:HistoricalPreview}|null>(null);
+  const currentHistorical=historicalState?.owner===previewOwner?historicalState:null;
+  useEffect(()=>{
+    if(!historical||!canSubmit||commandLocked||!historicalParsed?.ok)return;
+    const input=historicalParsed.value;const controller=new AbortController();let deadline:ReturnType<typeof setTimeout>|undefined;
+    const unavailable=()=>{if(!controller.signal.aborted)setHistoricalState({owner:previewOwner,status:"unavailable",message:"تعذّر التحقق من الاتفاق؛ أعد المعاينة."});};
+    const timer=setTimeout(()=>{deadline=setTimeout(()=>{unavailable();controller.abort();},15000);
+      void fetch(`/api/patients/${patientId}/historical-documents/preview`,{method:"POST",headers:{"Content-Type":"application/json"},signal:controller.signal,body:historicalKey})
+        .then(async response=>{const payload:unknown=await response.json().catch(()=>null);if(controller.signal.aborted)return;
+          if(!response.ok&&record(payload)&&typeof payload.message==="string"){setHistoricalState({owner:previewOwner,status:"refused",message:payload.message.slice(0,1500)});return;}
+          const preview=response.ok?readHistoricalPreview(payload,input):null;if(!preview){unavailable();return;}
+          setHistoricalState({owner:previewOwner,status:"ready",preview});
+        }).catch(unavailable).finally(()=>clearTimeout(deadline));
+    },350);
+    return()=>{controller.abort();clearTimeout(timer);clearTimeout(deadline);};
+  // The serialized intent and preview lifetime cover every clinical/financial input.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[historical,historicalKey,previewOwner,canSubmit,commandLocked,previewRetry,doctorCatalog]);
+  const historicalEvidence=currentHistorical?.status==="ready"?currentHistorical.preview:null;
+  const debtRemaining = historical ? historicalEvidence?.remainingMinor??historicalRemaining??0 : net;
+  const repayment = readDebtRepaymentDraft(repaymentDraft,currency,debtRemaining);
+  const clinicalPreviewBlocked = historical ? !historicalEvidence || historicalEvidence.requiresAllocationReview || historicalEvidence.lines.some(line=>line.case.mode==="choose") : rows.some((row) => isClinical(row.serviceId)
     && previewForRow(currentPreview, previewKey, row.key).status !== "ready");
 
   /* (INV-LINK TOOTH) لا يُحفظ بندٌ يحتاج سنًّا بلا سن — والخادم يرفضه أيضًا. */
   const toothProblems = rows.map((row) => row.serviceId ? toothProblem(modeOf(row), row) : null);
   const blockedLines = toothProblems.flatMap((problem, index) => problem ? [index + 1] : []);
   const expectedReceipt = (): InvoiceTemplateReceiptExpectation | null => {
-    if (!templateDraft || !currentTemplate || !currentPreview || templatePreviewBlocked || clinicalPreviewBlocked || discountInvalid) return null;
+    if (templateDraft && (!currentTemplate || !currentPreview || templatePreviewBlocked) || clinicalPreviewBlocked || discountInvalid || !repayment.ok) return null;
     const expectedLines: InvoiceTemplateReceiptExpectedLine[] = [];
     const append = (source: "manual" | "template", value: { serviceId: number | null; doctorId: number | null; description: string; quantity: number; unitPriceMinor: number; toothCode: number | null; surfaces: string | null }, key: string, category: string | null) => {
       const linkage = lineLinkage({ serviceId: value.serviceId, category });
-      const proof = currentPreview.byRow.get(key);
+      const proof = currentPreview?.byRow.get(key);
       const scheduled = source === "template" || linkage.kind === "clinical";
       if (scheduled && (!proof?.item || !proof.case || proof.case.mode === "choose")) return false;
       const planItem: InvoiceTemplateReceiptExpectedLine["planItem"] = !scheduled ? { mode: "none" }
@@ -1139,7 +1214,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
         : proof!.case!.mode === "existing" && proof!.case!.id !== null ? { mode: "existing", id: proof!.case!.id }
         : proof!.case!.mode === "bridge" ? { mode: "bridge" } : { mode: "new" };
       if (source === "manual" && linkage.kind === "clinical" && linkage.specialty === "restorative" && planItem.mode === "existing" && caseChoice.mode === "none") {
-        const candidate = currentPreview.selections?.itemChoices.get(key)?.find(one => one.id === planItem.id);
+        const candidate = currentPreview?.selections?.itemChoices.get(key)?.find(one => one.id === planItem.id);
         if (!candidate) return false;
         if (candidate.clinicalCaseId !== null) caseChoice = { mode: "existing", id: candidate.clinicalCaseId };
       }
@@ -1150,17 +1225,17 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
       const service = serviceOf(row.serviceId);
       const fields = toothPayload(modeOf(row), row);
       const site = validateLineSite({ category: service?.category ?? null, ...fields, toothCode: fields.toothCode ?? null });
-      const price = row.price.trim() ? parseAmount(row.price, currency) : service?.priceMinor ?? null;
+      const price = row.price.trim() ? parseAmount(row.price, currency) : service ? invoiceCatalogPrice(service, currency) : null;
       if (!site.ok || price === null || !append("manual", { serviceId: service?.id ?? null, doctorId: row.doctorId ? Number(row.doctorId) : null,
         description: service?.name ?? row.description.trim().slice(0, 160), quantity: Math.max(1, Math.round(Number(row.quantity) || 1)), unitPriceMinor: price,
         toothCode: site.site.toothCode, surfaces: site.site.surfaces }, row.key, service?.category ?? null)) return null;
     }
-    for (const line of currentTemplate.lines) {
-      const key = currentPreview.rows?.[line.line]?.key, service = services.find(one => one.id === line.serviceId);
+    for (const line of currentTemplate?.lines ?? []) {
+      const key = currentPreview?.rows?.[line.line]?.key, service = services.find(one => one.id === line.serviceId);
       if (!key || !service || !append("template", { serviceId: line.serviceId, doctorId: line.doctorId, description: line.description,
         quantity: line.quantity, unitPriceMinor: line.unitPriceMinor, toothCode: line.toothCode, surfaces: line.surfaces }, key, service.category)) return null;
     }
-    return { owner: authority, patientId, currency, discountMinor, note: null, expectedPlanId: selected.existingPlanId, lines: expectedLines };
+    return { owner: authority, patientId, currency, discountMinor, note: null, expectedPlanId: selected.existingPlanId, lines: expectedLines,repaymentTerms:repayment.value };
   };
   const dialogIndex = toothDialogFor === null ? -1 : rows.findIndex((row) => row.key === toothDialogFor);
   const dialogRow = dialogIndex >= 0 ? rows[dialogIndex] : null;
@@ -1234,8 +1309,23 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
 
   if (!canSubmit) return <p role="status" className="text-sm text-slate-500">لا توجد صلاحية لإصدار فاتورة في الجلسة الحالية.</p>;
   return (
-    <section className="mb-4 min-w-0 rounded-2xl border border-navy-800 bg-white p-4" aria-label="فاتورة جديدة">
-      <h3 className="mb-3 text-sm font-bold">فاتورة جديدة</h3>
+    <section className={`mb-4 ${workspace.workspace} ${historical ? workspace.legacy : ""}`} aria-label={historical ? "اتفاق تاريخي متعدد البنود" : "فاتورة جديدة"} data-testid="invoice-workspace">
+      <header className={workspace.header}><div><span className={workspace.eyebrow}>اتفاق العلاج · ١ الخدمات · ٢ السداد</span><h3>{historical ? "اتفاق بدأ قبل النظام" : "فاتورة جديدة"}</h3>
+        <p className="mt-1 text-xs leading-6 text-slate-500">حدّد العلاج والسعر، ثم راجع ربط الخطة وطريقة السداد.</p></div>
+        <span className={workspace.badge}>{historical ? "علاج سابق للنظام" : "علاج جديد"}</span>
+        <details className={workspace.correction}><summary>تصحيح مستند محفوظ</summary>
+          <p className="mt-2">يُراجع المدير المستند الأصلي وسنداته قبل التصحيح، مع حفظ سجل التدقيق وهوية العلاج.</p>
+          <p><a href="#saved-invoices">الفواتير: فتح إجراء «تصحيح»</a></p>
+          <p><a href="#saved-historical-agreements">الاتفاقات التاريخية: مراجعة الإبطال والتسوية</a></p>
+          <p>تعرض الاتفاقات التاريخية النسخة الحالية والمبالغ القديمة، ويبقى التحصيل المثبت في سنداته.</p>
+        </details></header>
+      <div className={workspace.body}>
+      <button type="button" className={workspace.summaryJump} onClick={() => document.getElementById(summaryId)?.scrollIntoView({block:"start",behavior:"smooth"})}>
+        ملخص الاتفاق والسداد · {formatMoney(net,currency)} ↓
+      </button>
+      {historical ? <p role="status" className="mb-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm leading-7 text-violet-900">
+        المتفق عليه والمدفوع سابقًا حقائق تاريخية؛ يدخل المتبقي وحده رصيدًا سابقًا، وتُربط البنود بالخطة والحالات في الحفظ نفسه. جدول السداد يغطي كامل الرصيد السابق بهذه العملة، ويشمل أي اتفاقات تاريخية قائمة.
+      </p> : null}
       {!commandState && recovery ? <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs">
         <p>يوجد طلب سابق غير محسوم لهذا المريض والمستخدم. لا تبدأ فاتورة بديلة قبل التحقق من الطلب الأصلي.</p>
         <button type="button" disabled={busy} className="mt-2 min-h-11 rounded-lg border px-3 font-bold" onClick={() => {
@@ -1249,13 +1339,13 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
       </div> : null}
       {commandState && commandState.outcome !== "saved" ? <div role="status" data-testid="invoice-command-recovery" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs">
         <p>{commandState.outcome === "pending" ? "جارٍ إرسال الطلب المعتمد؛ لا تغيّر بياناته." : commandState.outcome === "uncertain"
-          ? "نتيجة الطلب غير مؤكدة. احتُفظ بنفس البيانات ونسخة القالب والمفتاح؛ أعد التحقق من نفس الطلب."
+          ? "نتيجة الطلب غير مؤكدة. احتُفظ بنفس بيانات الاتفاق والمفتاح؛ أعد التحقق من نفس الطلب."
           : "لم يُعتمد هذا الطلب. يمكنك إعادة الطلب نفسه، أو تأكيد تعديل المسودة مع إبقاء المفتاح الأصلي."}</p>
         <p className="mt-1 font-bold">الطلب الأصلي: {formatMoney(commandState.original.netMinor, commandState.original.expected.currency)}</p>
         {commandState.submission.lease.serialized !== commandState.original.lease.serialized ? <p className="mt-1 font-bold">الطلب المعدّل: {formatMoney(commandState.submission.netMinor, commandState.submission.expected.currency)}</p> : null}
         <button type="button" disabled={busy || commandState.outcome === "pending" || commandState.submission.lease.owner !== authority}
           onClick={() => void submitCommand({}, null, "current")}
-          className="mt-2 min-h-11 rounded-lg border px-3 font-bold">إعادة نفس طلب الفاتورة</button>
+          className="mt-2 min-h-11 rounded-lg border px-3 font-bold">{historical?"إعادة نفس طلب الاتفاق":"إعادة نفس طلب الفاتورة"}</button>
         {commandState.submission.lease.serialized !== commandState.original.lease.serialized ? <button type="button" disabled={busy || commandState.outcome === "pending"}
           onClick={() => void submitCommand({}, null, "original")} className="mr-2 mt-2 min-h-11 rounded-lg border px-3 font-bold">التحقق من الطلب الأصلي قبل التعديل</button> : null}
         {(commandState.outcome === "busy" || commandState.outcome === "refused") && !commandState.editing ? <button type="button" disabled={busy}
@@ -1267,9 +1357,12 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
           }} className="mr-2 mt-2 min-h-11 rounded-lg border px-3">تعديل المسودة بعد الرفض</button> : null}
       </div> : null}
       <fieldset disabled={busy || commandLocked} className="min-w-0">
-      <button type="button" disabled={busy} aria-expanded={templateOpen}
+      <div className={workspace.layout}>
+      <div className={workspace.services}>
+      <h4 className={workspace.sectionTitle}>الخدمات وموضع العلاج</h4>
+      {!historical ? <button type="button" disabled={busy} aria-expanded={templateOpen}
         onClick={() => { if (editorEnabled()) setTemplateOpen(open => !open); }}
-        className="mb-3 min-h-11 rounded-xl border border-sky-300 px-3 text-sm font-bold">{templateOpen ? "إخفاء اختيار القالب" : "اختيار قالب علاج"}</button>
+        className="mb-3 min-h-11 rounded-xl border border-sky-300 px-3 text-sm font-bold">{templateOpen ? "إخفاء اختيار القالب" : "اختيار قالب علاج"}</button> : null}
       {templateOpen ? <InvoiceTemplatePicker patientId={patientId} authorityKey={authorityKey}
         services={services} doctors={doctors} disabled={busy || commandLocked} draft={templateDraft}
         allowManual={!commandState && !recovery} onCatalogReady={setTemplateCatalogReady}
@@ -1278,7 +1371,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
           if (editorEnabled() && canSubmit && !busy) setTemplateDraft(draft);
         }}
         evidence={currentTemplate && currentPreview ? { template: currentTemplate, byRow: currentPreview.byRow } : null} /> : null}
-      {!templateDraft && (commandState || recovery) ? <p role="status" className="mb-3 text-xs text-amber-800">الطلب المحفوظ مرتبط بقالب. تحقّق من الطلب الأصلي، أو اختر قالبًا صراحةً بعد السماح بالتعديل؛ لن يُرسل طلب يدوي بديل.</p> : null}
+      {!templateDraft && (commandState && invoiceCommandHasTemplate(commandState.original.lease) || recovery && invoiceCommandHasTemplate(recovery.original.lease)) ? <p role="status" className="mb-3 text-xs text-amber-800">الطلب المحفوظ مرتبط بقالب. تحقّق من الطلب الأصلي، أو اختر قالبًا صراحةً بعد السماح بالتعديل؛ لن يُرسل طلب يدوي بديل.</p> : null}
       {templateDraft ? <section className="mb-3 rounded-xl border border-sky-200 p-3" aria-label="معاينة بنود القالب وجلساته" data-testid="invoice-template-preview">
         <h4 className="text-sm font-bold">{templateDraft.template.name} — مراجعة بنود القالب</h4>
         {currentTemplate ? <ol className="mt-2 space-y-2">{currentTemplate.lines.map(line => <li key={currentPreview?.rows?.[line.line]?.key ?? "missing-template-row"} className="min-w-0 break-words rounded-lg bg-slate-50 p-2 text-xs">
@@ -1299,16 +1392,16 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
         <p className="mt-1 text-xs text-slate-500">الجلسات مغطاة بهذه الفاتورة ولا تعني تحصيلًا أو موافقة سريرية. يمكن قبض دفعات جزئية لاحقًا؛ هذا ليس جدول أقساط جديدًا.</p>
       </section> : null}
       <label className="mb-3 block w-48">
-        <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الفاتورة</span>
-        <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
-          aria-label="عملة الفاتورة"
+        <span className="mb-1 block text-[11px] font-bold text-slate-500">{historical ? "عملة الاتفاق" : "عملة الفاتورة"}</span>
+        <select value={currency} onChange={(event) => changeCurrency(event.target.value as Currency)}
+          aria-label={historical ? "عملة الاتفاق" : "عملة الفاتورة"}
           className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
           {CURRENCIES.map((option) => (
             <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
           ))}
         </select>
       </label>
-      {rows.some((row) => isClinical(row.serviceId)) || templateDraft ? <div className="mb-3 min-w-0 space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
+      {!historical && (rows.some((row) => isClinical(row.serviceId)) || templateDraft) ? <div className="mb-3 min-w-0 space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
         <label className="block min-w-0">
           <span className="mb-1 block text-xs font-bold text-sky-900">الخطة المقصودة للأعمال الجديدة</span>
           <select aria-label="الخطة المقصودة للأعمال الجديدة" data-testid="invoice-existing-plan"
@@ -1337,23 +1430,25 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
           {splitNotice}
         </p>
       ) : null}
+      <div aria-hidden="true" className={workspace.tableHead}><span>الخدمة</span><span>سعر الوحدة · {currency}</span><span>الكمية</span><span>إجمالي البند</span></div>
       {rows.map((row, index) => (
         <div key={row.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
-          className={`mb-3 rounded-xl border bg-slate-50/50 p-2.5 space-y-2 ${
+          className={`${workspace.line} space-y-3 ${
             row.groupId ? "border-sky-200 border-s-4 border-s-sky-400" : "border-slate-100"}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-[14rem] flex-1">
+          <div className={workspace.lineGrid}>
+            <div className={workspace.servicePicker}>
               <ServiceSelect
-                services={services}
+                services={selectorServices}
                 value={row.serviceId ? Number(row.serviceId) : null}
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
                     serviceId: id ? String(id) : "", doctorId: "",
-                    price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
+                    price: srv && invoiceCatalogPrice(srv, currency) !== null ? formatAmount(invoiceCatalogPrice(srv, currency)!, currency) : "",
                     description: srv ? srv.name : current[index].description,
                   }, invoiceToothMode(srv?.category)));
                 }}
-                base={base}
+                base={currency}
+                catalogCurrency={currency}
                 allowManual={true}
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
                 ariaLabel="الخدمة"
@@ -1366,11 +1461,11 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
                   i === index ? { ...item, description: event.target.value } : item))}
                 placeholder="وصف البند المخصص"
                 aria-label="وصف البند"
-                className="min-w-[8rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className={`${workspace.manualDescription} w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm`}
               />
             ) : null}
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-bold text-slate-500">السعر:</label>
+            <div className={workspace.linePrice}>
+              <label className="text-[11px] font-bold text-slate-500">سعر الوحدة ({CURRENCY_LABEL[currency]}):</label>
               <input
                 value={row.price}
                 onChange={(event) => setRows((current) => current.map((item, i) =>
@@ -1385,7 +1480,8 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
             {row.serviceId && (() => {
               const service = services.find((item) => String(item.id) === row.serviceId);
               const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-              const differs = currency !== base ? typed !== null : service ? typed !== null && typed !== service.priceMinor : false;
+              const catalogue = service ? invoiceCatalogPrice(service, currency) : null;
+              const differs = service ? typed !== null && typed !== catalogue : false;
               return differs ? (
                 <input
                   value={row.priceReason}
@@ -1394,11 +1490,11 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
                   placeholder="سبب تغيير السعر عن الدليل"
                   aria-label="سبب تغيير السعر"
                   maxLength={300}
-                  className="min-w-[10rem] flex-1 rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs"
+                  className={`${workspace.priceReason} w-full rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs`}
                 />
               ) : null;
             })()}
-            <div className="flex items-center gap-1.5">
+            <div className={workspace.quantity}>
               <label className="text-[11px] font-bold text-slate-500">الكمية:</label>
               <input
                 value={row.quantity}
@@ -1410,18 +1506,20 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
                 className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"
               />
             </div>
+            <div className={workspace.lineTotal} data-testid={`invoice-line-total-${index}`}><span>إجمالي البند</span><strong>{inputProblems[index]?"راجع المبلغ":formatMoney(previewAmount(index),currency)}</strong></div>
             {rows.length > 1 ? (
               <button
                 type="button"
                 onClick={() => setRows((current) => removeRowAt(current, index))}
                 className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
                 title="حذف البند"
+                aria-label={`حذف البند ${index+1}`}
               >
                 ✕
               </button>
             ) : null}
             {isClinical(row.serviceId) ? (
-              <label className="min-w-[12rem] flex-1">
+              <label className={workspace.provider}>
                 <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المكلّف بهذا العمل</span>
                 <select aria-label="الطبيب المكلّف بالبند" data-testid={`invoice-provider-${index}`} value={row.doctorId}
                   onChange={(event) => setRows((current) => current.map((item) => item.key === row.key
@@ -1433,7 +1531,10 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
                 {!doctorCatalog ? <span className="mt-1 block text-[10px] text-slate-500">قائمة الأطباء لم تُتحقق بعد؛ لا يُعيّن طبيب تلقائيًا.</span> : null}
               </label>
             ) : null}
-            {toothControl(row, index)}
+            {isClinical(row.serviceId)?<div className={workspace.toothGroup}>{toothControl(row, index)}
+              <p className="mt-2 text-xs font-bold text-slate-600">أساس التسعير: {modeOf(row) === "per_tooth_episode" || modeOf(row) === "tooth_surfaces"
+                ? "لكل سن — كل سن محدد له بند وسعر مستقل" : "للحالة / المجموعة — السعر مرة واحدة، لا يُضرب بعدد الأسنان"}</p>
+            </div>:null}
           </div>
           {inputProblems[index] ? <p role="alert" data-testid={`invoice-input-problem-${index}`}
             className="text-[11px] font-bold text-rose-800">{inputProblems[index]}</p> : null}
@@ -1468,6 +1569,15 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
             </label>;
           })()}
           {(() => {
+            if(historical){const indexInRequest=rows.slice(0,index).filter(one=>one.serviceId||one.description.trim()).length;
+              const proof=historicalEvidence?.lines[indexInRequest];
+              return <div role="status" data-testid={`historical-clinical-preview-${index}`} data-preview-state={proof?"ready":currentHistorical?.status??"pending"} className="rounded-lg border border-violet-200 bg-violet-50 p-2 text-xs leading-6">
+                {proof?<><p>{proof.planId?`إضافة بند للخطة #${proof.planId}`:"بند ضمن خطة علاج جديدة"} · {proof.case.mode==="existing"?`الحالة القائمة #${proof.case.id}`:proof.case.mode==="new"?"حالة تخصصية للعلاج السابق":proof.case.mode==="choose"?"اختر الحالة المقصودة":"علاج مغطّى بالاتفاق"}</p>
+                  {proof.case.mode==="choose"?<select aria-label="الحالة التاريخية" value={row.caseId} onChange={event=>setRows(current=>current.map((one,i)=>i===index?{...one,caseId:event.target.value}:one))}><option value="">اختر الحالة</option>{proof.case.options.map(option=><option key={option.id} value={option.id}>{option.title}</option>)}</select>:null}</>
+                  :historicalParsed&&!historicalParsed.ok?historicalParsed.message:currentHistorical?.message??"أكمل الحقائق التاريخية لمعاينة الربط."}
+                {currentHistorical?.status==="unavailable"?<button type="button" className="mr-2 underline" onClick={()=>setPreviewRetry(value=>value+1)}>إعادة المعاينة</button>:null}
+              </div>;
+            }
             if (!isClinical(row.serviceId)) return null;
             if (inputProblems[index]) return <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state="invalid"
               className="text-[11px] font-bold text-rose-800">صحّح بيانات البند قبل معاينة الربط السريري.</div>;
@@ -1517,12 +1627,21 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
         className="mb-3 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
         + بند آخر
       </button>
-
+      </div>
+      <aside id={summaryId} className={workspace.summary} aria-label="ملخص الاتفاق والسداد" data-testid="invoice-financial-summary">
+      <dl className={workspace.summaryCard}>
+        <dt>الإجمالي المتفق عليه</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate?"بانتظار اكتمال البنود":formatMoney(net,currency)}</dd>
+        <div className={workspace.facts}><div><dt>التحصيل في هذا الطلب</dt><dd>لا يوجد سند قبض</dd></div>
+          {historical ? <div><dt>المدفوع قبل النظام</dt><dd>{historicalPaidMinor === null ? "راجع المبلغ" : formatMoney(historicalPaidMinor,currency)}</dd></div> : null}
+          <div><dt>{historical ? "المتبقي · رصيد سابق فقط" : "الدين الجديد عند الحفظ"}</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate||historical&&historicalRemaining===null?"لم يُعتمد بعد":formatMoney(historical?historicalRemaining??0:debtRemaining,currency)}</dd></div>
+          {historicalEvidence?<><div><dt>كامل الرصيد السابق بعد الاتفاق</dt><dd>{formatMoney(historicalEvidence.remainingMinor,currency)}</dd></div><div><dt>المستحق الفعلي للحساب بعد الاتفاق</dt><dd>{formatMoney(historicalEvidence.accountDueMinor,currency)}</dd></div></>:null}
+          <div><dt>الدفعة المقدمة المقترحة</dt><dd>{repayment.ok&&repayment.value.mode==="installments"&&repayment.value.installments[0]?.kind==="down_payment"?formatMoney(repayment.value.installments[0].amountMinor,currency):"غير محددة"}</dd></div></div>
+      </dl>
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <label className="w-32">
           <span className="mb-1 block text-[11px] font-bold text-slate-500">خصم</span>
           <input value={discount} onChange={(event) => setDiscount(event.target.value)}
-            inputMode="decimal" dir="ltr" placeholder="0"
+            inputMode="decimal" dir="ltr" placeholder="0" aria-label="الخصم"
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
         </label>
         {discountMinor > 0 ? (
@@ -1534,12 +1653,24 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
           </label>
         ) : null}
         <p className="flex-1 text-left text-sm font-extrabold">
-          الإجمالي: {totalInvalid ? "المجموع غير صالح" : templateDraft && !currentTemplate ? "بانتظار معاينة القالب" : formatMoney(net, currency)}
+          الإجمالي المتفق عليه: {totalInvalid ? "المجموع غير صالح" : inputProblems.some(Boolean) ? "راجع أسعار البنود وكمياتها" : templateDraft && !currentTemplate ? "بانتظار معاينة القالب" : formatMoney(net, currency)}
           {!totalInvalid && discountMinor > 0 && (!templateDraft || currentTemplate) ? <span className="mr-2 text-[11px] font-normal text-slate-400">قبل الخصم {formatMoney(total, currency)}</span> : null}
         </p>
       </div>
       {/* الرقم المعتمد يُحسب على الخادم من البنود مهما أرسلت الواجهة؛ وهذا العرض
           يستعمل نفس دالة القراءة فيتطابق معه. */}
+      {historical ? <div className="space-y-3">
+        <label className="block text-xs font-bold">المدفوع قبل النظام
+          <input aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event => setHistoricalPaid(event.target.value)} inputMode="decimal" dir="ltr" className="mt-1 w-full rounded-xl border border-slate-200 px-3" />
+        </label>
+        <label className="block text-xs font-bold">تاريخ المعلومات التاريخية
+          <input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event => setHistoricalDate(event.target.value)} type="date" className="mt-1 w-full rounded-xl border border-slate-200 px-3" />
+        </label>
+        {historicalRemaining === null ? <p role="alert" className="text-xs text-rose-800">راجع المدفوع السابق؛ لا يتجاوز المتفق عليه بعد الخصم.</p> : null}
+        <p className="text-xs leading-6 text-slate-600">المتبقي وحده يدخل الرصيد السابق. المدفوع تاريخيًا لا يسجل تحصيلًا أو حركة صندوق.</p>
+      </div> : <p className="mb-3 text-xs text-slate-600">حفظ الاتفاق يثبت الفاتورة وربط العلاج. المبلغ المحصّل يُثبت بسند قبض مستقل؛ تحديد السعر لا يسجّل دفعة.</p>}
+      <DebtRepaymentEditor value={repaymentDraft} onChange={value=>{if(editorEnabled())setRepaymentDraft(value);}}
+        currency={currency} remainingMinor={debtRemaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={busy||commandLocked||!canSubmit} />
 
       {blockedLines.length > 0 ? (
         <p role="alert" data-testid="invoice-save-blocked"
@@ -1549,10 +1680,19 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
       ) : null}
       <button
         onClick={() => {
-          if (!templateDraft && (commandRef.current || recovery)) return;
-          if (!canSubmit || !editorEnabled() || busy || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed) return;
+          if(historical){
+            if(!formSession||!historicalEvidence||!historicalParsed?.ok||!repayment.ok||clinicalPreviewBlocked||!editorEnabled()||busy||commandLocked)return;
+            const body={...historicalSource,repaymentTerms:repayment.value,repaymentRemainingMinor:historicalEvidence.remainingMinor,repaymentVersion:historicalEvidence.scheduleVersion,repaymentSourceHash:historicalEvidence.sourceHash};
+            const input={...historicalParsed.value,repaymentTerms:repayment.value,repaymentRemainingMinor:historicalEvidence.remainingMinor,repaymentVersion:historicalEvidence.scheduleVersion,repaymentSourceHash:historicalEvidence.sourceHash};
+            void submitCommand(body,{kind:"historical",owner:authority,patientId,currency,createdBy:formSession.username,input,preview:historicalEvidence});return;
+          }
+          const retained = commandRef.current?.original ?? recovery?.original;
+          const retainedTemplate = retained && invoiceCommandHasTemplate(retained.lease);
+          if (!templateDraft && retainedTemplate) return;
+          if (!canSubmit || !editorEnabled() || busy || !repayment.ok || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed) return;
           const body = {
             currency,
+            repaymentTerms:repayment.value,
             existingPlanId: selected.existingPlanId,
             ...(templateDraft && currentTemplate ? { templateSelection: { ...templateDraft.selection, version: currentTemplate.version } } : {}),
             discount,
@@ -1561,6 +1701,7 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
               .filter((row) => row.serviceId || row.description.trim())
               .map((row) => ({
                 serviceId: row.serviceId ? Number(row.serviceId) : undefined,
+                catalogPriceMinor: serviceOf(row.serviceId) ? invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) : undefined,
                 doctorId: row.doctorId ? Number(row.doctorId) : undefined,
                 description: row.description,
                 price: row.price,
@@ -1572,16 +1713,19 @@ function InvoiceForm({ patientId, base, services, busy, selectionContextKey = ""
               })),
             idempotencyKey,
           };
-          if (templateDraft) { const expected = expectedReceipt(); if (expected) void submitCommand(body, expected); } else void onSubmit(body);
+          const expected = expectedReceipt(); if (expected) void submitCommand(body, expected);
         }}
-        disabled={!canSubmit || busy || commandLocked || (!templateDraft && (!!commandState || !!recovery)) || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed || (!templateDraft && !rows.some((row) => row.serviceId || row.description.trim()))}
-        className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
+        disabled={!canSubmit || busy || !repayment.ok || commandLocked || (!templateDraft && Boolean((commandState || recovery) && invoiceCommandHasTemplate((commandState ?? recovery)!.original.lease))) || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed || (!templateDraft && !rows.some((row) => row.serviceId || row.description.trim()))}
+        className={workspace.save}
       >
-        احفظ الفاتورة
+        {historical ? "احفظ الاتفاق التاريخي" : "احفظ الفاتورة"}
       </button>
+      </aside>
+      </div>
       </fieldset>
       {discountInvalid ? <p role="alert" className="mt-2 text-xs text-red-700">اكتب خصمًا صحيحًا قبل الحفظ؛ لم يُرسل الطلب.</p> : null}
       {totalInvalid ? <p role="alert" className="mt-2 text-xs text-red-700">مجموع البنود خارج النطاق الآمن؛ راجع البنود قبل الحفظ.</p> : null}
+      </div>
       {dialogRow ? (
         <ToothSelectionDialog
           key={`${patientId}:${dialogRow.key}:${dialogRow.serviceId}:${modeOf(dialogRow)}`}

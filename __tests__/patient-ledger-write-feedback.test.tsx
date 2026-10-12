@@ -6,6 +6,7 @@ import { ServiceSelect } from "../components/ServiceSelect";
 import { ToothSelectionDialog } from "../components/dental/ToothSelectionDialog";
 import { LegacyTreatmentForm } from "../components/LegacyTreatmentForm";
 import { TreatmentEntryChoice } from "../components/TreatmentEntryChoice";
+import {readInvoiceCommandReceipt,type InvoiceTemplateReceiptExpectation} from "../lib/invoice-template-receipt";
 
 // Execute the real wrapper/content and write callbacks. Child forms are left as
 // elements: this test owns feedback lifetime, not native form/chart acceptance.
@@ -74,6 +75,11 @@ const ledger = { invoices: [], payments: [], plans: [], opening: null, openingAc
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const fetchMock = vi.fn();
 let write: () => Promise<Response>;
+const invoiceOwner={};
+const invoiceExpectation:InvoiceTemplateReceiptExpectation={owner:invoiceOwner,patientId:901,currency:"YER",discountMinor:0,note:null,expectedPlanId:null,
+  lines:[{source:"manual",serviceId:31,doctorId:null,description:"Synthetic feedback seed",quantity:1,unitPriceMinor:180000,toothCode:36,surfaces:null,
+    kind:"clinical",specialty:"endodontics",scheduled:true,planItem:{mode:"new"},case:{mode:"new"}}]};
+const validateInvoice=(value:unknown)=>readInvoiceCommandReceipt(value,invoiceExpectation,invoiceOwner)!==null;
 beforeEach(() => {
   hooks.outer = hooks.make(); hooks.inner = hooks.make(); hooks.form = hooks.make(); hooks.current = hooks.outer; entryRequestKey = 0; fetchMock.mockReset();
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn(), confirm: vi.fn(() => true) });
@@ -81,7 +87,7 @@ beforeEach(() => {
     status: "open", totalMinor: 180000, discountMinor: 0, baseCurrency: "YER", note: null, createdAt: "2026-10-11T00:00:00.000Z",
     items: [{ id: 711, serviceId: 31, doctorId: null, description: "Synthetic feedback seed", quantity: 1, unitPriceMinor: 180000, totalMinor: 180000,
       planItemId: 811, caseId: 601, toothCode: 36, surfaces: null, originInvoiceId: 701, billingStatus: "needs_financial_review", financialReviewRequired: true }],
-    clinical: { planId: 801, links: [{ line: 0, kind: "clinical", specialty: "endodontics", planItemId: 811, planItemCreated: true, caseCreated: true, caseId: 601 }] }, replayed: false }, 201);
+    clinical: { planId: 801, links: [{ line: 0, kind: "clinical", specialty: "endodontics", planItemId: 811, planItemCreated: true, caseCreated: true, caseId: 601, scheduled: true }] }, replayed: false }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => init?.method === "POST" ? write()
     : url === "/api/patients/901/ledger" ? Promise.resolve(json(ledger))
     : url === "/api/services" ? Promise.resolve(json([{ id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000 }])) : Promise.reject(new Error("Unexpected synthetic route")));
@@ -105,7 +111,7 @@ describe("PatientLedger operation-scoped success feedback", () => {
   it.each(["toolbar", "request"] as const)("a new %s draft retires old success before refused preview, without a write", async entry => {
     render(); await settle(); open("invoice");
     const invoice = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm")!;
-    await (invoice.props.onSubmit as (body: Record<string, unknown>) => Promise<unknown>)({ currency: "YER", items: [{ serviceId: 31, toothCode: 36, price: "180000", quantity: "1" }], idempotencyKey: "synthetic-before-preview" });
+    await (invoice.props.onSubmit as (body: Record<string, unknown>,validate:(value:unknown)=>boolean) => Promise<unknown>)({ currency: "YER", items: [{ serviceId: 31, toothCode: 36, price: "180000", quantity: "1" }], idempotencyKey: "synthetic-before-preview" },validateInvoice);
     await settle(); expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeDefined();
     if (entry === "toolbar") click(find(node => node.props["data-testid"] === "treatment-entry-open"));
     else { entryRequestKey = 1; render(); }
@@ -139,7 +145,7 @@ describe("PatientLedger operation-scoped success feedback", () => {
   it.each([400, 409])("a new legacy write with refusal %i cannot retain the prior invoice success", async status => {
     render(); await settle(); open("invoice");
     const invoice = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm"); expect(invoice).toBeDefined();
-    await (invoice!.props.onSubmit as (body: Record<string, unknown>) => Promise<unknown>)({ currency: "YER", items: [{ serviceId: 31, toothCode: 36, description: "Synthetic feedback seed", price: "180000", quantity: "1" }], idempotencyKey: "synthetic-first" });
+    await (invoice!.props.onSubmit as (body: Record<string, unknown>,validate:(value:unknown)=>boolean) => Promise<unknown>)({ currency: "YER", items: [{ serviceId: 31, toothCode: 36, description: "Synthetic feedback seed", price: "180000", quantity: "1" }], idempotencyKey: "synthetic-first" },validateInvoice);
     await settle(); expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeDefined();
     open("legacy"); const form = find(node => node.type === LegacyTreatmentForm)!; expect(form).toBeDefined();
     let release!: (value: Response) => void; write = () => new Promise(resolve => { release = resolve; });

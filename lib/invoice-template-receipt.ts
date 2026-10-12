@@ -3,6 +3,7 @@ import type { LineLink } from "./invoice-linkage-db";
 import { LINKAGE_SPECIALTY_LABEL, type LinkageSpecialty } from "./invoice-clinical-linkage";
 import { isValidTooth, normalizeSurfaces } from "./dental";
 import { isCurrency, type Currency } from "./money";
+import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 
 type ExpectedPlanItem = { readonly mode: "none" | "new" } | { readonly mode: "existing"; readonly id: number };
 type ExpectedCase = { readonly mode: "none" | "new" | "bridge" } | { readonly mode: "existing"; readonly id: number };
@@ -35,6 +36,7 @@ export interface InvoiceTemplateReceiptExpectation {
   /** Explicitly selected/adopted plan, or null when its identity was not known before save. */
   readonly expectedPlanId: number | null;
   readonly lines: readonly InvoiceTemplateReceiptExpectedLine[];
+  readonly repaymentTerms?: DebtRepaymentTerms;
 }
 
 export interface AcceptedInvoiceTemplateReceipt {
@@ -96,11 +98,20 @@ function expectedLine(value: InvoiceTemplateReceiptExpectedLine): boolean {
 export function readInvoiceTemplateReceipt(
   payload: unknown, expected: InvoiceTemplateReceiptExpectation, currentOwner: object,
 ): AcceptedInvoiceTemplateReceipt | null {
+  return readReceipt(payload,expected,currentOwner,true);
+}
+export function readInvoiceCommandReceipt(
+  payload: unknown, expected: InvoiceTemplateReceiptExpectation, currentOwner: object,
+): AcceptedInvoiceTemplateReceipt | null {
+  return readReceipt(payload,expected,currentOwner,false);
+}
+function readReceipt(payload:unknown,expected:InvoiceTemplateReceiptExpectation,currentOwner:object,requireTemplate:boolean):AcceptedInvoiceTemplateReceipt|null {
   if (!object(expected) || expected.owner !== currentOwner || expected.owner === null || typeof expected.owner !== "object"
     || !id(expected.patientId) || !isCurrency(expected.currency) || !minor(expected.discountMinor)
     || !nullableText(expected.note) || !nullableId(expected.expectedPlanId)
     || !Array.isArray(expected.lines) || expected.lines.length === 0 || expected.lines.length > 40
-    || !Array.from(expected.lines).every(expectedLine) || !expected.lines.some((line) => line.source === "template")) return null;
+    || !Array.from(expected.lines).every(expectedLine) || requireTemplate && !expected.lines.some((line) => line.source === "template")) return null;
+  const expectsCreatedItems = expected.lines.some(line=>line.planItem.mode==="new");
   if (!object(payload) || !id(payload.id) || !nonemptyText(payload.invoiceNumber) || payload.patientId !== expected.patientId
     || typeof payload.patientName !== "string" || (payload.status !== "open" && payload.status !== "paid" && payload.status !== "cancelled")
     || payload.baseCurrency !== expected.currency || !minor(payload.totalMinor) || !minor(payload.discountMinor)
@@ -109,8 +120,8 @@ export function readInvoiceTemplateReceipt(
     || !Number.isFinite(Date.parse(payload.createdAt)) || new Date(payload.createdAt).toISOString() !== payload.createdAt
     || typeof payload.replayed !== "boolean"
     || !Array.isArray(payload.items) || payload.items.length !== expected.lines.length
-    || !object(payload.clinical) || !id(payload.clinical.planId)
-    || expected.expectedPlanId !== null && payload.clinical.planId !== expected.expectedPlanId
+    || !object(payload.clinical) || !nullableId(payload.clinical.planId) || (expectsCreatedItems ? !id(payload.clinical.planId) : payload.clinical.planId !== null)
+    || expectsCreatedItems && expected.expectedPlanId !== null && payload.clinical.planId !== expected.expectedPlanId
     || !Array.isArray(payload.clinical.links) || payload.clinical.links.length !== expected.lines.length) return null;
 
   const items: InvoiceItem[] = [];
@@ -171,6 +182,11 @@ export function readInvoiceTemplateReceipt(
       ...(link.scheduled === undefined ? {} : { scheduled: link.scheduled }) });
   }
   if (payload.totalMinor !== totalMinor || payload.discountMinor !== Math.min(expected.discountMinor, totalMinor)) return null;
+  if(expected.repaymentTerms){
+    if(!object(payload.repayment)||!id(payload.repayment.arrangementId)||!id(payload.repayment.revisionId)||payload.repayment.version!==1)return null;
+    const terms=validateDebtRepaymentTerms(payload.repayment.terms,totalMinor-payload.discountMinor);
+    if(!terms.ok||JSON.stringify(terms.value)!==JSON.stringify(expected.repaymentTerms))return null;
+  }
   return {
     invoice: { id: payload.id, invoiceNumber: payload.invoiceNumber, patientId: expected.patientId, patientName: payload.patientName,
       status: payload.status, totalMinor, discountMinor: payload.discountMinor, baseCurrency: expected.currency,

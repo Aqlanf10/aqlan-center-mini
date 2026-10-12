@@ -7,6 +7,14 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Root-allocated0059/0060 are reviewed non-contiguous extensions. The inactive
+  // candidate remains test-only and must not fill another branch's reservations.
+  if(files.length===45&&files[44].version==="0060"&&files[44].filename==="0060_historical_treatment_documents.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,44));return "0061";
+  }
+  if(files.length===44&&files[43].version==="0059"&&files[43].filename==="0059_invoice_debt_installments.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,43));return "0060";
+  }
   const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
   if (files.length < 40 || files.length > 43) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
   files.forEach((file, index) => {

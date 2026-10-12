@@ -7,6 +7,7 @@ import { parseInvoiceInput, type ParsedInvoiceInput } from "./invoice-input";
 import { CLINIC_BASE_CURRENCY, isCurrency, toInputAmount } from "./money";
 import { foreignRatesFromSettings } from "./service-pricing";
 import { buildTemplateDrafts, effectiveTemplates, type TemplatePlanDraft } from "./specialty-templates";
+import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 
 export type InvoiceTemplateSelection = {
   templateId: string; version?: string; teeth: number[];
@@ -23,7 +24,7 @@ export type InvoiceTemplatePreviewLine = {
 };
 export type InvoiceTemplatePreview = { templateId: string; version: string; lines: InvoiceTemplatePreviewLine[] };
 type Failure = { ok: false; status: 400 | 409; code: "INVOICE_TEMPLATE_INVALID" | "INVOICE_TEMPLATE_REVIEW_REQUIRED" | "INVOICE_TEMPLATE_STALE"; message: string };
-type Success = { ok: true; template: InvoiceTemplatePreview | null } & ParsedInvoiceInput;
+type Success = { ok: true; template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms } & ParsedInvoiceInput;
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -35,6 +36,13 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 const safeKey = (value: string): boolean => value !== "prototype" && !Object.hasOwn(Object.prototype, value);
 const id = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
 const invalid = (message = "اختيار قالب الفاتورة غير صالح."): Failure => ({ ok: false, status: 400, code: "INVOICE_TEMPLATE_INVALID", message });
+function withRepayment(source: Record<string,unknown>, parsed: Success): Success | Failure {
+  if (!Object.hasOwn(source,"repaymentTerms")) return parsed;
+  if (!parsed.idempotencyKey) return invalid("مفتاح الطلب إلزامي لحفظ الاتفاق وطريقة سداده معًا.");
+  const remaining = parsed.items.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0)-parsed.discountMinor;
+  const terms=validateDebtRepaymentTerms(source.repaymentTerms,remaining);
+  return terms.ok ? {...parsed,repaymentTerms:terms.value} : invalid(terms.message);
+}
 
 /** Clients provide selection only. No raw templatePlan, price, schedule or billing flag reaches the writer. */
 export function parseInvoiceCommand(
@@ -44,7 +52,7 @@ export function parseInvoiceCommand(
   if (!object(source)) return invalid();
   if (!Object.hasOwn(source, "templateSelection") || source.templateSelection == null) {
     const parsed = parseInvoiceInput(source, services, doctors);
-    return parsed.ok ? { ...parsed, template: null } : parsed;
+    return parsed.ok ? withRepayment(source,{ ...parsed, template: null }) : parsed;
   }
   const selection = source.templateSelection;
   if (Object.keys(source).some((key) => !safeKey(key))) return invalid();
@@ -78,7 +86,9 @@ export function parseInvoiceCommand(
   }
   if (source.currency !== undefined && source.currency !== null && source.currency !== "" && !isCurrency(source.currency)) return invalid("عملة الفاتورة غير صالحة.");
   const currency = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
-  const built = buildTemplateDrafts(template, { teeth, steps }, [...services.values()], currency, foreignRatesFromSettings(settings));
+  // An invoice agreement requires prices in its own currency; FX suggestions
+  // remain available to visit workflows but cannot silently price this agreement.
+  const built = buildTemplateDrafts(template, { teeth, steps }, [...services.values()], currency, {});
   if (!built.ok) return invalid(built.message);
   const manual = source.items === undefined ? [] : source.items;
   if (!Array.isArray(manual) || manual.length + built.drafts.length > 40) return invalid("عدد بنود الفاتورة مع القالب يجب ألا يتجاوز ٤٠.");
@@ -147,19 +157,35 @@ export function parseInvoiceCommand(
     // These are authoritative catalogue values, never user overrides.
     parsed.authorityLines[line].explicit = false;
   }
-  return { ...parsed, template: { templateId: template.id, version, lines } };
+  return withRepayment(source,{ ...parsed, template: { templateId: template.id, version, lines } });
 }
 
 /** Ordinary historical fingerprints remain exact; template commands bind their reviewed version and schedule. */
-export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null }): string {
+export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms }): string {
   const original = invoiceRequestFingerprint({ ...parsed, currency: parsed.baseCurrency });
-  return parsed.template === null ? original : JSON.stringify([original, { templateId: parsed.template.templateId,
+  const financial = parsed.repaymentTerms ? JSON.stringify([original,parsed.repaymentTerms]) : original;
+  return parsed.template === null ? financial : JSON.stringify([financial, { templateId: parsed.template.templateId,
     version: parsed.template.version, lines: parsed.template.lines.map((line) => [line.line, line.stepKey, line.sessionPlan]),
   }]);
 }
 
 /** Immutable submitted intent, independent of later catalogue changes; bound to the authenticated actor. */
 export function invoiceTemplateRequestFingerprint(source: Record<string, unknown>, actor: { username: string; role: string; userId?: number | null }): string {
+  return invoiceIntentFingerprint(source, actor, "invoice-template-intent-v1:");
+}
+
+/** Quoted manual entries can recover an acknowledged command after catalogue drift.
+ * Older unquoted API clients retain their existing canonical fingerprint contract. */
+export function hasInvoiceCatalogQuote(source: Record<string, unknown>): boolean {
+  return Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
+    && !Array.isArray(item) && Object.hasOwn(item, "catalogPriceMinor"));
+}
+
+export function invoiceCatalogRequestFingerprint(source: Record<string, unknown>, actor: { username: string; role: string; userId?: number | null }): string {
+  return invoiceIntentFingerprint(source, actor, "invoice-catalogue-intent-v1:");
+}
+
+function invoiceIntentFingerprint(source: Record<string, unknown>, actor: { username: string; role: string; userId?: number | null }, prefix: string): string {
   const canonical = (value: unknown, depth = 0): unknown => {
     if (depth > 40) throw new Error("Invoice intent nesting exceeds the bounded command depth");
     if (Array.isArray(value)) return ["array", value.map((item) => canonical(item, depth + 1))];
@@ -167,5 +193,5 @@ export function invoiceTemplateRequestFingerprint(source: Record<string, unknown
     return [value === null ? "null" : typeof value, value];
   };
   const body = Object.fromEntries(Object.entries(source).filter(([key]) => key !== "idempotencyKey"));
-  return "invoice-template-intent-v1:" + createHash("sha256").update(JSON.stringify([actor.userId ?? null, actor.username, actor.role, canonical(body)])).digest("hex");
+  return prefix + createHash("sha256").update(JSON.stringify([actor.userId ?? null, actor.username, actor.role, canonical(body)])).digest("hex");
 }

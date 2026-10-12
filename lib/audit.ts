@@ -18,6 +18,7 @@ export type AuditAction =
   | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "payment.recover_installment"
+  | "debt_repayment.create" | "debt_repayment.revise" | "debt_repayment.cancel" | "debt_repayment.collect"
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
   | "payment.correct"
   | "expense.create"
@@ -50,6 +51,7 @@ export type AuditAction =
   | "legacy_balance_arrangement.create" | "legacy_balance_arrangement.cancel"
   /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وإبطاله. */
   | "legacy_treatment.create" | "legacy_treatment.void"
+  | "legacy_document.create" | "legacy_document.correct"
   | "fx.revalue"
   | "journal.manual"
   | "settings.update"
@@ -136,6 +138,10 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "invoice.correct": "تصحيح فاتورة",
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.recover_installment": "استعادة تحصيل قسط معكوس على فاتورته الأصلية",
+  "debt_repayment.create": "توزيع سداد دين قائم",
+  "debt_repayment.revise": "مراجعة جدول سداد دين قائم",
+  "debt_repayment.cancel": "إلغاء جدول سداد دون إلغاء الدين",
+  "debt_repayment.collect": "تحصيل دفعة على دين مجدول",
   "payment.create": "سند قبض",
   "payment.refund": "استرداد",
   "payment.correct": "تصحيح سند قبض",
@@ -178,6 +184,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "opening_balance.clear": "حذف رصيد افتتاحي",
   "legacy_balance_arrangement.create": "ترتيب تحصيل رصيد سابق",
   "legacy_balance_arrangement.cancel": "إلغاء ترتيب تحصيل رصيد سابق",
+  "legacy_document.create": "تسجيل اتفاق تاريخي متعدد البنود",
+  "legacy_document.correct": "تصحيح اتفاق تاريخي متعدد البنود",
   "legacy_treatment.create": "تسجيل علاج بدأ قبل النظام (اتفاق تاريخي)",
   "legacy_treatment.void": "إبطال اتفاق علاج بدأ قبل النظام",
   "fx.revalue": "إعادة تقييم عملة",

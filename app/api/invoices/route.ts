@@ -9,10 +9,11 @@ import {
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { checkInvoiceAuthority, formatPriceOverrides } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
-import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceTemplateRequestFingerprint } from "@/lib/invoice-template";
+import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "@/lib/invoice-template";
 import { InvoiceTemplateAuthorityError, InvoiceTemplateBusyError, InvoiceTemplateAuthorizationError } from "@/lib/invoice-template-db";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
 
 export const dynamic = "force-dynamic";
 
@@ -48,21 +49,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  const templateIntent = source && typeof source === "object" && !Array.isArray(source)
+    && source.templateSelection !== null && typeof source.templateSelection === "object" && !Array.isArray(source.templateSelection);
+  const catalogIntent = source && typeof source === "object" && !Array.isArray(source) && hasInvoiceCatalogQuote(source);
 
   // A lost acknowledgement must remain recoverable after a catalogue/template edit.
   // The stored versioned raw intent includes actor, patient and all submitted values.
   // This read-only path never treats a key alone, GET, or current expansion as proof.
-  if (source && typeof source === "object" && !Array.isArray(source) && Object.hasOwn(source, "templateSelection")
-    && source.templateSelection !== null && typeof source.templateSelection === "object" && !Array.isArray(source.templateSelection)
+  if ((templateIntent || catalogIntent)
     && typeof source.idempotencyKey === "string" && INVOICE_IDEMPOTENCY_PATTERN.test(source.idempotencyKey.trim())
     && Number.isInteger(Number(source.patientId)) && Number(source.patientId) > 0) {
     try {
       const recovered = await recoverLinkedInvoice({ patientId: Number(source.patientId), idempotencyKey: source.idempotencyKey.trim(),
-        requestHash: invoiceTemplateRequestFingerprint(source, session), createdBy: session.username, session });
+        requestHash: templateIntent ? invoiceTemplateRequestFingerprint(source, session) : invoiceCatalogRequestFingerprint(source, session), createdBy: session.username, session });
       if (recovered && !recovered.ok) return NextResponse.json({ code: recovered.reason,
         message: recovered.reason === "no_patient" ? "المريض غير موجود." : INVOICE_LINKAGE_MESSAGE[recovered.reason],
       }, { status: recovered.reason === "no_patient" ? 404 : linkageRefusalStatus(recovered.reason) });
-      if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links }, replayed: true }, { status: 200 });
+      if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links },
+        ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(recovered.invoice.patientId,recovered.invoice.id)} : {}), replayed: true }, { status: 200 });
     } catch (error) {
       if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
       return NextResponse.json({ message: "تعذّر التحقق من نتيجة الطلب السابق؛ احتفظ بالمفتاح نفسه وأعد المحاولة." }, { status: 500 });
@@ -97,8 +101,10 @@ export async function POST(request: Request) {
       patientId, baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
-      ...(parsed.template ? { templateAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } } : {}),
-      requestHash: idempotencyKey ? parsed.template ? invoiceTemplateRequestFingerprint(source, session) : invoiceCommandFingerprint(parsed) : null,
+      ...(parsed.template ? { templateAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }
+        : { catalogueAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }),
+      requestHash: idempotencyKey ? parsed.template ? invoiceTemplateRequestFingerprint(source, session)
+        : catalogIntent ? invoiceCatalogRequestFingerprint(source, session) : invoiceCommandFingerprint(parsed) : null,
       auditDetails: {
         ...(parsed.template ? { قالب_العلاج: parsed.template.templateId, نسخة_القالب: parsed.template.version } : {}),
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
@@ -112,10 +118,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
     }
     return NextResponse.json(
-      { ...result.invoice, clinical: { planId: result.planId, links: result.links }, replayed: result.replayed },
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links },
+        ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(patientId,result.invoice.id)} : {}), replayed: result.replayed },
       { status: result.replayed ? 200 : 201 },
     );
   } catch (error) {
+    if (error instanceof DebtRepaymentError) return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
     if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
     if (error instanceof InvoiceTemplateAuthorityError || error instanceof InvoiceTemplateBusyError) return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
     return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. أعد المحاولة." }, { status: 500 });

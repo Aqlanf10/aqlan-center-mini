@@ -1,7 +1,7 @@
 /** Transaction-owned authority for template invoices. No process settings cache or second connection. */
 import { getSettingsInTransaction, type DbClient, type Service } from "./db";
 import type { LinkedInvoiceLineInput } from "./invoice-linkage-db";
-import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand } from "./invoice-template";
+import { invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, parseInvoiceCommand, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "./invoice-template";
 import { checkInvoiceAuthority } from "./invoice-pricing";
 import { foreignRatesFromSettings } from "./service-pricing";
 import type { SessionPayload } from "./auth";
@@ -41,19 +41,23 @@ function itemsFingerprint(items: readonly LinkedInvoiceLineInput[]): string {
 
 /** Call after patient/replay handling, before any invoice/plan writes; caller owns transaction lifetime. */
 export async function validateInvoiceTemplateInTransaction(client: DbClient, input: {
-  templateAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
+  templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
   idempotencyKey: string | null; requestHash: string | null;
   patientId: number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
   createdBy: string;
 }): Promise<void> {
-  if (!input.items.some((item) => item.templatePlan !== undefined)) {
+  const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
+  if (!usesTemplate && !input.catalogueAuthority) {
     if (input.templateAuthority) throw new InvoiceTemplateAuthorityError();
     return;
   }
-  const authority = input.templateAuthority;
+  const authority = usesTemplate ? input.templateAuthority : input.catalogueAuthority;
   if (!authority?.session) throw new InvoiceTemplateAuthorizationError();
-  if (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source,
-    { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null })) throw new InvoiceTemplateAuthorityError();
+  if (usesTemplate && (input.idempotencyKey === null || input.requestHash !== invoiceTemplateRequestFingerprint(authority.source,
+    { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null }))) throw new InvoiceTemplateAuthorityError();
+  if (!usesTemplate && input.idempotencyKey !== null && hasInvoiceCatalogQuote(authority.source)
+    && input.requestHash !== invoiceCatalogRequestFingerprint(authority.source,
+      { username: input.createdBy, role: input.actorRole ?? "", userId: authority.session.userId ?? null })) throw new InvoiceTemplateAuthorityError();
   // SHARE settings covers missing/default keys too. Template service references
   // are explicit, so new catalogue inserts cannot change the selected services.
   // This path performs only same-client DB work and synchronous validation under
@@ -90,7 +94,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
   }]));
   const { rows: doctors } = await client.query<{ id: number }>("SELECT id FROM parties WHERE kind = 'doctor'");
   const current = parseInvoiceCommand(authority.source, services, new Set(doctors.map((doctor) => doctor.id)), settings, true);
-  if (!current.ok || current.template === null || invoiceCommandFingerprint(current) !== authority.fingerprint
+  if (!current.ok || Boolean(current.template) !== usesTemplate || invoiceCommandFingerprint(current) !== authority.fingerprint
     || current.patientId !== input.patientId || current.baseCurrency !== input.baseCurrency
     || current.existingPlanId !== (input.existingPlanId ?? null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey

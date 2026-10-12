@@ -53,6 +53,8 @@ import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
 import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
+import { DEBT_INSTALLMENTS_SQL } from "./debt-installments-schema";
+import { LEGACY_TREATMENT_DOCUMENT_SQL } from "./legacy-treatment-document-schema";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
 import { ENDO_STAGE_LABEL } from "./endodontics";
@@ -2054,6 +2056,8 @@ export function ensureSchema(): Promise<void> {
     /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وبنده وحالته ورابط رصيده السابق — جسد الهجرة 0042 حرفيًّا. */
     await getPool().query(LEGACY_TREATMENT_SQL);
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
+    await getPool().query(DEBT_INSTALLMENTS_SQL);
+    await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -9692,6 +9696,19 @@ type PaymentOutcome =
       | "installment_recovery_review_required";
   };
 
+/** Narrow adapter for a caller-owned debt collection transaction. Its caller
+ * establishes session, shift, target, remaining-debt and schedule-version guards.
+ * Canonical receipt numbering, append-only, settlement and replay remain here. */
+export async function writeDebtCollectionReceipt(client: DbClient, input: {
+  patientId: number; invoiceId: number | null; openingCurrency: Currency | null;
+  amountMinor: number; currency: Currency; exchangeRate: number; method: string; note: string | null;
+  createdBy: string; idempotencyKey: string; requestHash: string;
+}) {
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error("Invalid debt receipt amount");
+  return runPaymentTransaction({ ...input,planId:null,kind:"payment",baseCurrency:CLINIC_BASE_CURRENCY },
+    { idempotencyKey:validateIdempotencyKey(input.idempotencyKey),reversalOfId:null,requestHashOverride:input.requestHash },client);
+}
+
 async function runPaymentTransaction(
   input: {
     patientId: number; invoiceId: number | null; planId: number | null; openingCurrency: Currency | null;
@@ -15312,6 +15329,14 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     if (row.child === "patient_families" && row.parent === "patients") continue;
     dependsOn.get(row.child)?.add(row.parent);
   }
+  //0060 seals a complete clinical snapshot on revision INSERT. These trigger
+  // dependencies are additional to declared foreign keys and must survive restore.
+  if(dependsOn.has("legacy_treatment_document_revisions")) {
+    dependsOn.get("legacy_treatment_document_revisions")!.add("legacy_treatment_agreements");
+    dependsOn.get("legacy_treatment_document_revisions")!.add("legacy_treatment_coverage_snapshots");
+  }
+  if(dependsOn.has("debt_repayment_arrangements"))
+    dependsOn.get("debt_repayment_arrangements")!.add("patient_opening_balance_history");
   const ordered = insertionOrder(
     tables.map((table) => ({ table, dependsOn: [...(dependsOn.get(table) ?? [])] })),
   );
@@ -15349,7 +15374,11 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       withSerialId.push(table);
     }
 
-    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"`);
+    // 0059 revisions are immutable and enforce consecutive versions on INSERT.
+    // Restore order must not depend on physical heap order after maintenance.
+    const restoreOrder = table === "debt_repayment_revisions" ? " ORDER BY arrangement_id, version"
+      : table === "legacy_treatment_document_revisions" ? " ORDER BY document_id, version" : "";
+    const { rows } = await pool.query(`SELECT ${backupSelectColumns(columnRows)} FROM "${table}"${restoreOrder}`);
     yield `\n-- ${table} (${rows.length})\n`;
     for (const row of rows) {
       if (table === "patient_families" && typeof row.id === "number" && typeof row.guarantor_patient_id === "number") {

@@ -14,6 +14,7 @@ import {
 } from "./invoice-clinical-linkage";
 import { isValidTooth } from "./dental";
 import { isCurrency, type Currency } from "./money";
+import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 
 export const LEGACY_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
@@ -33,6 +34,8 @@ export interface LegacyTreatmentRequest {
   historicalAsOf: string;
   note: string | null;
   idempotencyKey: string | null;
+  repaymentTerms?: DebtRepaymentTerms;
+  repaymentRemainingMinor?: number;
 }
 
 function optionalInt(value: unknown, min: number, max: number): number | null | undefined {
@@ -84,6 +87,14 @@ export function parseLegacyTreatmentRequest(source: Record<string, unknown>, tod
     return { ok: false, message: "مفتاح الطلب غير صالح." };
   }
   const note = typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null;
+  let repayment: {repaymentTerms:DebtRepaymentTerms;repaymentRemainingMinor:number}|undefined;
+  if(Object.hasOwn(source,"repaymentTerms")){
+    if(!idempotencyKey||typeof source.repaymentRemainingMinor!=="number"||!Number.isSafeInteger(source.repaymentRemainingMinor)
+      ||source.repaymentRemainingMinor<preview.historical.remainingMinor)return {ok:false,message:"راجع الدين المطلوب جدولته ومفتاح الطلب."};
+    const terms=validateDebtRepaymentTerms(source.repaymentTerms,source.repaymentRemainingMinor);
+    if(!terms.ok)return {ok:false,message:terms.message};
+    repayment={repaymentTerms:terms.value,repaymentRemainingMinor:source.repaymentRemainingMinor};
+  }
   return {
     ok: true,
     value: {
@@ -92,6 +103,7 @@ export function parseLegacyTreatmentRequest(source: Record<string, unknown>, tod
       previouslyPaidMinor: preview.historical.previouslyPaidMinor,
       remainingMinor: preview.historical.remainingMinor,
       historicalAsOf: preview.historical.historicalAsOf,
+      ...repayment,
     },
   };
 }
@@ -102,6 +114,7 @@ export function legacyTreatmentFingerprint(patientId: number, request: LegacyTre
     patientId, request.serviceId, request.toothCode, request.surfaces, request.episodeTeeth, request.scope,
     request.caseId, request.sessions, request.currency,
     request.agreedMinor, request.previouslyPaidMinor, request.historicalAsOf, request.note,
+    ...(request.repaymentTerms ? [request.repaymentTerms,request.repaymentRemainingMinor] : []),
   ]);
 }
 
@@ -134,9 +147,10 @@ export interface LegacyTreatmentPreview {
 
 export type LegacyVoidRefusal =
   | "not_found" | "already_void" | "opening_settled" | "opening_changed" | "period_locked" | "bad_reason"
-  | "opening_collected" | "void_forbidden" | "bad_void_request" | "preview_required" | "preview_stale";
+  | "document_correction_required" | "opening_collected" | "void_forbidden" | "bad_void_request" | "preview_required" | "preview_stale";
 
 export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, string> = {
+  document_correction_required: "هذا البند مرتبط باتفاق متعدد البنود؛ صحّح المستند كاملًا مع حفظ السندات وهويات العلاج.",
   no_patient: "المريض غير موجود.",
   incompatible_plan: "الخطة الرئيسية القائمة غير قابلة لإضافة العلاج السابق؛ راجع خطط المريض وموافقاتها وعملتها قبل المتابعة.",
   ortho_scope_mismatch: "حالة التقويم الجارية للمريض بنطاق فكّين مختلف أو غير مسجّل عن نطاق الاتفاق التاريخي — لا يُربط بها. راجع حالة التقويم ونطاقها أولًا.",
@@ -170,7 +184,7 @@ export const LEGACY_TREATMENT_MESSAGE: Record<LegacyTreatmentRefusal | LegacyVoi
 };
 
 export const LEGACY_TREATMENT_STATUS: Record<LegacyTreatmentRefusal | LegacyVoidRefusal, number> = {
-  opening_collected: 409, void_forbidden: 403, bad_void_request: 400, preview_required: 400, preview_stale: 409,
+  document_correction_required: 409, opening_collected: 409, void_forbidden: 403, bad_void_request: 400, preview_required: 400, preview_stale: 409,
   incompatible_plan: 409, needs_financial_review: 409, prior_receipts_review: 409, ortho_scope_mismatch: 409, legacy_episode_unsupported: 400,
   no_patient: 404, bad_service: 400, bad_tooth: 400, bad_case: 400, ambiguous_case: 409, idempotency_conflict: 409,
   duplicate_live: 409, open_item_exists: 409, opening_not_owned: 409, opening_edit_forbidden: 403, period_locked: 409,

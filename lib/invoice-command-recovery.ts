@@ -1,4 +1,4 @@
-/** Submitted template intent is retained independently of changing catalogue evidence. */
+/** Submitted invoice intent is retained independently of changing catalogue evidence. */
 export type InvoiceCommandOutcome = "saved" | "refused" | "busy" | "uncertain";
 export type InvoiceCommandLease = { owner: object; serialized: string };
 export function retainInvoiceCommand(owner: object, body: Record<string, unknown>): InvoiceCommandLease {
@@ -6,6 +6,9 @@ export function retainInvoiceCommand(owner: object, body: Record<string, unknown
 }
 export function invoiceCommandForOwner(lease: InvoiceCommandLease, owner: object): Record<string, unknown> | null {
   return lease.owner === owner ? JSON.parse(lease.serialized) as Record<string, unknown> : null;
+}
+export function invoiceCommandHasTemplate(lease: InvoiceCommandLease): boolean {
+  return Object.hasOwn(JSON.parse(lease.serialized) as Record<string, unknown>, "templateSelection");
 }
 export function invoiceCommandOutcome(status: number, payload: unknown, verifiedReceipt: boolean, redirected = false): InvoiceCommandOutcome {
   if (redirected) return "uncertain";

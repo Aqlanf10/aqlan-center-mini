@@ -25,6 +25,8 @@ import type { SpecialtyTemplate } from "./specialty-templates";
 import type { BillingRule } from "./workflow";
 import { assertInvoiceTemplateSession, validateInvoiceTemplateInTransaction, type InvoiceTemplateAuthority } from "./invoice-template-db";
 import type { SessionPayload } from "./auth";
+import { writeDebtRepaymentInTransaction } from "./debt-installments-db";
+import { lockDebtAccountForSchedule } from "./debt-account-position";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
   validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
@@ -304,6 +306,8 @@ export async function createLinkedInvoice(input: {
   requestHash: string | null;
   /** Exact source selection and preflight fingerprint; revalidated under transaction-owned catalogue locks. */
   templateAuthority?: InvoiceTemplateAuthority;
+  /** Ordinary invoice commands receive the same locked catalogue/session checks. */
+  catalogueAuthority?: InvoiceTemplateAuthority;
   /** تفاصيل سطر تدقيق `invoice.create` (السلطة السعرية) — يُكتب داخل المعاملة نفسها. */
   auditDetails: Record<string, unknown>;
 }): Promise<CreateLinkedInvoiceResult> {
@@ -322,23 +326,25 @@ type Written =
 
 async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[0]): Promise<Written> {
   const client = await getPool().connect();
+  const authority = input.templateAuthority ?? input.catalogueAuthority;
   try {
     await client.query("BEGIN");
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
     if (!patient[0]) throw new Refusal("no_patient", null);
+    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) await lockDebtAccountForSchedule(client,input.patientId);
 
     if (input.idempotencyKey) {
       const { rows: [prior] } = await client.query<{ id: number; idempotency_request_hash: string | null; patient_id: number }>(
         `SELECT id, idempotency_request_hash, patient_id FROM invoices WHERE idempotency_key = $1`, [input.idempotencyKey]);
       if (prior) {
-        if (input.templateAuthority) await assertInvoiceTemplateSession(client, input.templateAuthority.session, input);
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
         if (prior.idempotency_request_hash !== input.requestHash || prior.patient_id !== input.patientId) {
           throw new Refusal("idempotency_conflict", null);
         }
-        const replay = input.templateAuthority
+        const replay = authority
           ? await lockedInvoiceReceipt(client, prior.id, input)
           : await existingLinks(client, prior.id);
-        if (input.templateAuthority) await assertInvoiceTemplateSession(client, input.templateAuthority.session, input);
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
         await client.query("ROLLBACK");
         return { ok: true, invoiceId: prior.id, replayed: true, ...replay };
       }
@@ -591,11 +597,19 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       },
       actor: input.createdBy, actorRole: input.actorRole,
     });
-    const templateInvoice = input.templateAuthority ? await getInvoice(invoiceId, client) : null;
-    if (input.templateAuthority && (!templateInvoice || templateInvoice.id !== invoiceId || templateInvoice.patientId !== input.patientId
+    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) {
+      await writeDebtRepaymentInTransaction(client,{
+        target:{patientId:input.patientId,currency:input.baseCurrency,invoiceId,openingCurrency:null},
+        terms:authority.source.repaymentTerms,expectedVersion:0,
+        expectedRemainingMinor:input.items.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0)-input.discountMinor,
+        reason:"طريقة السداد عند إنشاء الاتفاق",idempotencyKey:`invoice:${invoiceId}:repayment`,session:authority.session,
+      });
+    }
+    const templateInvoice = authority ? await getInvoice(invoiceId, client) : null;
+    if (authority && (!templateInvoice || templateInvoice.id !== invoiceId || templateInvoice.patientId !== input.patientId
       || templateInvoice.items.length !== links.length || templateInvoice.items.some((item, line) =>
         (item.planItemId ?? null) !== links[line].planItemId || (item.caseId ?? null) !== links[line].caseId))) throw new Refusal("idempotency_conflict", null);
-    if (input.templateAuthority) await assertInvoiceTemplateSession(client, input.templateAuthority.session, input);
+    if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
     await client.query("COMMIT");
     return { ok: true, invoiceId, ...(templateInvoice ? { invoice: templateInvoice } : {}), replayed: false, planId, links };
   } catch (error) {

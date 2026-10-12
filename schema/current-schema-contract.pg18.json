@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 88,
-    "columns": 1156,
-    "constraints": 1074,
-    "indexes": 275,
-    "triggers": 28
+    "tables": 92,
+    "columns": 1206,
+    "constraints": 1164,
+    "indexes": 288,
+    "triggers": 35
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -1745,6 +1745,229 @@
         "commission_case_overrides_append_only": {
           "timing": "BEFORE",
           "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "debt_repayment_arrangements": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "invoice_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "opening_currency": {
+          "type": "text",
+          "nullable": true
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [],
+      "checks": [
+        "debt_repayment_arrangements_created_by_check",
+        "debt_repayment_arrangements_currency_check",
+        "debt_repayment_arrangements_opening_currency_check",
+        "debt_repayment_target_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "debt_repayment_arrangements_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        },
+        "debt_repayment_invoice_uniq": {
+          "columns": [
+            "invoice_id"
+          ],
+          "unique": true
+        },
+        "debt_repayment_opening_uniq": {
+          "columns": [
+            "patient_id",
+            "opening_currency"
+          ],
+          "unique": true
+        },
+        "debt_repayment_patient_idx": {
+          "columns": [
+            "patient_id",
+            "id"
+          ],
+          "unique": false
+        }
+      },
+      "triggers": {
+        "debt_repayment_arrangements_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "debt_repayment_revisions": {
+      "columns": {
+        "arrangement_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "principal_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "settled_snapshot_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "source_snapshot": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "status": {
+          "type": "text",
+          "nullable": false
+        },
+        "terms": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "arrangement_id",
+          "version"
+        ],
+        [
+          "idempotency_key"
+        ]
+      ],
+      "checks": [
+        "debt_repayment_cancel_terms_check",
+        "debt_repayment_revisions_created_by_check",
+        "debt_repayment_revisions_idempotency_key_check",
+        "debt_repayment_revisions_principal_minor_check",
+        "debt_repayment_revisions_reason_check",
+        "debt_repayment_revisions_request_hash_check",
+        "debt_repayment_revisions_settled_snapshot_minor_check",
+        "debt_repayment_revisions_source_snapshot_check",
+        "debt_repayment_revisions_status_check",
+        "debt_repayment_revisions_version_check",
+        "debt_repayment_terms_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "arrangement_id"
+          ],
+          "refTable": "debt_repayment_arrangements",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "debt_repayment_revisions_arrangement_id_version_key": {
+          "columns": [
+            "arrangement_id",
+            "version"
+          ],
+          "unique": true
+        },
+        "debt_repayment_revisions_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "debt_repayment_revisions_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "debt_repayment_revisions_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
             "DELETE",
             "UPDATE"
           ]
@@ -4323,6 +4546,14 @@
           "type": "text",
           "nullable": false
         },
+        "document_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "document_line": {
+          "type": "int4",
+          "nullable": true
+        },
         "historical_as_of": {
           "type": "date",
           "nullable": false
@@ -4361,11 +4592,11 @@
         },
         "previously_paid_minor": {
           "type": "int8",
-          "nullable": false
+          "nullable": true
         },
         "remaining_minor": {
           "type": "int8",
-          "nullable": false
+          "nullable": true
         },
         "service_id": {
           "type": "int4",
@@ -4425,6 +4656,15 @@
             "case_id"
           ],
           "refTable": "clinical_cases",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "document_id"
+          ],
+          "refTable": "legacy_treatment_documents",
           "refColumns": [
             "id"
           ]
@@ -4513,6 +4753,13 @@
             "id"
           ],
           "unique": true
+        },
+        "legacy_treatment_document_line_uniq": {
+          "columns": [
+            "document_id",
+            "document_line"
+          ],
+          "unique": true
         }
       },
       "triggers": {
@@ -4520,6 +4767,18 @@
           "timing": "BEFORE",
           "events": [
             "DELETE",
+            "UPDATE"
+          ]
+        },
+        "legacy_treatment_document_line_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "legacy_treatment_document_no_line_void": {
+          "timing": "BEFORE",
+          "events": [
             "UPDATE"
           ]
         }
@@ -4615,6 +4874,259 @@
           "timing": "BEFORE",
           "events": [
             "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "legacy_treatment_document_revisions": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "discount_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "discount_reason": {
+          "type": "text",
+          "nullable": true
+        },
+        "document_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "historical_as_of": {
+          "type": "date",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "lines": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "note": {
+          "type": "text",
+          "nullable": true
+        },
+        "opening_history_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "previously_paid_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "remaining_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "repayment_receipt": {
+          "type": "jsonb",
+          "nullable": true
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        },
+        "total_minor": {
+          "type": "int8",
+          "nullable": false
+        },
+        "version": {
+          "type": "int4",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "document_id",
+          "version"
+        ],
+        [
+          "idempotency_key"
+        ]
+      ],
+      "checks": [
+        "legacy_treatment_document_revisions_check",
+        "legacy_treatment_document_revisions_check1",
+        "legacy_treatment_document_revisions_check2",
+        "legacy_treatment_document_revisions_created_by_check",
+        "legacy_treatment_document_revisions_historical_as_of_check",
+        "legacy_treatment_document_revisions_idempotency_key_check",
+        "legacy_treatment_document_revisions_lines_check",
+        "legacy_treatment_document_revisions_previously_paid_minor_check",
+        "legacy_treatment_document_revisions_reason_check",
+        "legacy_treatment_document_revisions_request_hash_check",
+        "legacy_treatment_document_revisions_total_minor_check",
+        "legacy_treatment_document_revisions_version_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "document_id"
+          ],
+          "refTable": "legacy_treatment_documents",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "opening_history_id"
+          ],
+          "refTable": "patient_opening_balance_history",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "legacy_treatment_document_revisions_document_id_version_key": {
+          "columns": [
+            "document_id",
+            "version"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_document_revisions_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_document_revisions_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "legacy_treatment_document_revision_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "legacy_treatment_document_revisions_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "legacy_treatment_documents": {
+      "columns": {
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "created_role": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "intent": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "line_count": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "idempotency_key"
+        ]
+      ],
+      "checks": [
+        "legacy_treatment_documents_created_by_check",
+        "legacy_treatment_documents_created_role_check",
+        "legacy_treatment_documents_currency_check",
+        "legacy_treatment_documents_idempotency_key_check",
+        "legacy_treatment_documents_intent_check",
+        "legacy_treatment_documents_line_count_check",
+        "legacy_treatment_documents_request_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "legacy_treatment_documents_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "legacy_treatment_documents_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "legacy_treatment_documents_immutable": {
+          "timing": "BEFORE",
+          "events": [
             "DELETE",
             "UPDATE"
           ]

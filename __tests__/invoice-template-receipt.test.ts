@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Invoice, InvoiceItem } from "../lib/db";
 import type { LineLink } from "../lib/invoice-linkage-db";
 import {
-  readInvoiceTemplateReceipt, type InvoiceTemplateReceiptExpectation, type InvoiceTemplateReceiptExpectedLine,
+  readInvoiceTemplateReceipt, readInvoiceCommandReceipt, type InvoiceTemplateReceiptExpectation, type InvoiceTemplateReceiptExpectedLine,
 } from "../lib/invoice-template-receipt";
 
 /** The canonical mapper emits every item field, including nullable lineage. */
@@ -61,6 +61,19 @@ function rejected(change: (payload: Payload) => void) {
 }
 
 describe("complete template invoice success acknowledgement", () => {
+  it("requires complete ordinary financial invoice acknowledgement and exact saved repayment terms",()=>{
+    const {owner,expected,payload}=fixture();
+    const terms={mode:"installments" as const,installments:[{dueDate:"2026-10-12",amountMinor:198,kind:"installment" as const}]};
+    const ordinary={...expected,discountMinor:0,expectedPlanId:null,lines:[expected.lines[0]],repaymentTerms:terms};
+    const receipt={...payload,totalMinor:198,discountMinor:0,items:[payload.items[0]],clinical:{planId:null,links:[payload.clinical.links[0]]},repayment:{arrangementId:41,revisionId:51,version:1,terms}};
+    expect(readInvoiceCommandReceipt(receipt,ordinary,owner)?.invoice.id).toBe(payload.id);
+    expect(readInvoiceTemplateReceipt(receipt,ordinary,owner)).toBeNull();
+    expect(readInvoiceCommandReceipt({...receipt,repayment:null},ordinary,owner)).toBeNull();
+    expect(readInvoiceCommandReceipt({...receipt,repayment:{...receipt.repayment,terms:{mode:"full",installments:[]}}},ordinary,owner)).toBeNull();
+    expect(readInvoiceCommandReceipt({...receipt,patientId:92},ordinary,owner)).toBeNull();
+    expect(readInvoiceCommandReceipt({...receipt,items:[]},ordinary,owner)).toBeNull();
+    expect(readInvoiceCommandReceipt(receipt,ordinary,{})).toBeNull();
+  });
   it("accepts all manual and template rows, including financial scheduled work", () => {
     const { owner, expected, payload } = fixture();
     const accepted = readInvoiceTemplateReceipt(payload, expected, owner);
