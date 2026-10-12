@@ -2,6 +2,7 @@
 import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
+import { prepareBackupSql } from "../lib/restore/sql.mjs";
 
 /**
  * استعادة نسخة احتياطية.
@@ -28,10 +29,11 @@ if (!file || !url.trim()) {
 // As with full archive restore, schema ownership belongs to the target's
 // bootstrap/migrator, not the source backup's historical registry snapshot.
 // Application rows still use plain INSERT and reject an occupied target.
-const sql = readFileSync(file, "utf8").split('\n')
-  .filter(line => !/^INSERT INTO schema_migrations\s/.test(line)).join('\n');
-if (!sql.includes("COMMIT;")) {
-  console.error("الملف ناقص: لا يحمل خاتمة سليمة. لا تُستعاد منه قاعدة.");
+let sql;
+try {
+  sql = prepareBackupSql(readFileSync(file, "utf8")).sql;
+} catch (error) {
+  console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
 }
 
@@ -45,6 +47,8 @@ function sslFor(target) {
 const client = new Client({ connectionString: url, ssl: sslFor(url) });
 try {
   await client.connect();
+  // Match the backup writer's quote escaping even on a differently configured server.
+  await client.query("SET standard_conforming_strings = on");
   await client.query(sql);
   const { rows } = await client.query(
     `SELECT COUNT(*)::int AS tables FROM information_schema.tables
