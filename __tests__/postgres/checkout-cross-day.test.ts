@@ -13,7 +13,7 @@ beforeAll(async () => {
   await db.openShift({ openedBy: "synthetic-manager", opening: { YER: 0, SAR: 0, USD: 0 } });
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
-it.each(["today", "yesterday"])("yesterday's visit uses current-day installment receipts: receipt %s", async receiptDay => {
+it.each(["today", "yesterday"])("yesterday's visit preserves its arrival-day reference and uses current-day installments: receipt %s", async receiptDay => {
   const patient = await db.getPool().query<{id:number}>(`INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض اصطناعي') RETURNING id`, [`CROSS-${receiptDay}`]);
   const patientId = patient.rows[0].id;
   await db.setPatientOpeningBalance({ patientId, currency: "YER", amountMinor: 110000, asOfDate: yesterday, note: null, createdBy: "synthetic-manager", reason: null });
@@ -29,6 +29,11 @@ it.each(["today", "yesterday"])("yesterday's visit uses current-day installment 
   expect(line.currentBalanceMinor).toBe(100000);
   // Narrative remains the original visit day; actionable summary uses the server's current clinic day.
   expect(walkout.payments.map(p => p.receiptNumber)).toEqual(receiptDay === "today" ? [] : [paid.payment!.receiptNumber]);
+  // PREVIOUS_BALANCE_LABEL / NOTE exclude the visit invoice and arrival-day receipts,
+  // not financial-read-day receipts; this is a live ledger reference, not a signature snapshot.
+  const arrivalDayReference = receiptDay === "today" ? 100000 : 110000;
+  expect(walkout.checkout.previous.YER).toBe(arrivalDayReference);
+  expect(line.previousBalanceMinor).toBe(arrivalDayReference);
   expect(line.legacySuggestedMinor).toBe(receiptDay === "today" ? 0 : 10000);
   expect(line.paymentsTodayMinor).toBe(receiptDay === "today" ? 10000 : 0);
   expect(await db.patientLedger(patientId)).toEqual(before);

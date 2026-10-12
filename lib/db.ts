@@ -28279,27 +28279,30 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
       .map((currency) => ({ currency, balanceMinor: byCurrency[currency].dueMinor }))
       .filter((row) => row.balanceMinor !== 0);
 
-    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات تاريخ القراءة المالية — لا حسابٌ
+    /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات يومها — لا حسابٌ
        في الواجهة ولا طرحٌ عابرٌ للعملات. */
-    const todayPayment = (payment: Payment) =>
-      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.today;
+    const visitDayPayment = (payment: Payment) =>
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
     const before = ledgerBalancesByCurrency(visit.patient_id, {
       invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
-      payments: ledger.payments.filter((payment) => !todayPayment(payment)),
+      payments: ledger.payments.filter((payment) => !visitDayPayment(payment)),
       openings: ledger.openings,
     }, planCurrencies);
     for (const currency of CURRENCIES) {
       checkout.previous[currency] = before[currency].dueMinor;
       checkout.current[currency] = byCurrency[currency].dueMinor;
     }
+    // Actionable collection totals use the server financial day, independently of the arrival-day reference.
+    const financialDayPayment = (payment: Payment) =>
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.today;
     const paidByCurrency = new Map<Currency, number>();
-    for (const payment of ledger.payments.filter(todayPayment)) {
+    for (const payment of ledger.payments.filter(financialDayPayment)) {
       const signed = payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
       paidByCurrency.set(payment.currency, (paidByCurrency.get(payment.currency) ?? 0) + signed);
     }
     checkout.paymentsToday = [...paidByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
     const openingByCurrency = new Map<Currency, number>();
-    for (const payment of ledger.payments.filter(todayPayment)) {
+    for (const payment of ledger.payments.filter(financialDayPayment)) {
       if (payment.openingCurrency === null) continue;
       const target = payment.openingCurrency;
       const settled = payment.currency === target ? payment.amountMinor
