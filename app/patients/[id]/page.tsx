@@ -1112,6 +1112,21 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       {tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
+
+          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
+          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
+          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientContactPanel
+              patient={patient}
+              canEdit
+              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            />
+          ) : null}
+          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+          ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1128,20 +1143,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onChanged={() => void load()}
             onGoToTab={goTo}
           />
-          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
-          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
-          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
-              patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
-          ) : null}
-          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-          ) : null}
 
           </div>
         ) : (
