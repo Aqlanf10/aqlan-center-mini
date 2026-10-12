@@ -25,7 +25,7 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { PatientPlans } from "@/components/PatientPlans";
-import { DentalChart } from "@/components/DentalChart";
+import { TreatmentChartWorkspace } from "@/components/patient/TreatmentChartWorkspace";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
@@ -630,7 +630,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       {compactWorkspace ? medicalAlertBanner : null}
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
-        className="mb-4 min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-gradient-to-b from-white to-navy-50/30 p-3 shadow-card sm:p-5" data-testid="patient-details-panel">
+        className="mb-4 min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-gradient-to-b from-white to-sky-50/30 p-3 shadow-card sm:p-5" data-testid="patient-details-panel">
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
@@ -1084,8 +1084,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               data-testid={`patient-tab-${key}`}
               className={`${compactWorkspace ? "px-2.5 py-2 text-[11px]" : "px-4 py-2.5 text-xs"} inline-flex shrink-0 items-center gap-1.5 rounded-xl border-b-[3px] font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-navy-700 ${
                 isSelected
-                  ? "border-brand-orange bg-navy-900 text-white shadow-xs"
-                  : "border-transparent bg-white text-slate-600 hover:bg-navy-50 hover:text-navy-900"
+                  ? "border-brand-orange bg-brand-blue text-white shadow-xs"
+                  : "border-transparent bg-white text-slate-600 hover:bg-sky-50 hover:text-brand-blue"
               }`}
             >
               <Icon name={icon} className="h-4 w-4 shrink-0" />
@@ -1152,7 +1152,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "treatment" ? (
         <div className="space-y-4">
           {/* شريط محطات العلاج السريري الموحدة وفق المعايير العالمية */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+          <div className="rounded-2xl border border-sky-100 bg-white p-3 shadow-card">
             <label className="flex items-center gap-2 text-xs font-bold text-slate-600 sm:hidden" htmlFor="patient-treatment-section">
               قسم العلاج
               <select id="patient-treatment-section" data-testid="patient-treatment-section" value={treatmentSubTab}
@@ -1197,8 +1197,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                     data-testid={`patient-subtab-${subTab.id}`}
                     className={`flex items-center justify-between gap-1 rounded-lg px-2.5 py-1.5 text-right transition-all ${
                       isSelected
-                        ? "bg-navy-900 text-white shadow-xs"
-                        : "bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/70"
+                        ? "bg-brand-blue text-white shadow-xs"
+                        : "border border-sky-100 bg-sky-50/50 text-navy-800 hover:bg-sky-100"
                     }`}
                   >
                     <div className="flex items-center gap-1.5 truncate">
@@ -1213,8 +1213,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {/* محتوى المحطة العلاجية المحددة */}
           {treatmentSubTab === "chart" && (
-            <section aria-label="المخطط السني">
-              <DentalChart patientId={patient.id} />
+            <section aria-label="المخطط السني وسياق العلاج">
+              <TreatmentChartWorkspace
+                patientId={patient.id}
+                summary={summary}
+                onOpenPlans={() => setTreatmentSubTab("plans")}
+                onOpenOrtho={() => setTreatmentSubTab("ortho")}
+                onOpenToday={() => setTab("today")}
+                onOpenFiles={() => setTab("files")}
+              />
             </section>
           )}
 
