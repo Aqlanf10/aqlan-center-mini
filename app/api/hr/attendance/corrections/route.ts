@@ -1,3 +1,4 @@
+import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
     console.error("Failed to process correction:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر معالجة تصحيح الحضور." },
-      { status: 400 }
+      { status: error instanceof HrWorkforceMutationError ? error.status : 400 }
     );
   }
 }

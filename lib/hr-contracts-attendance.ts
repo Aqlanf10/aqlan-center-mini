@@ -40,6 +40,33 @@ export * from "./hr-contracts-attendance-shared";
 export class HrContractMutationError extends Error {
   constructor(message:string,readonly status:400|401|403|404|409){super(message);}
 }
+export class HrWorkforceMutationError extends Error {
+  constructor(message: string, readonly status: 401 | 403) { super(message); }
+}
+function assertWorkforceSessionCurrent(session: SessionPayload): void {
+  if (session.expiresAt < Date.now()) throw new HrWorkforceMutationError("انتهت الجلسة أثناء العملية؛ لم تُحفظ التغييرات.", 401);
+}
+async function authorizeWorkforceMutation(client: DbClient, session: SessionPayload): Promise<void> {
+  if (!(await revalidateSessionInTransaction(session, client))) {
+    throw new HrWorkforceMutationError("انتهت الجلسة أو تغيّرت صلاحياتها؛ سجّل الدخول من جديد.", 401);
+  }
+}
+/** The admitted server session is rechecked under the existing user SHARE lock.
+ * Keep the route's role rules; time expiry after a domain-lock wait rolls back
+ * every change and its audit together, including an idempotent decision replay. */
+async function withWorkforceTransaction<T>(
+  session: SessionPayload,
+  allowedRoles: readonly string[],
+  work: (client: DbClient) => Promise<T>,
+): Promise<T> {
+  if (!allowedRoles.includes(session.role)) throw new HrWorkforceMutationError("إدارة هذه العملية للمدير أو الدور المصرح به فقط.", 403);
+  return withTransaction(getPool(), async client => {
+    await authorizeWorkforceMutation(client, session);
+    const result = await work(client);
+    assertWorkforceSessionCurrent(session);
+    return result;
+  });
+}
 async function authorizeContractMutation(client:DbClient,session:SessionPayload):Promise<SessionPayload>{
   const current=await revalidateSessionInTransaction(session,client);
   if(!current)throw new HrContractMutationError("انتهت الجلسة أو تغيرت صلاحياتها.",401);
@@ -688,7 +715,7 @@ export async function createSchedule(
   session: SessionPayload,
 ): Promise<HrWorkScheduleView> {
   const staffId = input.staffId !== undefined && input.staffId !== null ? Number(input.staffId) : null;
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(session, ["admin"], async (client) => {
     const policy = await client.query("SELECT value FROM hr_settings WHERE key='attendance_policy' FOR SHARE");
     const grace = input.gracePeriodMins ?? (policy.rows[0] ? normalizeHrPolicy("attendance_policy", policy.rows[0].value).lateGraceMins as number : 0);
     validateSchedule({...input, gracePeriodMins: grace});
@@ -745,7 +772,7 @@ export async function updateWorkSchedule(
   session: SessionPayload,
 ): Promise<HrWorkScheduleView> {
   const schedId = Number(id);
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(session, ["admin"], async (client) => {
     const { rows: currentRows } = await client.query(
       `SELECT * FROM hr_work_schedules WHERE id = $1 FOR UPDATE`,
       [schedId],
@@ -916,7 +943,7 @@ export async function recordAttendance(
   },
   session: SessionPayload,
 ): Promise<HrAttendanceRecordView> {
-  return withTransaction(getPool(), client => recordAttendanceInTx(client, input, session));
+  return withWorkforceTransaction(session, ["admin", "reception"], client => recordAttendanceInTx(client, input, session));
 }
 
 async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
@@ -1085,7 +1112,7 @@ export async function recordAttendancePunch(
   if (!Number.isFinite(instant.getTime()) || !Number.isSafeInteger(staffId) || staffId<1) throw new Error("بصمة غير صالحة.");
   const punchIso = instant.toISOString();
   let dateStr = clinicDateString(instant, CLINIC_TIME_ZONE);
-  return withTransaction(getPool(), async client => {
+  return withWorkforceTransaction(session, ["admin", "reception"], async client => {
     const staff = await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
     if (!staff.rows[0]) throw new Error("الموظف غير موجود.");
     // Select the previous overnight window even when its first entry is missing.
@@ -1139,7 +1166,7 @@ export async function correctAttendanceRecord(
   session: SessionPayload,
 ): Promise<HrAttendanceRecordView> {
   const attId = Number(attendanceId);
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(session, ["admin"], async (client) => {
     const { rows: currRows } = await client.query(
       `SELECT ar.*, s.full_name as staff_name, s.job_title as staff_job_title, s.department, s.user_id as staff_user_id
        FROM hr_attendance_records ar
@@ -1213,7 +1240,7 @@ export async function requestAttendanceCorrection(
   if (session.role !== "admin") throw new Error("طلب التصحيح للمدير وحده.");
   if (!input.reason?.trim() || input.reason.length>500 || !["check_in","check_out","all","status","overtime"].includes(input.fieldCorrected)) throw new Error("طلب تصحيح غير صالح.");
   const attId = Number(input.attendanceRecordId);
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(session, ["admin"], async (client) => {
     const { rows: currRows } = await client.query(
       `SELECT ar.*, s.full_name as staff_name, s.user_id as staff_user_id
        FROM hr_attendance_records ar
@@ -1299,7 +1326,7 @@ export async function decideAttendanceCorrection(
   if (session.role !== "admin") throw new Error("اعتماد التصحيح للمدير وحده.");
   if (decision !== "approved" && decision !== "rejected") throw new Error("قرار غير صالح.");
   const corrId = Number(id);
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(session, ["admin"], async (client) => {
     const { rows: corrRows } = await client.query(
       `SELECT c.*, s.full_name as staff_name, s.user_id as staff_user_id
        FROM hr_attendance_corrections c
@@ -1510,7 +1537,7 @@ export async function adjustLeaveBalance(
   }
 
   if (sess.role!=="admin" || !Number.isSafeInteger(sId) || sId<1 || !Number.isInteger(yr) || yr<2000 || yr>9999 || !Number.isFinite(days) || days<0 || days>366) throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
-  return withTransaction(getPool(), async (client) => {
+  return withWorkforceTransaction(sess, ["admin"], async (client) => {
     await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[sId]);
     const existing = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[sId,code,yr]);
     const pending = Number((await client.query("SELECT COALESCE(SUM(days_count),0) AS days FROM hr_leave_requests WHERE staff_id=$1 AND leave_type_code=$2 AND EXTRACT(YEAR FROM start_date)=$3 AND status IN ('pending','under_review')",[sId,code,yr])).rows[0].days);
@@ -1625,6 +1652,7 @@ export async function createLeaveRequest(
   return withTransaction(getPool(), async (client) => {
     const staff = await client.query("SELECT user_id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
     if (!staff.rows[0] || (session.role!=="admin" && staff.rows[0].user_id!==session.userId)) throw new Error("الموظف غير موجود.");
+    await authorizeWorkforceMutation(client, session);
     // ١) منع التداخل مع إجازات أخرى معتمدة أو قيد المراجعة
     const overlapRes = await client.query(
       `SELECT id FROM hr_leave_requests
@@ -1685,6 +1713,7 @@ export async function createLeaveRequest(
       req.id,
       `${req.staffName} (${req.leaveTypeName} ${req.daysCount} يوم)`,
     );
+    assertWorkforceSessionCurrent(session);
     return req;
   });
 }
@@ -1718,6 +1747,7 @@ export async function decideLeaveRequest(
     }
 
     if (session.role !== "admin") throw new Error("قرار الإجازة للمدير وحده.");
+    await authorizeWorkforceMutation(client, session);
     // إن كانت الحالة هي نفسها تمامًا، فالعملية idempotent تعيد السجل فورًا دون تكرار أي أثر مالي أو زمني
     if (curr.status === decision) {
       return mapLeaveRequestRow(curr);
@@ -1846,6 +1876,7 @@ export async function decideLeaveRequest(
       `${req.staffName} (${decision === "approved" ? "قبول" : "رفض"} ${req.leaveTypeName})`,
       { decision, reason },
     );
+    assertWorkforceSessionCurrent(session);
     return req;
   });
 }

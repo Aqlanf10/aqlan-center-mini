@@ -1,3 +1,4 @@
+import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -73,7 +74,7 @@ export async function PATCH(
     console.error("Failed to decide leave request:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر اتخاذ قرار بشأن الإجازة." },
-      { status: 400 }
+      { status: error instanceof HrWorkforceMutationError ? error.status : 400 }
     );
   }
 }

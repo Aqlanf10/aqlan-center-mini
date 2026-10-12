@@ -281,6 +281,56 @@ describe("١ — مصدر الأجر: العقد المعتمد والملف ل�
 });
 
 describe("نسبة العقد المرجعية وسياسة العمولات القائمة",()=>{
+  async function appendPolicy(partyId:number, percent:number, at:string) {
+    await q(`INSERT INTO doctor_commission_history (party_id,percent,effective_from,source,reason,recorded_by)
+      VALUES ($1,$2,$3::timestamptz,'party','Synthetic dated policy','hr-int-admin')`,[partyId,percent,at]);
+  }
+  it("يحجب تغير نسبة منتصف الشهر ولو تطابقت نسبتا البداية والنهاية مع العقد",async()=>{
+    const s=await staffWith({kind:"commission",percent:30});
+    await activeContract({staffId:s.staffId,kind:"commission",percent:30,partyId:s.partyId!});
+    await appendPolicy(s.partyId!,40,"2026-10-10 00:00+03");
+    await appendPolicy(s.partyId!,30,"2026-10-20 00:00+03");
+    await earnCommission(s.partyId!,40_000,"2026-10-15 10:00+03");
+    expect((await doctorRow(s.partyId!))?.earnedMinor).toBe(16_000);
+    const {run,items}=await approvedRun();
+    expect(items[0].blockerCodes).toContain("commission_policy_conflict");
+    expect(items[0].commissionsMinor).toBe(0);
+    await expect(approve(run.id)).rejects.toThrow("العمولات");
+    expect(await q("SELECT id FROM payables")).toHaveLength(0);
+  });
+  it("يعيد فحص نسبة منتصف الشهر عند الاعتماد قبل إنشاء الالتزام",async()=>{
+    const s=await staffWith({kind:"commission",percent:30});
+    await activeContract({staffId:s.staffId,kind:"commission",percent:30,partyId:s.partyId!});
+    await earnCommission(s.partyId!,40_000);
+    const {run,items}=await approvedRun();
+    expect(items[0].blockerCodes).toEqual([]);
+    await appendPolicy(s.partyId!,40,"2026-10-10 00:00+03");
+    await appendPolicy(s.partyId!,30,"2026-10-20 00:00+03");
+    await expect(approve(run.id)).rejects.toThrow("العمولات");
+    expect(await q("SELECT id FROM payables")).toHaveLength(0);
+    expect((await payroll.getPayrollRunById(run.id))?.status).toBe("draft");
+  });
+  it("يفحص آخر ميكروثانية من الشهر قبل عودة النسبة عند بداية الشهر التالي",async()=>{
+    const s=await staffWith({kind:"commission",percent:30});
+    await activeContract({staffId:s.staffId,kind:"commission",percent:30,partyId:s.partyId!});
+    await appendPolicy(s.partyId!,40,"2026-10-31 23:59:59.999999+03");
+    await appendPolicy(s.partyId!,30,"2026-11-01 00:00+03");
+    const {items}=await approvedRun();
+    expect(items[0].blockerCodes).toContain("commission_policy_conflict");
+  });
+  it("لا يحجب سياسة تبدأ عند حد الشهر التالي أو نسبة استبدلت في اللحظة نفسها",async()=>{
+    const s=await staffWith({kind:"commission",percent:30});
+    await activeContract({staffId:s.staffId,kind:"commission",percent:30,partyId:s.partyId!});
+    await appendPolicy(s.partyId!,40,"2026-10-10 00:00+03");
+    await appendPolicy(s.partyId!,30,"2026-10-10 00:00+03");
+    await appendPolicy(s.partyId!,40,"2026-11-01 00:00+03");
+    await earnCommission(s.partyId!,40_000,"2026-10-15 10:00+03");
+    const {run,items}=await approvedRun();
+    expect(items[0].blockerCodes).toEqual([]);
+    expect(items[0].commissionsMinor).toBe(12_000);
+    await approve(run.id);
+    expect((await payroll.getPayrollRunById(run.id))?.status).toBe("approved");
+  });
   it("لا يعتمد مسيرًا عندما تختلف نسبة العقد عن سياسة المحرك السارية",async()=>{
     const s=await staffWith({kind:"commission",percent:30});
     await activeContract({staffId:s.staffId,kind:"commission",percent:40,partyId:s.partyId!});

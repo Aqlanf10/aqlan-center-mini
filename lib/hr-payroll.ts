@@ -2,6 +2,7 @@ import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
 import { withIsolation } from "./transactions";
 import { normalizeHrPolicy } from "./hr-settings-policy";
+import { commissionTimeKey } from "./commission-time";
 /** HR payroll uses the existing commission engine, payables and append-only expenses. */
 import { createHash } from "node:crypto";
 import {
@@ -193,9 +194,19 @@ async function staffResolution(client: DbClient, row: Row, period: Row, currency
   const contract = resolved.contract;
   if (contract && hasCommission(contract.kind) && contract.commissionRatePercent !== null) {
     const doctorId = contract.doctorPartyId ?? row.user_party_id;
-    const resolver = commissionPolicyResolver(await loadCommissionPolicyTimelines(client));
-    const dates = await client.query("SELECT ($1::date::timestamp AT TIME ZONE $3) AS start, (($2::date+1)::timestamp AT TIME ZONE $3)-interval '1 microsecond' AS finish",[period.start_date,period.end_date,CLINIC_TIME_ZONE]);
-    const policies = [dates.rows[0].start,dates.rows[0].finish].map((date:Date)=>resolver(Number(doctorId),date.toISOString()));
+    const history = await loadCommissionPolicyTimelines(client);
+    const resolver = commissionPolicyResolver(history);
+    const dates = await client.query("SELECT ($1::date::timestamp AT TIME ZONE $3) AS start, (($2::date+1)::timestamp AT TIME ZONE $3) AS exclusive_end",[period.start_date,period.end_date,CLINIC_TIME_ZONE]);
+    const start = (dates.rows[0].start as Date).toISOString();
+    const startKey = commissionTimeKey(start);
+    const endKey = commissionTimeKey((dates.rows[0].exclusive_end as Date).toISOString());
+    const timeline = history.timelines.get(Number(doctorId)) ?? [];
+    // Check every policy that actually governs part of this clinic month, not
+    // just its endpoints. Keep database microseconds and the engine's last-id
+    // winner for equal effective instants; the next month's boundary is excluded.
+    const changes = timeline.filter((entry, index) =>
+      entry.at > startKey && entry.at < endKey && timeline[index + 1]?.at !== entry.at);
+    const policies = [resolver(Number(doctorId), start), ...changes];
     if (policies.some((policy)=>!policy || (policy.config?.defaultPercent ?? policy.percent)!==contract.commissionRatePercent)) resolved.blockers.push("commission_policy_conflict");
   }
   return resolved;
