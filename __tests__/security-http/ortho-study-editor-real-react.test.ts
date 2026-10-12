@@ -31,6 +31,51 @@ async function open(width: number) {
   return { page, context, outside };
 }
 describe("real study React editor with strictly synthetic transport", () => {
+  it.each([390, 1280])("switches display language without rewriting clinical text or a pending command at %s", async width => {
+    const f = await open(width);
+    const narrative = "شكوى اصطناعية بنص الطبيب — authored text 12.5 mm";
+    try {
+      const language = f.page.getByLabel("لغة العرض / Display language", { exact: true });
+      await f.page.getByLabel("سبب حفظ النسخة", { exact: true }).fill("سبب اصطناعي محفوظ حرفيًا");
+      await f.page.getByLabel("تعليق الدراسة", { exact: true }).fill(narrative);
+      const before = await f.page.evaluate(() => window.__studyEditorFixture.snapshot());
+      await language.selectOption("en");
+      const study = f.page.getByTestId("ortho-case-study");
+      expect(await study.getAttribute("lang")).toBe("en");
+      expect(await study.getAttribute("dir")).toBe("ltr");
+      expect(await f.page.getByRole("heading", { name: "Orthodontic case study — Synthetic 19", exact: true }).count()).toBe(1);
+      expect(await f.page.getByLabel("Study comment", { exact: true }).inputValue()).toBe(narrative);
+      expect(await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).toEqual(before);
+      await f.page.getByRole("button", { name: "Save study draft", exact: true }).click();
+      await expect.poll(async () => (await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests.length).toBe(1);
+      const sent = (await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests[0];
+      expect(JSON.parse(sent.body).command.content.comment).toBe(narrative);
+      expect(sent.body).not.toContain("displayLocale");
+      await language.selectOption("ar");
+      expect(await study.getAttribute("dir")).toBe("rtl");
+      await f.page.evaluate(() => window.__studyEditorFixture.commit(0, true));
+      await f.page.getByRole("button", { name: "إعادة التحقق بنفس الطلب", exact: true }).waitFor();
+      await language.selectOption("en");
+      await f.page.getByRole("button", { name: "Recheck the same request", exact: true }).click();
+      await expect.poll(async () => (await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests.length).toBe(2);
+      expect((await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).requests[1]).toEqual(sent);
+      await f.page.evaluate(() => window.__studyEditorFixture.commit(1, false));
+      const review = f.page.getByRole("region", { name: "Saved study review", exact: true });
+      await review.waitFor();
+      await review.getByText(narrative, { exact: true }).waitFor();
+      expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await retainIndependentOrthoEvidence(f.page, `ortho-study-language-en-${width}`);
+      const after = await f.page.evaluate(() => window.__studyEditorFixture.snapshot());
+      await language.selectOption("ar");
+      await review.waitFor({ state: "hidden" });
+      await f.page.getByRole("region", { name: "مراجعة الدراسة المحفوظة", exact: true }).getByText(narrative, { exact: true }).waitFor();
+      expect(await f.page.evaluate(() => window.__studyEditorFixture.snapshot())).toEqual(after);
+      expect(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await retainIndependentOrthoEvidence(f.page, `ortho-study-language-ar-${width}`);
+      expect(after.count).toBe(1); expect(after.unexpected).toEqual([]);
+    } finally { await f.context.close(); }
+    expect(f.outside).toEqual([]);
+  });
   it.each([390, 1280])("keeps committed/lost reply identity through detach and A→B→A at %s", async width => {
     const f = await open(width);
     try {

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { readStudyDisplayLocale, STUDY_DISPLAY_LOCALE_KEY, studyDirection, studyLayoutTitle, studySourceName, studyText, type StudyDisplayLocale, type StudyMessage } from "@/lib/ortho-case-presentation-i18n";
 import { CASE_LAYOUTS, CASE_PAGE, caseLayout } from "@/lib/ortho-case-template";
 import { canonicalJourneyJSON } from "@/lib/ortho-case-journey-json";
 import { STUDY_SOURCE_KINDS, type StudySourceKind, type StudySourceSelection } from "@/lib/ortho-case-study";
@@ -19,21 +20,29 @@ export interface OrthoCaseStudyProps extends JourneyScope {
   requestImagePreview?: (request: StudyImagePreviewRequest) => Promise<StudyImagePreviewResult>;
 }
 const control = "min-h-11 min-w-11 rounded border px-3 py-2 disabled:opacity-50";
-const labels: Record<StudySourceKind, string> = { assessment: "التقييم", diagnosis: "التشخيص", strategy: "المشكلات والاستراتيجية", decision: "القرارات",
-  retention_event: "أجهزة التثبيت ومتابعتها", document: "الصور والمستندات", ceph_study: "السيفالومتري", adjustment: "جلسات المتابعة", plan_consent: "الخطة والموافقة المسجلة" };
-type View = { owner: StudyOwner; readVersion: number; selected: number | null; state: "loading" | "error"; message?: string }
+
+type View = { owner: StudyOwner; readVersion: number; selected: number | null; state: "loading" | "error"; message?: StudyMessage }
   | { owner: StudyOwner; readVersion: number; selected: number | null; state: "ready"; value: StudyEditorRead };
 async function boundedJson(response: Response): Promise<unknown> {
   const text = await response.text(); if (new TextEncoder().encode(text).length > 8 * 1024 * 1024) throw new Error("study_response_limit"); return JSON.parse(text);
 }
 export default function OrthoCaseStudy(props: OrthoCaseStudyProps) {
-  if (!props.owner.matches(props) || !props.ownerKey) return <p role="alert">تغيرت هوية الحالة؛ أعد فتح الدراسة من الحالة الصحيحة.</p>;
+  if (!props.owner.matches(props) || !props.ownerKey) return <p role="alert">{studyText("ar", "تغيرت هوية الحالة؛ أعد فتح الدراسة من الحالة الصحيحة.")}</p>;
   return <StudyWorkspace key={JSON.stringify([props.patientId, props.orthoCaseId, props.clinicalCaseId, props.ownerKey])} {...props} />;
 }
 function StudyWorkspace(props: OrthoCaseStudyProps) {
   const { owner, patientId, orthoCaseId, clinicalCaseId } = props;
+  const [locale, setLocale] = useState<StudyDisplayLocale>("ar");
+  const t = (message: StudyMessage) => studyText(locale, message);
+  useEffect(() => {
+    try { setLocale(readStudyDisplayLocale(localStorage.getItem(STUDY_DISPLAY_LOCALE_KEY))); } catch { /* Display still works without browser storage. */ }
+  }, []);
+  const changeLocale = (value: string) => {
+    const next = readStudyDisplayLocale(value); setLocale(next);
+    try { localStorage.setItem(STUDY_DISPLAY_LOCALE_KEY, next); } catch { /* No patient data or draft is stored here. */ }
+  };
   const [, update] = useState(0), [selected, setSelected] = useState<number | null>(null), [view, setView] = useState<View | null>(null);
-  const [notice, setNotice] = useState(""), [layout, setLayout] = useState("interview"), [sourcePanel, setSourcePanel] = useState("");
+  const [notice, setNotice] = useState<StudyMessage | null>(null), [layout, setLayout] = useState("interview"), [sourcePanel, setSourcePanel] = useState("");
   const readVersion = owner.readVersion, renderedDocument = owner.document;
   const mounted = useRef(false);
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -94,7 +103,7 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
     && draft?.expectedHead?.id === ready.revision.id && canonicalJourneyJSON(draft.content) === canonicalJourneyJSON(ready.revision.authored);
   const selectRevision = (id: number | null) => {
     if (!owner.canLeave(props.confirmDiscard)) return;
-    owner.settle(""); setSelected(id); setNotice("");
+    owner.settle(""); setSelected(id); setNotice(null);
   };
   const addPanel = () => {
     if (!draft || !caseLayout(layout)) return;
@@ -127,62 +136,68 @@ function StudyWorkspace(props: OrthoCaseStudyProps) {
     if (!use || canonicalOrthoMediaRecipe(use.recipe) !== request.expectedRecipe) return false;
     return change({ ...draft, content: { ...draft.content, mediaUses: draft.content.mediaUses.map(value => value === use ? { ...value, recipe: request.recipe } : value) } });
   };
-  return <section dir="rtl" aria-label="دراسة حالة التقويم" className="min-w-0 space-y-4" data-testid="ortho-case-study">
-    <header><h2 className="text-lg font-semibold break-words">دراسة حالة تقويم — {props.patientName}</h2>
-      <p>تُحفظ الدراسة داخل الملف مستقلة عن التصدير. توثيق نسخة لا يوقع موافقة علاجية ولا يغيّر العلاج أو الحساب.</p></header>
-    {notice && <p role="status">{notice}</p>}
-    {owner.recoveryBlocked && <p role="alert">توجد تعديلات محلية محفوظة لسياق سابق لهذه الحالة. لن يُكشف محتواها لحساب أو مريض أو رابط مختلف، ولن تُستبدل تلقائيًا. عُد للسياق الأصلي بعد التحقق من الصلاحية.</p>}
-    {owner.uncertain && <div role="alert"><p>نتيجة الطلب السابق غير مؤكدة. لن يُنشأ طلب حفظ جديد ولن تُحذف المسودة.</p>
-      <button type="button" className={control} disabled={!owner.canRetry()} onClick={() => void save("draft", true)}>إعادة التحقق بنفس الطلب</button></div>}
-    {view?.owner === owner && view.readVersion === readVersion && view.selected === selected && view.state === "error" && <p role="alert">{view.message}</p>}
-    {!ready && <p role="status">الدراسة غير جاهزة للعرض أو التعديل.</p>}
+  return <section lang={locale} dir={studyDirection(locale)} aria-label={t("دراسة حالة التقويم")} className="min-w-0 space-y-4" data-testid="ortho-case-study">
+    <label className="flex flex-wrap items-center gap-2">{t("لغة العرض")}
+      <select aria-label="لغة العرض / Display language" className={control} value={locale} onChange={event => changeLocale(event.currentTarget.value)}>
+        <option value="ar">العربية</option><option value="en">English</option>
+      </select>
+    </label>
+    <header><h2 className="text-lg font-semibold break-words">{t("دراسة حالة تقويم")} — <bdi>{props.patientName}</bdi></h2>
+      <p>{t("تُحفظ الدراسة داخل الملف مستقلة عن التصدير. توثيق نسخة لا يوقع موافقة علاجية ولا يغيّر العلاج أو الحساب.")}</p></header>
+    {notice && <p role="status">{t(notice)}</p>}
+    {owner.recoveryBlocked && <p role="alert">{t("توجد تعديلات محلية محفوظة لسياق سابق لهذه الحالة. لن يُكشف محتواها لحساب أو مريض أو رابط مختلف، ولن تُستبدل تلقائيًا. عُد للسياق الأصلي بعد التحقق من الصلاحية.")}</p>}
+    {owner.uncertain && <div role="alert"><p>{t("نتيجة الطلب السابق غير مؤكدة. لن يُنشأ طلب حفظ جديد ولن تُحذف المسودة.")}</p>
+      <button type="button" className={control} disabled={!owner.canRetry()} onClick={() => void save("draft", true)}>{t("إعادة التحقق بنفس الطلب")}</button></div>}
+    {view?.owner === owner && view.readVersion === readVersion && view.selected === selected && view.state === "error" && <p role="alert">{view.message && t(view.message)}</p>}
+    {!ready && <p role="status">{t("الدراسة غير جاهزة للعرض أو التعديل.")}</p>}
     {ready && <>
-      {ready.revision && <OrthoSavedStudyReview owner={owner} readVersion={readVersion} revision={ready.revision} />}
-      <div className="flex flex-wrap gap-2 items-center"><label>النسخة المعروضة <select aria-label="النسخة المعروضة" className={control} value={selected ?? "latest"}
+      {ready.revision && <OrthoSavedStudyReview locale={locale} owner={owner} readVersion={readVersion} revision={ready.revision} />}
+      <div className="flex flex-wrap gap-2 items-center"><label>{t("النسخة المعروضة")}<select aria-label={t("النسخة المعروضة")} className={control} value={selected ?? "latest"}
         disabled={owner.busy || owner.uncertain} onChange={event => { const value = event.currentTarget.value; event.currentTarget.value = selected === null ? "latest" : String(selected); selectRevision(value === "latest" ? null : Number(value)); }}>
-        <option value="latest">آخر نسخة محفوظة</option>{ready.history.map(row => <option key={row.id} value={row.id}>النسخة {row.version} — {row.kind === "draft" ? "مسودة" : "موثقة"}</option>)}</select></label>
-        <button type="button" className={control} disabled={owner.busy} onClick={() => owner.refresh()}>تحديث القراءة دون حذف المسودة</button></div>
-      {!draft ? <p role="alert">تعذّر فك المسودة المحلية؛ لم تُستبدل بمحتوى فارغ.</p> : <>
-        {!ready.canAppend && <p>عرض فقط حسب الصلاحية الحالية.</p>}
-        <label className="block">سبب حفظ النسخة<input aria-label="سبب حفظ النسخة" className={`${control} w-full`} maxLength={500} value={draft.reason} disabled={!editable} onChange={event => change({ ...draft!, reason: event.currentTarget.value })} /></label>
-        <label className="block">تعليق الدراسة<textarea aria-label="تعليق الدراسة" className={`${control} w-full`} maxLength={4000} value={draft.content.comment} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, comment: event.currentTarget.value } })} /></label>
-        <div className="flex flex-wrap gap-2"><select aria-label="قسم جديد للدراسة" className={control} value={layout} onChange={event => setLayout(event.currentTarget.value)} disabled={!editable}>{CASE_LAYOUTS.map(item => <option key={item.key} value={item.key}>{item.titleAr}</option>)}</select>
-          <button type="button" className={control} onClick={addPanel} disabled={!editable}>إضافة القسم</button></div>
+        <option value="latest">{t("آخر نسخة محفوظة")}</option>{ready.history.map(row => <option key={row.id} value={row.id}>{t("النسخة")} {row.version} — {t(row.kind === "draft" ? "مسودة" : "موثقة")}</option>)}</select></label>
+        <button type="button" className={control} disabled={owner.busy} onClick={() => owner.refresh()}>{t("تحديث القراءة دون حذف المسودة")}</button></div>
+      {!draft ? <p role="alert">{t("تعذّر فك المسودة المحلية؛ لم تُستبدل بمحتوى فارغ.")}</p> : <>
+        {!ready.canAppend && <p>{t("عرض فقط حسب الصلاحية الحالية.")}</p>}
+        <label className="block">{t("سبب حفظ النسخة")}<input dir="auto" aria-label={t("سبب حفظ النسخة")} className={`${control} w-full`} maxLength={500} value={draft.reason} disabled={!editable} onChange={event => change({ ...draft!, reason: event.currentTarget.value })} /></label>
+        <label className="block">{t("تعليق الدراسة")}<textarea dir="auto" aria-label={t("تعليق الدراسة")} className={`${control} w-full`} maxLength={4000} value={draft.content.comment} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, comment: event.currentTarget.value } })} /></label>
+        <div className="flex flex-wrap gap-2"><select aria-label={t("قسم جديد للدراسة")} className={control} value={layout} onChange={event => setLayout(event.currentTarget.value)} disabled={!editable}>{CASE_LAYOUTS.map(item => <option key={item.key} value={item.key}>{studyLayoutTitle(item.key, locale)}</option>)}</select>
+          <button type="button" className={control} onClick={addPanel} disabled={!editable}>{t("إضافة القسم")}</button></div>
         <ol className="space-y-3">{draft.content.panels.map((panel, index) => <li key={panel.instanceId} className="min-w-0 rounded border p-3 space-y-2">
-          <h3>{caseLayout(panel.layoutKey)?.titleAr}</h3><label><input type="checkbox" checked={panel.included} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, included: event.currentTarget.checked } : value) } })} /> تضمين القسم في العرض</label>
-          <textarea aria-label={`تعليق ${caseLayout(panel.layoutKey)?.titleAr}`} className={`${control} w-full`} value={panel.comment} maxLength={4000} disabled={!editable}
+          <h3>{studyLayoutTitle(panel.layoutKey, locale)}</h3><label><input type="checkbox" checked={panel.included} disabled={!editable} onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, included: event.currentTarget.checked } : value) } })} />{t("تضمين القسم في العرض")}</label>
+          <textarea dir="auto" aria-label={`${t("تعليق")} ${studyLayoutTitle(panel.layoutKey, locale)}`} className={`${control} w-full`} value={panel.comment} maxLength={4000} disabled={!editable}
             onChange={event => change({ ...draft!, content: { ...draft!.content, panels: draft!.content.panels.map(value => value.instanceId === panel.instanceId ? { ...value, comment: event.currentTarget.value } : value) } })} />
-          <p className="break-words">المراجع المختارة: {panel.sourceKeys.length ? panel.sourceKeys.join("، ") : "لم يُختر مصدر. لا تُفترض نتائج طبيعية."}</p>
+          <p className="break-words">{t("المراجع المختارة:")} {panel.sourceKeys.length ? panel.sourceKeys.join("، ") : t("لم يُختر مصدر. لا تُفترض نتائج طبيعية.")}</p>
           <div className="flex flex-wrap gap-2">{([-1, 1] as const).map(direction => <button key={direction} type="button" className={control} disabled={!editable || index + direction < 0 || index + direction >= draft!.content.panels.length}
-            onClick={() => { const panels = [...draft!.content.panels]; [panels[index], panels[index + direction]] = [panels[index + direction], panels[index]]; change({ ...draft!, content: { ...draft!.content, panels } }); }}>{direction < 0 ? "نقل للأعلى" : "نقل للأسفل"}</button>)}</div>
+            onClick={() => { const panels = [...draft!.content.panels]; [panels[index], panels[index + direction]] = [panels[index + direction], panels[index]]; change({ ...draft!, content: { ...draft!.content, panels } }); }}>{t(direction < 0 ? "نقل للأعلى" : "نقل للأسفل")}</button>)}</div>
         </li>)}</ol>
-        <label>إضافة المرجع إلى القسم <select aria-label="إضافة المرجع إلى القسم" className={`${control} max-w-full`} value={effectiveSourcePanel} onChange={event => setSourcePanel(event.currentTarget.value)} disabled={!editable}>{draft.content.panels.map(panel => <option key={panel.instanceId} value={panel.instanceId}>{caseLayout(panel.layoutKey)?.titleAr} — {panel.instanceId}</option>)}</select></label>
-        <SourcePicker {...props} editable={editable} onChoose={chooseSource} />
-        <ul aria-label="المراجع المحفوظة في المسودة">{draft.content.sources.map(source => <li key={source.key} className="flex flex-wrap gap-2 items-center">
-          <span>{labels[source.kind]} #{source.id}{source.version === null ? "" : ` — نسخة ${source.version}`}</span>
-          <button type="button" className={control} disabled={!editable} onClick={() => removeSource(source)}>إزالة المرجع واستخداماته من هذه المسودة</button>
+        <label>{t("إضافة المرجع إلى القسم")}<select aria-label={t("إضافة المرجع إلى القسم")} className={`${control} max-w-full`} value={effectiveSourcePanel} onChange={event => setSourcePanel(event.currentTarget.value)} disabled={!editable}>{draft.content.panels.map(panel => <option key={panel.instanceId} value={panel.instanceId}>{studyLayoutTitle(panel.layoutKey, locale)} — {panel.instanceId}</option>)}</select></label>
+        <SourcePicker {...props} locale={locale} editable={editable} onChoose={chooseSource} />
+        <ul aria-label={t("المراجع المحفوظة في المسودة")}>{draft.content.sources.map(source => <li key={source.key} className="flex flex-wrap gap-2 items-center">
+          <span>{studySourceName(source.kind, locale)} #{source.id}{source.version === null ? "" : ` — ${t("نسخة")} ${source.version}`}</span>
+          <button type="button" className={control} disabled={!editable} onClick={() => removeSource(source)}>{t("إزالة المرجع واستخداماته من هذه المسودة")}</button>
         </li>)}</ul>
-        {draft.content.sources.filter(source => source.kind === "document" && !draft!.content.mediaUses.some(use => use.documentId === source.id && use.sourceSha256 === source.contentHash)).map(source => <p key={source.key}>المستند #{source.id} مختار. إسناده إلى إطار صورة ينتظر أساس أبعاد واتجاه موثوقًا؛ لا تمنع هذه الخطوة حفظ الدراسة.</p>)}
+        {draft.content.sources.filter(source => source.kind === "document" && !draft!.content.mediaUses.some(use => use.documentId === source.id && use.sourceSha256 === source.contentHash)).map(source => <p key={source.key}>{t("المستند")} #{source.id} {t("مختار. إسناده إلى إطار صورة ينتظر أساس أبعاد واتجاه موثوقًا؛ لا تمنع هذه الخطوة حفظ الدراسة.")}</p>)}
         {draft.content.mediaUses.map(use => {
           const panel = draft!.content.panels.find(value => value.images.some(image => image.useId === use.useId));
           const binding = panel?.images.find(image => image.useId === use.useId), slot = panel && binding ? caseLayout(panel.layoutKey)?.images.find(image => image.slotId === binding.slot) : null;
-          if (!slot) return <p role="alert" key={use.useId}>إطار الصورة غير متاح؛ لم تُحذف تعديلات الاستخدام.</p>;
+          if (!slot) return <p role="alert" key={use.useId}>{t("إطار الصورة غير متاح؛ لم تُحذف تعديلات الاستخدام.")}</p>;
           return <OrthoStudyImageEditor key={use.useId} ownerKey={props.ownerKey} use={use} frame={{ width: Math.ceil(slot.w * CASE_PAGE.imageDpi), height: Math.ceil(slot.h * CASE_PAGE.imageDpi) }} editable={editable}
             onChange={editImage} requestPreview={props.requestImagePreview ?? (async () => ({ ok: false, code: "unavailable" }))} />;
         })}
-        <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save("draft")}>حفظ مسودة الدراسة</button>
-          <button type="button" className={control} disabled={!canDocument} onClick={() => void save("documented")}>توثيق النسخة المحفوظة نفسها</button></div>
-        <p>التصدير غير مفعّل حتى اكتمال التحقق من ملفات PowerPoint وPDF. حفظ الدراسة وإعادة فتحها لا يحتاجان محرك التصدير.</p>
+        <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={!editable} onClick={() => void save("draft")}>{t("حفظ مسودة الدراسة")}</button>
+          <button type="button" className={control} disabled={!canDocument} onClick={() => void save("documented")}>{t("توثيق النسخة المحفوظة نفسها")}</button></div>
+        <p>{t("التصدير غير مفعّل حتى اكتمال التحقق من ملفات PowerPoint وPDF. حفظ الدراسة وإعادة فتحها لا يحتاجان محرك التصدير.")}</p>
       </>}
     </>}
   </section>;
 }
-function SourcePicker(props: OrthoCaseStudyProps & { editable: boolean; onChoose(source: StudySourceSelection): void }) {
+function SourcePicker(props: OrthoCaseStudyProps & { locale: StudyDisplayLocale; editable: boolean; onChoose(source: StudySourceSelection): void }) {
+  const t = (message: StudyMessage) => studyText(props.locale, message);
   const [kind, setKind] = useState<StudySourceKind>("assessment"), [after, setAfter] = useState<number | null>(null);
-  const [result, setResult] = useState<{ owner: StudyOwner; key: string; value: ReturnType<typeof readStudyInventoryResponse> } | null>(null), [error, setError] = useState("");
+  const [result, setResult] = useState<{ owner: StudyOwner; key: string; value: ReturnType<typeof readStudyInventoryResponse> } | null>(null), [error, setError] = useState<StudyMessage | null>(null);
   const key = JSON.stringify([kind, after, props.owner.readVersion]);
   useEffect(() => {
-    let active = true; const abort = new AbortController(), generation = props.owner.readVersion; setError("");
+    let active = true; const abort = new AbortController(), generation = props.owner.readVersion; setError(null);
     const currentOwner = () => active && props.owner.active() && props.owner.readVersion === generation;
     void (async () => { try {
       const query = new URLSearchParams({ patientId: String(props.patientId), kind }); if (after !== null) query.set("afterId", String(after));
@@ -196,14 +211,14 @@ function SourcePicker(props: OrthoCaseStudyProps & { editable: boolean; onChoose
     return () => { active = false; abort.abort(); };
   }, [props.owner, props.patientId, props.orthoCaseId, props.clinicalCaseId, kind, after, key]);
   const current = result?.owner === props.owner && result.key === key ? result.value : null;
-  return <fieldset className="min-w-0 rounded border p-3"><legend>اختيار مصدر حقيقي</legend>
-    <select className={control} aria-label="نوع مصدر الدراسة" value={kind} onChange={event => { setKind(event.currentTarget.value as StudySourceKind); setAfter(null); }}>{STUDY_SOURCE_KINDS.map(value => <option key={value} value={value}>{labels[value]}</option>)}</select>
-    {error && <p role="alert">{error}</p>}{current?.state === "restricted" && <p>هذا النوع من المصادر مقيّد بالصلاحية الحالية.</p>}
-    {current?.state === "available" && <><ul>{current.choices.map(choice => <li key={choice.id} className="flex flex-wrap gap-2 items-center"><span>{labels[kind]} #{choice.id}{choice.version === null ? "" : ` — نسخة ${choice.version}`}</span>
-      <button type="button" className={control} disabled={!props.editable || !choice.selection} onClick={() => choice.selection && props.onChoose(choice.selection)}>اختيار</button>
-      {!choice.selection && <span>المصدر غير متاح بهذه النسخة؛ لا تُفترض بيانات بديلة.</span>}</li>)}</ul>
-      {!current.choices.length && <p>لا توجد مراجع من هذا النوع في الصفحة الحالية.</p>}
-      <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={after === null} onClick={() => setAfter(null)}>الصفحة الأولى</button>
-        <button type="button" className={control} disabled={current.nextAfterId === null} onClick={() => setAfter(current.nextAfterId)}>المراجع التالية</button></div></>}
+  return <fieldset className="min-w-0 rounded border p-3"><legend>{t("اختيار مصدر حقيقي")}</legend>
+    <select className={control} aria-label={t("نوع مصدر الدراسة")} value={kind} onChange={event => { setKind(event.currentTarget.value as StudySourceKind); setAfter(null); }}>{STUDY_SOURCE_KINDS.map(value => <option key={value} value={value}>{studySourceName(value, props.locale)}</option>)}</select>
+    {error && <p role="alert">{t(error)}</p>}{current?.state === "restricted" && <p>{t("هذا النوع من المصادر مقيّد بالصلاحية الحالية.")}</p>}
+    {current?.state === "available" && <><ul>{current.choices.map(choice => <li key={choice.id} className="flex flex-wrap gap-2 items-center"><span>{studySourceName(kind, props.locale)} #{choice.id}{choice.version === null ? "" : ` — ${t("نسخة")} ${choice.version}`}</span>
+      <button type="button" className={control} disabled={!props.editable || !choice.selection} onClick={() => choice.selection && props.onChoose(choice.selection)}>{t("اختيار")}</button>
+      {!choice.selection && <span>{t("المصدر غير متاح بهذه النسخة؛ لا تُفترض بيانات بديلة.")}</span>}</li>)}</ul>
+      {!current.choices.length && <p>{t("لا توجد مراجع من هذا النوع في الصفحة الحالية.")}</p>}
+      <div className="flex flex-wrap gap-2"><button type="button" className={control} disabled={after === null} onClick={() => setAfter(null)}>{t("الصفحة الأولى")}</button>
+        <button type="button" className={control} disabled={current.nextAfterId === null} onClick={() => setAfter(current.nextAfterId)}>{t("المراجع التالية")}</button></div></>}
   </fieldset>;
 }
