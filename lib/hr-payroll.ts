@@ -32,6 +32,9 @@ export class HrPayrollError extends Error {
   constructor(public code: string, public status: number, message: string) { super(message); this.name = "HrPayrollError"; }
 }
 const fail = (code: string, message: string, status = 409): never => { throw new HrPayrollError(code, status, message); };
+function assertPayTermsUnblocked(blockers: readonly string[]) {
+  if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map((b) => PAY_BLOCKER_LABEL[b as keyof typeof PAY_BLOCKER_LABEL] ?? b).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
+}
 export type HrPayrollWriteAuthorizer = ((client: DbClient) => Promise<boolean>) & { isCurrent: () => boolean };
 /** HTTP callers supply the live authorizer; trusted internal writers keep their explicit actor contract. */
 async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrPayrollWriteAuthorizer | undefined,
@@ -280,7 +283,7 @@ export async function approvePayrollRun(runId: number | string, session: Session
       const staff = staffRows.rows[0];
       const resolved = await staffResolution(client, staff, run, item.currency);
       const blockers = [...new Set([...(item.blocker_codes ?? []), ...resolved.blockers])];
-      if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map((b) => PAY_BLOCKER_LABEL[b as keyof typeof PAY_BLOCKER_LABEL] ?? b).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
+      assertPayTermsUnblocked(blockers);
       const snapshot = jsonObject(item.pay_terms_snapshot);
       const doctorId = resolved.contract?.doctorPartyId ?? staff.user_party_id ?? null;
       if (!resolved.inScope || JSON.stringify({ ...resolved.snapshot, doctorPartyId: doctorId }) !== JSON.stringify(snapshot)) {
@@ -290,6 +293,11 @@ export async function approvePayrollRun(runId: number | string, session: Session
         if (!resolved.inScope || fields.some((f) => now[f] !== snapshot[f])) fail("stale_terms", "تغيّرت شروط الأجر بعد الاحتساب؛ أعد الاحتساب قبل الاعتماد.");
       }
       const partyId = await ensureStaffParty(client, Number(item.staff_id), item.staff_name, doctorId);
+      // Policy writers lock this same doctor party before appending history. A
+      // writer may have committed while we waited: review again under the lock,
+      // before reading commission due or creating any payable. Staff terms stay
+      // protected by the staff lock held above throughout both reads.
+      if (doctorId) assertPayTermsUnblocked((await staffResolution(client, staff, run, item.currency)).blockers);
       if (Number(item.commissions_minor) > 0) {
         const current = (await commissionReport(run.start_date, run.end_date, undefined, client))
           .find((c) => c.doctorId === partyId && c.currency === item.currency);

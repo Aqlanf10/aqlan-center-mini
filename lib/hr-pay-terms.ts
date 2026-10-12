@@ -17,6 +17,7 @@ export type SalaryPeriodUnit = "monthly" | "weekly" | "daily" | "per_shift";
 
 export type PayBlocker =
   | "commission_policy_conflict"
+  | "contract_lifecycle_unresolved"
   | "terms_conflict"
   | "terms_changed_in_period"
   | "unsupported_salary_period"
@@ -26,6 +27,7 @@ export type PayBlocker =
 
 export const PAY_BLOCKER_LABEL: Record<PayBlocker, string> = {
   commission_policy_conflict: "نسبة العقد تختلف عن سياسة محرك العمولات السارية؛ صحّح العقد أو اعتمد السياسة عبر مسار العمولات",
+  contract_lifecycle_unresolved: "حالة العقد المرجعي لا تثبت استمرار أثره على الأجر؛ راجع تاريخ الأثر والشروط المعتمدة قبل الاحتساب",
   terms_conflict: "تعارض بين أجر ملف الموظف والعقد الساري",
   terms_changed_in_period: "تغيّرت شروط الأجر أثناء الفترة (تقسيمها قرار للمالك لم يُحدَّد)",
   unsupported_salary_period: "دورية الأجر غير شهرية (احتسابها قرار للمالك لم يُحدَّد)",
@@ -52,6 +54,8 @@ export interface ContractInput extends PayTerms {
   contractNumber: string;
   versionNumber: number;
   status: string;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
   startDate: string;
   endDate: string | null;
   commissionRatePercent: number | null;
@@ -82,6 +86,15 @@ export function payTermsKey(terms: PayTerms): string {
 }
 
 const isLive = (status: string) => status === "approved" || status === "active";
+// A terminal status is not a dated wage decision. Retain the approved agreement
+// as an unresolved payroll witness instead of silently substituting today's
+// profile. Expired legacy rows also require review; never-approved drafts do not.
+const hasPayrollWitness = (contract: ContractInput) => isLive(contract.status) || contract.status === "expired"
+  || Boolean(contract.approvedBy || contract.approvedAt);
+const byVersion = (a: ContractInput, b: ContractInput) => b.versionNumber - a.versionNumber || b.id - a.id;
+const contractEarningKey = (contract: ContractInput) => hasCommission(contract.kind)
+  ? `${payTermsKey(contract)}|${contract.commissionRatePercent}|${contract.doctorPartyId}`
+  : payTermsKey(contract);
 const covers = (contract: ContractInput, day: string) =>
   contract.startDate <= day && (contract.endDate === null || contract.endDate >= day);
 const overlaps = (contract: ContractInput, start: string, end: string) =>
@@ -90,7 +103,7 @@ const overlaps = (contract: ContractInput, start: string, end: string) =>
 /** العقد الحاكم يوم معيّن: الأحدث إصدارًا بين الفعّالة/المعتمدة التي تغطي اليوم. */
 export function governingContractOn(contracts: readonly ContractInput[], day: string): ContractInput | null {
   const live = contracts.filter((contract) => isLive(contract.status) && covers(contract, day));
-  live.sort((a, b) => b.versionNumber - a.versionNumber || b.id - a.id);
+  live.sort(byVersion);
   return live[0] ?? null;
 }
 
@@ -118,7 +131,7 @@ export function resolvePayTerms(
     blockers.push("partial_period_employment");
   }
 
-  const candidates = contracts.filter((contract) => isLive(contract.status) && overlaps(contract, start, end));
+  const candidates = contracts.filter((contract) => hasPayrollWitness(contract) && overlaps(contract, start, end));
   let terms: PayTerms | null = null;
   let source: "contract" | "staff_profile" | null = null;
   let contract: ContractInput | null = null;
@@ -132,9 +145,10 @@ export function resolvePayTerms(
         if (next > start && next <= end) breakpoints.add(next);
       }
     }
-    const segments = [...breakpoints].sort().map((day) => governingContractOn(contracts, day));
-    const keys = new Set(segments.map((segment) => (segment ? payTermsKey(segment) : "none")));
+    const segments = [...breakpoints].sort().map((day) => candidates.filter((candidate) => covers(candidate, day)).sort(byVersion)[0] ?? null);
+    const keys = new Set(segments.map((segment) => (segment ? contractEarningKey(segment) : "none")));
     if (keys.size > 1) blockers.push("terms_changed_in_period");
+    if (segments.some((segment) => segment && !isLive(segment.status))) blockers.push("contract_lifecycle_unresolved");
     contract = segments[0] ?? segments.find((segment) => segment !== null) ?? null;
     if (contract) {
       terms = termsOf(contract);
@@ -142,7 +156,10 @@ export function resolvePayTerms(
       if (hasSalary(terms.kind) && (terms.salaryMinor === null || terms.currency === null || terms.salaryPeriod === null)) {
         blockers.push("no_pay_terms");
       }
-      if ((!profile.effectiveOn || profile.effectiveOn <= end) && payTermsKey(termsOf(profile)) !== payTermsKey(terms)) blockers.push("terms_conflict");
+      // An explicitly dated approved agreement supersedes an older profile.
+      // Same/later-effective or undated contradictions still require review.
+      if ((!profile.effectiveOn || (profile.effectiveOn >= contract.startDate && profile.effectiveOn <= end))
+        && payTermsKey(termsOf(profile)) !== payTermsKey(terms)) blockers.push("terms_conflict");
     }
   } else {
     terms = termsOf(profile);
@@ -171,6 +188,7 @@ export function resolvePayTerms(
       source,
       contractId: contract?.id ?? null,
       contractNumber: contract?.contractNumber ?? null,
+      contractStatus: contract?.status ?? null,
       versionNumber: contract?.versionNumber ?? null,
       kind: terms?.kind ?? null,
       baseSalaryMinor: terms && hasSalary(terms.kind) ? terms.salaryMinor : null,
@@ -191,7 +209,8 @@ const toTextOrNull = (value: unknown): string | null => (value === null || value
 
 export const CONTRACT_SELECT = `
   SELECT id, contract_number, version_number, status, start_date::text AS start_date, end_date::text AS end_date,
-         compensation_kind, base_salary_minor, salary_currency, salary_period, commission_rate_percent, doctor_party_id
+         compensation_kind, base_salary_minor, salary_currency, salary_period, commission_rate_percent, doctor_party_id,
+         approved_by, approved_at::text AS approved_at
     FROM hr_contracts`;
 
 export function contractFromRow(row: Row): ContractInput {
@@ -200,6 +219,8 @@ export function contractFromRow(row: Row): ContractInput {
     contractNumber: String(row.contract_number),
     versionNumber: Number(row.version_number),
     status: String(row.status),
+    approvedBy: toTextOrNull(row.approved_by),
+    approvedAt: toTextOrNull(row.approved_at),
     startDate: String(row.start_date),
     endDate: toTextOrNull(row.end_date),
     kind: row.compensation_kind as PayKind,
