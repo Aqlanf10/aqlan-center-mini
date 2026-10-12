@@ -131,7 +131,10 @@ describe("القياسات على الحالة التركيبية", () => {
   it("L1-NB = 25 وINTER = 131 وSN-GoGn والزاوية الوجهية ومحور Y — قيم مشتقة يدويًا", () => {
     expect(byCode("L1NB_A")).toBeCloseTo(25, 1);
     expect(byCode("INTER")).toBeCloseTo(131, 1);
-    expect(byCode("SNGOGN")).toBeCloseTo(31.6, 0);
+    // Keep the historical implementation available without emitting its old
+    // mislabeled identity for a newly computed study.
+    expect(measure("SNGOGN", CASE, SCALE)).toBeCloseTo(31.6, 0);
+    expect(computeAll(CASE, SCALE).some(row => row.code === "SNGOGN")).toBe(false);
     expect(byCode("FANGLE")).toBeCloseTo(87, 1);
     expect(byCode("YAXIS")).toBeCloseTo(63.8, 0);
   });
@@ -266,8 +269,11 @@ describe("السجلات المغلقة والتفسير", () => {
 
   it("سجل القياسات مكتمل التراتب: كل تعريف يحمل معدلاً ومدىً ومصدراً", () => {
     for (const def of MEASUREMENTS) {
-      expect(def.mean).toBeTypeOf("number");
-      expect(def.tol).toBeGreaterThan(0);
+      if (def.referencePending) {
+        expect(def.mean).toBeNull(); expect(def.tol).toBeNull();
+      } else {
+        expect(def.mean).toBeTypeOf("number"); expect(def.tol).toBeGreaterThan(0);
+      }
       expect(def.source.length).toBeGreaterThan(0);
       expect(def.needs.length).toBeGreaterThan(0);
       expect(def.schools.length).toBeGreaterThan(0);
@@ -286,7 +292,7 @@ describe("السجلات المغلقة والتفسير", () => {
     const all = computeAll(CASE, SCALE);
     const s = summarize(all);
     expect(s.skeletal).toContain("صنف أول");
-    expect(s.vertical).toContain("متوازن");
+    expect(s.vertical).toContain("مرجع SN–GoGn لهذا الإصدار غير محقق");
 
     const classTwo = summarize(computeAll({ ...CASE, B: img(53.84, -79.85) }, SCALE));
     expect(classTwo.skeletal).toContain("ثانٍ");
