@@ -56,7 +56,7 @@ export function TreatmentChartWorkspace({
             <h3 className="border-b border-slate-100 pb-2 text-sm font-extrabold text-brand-blue">الحالة السريرية</h3>
             {summary ? (
               <>
-                <p className="mt-2 text-[11px] font-bold text-slate-500">{activePlans.length > 1 ? `الخطة الأولى المعروضة من ${activePlans.length} خطط نشطة` : "الخطة النشطة"}</p>
+                <p className="mt-2 text-[11px] font-bold text-slate-500">{activePlans.length > 1 ? `الخطة المعروضة (1 من ${activePlans.length})` : "الخطة النشطة"}</p>
                 <p className="mt-1 break-words text-sm font-black text-navy-900">{plan?.title ?? "لا توجد خطة نشطة"}</p>
                 {plan?.specialty ? (
                   <p className="mt-2 break-words text-xs text-slate-600">التخصص: {plan.specialty}</p>
@@ -96,7 +96,7 @@ export function TreatmentChartWorkspace({
 
         <div className="min-w-0 space-y-3">
           <section className="rounded-2xl border border-sky-100 bg-white p-4 shadow-card" aria-label="تقدم العلاج">
-            <h3 className="text-sm font-extrabold text-brand-blue">تقدم {plan ? `خطة ${plan.title}` : "الخطة العلاجية"}</h3>
+            <h3 className="text-sm font-extrabold text-brand-blue">تقدم العلاج {plan ? `— ${plan.title}` : ""}</h3>
             {activePlans.length > 1 ? (
               <p className="mt-1 text-[11px] leading-5 text-slate-600">هذه نسبة الخطة الأولى فقط؛ تُعرض الخطط الأخرى منفصلة ولا تُجمع نسب إنجازها.</p>
             ) : null}
