@@ -11,7 +11,9 @@
   --patient-outline: #d9e9f8;
   --patient-surface: rgba(255,255,255,.98);
   position: relative;
-  isolation: isolate;
+  /* Keep this page in the app's global stacking order: patient dialogs (z-50)
+   * must cover the fixed header and bottom navigation (z-30).
+   * 'isolation: isolate' here trapped those dialogs under the app shell. */
   background:
     radial-gradient(ellipse 64% 250px at 0% 3%, rgba(76,168,224,.10), transparent 70%),
     radial-gradient(ellipse 38% 250px at 100% 1%, rgba(246,161,68,.08), transparent 75%),
@@ -21,7 +23,8 @@
 .root::before {
   content: "";
   position: absolute;
-  z-index: -1;
+  /* Decorative only. Do not create a negative layer or a local stacking context. */
+  z-index: 0;
   pointer-events: none;
   inset: 0 0 auto 0;
   height: 110px;
