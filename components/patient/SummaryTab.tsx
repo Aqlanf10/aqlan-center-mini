@@ -160,7 +160,7 @@ export function SummaryTab({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-2" data-testid="patient-executive-summary">
       {message ? (
         <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
           {message}
@@ -184,7 +184,7 @@ export function SummaryTab({
         * رحلة الاستقبال مع المريض: البطاقة في جيبه تختصر البحث إلى رقم،
         * والرابط على جوّاله يعطيه مواعيده بنفسه.
         */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 rounded-2xl border border-navy-100 bg-white px-3 py-2.5 shadow-card sm:flex-row sm:flex-wrap sm:items-center">
         <div className="flex flex-wrap items-center gap-2">
           <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener"
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
@@ -217,9 +217,9 @@ export function SummaryTab({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2" data-testid="summary-current-work">
+      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="summary-current-work">
         {/* الموعد القادم */}
-        <div className={`rounded-2xl border p-4 ${summary.nextAppointment ? "border-sky-300 bg-sky-50/40" : "border-slate-200 bg-white"}`}>
+        <div className={`min-w-0 rounded-2xl border border-t-[3px] p-4 shadow-card ${summary.nextAppointment ? "border-navy-200 border-t-brand-orange bg-white" : "border-slate-200 border-t-navy-300 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
             {summary.nextAppointment
@@ -234,7 +234,7 @@ export function SummaryTab({
         </div>
 
         {/* آخر زيارة */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-navy-300 bg-white p-4 shadow-card">
           <span className="text-xs font-bold text-slate-500">آخر زيارة</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
             {summary.lastVisit ? friendlyDateLong(summary.lastVisit.date) : "لا زيارات سابقة"}
@@ -247,8 +247,8 @@ export function SummaryTab({
         </div>
 
         {/* الخطة النشطة */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
+        <div className="min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-white p-4 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
             <span className="text-xs font-bold text-slate-500">خطة العلاج النشطة</span>
             {primaryPlan && !primaryPlan.consentAt ? (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
@@ -266,7 +266,7 @@ export function SummaryTab({
               ) : <>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="h-full bg-emerald-500"
+                  className="h-full rounded-full bg-brand-orange transition-[width] duration-300"
                   style={{ width: `${Math.min(100, Math.round((primaryPlan.doneItems / Math.max(1, primaryPlan.itemsCount)) * 100))}%` }}
                 />
               </div>
@@ -283,7 +283,7 @@ export function SummaryTab({
         </div>
 
         {/* الجلسة التالية المخططة */}
-        <div className={`rounded-2xl border p-4 ${nextPlanned ? "border-navy-200 bg-navy-50/40" : "border-slate-200 bg-white"}`}>
+        <div className={`min-w-0 rounded-2xl border border-t-[3px] p-4 shadow-card ${nextPlanned ? "border-navy-200 border-t-brand-orange bg-white" : "border-slate-200 border-t-navy-300 bg-white"}`}>
           <span className="text-xs font-bold text-slate-500">الجلسة التالية المخططة</span>
           <p className="mt-1.5 text-sm font-extrabold text-navy-900">
             {nextPlanned ?? scheduledNext
@@ -300,7 +300,7 @@ export function SummaryTab({
 
       {/* جدولة الجلسة / بدؤها — تاريخ ووقت فقط، والعلاج من الخطة */}
       {summary.plannedVisits.length > 0 && !summary.openVisit ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="الجلسات المخطَّطة">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label="الجلسات المخطَّطة">
           <h3 className="mb-2 text-xs font-extrabold text-navy-900">
             الجلسات المخطَّطة ({summary.plannedVisits.length})
           </h3>
@@ -372,7 +372,7 @@ export function SummaryTab({
 
       {/* الحساب — للمخوّل ماليًا فقط؛ الخادم أرسل الرصيد لمن يملكه */}
       {financial ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="الحساب">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label="الحساب">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-extrabold text-navy-900">الحساب</h3>
             <div className="flex gap-1.5">
@@ -396,7 +396,7 @@ export function SummaryTab({
             return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || (row.clinicalProgress?.historicalItems ?? 0) > 0 || currency === base && !financial.byCurrency);
           }).map((currency) => {
             const row = financial.byCurrency?.[currency] ?? financial;
-            return <div key={currency} className="mt-3 rounded-xl border border-slate-200 p-3">
+            return <div key={currency} className="mt-3 min-w-0 rounded-xl border border-navy-100 bg-navy-50/30 p-3">
               <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
               <p className="mt-1 text-lg font-black">
                 {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
@@ -412,9 +412,9 @@ export function SummaryTab({
                   ["تم فوترة", row.invoicedMinor],
                   ["تم دفع", row.paidMinor],
                   ["المديونية الحالية", row.balanceMinor],
-                ].map(([label, value]) => <div key={label as string} className="rounded-xl bg-slate-50 px-2 py-2">
+                ].map(([label, value]) => <div key={label as string} className="min-w-0 rounded-xl border border-slate-100 bg-white px-2 py-2.5">
                   <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
-                  <dd className="mt-0.5 font-extrabold text-navy-900">{formatMoney(value as number, currency)}</dd>
+                  <dd className="mt-0.5 break-words font-extrabold text-navy-900 [overflow-wrap:anywhere]">{formatMoney(value as number, currency)}</dd>
                 </div>)}
               </dl>
               {row.clinicalProgress?.historicalItems ? <p className="mt-2 text-xs text-slate-600"><HistoricalClinicalNote progress={row.clinicalProgress} currency={currency} /></p> : null}
