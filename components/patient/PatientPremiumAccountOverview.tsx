@@ -20,18 +20,22 @@ export function PatientPremiumAccountOverview({
 
   const financial = summary.financial;
   const entries: { currency: Currency; row: CurrencyRow }[] = financial.byCurrency
-    ? CURRENCIES.map((currency) => ({
-        currency, row: financial.byCurrency![currency] as CurrencyRow,
-      })).filter(({ row }) => [
-        row.agreedMinor, row.agreementPaidMinor ?? 0, row.agreementRemainingMinor ?? 0,
-        row.balanceMinor, row.invoicedMinor, row.paidMinor, row.openingMinor,
-      ].some((amount) => amount !== 0))
+    ? CURRENCIES.flatMap((currency) => {
+        const row = financial.byCurrency?.[currency];
+        if (!row) return []; // No synthetic empty financial bucket on partial reads.
+        const amounts = [
+          row.agreedMinor, row.agreementPaidMinor, row.agreementRemainingMinor,
+          row.balanceMinor, row.invoicedMinor, row.paidMinor, row.openingMinor,
+        ];
+        return amounts.some((amount) => typeof amount === "number" && Number.isFinite(amount) && amount !== 0)
+          ? [{ currency, row }] : [];
+      })
     : [{ currency: base, row: financial }];
 
   if (entries.length === 0) return (
     <section aria-label="الملخص المالي الحالي" className="mb-4 rounded-2xl border border-sky-100 bg-white p-4">
       <h2 className="text-sm font-black text-brand-blue">ملخص الحساب</h2>
-      <p className="mt-2 text-xs text-slate-600">لا توجد مبالغ مسجلة في القراءة المالية الحالية.</p>
+      <p className="mt-2 text-xs text-slate-600">لا تتوفر مبالغ تفصيلية لعرضها في هذه القراءة؛ راجع سجل الحساب الأصلي أدناه.</p>
     </section>
   );
 
