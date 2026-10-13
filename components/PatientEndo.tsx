@@ -240,6 +240,10 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
   const [caseCreationUncertain, setCaseCreationUncertain] = useState(false);
   const [crownLink, setCrownLink] = useState({ crown: "", rct: "" });
   const [closing, setClosing] = useState<{ treatmentId: number; status: "completed" | "abandoned"; outcome: string } | null>(null);
+  // The completion disclosure belongs to the current treatment. Remember a
+  // user-opened panel when an asynchronous clinical read/close resets drafts;
+  // otherwise React can close it between a click and the displayed result.
+  const [completionDisclosure, setCompletionDisclosure] = useState<{ treatmentId: number; open: boolean } | null>(null);
 
   const pendingDraft = form !== null || addendum !== null || closing !== null || openForm !== null || Boolean(crownLink.crown || crownLink.rct) || busy;
   useEffect(() => { onDraftChange?.(pendingDraft); return () => onDraftChange?.(false); }, [pendingDraft, onDraftChange]);
@@ -763,7 +767,15 @@ function PatientEndoWorkspace({ patientId, canWrite, canEditPlans = false, openV
 
           {/* ── التاج والإكمال ── */}
           {selected.status !== "abandoned" ? (
-            <details key={`completion-${selected.id}`} open={Boolean(closing || crownLink.crown || crownLink.rct)} className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="endo-completion">
+            <details key={`completion-${selected.id}`}
+              open={Boolean(closing || crownLink.crown || crownLink.rct || (completionDisclosure?.treatmentId === selected.id && completionDisclosure.open))}
+              onToggle={(event) => {
+                const open = event.currentTarget.open;
+                setCompletionDisclosure((current) =>
+                  current?.treatmentId === selected.id && current.open === open
+                    ? current : { treatmentId: selected.id, open });
+              }}
+              className="rounded-2xl border border-slate-200 bg-white p-3" data-testid="endo-completion">
               <summary className="cursor-pointer text-sm font-bold text-navy-900">التاج وإكمال العلاج</summary>
               <p className="my-2 text-xs text-slate-500" data-testid="endo-crown-state">{selected.crown === "ready" ? "علاج الجذور مكتمل سريريًا؛ تنفيذ التاج يتبع متطلبات الخطة" : CROWN_STATE_LABEL[selected.crown]}</p>
               {canWrite ? <div className="flex flex-wrap items-end gap-2">
