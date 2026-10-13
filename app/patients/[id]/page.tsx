@@ -51,6 +51,7 @@ import { PatientContactPanel, PatientFlagChips } from "@/components/PatientConta
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
+import { PatientPremiumAccountOverview } from "@/components/patient/PatientPremiumAccountOverview";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
@@ -1319,6 +1320,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : tab === "account" ? (
         <>
+          <PatientPremiumAccountOverview summary={summary} base={base} />
           <PatientLedger patientId={patient.id} onClinicalChange={refreshWorkflow} />
           <LegacyHistory patientId={patient.id} />
         </>
