@@ -198,7 +198,7 @@ export function PatientDocuments({
   };
 
   return (
-    <div>
+    <div className="min-w-0 space-y-3" data-testid="patient-documents-workspace">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
@@ -221,7 +221,7 @@ export function PatientDocuments({
       ) : null}
 
       {/* شريط الأدوات السريرية: الإقرارات الطبية ومقارنة الابتسامة */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-navy-50/40 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-100 border-t-[3px] border-t-brand-orange bg-gradient-to-l from-white via-sky-50/60 to-white p-3 shadow-card">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -249,7 +249,7 @@ export function PatientDocuments({
         </div>
       </div>
 
-      <form onSubmit={upload} className="mb-3 rounded-2xl border border-slate-200 bg-white p-3">
+      <form onSubmit={upload} className="min-w-0 rounded-2xl border border-sky-100 bg-white p-3 shadow-card sm:p-4">
         <div className="mb-2 flex flex-wrap items-end gap-2">
           <label className="min-w-[7rem]">
             <span className="mb-1 block text-[10px] font-bold text-slate-500">النوع</span>
@@ -348,30 +348,31 @@ export function PatientDocuments({
           لا أشعة ولا مستندات في هذا الملف.
         </p>
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="معرض مستندات المريض" data-testid="patient-document-gallery">
           {documents.map((document) => (
-            <li key={document.id}
-              className={`overflow-hidden rounded-2xl border bg-white ${
-                document.removedAt ? "border-slate-200 opacity-60" : "border-slate-200"
+            <li key={document.id} data-testid="patient-document-card"
+              className={`group flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-white shadow-card transition-[border-color,box-shadow] ${
+                document.removedAt ? "border-slate-200 opacity-60" : "border-sky-100 hover:border-sky-200 hover:shadow-lg focus-within:border-brand-blue"
               }`}>
               <button type="button" onClick={() => setViewing(document)}
-                className="block w-full text-right">
+                aria-label={`عرض المستند: ${document.title}`}
+                className="block min-w-0 w-full flex-1 text-right focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-blue">
                 {document.isImage ? (
                   <img src={`/api/documents/${document.id}`} alt={document.title}
                     loading="lazy"
-                    className="h-36 w-full bg-slate-900 object-contain" />
+                    className="h-44 w-full bg-slate-900 object-contain" />
                 ) : (
-                  <div className="flex h-36 w-full items-center justify-center bg-slate-100 text-3xl">📄</div>
+                  <div className="flex h-44 w-full items-center justify-center bg-gradient-to-b from-sky-50 to-slate-100 text-4xl">📄</div>
                 )}
-                <div className="p-2.5">
-                  <p className="truncate text-sm font-bold">{document.title}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-500">
+                <div className="min-w-0 p-3">
+                  <p className="line-clamp-2 min-h-[2.4rem] break-words text-sm font-extrabold leading-5 text-navy-900 [overflow-wrap:anywhere]">{document.title}</p>
+                  <p className="mt-1 break-words text-[11px] leading-5 text-slate-500">
                     {KIND_LABEL[document.kind]} · {formatBytes(document.sizeBytes)}
                     {document.takenOn ? ` · ${friendlyDateLong(document.takenOn)}` : ""}
                   </p>
                 </div>
               </button>
-              <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-2.5 py-1.5">
+              <div className="mt-auto flex min-w-0 flex-wrap items-center gap-2 border-t border-sky-100 bg-sky-50/30 px-3 py-2.5">
                 <a href={`/api/documents/${document.id}?download=1`}
                   className="text-[11px] font-bold text-navy-800 underline decoration-slate-300 underline-offset-4">
                   نزّل
