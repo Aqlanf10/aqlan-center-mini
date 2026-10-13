@@ -1,6 +1,7 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
+import patientPremium from "./patient-premium.module.css";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -99,15 +100,15 @@ const TABS: [Tab, string, IconName][] = [
 
 export type { TreatmentSubTab } from "@/lib/patient-navigation";
 
-export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
-  { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
-  { id: "plans", title: "خطط العلاج", icon: "📋", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
-  { id: "cases", title: "الحالات والمشاكل", icon: "🩺", desc: "الحالات التخصصية، قائمة المشاكل، وترتيب الخطة الشاملة" },
-  { id: "endo", title: "علاج الجذور", icon: "🦷", desc: "التشخيص، القنوات وأطوالها العاملة، الجلسات، والتاج بعد العلاج" },
-  { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "📐", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
-  { id: "lab", title: "المعمل والتركيبات", icon: "🧪", desc: "طلبات التيجان والجسور والمختبرات" },
-  { id: "referrals", title: "الإحالات", icon: "📨", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
-  { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
+export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: IconName; desc: string }[] = [
+  { id: "chart", title: "المخطط السني", icon: "tooth", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
+  { id: "plans", title: "خطط العلاج", icon: "clipboard", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
+  { id: "cases", title: "الحالات والمشاكل", icon: "briefcase", desc: "الحالات التخصصية، قائمة المشاكل، وترتيب الخطة الشاملة" },
+  { id: "endo", title: "علاج الجذور", icon: "tooth", desc: "التشخيص، القنوات وأطوالها العاملة، الجلسات، والتاج بعد العلاج" },
+  { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "chart", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
+  { id: "lab", title: "المعمل والتركيبات", icon: "flask", desc: "طلبات التيجان والجسور والمختبرات" },
+  { id: "referrals", title: "الإحالات", icon: "link", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
+  { id: "materials", title: "المستهلكات", icon: "box", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
 export default function PatientFilePage({ params, searchParams }: {
@@ -566,7 +567,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         ) : null;
 
   return (
-    <main className="mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28" data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
+    <main className={`${patientPremium.root} mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28`} data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
       {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
         patientId={patient.id}
@@ -1203,6 +1204,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                     }`}
                   >
                     <div className="flex items-center gap-1.5 truncate">
+                      <Icon name={subTab.icon} className="h-4 w-4 shrink-0" />
                       <span className="text-xs font-bold">{subTab.title}</span>
                     </div>
                     {badgeContent}
