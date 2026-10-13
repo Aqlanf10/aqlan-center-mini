@@ -1,6 +1,7 @@
 "use client";
 
 import { clinicDateString } from "@/lib/schedule";
+import patientPremium from "./patient-premium.module.css";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -26,7 +27,7 @@ import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
 import { PatientPlans } from "@/components/PatientPlans";
-import { DentalChart } from "@/components/DentalChart";
+import { TreatmentChartWorkspace } from "@/components/patient/TreatmentChartWorkspace";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { PatientOrtho } from "@/components/PatientOrtho";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
@@ -51,9 +52,11 @@ import { PatientContactPanel, PatientFlagChips } from "@/components/PatientConta
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
+import { PatientPremiumAccountOverview } from "@/components/patient/PatientPremiumAccountOverview";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { PatientCockpit } from "@/components/patient/PatientCockpit";
+import { Icon, type IconName } from "@/components/Icon";
 import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
@@ -94,25 +97,25 @@ interface PatientFile {
 
 type Tab = PatientTab;
 
-const TABS: [Tab, string, string][] = [
-  ["summary", "الملخص", "📊"],
-  ["treatment", "العلاج", "🦷"],
-  ["today", "زيارة اليوم", "🪑"],
-  ["account", "الحساب", "💳"],
-  ["files", "الأشعة والملفات", "🗂️"],
+const TABS: [Tab, string, IconName][] = [
+  ["summary", "الملخص", "chart"],
+  ["treatment", "العلاج", "tooth"],
+  ["today", "زيارة اليوم", "calendar"],
+  ["account", "الحساب", "wallet"],
+  ["files", "الأشعة والملفات", "file"],
 ];
 
 export type { TreatmentSubTab } from "@/lib/patient-navigation";
 
-export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: string; desc: string }[] = [
-  { id: "chart", title: "المخطط السني", icon: "🦷", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
-  { id: "plans", title: "خطط العلاج", icon: "📋", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
-  { id: "cases", title: "الحالات والمشاكل", icon: "🩺", desc: "الحالات التخصصية، قائمة المشاكل، وترتيب الخطة الشاملة" },
-  { id: "endo", title: "علاج الجذور", icon: "🦷", desc: "التشخيص، القنوات وأطوالها العاملة، الجلسات، والتاج بعد العلاج" },
-  { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "📐", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
-  { id: "lab", title: "المعمل والتركيبات", icon: "🧪", desc: "طلبات التيجان والجسور والمختبرات" },
-  { id: "referrals", title: "الإحالات", icon: "📨", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
-  { id: "materials", title: "المستهلكات", icon: "📦", desc: "المواد والأدوات المصروفة للمريض" },
+export const TREATMENT_SUBTABS: { id: TreatmentSubTab; title: string; icon: IconName; desc: string }[] = [
+  { id: "chart", title: "المخطط السني", icon: "tooth", desc: "خريطة الأسنان، الحشوات، والمعالجات السريرية" },
+  { id: "plans", title: "خطط العلاج", icon: "clipboard", desc: "الخطط العلاجية، التكلفة، والأقساط المالية" },
+  { id: "cases", title: "الحالات والمشاكل", icon: "briefcase", desc: "الحالات التخصصية، قائمة المشاكل، وترتيب الخطة الشاملة" },
+  { id: "endo", title: "علاج الجذور", icon: "tooth", desc: "التشخيص، القنوات وأطوالها العاملة، الجلسات، والتاج بعد العلاج" },
+  { id: "ortho", title: "التقويم وسيفالو WebCeph", icon: "chart", desc: "الحالة التقويمية، دراسات ويب سيف، وسلسلة الأسلاك" },
+  { id: "lab", title: "المعمل والتركيبات", icon: "flask", desc: "طلبات التيجان والجسور والمختبرات" },
+  { id: "referrals", title: "الإحالات", icon: "link", desc: "خطاب إحالة إلى الجرّاح أو الأخصائي، ونتيجتها حين تعود" },
+  { id: "materials", title: "المستهلكات", icon: "box", desc: "المواد والأدوات المصروفة للمريض" },
 ];
 
 export default function PatientFilePage({ params, searchParams }: {
@@ -620,7 +623,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         ) : null;
 
   return (
-    <main className="mx-auto max-w-5xl p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-4 sm:pt-4 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28" data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
+    <main className={`${patientPremium.root} mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28`} data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
       {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
         patientId={patient.id}
@@ -684,14 +687,14 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       {compactWorkspace ? medicalAlertBanner : null}
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
-        className="mb-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" data-testid="patient-details-panel">
+        className="mb-4 min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-gradient-to-b from-white to-sky-50/30 p-3 shadow-card sm:p-5" data-testid="patient-details-panel">
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* قسم هوية المريض والبيانات التعريفية */}
           <div className="flex items-start gap-4 min-w-0">
             {/* (PAT-3) صورة المريض إن وُجدت — تمييز المتشابهة أسماؤهم والتوائم — وإلا الأحرف الأولى. */}
             {patient.photoDocumentId ? (
               <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
-                className="h-14 w-14 shrink-0 rounded-2xl object-cover shadow-md ring-2 ring-white" />
+                className="h-12 w-12 shrink-0 rounded-2xl object-cover shadow-card ring-2 ring-navy-100 sm:h-14 sm:w-14" />
             ) : (
             <div
               className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-lg font-black shadow-md ${
@@ -706,7 +709,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <DetailsHeading className="text-xl font-black text-navy-900 leading-tight">
+                <DetailsHeading className="break-words [overflow-wrap:anywhere] text-lg font-black leading-tight tracking-tight text-navy-900 sm:text-xl">
                   {patient.fullName}
                 </DetailsHeading>
 
@@ -793,7 +796,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 type="button"
                 onClick={primaryAction.run}
                 disabled={busyAction}
-                className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand-orange px-4 py-2.5 text-xs font-extrabold text-white shadow-card transition-colors hover:bg-accent-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 disabled:opacity-50"
               >
                 🪑 {primaryAction.label}
               </button>
@@ -802,9 +805,9 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <button
               type="button"
               onClick={() => setShowBookModal(true)}
-              className="rounded-xl bg-navy-800 px-3 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-navy-800 px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-navy-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-navy-700"
             >
-              📅 حجز موعد
+              <Icon name="calendar" className="h-4 w-4" /> حجز موعد
             </button>
 
             <button
@@ -822,10 +825,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               href={`/print/dossier/${patient.id}`}
               target="_blank"
               rel="noopener"
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 shadow-xs"
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 shadow-xs transition-colors hover:border-navy-200 hover:bg-navy-50"
               title="طباعة الملف الطبي السريري الشامل A4"
             >
-              <span>🖨️</span>
+              <Icon name="print" className="h-4 w-4" />
               <span>الملف الشامل</span>
             </a>
 
@@ -1065,7 +1068,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       />
 
       {/* خمسة تبويبات لا أحد عشر */}
-      <div className={`${compactWorkspace ? "mb-2 flex-nowrap overflow-x-auto gap-1" : "mb-4 flex-wrap gap-1.5"} flex items-center border-b border-slate-200 pb-2`} aria-label="أقسام ملف المريض">
+      <div className={`${compactWorkspace ? "mb-2" : "mb-4"} flex min-w-0 items-center gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-card sm:gap-2`} aria-label="أقسام ملف المريض">
         {TABS.map(([key, title, icon]) => {
           const isSelected = tab === key;
           const badge =
@@ -1079,13 +1082,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               onClick={() => setTab(key)}
               aria-current={isSelected ? "page" : undefined}
               data-testid={`patient-tab-${key}`}
-              className={`${compactWorkspace ? "shrink-0 rounded-lg px-2 py-2 text-[11px]" : "rounded-xl px-3.5 py-2 text-xs"} font-bold transition-all ${
+              className={`${compactWorkspace ? "px-2.5 py-2 text-[11px]" : "px-4 py-2.5 text-xs"} inline-flex shrink-0 items-center gap-1.5 rounded-xl border-b-[3px] font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-navy-700 ${
                 isSelected
-                  ? "bg-navy-800 text-white shadow-xs"
-                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  ? "border-brand-orange bg-brand-blue text-white shadow-xs"
+                  : "border-transparent bg-white text-slate-600 hover:bg-sky-50 hover:text-brand-blue"
               }`}
             >
-              {!compactWorkspace ? <span className="ml-1">{icon}</span> : null}
+              <Icon name={icon} className="h-4 w-4 shrink-0" />
               {title}{badge}
               {filesCount != null ? (
                 <span className={`mr-1.5 rounded-full px-1.5 text-[10px] font-extrabold ${
@@ -1145,6 +1148,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onChanged={() => void load()}
             onGoToTab={goTo}
           />
+
           </div>
         ) : (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -1154,7 +1158,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "treatment" ? (
         <div className="space-y-4">
           {/* شريط محطات العلاج السريري الموحدة وفق المعايير العالمية */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
+          <div className="rounded-2xl border border-sky-100 bg-white p-3 shadow-card">
             <label className="flex items-center gap-2 text-xs font-bold text-slate-600 sm:hidden" htmlFor="patient-treatment-section">
               قسم العلاج
               <select id="patient-treatment-section" data-testid="patient-treatment-section" value={treatmentSubTab}
@@ -1199,11 +1203,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                     data-testid={`patient-subtab-${subTab.id}`}
                     className={`flex items-center justify-between gap-1 rounded-lg px-2.5 py-1.5 text-right transition-all ${
                       isSelected
-                        ? "bg-navy-900 text-white shadow-xs"
-                        : "bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/70"
+                        ? "bg-brand-blue text-white shadow-xs"
+                        : "border border-sky-100 bg-sky-50/50 text-navy-800 hover:bg-sky-100"
                     }`}
                   >
                     <div className="flex items-center gap-1.5 truncate">
+                      <Icon name={subTab.icon} className="h-4 w-4 shrink-0" />
                       <span className="text-xs font-bold">{subTab.title}</span>
                     </div>
                     {badgeContent}
@@ -1215,8 +1220,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {/* محتوى المحطة العلاجية المحددة */}
           {treatmentSubTab === "chart" && (
-            <section aria-label="المخطط السني">
-              <DentalChart patientId={patient.id} />
+            <section aria-label="المخطط السني وسياق العلاج">
+              <TreatmentChartWorkspace
+                patientId={patient.id}
+                summary={summary}
+                onOpenPlans={() => setTreatmentSubTab("plans")}
+                onOpenOrtho={() => setTreatmentSubTab("ortho")}
+                onOpenToday={() => setTab("today")}
+                onOpenFiles={() => setTab("files")}
+              />
             </section>
           )}
 
@@ -1316,6 +1328,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : tab === "account" ? (
         <>
+          <PatientPremiumAccountOverview summary={summary} base={base} />
           <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
             setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
           }} accountDetails={<>
