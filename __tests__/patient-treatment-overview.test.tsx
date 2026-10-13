@@ -48,7 +48,7 @@ describe("patient treatment executive overview", () => {
     expect(html).toContain('data-testid="patient-active-plans"');
     expect(html).toContain("خطة التقويم");
     expect(html).toContain("خطة علاج الجذور");
-    expect(html).toContain("الخطة الأولى المعروضة من 2 خطط نشطة");
+    expect(html).toContain("الخطة المعروضة (1 من 2)");
     expect(html).toContain("هذه نسبة الخطة الأولى فقط");
     // First plan = 1 / 4, not the combined (1+2) / (4+3) value.
     expect(html).toContain('aria-valuenow="25"');
