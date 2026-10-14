@@ -8,7 +8,7 @@
  */
 export interface FinancialCommandScope { actor: string; patientId: number }
 export interface FinancialCommand {
-  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction";
+  kind: "invoice" | "debt" | "invoice-correction" | "historical-correction" | "receipt-correction" | "collection";
   key: string;
   /** Immutable first intent, including its receipt expectations. */
   original: string;
@@ -28,7 +28,7 @@ type StoredJournal = FinancialJournal & { scope: string; acknowledged?: Acknowle
 const DATABASE = "aqlan-financial-command-recovery";
 const STORE = "patient-commands";
 const MAX_BYTES = 1024 * 1024;
-const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction"]);
+const kinds = new Set(["invoice", "debt", "invoice-correction", "historical-correction", "receipt-correction", "collection"]);
 export class FinancialRecoveryError extends Error {
   constructor(public readonly code: "unavailable" | "invalid" | "changed") {
     super(code === "changed" ? "تغيّر الطلب المالي في نافذة أخرى. راجع الطلب المحفوظ قبل بدء عملية جديدة."

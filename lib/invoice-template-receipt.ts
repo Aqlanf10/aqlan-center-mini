@@ -26,6 +26,7 @@ export interface InvoiceTemplateReceiptExpectedLine {
 }
 
 export interface InvoiceTemplateReceiptExpectation {
+  readonly visitId?:number;
   /** Reference identity of this form/authority lifetime, not a patient ID or request string. */
   readonly owner: object;
   readonly patientId: number;
@@ -107,7 +108,7 @@ export function readInvoiceCommandReceipt(
 }
 function readReceipt(payload:unknown,expected:InvoiceTemplateReceiptExpectation,currentOwner:object,requireTemplate:boolean):AcceptedInvoiceTemplateReceipt|null {
   if (!object(expected) || expected.owner !== currentOwner || expected.owner === null || typeof expected.owner !== "object"
-    || !id(expected.patientId) || !isCurrency(expected.currency) || !minor(expected.discountMinor)
+    || !id(expected.patientId) || expected.visitId!==undefined&&!id(expected.visitId) || !isCurrency(expected.currency) || !minor(expected.discountMinor)
     || !nullableText(expected.note) || !nullableId(expected.expectedPlanId)
     || !Array.isArray(expected.lines) || expected.lines.length === 0 || expected.lines.length > 40
     || !Array.from(expected.lines).every(expectedLine) || requireTemplate && !expected.lines.some((line) => line.source === "template")) return null;
@@ -118,6 +119,7 @@ function readReceipt(payload:unknown,expected:InvoiceTemplateReceiptExpectation,
     || payload.note !== expected.note || typeof payload.createdAt !== "string"
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(payload.createdAt)
     || !Number.isFinite(Date.parse(payload.createdAt)) || new Date(payload.createdAt).toISOString() !== payload.createdAt
+    || expected.visitId!==undefined&&payload.visitId!==expected.visitId
     || typeof payload.replayed !== "boolean"
     || !Array.isArray(payload.items) || payload.items.length !== expected.lines.length
     || !object(payload.clinical) || !nullableId(payload.clinical.planId) || (expectsCreatedItems ? !id(payload.clinical.planId) : payload.clinical.planId !== null)

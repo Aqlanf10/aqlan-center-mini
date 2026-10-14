@@ -27,6 +27,7 @@ import { assertInvoiceTemplateSession, validateInvoiceTemplateInTransaction, typ
 import type { SessionPayload } from "./auth";
 import { writeDebtRepaymentInTransaction } from "./debt-installments-db";
 import { lockDebtAccountForSchedule } from "./debt-account-position";
+import {InvoiceVisitContextError,lockInvoiceVisitContext,readInvoiceVisitContext} from "./invoice-visit-context";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
   validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
@@ -75,7 +76,7 @@ export interface LineLink {
 }
 
 export type CreateLinkedInvoiceResult =
-  | { ok: true; invoice: Invoice; replayed: boolean; planId: number | null; links: LineLink[] }
+  | { ok: true; invoice: Invoice; replayed: boolean; planId: number | null; links: LineLink[];visitId?:number }
   | { ok: false; reason: InvoiceLinkageRefusal | "no_patient"; line: number | null };
 
 class Refusal extends Error {
@@ -266,7 +267,7 @@ async function lockedInvoiceReceipt(client: DbClient, invoiceId: number,
 /** Recover only an authenticated caller's exact immutable template command, before current template expansion. */
 export async function recoverLinkedInvoice(input: {
   patientId: number; idempotencyKey: string; requestHash: string; createdBy: string;
-  session: SessionPayload;
+  session: SessionPayload;visitId?:number;
 }): Promise<CreateLinkedInvoiceResult | null> {
   await ensureSchema();
   const client = await getPool().connect();
@@ -281,19 +282,21 @@ export async function recoverLinkedInvoice(input: {
     if (prior.patient_id !== input.patientId || prior.created_by !== input.createdBy || prior.idempotency_request_hash !== input.requestHash) {
       throw new Refusal("idempotency_conflict", null);
     }
+    if(input.visitId!==undefined)await readInvoiceVisitContext(client,input.patientId,input.visitId,prior.id);
     const receipt = await lockedInvoiceReceipt(client, prior.id, input);
     await assertInvoiceTemplateSession(client, input.session, { createdBy: input.createdBy, actorRole: input.session.role });
     await client.query("ROLLBACK");
-    return { ok: true, ...receipt, replayed: true };
+    return { ok: true, ...receipt, replayed: true,...(input.visitId!==undefined?{visitId:input.visitId}:{}) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
+    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
     if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
     throw error;
   } finally { client.release(); }
 }
 
 export async function createLinkedInvoice(input: {
-  patientId: number;
+  patientId: number;visitId?:number;
   existingPlanId?: number | null;
   baseCurrency: Currency;
   discountMinor: number;
@@ -317,11 +320,11 @@ export async function createLinkedInvoice(input: {
   const written = await writeLinkedInvoice(input);
   if (!written.ok) return written;
   const invoice = written.invoice ?? await getInvoice(written.invoiceId);
-  return { ok: true, invoice: invoice as Invoice, replayed: written.replayed, planId: written.planId, links: written.links };
+  return { ok: true, invoice: invoice as Invoice, replayed: written.replayed, planId: written.planId, links: written.links,...(input.visitId!==undefined?{visitId:input.visitId}:{}) };
 }
 
 type Written =
-  | { ok: true; invoiceId: number; invoice?: Invoice; replayed: boolean; planId: number | null; links: LineLink[] }
+  | { ok: true; invoiceId: number; invoice?: Invoice; replayed: boolean; planId: number | null; links: LineLink[];visitId?:number }
   | Extract<CreateLinkedInvoiceResult, { ok: false }>;
 
 async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[0]): Promise<Written> {
@@ -331,7 +334,6 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     await client.query("BEGIN");
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
     if (!patient[0]) throw new Refusal("no_patient", null);
-    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) await lockDebtAccountForSchedule(client,input.patientId);
 
     if (input.idempotencyKey) {
       const { rows: [prior] } = await client.query<{ id: number; idempotency_request_hash: string | null; patient_id: number }>(
@@ -341,6 +343,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
         if (prior.idempotency_request_hash !== input.requestHash || prior.patient_id !== input.patientId) {
           throw new Refusal("idempotency_conflict", null);
         }
+        if(input.visitId!==undefined)await readInvoiceVisitContext(client,input.patientId,input.visitId,prior.id);
         const replay = authority
           ? await lockedInvoiceReceipt(client, prior.id, input)
           : await existingLinks(client, prior.id);
@@ -350,10 +353,19 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       }
     }
 
+    if(input.visitId!==undefined||authority&&Object.hasOwn(authority.source,"repaymentTerms")){
+      await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
+    }
+    if(input.visitId!==undefined){
+      if(!authority||!input.idempotencyKey)throw new InvoiceVisitContextError();
+      await assertInvoiceTemplateSession(client,authority.session,input);
+      await lockInvoiceVisitContext(client,input.patientId,input.visitId);
+    }
     await validateInvoiceTemplateInTransaction(client, input);
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [input.patientId]);
+    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) await lockDebtAccountForSchedule(client,input.patientId);
     const linkages = input.items.map((item) => lineLinkage({ serviceId: item.serviceId, category: item.category }));
     // A selected template may schedule consultation/records without manufacturing a specialty case.
     const scheduled = input.items.map((item, line) => linkages[line].kind === "clinical" || item.templatePlan !== undefined);
@@ -583,12 +595,16 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           source === null ? null : "plan_item", source, source]);
     }
 
+    if(input.visitId!==undefined){
+      const linked=await client.query("UPDATE visits SET invoice_id=$3 WHERE id=$1 AND patient_id=$2 AND invoice_id IS NULL RETURNING id",[input.visitId,input.patientId,invoiceId]);
+      if(linked.rows.length!==1)throw new InvoiceVisitContextError();
+    }
     const clinical = links.filter((link) => link.kind === "clinical");
     await audit(client, {
       action: "invoice.create", entity: "invoice", entityId: invoiceId, entityLabel: created.invoice_number,
       details: {
         المريض: input.patientId, الإجمالي: total, الخصم: discount, عدد_البنود: input.items.length,
-        ...input.auditDetails,
+        ...input.auditDetails,...(input.visitId!==undefined?{زيارة_السياق:input.visitId}:{}),
         ...(clinical.length ? {
           الربط_بالعلاج: clinical.map((link) =>
             `${LINKAGE_SPECIALTY_LABEL[link.specialty!]}: بند ${link.planItemId}${link.planItemCreated ? " (جديد)" : " (قائم)"}`
@@ -614,6 +630,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     return { ok: true, invoiceId, ...(templateInvoice ? { invoice: templateInvoice } : {}), replayed: false, planId, links };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
+    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
     if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
     // مفتاحٌ واحد لطلبين متزامنين لمريضين مختلفين: الفهرس الفريد يحسم — تعارضٌ لا فاتورة ثانية.
     if ((error as { code?: string; constraint?: string }).code === "23505"

@@ -85,7 +85,7 @@ export function ReceiptCorrectionLauncher({ paymentId, patientId, label = "تص�
           </p>
         ) : (
           <ReceiptCorrection
-            receipt={receipt}
+            receipt={receipt} patientId={patientId}
             remainingMinor={remaining}
             invoices={ledger.invoices.map((invoice) => ({ ...invoice, baseCurrency: invoice.baseCurrency ?? base }))}
             plans={ledger.plans}

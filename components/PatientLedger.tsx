@@ -27,6 +27,11 @@ import type { InvoiceTemplatePreview } from "@/lib/invoice-template";
 import { readInvoiceTemplatePreview, type InvoiceTemplatePreviewRow } from "./dental/invoice-template-preview";
 import { TreatmentEntryChoice } from "./TreatmentEntryChoice";
 import { HistoricalDocuments } from "./HistoricalDocuments";
+import {MoneyCommandRecovery} from "./MoneyCommandRecovery";
+import {MONEY_JOURNAL_EVENT} from "./useDurableMoneyAttempt";
+import {restoreMoneyCommand,type DurableMoneyCommand} from "@/lib/durable-money-command";
+import { HistoricalCorrection } from "./HistoricalCorrection";
+import {restoreHistoricalCorrection,type HistoricalCorrectionCommand,type HistoricalDocumentView} from "@/lib/historical-correction-view";
 import { parseHistoricalDocument } from "@/lib/legacy-treatment-document";
 import { readHistoricalPreview, readHistoricalReceipt, type HistoricalPreview, type HistoricalReceiptExpectation } from "@/lib/historical-document-receipt";
 import { LegacyTreatmentAgreements } from "./LegacyTreatmentAgreements";
@@ -314,7 +319,7 @@ function restoreInvoiceCommand(command: FinancialCommand, patientId: number): In
     if (one.expected.kind === "historical") {
       if (!record(one.expected.input) || !record(one.expected.preview) || !Array.isArray(one.expected.input.lines)
         || !Array.isArray(one.expected.preview.lines) || one.expected.input.lines.length !== one.expected.preview.lines.length) throw new FinancialRecoveryError("invalid");
-    } else if (!Array.isArray(one.expected.lines)) throw new FinancialRecoveryError("invalid");
+    } else if (!Array.isArray(one.expected.lines)||body.visitId!==one.expected.visitId) throw new FinancialRecoveryError("invalid");
     one.lease.owner = owner; one.expected.owner = owner;
   }
   if (durableJson(value.original) !== command.original) throw new FinancialRecoveryError("invalid");
@@ -323,6 +328,8 @@ function restoreInvoiceCommand(command: FinancialCommand, patientId: number): In
 
 interface PatientLedgerProps {
   patientId: number;
+  /** Trusted calling visit context; independent entry leaves this undefined. */
+  visitId?:number;
   selectionContextKey?: string;
   onClinicalChange?: () => void;
   entryRequestKey?: number;
@@ -331,14 +338,16 @@ interface PatientLedgerProps {
   accountDetails?: ReactNode;
 }
 
-export function PatientLedger({ patientId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
+export function PatientLedger({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
-  const scope = JSON.stringify([patientId, session]);
+  const scope = JSON.stringify([patientId, session, visitId??null]);
   const principal = JSON.stringify([session?.username, session?.role]);
   const [recoveries, setRecoveries] = useState<ReadonlyMap<string, RetainedInvoiceRecovery>>(() => new Map());
   const [debtRecoveries,setDebtRecoveries]=useState<ReadonlyMap<string,DebtRepaymentCommand>>(()=>new Map());
   const [revisionRecoveries,setRevisionRecoveries]=useState<ReadonlyMap<string,InvoiceRevisionCommand>>(()=>new Map());
+  const [historicalRecoveries,setHistoricalRecoveries]=useState<ReadonlyMap<string,HistoricalCorrectionCommand>>(()=>new Map());
+  const [moneyRecoveries,setMoneyRecoveries]=useState<ReadonlyMap<string,DurableMoneyCommand>>(()=>new Map());
   const recoveryKey = JSON.stringify([patientId, principal]);
   const recoveryOwner = useMemo(() => ({ scope }), [scope]);
   const recoveryLifetime = useRef<{ owner: object | null; active: boolean }>({ owner: null, active: false });
@@ -353,20 +362,25 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
     const invoice = command?.kind === "invoice" ? restoreInvoiceCommand(command, patientId) : null;
     const debt = command?.kind === "debt" ? restoreDebtCommand(command, patientId, session?.username ?? "") : null;
     const revision = command?.kind === "invoice-correction" ? restoreInvoiceRevision(command,patientId,session?.username??"") : null;
-    if (command && !invoice && !debt && !revision) throw new FinancialRecoveryError("invalid");
+    const historical=command?.kind==="historical-correction"?restoreHistoricalCorrection(command,patientId,session?.username??""):null;
+    const money=command&&(command.kind==="collection"||command.kind==="receipt-correction")?restoreMoneyCommand(command,patientId,session?.username??""):null;
+    if (command && !invoice && !debt && !revision && !historical && !money) throw new FinancialRecoveryError("invalid");
     setRecoveries(current => { const next = new Map(current); if (invoice) next.set(recoveryKey, { patientId, principal, command: invoice }); else next.delete(recoveryKey); return next; });
     setDebtRecoveries(current => { const next = new Map(current); if (debt) next.set(recoveryKey, debt); else next.delete(recoveryKey); return next; });
     setRevisionRecoveries(current=>{const next=new Map(current);if(revision)next.set(recoveryKey,revision);else next.delete(recoveryKey);return next;});
+    setHistoricalRecoveries(current=>{const next=new Map(current);if(historical)next.set(recoveryKey,historical);else next.delete(recoveryKey);return next;});
+    setMoneyRecoveries(current=>{const next=new Map(current);if(money)next.set(recoveryKey,money);else next.delete(recoveryKey);return next;});
     setRestoredCommandKey(invoice ? command!.key : "");
-  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries]);
+  }, [patientId, principal, recoveryKey, recoveryOwner, session?.username, setRecoveries, setDebtRecoveries,setRevisionRecoveries,setHistoricalRecoveries,setMoneyRecoveries]);
   useEffect(() => {
     if (!session?.username) return;
-    let active = true;
-    void readFinancialJournal({ actor: session.username, patientId }).then(saved => {
-      if (!active) return;
+    let active = true,generation=0;
+    const read=()=>{const request=++generation;void readFinancialJournal({ actor: session.username, patientId }).then(saved => {
+      if (!active||request!==generation) return;
       adoptDurable(saved.command); setJournal({ scope, revision: saved.revision, error: null });
-    }).catch(() => { if (active) setJournal({ scope, revision: 0, error: new FinancialRecoveryError("unavailable").message }); });
-    return () => { active = false; };
+    }).catch(() => { if (active&&request===generation) setJournal({ scope, revision: 0, error: new FinancialRecoveryError("unavailable").message }); });};
+    read();window.addEventListener(MONEY_JOURNAL_EVENT,read);
+    return () => { active = false;window.removeEventListener(MONEY_JOURNAL_EVENT,read); };
   }, [scope, patientId, session?.username, adoptDurable]);
   const financialRecovery: FinancialRecoveryControl = {
     ready: journal?.scope === scope && !journal.error,
@@ -378,7 +392,7 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
         const saved = await reserveFinancialCommand({ actor: session.username, patientId }, revision, command);
         if (recoveryLifetime.current.owner !== recoveryOwner || !recoveryLifetime.current.active) return false;
         if (saved.command?.key !== command.key || saved.command.kind !== command.kind || saved.command.original !== command.original) {
-          adoptDurable(saved.command); return false;
+          adoptDurable(saved.command);setJournal({scope,revision:saved.revision,error:null});return false;
         }
         return true;
       } catch (error) {
@@ -394,9 +408,18 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
   };
   const recovery = recoveries.get(recoveryKey) ?? null;
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
-  return <PatientLedgerContent key={scope} patientId={patientId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
+  return <PatientLedgerContent key={scope} patientId={patientId} visitId={visitId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
     accountDetails={accountDetails} financialRecovery={financialRecovery} restoredCommandKey={restoredCommandKey}
     debtRecovery={debtRecoveries.get(recoveryKey)??null}
+    moneyRecovery={moneyRecoveries.get(recoveryKey)??null} onMoneyRecoveryChange={command=>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setMoneyRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+    }}
+    historicalRecovery={historicalRecoveries.get(recoveryKey)??null}
+    onHistoricalRecoveryChange={command=>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setHistoricalRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+    }}
     revisionRecovery={revisionRecoveries.get(recoveryKey)??null}
     onRevisionRecoveryChange={command=>{
       if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
@@ -413,7 +436,7 @@ export function PatientLedger({ patientId, selectionContextKey = "", onClinicalC
     }} />;
 }
 
-function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,revisionRecovery,onRevisionRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
+function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, recovery, onRecoveryChange, debtRecovery,onDebtRecoveryChange,revisionRecovery,onRevisionRecoveryChange,historicalRecovery,onHistoricalRecoveryChange,moneyRecovery,onMoneyRecoveryChange,accountDetails,financialRecovery,restoredCommandKey }: PatientLedgerProps & { recovery: InvoiceCommandState | null; onRecoveryChange: (command: InvoiceCommandState | null) => void;debtRecovery:DebtRepaymentCommand|null;onDebtRecoveryChange:(command:DebtRepaymentCommand|null)=>void;financialRecovery:FinancialRecoveryControl;restoredCommandKey:string;moneyRecovery:DurableMoneyCommand|null;onMoneyRecoveryChange:(command:DurableMoneyCommand|null)=>void;historicalRecovery:HistoricalCorrectionCommand|null;onHistoricalRecoveryChange:(command:HistoricalCorrectionCommand|null)=>void;revisionRecovery:InvoiceRevisionCommand|null;onRevisionRecoveryChange:(command:InvoiceRevisionCommand|null)=>void }) {
   // (TD-05) الأساس دستوري من الكود.
   const fallbackBase: Currency = CLINIC_BASE_CURRENCY;
 
@@ -433,6 +456,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
   const session = useSession();
   const admin = isAdmin(session?.role);
   /* (FIN-2) الفاتورة المفتوحة للتصحيح الآن، ورسالة نجاح التصحيح. */
+  const [historicalCorrecting,setHistoricalCorrecting]=useState<HistoricalDocumentView|null>(null);
   const [correcting, setCorrecting] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   /* (RC-1) سند القبض المفتوح للتصحيح الآن. */
@@ -443,7 +467,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
   const canAddOpening = ledger?.openingAccess?.add ?? admin;
   const canEditOpening = ledger?.openingAccess?.edit ?? admin;
   const canAddLegacy = !loading && !error && ledger?.openingAccess?.add === true;
-  const canStartTreatment = financialRecovery.ready && !revisionRecovery && correcting===null && !loading && !error && !!session && canHandleMoney(session.role);
+  const canStartTreatment = financialRecovery.ready && !moneyRecovery && !historicalRecovery && !historicalCorrecting && !revisionRecovery && correcting===null && !loading && !error && !!session && canHandleMoney(session.role);
   const readRef = useRef({ active: false, authorized: false, generation: 0, controller: null as AbortController | null });
   const writePending = useRef(false);
   const invoiceUnresolved = useRef(false);
@@ -451,7 +475,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
   const holdDebt=useCallback((held:boolean)=>{debtHeld.current=held;},[]);
   const consumedEntryRequest = useRef(0);
   const hasEntryDraft = mode === "invoice" || mode === "legacy" || mode === "opening";
-  const financialBlocked = !financialRecovery.ready || !!recovery || !!debtRecovery || !!revisionRecovery || correcting!==null;
+  const financialBlocked = !financialRecovery.ready || !!recovery || !!debtRecovery || !!revisionRecovery || correcting!==null || !!historicalRecovery || !!historicalCorrecting || !!moneyRecovery;
   const shownRestoredKey=useRef("");
   useEffect(() => {
     if (recovery && restoredCommandKey && shownRestoredKey.current !== restoredCommandKey) {
@@ -459,27 +483,27 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
     }
   }, [recovery, restoredCommandKey]);
   const canLeave = useCallback(() => {
-    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: !!revisionRecovery || debtHeld.current || !!debtRecovery&&debtRecovery.outcome!=="refused" || writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: hasEntryDraft || correcting!==null },
+    return canLeaveTreatmentEntry({ active: readRef.current.active, pending: !!moneyRecovery || !!historicalRecovery || !!revisionRecovery || debtHeld.current || !!debtRecovery&&debtRecovery.outcome!=="refused" || writePending.current || invoiceUnresolved.current || !!recovery && !recovery.editing || busy, hasDraft: hasEntryDraft || correcting!==null || !!historicalCorrecting },
       () => window.confirm("هناك مسودة فاتورة أو اتفاق غير محفوظة. مغادرة الشاشة لا تلغي طلبًا سبق إرساله. هل تريد المغادرة؟"));
-  }, [busy, hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting]);
+  }, [busy, hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   useEffect(() => {
-    if (entryRequestKey <= consumedEntryRequest.current || revisionRecovery || correcting!==null) return;
+    if (entryRequestKey <= consumedEntryRequest.current || revisionRecovery || correcting!==null || historicalRecovery || historicalCorrecting || moneyRecovery) return;
     consumedEntryRequest.current = entryRequestKey;
     setLinkNotice(null); setNotice(null);
     setMode(recovery ? isHistoricalRecovery(recovery) ? "legacy" : "invoice" : "entry");
     onEntryRequestConsumed?.(entryRequestKey);
-  }, [entryRequestKey, onEntryRequestConsumed, recovery,revisionRecovery,correcting]);
+  }, [entryRequestKey, onEntryRequestConsumed, recovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!revisionRecovery&&correcting===null&&!debtHeld.current&&!debtRecovery&&!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
+      if (!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!revisionRecovery&&correcting===null&&!debtHeld.current&&!debtRecovery&&!writePending.current && !invoiceUnresolved.current && !recovery && !hasEntryDraft) return;
       event.preventDefault(); event.returnValue = "";
     };
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting]);
+  }, [hasEntryDraft, recovery,debtRecovery,revisionRecovery,correcting,historicalRecovery,historicalCorrecting,moneyRecovery]);
   const changeMode = (next: typeof mode) => {
-    if (!readRef.current.active || revisionRecovery || correcting!==null || debtHeld.current || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
+    if (!readRef.current.active || moneyRecovery || historicalRecovery || historicalCorrecting || revisionRecovery || correcting!==null || debtHeld.current || writePending.current || invoiceUnresolved.current || busy || (next !== "none" && (loading || error))) return;
     if (next === mode) return;
     if (hasEntryDraft && !canLeave()) return;
     // A newly admitted draft may stop at preview refusal without ever sending a write.
@@ -647,7 +671,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
       {mode === "invoice" ? (
         <InvoiceForm key={patientId}
           originControl={<TreatmentEntryChoice canAddLegacy={canAddLegacy} activeMode="invoice" disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode}/>}
-          patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
+          patientId={patientId} visitId={visitId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
           financialRecovery={financialRecovery}
           canChangeDraft={() => financialRecovery.ready && !debtRecovery && readRef.current.active && readRef.current.authorized && !writePending.current}
           onRecoveryHold={value => { invoiceUnresolved.current = value; }}
@@ -701,9 +725,13 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
       {mode==="none"&&session&&canHandleMoney(session.role)?<DebtRepaymentPanel patientId={patientId} refreshKey={ledger}
         financialRecovery={financialRecovery}
         recovery={debtRecovery} onRecoveryChange={onDebtRecoveryChange} onHold={holdDebt}
-        enabled={financialRecovery.ready&&!recovery&&!revisionRecovery&&correcting===null&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
+        enabled={financialRecovery.ready&&!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!recovery&&!revisionRecovery&&correcting===null&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
 
-      {mode==="none"&&ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} />:null}
+      {mode==="none"&&ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} enabled={!financialBlocked&&!busy&&!collectOpen&&correctingReceipt===null} onCorrect={document=>{if(!financialBlocked){setHistoricalCorrecting(document);setNotice(null);}}} />:null}
+      {moneyRecovery?<MoneyCommandRecovery command={moneyRecovery} onDone={(message,paymentId)=>{onMoneyRecoveryChange(null);setNotice(message);if(paymentId!==null)setLastReceiptId(paymentId);void load();}}/>:null}
+      {admin&&(historicalRecovery||historicalCorrecting)?<HistoricalCorrection key={historicalRecovery?.documentId??historicalCorrecting!.id}
+        original={historicalRecovery?.original??historicalCorrecting!} recovery={historicalRecovery} onRecoveryChange={onHistoricalRecoveryChange} financialRecovery={financialRecovery}
+        onCancel={()=>setHistoricalCorrecting(null)} onDone={message=>{setHistoricalCorrecting(null);setNotice(message);void load();onClinicalChange?.();}}/>:null}
 
       {ledger ? (
         <LegacyBalanceArrangementPanel
@@ -982,7 +1010,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
                 <span className="flex gap-2">
                   {admin && payment.kind === "payment"
                     && correctingReceipt !== payment.id ? (
-                    <ReceiptCorrectionTrigger paymentId={payment.id} remainingMinor={ledger.receiptRemaining?.[payment.id] ?? 0}
+                    <ReceiptCorrectionTrigger patientId={patientId} paymentId={payment.id} remainingMinor={ledger.receiptRemaining?.[payment.id] ?? 0}
                       onClick={() => { if (!financialBlocked) { setCorrectingReceipt(payment.id); setNotice(null); } }}
                       className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800" />
                   ) : null}
@@ -995,7 +1023,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
                   provenance={receiptProvenanceFor(ledger.receiptProvenance, payment.id, payment.amountMinor, payment.kind, payment.receiptNumber)} />
                 {correctingReceipt === payment.id ? (
                   <ReceiptCorrection
-                    receipt={payment}
+                    receipt={payment} patientId={patientId}
                     remainingMinor={ledger.receiptRemaining?.[payment.id] ?? payment.amountMinor}
                     invoices={ledger.invoices.map((invoice) => ({ ...invoice, baseCurrency: invoice.baseCurrency ?? base }))}
                     plans={ledger.plans}
@@ -1023,8 +1051,8 @@ const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
-function InvoiceForm({ patientId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery, originControl }: {
-  patientId: number;
+function InvoiceForm({ patientId, visitId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery, originControl }: {
+  patientId: number;visitId?:number;
   base: Currency;
   services: Service[];
   busy: boolean;
@@ -1041,7 +1069,7 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
   const summaryId = useId();
   const formSession = useSession();
   const canSubmit = canHandleMoney(formSession?.role);
-  const authorityKey = JSON.stringify(formSession);
+  const authorityKey = JSON.stringify([formSession,visitId??null]);
   const authority = useMemo(() => ({ authorityKey, canSubmit }), [authorityKey, canSubmit]);
   // Preserve the revision this draft started from; another tab's completed save
   // must invalidate this draft rather than silently minting another operation.
@@ -1334,7 +1362,7 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
       if (!key || !service || !append("template", { serviceId: line.serviceId, doctorId: line.doctorId, description: line.description,
         quantity: line.quantity, unitPriceMinor: line.unitPriceMinor, toothCode: line.toothCode, surfaces: line.surfaces }, key, service.category)) return null;
     }
-    return { owner: authority, patientId, currency, discountMinor, note: null, expectedPlanId: selected.existingPlanId, lines: expectedLines,repaymentTerms:repayment.value };
+    return { owner: authority, patientId,...(visitId!==undefined?{visitId}:{}), currency, discountMinor, note: null, expectedPlanId: selected.existingPlanId, lines: expectedLines,repaymentTerms:repayment.value };
   };
   const dialogIndex = toothDialogFor === null ? -1 : rows.findIndex((row) => row.key === toothDialogFor);
   const dialogRow = dialogIndex >= 0 ? rows[dialogIndex] : null;
@@ -1759,7 +1787,7 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
           if (!templateDraft && retainedTemplate) return;
           if (!canSubmit || !editorEnabled() || busy || !repayment.ok || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed) return;
           const body = {
-            currency,
+            currency,...(visitId!==undefined?{visitId}:{}),
             repaymentTerms:repayment.value,
             existingPlanId: selected.existingPlanId,
             ...(templateDraft && currentTemplate ? { templateSelection: { ...templateDraft.selection, version: currentTemplate.version } } : {}),

@@ -288,12 +288,13 @@ export function invoiceRequestFingerprint(input: {
 }
 
 export type InvoiceLinkageRefusal =
-  | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
+  | "visit_context_invalid" | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
   | "case_mismatch" | "shape_mismatch" | "ambiguous_item"
   | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
   | "needs_financial_review" | "existing_work" | "bad_provider" | "incompatible_plan" | "bad_site" | "legacy_covered" | "selected_item_mismatch";
 
 export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
+  visit_context_invalid:"الزيارة المحددة لا تخص هذا المريض أو لم تعد متاحة لربط الفاتورة؛ حدّث الزيارة واختر سياقها صراحةً.",
   selected_item_mismatch: "بند الخطة المختار لم يعد مطابقًا للمريض والخدمة والنطاق والاتفاق؛ أعد اختيار البند الأصلي دون إنشاء بديل.",
   needs_financial_review: "هذا العلاج يحتاج مراجعة مالية لسجل فواتيره؛ لا تُنشئ التزامًا جديدًا للعمل نفسه.",
   existing_work: "يوجد سجل للعلاج نفسه بدأ أو أُنجز أو أُلغي؛ راجع البند الأصلي قبل إصدار فاتورة أخرى.",

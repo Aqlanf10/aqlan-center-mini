@@ -1,35 +1,18 @@
 "use client";
 
 import {useEffect,useState} from "react";
-import {formatMoney,isCurrency} from "@/lib/money";
-import type {HistoricalDocumentReceipt} from "@/lib/legacy-treatment-document";
-
-type DocumentView=HistoricalDocumentReceipt&{openingRemainingMinor:number;accountDueMinor:number;scheduleVersion:number;sourceHash:string;history:{version:number;reason:string;created_by:string}[]};
+import {formatMoney} from "@/lib/money";
+import {readHistoricalDocuments,type HistoricalDocumentView} from "@/lib/historical-correction-view";
+import {useSession} from "./SessionProvider";
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==="object"&&!Array.isArray(value);
-const minor=(value:unknown):value is number=>typeof value==="number"&&Number.isSafeInteger(value)&&value>=0;
-const id=(value:unknown):value is number=>minor(value)&&value>0;
-function readDocuments(value:unknown,patientId:number):DocumentView[]|null {
-  if(!record(value)||!Array.isArray(value.documents))return null;
-  for(const document of value.documents){
-    if(!record(document)||!id(document.id)||!id(document.version)||!id(document.revisionId)||document.patientId!==patientId||!isCurrency(document.currency)
-      ||![document.totalMinor,document.discountMinor,document.agreedMinor,document.previouslyPaidMinor,document.remainingMinor,document.openingRemainingMinor,document.scheduleVersion].every(minor)
-      ||typeof document.accountDueMinor!=="number"||!Number.isSafeInteger(document.accountDueMinor)||typeof document.sourceHash!=="string"||!/^[a-f0-9]{64}$/.test(document.sourceHash)
-      ||Number(document.agreedMinor)!==Number(document.totalMinor)-Number(document.discountMinor)||Number(document.remainingMinor)!==Number(document.agreedMinor)-Number(document.previouslyPaidMinor)
-      ||typeof document.historicalAsOf!=="string"||typeof document.createdBy!=="string"||typeof document.reason!=="string"||!Array.isArray(document.lines)||!document.lines.length
-      ||!document.lines.every(line=>record(line)&&id(line.agreementId)&&id(line.planItemId)&&id(line.planId)&&id(line.serviceId)&&(line.caseId===null||id(line.caseId))
-        &&typeof line.description==="string"&&minor(line.unitPriceMinor)&&minor(line.discountMinor)&&minor(line.netMinor)&&line.netMinor===line.unitPriceMinor-line.discountMinor&&record(line.site))
-      ||document.lines.reduce((sum,line)=>sum+Number(line.unitPriceMinor),0)!==document.totalMinor||document.lines.reduce((sum,line)=>sum+Number(line.discountMinor),0)!==document.discountMinor
-      ||!Array.isArray(document.history)||document.history.length!==document.version||!document.history.every((row,index)=>record(row)&&row.version===index+1&&typeof row.reason==="string"&&typeof row.created_by==="string"))return null;
-  }
-  return value.documents as DocumentView[];
-}
 
-export function HistoricalDocuments({patientId,refreshKey}:{patientId:number;refreshKey:unknown}){
-  const [state,setState]=useState<{patientId:number;documents:DocumentView[];error:string|null}|null>(null);
+export function HistoricalDocuments({patientId,refreshKey,enabled=false,onCorrect}:{patientId:number;refreshKey:unknown;enabled?:boolean;onCorrect?:(document:HistoricalDocumentView)=>void}){
+  const session=useSession();
+  const [state,setState]=useState<{patientId:number;documents:HistoricalDocumentView[];error:string|null}|null>(null);
   useEffect(()=>{const controller=new AbortController();
     void fetch(`/api/patients/${patientId}/historical-documents`,{cache:"no-store",signal:controller.signal}).then(async response=>{
       const value=await response.json().catch(()=>null);if(controller.signal.aborted)return;
-      const documents=response.ok?readDocuments(value,patientId):null;
+      const documents=response.ok?readHistoricalDocuments(value,patientId):null;
       setState({patientId,documents:documents??[],error:documents?null:record(value)&&typeof value.message==="string"?value.message:"تعذّر قراءة الاتفاقات التاريخية."});
     }).catch(()=>{if(!controller.signal.aborted)setState({patientId,documents:[],error:"تعذّر قراءة الاتفاقات التاريخية."});});
     return()=>controller.abort();
@@ -49,6 +32,8 @@ export function HistoricalDocuments({patientId,refreshKey}:{patientId:number;ref
         {` · ${formatMoney(line.unitPriceMinor,document.currency)} − خصم ${formatMoney(line.discountMinor,document.currency)} = ${formatMoney(line.netMinor,document.currency)}`}
         <span className="block text-slate-500">خطة #{line.planId} · بند #{line.planItemId}{line.caseId?` · حالة #${line.caseId}`:""}</span>
       </li>)}</ul>
+      {session?.role==="admin"&&onCorrect?<div className="mt-3"><button type="button" disabled={!enabled||!document.correctionAvailable} onClick={()=>onCorrect(document)} className="min-h-11 rounded-xl border border-violet-300 px-4 text-sm font-bold disabled:opacity-50">تصحيح الاتفاق التاريخي</button>
+        {!document.correctionAvailable?<p className="mt-2 text-xs text-amber-900">{document.correctionMessage}</p>:null}</div>:null}
       <details className="mt-3 text-xs"><summary className="min-h-11 cursor-pointer py-3 font-bold">سجل النسخ والتصحيح</summary>
         <ol className="space-y-2">{document.history.map(version=><li key={version.version}>النسخة {version.version} · {version.reason} · {version.created_by}</li>)}</ol>
       </details>

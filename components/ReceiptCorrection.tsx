@@ -14,6 +14,7 @@ import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
  */
 
 interface ReceiptLike {
+  patientId?:number;
   id: number; receiptNumber: string; amountMinor: number; currency: Currency; method: string;
   invoiceId: number | null; planId?: number | null; openingCurrency?: Currency | null;
 }
@@ -22,16 +23,17 @@ interface PlanOption { id: number; title: string; baseCurrency?: Currency; statu
 
 /** A refreshed ledger may already show zero remaining after a lost response.
  * The pending correction must still be reachable for its original-key replay. */
-export function ReceiptCorrectionTrigger({ paymentId, remainingMinor, onClick, className }: {
-  paymentId: number; remainingMinor: number; onClick: () => void; className: string;
+export function ReceiptCorrectionTrigger({ paymentId, patientId, remainingMinor, onClick, className }: {
+  paymentId: number;patientId?:number; remainingMinor: number; onClick: () => void; className: string;
 }) {
-  const money = useMoneyAttempt(`correction:${paymentId}`);
+  const money = useMoneyAttempt(`correction:${paymentId}`,true,`correction:${paymentId}`,patientId?{patientId}:undefined);
   if (remainingMinor <= 0 && !money.attempt) return null;
   return <button type="button" onClick={onClick} className={className}>تصحيح السند</button>;
 }
 
-export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, openingCurrencies, onDone, onCancel }: {
+export function ReceiptCorrection({ receipt, patientId=receipt.patientId, remainingMinor, invoices, plans, openingCurrencies, onDone, onCancel }: {
   receipt: ReceiptLike;
+  patientId?:number;
   remainingMinor: number;
   invoices: InvoiceOption[];
   plans: PlanOption[];
@@ -48,11 +50,11 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const money = useMoneyAttempt(`correction:${receipt.id}`);
+  const money = useMoneyAttempt(`correction:${receipt.id}`,true,`correction:${receipt.id}`,patientId?{patientId,receipt:{...receipt,remainingMinor}}:undefined);
 
   const amountMinor = parseAmount(amount, currency);
   const validAmount = amountMinor !== null && amountMinor > 0;
-  const ready = !busy && reason.trim().length >= CORRECTION_REASON_MIN && (mode === "void" || validAmount);
+  const ready = money.ready && !busy && reason.trim().length >= CORRECTION_REASON_MIN && (mode === "void" || validAmount);
 
   /* «كما في السند الأصلي» يحلّه الخادم من الأصل المقفول — فقسط الخطة يبقى على فاتورته وخطته معًا. */
   const targetBody = (): Record<string, unknown> => {
@@ -96,7 +98,8 @@ export function ReceiptCorrection({ receipt, remainingMinor, invoices, plans, op
   return (
     <div role="group" aria-label={`تصحيح ${receipt.receiptNumber}`} className="mt-2 w-full rounded-xl border border-amber-300 bg-amber-50 p-3">
       <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
-      <fieldset disabled={busy || money.attempt !== null} className="min-w-0">
+      {money.error?<p role="alert" className="mb-2 text-sm text-rose-800">{money.error}</p>:null}
+      <fieldset disabled={!money.ready || busy || money.attempt !== null} className="min-w-0">
       <p className="mb-2 text-xs font-bold text-amber-900">
         السند لا يُمسح: يُعكس {formatMoney(remainingMinor, receipt.currency)} منه بسند ردٍّ ظاهرٍ بسببه، ثم يُصدر السند الصحيح
         بدله — والدرج في الوردية المفتوحة يتحرك بالفرق فقط.

@@ -163,7 +163,8 @@ export function parseInvoiceCommand(
 /** Ordinary historical fingerprints remain exact; template commands bind their reviewed version and schedule. */
 export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms }): string {
   const original = invoiceRequestFingerprint({ ...parsed, currency: parsed.baseCurrency });
-  const financial = parsed.repaymentTerms ? JSON.stringify([original,parsed.repaymentTerms]) : original;
+  const scoped=parsed.visitId!==undefined?JSON.stringify([original,{visitId:parsed.visitId}]):original;
+  const financial = parsed.repaymentTerms ? JSON.stringify([scoped,parsed.repaymentTerms]) : scoped;
   return parsed.template === null ? financial : JSON.stringify([financial, { templateId: parsed.template.templateId,
     version: parsed.template.version, lines: parsed.template.lines.map((line) => [line.line, line.stepKey, line.sessionPlan]),
   }]);
@@ -177,7 +178,7 @@ export function invoiceTemplateRequestFingerprint(source: Record<string, unknown
 /** Quoted manual entries can recover an acknowledged command after catalogue drift.
  * Older unquoted API clients retain their existing canonical fingerprint contract. */
 export function hasInvoiceCatalogQuote(source: Record<string, unknown>): boolean {
-  return Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
+  return source.visitId!=null || Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
     && !Array.isArray(item) && Object.hasOwn(item, "catalogPriceMinor"));
 }
 

@@ -18,6 +18,16 @@ window.fetch = (input, init) => new Promise<Response>((resolve, reject) => {
 const api = {
   snapshot: () => ({ requests: pending.map(({ url, key, body }) => ({ url, key, body })), successes, openingProbes }),
   reply: (index: number, body: string, status = 201) => pending[index].resolve(new Response(body, { status, headers: { "Content-Type": "application/json" } })),
+  replyValid: (index:number, ids:{id?:number;reversalId?:number;replacementId?:number}={})=>{
+    const request=pending[index],body=JSON.parse(request.body),correction=request.url!=="/api/payments";
+    const patientId=correction?Number(request.url.split("/")[3])-500:body.patientId;
+    const actor="synthetic-money",currency=body.currency??"YER",amountMinor=Math.round(Number(body.amount??500)*(currency==="YER"?1:100));
+    const payment=(id:number,kind:string,value:number)=>({id,receiptNumber:`SYN-${id}`,patientId,invoiceId:body.invoiceId?Number(body.invoiceId):null,planId:null,openingCurrency:null,shiftId:1,kind,amountMinor:value,currency,exchangeRate:1,baseAmountMinor:Math.round(value/(currency==="YER"?1:100)),baseCurrency:"YER",method:body.method??"cash",note:null,createdBy:actor,createdAt:"2026-10-14T03:00:00Z"});
+    const payload=correction?{original:{id:patientId+500,receiptNumber:"SYN-P",patientId},replayed:true,idempotencyKey:request.key,
+      reversal:payment(ids.reversalId??801,"refund",500),replacement:payment(ids.replacementId??802,"payment",amountMinor)}
+      :{...payment(ids.id??701,"payment",amountMinor),idempotencyKey:request.key};
+    request.resolve(new Response(JSON.stringify(payload),{status:200,headers:{"Content-Type":"application/json"}}));
+  },
   fail: (index: number) => pending[index].reject(),
 };
 declare global { interface Window { __moneyFixture: typeof api } }
@@ -55,7 +65,7 @@ function Controls() {
       invoices={foreign ? [{ id: 202, invoiceNumber: "SYN-SAR", totalMinor: 5000, discountMinor: 0, baseCurrency: "SAR" }] : []}
       suggestedMinor={foreign ? 5000 : null}
       onClose={() => setOpen(false)} onSuccess={(id) => { successes.push({ patientId, id }); setOpen(false); }} /> : null}
-    {mounted && correction && open ? <ReceiptCorrection receipt={{ id: patientId + 500, receiptNumber: "SYN-P", amountMinor: 500, currency: "YER", method: "cash", invoiceId: null }}
+    {mounted && correction && open ? <ReceiptCorrection patientId={patientId} receipt={{ id: patientId + 500, receiptNumber: "SYN-P", amountMinor: 500, currency: "YER", method: "cash", invoiceId: null }}
       remainingMinor={500} invoices={[]} plans={[]} openingCurrencies={[]} onCancel={() => setOpen(false)}
       onDone={(_message, id) => { successes.push({ patientId, id }); setOpen(false); }} /> : null}
   </>;

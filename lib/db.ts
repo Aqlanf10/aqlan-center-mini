@@ -9314,6 +9314,14 @@ export async function getPayment(id: number): Promise<Payment | null> {
   return rows[0] ? toPayment(rows[0]) : null;
 }
 
+/** Read-only recovery evidence. The caller still invokes the canonical writer,
+ * whose complete fingerprint rejects changed intent; this supplies the saved FX snapshot only. */
+export async function getPaymentByIdempotencyKey(key:string):Promise<Payment|null>{
+  await ensureSchema();
+  const {rows}=await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.idempotency_key=$1`,[key]);
+  return rows[0]?toPayment(rows[0]):null;
+}
+
 export async function listShiftPayments(shiftId: number): Promise<Payment[]> {
   await ensureSchema();
   const { rows } = await getPool().query<PaymentRow>(

@@ -5,7 +5,7 @@ import { revalidateSessionInTransaction } from "./session";
 import { requireCurrency, settlePaymentMinor, type Currency } from "./money";
 import { debtInstallmentProgress, validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-position";
-import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
+import {readInvoiceSettlementPosition,InvoiceSettlementError} from "./invoice-settlement-position";
 
 export type DebtTarget = { patientId: number; currency: Currency; invoiceId: number | null; openingCurrency: Currency | null };
 export class DebtRepaymentError extends Error {
@@ -33,29 +33,25 @@ export async function readDebtPosition(client: DbClient, target: DebtTarget, loc
   if (!validDebtTarget(target)) throw new DebtRepaymentError("invalid","اختر فاتورة أو رصيدًا سابقًا واحدًا بعملته.");
   let snapshot: Record<string, unknown>; let principal: number; let available = true;
   if (target.invoiceId !== null) {
-    const { rows: [row] } = await client.query<{ id: number; patient_id: number; base_currency: string; total_minor: string; discount_minor: string; status: string }>(
-      `SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status FROM invoices WHERE id=$1 ${lock ? "FOR NO KEY UPDATE" : ""}`, [target.invoiceId]);
-    if (!row || row.patient_id !== target.patientId || row.base_currency !== target.currency) throw new DebtRepaymentError("missing","الفاتورة لا تخص المريض أو عملة الاتفاق.");
-    available = row.status !== "cancelled";
-    principal = available ? Math.max(0,safe(row.total_minor)-safe(row.discount_minor)) : 0;
-    snapshot = { invoiceId:row.id,patientId:row.patient_id,currency:row.base_currency,totalMinor:safe(row.total_minor),discountMinor:safe(row.discount_minor),cancelled:!available };
+    let position;
+    try{position=await readInvoiceSettlementPosition(client,{patientId:target.patientId,invoiceId:target.invoiceId,currency:target.currency},lock);}
+    catch(error){if(error instanceof InvoiceSettlementError)throw new DebtRepaymentError(error.code,error.message);throw error;}
+    return {...target,principalMinor:position.principalMinor,settledMinor:position.settledMinor,remainingMinor:position.remainingMinor,available:position.available,
+      settlementProofHash:position.proofHash,sourceSnapshot:position.sourceSnapshot,sourceHash:debtRequestHash(position.sourceSnapshot)};
   } else {
     const { rows: [row] } = await client.query<{ amount_minor: string; as_of_date: string; updated_at: string }>(
       `SELECT amount_minor::text,as_of_date::text,updated_at::text FROM patient_opening_balances WHERE patient_id=$1 AND currency=$2 ${lock ? "FOR NO KEY UPDATE" : ""}`,[target.patientId,target.currency]);
     available = Boolean(row); principal = row ? safe(row.amount_minor) : 0;
     snapshot = { patientId:target.patientId,currency:target.currency,opening:row ?? null };
   }
-  const settlementInvoiceIds = target.invoiceId === null ? null : await invoiceSettlementLineage(client,target.invoiceId,target.patientId,target.currency);
   const { rows: payments } = await client.query<{ id: number; patient_id: number; amount_minor: string; base_amount_minor: string; currency: string; kind: string }>(
-    `SELECT id,patient_id,amount_minor::text,base_amount_minor::text,currency,kind FROM payments
-     WHERE ${target.invoiceId !== null ? "invoice_id=ANY($1::int[])" : "patient_id=$1 AND opening_currency=$2"} ORDER BY id`,
-    target.invoiceId !== null ? [settlementInvoiceIds] : [target.patientId,target.currency]);
+    "SELECT id,patient_id,amount_minor::text,base_amount_minor::text,currency,kind FROM payments WHERE patient_id=$1 AND opening_currency=$2 ORDER BY id",[target.patientId,target.currency]);
   let settledMinor = 0;
   for (const payment of payments) {
     if (payment.patient_id !== target.patientId || !["payment","refund"].includes(payment.kind)) throw new DebtRepaymentError("invalid","ربط السند يحتاج مراجعة مالية.");
     settledMinor = safe(settledMinor + (payment.kind === "refund" ? -1 : 1)*settlePaymentMinor({ id:payment.id,amountMinor:safe(payment.amount_minor),baseAmountMinor:safe(payment.base_amount_minor),currency:requireCurrency(payment.currency,"سند الاتفاق",payment.id) },target.currency));
   }
-  return { ...target,principalMinor:principal,settledMinor,remainingMinor:Math.max(0,principal-settledMinor),available,sourceSnapshot:snapshot,sourceHash:debtRequestHash(snapshot) };
+  return { ...target,principalMinor:principal,settledMinor,remainingMinor:Math.max(0,principal-settledMinor),available,settlementProofHash:undefined,sourceSnapshot:snapshot,sourceHash:debtRequestHash(snapshot) };
 }
 
 type Revision = { id: number; arrangement_id: number; version: number; status: "active" | "cancelled";

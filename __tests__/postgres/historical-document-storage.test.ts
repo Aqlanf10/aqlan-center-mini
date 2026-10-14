@@ -160,12 +160,26 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
     expect((await documents.listHistoricalDocuments(source.patientId))[0]).toMatchObject({version:2,accountDueMinor:0,history:[{version:1},{version:2}]});
     expect(await documents.correctHistoricalDocument(source.patientId,document.id,change,session)).toEqual({...saved,replayed:true});
   });
-  it("rejects a correction below already-collected settlement without changing the historical facts",async()=>{
+  it("keeps collected receipts and exposes credit after an authorized historical reduction without a cash refund",async()=>{
     const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);
     await collection.collectDebtInstallment({patientId:source.patientId,arrangementId:document.repayment!.arrangementId,amountMinor:20000,idempotencyKey:`historical-lower-${++serial}`,currency:"YER",expectedVersion:1,method:"cash",note:null,session});
+    const originalReceipts=await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1",[source.patientId]);
     const change={...await correction(document,"290000"),repaymentRemainingMinor:0,repaymentTerms:terms(0)};
-    await expect(documents.correctHistoricalDocument(source.patientId,document.id,change,session)).rejects.toMatchObject({code:"conflict"});
-    expect((await documents.listHistoricalDocuments(source.patientId))[0]).toMatchObject({version:1,openingRemainingMinor:160000});
+    const saved=await documents.correctHistoricalDocument(source.patientId,document.id,change,session);
+    expect((await documents.listHistoricalDocuments(source.patientId))[0]).toMatchObject({version:2,openingPrincipalMinor:10000,openingCollectedMinor:20000,openingRemainingMinor:0,accountDueMinor:-10000});
+    expect(await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1",[source.patientId])).toEqual(originalReceipts);
+    expect(await counts(source.patientId)).toMatchObject({invoices:0,payments:1,documents:1,items:3});
+    expect(await documents.correctHistoricalDocument(source.patientId,document.id,change,session)).toEqual({...saved,replayed:true});
+    expect((await schedules.listDebtRepayments(source.patientId,"2026-10-14"))[0]).toMatchObject({status:"cancelled",remainingMinor:0});
+  });
+  it("reopens a cleared historical opening with the reviewed date and a new schedule version",async()=>{
+    const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);
+    const cleared=await documents.correctHistoricalDocument(source.patientId,document.id,await correction(document,"300000"),session);
+    const input=await correction(cleared.document,"120000");
+    const saved=await documents.correctHistoricalDocument(source.patientId,document.id,input,session);
+    expect(saved.document).toMatchObject({version:3,remainingMinor:180000,repayment:{version:3}});
+    expect(await q("SELECT amount_minor::text,as_of_date::text FROM patient_opening_balances WHERE patient_id=$1",[source.patientId])).toEqual([{amount_minor:"180000",as_of_date:source.historicalAsOf}]);
+    expect(await counts(source.patientId)).toMatchObject({invoices:0,payments:0,documents:1,items:3,openings:1});
   });
   it("different concurrent corrections serialize and the stale version cannot append a second revision",async()=>{
     const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);

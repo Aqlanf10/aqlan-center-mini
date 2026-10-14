@@ -112,7 +112,7 @@ export function CollectPaymentModal({
      المفتاح نفسه مفتوحًا لا نلمس إدخال المستخدم مهما أعاد React الرسم. عند
      الإغلاق نصفر الحارس كي يعاد الاقتراح طبيعيًا في الفتح التالي. */
   const initializationKey = `${patientId}:${presetInvoice?.id ?? (presetOpeningCurrency ? `opening-${presetOpeningCurrency}` : presetPlanId ? `plan-${presetPlanId}` : "account")}:${initialCurrency}`;
-  const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey);
+  const money = useMoneyAttempt(`collection:${patientId}`, isOpen, initializationKey,{patientId});
   const initializedSessionRef = useRef<string | null>(null);
   const [initializedFor, setInitializedFor] = useState<string | null>(null);
   const formReady = initializedFor === initializationKey;
@@ -142,7 +142,7 @@ export function CollectPaymentModal({
   const missingForeignTarget = currency !== base && !invoiceId && !planId && !openingCurrency;
 
   const submit = async (retry = false) => {
-    if (busy || (!retry && (!formReady || !amount.trim()))) return;
+    if (busy || !money.ready || (!retry && (!formReady || !amount.trim()))) return;
     if (!retry && missingForeignTarget) {
       setError("التحصيل بالريال السعودي أو الدولار يتطلب اختيار فاتورة أو خطة أو رصيد سابق بنفس العملة.");
       return;
@@ -198,7 +198,8 @@ export function CollectPaymentModal({
 
         <CurrentCollectionGuidance />
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void submit(true)} />
-        <fieldset disabled={!formReady || busy || money.attempt !== null} className="min-w-0">
+        {money.error?<p role="alert" className="mb-3 text-sm text-rose-800">{money.error}</p>:null}
+        <fieldset disabled={!money.ready || !formReady || busy || money.attempt !== null} className="min-w-0">
 
         {contextLabel ? (
           <p className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-navy-900">
@@ -352,7 +353,7 @@ export function CollectPaymentModal({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!formReady || busy || money.attempt !== null || !amount.trim() || missingForeignTarget}
+          disabled={!money.ready || !formReady || busy || money.attempt !== null || !amount.trim() || missingForeignTarget}
           className="w-full rounded-xl bg-brand-orange py-2.5 text-sm font-extrabold text-white disabled:opacity-50"
         >
           {busy ? "جارٍ التسجيل…" : "سجّل الدفعة واطبع السند"}

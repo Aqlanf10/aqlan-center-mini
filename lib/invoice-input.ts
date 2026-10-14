@@ -6,6 +6,7 @@ import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./
 import { invoiceCatalogPrice } from "./invoice-catalog-price";
 
 export type ParsedInvoiceInput = {
+  visitId?:number;
   patientId: number; baseCurrency: Currency; existingPlanId: number | null; items: LinkedInvoiceLineInput[];
   authorityLines: InvoiceLineAuthorityInput[]; discountMinor: number; note: string | null; idempotencyKey: string | null;
 };
@@ -31,6 +32,8 @@ export function parseInvoiceInput(
     ? null : typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : undefined;
   const existingPlanId = selectedId(source.existingPlanId);
   if (existingPlanId === undefined) return { ok: false, message: "الخطة المختارة غير صالحة." };
+  const visitId=selectedId(source.visitId);
+  if(visitId===undefined)return {ok:false,message:"سياق الزيارة يحتاج معرّفًا صريحًا صالحًا."};
 
   const rawItems = Array.isArray(source.items) ? source.items : [];
   if (rawItems.length === 0 || rawItems.length > 40) {
@@ -43,6 +46,7 @@ export function parseInvoiceInput(
   if (idempotencyKey !== null && !INVOICE_IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
     return { ok: false, message: "مفتاح الطلب غير صالح." };
   }
+  if(visitId!==null&&!idempotencyKey)return {ok:false,message:"مفتاح الطلب مطلوب لحفظ رابط الفاتورة بالزيارة وإعادة التحقق منه."};
 
   const items: LinkedInvoiceLineInput[] = [];
   /* (FIN-4) ما تحتاجه سلطة السعر لكل بند: خدمة الدليل، وهل كُتب السعر، وسببه. */
@@ -136,5 +140,5 @@ export function parseInvoiceInput(
   const note = typeof source.note === "string" && source.note.trim()
     ? source.note.trim().slice(0, 300) : null;
 
-  return { ok: true, patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey };
+  return { ok: true, patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey,...(visitId!==null?{visitId}:{}) };
 }

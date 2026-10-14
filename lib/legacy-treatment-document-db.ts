@@ -100,9 +100,9 @@ export async function previewHistoricalDocument(patientId:number,source:Record<s
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
 }
 
-async function writeOpening(client:DbClient,input:{patientId:number;currency:Currency;after:number;asOf:string;reason:string;session:SessionPayload;prior:Awaited<ReturnType<typeof openingEvidence>>;addOnly:boolean}){
+async function writeOpening(client:DbClient,input:{patientId:number;currency:Currency;after:number;asOf:string;reason:string;session:SessionPayload;prior:Awaited<ReturnType<typeof openingEvidence>>;addOnly:boolean;allowCredit?:boolean}){
   const {prior}=input;const before=prior.opening;
-  if(!Number.isSafeInteger(input.after)||input.after<0||input.after<prior.position.settledMinor)bad("المتبقي المصحّح لا يغطي التحصيل المثبت؛ راجع السندات قبل تعديل أصل الدين.","conflict");
+  if(!Number.isSafeInteger(input.after)||input.after<0||!input.allowCredit&&input.after<prior.position.settledMinor)bad("المتبقي المصحّح لا يغطي التحصيل المثبت؛ راجع السندات قبل تعديل أصل الدين.","conflict");
   if(input.after===(before?.amountMinor??0)&&(!before||input.asOf===before.asOfDate))return null;
   const historyId=input.after===0&&before?await clearPatientOpeningBalanceInTx(client,input.patientId,input.session.username,input.reason,input.currency,before)
     :(await setPatientOpeningBalanceInTx(client,{patientId:input.patientId,currency:input.currency,amountMinor:input.after,asOfDate:input.asOf,note:before?.note??input.reason,
@@ -186,20 +186,19 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
     const input=parsed.value;const prior=await openingEvidence(client,patientId,current.currency);
     if((prior.sourceHash??debtRequestHash(null))!==input.expectedSourceHash||prior.scheduleVersion!==input.repaymentVersion)bad("تغيّر الرصيد أو جدول السداد منذ القراءة.","stale");
     const after=prior.position.principalMinor-current.remainingMinor+input.remainingMinor;
-    const delta=input.remainingMinor-current.remainingMinor;
-    if((await debtAccountDue(client,patientId,current.currency)).due+delta<0)bad("التصحيح سيخفض أصل الدين دون التسويات المثبتة؛ راجع السندات أولًا.","conflict");
-    if(after-prior.position.settledMinor!==input.repaymentRemainingMinor)bad("جدول السداد لا يطابق المتبقي بعد التصحيح.","stale");
+    if(Math.max(0,after-prior.position.settledMinor)!==input.repaymentRemainingMinor)bad("جدول السداد لا يطابق المتبقي بعد التصحيح.","stale");
     await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
     await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client);
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
     const reason=`تصحيح الاتفاق التاريخي #${documentId}: ${input.reason}`.slice(0,300);
-    const openingHistoryId=await writeOpening(client,{patientId,currency:current.currency,after,asOf:prior.opening?.asOfDate??input.historicalAsOf,prior,reason,session,addOnly:false});
+    const openingHistoryId=await writeOpening(client,{patientId,currency:current.currency,after,asOf:prior.opening?.asOfDate??input.historicalAsOf,prior,reason,session,addOnly:false,allowCredit:true});
     const repayment=await writeTerms(client,{...input,patientId,currency:current.currency},`historical-document:${documentId}:v${current.version+1}`,reason,session);
     const allocations=allocateHistoricalDiscount(input.prices,input.discountMinor);
     const lines=current.lines.map((line,index)=>({...line,unitPriceMinor:input.prices[index],...allocations[index]}));
     await insertRevision(client,{...input,documentId,version:current.version+1,lines,reason:input.reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.correct",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
-      details:{documentId,version:current.version+1,reason:input.reason,before:current,after:{...input,lines},openingHistoryId,receiptsPreserved:true,clinicalIdentitiesPreserved:true}});
+      details:{documentId,version:current.version+1,reason:input.reason,before:current,after:{...input,lines},openingHistoryId,receiptsPreserved:true,clinicalIdentitiesPreserved:true,
+        accountCreditMinor:Math.max(0,-(await debtAccountDue(client,patientId,current.currency)).due),cashMovement:0}});
     await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,documentId,patientId,current.version+1);await client.query("COMMIT");return {document:receipt!,replayed:false};
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
 }
@@ -212,7 +211,7 @@ export async function listHistoricalDocuments(patientId:number){
       // Historical facts stay readable after an independent account correction.
       // Mutation paths still require exact ownership under their write locks.
       const opening=await openingEvidence(client,patientId,document.currency,false);const history=(await client.query("SELECT version,reason,created_by,created_at::text,total_minor::text,discount_minor::text,previously_paid_minor::text,remaining_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[id])).rows;
-      documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,
+      documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingPrincipalMinor:opening.position.principalMinor,openingCollectedMinor:opening.position.settledMinor,openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,
         correctionAvailable:opening.owned,correctionMessage:opening.owned?null:LEGACY_TREATMENT_MESSAGE.opening_not_owned,history});}
     await client.query("COMMIT");return documents;
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}

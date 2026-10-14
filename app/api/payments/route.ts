@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPayment, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment, recordReversedInstallmentRecovery } from "@/lib/db";
+import { getPayment, getPaymentByIdempotencyKey, getPlan, getSettings, isPlanFundedByAgreement, listPaymentsByDate, recordAudit, recordPayment, recordPlanInstallment, recordReversedInstallmentRecovery } from "@/lib/db";
 import { parseRecoveryIntent } from "@/lib/reversed-installment-recovery";
 import { isCurrency, parseAmount, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
         };
         return NextResponse.json({ reason: result.reason, message: messages[result.reason ?? ""] ?? "تعذّرت إعادة تحصيل القسط. راجع الحساب قبل المحاولة." }, { status: result.reason === "invalid_recovery_request" ? 400 : 409 });
       }
-      return NextResponse.json(result.payment, { status: result.replayed ? 200 : 201 });
+      return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch {
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
@@ -160,7 +160,9 @@ export async function POST(request: Request) {
   const settings = await getSettings();
   // (TD-05) الأساس دستوري من الكود — والإعدادات لأسعار الصرف.
   const base = CLINIC_BASE_CURRENCY;
-  const exchangeRate = rateFromSettings(settings, currency, base);
+  const savedPayment=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
+  const exchangeRate = savedPayment?.patientId===patientId&&savedPayment.createdBy===session.username&&savedPayment.currency===currency
+    ?savedPayment.exchangeRate:rateFromSettings(settings, currency, base);
   if (exchangeRate === null) {
     return NextResponse.json(
       { message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." },
@@ -197,7 +199,7 @@ export async function POST(request: Request) {
           }
           // (TD-06) سطر التدقيق يُكتب داخل recordPlanInstallment في معاملة السند نفسها.
           const payment = await getPayment(result.paymentId);
-          return NextResponse.json(payment, { status: result.replayed ? 200 : 201 });
+          return NextResponse.json({ ...payment, idempotencyKey }, { status: result.replayed ? 200 : 201 });
         }
       }
     } catch {
@@ -317,7 +319,7 @@ export async function POST(request: Request) {
       });
     }
     // replay = نفس العملية المالية التي نجحت قبل قليل، فيُعاد السند نفسه بلا 201.
-    return NextResponse.json(payment, { status: replayed ? 200 : 201 });
+    return NextResponse.json({ ...payment, idempotencyKey }, { status: replayed ? 200 : 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة." }, { status: 500 });
   }

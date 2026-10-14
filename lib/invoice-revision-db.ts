@@ -42,7 +42,7 @@ async function contextInTx(client: DbClient, invoiceId: number) {
       WHERE a.patient_id=$1 AND a.invoice_id=$2`, [invoice.patientId,invoice.id]);
   const accountDueMinor = (await debtAccountDue(client,invoice.patientId,invoice.baseCurrency)).due;
   const facts = { invoice, work, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
-    accountDueMinor, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
+    accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
   return { ...facts, sourceHash: debtRequestHash(facts), schedule, target };
 }
 

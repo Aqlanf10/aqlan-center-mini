@@ -43,7 +43,7 @@ function itemsFingerprint(items: readonly LinkedInvoiceLineInput[]): string {
 export async function validateInvoiceTemplateInTransaction(client: DbClient, input: {
   templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
   idempotencyKey: string | null; requestHash: string | null;
-  patientId: number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
+  patientId: number;visitId?:number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
   createdBy: string;
 }): Promise<void> {
   const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
@@ -96,7 +96,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
   const current = parseInvoiceCommand(authority.source, services, new Set(doctors.map((doctor) => doctor.id)), settings, true);
   if (!current.ok || Boolean(current.template) !== usesTemplate || invoiceCommandFingerprint(current) !== authority.fingerprint
     || current.patientId !== input.patientId || current.baseCurrency !== input.baseCurrency
-    || current.existingPlanId !== (input.existingPlanId ?? null) || current.discountMinor !== input.discountMinor
+    || current.existingPlanId !== (input.existingPlanId ?? null) || (current.visitId??null)!==(input.visitId??null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
   const pricing = checkInvoiceAuthority({

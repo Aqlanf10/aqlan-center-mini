@@ -61,11 +61,12 @@ export async function POST(request: Request) {
     && Number.isInteger(Number(source.patientId)) && Number(source.patientId) > 0) {
     try {
       const recovered = await recoverLinkedInvoice({ patientId: Number(source.patientId), idempotencyKey: source.idempotencyKey.trim(),
-        requestHash: templateIntent ? invoiceTemplateRequestFingerprint(source, session) : invoiceCatalogRequestFingerprint(source, session), createdBy: session.username, session });
+        requestHash: templateIntent ? invoiceTemplateRequestFingerprint(source, session) : invoiceCatalogRequestFingerprint(source, session), createdBy: session.username, session,...(typeof source.visitId==="number"?{visitId:source.visitId}:{}) });
       if (recovered && !recovered.ok) return NextResponse.json({ code: recovered.reason,
         message: recovered.reason === "no_patient" ? "المريض غير موجود." : INVOICE_LINKAGE_MESSAGE[recovered.reason],
       }, { status: recovered.reason === "no_patient" ? 404 : linkageRefusalStatus(recovered.reason) });
       if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links },
+        ...(typeof source.visitId==="number"?{visitId:recovered.visitId}:{}),
         ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(recovered.invoice.patientId,recovered.invoice.id)} : {}), replayed: true }, { status: 200 });
     } catch (error) {
       if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
@@ -98,7 +99,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await createLinkedInvoice({
-      patientId, baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      patientId,...(parsed.visitId!==undefined?{visitId:parsed.visitId}:{}), baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
       ...(parsed.template ? { templateAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
     }
     return NextResponse.json(
-      { ...result.invoice, clinical: { planId: result.planId, links: result.links },
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links },...(result.visitId!==undefined?{visitId:result.visitId}:{}),
         ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(patientId,result.invoice.id)} : {}), replayed: result.replayed },
       { status: result.replayed ? 200 : 201 },
     );

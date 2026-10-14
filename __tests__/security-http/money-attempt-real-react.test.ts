@@ -20,14 +20,15 @@ async function open() {
   const context = await browser.newContext();
   await context.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.origin !== "http://money.test") throw new Error("Unexpected external request");
+    if (url.origin !== "http://127.0.0.1:39877") throw new Error("Unexpected external request");
     if (url.pathname === "/fixture.js") return route.fulfill({ contentType: "text/javascript", body: script });
     if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<!doctype html><meta charset="utf-8"><div id="root"></div><script src="/fixture.js"></script>' });
     await route.abort();
   });
   const page = await context.newPage();
-  await page.goto("http://money.test/");
+  await page.goto("http://127.0.0.1:39877/");
   await page.getByRole("dialog").waitFor();
+  expect(await page.evaluate(()=>({secure:window.isSecureContext,subtle:typeof crypto.subtle?.digest==="function"}))).toEqual({secure:true,subtle:true});
   return { page, context };
 }
 async function submit(page: Page) {
@@ -57,7 +58,7 @@ describe("DOT-PF-01 real forms", () => {
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(2);
       const requests = (await snapshot(f.page)).requests;
       expect(requests[1]).toEqual(requests[0]);
-      await f.page.evaluate(() => window.__moneyFixture.reply(1, '{"id":701}', 200));
+      await f.page.evaluate(() => window.__moneyFixture.replyValid(1));
       await expect.poll(async () => (await snapshot(f.page)).successes).toEqual([{ patientId: 101, id: 701 }]);
     } finally { await f.context.close(); }
   });
@@ -87,7 +88,7 @@ describe("DOT-PF-01 real forms", () => {
     const f = await open();
     try {
       await submit(f.page); await f.page.locator(change).click();
-      await f.page.evaluate(() => window.__moneyFixture.reply(0, '{"id":701}'));
+      await f.page.evaluate(() => window.__moneyFixture.replyValid(0));
       // Allow the promise + React updates to drain, without elapsed-time sleeps.
       await f.page.evaluate(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
       expect((await snapshot(f.page)).successes).toEqual([]);
@@ -101,7 +102,7 @@ describe("DOT-PF-01 real forms", () => {
       await f.page.getByLabel("المبلغ", { exact: true }).fill("500");
       await f.page.getByRole("button", { name: "سجّل الدفعة واطبع السند" }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(1);
-      await f.page.evaluate(() => window.__moneyFixture.reply(0, '{"id":701}'));
+      await f.page.evaluate(() => window.__moneyFixture.replyValid(0));
       await expect.poll(async () => (await snapshot(f.page)).successes.length).toBe(1);
       await f.page.getByRole("dialog").waitFor({ state: "hidden" });
       await f.page.locator("#open").click(); await submit(f.page);
@@ -154,7 +155,7 @@ describe("DOT-PF-01 real forms", () => {
       await retry(f.page).click();
       await expect.poll(async () => (await snapshot(f.page)).requests.length).toBe(2);
       const { requests } = await snapshot(f.page); expect(requests[1]).toEqual(requests[0]);
-      await f.page.evaluate(() => window.__moneyFixture.reply(1, JSON.stringify({ reversal: { id: 801, receiptNumber: "SYN-R" }, replacement: { id: 802, receiptNumber: "SYN-P2" } }), 200));
+      await f.page.evaluate(() => window.__moneyFixture.replyValid(1,{reversalId:801,replacementId:802}));
       await expect.poll(async () => (await snapshot(f.page)).successes).toEqual([{ patientId: 101, id: 802 }]);
     } finally { await f.context.close(); }
   });
