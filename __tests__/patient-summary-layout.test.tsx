@@ -41,7 +41,7 @@ function before(html: string, first: string, second: string) {
   expect(html.indexOf(second)).toBeGreaterThan(html.indexOf(first));
 }
 
-describe("restored patient Summary presentation", () => {
+describe("reference patient Summary presentation", () => {
   it("retains the original compact identity and actions with complete warnings and unknown-state feedback", () => {
     const props = {
       patientId: 91, patientName: "مريض اصطناعي", patientPhone: null, fallbackAlert: null,
@@ -68,19 +68,17 @@ describe("restored patient Summary presentation", () => {
     cockpit.unavailable = false;
   });
 
-  it("restores visible intake/card/portal before current and planned work without hiding safety", () => {
+  it("places operational work first while keeping safety visible and administrative utilities in a native disclosure", () => {
     const html = render();
     before(html, "تحذير يحتاج المراجعة", 'data-testid="summary-current-work"');
-    before(html, "تحذير يحتاج المراجعة", 'data-testid="intake-history"');
+    before(html, 'data-testid="summary-current-work"', "الجلسات المخطَّطة (1)");
+    before(html, "الجلسات المخطَّطة (1)", 'data-testid="summary-history-details"');
+    before(html, 'data-testid="summary-history-details"', 'data-testid="intake-history"');
     before(html, 'data-testid="intake-history"', 'href="/print/patient-card/91"');
     before(html, 'href="/print/patient-card/91"', 'data-testid="portal-invite"');
-    before(html, 'data-testid="portal-invite"', 'data-testid="summary-open-ortho"');
-    before(html, 'data-testid="summary-open-ortho"', 'data-testid="summary-current-work"');
-    before(html, 'data-testid="summary-current-work"', "الجلسات المخطَّطة (1)");
-    before(html, "الجلسات المخطَّطة (1)", 'data-testid="timeline"');
-    expect(html).toContain('href="/print/patient-card/91"');
-    expect(html).toContain('data-testid="portal-invite"');
-    expect(html).not.toContain('data-testid="summary-administrative-details"');
+    before(html, 'data-testid="portal-invite"', 'data-testid="timeline"');
+    expect(html).toContain('data-testid="summary-open-ortho"');
+    expect(html).toContain('<details');
   });
 
   it("retains no-appointment/no-plan states without inventing clinical or financial work", () => {

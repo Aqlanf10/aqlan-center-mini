@@ -219,7 +219,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const contextRequest = useRef(0);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "today" || tab === "treatment" || tab === "account";
+  const compactWorkspace = true; // Consistent compact identity on all five patient tabs.
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
@@ -624,6 +624,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
   return (
     <main className={`${patientPremium.root} mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28`} data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
+      <div className={patientPremium.pageHeading}>
+        <p>ملف المريض — {TABS.find(([key]) => key === tab)?.[1]}</p>
+        <a href="/patients"><Icon name="arrow" className="h-3.5 w-3.5" /> عودة للمرضى</a>
+      </div>
       {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
         patientId={patient.id}
@@ -634,7 +638,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         summary={summary}
         compact={compactWorkspace}
         identity={compactWorkspace ? (
-          <div className="flex min-w-0 items-center gap-2" data-testid="patient-compact-identity">
+          <div className={patientPremium.identity} data-testid="patient-compact-identity">
+            <div className={patientPremium.identityName}>
             {patient.photoDocumentId ? <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
               className="h-8 w-8 shrink-0 rounded-lg object-cover" />
               : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
@@ -647,6 +652,14 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 {copiedLabel === "patientNumber" ? <span role="status" className="text-emerald-700">نُسخ الرقم</span> : null}
               </div>
             </div>
+            </div>
+            <dl className={patientPremium.identityFacts}>
+              <div><dt>الطبيب المسؤول عن الخطة</dt><dd>{primaryPlan?.primaryDoctorName ?? "غير محدد"}</dd></div>
+              <div><dt>رقم الجوال</dt><dd dir="ltr">{patient.phone ? <a href={`tel:${patient.phone}`}>{patient.phone}</a> : "غير مسجل"}</dd></div>
+              <div><dt>العمر</dt><dd>{ageText(age)}</dd></div>
+              <div><dt>الموعد القادم</dt><dd>{summary?.nextAppointment ? `${summary.nextAppointment.date} · ${summary.nextAppointment.time.slice(0, 5)}` : summary ? "لا يوجد موعد" : "غير متاح"}</dd></div>
+              <div><dt>رقم الملف</dt><dd>{patient.patientNumber}</dd></div>
+            </dl>
           </div>
         ) : undefined}
         primaryAction={compactWorkspace && primaryAction ? (
@@ -1118,20 +1131,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
-          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
-          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
-          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
-              patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
-          ) : null}
-          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-          ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1148,6 +1147,23 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onChanged={() => void load()}
             onGoToTab={goTo}
           />
+          <div className={patientPremium.detailsGrid} data-testid="summary-administrative-details">
+          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
+          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
+          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientContactPanel
+              patient={patient}
+              canEdit
+              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            />
+          ) : null}
+          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
+          {!isRestrictedRole(session?.role) ? (
+            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+          ) : null}
+
+          </div>
 
           </div>
         ) : (
@@ -1329,6 +1345,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "account" ? (
         <>
           <PatientPremiumAccountOverview summary={summary} base={base} />
+          <div className={patientPremium.ledger} data-testid="patient-canonical-ledger">
           <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
             setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
           }} accountDetails={<>
@@ -1370,6 +1387,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             planId={clinicalContext.context?.planId} planItemId={clinicalContext.context?.planItemId} clinicalCaseId={clinicalContext.context?.clinicalCaseId} orthoCaseId={clinicalContext.context?.orthoCaseId}
             onOpenClinicalContext={openClinicalContext} /> : null}
           </>} />
+          </div>
 
           <LegacyHistory patientId={patient.id} />
         </>

@@ -1,3 +1,5 @@
+import styles from "./PatientOverview.module.css";
+import { Icon, type IconName } from "../Icon";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import type { WorkflowSummary } from "./SummaryTab";
 
@@ -41,45 +43,32 @@ export function PatientPremiumAccountOverview({
 
   return (
     <section aria-label="الملخص المالي الحالي" data-testid="patient-premium-account-overview"
-      className="mb-4 space-y-4 rounded-2xl border border-sky-100 bg-white p-3 shadow-card sm:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-black text-brand-blue">الملخص المالي للمريض</h2>
-          <p className="mt-1 text-[11px] leading-5 text-slate-600">
-            ملخص حسب العملة من سجل الحساب الحالي؛ الفواتير والدفعات والتصحيحات من سجل الحساب الرسمي أدناه.
-          </p>
-        </div>
-        <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-[11px] font-bold text-orange-800">
-          بدون دمج أرصدة العملات
-        </span>
-      </div>
+      className={styles.metrics}>
       {entries.map(({ currency, row }) => {
         const due = row.balanceMinor;
         const agreementRemaining = row.agreementRemainingMinor;
-        const cards = [
-          { label: "إجمالي الاتفاق المسجل", amount: row.agreedMinor, color: "text-brand-blue", accent: "border-t-brand-blue" },
-          { label: "المسدّد من الاتفاق", amount: row.agreementPaidMinor, color: "text-emerald-700", accent: "border-t-emerald-500" },
-          { label: "المتبقي من الاتفاق", amount: agreementRemaining, color: "text-navy-800", accent: "border-t-sky-400" },
+        const cards: { label: string; amount: number | undefined; tone: string; icon: IconName }[] = [
+          { label: "إجمالي الاتفاق المسجل", amount: row.agreedMinor, tone: "agreed", icon: "clipboard" },
+          { label: "المسدّد من الاتفاق", amount: row.agreementPaidMinor, tone: "paid", icon: "check" },
+          { label: "المتبقي من الاتفاق", amount: agreementRemaining, tone: "remaining", icon: "wallet" },
           { label: due > 0 ? "الرصيد المستحق حالياً" : due < 0 ? "رصيد لصالح المريض" : "الرصيد الحالي",
-            amount: Math.abs(due), color: due > 0 ? "text-orange-700" : "text-emerald-700", accent: "border-t-brand-orange" },
+            amount: Number.isFinite(due) ? Math.abs(due) : undefined, tone: due > 0 ? "due" : "paid", icon: "wallet" },
         ];
         return (
           <div key={currency} className="space-y-2">
-            <h3 className="text-xs font-black text-navy-900">{CURRENCY_LABEL[currency]}</h3>
-            <div className="grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-4" data-testid={`patient-finance-overview-${currency}`}>
+            <h3 className={styles.currency}>{CURRENCY_LABEL[currency]}</h3>
+            <div className={styles.metricGrid} data-testid={`patient-finance-overview-${currency}`}>
               {cards.map((card) => (
-                <div key={card.label} className={`min-w-0 rounded-xl border border-sky-100 border-t-[3px] bg-sky-50/30 p-3 ${card.accent}`}>
-                  <p className="text-[11px] font-bold leading-5 text-slate-600">{card.label}</p>
-                  <p className={`mt-1 break-words text-base font-black tabular-nums [overflow-wrap:anywhere] ${card.color}`}>
-                    {card.amount === undefined ? "غير متاح" : formatMoney(card.amount, currency)}
-                  </p>
+                <div key={card.label} className={styles.metric} data-tone={card.tone}>
+                  <dl><dt>{card.label}</dt><dd>{typeof card.amount === "number" && Number.isFinite(card.amount) ? formatMoney(card.amount, currency) : "غير متاح"}</dd></dl>
+                  <span className={styles.metricIcon} aria-hidden="true"><Icon name={card.icon} className="h-6 w-6" /></span>
                 </div>
               ))}
             </div>
           </div>
         );
       })}
-      <p className="text-[11px] leading-5 text-slate-500">
+      <p className={styles.note}>
         الرصيد الحالي مستقل عن المبلغ المتبقي من اتفاق العلاج؛ لا يُضاف أحدهما إلى الآخر.
       </p>
     </section>

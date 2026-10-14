@@ -1,184 +1,60 @@
-/*
- * AQLAN approved Patient File visual language (October 2026).
- * Scope intentionally begins at patient-premium-root. No global body, app shell,
- * print, overlay, medical status or financial value semantics are overridden.
- * Original blue/orange tokens and Logo component remain authoritative.
- */
-.root {
-  --patient-blue: #3d7ab5;
-  --patient-blue-dark: #24507c;
-  --patient-orange: #f5922e;
-  --patient-outline: #d9e9f8;
-  --patient-surface: rgba(255,255,255,.98);
-  position: relative;
-  /* Keep this page in the app's global stacking order: patient dialogs (z-50)
-   * must cover the fixed header and bottom navigation (z-30).
-   * 'isolation: isolate' here trapped those dialogs under the app shell. */
-  background:
-    radial-gradient(ellipse 64% 250px at 0% 3%, rgba(76,168,224,.10), transparent 70%),
-    radial-gradient(ellipse 38% 250px at 100% 1%, rgba(246,161,68,.08), transparent 75%),
-    linear-gradient(180deg,#f7fbff 0%,#f2f7fd 360px,#f7fafd 100%);
-  border-radius: 22px;
+/* Measured from the approved 1448 × 1024 gallery. Patient scope only. */
+.root { --patient-blue: #0878d2; --patient-blue-dark: #104e89; --patient-orange: #ff921e; --patient-outline: #d5e8fa; width: 100%; max-width: none; color: #174777; background: #eff8ff; padding: 12px 21px 96px; }
+.pageHeading { min-height: 35px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pageHeading p { color: #085ca3; font-size: 17px; font-weight: 700; }
+.pageHeading a { display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 1px solid var(--patient-outline); border-radius: 7px; padding: 8px 12px; color: #077acb; font-size: 11px; }
+.identity { display: flex; align-items: center; gap: 14px; width: 100%; }
+.identityName { display: flex; min-width: 225px; align-items: center; gap: 13px; }
+.identityName > img, .identityName > span { width: 46px; height: 46px; border-radius: 50%; background: #c1e3f8; color: #076bae; box-shadow: none; }
+.identityName h1 { color: #11477e; font-size: 15px; line-height: 1.6; }
+.identityFacts { flex: 1; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0; text-align: center; }
+.identityFacts > div { min-width: 0; padding: 4px 8px; border-inline-start: 1px solid #d0e5fa; }
+.identityFacts dt { font-size: 10px; color: #567fa4; margin-bottom: 6px; }
+.identityFacts dd { font-size: 12px; color: #134b80; font-weight: 700; overflow-wrap: anywhere; }
+.root :global([data-testid="patient-context-strip"]) { padding: 14px 18px 10px; border: 1px solid var(--patient-outline); border-radius: 10px; background: #fff; box-shadow: 0 2px 8px #256fa508; margin-bottom: 10px; }
+.root :global([data-testid="patient-context-strip"] > div:first-child) { gap: 5px; }
+.root :global([data-testid="patient-context-strip"] > div:first-child > div:first-child) { margin-bottom: 8px; }
+.root :global([data-testid="patient-context-strip"] > div:nth-child(2)) { margin-top: 8px; padding-top: 7px; border-top: 1px solid #e5f0fc; }
+.root :global([data-testid="patient-details-panel"]) { border: 1px solid var(--patient-outline); background: white; border-radius: 10px; box-shadow: none; }
+.root :global([data-testid="patient-medical-alert-banner"]) { margin: 8px 0 10px; }
+.root :global([aria-label="أقسام ملف المريض"]) { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0; padding: 0; min-height: 45px; margin-bottom: 10px; overflow: hidden; border: 1px solid var(--patient-outline); border-radius: 9px; box-shadow: 0 2px 7px #125c9b0b; background: white; }
+.root :global([data-testid^="patient-tab-"]) { justify-content: center; min-width: 0; padding: 11px 6px; border-radius: 0; border-inline-end: 1px solid #e0edf9; color: #086ab6; font-size: 13px; }
+.root :global([data-testid^="patient-tab-"][aria-current="page"]) { background: linear-gradient(105deg,#209beb,#0870cd); color: white; border-bottom-color: var(--patient-orange); box-shadow: none; }
+.root :global([aria-label="أقسام العلاج"]) { gap: 3px; flex-wrap: nowrap; }
+.root :global([aria-label="أقسام العلاج"] > button) { flex: 1; justify-content: center; min-height: 33px; min-width: 0; border: 0; border-radius: 5px; padding: 6px 4px; background: white; color: #0863aa; }
+.root :global([aria-label="أقسام العلاج"] > button span) { font-size: 10px; }
+.root :global([aria-label="أقسام العلاج"] > button svg) { display: none; }
+.root :global([data-testid^="patient-subtab-"][aria-current="page"]) { background: #138bdd; color: white; box-shadow: 0 2px 5px #0670b925; }
+.root :global([aria-label="أقسام العلاج"] > button[aria-current="page"] span) { color: white; }
+.detailsGrid { display: grid; gap: 10px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+.detailsGrid > :first-child { grid-column: 1 / -1; }
+.root :global(input:not([type="checkbox"]):not([type="radio"]):not([type="file"])), .root :global(select), .root :global(textarea) { max-width: 100%; border-color: #cee4fb; }
+.root :global(button:focus-visible), .root :global(a:focus-visible), .root :global(summary:focus-visible), .root :global(input:focus-visible), .root :global(select:focus-visible), .root :global(textarea:focus-visible) { outline: 2px solid #dd7d00; outline-offset: 3px; }
+.root :global([data-testid="patient-treatment-overview"] section), .root :global([data-testid="patient-plans-content"] > ul > li), .root :global([data-testid="patient-ortho-workspace"]), .root :global([data-testid="patient-endo"] > section), .root :global([aria-label="زيارة اليوم"] > div), .root :global([aria-label="الفواتير"] > ul > li), .root :global([aria-label="الدفعات"] > ul > li) { border-color: var(--patient-outline); border-radius: 10px; }
+.root :global([data-testid="patient-treatment-overview"] h2), .root :global([data-testid="patient-treatment-overview"] h3) { color: #076fbf; }
+/* Read-only presentation of the canonical ledger: its forms/writers are untouched. */
+.root :global([aria-label="الفواتير"]), .root :global([aria-label="الدفعات"]) { min-width: 0; padding: 14px; border: 1px solid var(--patient-outline); border-radius: 10px; background: white; }
+.root :global([aria-label="الفواتير"] h3), .root :global([aria-label="الدفعات"] h3) { color: #0574cd; border-bottom: 1px solid #e0eefc; padding-bottom: 12px; }
+@media (min-width: 1100px) { .root :global([aria-label="حساب المريض"]) { display: grid; gap: 10px; grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 1250px) { .identityName { min-width: 190px; } .identityFacts > div { padding-inline: 5px; } .identityFacts dt { font-size: 9px; } .identityFacts dd { font-size: 11px; } }
+@media (max-width: 767px) {
+  .root { padding: 10px 10px 110px; }
+  .pageHeading { margin-bottom: 8px; } .pageHeading p { font-size: 15px; }
+  .identity { align-items: stretch; flex-direction: column; gap: 12px; }
+  .identityName { min-width: 0; } .identityFacts { grid-template-columns: repeat(3,minmax(0,1fr)); row-gap: 10px; text-align: start; }
+  .identityFacts > div { padding: 3px 8px; }
+  .identityFacts > div:nth-child(4), .identityFacts > div:nth-child(5) { display: none; }
+  .root :global([data-testid="patient-context-strip"]) { padding: 12px; }
+  .root :global([data-testid^="patient-tab-"]) { flex-direction: column; gap: 5px; padding: 9px 2px; font-size: 10px; white-space: normal; }
+  .root :global([data-testid^="patient-tab-"] > span) { display: none; }
+  .detailsGrid { grid-template-columns: minmax(0,1fr); }
 }
-.root::before {
-  content: "";
-  position: absolute;
-  /* Decorative only. Do not create a negative layer or a local stacking context. */
-  z-index: 0;
-  pointer-events: none;
-  inset: 0 0 auto 0;
-  height: 110px;
-  border-top: 3px solid transparent;
-  border-image: linear-gradient(90deg,var(--patient-blue),#b6dcf3,var(--patient-orange)) 1;
-  border-radius: 20px;
-}
-.root :global([data-testid="patient-context-strip"]) {
-  border-color: var(--patient-outline);
-  background: rgba(255,255,255,.95);
-  box-shadow: 0 2px 10px rgba(26,58,92,.05);
-}
-.root :global([data-testid="patient-details-panel"]) {
-  position: relative;
-  border: 1px solid var(--patient-outline);
-  border-top: 3px solid var(--patient-orange);
-  box-shadow: 0 9px 32px rgba(34,89,139,.06), 0 1px 3px rgba(13,33,55,.04);
-  background: linear-gradient(120deg,#ffffff 0%,#ffffff 62%,#f0f8ff 100%);
-}
-.root :global([data-testid="patient-details-panel"])::after {
-  content: "";
-  position: absolute;
-  width: 135px;
-  height: 7px;
-  inset: 0 0 auto auto;
-  pointer-events: none;
-  background: linear-gradient(90deg,transparent 0%,#72bcec 57%,var(--patient-orange) 100%);
-  border-radius: 0 0 0 100%;
-}
-.root :global([data-testid="patient-details-panel"] h1),
-.root :global([data-testid="patient-compact-identity"] h1) {
-  color: #174b86;
-  line-height: 1.45;
-  letter-spacing: -.015em;
-}
-.root :global([data-testid="patient-details-panel"] button:focus-visible),
-.root :global([aria-label="أقسام ملف المريض"] button:focus-visible),
-.root :global([aria-label="أقسام العلاج"] button:focus-visible) {
-  outline: 2px solid var(--patient-orange);
-  outline-offset: 3px;
-}
-.root :global([aria-label="أقسام ملف المريض"]) {
-  background: linear-gradient(180deg,#fff,#f8fcff);
-  border: 1px solid var(--patient-outline);
-  box-shadow: 0 3px 12px rgba(26,58,92,.045);
-  scrollbar-color: #a9cde8 transparent;
-}
-.root :global([data-testid^="patient-tab-"][aria-current="page"]) {
-  background: linear-gradient(115deg,#1465b1,var(--patient-blue));
-  border-bottom-color: var(--patient-orange);
-  color: white;
-  box-shadow: 0 3px 8px rgba(43,117,182,.14);
-}
-.root :global([aria-label="أقسام العلاج"]) {
-  row-gap: 9px;
-}
-.root :global([data-testid^="patient-subtab-"]) {
-  min-height: 39px;
-  border-radius: 10px;
-  font-weight: 700;
-}
-.root :global([data-testid^="patient-subtab-"][aria-current="page"]) {
-  background: linear-gradient(115deg,#1466b2,var(--patient-blue));
-  box-shadow: 0 3px 9px rgba(43,117,182,.14);
-}
-.root :global([data-testid="patient-executive-summary"]),
-.root :global([data-testid="patient-treatment-overview"]) {
-  color: #174472;
-}
-.root :global([data-testid="summary-current-work"] > div),
-.root :global([data-testid="patient-treatment-overview"] section),
-.root :global([data-testid="patient-treatment-overview"] aside > section),
-.root :global([aria-label="الحساب"]),
-.root :global([aria-label="الجلسات المخطَّطة"]) {
-  background: var(--patient-surface);
-  border-color: var(--patient-outline);
-  border-radius: 16px;
-  box-shadow: 0 4px 15px rgba(26,58,92,.045);
-}
-.root :global([data-testid="summary-current-work"] > div) {
-  border-top-color: var(--patient-blue);
-  transition: box-shadow .16s ease;
-}
-.root :global([data-testid="summary-current-work"] > div:hover) {
-  box-shadow: 0 6px 21px rgba(26,58,92,.075);
-}
-.root :global([data-testid="summary-current-work"] p),
-.root :global([data-testid="patient-treatment-overview"] p) {
-  overflow-wrap: anywhere;
-}
-.root :global([data-testid="patient-treatment-overview"] h2),
-.root :global([data-testid="patient-treatment-overview"] h3),
-.root :global([data-testid="patient-executive-summary"] h3) {
-  color: #205a95;
-}
-.root :global([data-testid="patient-treatment-overview"] [aria-label="مخطط الأسنان الفعلي"]) {
-  box-shadow: 0 8px 20px rgba(26,58,92,.06);
-}
-.root :global([data-testid="patient-plans-content"] > ul > li),
-.root :global([data-testid="patient-ortho-workspace"]),
-.root :global([data-testid="patient-endo"] > section),
-.root :global([aria-label="زيارة اليوم"] > div),
-.root :global([aria-label="الفواتير"] > ul > li),
-.root :global([aria-label="الدفعات"] > ul > li) {
-  border-color: var(--patient-outline);
-  border-radius: 16px;
-}
-.root :global([aria-label="الأشعة والمستندات"] h2),
-.root :global([aria-label="الفواتير"] h3),
-.root :global([aria-label="الدفعات"] h3),
-.root :global([aria-label="خطط العلاج"] h3) {
-  color: #205a95;
-  font-weight: 800;
-}
-.root :global(input:not([type="checkbox"]):not([type="radio"]):not([type="file"])),
-.root :global(select),
-.root :global(textarea) {
-  max-width: 100%;
-  border-color: #d3e4f4;
-}
-.root :global(input:focus-visible),
-.root :global(select:focus-visible),
-.root :global(textarea:focus-visible) {
-  outline: 2px solid #73b9e8;
-  outline-offset: 1px;
-}
-.root :global([data-testid="patient-treatment-overview"] button),
-.root :global([data-testid="patient-executive-summary"] button) {
-  transition: box-shadow .16s ease, border-color .16s ease;
-}
-.root :global([data-testid="patient-treatment-overview"] button:hover),
-.root :global([data-testid="patient-executive-summary"] button:hover) {
-  box-shadow: 0 2px 8px rgba(36,80,124,.08);
-}
-@media (max-width: 640px) {
-  .root { border-radius: 14px; }
-  .root::before { height: 65px; }
-  .root :global([data-testid="patient-details-panel"]) { border-radius: 15px; }
-  .root :global([data-testid="summary-current-work"] > div) { min-width: 0; }
-  .root :global([aria-label="أقسام ملف المريض"]) { scroll-padding-inline: 1rem; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .root :global([data-testid="summary-current-work"] > div),
-  .root :global([data-testid="patient-treatment-overview"] button),
-  .root :global([data-testid="patient-executive-summary"] button) {
-    transition: none;
-  }
-}
-@media print {
-  .root {
-    background: white !important;
-  }
-  .root::before,
-  .root :global([data-testid="patient-details-panel"])::after {
-    display: none;
-  }
-}
+@media print { .root { background: white; padding: 0; } .pageHeading { display: none; } }
+
+.ledger { margin-top: 12px; }
+.ledger > div { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.ledger > div > * { grid-column: 1 / -1; min-width: 0; }
+.ledger > div > :global(section[aria-label="الفواتير"]), .ledger > div > :global(section[aria-label="الدفعات"]) { grid-column: auto; margin: 0; }
+.ledger :global([data-testid="account-canonical-balance"]) { background: #fff; border: 1px solid #d5e8fa; border-inline-start: 4px solid #ff962c; border-radius: 10px; padding: 16px; text-align: start; margin: 0; }
+.ledger :global([data-testid="account-treatment-details"]) { background: white; border-color: #d5e8fa; margin: 0; }
+@media (max-width: 767px) { .ledger > div { grid-template-columns: minmax(0,1fr); } }
