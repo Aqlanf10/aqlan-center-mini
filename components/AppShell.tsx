@@ -100,15 +100,17 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
 
   const bare = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
+  const badgeRole = session?.role;
   const loadBadges = useCallback(async () => {
     try {
       const [requests, lab, messages] = await Promise.all([
-        fetch("/api/booking-requests?status=new", { cache: "no-store" }),
+        badgeRole === "admin" || badgeRole === "reception"
+          ? fetch("/api/booking-requests?status=new", { cache: "no-store" }) : Promise.resolve(null),
         fetch("/api/lab?summary=1", { cache: "no-store"}),
         fetch("/api/messages?unread=1", { cache: "no-store" }),
       ]);
       const next = { requests: 0, lab: 0, messages: 0, urgentMessages: 0 };
-      if (requests.ok) next.requests = ((await requests.json()) as unknown[]).length;
+      if (requests?.ok) next.requests = ((await requests.json()) as unknown[]).length;
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
       if (messages.ok) {
         const payload = (await messages.json()) as { unread?: number; urgent?: number };
@@ -132,7 +134,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
     } catch {
       // العدّادات تبقى على آخر قيمة
     }
-  }, []);
+  }, [badgeRole]);
 
   // تاريخ المركز وساعته من توقيت الخادم المحسوم، لا من توقيت جهاز المشاهد.
   useEffect(() => {

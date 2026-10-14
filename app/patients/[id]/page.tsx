@@ -48,6 +48,9 @@ import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
+import { PatientIdentityOverview } from "@/components/patient/PatientIdentityOverview";
+import profileStyles from "@/components/patient/PatientProfile.module.css";
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "@/components/patient/usePatientDraftGuard";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
@@ -226,6 +229,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const plansLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const accountLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const uiLeaveGuards = useRef(new Map<symbol, { guard: () => boolean; owner: typeof alertOwner }>());
+  const trackUiGuard = useCallback((guard: () => boolean) => {
+    const token = Symbol("patient-ui-draft");
+    if (alertOwner.active) uiLeaveGuards.current.set(token, { guard, owner: alertOwner });
+    return () => { uiLeaveGuards.current.delete(token); };
+  }, [alertOwner]);
   const treatmentEntrySequence = useRef(0);
   const [treatmentEntryRequest, setTreatmentEntryRequest] = useState<{ owner: typeof alertOwner; key: number } | null>(null);
   const trackAccountGuard = useCallback((guard: () => boolean) => {
@@ -256,6 +265,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   useEffect(() => {
     const controller = createPatientNavigation(window, {
       canLeave: () => {
+        for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return false;
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const account = accountLeaveGuard.current;
         if (account?.owner.active && !account.guard()) return false;
@@ -314,6 +324,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     onOpenAccount: summary?.canSeeFinancial ? (context: ClinicalNavigationContext) => openClinicalContext(context, "account") : undefined,
   };
   const [editing, setEditing] = useState(false);
+  const [summaryView, setSummaryView] = useState<"overview" | "identity" | "medical">("overview");
+  const showSummaryView = (view: typeof summaryView) => {
+    for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return;
+    setSummaryView(view);
+  };
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async (workflowOnly = false) => {
@@ -897,7 +912,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-emerald-800 hover:bg-emerald-50">
                   📋 إرشادات العناية بعد العلاج
                 </button>
-                <button type="button" onClick={() => setEditing((open) => !open)}
+                <button type="button" onClick={() => { if (editing) for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return; setEditing((open) => !open); }}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
                   ✏️ تعديل بيانات الملف
                 </button>
@@ -1044,7 +1059,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : null}
 
       {editing ? (
-        <PatientEditor
+        <PatientEditor onNavigationGuardChange={trackUiGuard}
           patient={patient}
           onSaved={(medicalAlert) => {
             if (!confirmPatientAlert(medicalAlert)) return;
@@ -1131,6 +1146,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
+          {!isRestrictedRole(session?.role) ? <nav aria-label="تفاصيل الملخص" className={patientPremium.summaryViews}>
+            {([ ["overview","ملخص الرحلة"], ["identity","البيانات الشخصية"], ["medical","التاريخ الطبي"] ] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={summaryView === value} onClick={() => showSummaryView(value)}>{label}</button>)}
+          </nav> : null}
+          <div hidden={summaryView !== "overview"}>
           <SummaryTab
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
@@ -1147,20 +1166,24 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onChanged={() => void load()}
             onGoToTab={goTo}
           />
+          </div>
+          <div hidden={summaryView !== "identity"}>
+            {!isRestrictedRole(session?.role) ? <PatientIdentityOverview patient={patient} onEdit={() => setEditing(true)} /> : null}
+          </div>
           <div className={patientPremium.detailsGrid} data-testid="summary-administrative-details">
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
-          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
+          {!isRestrictedRole(session?.role) ? <div hidden={summaryView === "identity"} className={patientPremium.medicalSection}><MedicalHistoryPanel patientId={patient.id} onNavigationGuardChange={trackUiGuard} /></div> : null}
           {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
           {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
+            <div hidden={summaryView === "medical"}><PatientContactPanel onNavigationGuardChange={trackUiGuard}
               patient={patient}
               canEdit
               onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
+            /></div>
           ) : null}
           {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
           {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
+            <div hidden={summaryView === "medical"}><PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} /></div>
           ) : null}
 
           </div>
@@ -1295,7 +1318,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "referrals" && (
             <section aria-label="الإحالات إلى الأخصائيين">
-              <PatientReferrals patientId={patient.id} canIssue={session?.role === "doctor" || admin}
+              <PatientReferrals onNavigationGuardChange={trackUiGuard} patientId={patient.id} canIssue={session?.role === "doctor" || admin}
                 appointments={file?.appointments ?? []} />
             </section>
           )}
@@ -1304,7 +1327,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <section aria-label="المستهلكات والمواد المنصرفة">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
                 <h3 className="mb-3 text-sm font-extrabold text-navy-900">📦 المستهلكات والمواد المنصرفة للمريض</h3>
-                <PatientMaterials
+                <PatientMaterials onNavigationGuardChange={trackUiGuard}
                   patientId={patient.id}
                   visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
                 />
@@ -1402,7 +1425,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 </span>
               ) : null}
             </div>
-            <PatientDocuments
+            <PatientDocuments onNavigationGuardChange={trackUiGuard}
               patientId={patient.id}
               patientName={patient.fullName}
               patientPhone={patient.phone}
@@ -1678,11 +1701,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 }
 
 function PatientEditor({
+  onNavigationGuardChange,
   patient,
   onSaved,
   onError,
 }: {
   patient: Patient;
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   onSaved: (medicalAlert: string | null) => void;
   onError: (message: string | null) => void;
 }) {
@@ -1703,6 +1728,8 @@ function PatientEditor({
     referredBy: patient.referredBy ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const [original] = useState(() => JSON.stringify(form));
+  usePatientDraftGuard(JSON.stringify(form) !== original, saving, onNavigationGuardChange);
   /* (P3-8ب) خيارات «من أين جاء» من الإعداد — والقيمة المحفوظة تبقى خيارًا وإن حُذفت
      من القائمة لاحقًا، فلا يُمحى مصدرٌ قديم بمجرد فتح المحرّر. */
   const sourceList = useSetting("patients.referral_sources");
@@ -1752,9 +1779,10 @@ function PatientEditor({
   };
 
   return (
-    <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4 shadow-sm" aria-label="تعديل البيانات">
+    <section className={`mb-4 rounded-xl border border-sky-200 bg-white p-4 ${profileStyles.editor}`} aria-label="تعديل البيانات">
       <h2 className="mb-3 text-sm font-extrabold text-navy-900">تعديل بيانات المريض</h2>
 
+      <fieldset><legend>الهوية والبيانات الأساسية</legend>
       <Field label="الاسم الكامل">
         <input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} className={inputClass} />
       </Field>
@@ -1798,6 +1826,7 @@ function PatientEditor({
         </Field>
       </div>
 
+      </fieldset><fieldset><legend>التواصل ووليّ الأمر</legend>
       <div className="flex flex-wrap gap-2">
         <Field label="وليّ الأمر (للأطفال)" className="min-w-[9rem] flex-1">
           <input value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} className={inputClass} />
@@ -1853,6 +1882,7 @@ function PatientEditor({
         <input value={form.address} onChange={(e) => set("address", e.target.value)} className={inputClass} />
       </Field>
 
+      </fieldset><fieldset><legend>التنبيهات الطبية</legend>
       <Field label="تنبيه طبي (حساسية بنج، أمراض مزمنة، أدوية سيولة)">
         <input
           value={form.medicalAlert}
@@ -1887,6 +1917,7 @@ function PatientEditor({
         </div>
       </Field>
 
+      </fieldset><fieldset><legend>ملاحظات الملف</legend>
       <Field label="ملاحظات عامة">
         <textarea
           value={form.note}
@@ -1896,6 +1927,7 @@ function PatientEditor({
         />
       </Field>
 
+      </fieldset>
       <div className="mt-3 flex justify-end gap-2">
         <button
           type="button"

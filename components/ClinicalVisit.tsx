@@ -1,5 +1,7 @@
 "use client";
 
+import patientClinical from "./patient/PatientClinical.module.css";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
@@ -1295,6 +1297,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       ]} />
 
       {orthodonticEntry}
+      <div className={patientClinical.visitColumns}>
+      <div className={patientClinical.visitNotes}><h3>التوثيق السريري للزيارة</h3>
       {orthoFollowUp ? (
         <>
           {visitNotes}
@@ -1350,6 +1354,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           </details>
         </>
       ) : <>{visitReference}{visitNotes}</>}
+      </div>
 
       <section id="visit-procedures" className="mb-4 min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="قائمة عمل الزيارة">
         <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
@@ -1572,6 +1577,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
         </fieldset>
       </section>
+      </div>
 
       {labVisitIsCurrent ? <section aria-label="طلبات المختبر المرتبطة بالزيارة" data-testid="clinical-visit-lab-orders" className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs">
         <h3 className="font-bold text-sky-900">طلبات المختبر المرتبطة بالزيارة</h3>

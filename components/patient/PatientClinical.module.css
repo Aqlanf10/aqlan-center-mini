@@ -1,0 +1,19 @@
+.workspace { min-width: 0; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border: 1px solid #d5e8fa; border-radius: 9px; background: white; }
+.toolbar h2 { color: #0776c9; font-size: 14px; }
+.chartGrid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2.25fr) minmax(0,1.1fr); gap: 10px; align-items: start; }
+:global([data-testid="patient-workspace"]) .visitColumns { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.3fr); gap: 10px; align-items: start; }
+:global([data-testid="patient-workspace"]) .visitNotes { min-width: 0; padding: 12px; border: 1px solid #d5e8fa; border-radius: 10px; background: white; }
+:global([data-testid="patient-workspace"]) .visitNotes > h3 { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid #dcecfb; font-size: 14px; font-weight: 700; color: #0273c8; }
+:global([data-testid="patient-workspace"]) .visitNotes :global(#visit-notes) { grid-template-columns: minmax(0,1fr); margin: 0; }
+:global([data-testid="patient-workspace"]) .visitColumns > section { border-color: #d5e8fa; border-radius: 10px; }
+.serviceWorkspace { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.8fr); gap: 12px; align-items: start; }
+.serviceWorkspace > * { grid-column: 1 / -1; min-width: 0; margin-top: 0; }
+.serviceWorkspace > form { grid-column: 1; border: 1px solid #d5e8fa; background: white; border-radius: 10px; padding: 14px; }
+.serviceWorkspace > form > div { grid-template-columns: minmax(0,1fr); }
+.serviceWorkspace > form label { grid-column: auto; }
+.serviceWorkspace > form ~ div:last-child { grid-column: 2; }
+.serviceWorkspace h3, .serviceWorkspace h4 { color: #0572c7; }
+.serviceWorkspace > :first-child { padding: 13px; border: 1px solid #d5e8fa; border-radius: 10px; background: white; }
+@media (max-width: 1100px) { .chartGrid { grid-template-columns: minmax(0,1fr) minmax(0,2fr); } .chartGrid > :last-child { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; } }
+@media (max-width: 767px) { .chartGrid, :global([data-testid="patient-workspace"]) .visitColumns, .serviceWorkspace { grid-template-columns: minmax(0,1fr); } .chartGrid > :last-child { display: block; } .serviceWorkspace > form, .serviceWorkspace > form ~ div:last-child { grid-column: 1; } }

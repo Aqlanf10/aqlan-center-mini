@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "./patient/usePatientDraftGuard";
 import { useSetting } from "@/components/SettingsProvider";
 import type { Patient } from "@/lib/patient";
 import {
@@ -51,7 +52,8 @@ export function PatientFlagChips({ flags }: { flags: readonly string[] | undefin
   );
 }
 
-export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
+export function PatientContactPanel({ patient, canEdit, onPatientChange, onNavigationGuardChange }: {
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   patient: Patient;
   canEdit: boolean;
   onPatientChange: (patient: Patient) => void;
@@ -63,6 +65,8 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
   const [email, setEmail] = useState(patient.email ?? "");
   const [source, setSource] = useState<ConsentSource>("in_person");
   const [showHistory, setShowHistory] = useState(false);
+
+  usePatientDraftGuard(email !== (patient.email ?? ""), busy, onNavigationGuardChange);
 
   useEffect(() => { setEmail(patient.email ?? ""); }, [patient.email]);
 

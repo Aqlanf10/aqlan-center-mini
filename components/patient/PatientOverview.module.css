@@ -36,3 +36,7 @@
   .metricIcon { width: 26px; height: 30px; } .metricIcon svg { width: 17px; }
   .workGrid, .followUp { grid-template-columns: minmax(0,1fr); }
 }
+
+.currencyChoices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 11px; color: #5c7e9d; }
+.currencyChoices button { padding: 6px 12px; border: 1px solid #cde5fa; border-radius: 6px; color: #076dbc; background: white; font-weight: 700; }
+.currencyChoices button[aria-pressed="true"] { background: #0b80d3; border-color: #0b80d3; color: white; }

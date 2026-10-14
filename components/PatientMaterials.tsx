@@ -1,5 +1,8 @@
 "use client";
 
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "./patient/usePatientDraftGuard";
+import patientClinical from "./patient/PatientClinical.module.css";
+
 import { useCallback, useEffect, useState } from "react";
 import { friendlyDateLong } from "@/lib/reminders";
 import { itemCategoryLabel } from "@/lib/inventory";
@@ -27,10 +30,11 @@ interface MaterialMovement {
 }
 
 export function PatientMaterials({
-  patientId,
+  patientId, onNavigationGuardChange,
   visits = [],
 }: {
   patientId: number;
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   visits?: { id: number; arrivedAt: string }[];
 }) {
   const [consumptions, setConsumptions] = useState<MaterialMovement[]>([]);
@@ -45,6 +49,7 @@ export function PatientMaterials({
   const [qty, setQty] = useState("1");
   const [selectedVisitId, setSelectedVisitId] = useState<number | "">("");
   const [reason, setReason] = useState("");
+  usePatientDraftGuard(Boolean(selectedItemId || reason.trim() || qty !== "1"), busy, onNavigationGuardChange);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +59,7 @@ export function PatientMaterials({
         fetch("/api/inventory", { cache: "no-store" }),
       ]);
 
+      if (!matRes.ok || !invRes.ok) throw new Error("تعذّر التحقق من صلاحية الوصول أو تحميل المستهلكات والمخزون.");
       if (matRes.ok) {
         const data = await matRes.json();
         setConsumptions(Array.isArray(data) ? data : data.movements ?? []);
@@ -65,8 +71,9 @@ export function PatientMaterials({
         setItems(rawItems.filter((i) => i.isActive !== false));
       }
       setError(null);
-    } catch {
-      setError("تعذّر تحميل سجل المستهلكات.");
+    } catch (error) {
+      setConsumptions([]); setItems([]);
+      setError(error instanceof Error ? error.message : "تعذّر تحميل سجل المستهلكات.");
     } finally {
       setLoading(false);
     }
@@ -117,7 +124,7 @@ export function PatientMaterials({
   };
 
   return (
-    <div className="space-y-4">
+    <div className={patientClinical.serviceWorkspace} data-testid="patient-materials-workspace">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-navy-900">المستهلكات والمواد الطبية المصروفة للمريض</h3>
@@ -223,7 +230,7 @@ export function PatientMaterials({
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
           جارٍ التحميل…
         </p>
-      ) : consumptions.length === 0 ? (
+      ) : error ? <button type="button" className="rounded-lg border bg-white p-3 text-sm" onClick={() => void load()}>إعادة تحميل المستهلكات</button> : consumptions.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
           <p className="text-sm font-bold text-slate-600">لا توجد مواد مسجلة مصروفة لهذا المريض بعد</p>
           <p className="mt-1 text-xs text-slate-400">

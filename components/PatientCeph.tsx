@@ -1,5 +1,6 @@
 "use client";
 
+import profileStyles from "./patient/PatientProfile.module.css";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSession } from "./SessionProvider";
@@ -416,33 +417,19 @@ export function PatientCeph({
             </Link>
           </div>
 
-          <div className="mt-2 grid grid-cols-3 sm:grid-cols-4 gap-2 text-center">
-            <div className="rounded-lg bg-white/80 p-1.5 border border-emerald-100">
-              <span className="block text-[10px] text-slate-500 font-bold">العلاقة الفكية ANB</span>
-              <span className="text-xs font-black text-navy-900" dir="ltr">
-                {fmt(latestCompleted.findings.anb)}°
-              </span>
-            </div>
-            <div className="rounded-lg bg-white/80 p-1.5 border border-emerald-100">
-              <span className="block text-[10px] text-slate-500 font-bold">زاوية الفك FMA</span>
-              <span className="text-xs font-black text-navy-900" dir="ltr">
-                {fmt(latestCompleted.findings.fma)}°
-              </span>
-            </div>
-            <div className="rounded-lg bg-white/80 p-1.5 border border-emerald-100">
-              <span className="block text-[10px] text-slate-500 font-bold">علاقة ويتس Wits</span>
-              <span className="text-xs font-black text-navy-900" dir="ltr">
-                {fmt(latestCompleted.findings.wits)} مم
-              </span>
-            </div>
-            <div className="rounded-lg bg-white/80 p-1.5 border border-emerald-100 col-span-3 sm:col-span-1">
-              <span className="block text-[10px] text-slate-500 font-bold">المعايرة</span>
-              <span className="text-[11px] font-bold text-emerald-700">
-                {latestCompleted.mmPerPixel != null
-                  ? `${(1 / latestCompleted.mmPerPixel).toFixed(1)} بكسل/مم`
-                  : "غير معايرة"}
-              </span>
-            </div>
+          <div className={`${profileStyles.columns} mt-3`}>
+            <section className={profileStyles.card}><h3>سياق الدراسة المعتمدة</h3><dl className={`${profileStyles.body} ${profileStyles.facts}`}>
+              <div><dt>المرحلة</dt><dd>{CEPH_DIAGNOSTIC_STAGES[latestCompleted.phase]?.labelAr ?? latestCompleted.phase}</dd></div>
+              <div><dt>التاريخ</dt><dd>{friendlyDateLong((latestCompleted.completedAt ?? latestCompleted.createdAt).slice(0, 10))}</dd></div>
+              <div><dt>اعتمدها</dt><dd>{latestCompleted.completedBy ?? "لم يسجّل"}</dd></div>
+              <div><dt>المعايرة</dt><dd>{latestCompleted.mmPerPixel != null ? `${(1 / latestCompleted.mmPerPixel).toFixed(1)} بكسل/مم` : "غير معايرة"}</dd></div>
+            </dl></section>
+            <section className={profileStyles.card}><h3>مصدر الدراسة</h3><CephSourceImage key={latestCompleted.documentId} documentId={latestCompleted.documentId} /></section>
+            <section className={profileStyles.card}><h3>القياسات المعتمدة</h3><dl className={`${profileStyles.body} ${profileStyles.facts}`}>
+              <div><dt>العلاقة الفكية ANB</dt><dd dir="ltr">{fmt(latestCompleted.findings.anb)}°</dd></div>
+              <div><dt>زاوية الفك FMA</dt><dd dir="ltr">{fmt(latestCompleted.findings.fma)}°</dd></div>
+              <div><dt>علاقة ويتس Wits</dt><dd dir="ltr">{fmt(latestCompleted.findings.wits)} مم</dd></div>
+            </dl><p className="px-3 pb-3 text-xs text-slate-600">القياسات الكاملة والتشخيص الموثّق داخل الدراسة.</p></section>
           </div>
         </div>
       )}
@@ -814,4 +801,13 @@ export function PatientCeph({
       )}
     </div>
   );
+}
+
+function CephSourceImage({ documentId }: { documentId: number }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  return <div className="flex min-h-56 items-center justify-center bg-sky-50 p-3">
+    {failed ? <p role="alert" className="text-center text-xs text-red-800">تعذّر تحميل مصدر الدراسة.<button type="button" className="mx-2 underline" onClick={() => {setFailed(false);setAttempt(n => n + 1);}}>إعادة المحاولة</button></p> :
+      <img key={attempt} src={`/api/documents/${documentId}`} alt="الصورة المرتبطة بالدراسة السيفالومترية المعتمدة" className="max-h-64 w-full object-contain" onError={() => setFailed(true)} />}
+  </div>;
 }

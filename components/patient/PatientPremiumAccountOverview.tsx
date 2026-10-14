@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import styles from "./PatientOverview.module.css";
 import { Icon, type IconName } from "../Icon";
 import { CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
@@ -17,6 +20,7 @@ export function PatientPremiumAccountOverview({
   summary: WorkflowSummary | null;
   base: Currency;
 }) {
+  const [selectedCurrency, setSelectedCurrency] = useState<Currency>(base);
   // Finance values are omitted by the server for users without authority.
   if (!summary?.canSeeFinancial || !summary.financial) return null;
 
@@ -41,9 +45,15 @@ export function PatientPremiumAccountOverview({
     </section>
   );
 
+  const currentCurrency = entries.some(entry => entry.currency === selectedCurrency) ? selectedCurrency : entries[0].currency;
   return (
     <section aria-label="الملخص المالي الحالي" data-testid="patient-premium-account-overview"
       className={styles.metrics}>
+      <div className={styles.currencyChoices} role="group" aria-label="عملات ملخص الحساب">
+        {entries.map(({currency}) => <button key={currency} type="button" aria-pressed={currency === currentCurrency}
+          onClick={() => setSelectedCurrency(currency)}>{CURRENCY_LABEL[currency]}</button>)}
+        {entries.length > 1 ? <span>حساب مستقل لكل عملة</span> : null}
+      </div>
       {entries.map(({ currency, row }) => {
         const due = row.balanceMinor;
         const agreementRemaining = row.agreementRemainingMinor;
@@ -55,8 +65,7 @@ export function PatientPremiumAccountOverview({
             amount: Number.isFinite(due) ? Math.abs(due) : undefined, tone: due > 0 ? "due" : "paid", icon: "wallet" },
         ];
         return (
-          <div key={currency} className="space-y-2">
-            <h3 className={styles.currency}>{CURRENCY_LABEL[currency]}</h3>
+          <div key={currency} hidden={currency !== currentCurrency} aria-label={CURRENCY_LABEL[currency]}>
             <div className={styles.metricGrid} data-testid={`patient-finance-overview-${currency}`}>
               {cards.map((card) => (
                 <div key={card.label} className={styles.metric} data-tone={card.tone}>

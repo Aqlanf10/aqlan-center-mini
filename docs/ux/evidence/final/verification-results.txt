@@ -1,0 +1,188 @@
+# Local verification evidence — synthetic isolated environment
+
+These are excerpts from actual runner logs, not invented results. Earlier failures and their corrections are described in the review. The 93 HTTP/browser cases are a union across the successful reruns; they are not one 93-case invocation.
+
+
+## verified-unit.log
+
+ Test Files  514 passed (514)
+      Tests  9179 passed (9179)
+   Start at  01:07:46
+   Duration  384.22s (transform 24.29s, setup 0ms, import 82.44s, tests 220.36s, environment 65ms)
+
+
+## delivery-unit.log
+
+ Test Files  3 passed (3)
+      Tests  22 passed (22)
+   Start at  01:24:25
+   Duration  1.69s (transform 637ms, setup 0ms, import 823ms, tests 257ms, environment 0ms)
+
+
+## verified-browser.log
+
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > a new refused command retires prior success while preserving the authoritative balance at 390×844 4715ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > a new refused command retires prior success while preserving the authoritative balance at 1280×844 3830ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'malformed-links' at 390×844, bounds uncertainty and fences a late reply 3095ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'hanging-headers' at 390×844, bounds uncertainty and fences a late reply 23927ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'hanging-body' at 390×844, bounds uncertainty and fences a late reply 24986ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'malformed-links' at 1280×844, bounds uncertainty and fences a late reply 4974ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'hanging-headers' at 1280×844, bounds uncertainty and fences a late reply 24193ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > retains the committed command after 'hanging-body' at 1280×844, bounds uncertainty and fences a late reply 23604ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > lost acknowledgement plus catalogue drift retries exactly, clears parent recovery and permits one independent next invoice at 390×844 6026ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > lost acknowledgement plus catalogue drift retries exactly, clears parent recovery and permits one independent next invoice at 1280×844 7533ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > explicit BUSY allows confirmed edit but refuses manual removal, restores the parent command and clears it only on exact success at 390×844 4891ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > explicit BUSY allows confirmed edit but refuses manual removal, restores the parent command and clears it only on exact success at 1280×844 5008ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > requires a fresh preview generation when A returns after B, without reviving the earlier ready A 3128ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > invalidates prior success immediately, blocks a pending/failed save, and recovers only after an explicit successful retry 3464ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > shows refusal without an affirmative creation promise, rejects malformed evidence, and contains a failed request 3611ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > preserves an actionable server price/discount refusal rather than hiding it behind retry 2757ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > does not move a removed row's preview onto its successor at the same index 3464ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > ignores an older delayed response after changing to a financial-only service 1826ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > invalid current values never retain a ready preview or enable save: {"price":"abc","quantity":"1","currency":"YER"} 2311ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > invalid current values never retain a ready preview or enable save: {"price":"","quantity":"1","currency":"SAR"} 2222ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > invalid current values never retain a ready preview or enable save: {"price":"","quantity":"1","currency":"USD"} 2168ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > invalid current values never retain a ready preview or enable save: {"price":"1500000","quantity":"1000","currency":"YER"} 3414ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > uses an explicit provider choice for both preview and save, then clears it on a different service 3100ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > failure chart reads show unknown selectable anatomy; surfaces reset on tooth change and focus remains in the dialog 1397ms
+ ✓ __tests__/security-http/invoice-preview-state-journey.test.ts > invoice form preview safety and shared chart interruption journeys > malformed chart reads show unknown selectable anatomy; surfaces reset on tooth change and focus remains in the dialog 1775ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1448px 23152ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1280px 24099ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 390px 25659ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1448px 3047ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1280px 3188ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 390px 1955ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps doctorA authority from the real server 1741ms
+ × __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps reception authority from the real server 1556ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1448px 2308ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1280px 2741ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 390px 2253ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > denies an unrelated doctor's patient/documents reads 21ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > keeps compact Summary identity, operational order, editable details, safety, drafts and More dismissal at 1280px 2159ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > keeps compact Summary identity, operational order, editable details, safety, drafts and More dismissal at 390px 2564ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > opens Summary's Ortho shortcut atomically, persists URL/reload, and accepts legacy aliases 2982ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 1280px 3446ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 390px 2034ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > refuses fabricated mixed-specialty context instead of opening an unrelated Endo editor 1313ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > explicit tab and specialty cancellation preserve the selected workspace and draft at 1280px 2943ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > explicit tab and specialty cancellation preserve the selected workspace and draft at 390px 2768ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > the child's synchronous save guard blocks repeated tab and specialty requests at 1280px 2447ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > the child's synchronous save guard blocks repeated tab and specialty requests at 390px 1281ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > legacy visit links reach the existing page while login and patient API authorization remain intact 1807ms
+ ↓ __tests__/security-http/patient-navigation-ui-journey.test.ts > compact patient context on the actual built RTL workspace > keeps identity, complete warnings and actions reachable at 1280px without duplicate controls
+ ↓ __tests__/security-http/patient-navigation-ui-journey.test.ts > compact patient context on the actual built RTL workspace > keeps identity, complete warnings and actions reachable at 390px without duplicate controls
+ ✓ __tests__/security-http/ortho-records-case-ui.test.ts > exact-case orthodontic record slots on the built RTL patient page > keeps historical/unassigned records explicit and captures the exact-case grid at 1280 4212ms
+ ✓ __tests__/security-http/ortho-records-case-ui.test.ts > exact-case orthodontic record slots on the built RTL patient page > keeps historical/unassigned records explicit and captures the exact-case grid at 390 3618ms
+ ✓ __tests__/security-http/ortho-records-case-ui.test.ts > exact-case orthodontic record slots on the built RTL patient page > shows an unavailable read, retries to real links, and leaves the stored records unchanged 1484ms
+ ✓ __tests__/security-http/invoice-first-ui-journey.test.ts > INV-LINK D — invoice-first journey > reception: preview says a new intake case will be created; a double click saves one invoice 3561ms
+ ✓ __tests__/security-http/invoice-first-ui-journey.test.ts > INV-LINK D — invoice-first journey > doctor: the next action is the clinical assessment and the ortho tab shows the pending case 3150ms
+ ✓ __tests__/security-http/invoice-first-ui-journey.test.ts > INV-LINK D — invoice-first journey > cancelled before intake: the rendered hint promises only a clinical bridge and preserves financial review 2513ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) patient flags and email via PATCH /api/patients/[id] > saves listed flags and a valid email; refuses an unlisted flag and a bad email in Arabic 44ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) /api/patients/[id]/contact > shows the latest state of every channel even when the audit history is capped at 200 21ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) /api/patients/[id]/contact > reception records a withdrawal; the state and log follow; the messaging route then refuses to send 73ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) /api/patients/[id]/contact > the system-only source and malformed input are refused in Arabic 24ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) /api/patients/[id]/contact > finance roles see nothing; an unrelated doctor cannot read; no doctor records consent 27ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) /api/patients/[id]/contact > does not accept a client-declared reply without a matching inbound message 24ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) PUT /api/patients/[id]/photo > blocks a doctor from changing an owned patient's photo when edit permission is withdrawn 21ms
+ ✓ __tests__/security-http/patient-identity-http.test.ts > (PAT-3) PUT /api/patients/[id]/photo > refuses a document of another patient and finance roles 26ms
+ ✓ __tests__/security-http/medical-history-http.test.ts > (PAT-2) /api/patients/[id]/medical-history and /vitals > reception fills the questionnaire; the file then shows derived alerts and no review due 20ms
+ ✓ __tests__/security-http/medical-history-http.test.ts > (PAT-2) /api/patients/[id]/medical-history and /vitals > records vitals and refuses impossible readings in Arabic 21ms
+ ✓ __tests__/security-http/medical-history-http.test.ts > (PAT-2) /api/patients/[id]/medical-history and /vitals > saves the chosen historical date and alert together without putting the backdated reading first 33ms
+ ✓ __tests__/security-http/medical-history-http.test.ts > (PAT-2) /api/patients/[id]/medical-history and /vitals > allows a doctor to read an owned file but blocks writes when edit permission is removed 36ms
+ ✓ __tests__/security-http/medical-history-http.test.ts > (PAT-2) /api/patients/[id]/medical-history and /vitals > finance roles and an unrelated doctor see nothing medical 32ms
+ Test Files  1 failed | 6 passed (7)
+      Tests  1 failed | 66 passed | 2 skipped (69)
+   Start at  01:06:58
+   Duration  322.80s (transform 476ms, setup 0ms, import 1.14s, tests 315.29s, environment 0ms)
+
+
+## reviewed-browser.log
+
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > keeps compact Summary identity, operational order, editable details, safety, drafts and More dismissal at 1280px 1585ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > keeps compact Summary identity, operational order, editable details, safety, drafts and More dismissal at 390px 1183ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > opens Summary's Ortho shortcut atomically, persists URL/reload, and accepts legacy aliases 1652ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 1280px 1911ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 390px 1727ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > refuses fabricated mixed-specialty context instead of opening an unrelated Endo editor 711ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > explicit tab and specialty cancellation preserve the selected workspace and draft at 1280px 1311ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > explicit tab and specialty cancellation preserve the selected workspace and draft at 390px 1242ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > the child's synchronous save guard blocks repeated tab and specialty requests at 1280px 1130ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > the child's synchronous save guard blocks repeated tab and specialty requests at 390px 1060ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > legacy visit links reach the existing page while login and patient API authorization remain intact 1288ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > compact patient context on the actual built RTL workspace > keeps identity, complete warnings and actions reachable at 1280px without duplicate controls 4987ms
+ ✓ __tests__/security-http/patient-navigation-ui-journey.test.ts > compact patient context on the actual built RTL workspace > keeps identity, complete warnings and actions reachable at 390px without duplicate controls 4014ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > shows full/partial reversal amounts and currency-credit caution without collection at 1280px 1193ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > shows full/partial reversal amounts and currency-credit caution without collection at 390px 1083ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > preserves the ordinary raw status when the server omits the optional projection 805ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed invalid-amount evidence 786ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed foreign-patient evidence 798ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed currency-mismatch evidence 736ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed duplicate-evidence evidence 883ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed conflicting-review evidence 779ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed null projection envelope as absent 876ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed missing-array projection envelope as absent 929ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed unidentified-entry projection envelope as absent 849ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 401 1858ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 403 2062ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 500 1949ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not resurrect a recovery amount after an unreadable ledger reload 1487ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1448px 22666ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1280px 19600ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 390px 16665ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1448px 1685ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1280px 1539ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 390px 1495ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps doctorA authority from the real server 1312ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps reception authority from the real server 1368ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1448px 1617ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1280px 1587ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 390px 1462ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > denies an unrelated doctor's patient/documents reads 32ms
+ ✓ __tests__/security-http/patient-more-menu-ui.test.ts > patient More disclosure on the built application > dismisses once with pointer, touch and keyboard at 390 px / 'rtl' 4509ms
+ ✓ __tests__/security-http/patient-more-menu-ui.test.ts > patient More disclosure on the built application > dismisses once with pointer, touch and keyboard at 390 px / 'ltr' 4796ms
+ ✓ __tests__/security-http/patient-more-menu-ui.test.ts > patient More disclosure on the built application > dismisses once with pointer, touch and keyboard at 1280 px / 'rtl' 5195ms
+ ✓ __tests__/security-http/patient-more-menu-ui.test.ts > patient More disclosure on the built application > dismisses once with pointer, touch and keyboard at 1280 px / 'ltr' 7698ms
+ ✓ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts > actual visit API contract reaches the cockpit > accepts the real shared chair list for a no-visit patient without any command 876ms
+ ✓ __tests__/security-http/patient-cockpit-real-contract-ui.test.ts > actual visit API contract reaches the cockpit > accepts the real shared chair list for a waiting patient without any command 1375ms
+ Test Files  5 passed (5)
+      Tests  46 passed (46)
+   Start at  01:17:27
+   Duration  149.65s (transform 336ms, setup 0ms, import 755ms, tests 145.52s, environment 0ms)
+
+
+## acceptance-browser.log
+
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1448px 35032ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 1280px 36167ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > patient premium real application evidence > captures all 15 reference scenes and real file-preview interaction at 390px 21218ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1448px 2565ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 1280px 2334ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > retains upload draft after refused navigation and preserves preview focus at 390px 2207ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps doctorA authority from the real server 1713ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > keeps reception authority from the real server 1616ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1448px 1788ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 1280px 1654ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > saves a real medical version after protecting its draft at 390px 1669ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > uploads through the original form and keeps only the selected input at 1448px 1737ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > uploads through the original form and keeps only the selected input at 1280px 1772ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > uploads through the original form and keeps only the selected input at 390px 1593ms
+ ✓ __tests__/security-http/patient-premium-visual-ui.test.ts > premium UI authority and draft ownership > denies an unrelated doctor's patient/documents reads 30ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > shows full/partial reversal amounts and currency-credit caution without collection at 1280px 1598ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > shows full/partial reversal amounts and currency-credit caution without collection at 390px 1289ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > preserves the ordinary raw status when the server omits the optional projection 980ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed invalid-amount evidence 806ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed foreign-patient evidence 746ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed currency-mismatch evidence 803ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed duplicate-evidence evidence 786ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > withholds a settled or collectible claim for malformed conflicting-review evidence 831ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed null projection envelope as absent 856ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed missing-array projection envelope as absent 814ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not silently treat a malformed unidentified-entry projection envelope as absent 812ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 401 1838ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 403 1933ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not reuse a successful recovery label while reloading or after HTTP 500 2033ms
+ ✓ __tests__/security-http/patient-invoice-recovery-labels-ui.test.ts > server-evidence invoice settlement labels in the real Account UI > does not resurrect a recovery amount after an unreadable ledger reload 1379ms
+ Test Files  2 passed (2)
+      Tests  30 passed (30)
+   Start at  01:31:41
+   Duration  139.81s (transform 180ms, setup 0ms, import 685ms, tests 134.23s, environment 0ms)

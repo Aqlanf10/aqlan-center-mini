@@ -5,6 +5,9 @@ import {
   ASA_CLASSES, ASA_LABEL, HISTORY_QUESTIONS, SEVERITY_LABEL,
   type Allergy, type Answer, type AsaClass, type DerivedAlert, type Medication, type Severity,
 } from "@/lib/medical-history";
+import styles from "./patient/PatientProfile.module.css";
+import { Modal } from "./Modal";
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "./patient/usePatientDraftGuard";
 import { BLOOD_GROUPS } from "@/lib/patient";
 
 /**
@@ -43,7 +46,7 @@ interface Payload {
 
 const dateText = (iso: string) => new Date(iso).toLocaleDateString("ar-YE-u-nu-latn");
 
-export function MedicalHistoryPanel({ patientId }: { patientId: number }) {
+export function MedicalHistoryPanel({ patientId, onNavigationGuardChange }: { patientId: number; onNavigationGuardChange?: RegisterPatientDraftGuard }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -62,64 +65,54 @@ export function MedicalHistoryPanel({ patientId }: { patientId: number }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  if (error) return <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{error}</p>;
-  if (!data) return null;
+  if (error) return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{error}<button type="button" className="mx-2 underline" onClick={() => void load()}>إعادة المحاولة</button></div>;
+  if (!data) return <p role="status" className="rounded-xl border border-sky-100 bg-white p-3 text-xs text-slate-600">جارٍ تحميل التاريخ الطبي…</p>;
   const { latest, alerts, review, vitals } = data;
   const lastVitals = vitals[0] ?? null;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4" aria-label="التاريخ الطبي">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-extrabold text-navy-900">التاريخ الطبي</h3>
-        <button type="button" onClick={() => setEditing(true)}
-          className="rounded-xl bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white">
+    <section className={styles.workspace} aria-label="التاريخ الطبي">
+      <div className={styles.toolbar}><h2>التاريخ الطبي</h2>
+        <button type="button" onClick={() => setEditing(true)} className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs font-bold">
           {latest ? "تحديث التاريخ الطبي" : "+ تعبئة الاستبيان الطبي"}
         </button>
       </div>
-
-      {review.due ? (
-        <p className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
-          {latest
-            ? `مضى أكثر من ${review.months} أشهر على آخر تحديث (${dateText(latest.recordedAt)}) — راجع التاريخ الطبي مع المريض.`
-            : "لا يوجد استبيان طبي لهذا المريض بعد — عبّئه قبل أي إجراء."}
-        </p>
-      ) : null}
-
-      {alerts.length > 0 ? (
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {alerts.map((alert) => (
-            <span key={alert.label}
-              className={`rounded-lg border px-2 py-0.5 text-[11px] font-extrabold ${alert.severity === "high"
-                ? "border-red-300 bg-red-50 text-red-800" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
-              ⚠ {alert.label}
-            </span>
-          ))}
-        </div>
-      ) : latest ? <p className="mb-2 text-xs font-bold text-emerald-700">لا تنبيهات طبية في آخر استبيان.</p> : null}
-
-      {latest ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">
-          <div><dt className="text-slate-500">ASA</dt><dd className="font-bold">{latest.asaClass ?? "—"}</dd></div>
-          <div><dt className="text-slate-500">فصيلة الدم</dt><dd className="font-bold" dir="ltr">{latest.bloodGroup ?? "—"}</dd></div>
-          <div><dt className="text-slate-500">الأدوية</dt><dd className="font-bold">{latest.medications.map((m) => m.name).join("، ") || "—"}</dd></div>
-          <div><dt className="text-slate-500">آخر تحديث</dt><dd className="font-bold">{dateText(latest.recordedAt)} · {latest.recordedBy}{latest.patientConfirmed ? " · أكّده المريض" : ""}</dd></div>
-        </dl>
-      ) : null}
-
-      {lastVitals ? (
-        <p className="mt-2 text-[11px] font-bold text-slate-600">
-          آخر علامات حيوية ({dateText(lastVitals.recordedAt)}):
-          {lastVitals.bpSystolic ? ` الضغط ${lastVitals.bpSystolic}/${lastVitals.bpDiastolic}` : ""}
-          {lastVitals.pulse ? ` · النبض ${lastVitals.pulse}` : ""}
-          {lastVitals.glucose ? ` · السكر ${lastVitals.glucose}` : ""}
-          {lastVitals.temperature ? ` · الحرارة ${lastVitals.temperature}` : ""}
-          {lastVitals.spo2 ? ` · الأكسجين ${lastVitals.spo2}%` : ""}
-          {lastVitals.weightKg ? ` · الوزن ${lastVitals.weightKg} كغ` : ""}
-        </p>
-      ) : null}
+      <div className={styles.columns}>
+        <section className={styles.card} aria-label="التاريخ الطبي العام"><h3>التاريخ الطبي العام</h3><div className={styles.body}>
+          <dl className={styles.facts}>
+            <div><dt>الحساسية</dt><dd>{latest?.allergies.map(a => `${a.substance} (${SEVERITY_LABEL[a.severity]})`).join("، ") || "لم تسجّل حساسية في الاستبيان"}</dd></div>
+            <div><dt>الأدوية الحالية</dt><dd>{latest?.medications.map(m => [m.name,m.dose].filter(Boolean).join(" — ")).join("، ") || "لم تسجّل أدوية"}</dd></div>
+            <div><dt>تصنيف ASA</dt><dd>{latest?.asaClass ? ASA_LABEL[latest.asaClass] : "لم يسجّل"}</dd></div>
+            {HISTORY_QUESTIONS.filter(q => latest?.answers[q.key] === "yes").map(q => <div key={q.key}><dt>{q.label}</dt><dd>نعم — مسجّل في الاستبيان</dd></div>)}
+          </dl>
+          <p className={styles.warning}>غياب البيان لا يعني سلامة مؤكدة؛ راجع التاريخ الطبي قبل العلاج.</p>
+          {latest?.notes ? <p>{latest.notes}</p> : null}
+        </div></section>
+        <section className={styles.card} aria-label="المؤشرات والعلامات الحيوية"><h3>المؤشرات والعلامات الحيوية</h3><div className={styles.body}>
+          <dl className={styles.facts}>
+            <div><dt>ضغط الدم</dt><dd dir="ltr">{lastVitals?.bpSystolic != null && lastVitals.bpDiastolic != null ? `${lastVitals.bpSystolic}/${lastVitals.bpDiastolic} mmHg` : "لم يسجّل"}</dd></div>
+            <div><dt>النبض</dt><dd>{lastVitals?.pulse != null ? `${lastVitals.pulse} / دقيقة` : "لم يسجّل"}</dd></div>
+            <div><dt>سكر الدم</dt><dd>{lastVitals?.glucose ?? "لم يسجّل"}</dd></div>
+            <div><dt>الحرارة</dt><dd>{lastVitals?.temperature != null ? `${lastVitals.temperature} °C` : "لم تسجّل"}</dd></div>
+            <div><dt>الأكسجين</dt><dd>{lastVitals?.spo2 != null ? `${lastVitals.spo2}%` : "لم يسجّل"}</dd></div>
+            <div><dt>الوزن</dt><dd>{lastVitals?.weightKg != null ? `${lastVitals.weightKg} كغ` : "لم يسجّل"}</dd></div>
+            <div><dt>فصيلة الدم</dt><dd>{latest?.bloodGroup ?? "لم تسجّل"}</dd></div>
+          </dl>
+          {lastVitals ? <p className="mt-3 text-xs text-slate-500">آخر قياس: {dateText(lastVitals.recordedAt)} · {lastVitals.recordedBy}</p> : null}
+        </div></section>
+        <section className={styles.card} aria-label="تنبيهات السلامة"><h3>تنبيهات السلامة</h3><div className={styles.body}>
+          {alerts.map(alert => <p key={alert.label} className={`mb-2 rounded-lg border p-2 font-bold ${alert.severity === "high" ? "border-red-300 bg-red-50 text-red-800" : "border-amber-300 bg-amber-50 text-amber-800"}`}>⚠ {alert.label}</p>)}
+          {!alerts.length && latest ? <p>لا تنبيهات مشتقة من آخر استبيان مسجّل.</p> : null}
+          <dl className={styles.facts}><div><dt>تأكيد المريض</dt><dd>{latest?.patientConfirmed ? "أكّد المريض المعلومات" : "بحاجة لتأكيد"}</dd></div><div><dt>آخر تحديث</dt><dd>{latest ? `${dateText(latest.recordedAt)} · ${latest.recordedBy}` : "لم يسجّل"}</dd></div></dl>
+          {review.due ? <p className={styles.warning}>{latest ? `حان تحديث التاريخ الطبي: مرّ أكثر من ${review.months} أشهر على آخر تحديث.` : "لا يوجد استبيان طبي لهذا المريض بعد — عبّئه قبل أي إجراء."}</p> : null}
+        </div></section>
+      </div>
+      <section className={`${styles.card} ${styles.history}`} aria-label="سجل التاريخ الطبي"><h3>التاريخ الطبي المسجّل</h3>
+        {data.versions.length ? <ul>{data.versions.map(version => <li key={version.id}><span>استبيان طبي #{version.id}</span><time dateTime={version.recordedAt}>{dateText(version.recordedAt)}</time><span>{version.recordedBy}</span></li>)}</ul> : <p className={styles.body}>لا توجد نسخ مسجّلة.</p>}
+      </section>
 
       {editing ? (
-        <HistoryForm patientId={patientId} initial={latest}
+        <HistoryForm patientId={patientId} initial={latest} onNavigationGuardChange={onNavigationGuardChange}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); void load(); }} />
       ) : null}
@@ -127,7 +120,8 @@ export function MedicalHistoryPanel({ patientId }: { patientId: number }) {
   );
 }
 
-function HistoryForm({ patientId, initial, onClose, onSaved }: {
+function HistoryForm({ patientId, initial, onClose, onSaved, onNavigationGuardChange }: {
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   patientId: number;
   initial: HistoryRecord | null;
   onClose: () => void;
@@ -143,7 +137,14 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const draft = JSON.stringify({ answers, allergies, medications, asaClass, bloodGroup, notes, confirmed });
+  const [original] = useState(draft);
+  const dirty = draft !== original;
+  usePatientDraftGuard(dirty, busy, onNavigationGuardChange);
+  const close = () => { if (!busy && (!dirty || window.confirm("تجاهل تعديلات الاستبيان غير المحفوظة؟"))) onClose(); };
+
   async function save() {
+    if (busy) return;
     setBusy(true); setError(null);
     try {
       const response = await fetch(`/api/patients/${patientId}/medical-history`, {
@@ -154,6 +155,7 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setError(payload.message ?? "تعذّر الحفظ."); return; }
       onSaved();
+    } catch { setError("تعذّر الاتصال. بقيت التعديلات في النموذج؛ أعد المحاولة.");
     } finally {
       setBusy(false);
     }
@@ -167,7 +169,7 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4" role="dialog" aria-label="الاستبيان الطبي">
+    <Modal label="الاستبيان الطبي" onClose={close} busy={busy} alignTop>
       <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl">
         <h3 className="mb-3 text-sm font-extrabold text-navy-900">الاستبيان الطبي — نسخة جديدة</h3>
 
@@ -248,9 +250,9 @@ function HistoryForm({ patientId, initial, onClose, onSaved }: {
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={() => void save()}
             className="flex-1 rounded-xl bg-navy-800 py-2 text-xs font-extrabold text-white disabled:opacity-40">حفظ نسخة جديدة</button>
-          <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold">إلغاء</button>
+          <button type="button" disabled={busy} onClick={close} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold">إلغاء</button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

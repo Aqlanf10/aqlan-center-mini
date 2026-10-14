@@ -58,3 +58,61 @@
 .ledger :global([data-testid="account-canonical-balance"]) { background: #fff; border: 1px solid #d5e8fa; border-inline-start: 4px solid #ff962c; border-radius: 10px; padding: 16px; text-align: start; margin: 0; }
 .ledger :global([data-testid="account-treatment-details"]) { background: white; border-color: #d5e8fa; margin: 0; }
 @media (max-width: 767px) { .ledger > div { grid-template-columns: minmax(0,1fr); } }
+
+/* Specialty regions keep their original readers, forms and guarded context. */
+.root :global([data-testid="patient-cases"]) { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; align-items: start; }
+.root :global([data-testid="patient-cases"] > *) { min-width: 0; margin-top: 0; grid-column: 1 / -1; }
+.root :global([data-testid="patient-cases"] > section) { grid-column: auto; border: 1px solid var(--patient-outline); border-radius: 10px; }
+.root :global([data-testid="patient-cases"] > section > ul) { grid-template-columns: minmax(0,1fr); }
+.root :global([data-testid="patient-cases"] h3), .root :global([data-testid="patient-endo"] h3), .root :global([data-testid="patient-ortho-workspace"] h3), .root :global([data-testid="patient-ortho-workspace"] h4) { color: #0476c9; }
+.root :global([data-testid="patient-cases"] > section > div:first-child) { padding-bottom: 10px; border-bottom: 1px solid #dfedfb; }
+.root :global([data-testid="patient-plans-content"] > ul) { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; }
+.root :global([data-testid="patient-plans-content"] > ul > li) { margin: 0; padding: 14px; border: 1px solid var(--patient-outline); }
+.root :global([data-testid="plan-amount-summary"] > div) { border: 1px solid #e0effa; border-radius: 7px; padding: 13px 6px; }
+.root :global([data-testid="patient-endo"]) { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.8fr); gap: 10px; align-items: start; }
+.root :global([data-testid="patient-endo"] > *) { min-width: 0; grid-column: 1 / -1; margin-top: 0; }
+.root :global([data-testid="patient-endo"] > section[aria-label="أسنان علاج الجذور"]), .root :global([data-testid="patient-endo"] > section[aria-label="ملخص علاج الجذور"]) { grid-column: auto; }
+.root :global([data-testid="patient-ortho-workspace"] > ul > li) { border-color: var(--patient-outline); border-radius: 10px; }
+.root :global([data-testid="patient-ortho-workspace"] table) { font-size: 12px; }
+.root :global([data-testid="patient-ortho-workspace"] thead) { background: #eaf5ff; color: #116bb5; }
+.root :global([data-testid="patient-referrals-workspace"]) { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.8fr); gap: 12px; border: 0; padding: 0; background: transparent; box-shadow: none; }
+.root :global([data-testid="patient-referrals-workspace"] > *) { grid-column: 1 / -1; min-width: 0; margin: 0; }
+.root :global([data-testid="patient-referrals-workspace"] > div:first-child) { border: 1px solid var(--patient-outline); background: white; padding: 12px; border-radius: 10px; }
+.root :global([data-testid="patient-referral-form"]) { grid-column: 1; grid-template-columns: minmax(0,1fr); border: 1px solid var(--patient-outline); background: white; border-radius: 10px; }
+.root :global([data-testid="patient-referral-form"] > *) { grid-column: auto; }
+.root :global([data-testid="patient-referrals-workspace"]:has([data-testid="patient-referral-form"]) > ul) { grid-column: 2; }
+.root :global([data-testid="patient-referrals-workspace"] > ul > li) { border-color: var(--patient-outline); border-radius: 10px; background: white; padding: 14px; }
+.detailsGrid :global(section) { border-color: var(--patient-outline); border-radius: 10px; box-shadow: none; }
+.detailsGrid :global(h3) { color: #0676c8; }
+@media (max-width: 1100px) { .root :global([data-testid="patient-cases"]) { grid-template-columns: repeat(2,minmax(0,1fr)); } .root :global([data-testid="patient-cases"] > section:last-child) { grid-column: 1 / -1; } }
+@media (max-width: 767px) {
+ .root :global([data-testid="patient-cases"]), .root :global([data-testid="patient-plans-content"] > ul), .root :global([data-testid="patient-endo"]), .root :global([data-testid="patient-referrals-workspace"]) { grid-template-columns: minmax(0,1fr); }
+ .root :global([data-testid="patient-referrals-workspace"]:has([data-testid="patient-referral-form"]) > ul) { grid-column: 1; }
+}
+
+.summaryViews { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.summaryViews button { min-height: 34px; padding: 7px 14px; border: 1px solid #cce4fa; border-radius: 6px; background: white; color: #0773bf; font-size: 12px; font-weight: 700; }
+.summaryViews button[aria-pressed="true"] { background: #0c84d7; color: white; }
+.medicalSection { grid-column: 1 / -1; }
+.root [hidden] { display: none; }
+/* Compose the existing balance, actions and plan disclosure into one account row. */
+@media (min-width: 1100px) {
+  .ledger > div { grid-template-columns: repeat(6,minmax(0,1fr)); align-items: start; }
+  .ledger > div > :global([data-testid="account-canonical-balance"]),
+  .ledger > div > :global([data-testid="account-treatment-details"]),
+  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { grid-column: span 2; height: 100%; }
+  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { flex-direction: column; padding: 14px; border: 1px solid #d5e8fa; border-radius: 10px; background: #fff; }
+  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) > button { min-height: 36px; }
+  .ledger > div > :global(section[aria-label="الفواتير"]),
+  .ledger > div > :global(section[aria-label="الدفعات"]) { grid-column: span 3; }
+}
+
+/* Arabic glyph edges must remain within the inline settlement hit area in narrow invoice cards. */
+.ledger :global([role="group"][aria-label^="حالة تسوية الفاتورة"]) { padding-inline: 3px; }
+
+@media (min-width: 1100px) {
+  .ledger > div > :global([data-testid="account-canonical-balance"]),
+  .ledger > div > :global([data-testid="account-treatment-details"]),
+  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { order: -1; }
+  .ledger > div > :global([role="alert"]), .ledger > div > :global([role="status"]) { order: -2; }
+}
