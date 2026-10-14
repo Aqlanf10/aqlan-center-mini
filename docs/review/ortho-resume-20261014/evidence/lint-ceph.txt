@@ -1,0 +1,31 @@
+[BABEL] Note: The code generator has deoptimised the styling of /workspace/aqlan-ortho-resume/lib/db.ts as it exceeds the max of 500KB.
+
+/workspace/aqlan-ortho-resume/__tests__/ceph.test.ts
+  7:8  warning  'LandmarkCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-ortho-resume/components/CephTracer.tsx
+  1173:16  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+  1410:18  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+/workspace/aqlan-ortho-resume/lib/ceph.ts
+  1118:9  warning  'convAngle' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  1119:9  warning  'abPlane' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+  1259:9  warning  'u1Apog' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+
+/workspace/aqlan-ortho-resume/lib/db.ts
+     14:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     22:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     23:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+  10378:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  15959:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  15959:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  15960:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+✖ 13 problems (0 errors, 13 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

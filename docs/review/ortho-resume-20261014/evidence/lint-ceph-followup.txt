@@ -1,0 +1,13 @@
+
+/workspace/aqlan-ortho-resume/components/CephTracer.tsx
+  1176:16  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+  1413:18  warning  Unused eslint-disable directive (no problems were reported from '@next/next/no-img-element')
+
+✖ 2 problems (0 errors, 2 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
