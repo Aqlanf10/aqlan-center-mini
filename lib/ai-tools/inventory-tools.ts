@@ -3,7 +3,8 @@
  */
 
 import { listInventoryItems, type InventoryItem } from "../db";
-import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable, ActionButton } from "./types";
+import { stockStatus } from "../inventory";
+import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable } from "./types";
 
 /**
  * أداة جلب حالة المخزون ونواقص المواد السنية
@@ -22,9 +23,9 @@ export async function getInventorySummary(
   }
 
   try {
-    const items: InventoryItem[] = await listInventoryItems().catch(() => []);
+    const items: InventoryItem[] = await listInventoryItems();
     const activeItems = items.filter((it) => it.isActive);
-    const lowStock = activeItems.filter((it) => it.balance <= it.minLevel);
+    const lowStock = activeItems.filter((it) => stockStatus(it.balance, it.minLevel) !== "ok");
     const outOfStock = activeItems.filter((it) => it.balance <= 0);
 
     const cards: KpiCard[] = [
@@ -79,11 +80,11 @@ ${itemsList}${lowStock.length > 8 ? `\n... و (${lowStock.length - 8}) مواد 
       actions: [{ label: "شاشة المخزون", href: "/inventory", actionType: "navigate" }],
       data: { activeCount: activeItems.length, lowStockCount: 0 },
     };
-  } catch (err) {
+  } catch {
     return {
       success: false,
-      textSummary: `تعذر جلب تقرير المخزون: ${(err as Error).message}`,
-      warnings: [(err as Error).message],
+      textSummary: "تعذّر تحميل المخزون. أعد المحاولة؛ لا يمكن تأكيد حالة المواد الآن.",
+      warnings: ["inventory_unavailable"],
     };
   }
 }

@@ -96,17 +96,17 @@ export type StockStatus = "out" | "low" | "ok";
 
 /**
  * موضع البند من حد الطلب: «منتهي» شامل الصفر والسالب (سالبٌ يعني نقصًا مسجَّلًا
- * بالحركات — يُصحَّح بتسوية موثَّقة لا بحذف حركة)، و«تحت الحد» قبل بلوغه.
+ * بالحركات — يُصحَّح بتسوية موثَّقة لا بحذف حركة)، و«وصل حد الطلب» عند بلوغه أو النزول عنه.
  */
 export function stockStatus(balance: number, minLevel: number): StockStatus {
   if (balance <= 0) return "out";
-  if (minLevel > 0 && balance < minLevel) return "low";
+  if (minLevel > 0 && balance <= minLevel) return "low";
   return "ok";
 }
 
 export const STOCK_STATUS_LABEL: Record<StockStatus, string> = {
   out: "منتهي",
-  low: "تحت حد الطلب",
+  low: "وصل حد الطلب",
   ok: "متوفر",
 };
 

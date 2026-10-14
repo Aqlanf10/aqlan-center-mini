@@ -4,7 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { AUTO_MATERIAL_REASON_PREFIX, createInventoryMovement, visitPatientOf } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
 import { parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
-import { canHandleMoney, canManageInventory } from "@/lib/roles";
+import { inventoryMovementForRead } from "@/lib/inventory-domain/presentation";
+import { canHandleMoney, canManageInventory, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -133,7 +134,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!result.ok) {
       return NextResponse.json({ message: result.message }, { status: 409 });
     }
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json({ ...result, movement: inventoryMovementForRead(result.movement, isAdmin(session.role)) }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الحركة. أعد المحاولة." }, { status: 500 });
   }

@@ -128,9 +128,11 @@ export default function InventoryPage() {
   const [suppliers, setSuppliers] = useState<{ id: number; name: string; isActive: boolean }[]>([]);
   /* قيمة المخزون للمدير وحده: ما في الرفّ من مال — مشتقّة لا مخزّنة. */
   const [valuePanel, setValuePanel] = useState<{
-    totalMinor: number;
+    totalMinor: number | null;
+    knownTotalMinor: number;
+    estimated: number;
     withoutCost: number;
-    items: { id: number; name: string; qty: number; valueMinor: number; unitCostMinor: number | null }[];
+    items: { id: number; name: string; qty: number; valueMinor: number | null; unitCostMinor: number | null; costStatus: "known" | "estimated" | "missing" }[];
   } | null>(null);
   const [qty, setQty] = useState("");
   const [expiry, setExpiry] = useState("");
@@ -318,6 +320,7 @@ export default function InventoryPage() {
       <PageHeader
         title="إدارة المخزون والمستهلكات السنية"
         subtitle="تتبع دقيق للمواد، حركة الوارد والصرف، وتنبيهات الصلاحية وحد الطلب التلقائية"
+        links={[{ href: "/inventory", label: "المخزون", current: true }, { href: "/inventory/procurement", label: "طلبات شراء المواد" }, ...(isAdmin ? [{ href: "/inventory/review", label: "التقييم والطباعة · English" }] : [])]}
       >
         <button
           onClick={() => setShowAdd((v) => !v)}
@@ -355,7 +358,8 @@ export default function InventoryPage() {
             </div>
             {valuePanel ? (
               <p className="text-2xl font-black text-emerald-700">
-                {formatMoney(valuePanel.totalMinor, base)}
+                {valuePanel.totalMinor === null ? "التقييم غير مكتمل" : formatMoney(valuePanel.totalMinor, base)}
+                {valuePanel.totalMinor === null ? <span className="block text-xs">القيمة المعلومة فقط: {formatMoney(valuePanel.knownTotalMinor, base)} · {valuePanel.estimated} بند تقديري</span> : null}
                 {valuePanel.withoutCost > 0 ? (
                   <span className="mr-2 align-middle text-[11px] font-bold text-amber-700">
                     {valuePanel.withoutCost} بندًا بلا ثمنٍ مسجَّل — تُعدّ وتُقال
@@ -381,7 +385,8 @@ export default function InventoryPage() {
                     <span className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400">{fmt(item.qty)} وحدة</span>
                       <span className="font-extrabold tabular-nums text-slate-700">
-                        {formatMoney(item.valueMinor, base)}
+                        {item.valueMinor === null ? "تكلفة مجهولة" : formatMoney(item.valueMinor, base)}
+                        {item.costStatus === "estimated" ? " (تقديرية)" : ""}
                       </span>
                       {item.unitCostMinor == null ? (
                         <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-bold text-amber-700">بلا ثمن</span>

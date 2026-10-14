@@ -1,0 +1,48 @@
+/* Inventory scope. Shared app chrome and patient styling retain their owners. */
+.root {
+  --inventory-primary: #057bdc;
+  --inventory-bright: #079bf5;
+  --inventory-dark: #0a4788;
+  --inventory-text: #143f68;
+  --inventory-orange: #ff8b2b;
+  --inventory-canvas: #f3f9ff;
+  --inventory-border: #dcebf7;
+  --inventory-muted: #526e8b;
+  background: var(--inventory-canvas);
+  color: var(--inventory-text);
+  padding: 18px 22px 48px;
+  min-width: 0;
+  border-radius: 12px;
+  font-family: var(--font-arabic), sans-serif;
+}
+.toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.title { font-size:22px; line-height:1.5; font-weight:700; color:var(--inventory-dark); margin:0; }
+.caption { color:var(--inventory-muted); font-size:12px; line-height:1.7; }
+.actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:42px; padding:8px 14px; border:1px solid var(--inventory-border); border-radius:7px; background:#fff; color:var(--inventory-dark); font-size:13px; font-weight:600; cursor:pointer; transition:background-color .15s; }
+.button:hover { background:#e9f5ff; }
+.button:active { background:#dcefff; }
+.button:disabled { cursor:default; opacity:.55; }
+.primary { background:var(--inventory-dark); color:#fff; border-color:var(--inventory-dark); border-bottom:3px solid var(--inventory-orange); }
+.primary:hover { background:#103b68; }
+.root button:focus-visible, .root a:focus-visible, .root input:focus-visible, .root summary:focus-visible { outline:3px solid var(--inventory-dark); outline-offset:3px; }
+.metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.metric { padding:18px; border:1px solid var(--inventory-border); border-radius:10px; background:#fff; }
+.metric dt { color:var(--inventory-muted); font-size:12px; margin-bottom:6px; }
+.metric dd { font-size:24px; font-weight:700; color:var(--inventory-dark); overflow-wrap:anywhere; }
+.metric.warn { border-top:3px solid var(--inventory-orange); }
+.metric.warn dd { color:#92450e; font-size:20px; }
+.panel { background:#fff; border:1px solid var(--inventory-border); border-radius:10px; overflow:hidden; }
+.panelHeading { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--inventory-border); background:#f8fcff; font-weight:700; color:var(--inventory-dark); }
+.items { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:18px; }
+.item { border:1px solid var(--inventory-border); border-radius:9px; padding:16px; background:#fff; break-inside:avoid; }
+.item h2 { font-size:14px; line-height:1.7; color:var(--inventory-dark); overflow-wrap:anywhere; }
+.badge { display:inline-flex; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; background:#e6f6ec; color:#176338; }
+.badge[data-state="missing"], .badge[data-state="estimated"] { color:#92450e; background:#fff0df; }
+.note { padding:13px 18px; font-size:12px; line-height:1.8; color:var(--inventory-muted); }
+.search { width:min(100%,360px); min-height:42px; border:1px solid var(--inventory-border); border-radius:7px; background:#fff; padding:8px 12px; color:var(--inventory-text); font-size:13px; }
+.feedback { padding:24px 18px; min-height:160px; border:1px solid var(--inventory-border); border-radius:10px; background:white; line-height:1.9; }
+.printHeader,.printItems { display:none; }
+@media(max-width:640px) { .root { padding:14px 12px 32px; } .title { font-size:19px; } .metrics,.items { grid-template-columns:minmax(0,1fr); } .items { padding:12px; } .metric dd { font-size:21px; } .toolbar { align-items:flex-start; } }
+@media(prefers-reduced-motion:reduce) { .button { transition:none; } }
+@media print { .root { background:#fff; padding:0; border-radius:0; } .toolbar,.actions,.screenControls { display:none; } .printHeader { display:block; margin-bottom:18px; } .screenItems { display:none; } .printItems { display:grid; } .metrics { grid-template-columns:repeat(3,minmax(0,1fr)); } .items { grid-template-columns:repeat(2,minmax(0,1fr)); } .metric,.panel,.item { box-shadow:none; } }

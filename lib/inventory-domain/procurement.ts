@@ -1,0 +1,720 @@
+/** Pure procurement plans only. No database, ledger, payment or permission writer.
+ * Every authorizer, revision and prior allocation must come from locked server
+ * reads. A plan is not evidence that a transaction was committed.
+ */
+import { CLINIC_BASE_CURRENCY, MINOR_UNITS, requireCurrency, type Currency } from "../money";
+import {
+  convertQuantity, decimalRatio, invariant, positiveId, quantityAtoms, quantityText,
+  unitConversionSnapshot, type UnitConversionSnapshot,
+} from "./quantities";
+
+export interface MoneyAmount { readonly currency: Currency; readonly amountMinor: number }
+export type UnitPrice =
+  | { readonly state: "missing"; readonly currency: Currency; readonly reason: string }
+  | { readonly state: "known" | "estimated"; readonly currency: Currency; readonly unitPriceMinor: number; readonly reason: string };
+
+export function minorAmount(value: unknown): number {
+  invariant(typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+    "invalid_money", "Money must be nonnegative safe integer minor units");
+  return value;
+}
+
+function safeMinor(value: bigint): number {
+  invariant(value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER), "money_overflow", "Amount exceeds safe minor units");
+  return Number(value);
+}
+
+function roundRatio(numerator: bigint, denominator: bigint): bigint {
+  invariant(numerator >= 0n && denominator > 0n, "invalid_ratio", "Expected a nonnegative exact ratio");
+  return (numerator * 2n + denominator) / (denominator * 2n);
+}
+
+function identifier(value: unknown, name: string): asserts value is string {
+  invariant(typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 120,
+    "invalid_identifier", `${name} is required and must be bounded text`);
+}
+
+function reason(value: unknown): asserts value is string {
+  invariant(typeof value === "string" && value.trim().length > 0 && value.length <= 2_000,
+    "reason_required", "A bounded explicit reason is required");
+}
+
+function dateOnly(value: unknown): asserts value is string {
+  invariant(typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value), "invalid_date", "Use an ISO calendar date");
+  const time = Date.parse(`${value}T00:00:00.000Z`);
+  invariant(Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value,
+    "invalid_date", "Invalid calendar date");
+}
+
+function timestamp(value: string): void {
+  invariant(typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value),
+    "invalid_timestamp", "A UTC timestamp is required");
+  dateOnly(value.slice(0, 10));
+  const time = Date.parse(value);
+  invariant(Number.isFinite(time) && new Date(time).toISOString() === (value.includes(".") ? value : value.replace("Z", ".000Z")),
+    "invalid_timestamp", "Invalid UTC timestamp");
+}
+
+function unique<T>(values: readonly T[], key: (value: T) => string, name: string): Map<string, T> {
+  const result = new Map<string, T>();
+  for (const value of values) {
+    const id = key(value);
+    identifier(id, name);
+    invariant(!result.has(id), "duplicate_source", `Duplicate ${name}: ${id}`);
+    result.set(id, value);
+  }
+  return result;
+}
+
+function freeze<T>(value: T): Readonly<T> {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Canonical strict JSON, deliberately not a lossy JS stringify/replacer. The
+ * persistence adapter may hash this text but must version the algorithm. Numbers
+ * are safe integers; quantities/rates must already be normalized decimal text.
+ */
+export function payloadIdentity(value: unknown): string {
+  const parents = new Set<object>();
+  function canonical(input: unknown, depth: number): string {
+    invariant(depth <= 32, "invalid_payload", "Payload is too deeply nested");
+    if (input === null || typeof input === "boolean" || typeof input === "string") return JSON.stringify(input);
+    if (typeof input === "number") {
+      invariant(Number.isSafeInteger(input) && !Object.is(input, -0), "invalid_payload", "Payload numbers must be safe integers");
+      return String(input);
+    }
+    invariant(typeof input === "object" && input !== null, "invalid_payload", "Payload contains a non-JSON value");
+    invariant(!parents.has(input), "invalid_payload", "Payload is cyclic");
+    parents.add(input);
+    let result: string;
+    if (Array.isArray(input)) {
+      invariant(Object.keys(input).length === input.length, "invalid_payload", "Sparse arrays or array properties are not accepted");
+      result = `[${input.map((entry) => canonical(entry, depth + 1)).join(",")}]`;
+    } else {
+      invariant(Object.getPrototypeOf(input) === Object.prototype || Object.getPrototypeOf(input) === null,
+        "invalid_payload", "Payload must contain plain JSON objects");
+      invariant(Object.getOwnPropertySymbols(input).length === 0, "invalid_payload", "Symbol properties are not accepted");
+      result = `{${Object.keys(input).sort().map((key) => `${JSON.stringify(key)}:${canonical((input as Record<string, unknown>)[key], depth + 1)}`).join(",")}}`;
+    }
+    parents.delete(input);
+    return result;
+  }
+  const identity = `inventory-json-v1:${canonical(value, 0)}`;
+  invariant(identity.length <= 1_000_000, "invalid_payload", "Payload is too large");
+  return identity;
+}
+
+export interface OperationRecord {
+  readonly scope: string; readonly key: string; readonly identity: string; readonly resultId: string;
+}
+
+export function inspectIdempotency(scope: string, key: string, payload: unknown, previous: OperationRecord | null):
+  { readonly kind: "new"; readonly identity: string } |
+  { readonly kind: "replay"; readonly identity: string; readonly resultId: string } {
+  identifier(scope, "operation scope");
+  identifier(key, "idempotency key");
+  const identity = payloadIdentity(payload);
+  if (!previous) return Object.freeze({ kind: "new", identity });
+  invariant(previous.scope === scope && previous.key === key, "operation_scope_mismatch", "Operation lookup has the wrong scope/key");
+  invariant(previous.identity === identity, "idempotency_conflict", "The same operation key cannot identify changed content");
+  identifier(previous.resultId, "operation result");
+  return Object.freeze({ kind: "replay", identity, resultId: previous.resultId });
+}
+
+export interface ValuationSnapshot extends MoneyAmount {
+  readonly purpose: "approval_estimate" | "invoice_valuation";
+  readonly baseCurrency: Currency;
+  /** Existing money convention: YER major units for one foreign major unit. */
+  readonly rateToBase: string;
+  readonly baseAmountMinor: number;
+  readonly capturedAt: string;
+  readonly sourceRef: string;
+}
+
+export function valuationSnapshot(input: Omit<ValuationSnapshot, "baseCurrency" | "baseAmountMinor">): ValuationSnapshot {
+  const currency = requireCurrency(input.currency, "procurement valuation", input.sourceRef);
+  minorAmount(input.amountMinor);
+  invariant(input.purpose === "approval_estimate" || input.purpose === "invoice_valuation", "invalid_valuation_purpose", "Valuation purpose is required");
+  timestamp(input.capturedAt);
+  identifier(input.sourceRef, "valuation source");
+  const rate = decimalRatio(input.rateToBase);
+  invariant(rate.numerator > 0n, "invalid_rate", "The valuation rate must be positive");
+  invariant(currency !== CLINIC_BASE_CURRENCY || rate.numerator === rate.denominator,
+    "invalid_rate", "The clinic base currency rate must equal one");
+  const baseAmountMinor = safeMinor(roundRatio(BigInt(input.amountMinor) * rate.numerator * BigInt(MINOR_UNITS[CLINIC_BASE_CURRENCY]),
+    rate.denominator * BigInt(MINOR_UNITS[currency])));
+  return Object.freeze({ purpose: input.purpose, currency, amountMinor: input.amountMinor,
+    baseCurrency: CLINIC_BASE_CURRENCY, baseAmountMinor, rateToBase: rate.canonical,
+    capturedAt: input.capturedAt, sourceRef: input.sourceRef });
+}
+
+function validateValuation(snapshot: ValuationSnapshot): void {
+  const calculated = valuationSnapshot(snapshot);
+  invariant(snapshot.baseCurrency === calculated.baseCurrency && snapshot.baseAmountMinor === calculated.baseAmountMinor,
+    "valuation_mismatch", "Valuation snapshot does not match its exact original amount and rate");
+}
+
+/** Largest remainder, stable ties by source id; all calculations use bigint.
+ * Use the same function separately for shipping and discount and save its policy.
+ */
+export function allocateMinor(totalMinor: number, weights: readonly { readonly id: string; readonly weight: string }[]):
+  ReadonlyArray<{ readonly id: string; readonly amountMinor: number }> {
+  minorAmount(totalMinor);
+  unique(weights, (row) => row.id, "allocation id");
+  invariant(weights.length > 0, "empty_allocation", "An allocation needs destinations");
+  const parsed = weights.map((row) => {
+    invariant(typeof row.weight === "string" && /^\d{1,40}$/.test(row.weight), "invalid_weight", "Weights must be bounded nonnegative integer text");
+    return { id: row.id, weight: BigInt(row.weight) };
+  });
+  const sum = parsed.reduce((total, row) => total + row.weight, 0n);
+  invariant(sum > 0n || totalMinor === 0, "zero_weight", "A nonzero amount cannot be allocated to zero weights");
+  if (sum === 0n) return freeze(parsed.map((row) => ({ id: row.id, amountMinor: 0 })));
+  const rows = parsed.map((row) => ({ id: row.id, minor: BigInt(totalMinor) * row.weight / sum,
+    remainder: BigInt(totalMinor) * row.weight % sum }));
+  let left = BigInt(totalMinor) - rows.reduce((total, row) => total + row.minor, 0n);
+  const ranked = [...rows].sort((a, b) => a.remainder === b.remainder ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    : a.remainder > b.remainder ? -1 : 1);
+  for (const row of ranked) { if (left === 0n) break; row.minor += 1n; left -= 1n; }
+  return freeze(rows.map((row) => ({ id: row.id, amountMinor: safeMinor(row.minor) })));
+}
+
+function priceTotal(price: UnitPrice, quantity: string, currency: Currency): number | null {
+  requireCurrency(price.currency, "unit price", "procurement");
+  invariant(price.currency === currency, "currency_mismatch", "Unit price and document currency differ");
+  invariant(["known", "estimated", "missing"].includes(price.state), "invalid_price_state", "Explicit cost state is required");
+  if (price.state === "missing") { reason(price.reason); return null; }
+  minorAmount(price.unitPriceMinor);
+  if (price.unitPriceMinor === 0 || price.state === "estimated") reason(price.reason);
+  return safeMinor(roundRatio(BigInt(price.unitPriceMinor) * quantityAtoms(quantity), 1_000n));
+}
+
+export interface RequestLine {
+  readonly id: string; readonly itemId: number; readonly quantity: string;
+  readonly conversion: UnitConversionSnapshot;
+}
+export interface RequestRevision {
+  readonly id: string; readonly version: number; readonly branchId: string; readonly requestedBy: number;
+  readonly reason: string; readonly proposedSupplierPartyId: number | null;
+  readonly value: MoneyAmount | null; readonly lines: readonly RequestLine[];
+}
+export interface RequestApproval {
+  readonly requestId: string; readonly requestVersion: number; readonly requestIdentity: string;
+  readonly branchId: string; readonly actorId: number; readonly policyVersion: number;
+  readonly selfApprovalReason: string | null; readonly status: "approved" | "partially_approved" | "rejected";
+  readonly valueCeiling: ValuationSnapshot | null;
+  readonly lines: ReadonlyArray<{ readonly lineId: string; readonly itemId: number; readonly baseQuantity: string; readonly reason: string }>;
+}
+
+export function validateRequest(request: RequestRevision): void {
+  identifier(request.id, "request id"); identifier(request.branchId, "branch id");
+  positiveId(request.version, "request version"); positiveId(request.requestedBy, "requester");
+  reason(request.reason);
+  if (request.proposedSupplierPartyId !== null) positiveId(request.proposedSupplierPartyId, "supplier");
+  if (request.value) { requireCurrency(request.value.currency, "request value", request.id); minorAmount(request.value.amountMinor); }
+  invariant(request.lines.length > 0, "empty_request", "A request must have lines");
+  unique(request.lines, (line) => line.id, "request line");
+  for (const line of request.lines) {
+    positiveId(line.itemId, "request item");
+    invariant(line.conversion.itemId === line.itemId, "item_mismatch", "Conversion belongs to a different item");
+    convertQuantity(line.quantity, line.conversion);
+  }
+}
+
+export function approveRequest(input: {
+  readonly request: RequestRevision; readonly state: "submitted" | "in_review";
+  readonly actorId: number; readonly canApprove: boolean; readonly allowedBranchIds: readonly string[];
+  readonly policy: { readonly version: number; readonly currency: Currency; readonly limitMinor: number; readonly allowSelfApproval: boolean };
+  readonly selfApprovalReason: string | null; readonly valuation: ValuationSnapshot | null;
+  readonly decisions: readonly { readonly lineId: string; readonly quantity: string; readonly reason: string }[];
+}): RequestApproval {
+  const { request } = input;
+  validateRequest(request);
+  invariant(input.state === "submitted" || input.state === "in_review", "invalid_transition", "Only a submitted request can be approved");
+  positiveId(input.actorId, "approval actor"); positiveId(input.policy.version, "approval policy version");
+  invariant(input.canApprove === true && input.allowedBranchIds.includes(request.branchId), "approval_forbidden", "Approval authority does not cover this branch");
+  if (input.actorId === request.requestedBy) {
+    invariant(input.policy.allowSelfApproval === true, "self_approval_forbidden", "Policy does not authorize self approval");
+    reason(input.selfApprovalReason);
+  }
+  minorAmount(input.policy.limitMinor);
+  invariant(input.policy.currency === CLINIC_BASE_CURRENCY, "unsupported_policy_currency", "This policy uses explicit YER approval limits");
+  if (request.value) {
+    invariant(input.valuation !== null, "missing_valuation", "A monetary request needs a fixed approval valuation");
+    validateValuation(input.valuation);
+    invariant(input.valuation.purpose === "approval_estimate" && input.valuation.currency === request.value.currency
+      && input.valuation.amountMinor === request.value.amountMinor, "valuation_mismatch", "Approval must value this request's exact original amount");
+    invariant(input.valuation.baseAmountMinor <= input.policy.limitMinor, "approval_limit", "Request exceeds the authorized currency-valued approval limit");
+  } else invariant(input.valuation === null, "valuation_mismatch", "An unknown request value cannot be silently replaced by a valuation");
+  const decisions = unique(input.decisions, (line) => line.lineId, "approval decision");
+  invariant(decisions.size === request.lines.length, "incomplete_decision", "Every requested line needs an explicit decision");
+  let all = true; let any = false;
+  const lines = request.lines.map((line) => {
+    const decision = decisions.get(line.id);
+    invariant(decision, "incomplete_decision", "Approval decision is missing");
+    const original = quantityAtoms(convertQuantity(line.quantity, line.conversion).baseQuantity);
+    const approved = quantityAtoms(convertQuantity(decision.quantity, line.conversion, true).baseQuantity, 3, true);
+    invariant(approved <= original, "approval_quantity", "Approved quantity exceeds the requested quantity");
+    if (approved !== original) { all = false; reason(decision.reason); }
+    if (approved > 0n) any = true;
+    return { lineId: line.id, itemId: line.itemId, baseQuantity: quantityText(approved), reason: decision.reason };
+  });
+  return freeze({ requestId: request.id, requestVersion: request.version, requestIdentity: payloadIdentity(request),
+    branchId: request.branchId, actorId: input.actorId, policyVersion: input.policy.version,
+    selfApprovalReason: input.selfApprovalReason, status: all ? "approved" : any ? "partially_approved" : "rejected",
+    valueCeiling: input.valuation ? { ...input.valuation } : null, lines });
+}
+
+export function requireCurrentApproval(request: RequestRevision, approval: RequestApproval): void {
+  validateRequest(request);
+  invariant(approval.requestId === request.id && approval.requestVersion === request.version
+    && approval.requestIdentity === payloadIdentity(request) && approval.branchId === request.branchId,
+    "stale_approval", "Approval does not authorize this exact request revision/content");
+  invariant(approval.status === "approved" || approval.status === "partially_approved", "request_not_approved", "The request is not approved");
+  positiveId(approval.actorId, "approval actor"); positiveId(approval.policyVersion, "approval policy version");
+  const lines = unique(approval.lines, (line) => line.lineId, "approved line");
+  invariant(lines.size === request.lines.length, "incomplete_decision", "Approval does not cover the exact request lines");
+  for (const requested of request.lines) {
+    const approved = lines.get(requested.id);
+    invariant(approved && approved.itemId === requested.itemId, "item_mismatch", "Approval line belongs to a different item");
+    invariant(quantityAtoms(approved.baseQuantity, requested.conversion.basePrecision, true)
+      <= quantityAtoms(convertQuantity(requested.quantity, requested.conversion).baseQuantity),
+    "approval_quantity", "Stored approval exceeds requested quantity");
+  }
+  if (approval.valueCeiling !== null) {
+    validateValuation(approval.valueCeiling);
+    invariant(request.value && approval.valueCeiling.purpose === "approval_estimate"
+      && approval.valueCeiling.currency === request.value.currency && approval.valueCeiling.amountMinor === request.value.amountMinor,
+    "valuation_mismatch", "Stored value approval differs from the approved request");
+  }
+}
+
+export interface SourceAllocation {
+  readonly id: string; readonly requestId: string; readonly requestLineId: string; readonly baseQuantity: string;
+}
+export interface CommittedSourceAllocation extends SourceAllocation {
+  readonly currency: Currency; readonly amountMinor: number; readonly baseAmountMinor: number;
+}
+export interface PurchaseOrderLine {
+  readonly id: string; readonly itemId: number; readonly kind: "stock" | "non_stock" | "asset";
+  readonly quantity: string; readonly conversion: UnitConversionSnapshot; readonly price: UnitPrice;
+  readonly trackLot: boolean; readonly requiresExpiry: boolean; readonly minimumShelfLifeDays: number;
+  readonly sources: readonly SourceAllocation[];
+}
+export interface PurchaseOrder {
+  readonly id: string; readonly version: number; readonly branchId: string; readonly supplierPartyId: number;
+  readonly currency: Currency; readonly shippingMinor: number; readonly discountMinor: number;
+  readonly lines: readonly PurchaseOrderLine[];
+}
+export interface IssuedPurchaseOrder extends PurchaseOrder { readonly status: "issued" }
+
+function validateOrder(order: PurchaseOrder): void {
+  identifier(order.id, "order id"); identifier(order.branchId, "order branch");
+  positiveId(order.version, "order version"); positiveId(order.supplierPartyId, "order supplier");
+  requireCurrency(order.currency, "purchase order", order.id);
+  minorAmount(order.shippingMinor); minorAmount(order.discountMinor);
+  invariant(order.lines.length > 0, "empty_order", "Order needs lines");
+  unique(order.lines, (line) => line.id, "order line");
+  for (const line of order.lines) {
+    positiveId(line.itemId, "order item");
+    invariant(["stock", "non_stock", "asset"].includes(line.kind), "invalid_item_kind", "Invalid item kind");
+    invariant(line.conversion.itemId === line.itemId, "item_mismatch", "Conversion belongs to a different item");
+    convertQuantity(line.quantity, line.conversion);
+    priceTotal(line.price, line.quantity, order.currency);
+    invariant(typeof line.trackLot === "boolean" && typeof line.requiresExpiry === "boolean", "invalid_tracking", "Tracking policy must be explicit");
+    invariant(Number.isSafeInteger(line.minimumShelfLifeDays) && line.minimumShelfLifeDays >= 0 && line.minimumShelfLifeDays <= 36_500,
+      "invalid_shelf_life", "Minimum shelf life must be bounded whole days");
+  }
+}
+
+const NO_FINANCIAL_EFFECT = Object.freeze({ inventoryMovements: 0, payables: 0, expenses: 0 });
+
+/** A validated issuance plan, still requiring a permissioned atomic transaction.
+ * Supplier active/kind checks belong to the parties owner, never a numeric-id guess.
+ */
+export function planOrderIssue(input: {
+  readonly order: PurchaseOrder;
+  readonly requests: readonly { readonly request: RequestRevision; readonly approval: RequestApproval }[];
+  readonly priorAllocations: readonly CommittedSourceAllocation[];
+  readonly supplier: { readonly id: number; readonly active: boolean; readonly isSupplier: boolean };
+}): { readonly order: IssuedPurchaseOrder; readonly allocations: readonly CommittedSourceAllocation[];
+  readonly totalMinor: number; readonly effects: typeof NO_FINANCIAL_EFFECT } {
+  const { order } = input;
+  validateOrder(order);
+  invariant(input.supplier.id === order.supplierPartyId && input.supplier.active === true && input.supplier.isSupplier === true,
+    "invalid_supplier", "A new order requires this active supplier from parties");
+  const requests = unique(input.requests, (row) => row.request.id, "request");
+  for (const { request, approval } of requests.values()) {
+    requireCurrentApproval(request, approval);
+    invariant(request.branchId === order.branchId, "branch_mismatch", "Order and request branches differ");
+    invariant(request.proposedSupplierPartyId === null || request.proposedSupplierPartyId === order.supplierPartyId,
+      "supplier_mismatch", "Supplier choice is outside the approved request");
+    invariant(approval.valueCeiling !== null, "value_approval_required", "A quantity-only approval cannot authorize a supplier order");
+    validateValuation(approval.valueCeiling);
+    invariant(approval.valueCeiling.currency === order.currency, "currency_mismatch", "Order currency requires a matching approved value snapshot");
+  }
+  const historical = unique(input.priorAllocations, (row) => row.id, "prior allocation");
+  const cumulativeQty = new Map<string, bigint>();
+  const cumulativeMoney = new Map<string, bigint>();
+  const priorBaseMoney = new Map<string, bigint>();
+  const sourceKey = (row: SourceAllocation) => JSON.stringify([row.requestId, row.requestLineId]);
+  for (const row of historical.values()) {
+    identifier(row.requestId, "allocation request"); identifier(row.requestLineId, "allocation line");
+    const owner = requests.get(row.requestId);
+    invariant(owner, "unknown_prior_source", "Prior source allocation is outside the supplied request scope");
+    invariant(row.currency === owner.approval.valueCeiling!.currency, "currency_mismatch", "Prior allocation currency differs from the approved source");
+    const key = sourceKey(row);
+    cumulativeQty.set(key, (cumulativeQty.get(key) ?? 0n) + quantityAtoms(row.baseQuantity));
+    cumulativeMoney.set(row.requestId, (cumulativeMoney.get(row.requestId) ?? 0n) + BigInt(minorAmount(row.amountMinor)));
+    priorBaseMoney.set(row.requestId, (priorBaseMoney.get(row.requestId) ?? 0n) + BigInt(minorAmount(row.baseAmountMinor)));
+  }
+  for (const [requestId, amount] of cumulativeMoney) {
+    const ceiling = requests.get(requestId)!.approval.valueCeiling!;
+    invariant(amount <= BigInt(ceiling.amountMinor), "source_budget_exceeded", "Historical order value exceeds the approved budget");
+    invariant(BigInt(valuationSnapshot({ ...ceiling, amountMinor: safeMinor(amount) }).baseAmountMinor) === priorBaseMoney.get(requestId),
+      "valuation_mismatch", "Historical source valuation does not reconcile to its fixed rate");
+  }
+  const totals = order.lines.map((line) => {
+    invariant(line.price.state === "known", "unconfirmed_order_price", "Issued orders require a known approved quote price");
+    return { id: line.id, amountMinor: priceTotal(line.price, line.quantity, order.currency)! };
+  });
+  const subtotal = totals.reduce((total, row) => total + BigInt(row.amountMinor), 0n);
+  invariant(BigInt(order.discountMinor) <= subtotal, "excess_discount", "Discount exceeds line value");
+  const weights = totals.map((row) => ({ id: row.id, weight: String(row.amountMinor) }));
+  // Explicit equal weights for an entirely free/gift order; save this policy with the plan.
+  if (subtotal === 0n) for (const row of weights) row.weight = "1";
+  const shipping = new Map(allocateMinor(order.shippingMinor, weights).map((row) => [row.id, row.amountMinor]));
+  const discounts = new Map(allocateMinor(order.discountMinor, weights).map((row) => [row.id, row.amountMinor]));
+  const allocationIds = new Set<string>();
+  const allocations: CommittedSourceAllocation[] = [];
+  for (const line of order.lines) {
+    invariant(line.sources.length > 0, "missing_sources", "Every order line must allocate approved request quantities");
+    const base = quantityAtoms(convertQuantity(line.quantity, line.conversion).baseQuantity);
+    const sourceQuantities = line.sources.map((source) => quantityAtoms(source.baseQuantity));
+    invariant(sourceQuantities.reduce((sum, qty) => sum + qty, 0n) === base,
+      "source_quantity_mismatch", "Request allocations must exactly equal the order line quantity");
+    const total = BigInt(totals.find((row) => row.id === line.id)!.amountMinor)
+      + BigInt(shipping.get(line.id)!) - BigInt(discounts.get(line.id)!);
+    const portions = new Map(allocateMinor(safeMinor(total), line.sources.map((source, index) => ({ id: source.id, weight: String(sourceQuantities[index]) })))
+      .map((row) => [row.id, row.amountMinor]));
+    for (const source of line.sources) {
+      identifier(source.id, "source allocation id");
+      invariant(!allocationIds.has(source.id) && !historical.has(source.id), "duplicate_source", "Source allocation id was already used");
+      allocationIds.add(source.id);
+      const owner = requests.get(source.requestId);
+      invariant(owner, "unapproved_source", "Source request is not approved in this scope");
+      const approved = owner.approval.lines.find((row) => row.lineId === source.requestLineId);
+      const requested = owner.request.lines.find((row) => row.id === source.requestLineId);
+      invariant(approved && requested && approved.itemId === line.itemId, "item_mismatch", "Order source belongs to a different item or line");
+      invariant(requested.conversion.baseUnit === line.conversion.baseUnit && requested.conversion.basePrecision === line.conversion.basePrecision,
+        "unit_mismatch", "Order source base unit differs from approval");
+      const key = sourceKey(source);
+      const quantity = (cumulativeQty.get(key) ?? 0n) + quantityAtoms(source.baseQuantity);
+      invariant(quantity <= quantityAtoms(approved.baseQuantity, 3, true), "source_overallocated", "Combined order allocations exceed approved quantity");
+      cumulativeQty.set(key, quantity);
+      const ceiling = owner.approval.valueCeiling!;
+      const amount = portions.get(source.id)!;
+      cumulativeMoney.set(source.requestId, (cumulativeMoney.get(source.requestId) ?? 0n) + BigInt(amount));
+      invariant(cumulativeMoney.get(source.requestId)! <= BigInt(ceiling.amountMinor), "source_budget_exceeded", "Combined issued value exceeds the fixed approved budget");
+      allocations.push({ ...source, baseQuantity: quantityText(quantityAtoms(source.baseQuantity)),
+        currency: order.currency, amountMinor: amount, baseAmountMinor: 0 });
+    }
+  }
+  // Convert a source request's cumulative value once, then apportion its new
+  // rounded base delta. Splitting a source cannot erase sub-YER value or budget.
+  for (const requestId of new Set(allocations.map((row) => row.requestId))) {
+    const ceiling = requests.get(requestId)!.approval.valueCeiling!;
+    const baseTotal = BigInt(valuationSnapshot({ ...ceiling, amountMinor: safeMinor(cumulativeMoney.get(requestId)!) }).baseAmountMinor);
+    const delta = safeMinor(baseTotal - (priorBaseMoney.get(requestId) ?? 0n));
+    const group = allocations.filter((row) => row.requestId === requestId);
+    const baseParts = new Map(allocateMinor(delta, group.map((row) => ({ id: row.id, weight: String(row.amountMinor) })))
+      .map((row) => [row.id, row.amountMinor]));
+    for (let index = 0; index < allocations.length; index += 1) {
+      if (allocations[index].requestId === requestId) allocations[index] = { ...allocations[index], baseAmountMinor: baseParts.get(allocations[index].id)! };
+    }
+  }
+  const resultOrder = { ...order, status: "issued" as const,
+    lines: order.lines.map((line) => ({ ...line, conversion: unitConversionSnapshot(line.conversion),
+      price: { ...line.price }, sources: line.sources.map((source) => ({ ...source })) })) };
+  return freeze({ order: resultOrder, allocations,
+    totalMinor: safeMinor(subtotal + BigInt(order.shippingMinor) - BigInt(order.discountMinor)), effects: NO_FINANCIAL_EFFECT });
+}
+
+export type InspectionDisposition = "accepted" | "quarantined" | "rejected";
+export interface InspectionPortion {
+  readonly id: string; readonly quantity: string; readonly disposition: InspectionDisposition;
+  readonly lotCode: string | null; readonly expiryDate: string | null; readonly locationId: string;
+  readonly damaged: boolean; readonly reason: string;
+}
+export interface ReceiptRevision {
+  readonly id: string; readonly version: number; readonly orderId: string; readonly orderVersion: number;
+  readonly supplierPartyId: number; readonly branchId: string; readonly actualArrivalDate: string;
+  readonly lines: ReadonlyArray<{ readonly orderLineId: string; readonly arrivedQuantity: string; readonly portions: readonly InspectionPortion[] }>;
+}
+export interface PriorInspectedQuantity {
+  readonly orderLineId: string; readonly acceptedBaseQuantity: string;
+  readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
+}
+export interface InspectedReceiptLine {
+  readonly id: string; readonly receiptId: string; readonly orderId: string; readonly orderVersion: number;
+  readonly orderLineId: string; readonly itemId: number; readonly supplierPartyId: number; readonly branchId: string;
+  readonly baseQuantity: string; readonly enteredQuantity: string; readonly conversion: UnitConversionSnapshot;
+  readonly disposition: InspectionDisposition; readonly lotCode: string | null;
+  readonly expiryDate: string | null; readonly locationId: string; readonly reason: string;
+}
+export interface ReceiptPlan {
+  readonly receiptId: string; readonly receiptVersion: number;
+  readonly lines: readonly InspectedReceiptLine[];
+  readonly stockEntries: ReadonlyArray<{ readonly receiptLineId: string; readonly itemId: number;
+    readonly baseQuantity: string; readonly locationId: string; readonly availability: "available" | "quarantined" }>;
+  readonly remaining: ReadonlyArray<{ readonly orderLineId: string; readonly acceptedBaseQuantity: string;
+    readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
+    readonly remainingFulfillmentBaseQuantity: string; readonly remainingDeliveryBaseQuantity: string }>;
+  readonly financialEffects: { readonly payables: 0; readonly expenses: 0 };
+}
+
+/** Expiry is checked at posting, not the backdated arrival date. Rejected items
+ * remain documented outside usable stock; quarantined material is segregated.
+ */
+export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: ReceiptRevision,
+  prior: readonly PriorInspectedQuantity[], postingDate: string): ReceiptPlan {
+  validateOrder(order);
+  invariant(order.status === "issued", "order_not_issued", "Receipt requires an issued order");
+  identifier(receipt.id, "receipt id"); positiveId(receipt.version, "receipt version");
+  invariant(receipt.orderId === order.id && receipt.orderVersion === order.version, "stale_order", "Receipt targets a different order revision");
+  invariant(receipt.branchId === order.branchId, "branch_mismatch", "Receipt and order branches differ");
+  invariant(receipt.supplierPartyId === order.supplierPartyId, "supplier_mismatch", "Receipt and order suppliers differ");
+  dateOnly(receipt.actualArrivalDate); dateOnly(postingDate);
+  invariant(receipt.actualArrivalDate <= postingDate, "future_arrival", "Actual arrival cannot be after posting");
+  const previous = unique(prior, (row) => row.orderLineId, "prior receipt total");
+  const incoming = unique(receipt.lines, (line) => line.orderLineId, "incoming order line");
+  invariant(incoming.size > 0, "empty_receipt", "Receipt must classify at least one line");
+  const orderLines = new Map(order.lines.map((line) => [line.id, line]));
+  for (const key of [...previous.keys(), ...incoming.keys()]) {
+    invariant(orderLines.has(key), "unknown_order_line", "Receipt references a line outside this order");
+  }
+  const ids = new Set<string>();
+  const lines: InspectedReceiptLine[] = [];
+  const stockEntries: ReceiptPlan["stockEntries"][number][] = [];
+  const remaining: ReceiptPlan["remaining"][number][] = [];
+  for (const orderLine of order.lines) {
+    const ordered = quantityAtoms(convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity);
+    const old = previous.get(orderLine.id);
+    let accepted = quantityAtoms(old?.acceptedBaseQuantity ?? "0", 3, true);
+    let quarantined = quantityAtoms(old?.quarantinedBaseQuantity ?? "0", 3, true);
+    let rejected = quantityAtoms(old?.rejectedBaseQuantity ?? "0", 3, true);
+    invariant(accepted + quarantined <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted/held capacity");
+    const current = incoming.get(orderLine.id);
+    if (current) {
+      const arrived = quantityAtoms(convertQuantity(current.arrivedQuantity, orderLine.conversion).baseQuantity);
+      invariant(arrived <= ordered - accepted - quarantined, "overdelivery", "Arrival exceeds remaining delivery capacity; obtain an order revision first");
+      invariant(current.portions.length > 0, "unclassified_receipt", "Every arrived quantity must be inspected");
+      let classified = 0n;
+      for (const portion of current.portions) {
+        identifier(portion.id, "receipt portion"); identifier(portion.locationId, "receipt location");
+        invariant(!ids.has(portion.id), "duplicate_source", "Receipt portion id is duplicated"); ids.add(portion.id);
+        invariant(["accepted", "quarantined", "rejected"].includes(portion.disposition), "invalid_disposition", "Inspection disposition is invalid");
+        invariant(typeof portion.damaged === "boolean", "invalid_inspection", "Damage classification is required");
+        const converted = convertQuantity(portion.quantity, orderLine.conversion);
+        const amount = quantityAtoms(converted.baseQuantity);
+        classified += amount;
+        if (portion.expiryDate !== null) dateOnly(portion.expiryDate);
+        if (portion.lotCode !== null) identifier(portion.lotCode, "manufacturer lot");
+        if (portion.disposition === "accepted") {
+          invariant(!portion.damaged, "damaged_stock", "Damaged material cannot become available stock");
+          invariant(!orderLine.trackLot || portion.lotCode !== null, "missing_lot", "This item requires a manufacturer lot");
+          invariant(!orderLine.requiresExpiry || portion.expiryDate !== null, "missing_expiry", "This item requires a known expiry date");
+          if (portion.expiryDate !== null) {
+            const days = (Date.parse(`${portion.expiryDate}T00:00:00.000Z`) - Date.parse(`${postingDate}T00:00:00.000Z`)) / 86_400_000;
+            invariant(days > 0 && days >= orderLine.minimumShelfLifeDays, "expired_receipt", "Accepted material fails the posting-date shelf-life policy");
+          }
+          accepted += amount;
+        } else {
+          reason(portion.reason);
+          if (portion.disposition === "quarantined") quarantined += amount;
+          else rejected += amount;
+        }
+        lines.push({ id: portion.id, receiptId: receipt.id, orderId: order.id, orderVersion: order.version,
+          orderLineId: orderLine.id, itemId: orderLine.itemId, supplierPartyId: order.supplierPartyId, branchId: order.branchId,
+          baseQuantity: converted.baseQuantity, enteredQuantity: converted.enteredQuantity, conversion: converted.conversion,
+          disposition: portion.disposition, lotCode: portion.lotCode, expiryDate: portion.expiryDate,
+          locationId: portion.locationId, reason: portion.reason });
+        if (orderLine.kind === "stock" && portion.disposition !== "rejected") {
+          stockEntries.push({ receiptLineId: portion.id, itemId: orderLine.itemId, baseQuantity: converted.baseQuantity,
+            locationId: portion.locationId, availability: portion.disposition === "accepted" ? "available" : "quarantined" });
+        }
+      }
+      invariant(classified === arrived, "classification_mismatch", "Accepted + quarantined + rejected must equal exactly what arrived");
+    }
+    remaining.push({ orderLineId: orderLine.id, acceptedBaseQuantity: quantityText(accepted),
+      quarantinedBaseQuantity: quantityText(quarantined), rejectedBaseQuantity: quantityText(rejected),
+      remainingFulfillmentBaseQuantity: quantityText(ordered - accepted),
+      remainingDeliveryBaseQuantity: quantityText(ordered - accepted - quarantined) });
+  }
+  return freeze({ receiptId: receipt.id, receiptVersion: receipt.version, lines, stockEntries, remaining,
+    financialEffects: { payables: 0 as const, expenses: 0 as const } });
+}
+
+export interface InvoiceReceiptAllocation {
+  readonly id: string; readonly invoiceLineId: string; readonly receiptLineId: string; readonly baseQuantity: string;
+}
+export interface SupplierInvoiceLine {
+  readonly id: string; readonly orderLineId: string; readonly quantity: string; readonly price: UnitPrice;
+  readonly receiptAllocations: readonly InvoiceReceiptAllocation[];
+}
+export interface SupplierInvoiceRevision {
+  readonly id: string; readonly version: number; readonly orderId: string; readonly orderVersion: number;
+  readonly branchId: string; readonly supplierPartyId: number; readonly currency: Currency;
+  readonly invoiceNumber: string | null; readonly invoiceDate: string; readonly missingNumberReason: string | null;
+  readonly shippingMinor: number; readonly discountMinor: number; readonly valuation: ValuationSnapshot | null;
+  readonly lines: readonly SupplierInvoiceLine[];
+}
+export type MatchIssue = "awaiting_receipt" | "price_variance" | "missing_price" | "estimated_price" | "invoice_exceeds_order"
+  | "missing_valuation" | "missing_invoice_number" | "header_charge_review";
+export interface InvoiceMatchPlan {
+  readonly invoiceId: string; readonly invoiceVersion: number; readonly identity: string;
+  readonly duplicateKey: string | null; readonly status: "matched" | "needs_review";
+  readonly issues: readonly MatchIssue[];
+  readonly lines: ReadonlyArray<{ readonly invoiceLineId: string; readonly baseQuantity: string;
+    readonly matchedBaseQuantity: string; readonly unreceivedBaseQuantity: string;
+    readonly priceDifferenceMinor: number | null; readonly lineTotalMinor: number | null; readonly issues: readonly MatchIssue[] }>;
+  readonly total: MoneyAmount | null;
+  readonly charges: ReadonlyArray<{ readonly invoiceLineId: string; readonly shippingMinor: number; readonly discountMinor: number }>;
+  /** There is no payable creation API here. Finance must approve and post exactly
+   * one existing payable, then call the unchanged supplier payment engine. */
+  readonly effects: typeof NO_FINANCIAL_EFFECT;
+}
+
+/** Policy v1: supplier + calendar invoice year + NFKC/uppercase/collapsed-space
+ * number. Punctuation and leading zeroes remain significant. Missing numbers
+ * require a reason and manual duplicate review, never a fabricated unique number.
+ */
+export function supplierInvoiceDuplicateKey(supplierPartyId: number, invoiceNumber: string | null,
+  invoiceDate: string, missingNumberReason: string | null): string | null {
+  positiveId(supplierPartyId, "invoice supplier"); dateOnly(invoiceDate);
+  if (invoiceNumber === null) { reason(missingNumberReason); return null; }
+  invariant(typeof invoiceNumber === "string" && invoiceNumber.length <= 120, "invalid_invoice_number", "Invoice number is too long");
+  const normalized = invoiceNumber.normalize("NFKC").trim().replace(/\s+/g, " ").toUpperCase();
+  identifier(normalized, "supplier invoice number");
+  return `supplier-invoice-v1:${JSON.stringify([supplierPartyId, invoiceDate.slice(0, 4), normalized])}`;
+}
+
+/** Receipt inputs must be persisted posted receipt lines, selected and locked by
+ * the server. Prior allocations exclude this invoice and include all active
+ * posted invoices net explicit reversal allocations. This function never marks
+ * goods received just because an invoice exists.
+ */
+export function matchSupplierInvoice(order: IssuedPurchaseOrder, invoice: SupplierInvoiceRevision,
+  postedReceiptLines: readonly InspectedReceiptLine[], priorAllocations: readonly InvoiceReceiptAllocation[]): InvoiceMatchPlan {
+  validateOrder(order);
+  invariant(order.status === "issued", "order_not_issued", "Invoice matching needs an issued order");
+  identifier(invoice.id, "supplier invoice id"); positiveId(invoice.version, "invoice version");
+  invariant(invoice.orderId === order.id && invoice.orderVersion === order.version, "stale_order", "Invoice targets another order revision");
+  invariant(invoice.branchId === order.branchId, "branch_mismatch", "Invoice branch differs from order branch");
+  invariant(invoice.supplierPartyId === order.supplierPartyId, "supplier_mismatch", "Invoice supplier differs from order supplier");
+  requireCurrency(invoice.currency, "supplier invoice", invoice.id);
+  invariant(invoice.currency === order.currency, "currency_mismatch", "Invoice currency differs from the approved order");
+  minorAmount(invoice.shippingMinor); minorAmount(invoice.discountMinor);
+  const duplicateKey = supplierInvoiceDuplicateKey(invoice.supplierPartyId, invoice.invoiceNumber, invoice.invoiceDate, invoice.missingNumberReason);
+  invariant(invoice.lines.length > 0, "empty_invoice", "Invoice needs lines");
+  unique(invoice.lines, (line) => line.id, "invoice line");
+  const receipts = unique(postedReceiptLines, (line) => line.id, "posted receipt line");
+  const prior = unique(priorAllocations, (row) => row.id, "prior invoicing allocation");
+  const orders = new Map(order.lines.map((line) => [line.id, line]));
+  const allocatedReceipt = new Map<string, bigint>();
+  const allocatedOrder = new Map<string, bigint>();
+  const checkReceipt = (receiptLineId: string): InspectedReceiptLine => {
+    const receipt = receipts.get(receiptLineId);
+    invariant(receipt, "unknown_receipt", "Invoice allocation references an unknown posted receipt");
+    invariant(receipt.orderId === order.id && receipt.supplierPartyId === invoice.supplierPartyId
+      && receipt.branchId === invoice.branchId, "receipt_owner_mismatch", "Receipt belongs to another order, supplier or branch");
+    // Earlier order revisions remain valid historical receipts when the current
+    // order retains the same line/item/base unit. Future revisions are invalid.
+    positiveId(receipt.orderVersion, "receipt order version");
+    invariant(receipt.orderVersion <= order.version, "stale_order", "Receipt is from a future order revision");
+    const source = orders.get(receipt.orderLineId);
+    invariant(source && source.itemId === receipt.itemId, "item_mismatch", "Receipt item does not match the order");
+    const conversion = unitConversionSnapshot(receipt.conversion);
+    invariant(conversion.itemId === receipt.itemId && conversion.baseUnit === source.conversion.baseUnit,
+      "unit_mismatch", "Receipt base unit differs from the order");
+    invariant(receipt.disposition === "accepted", "unaccepted_invoice_quantity", "Only accepted inspected quantities may be matched");
+    quantityAtoms(receipt.baseQuantity);
+    return receipt;
+  };
+  for (const row of prior.values()) {
+    const receipt = checkReceipt(row.receiptLineId);
+    const qty = quantityAtoms(row.baseQuantity);
+    const total = (allocatedReceipt.get(receipt.id) ?? 0n) + qty;
+    invariant(total <= quantityAtoms(receipt.baseQuantity), "receipt_already_invoiced", "Historical invoice allocations exceed accepted receipt quantity");
+    allocatedReceipt.set(receipt.id, total);
+    allocatedOrder.set(receipt.orderLineId, (allocatedOrder.get(receipt.orderLineId) ?? 0n) + qty);
+  }
+  const seenAllocationIds = new Set(prior.keys());
+  const issues = new Set<MatchIssue>();
+  if (duplicateKey === null) issues.add("missing_invoice_number");
+  // Quantity allocations alone do not prove how earlier invoices used header
+  // charges. Until finance supplies cumulative charge allocations, require review.
+  if (invoice.shippingMinor !== 0 || invoice.discountMinor !== 0 || order.shippingMinor !== 0 || order.discountMinor !== 0) {
+    issues.add("header_charge_review");
+  }
+  const lines: InvoiceMatchPlan["lines"][number][] = [];
+  for (const line of invoice.lines) {
+    const source = orders.get(line.orderLineId);
+    invariant(source, "unknown_order_line", "Invoice references an order line outside this order");
+    const base = quantityAtoms(convertQuantity(line.quantity, source.conversion).baseQuantity);
+    const lineIssues = new Set<MatchIssue>();
+    const lineTotalMinor = priceTotal(line.price, line.quantity, invoice.currency);
+    if (line.price.state === "missing" || source.price.state === "missing") lineIssues.add("missing_price");
+    if (line.price.state === "estimated" || source.price.state === "estimated") lineIssues.add("estimated_price");
+    const priceDifferenceMinor = line.price.state === "missing" || source.price.state === "missing"
+      ? null : line.price.unitPriceMinor - source.price.unitPriceMinor;
+    if (priceDifferenceMinor !== null && priceDifferenceMinor !== 0) lineIssues.add("price_variance");
+    let matched = 0n;
+    for (const allocation of line.receiptAllocations) {
+      identifier(allocation.id, "invoice receipt allocation");
+      invariant(!seenAllocationIds.has(allocation.id), "duplicate_source", "Invoice receipt allocation id already exists");
+      seenAllocationIds.add(allocation.id);
+      invariant(allocation.invoiceLineId === line.id, "invoice_line_mismatch", "Allocation belongs to another invoice line");
+      const receipt = checkReceipt(allocation.receiptLineId);
+      invariant(receipt.orderLineId === source.id, "item_mismatch", "Invoice allocation references a different order line");
+      const qty = quantityAtoms(allocation.baseQuantity, source.conversion.basePrecision);
+      matched += qty;
+      const total = (allocatedReceipt.get(receipt.id) ?? 0n) + qty;
+      invariant(total <= quantityAtoms(receipt.baseQuantity), "receipt_already_invoiced", "Combined invoice allocations exceed accepted receipt quantity");
+      allocatedReceipt.set(receipt.id, total);
+    }
+    invariant(matched <= base, "invoice_overallocated", "Receipt allocation exceeds invoice quantity");
+    if (matched < base) lineIssues.add("awaiting_receipt");
+    const billed = (allocatedOrder.get(source.id) ?? 0n) + base;
+    allocatedOrder.set(source.id, billed);
+    if (billed > quantityAtoms(convertQuantity(source.quantity, source.conversion).baseQuantity)) lineIssues.add("invoice_exceeds_order");
+    lineIssues.forEach((issue) => issues.add(issue));
+    lines.push({ invoiceLineId: line.id, baseQuantity: quantityText(base), matchedBaseQuantity: quantityText(matched),
+      unreceivedBaseQuantity: quantityText(base - matched), priceDifferenceMinor, lineTotalMinor, issues: [...lineIssues] });
+  }
+  const hasMissingPrice = lines.some((line) => line.lineTotalMinor === null);
+  let total: MoneyAmount | null = null;
+  const charges: InvoiceMatchPlan["charges"][number][] = [];
+  if (!hasMissingPrice) {
+    const subtotal = lines.reduce((sum, line) => sum + BigInt(line.lineTotalMinor!), 0n);
+    invariant(BigInt(invoice.discountMinor) <= subtotal, "excess_discount", "Invoice discount exceeds line value");
+    total = { currency: invoice.currency, amountMinor: safeMinor(subtotal + BigInt(invoice.shippingMinor) - BigInt(invoice.discountMinor)) };
+    const weights = lines.map((line) => ({ id: line.invoiceLineId, weight: subtotal === 0n ? "1" : String(line.lineTotalMinor) }));
+    const shipping = new Map(allocateMinor(invoice.shippingMinor, weights).map((row) => [row.id, row.amountMinor]));
+    const discounts = new Map(allocateMinor(invoice.discountMinor, weights).map((row) => [row.id, row.amountMinor]));
+    for (const line of lines) charges.push({ invoiceLineId: line.invoiceLineId,
+      shippingMinor: shipping.get(line.invoiceLineId)!, discountMinor: discounts.get(line.invoiceLineId)! });
+  }
+  if (invoice.valuation === null) issues.add("missing_valuation");
+  else {
+    validateValuation(invoice.valuation);
+    invariant(invoice.valuation.purpose === "invoice_valuation" && invoice.valuation.currency === invoice.currency
+      && total !== null && invoice.valuation.amountMinor === total.amountMinor,
+      "valuation_mismatch", "Invoice valuation must match the final invoice total and its purpose");
+  }
+  return freeze({ invoiceId: invoice.id, invoiceVersion: invoice.version, identity: payloadIdentity(invoice), duplicateKey,
+    status: issues.size === 0 ? "matched" : "needs_review", issues: [...issues], lines, total, charges, effects: NO_FINANCIAL_EFFECT });
+}
