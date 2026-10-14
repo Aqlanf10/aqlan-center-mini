@@ -1,0 +1,167 @@
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/collections-native-currency-ui.test.ts [ __tests__/security-http/collections-native-currency-ui.test.ts ]
+AssertionError: the old witness date is not shared with another fixture: expected [ { receiptId: 1, …(13) }, …(3) ] to have a length of +0 but got 4
+
+- Expected
++ Received
+
+- 0
++ 4
+
+ ❯ __tests__/security-http/collections-native-currency-ui.test.ts:78:95
+     76|   await db.connect();
+     77|   expect((await db.query("SELECT current_database() AS name")).rows[0]…
+     78|   expect((await apiReport()).rows, "the old witness date is not shared…
+       |                                                                                               ^
+     79|   const { rows: [shift] } = await db.query<{ id: number }>(
+     80|     `INSERT INTO cashier_shifts (opened_by, status, closed_by, opened_…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/finance-shift-read-state-ui.test.ts > built reconciliation shift read state > preserves accountant read-only controls after a confirmed open read
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:45
+     83|   try {
+     84|     await page.goto(`${baseUrl}${mode === "finance" ? "/finance" : "/f…
+     85|     await expect.poll(() => pending.length).toBe(1);
+       |                                             ^
+     86|     return {
+     87|       page, context, pending, writes, unexpected, errors,
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:134:17
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ fixture __tests__/security-http/finance-shift-read-state-ui.test.ts:85:5
+ ❯ __tests__/security-http/finance-shift-read-state-ui.test.ts:134:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records
+Error: PDF service label must occur in exactly one field block
+ ❯ only __tests__/helpers/lab-dispatch-pdf-fields.ts:12:34
+     10|   .replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+     11| const only = <T>(values: T[], description: string): T => {
+     12|   if (values.length !== 1) throw new Error(`PDF ${description} must oc…
+       |                                  ^
+     13|   return values[0];
+     14| };
+ ❯ assertLabDispatchPdfFields __tests__/helpers/lab-dispatch-pdf-fields.ts:68:24
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:455:11
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts > lab dispatch privacy on actual built browser and PDF outputs > both entrypoints omit patient identity, isolate print, keep only the QR reference, and preserve internal records
+AssertionError: expected '' to match /^\d{1,24}$/
+
+- Expected:
+/^\d{1,24}$/
+
++ Received:
+""
+
+ ❯ emitDiagnosticPdf __tests__/security-http/lab-dispatch-privacy-ui.test.ts:291:17
+    289|   const runId = process.env.GITHUB_RUN_ID ?? "", runAttempt = process.…
+    290|   const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { enc…
+    291|   expect(runId).toMatch(/^\d{1,24}$/); expect(runAttempt).toMatch(/^\d…
+       |                 ^
+    292|   expect(checkoutSha).toMatch(/^[a-f0-9]{40}$/); expect(checkoutSha).t…
+    293|   const eventPath = process.env.GITHUB_EVENT_PATH;
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:479:11
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:347:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  __tests__/security-http/patient-lab-read-state-ui.test.ts > patient lab read states in the built page > contains refused/malformed/failed reads and explicitly recovers at 390px
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ waitForRequest __tests__/security-http/patient-lab-read-state-ui.test.ts:130:64
+    128| }
+    129| async function waitForRequest(page: Page, index: number) {
+    130|   await expect.poll(async () => (await requests(page)).length).toBe(in…
+       |                                                                ^
+    131| }
+    132| async function head(page: Page, index: number, status = 200) {
+ ❯ open __tests__/security-http/patient-lab-read-state-ui.test.ts:156:9
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:163:7
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:162:5
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ waitForRequest __tests__/security-http/patient-lab-read-state-ui.test.ts:130:3
+ ❯ open __tests__/security-http/patient-lab-read-state-ui.test.ts:156:3
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:163:7
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:162:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  __tests__/security-http/patient-lab-read-state-ui.test.ts > patient lab read states in the built page > contains old 'body' after leaving and reopening the lab panel at 390
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ waitForRequest __tests__/security-http/patient-lab-read-state-ui.test.ts:130:64
+    128| }
+    129| async function waitForRequest(page: Page, index: number) {
+    130|   await expect.poll(async () => (await requests(page)).length).toBe(in…
+       |                                                                ^
+    131| }
+    132| async function head(page: Page, index: number, status = 200) {
+ ❯ open __tests__/security-http/patient-lab-read-state-ui.test.ts:156:9
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:205:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:204:7
+
+Caused by: Error: Matcher did not succeed in time.
+ ❯ waitForRequest __tests__/security-http/patient-lab-read-state-ui.test.ts:130:3
+ ❯ open __tests__/security-http/patient-lab-read-state-ui.test.ts:156:3
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:205:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:204:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:330:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:239:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  5 failed | 182 passed (187)
+      Tests  5 failed | 1331 passed | 1 skipped (1337)
+   Start at  03:45:48
+   Duration  1796.97s (transform 6.91s, setup 0ms, import 9.51s, tests 1780.59s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

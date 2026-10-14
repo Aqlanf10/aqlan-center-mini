@@ -1,0 +1,33 @@
+Receipt provenance ran before collections in the same isolated database. All original configuration and assertions were retained. The sole remaining failure below is the previously documented local receipt PDF glyph geometry, not the collections witness.
+
+Temporary sequencer used for this order-specific reproduction:
+import { BaseSequencer } from '/workspace/aqlan-center-mini/node_modules/vitest/dist/node.js';
+
+// Reproduce the observed cross-file witness collision without changing CI,
+// test assertions, database isolation, or the test runner's time limits.
+export default class ReceiptBeforeCollections extends BaseSequencer {
+  async sort(files) {
+    const rank = file => file.moduleId.endsWith('/receipt-provenance-ui.test.ts') ? 0 : 1;
+    return [...files].sort((a, b) => rank(a) - rank(b));
+  }
+}
+
+Temporary config (extends the unchanged security config):
+import { mergeConfig } from '/workspace/aqlan-center-mini/node_modules/vitest/dist/config.js';
+import base from '/workspace/aqlan-center-mini/vitest.config.security.mts';
+import ReceiptBeforeCollections from './receipt-before-collections.mjs';
+
+export default mergeConfig(base, {
+  test: { sequence: { sequencer: ReceiptBeforeCollections } },
+});
+
+Runner:
+ ✓ __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance through existing authorized read routes > adds a separate privacy-minimal projection without changing existing financial permissions or DTOs 787ms
+ ✓ __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps the recorded face amount when optional provenance is absent or malformed, then recovers 3195ms
+ × __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels 6457ms
+   → PDF signature receipt fragments violate exact glyph geometry
+ ✓ __tests__/security-http/collections-native-currency-ui.test.ts > collections native currency across the actual loader, report, downloads and official PDF > keeps native signed amounts, records only explicit cross-currency settlements and applies exact tender/receiver filters 20901ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 3 passed (4)
+   Duration  40.98s (transform 114ms, setup 0ms, import 1.07s, tests 34.50s, environment 0ms)
