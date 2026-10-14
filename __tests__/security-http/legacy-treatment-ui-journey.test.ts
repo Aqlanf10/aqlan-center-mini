@@ -18,6 +18,14 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let bridge = 0;
 const stamp = Date.now();
+const historicalState = (form: ReturnType<Page["locator"]>) => form.getByTestId("historical-clinical-preview-0");
+const historicalRemaining = (form: ReturnType<Page["locator"]>) => form.getByText("المتبقي التاريخي الافتتاحي", {exact:true}).locator("..");
+const revealHistory = async (form: ReturnType<Page["locator"]>) => {
+  const proof = historicalState(form);
+  await proof.waitFor({ state: "attached" });
+  if (!await proof.isVisible()) await proof.locator("..").locator("summary").click();
+  return proof;
+};
 const SHOTS = ".settings-ui-artifacts";
 
 /*
@@ -64,37 +72,38 @@ async function registerThroughForm(patientId: number, width: number) {
   const page = await open(patientId, width, "?tab=account");
   const previews: number[] = [];
   page.on("response", (response) => {
-    if (response.url().includes("/legacy-treatments/preview")) previews.push(response.status());
+    if (response.url().includes("/historical-documents/preview")) previews.push(response.status());
     // The legacy form must never borrow the ordinary invoice preview again.
     if (response.url().includes("/api/invoices/clinical-preview")) previews.push(-1);
   });
   try {
     await page.getByTestId("treatment-entry-open").click();
     await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
-    const form = page.getByTestId("legacy-treatment-form");
-    await form.getByLabel("الخدمة العلاجية").selectOption(String(bridge));
-    await form.getByTestId("legacy-tooth-button").click();
+    const form = page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true });
+    await form.getByLabel("الخدمة").selectOption(String(bridge));
+    await form.getByTestId("invoice-tooth-button-0").click();
     const dialog = page.getByTestId("tooth-dialog");
     for (const tooth of [14, 15, 16]) await dialog.getByTestId(`odontogram-tooth-${tooth}`).click();
     await page.getByTestId("tooth-dialog-confirm").click();
     await dialog.waitFor({ state: "detached" });
-    expect(await form.getByTestId("legacy-tooth-chip").innerText()).toMatch(/14[\s\S]*16/);
+    expect(await form.getByTestId("invoice-tooth-chip-0").innerText()).toMatch(/14[\s\S]*16/);
     // Incomplete draft: the save stays disabled and says why.
-    expect(await form.getByTestId("legacy-preview-read-state").innerText()).toContain("أكمل");
-    await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+    expect(await (await revealHistory(form)).innerText()).toMatch(/أكمل|تاريخ/);
+    await form.getByLabel("السعر", {exact:true}).fill("300000");
     await form.getByLabel("المدفوع قبل النظام").fill("120000");
     await form.getByLabel("تاريخ المعلومات التاريخية").fill("2026-01-15");
-    await expect.poll(() => form.getByTestId("legacy-remaining").innerText()).toContain("180,000");
+    await expect.poll(() => historicalRemaining(form).innerText()).toContain("180,000");
     // The case-link and opening evidence must be ready before saving; report its final message if it never becomes ready.
-    const readState = form.getByTestId("legacy-preview-read-state");
-    await expect.poll(async () => await readState.count() === 0 ? "ready" : await readState.innerText(), { timeout: 30_000 }).toBe("ready");
-    expect(await form.getByTestId("legacy-opening-effect").innerText()).toContain("180,000");
-    expect(await form.getByTestId("legacy-case-preview").innerText()).toContain("حالة بدأت قبل النظام");
+    const readState = form.getByTestId("historical-clinical-preview-0");
+    await expect.poll(() => readState.getAttribute("data-preview-state"), { timeout: 30_000 }).toBe("ready");
+    await revealHistory(form);
+    expect(await historicalRemaining(form).innerText()).toContain("180,000");
+    expect(await historicalState(form).innerText()).toContain("حالة تخصصية للعلاج السابق");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
     await page.screenshot({ path: `${SHOTS}/legacy-treatment-form-${width}.png`, fullPage: true });
-    await form.getByRole("button", { name: "احفظ العلاج السابق" }).dblclick();
-    await page.getByTestId("legacy-agreements").waitFor();
-    await expect.poll(() => page.getByTestId("legacy-agreements").innerText()).toContain("14");
+    await form.getByRole("button", { name: "احفظ الاتفاق التاريخي" }).dblclick();
+    await page.getByTestId("historical-documents").waitFor();
+    await expect.poll(() => page.getByTestId("historical-documents").innerText()).toContain("14");
     await page.screenshot({ path: `${SHOTS}/legacy-treatment-saved-${width}.png`, fullPage: true });
     expect(previews.length).toBeGreaterThan(0);
     expect(previews.every((status) => status === 200)).toBe(true);
@@ -107,12 +116,14 @@ describe("pre-system treatment through the built form", () => {
       "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id", [`LGUI-${stamp}-${width}`, "مريض علاج سابق اصطناعي"]);
     await registerThroughForm(patientId, width);
 
-    const { rows: agreements } = await db.query(`SELECT a.id, a.agreed_minor::int AS agreed, a.previously_paid_minor::int AS paid,
-        a.remaining_minor::int AS remaining, a.currency, a.historical_as_of::text AS as_of, a.case_id, a.plan_item_id,
+    const { rows: agreements } = await db.query(`SELECT a.id, a.agreed_minor::int AS agreed, a.previously_paid_minor AS line_paid, a.remaining_minor AS line_remaining, r.previously_paid_minor::int AS paid,
+        r.remaining_minor::int AS remaining, a.currency, a.historical_as_of::text AS as_of, a.case_id, a.plan_item_id,
         s.snapshot_tooth_codes AS teeth, s.snapshot_mode AS mode
-      FROM legacy_treatment_agreements a LEFT JOIN legacy_treatment_coverage_snapshots s ON s.agreement_id = a.id
+      FROM legacy_treatment_agreements a
+      JOIN legacy_treatment_document_revisions r ON r.document_id=a.document_id AND r.version=1
+      LEFT JOIN legacy_treatment_coverage_snapshots s ON s.agreement_id = a.id
       WHERE a.patient_id = $1`, [patientId]);
-    expect(agreements).toEqual([expect.objectContaining({ agreed: 300000, paid: 120000, remaining: 180000, currency: "YER",
+    expect(agreements).toEqual([expect.objectContaining({ agreed: 300000, line_paid: null, line_remaining: null, paid: 120000, remaining: 180000, currency: "YER",
       as_of: "2026-01-15", teeth: [14, 15, 16], mode: "multi_tooth_episode" })]);
     expect((await db.query("SELECT amount_minor::int AS amount FROM patient_opening_balances WHERE patient_id = $1 AND currency = 'YER'", [patientId])).rows)
       .toEqual([{ amount: 180000 }]);
@@ -147,7 +158,7 @@ describe("pre-system treatment through the built form", () => {
       } finally { await lab.context().close(); }
       const account = await open(patientId, width, "?tab=account");
       try {
-        await account.getByTestId("legacy-agreements").waitFor();
+        await account.getByTestId("historical-documents").waitFor();
         await account.getByTestId("account-treatment-details").locator("summary").click();
         const header = account.getByTestId("patient-account-currency-banner").filter({ has: account.getByTestId("historical-clinical-note") });
         expect(await header.getAttribute("data-currency")).toBe("YER");
@@ -209,7 +220,7 @@ describe("legacy preview failure, staleness and form ownership", () => {
       const control = page.getByLabel(label, { exact: true });
       await revealInvoiceControlByWheel(page, control); await control.fill(value);
     };
-    await page.route(`**/api/patients/${patient.id}/legacy-treatments`, async route => {
+    await page.route(`**/api/patients/${patient.id}/historical-documents`, async route => {
       if (route.request().method() !== "POST") return route.continue();
       commands.push(route.request().postDataJSON() as Record<string, unknown>);
       if (commands.length === 1) return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ message: "صحّح الملاحظة التاريخية ثم أعد المحاولة." }) });
@@ -220,10 +231,10 @@ describe("legacy preview failure, staleness and form ownership", () => {
     try {
       await click(page.getByTestId("treatment-entry-open"));
       await click(page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }));
-      const form = page.getByTestId("legacy-treatment-form");
-      const service = form.getByLabel("الخدمة العلاجية", { exact: true });
+      const form = page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true });
+      const service = form.getByLabel("الخدمة", { exact: true });
       await revealInvoiceControlByWheel(page, service); await service.selectOption(String(bridge));
-      await click(form.getByTestId("legacy-tooth-button"));
+      await click(form.getByTestId("invoice-tooth-button-0"));
       const dialog = page.getByTestId("tooth-dialog");
       await dialog.waitFor();
       for (const target of [dialog.getByTestId("odontogram-tooth-14"), page.getByTestId("tooth-dialog-confirm")]) {
@@ -234,26 +245,30 @@ describe("legacy preview failure, staleness and form ownership", () => {
         await page.mouse.click(proof.left + proof.width / 2, proof.top + proof.height / 2);
       }
       await dialog.waitFor({ state: "detached" });
-      await fill("المبلغ المتفق عليه أصلًا", "300000"); await fill("المدفوع قبل النظام", "120000");
+      await fill("السعر", "300000"); await fill("المدفوع قبل النظام", "120000");
       await fill("تاريخ المعلومات التاريخية", "2026-01-15"); await fill("ملاحظة الاتفاق التاريخي", "قبل التصحيح");
-      const save = form.getByRole("button", { name: "احفظ العلاج السابق", exact: true });
+      const save = form.getByRole("button", { name: "احفظ الاتفاق التاريخي", exact: true });
       await expect.poll(() => save.isEnabled(), { timeout: 15_000 }).toBe(true); await click(save);
       const error = page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب", exact: true });
       await error.waitFor(); await revealInvoiceControlByWheel(page, error);
       expect(await error.innerText()).toContain("صحّح الملاحظة");
-      expect(await form.getByLabel("المبلغ المتفق عليه أصلًا").inputValue()).toBe("300000");
+      expect(await form.getByLabel("السعر", {exact:true}).inputValue()).toBe("300000");
       expect(await form.getByLabel("المدفوع قبل النظام").inputValue()).toBe("120000");
-      expect(await form.getByTestId("legacy-tooth-chip").innerText()).toContain("14");
+      expect(await form.getByTestId("invoice-tooth-chip-0").innerText()).toContain("14");
       expect(await page.getByTestId("account-canonical-balance").innerText()).toContain("250,000");
       expect(await page.getByTestId("account-balance-unavailable").count()).toBe(0);
       expect((await db.query(`SELECT id FROM legacy_treatment_agreements WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
+      expect(await save.isDisabled()).toBe(true);
+      page.once("dialog", dialog => dialog.accept());
+      await click(form.getByRole("button", {name:"تعديل المسودة بعد الرفض",exact:true}));
       await fill("ملاحظة الاتفاق التاريخي", "معلومة تاريخية مصححة");
+      await expect.poll(() => save.isEnabled(), {timeout:15000}).toBe(true);
       await click(save); await page.getByTestId("invoice-clinical-notice").waitFor();
       expect(commands).toHaveLength(2); expect(commands[1].idempotencyKey).toBe(commands[0].idempotencyKey);
       expect(commands[1].note).toBe("معلومة تاريخية مصححة");
       await page.getByTestId("account-balance-unavailable").waitFor();
       expect(await page.getByTestId("account-canonical-balance").count()).toBe(0);
-      expect((await db.query(`SELECT remaining_minor::int FROM legacy_treatment_agreements WHERE patient_id=$1`, [patient.id])).rows).toEqual([{ remaining_minor: 180000 }]);
+      expect((await db.query(`SELECT r.remaining_minor::int FROM legacy_treatment_document_revisions r JOIN legacy_treatment_documents d ON d.id=r.document_id WHERE d.patient_id=$1`, [patient.id])).rows).toEqual([{ remaining_minor: 180000 }]);
       for (const table of ["invoices", "payments"]) expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [patient.id])).rows).toHaveLength(0);
       await page.screenshot({ path: `${SHOTS}/legacy-refusal-recovery-${width}.png`, fullPage: false });
     } catch (error) {
@@ -268,8 +283,8 @@ describe("legacy preview failure, staleness and form ownership", () => {
     let mode: "fail" | "hold" | "pass" = "fail";
     let held: Route | null = null;
     const seen: { agreed: unknown; status: number }[] = [];
-    await page.route("**/legacy-treatments/preview", async (route) => {
-      const agreed = (JSON.parse(route.request().postData() ?? "{}") as { agreedAmount?: unknown }).agreedAmount;
+    await page.route("**/historical-documents/preview", async (route) => {
+      const agreed = (JSON.parse(route.request().postData() ?? "{}") as { items?: {price?:unknown}[] }).items?.[0]?.price;
       if (mode === "fail") { seen.push({ agreed, status: 503 }); return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "تعذّرت المعاينة (اختبار)." }) }); }
       if (mode === "hold" && agreed === "300000" && held === null) { held = route; return; }
       seen.push({ agreed, status: 200 });
@@ -278,11 +293,11 @@ describe("legacy preview failure, staleness and form ownership", () => {
     try {
       await page.getByTestId("treatment-entry-open").click();
       await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
-      const form = page.getByTestId("legacy-treatment-form");
-      const save = form.getByRole("button", { name: "احفظ العلاج السابق" });
-      const readState = form.getByTestId("legacy-preview-read-state");
-      await form.getByLabel("الخدمة العلاجية").selectOption(String(bridge));
-      await form.getByTestId("legacy-tooth-button").click();
+      const form = page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true });
+      const save = form.getByRole("button", { name: "احفظ الاتفاق التاريخي" });
+      const readState = form.getByTestId("historical-clinical-preview-0");
+      await form.getByLabel("الخدمة").selectOption(String(bridge));
+      await form.getByTestId("invoice-tooth-button-0").click();
       const dialog = page.getByTestId("tooth-dialog");
       for (const tooth of [24, 25]) await dialog.getByTestId(`odontogram-tooth-${tooth}`).click();
       await page.getByTestId("tooth-dialog-confirm").click();
@@ -290,7 +305,9 @@ describe("legacy preview failure, staleness and form ownership", () => {
       await form.getByLabel("تاريخ المعلومات التاريخية").fill("2026-02-01");
 
       // A failed preview keeps save disabled and says so.
-      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("250000");
+      await form.getByLabel("السعر", {exact:true}).fill("250000");
+      await form.getByLabel("سبب تغيير السعر", {exact:true}).fill("تصحيح قيمة تاريخية موثقة");
+      await revealHistory(form);
       await expect.poll(() => readState.innerText(), { timeout: 30_000 }).toContain("تعذّرت المعاينة (اختبار).");
       expect(await readState.isVisible()).toBe(true);
       expect(await save.isEnabled()).toBe(false);
@@ -302,27 +319,30 @@ describe("legacy preview failure, staleness and form ownership", () => {
       page.on("requestfailed", (request) => { settled.add(request); });
       page.on("requestfinished", (request) => { settled.add(request); });
       mode = "hold";
-      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+      await form.getByLabel("السعر", {exact:true}).fill("300000");
       await expect.poll(() => held !== null, { timeout: 30_000 }).toBe(true);
       const staleRoute = held as unknown as Route;
       const staleRequest = staleRoute.request();
-      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("400000");
-      const effect = async () => await form.getByTestId("legacy-opening-effect").count() === 0 ? ""
-        : form.getByTestId("legacy-opening-effect").innerText();
+      await form.getByLabel("السعر", {exact:true}).fill("400000");
+      const effect = async () => await historicalRemaining(form).count() === 0 ? ""
+        : historicalRemaining(form).innerText();
+      await expect.poll(() => seen.some(one => one.agreed === "400000" && one.status === 200), {timeout:30_000}).toBe(true);
+      await expect.poll(() => readState.getAttribute("data-preview-state")).toBe("ready");
       await expect.poll(effect, { timeout: 30_000 }).toContain("300,000");
 
       mode = "pass";
-      const freshA = page.waitForResponse((response) => response.url().includes("/legacy-treatments/preview")
-        && (JSON.parse(response.request().postData() ?? "{}") as { agreedAmount?: unknown }).agreedAmount === "300000");
-      await form.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+      const freshA = page.waitForResponse((response) => response.url().includes("/historical-documents/preview")
+        && (JSON.parse(response.request().postData() ?? "{}") as { items?: {price?:unknown}[] }).items?.[0]?.price === "300000");
+      await form.getByLabel("السعر", {exact:true}).fill("300000");
       await freshA;
+      await expect.poll(() => readState.getAttribute("data-preview-state")).toBe("ready");
       await expect.poll(effect, { timeout: 30_000 }).toContain("200,000");
 
       // A2 is current. Release A1 with its real response, marked (after ×3), while A2 is on screen.
       const real = await staleRoute.fetch();
-      const marked = await real.json() as { preview?: { opening?: { afterMinor?: number } } };
-      expect(marked.preview?.opening?.afterMinor).toBeGreaterThan(0);
-      marked.preview!.opening!.afterMinor = marked.preview!.opening!.afterMinor! * 3;
+      const marked = await real.json() as { remainingMinor: number };
+      expect(marked.remainingMinor).toBeGreaterThan(0);
+      marked.remainingMinor *= 3;
       // Today the form aborts A1 when the draft changes, so delivery is refused; were it delivered, the sequence guard
       // must still drop it. Either way the outcome below is what counts.
       await staleRoute.fulfill({ status: real.status(), contentType: "application/json", body: JSON.stringify(marked) })
@@ -331,22 +351,24 @@ describe("legacy preview failure, staleness and form ownership", () => {
       await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       expect(await effect()).toContain("200,000");
       expect(await effect()).not.toContain("600,000");
+      expect(await form.innerText()).not.toContain("600,000");
       expect(await save.isEnabled()).toBe(true);
       expect(seen.some((one) => one.agreed === "400000" && one.status === 200)).toBe(true);
 
       // Close and reopen: a fresh, empty form with save disabled; nothing was written by any preview.
       const discard = page.waitForEvent("dialog");
-      const cancel = form.getByRole("button", { name: "إلغاء" }).click();
+      const cancel = page.getByTestId("treatment-entry-open").click();
       const confirmation = await discard;
       expect(confirmation.type()).toBe("confirm");
       expect(confirmation.message()).toContain("مسودة فاتورة أو اتفاق غير محفوظة");
       await confirmation.accept();
       await cancel;
+      await page.getByTestId("treatment-entry-open").click();
       await page.getByTestId("treatment-entry-choice").waitFor();
       await page.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }).click();
-      const reopened = page.getByTestId("legacy-treatment-form");
-      expect(await reopened.getByLabel("المبلغ المتفق عليه أصلًا").inputValue()).toBe("");
-      expect(await reopened.getByRole("button", { name: "احفظ العلاج السابق" }).isEnabled()).toBe(false);
+      const reopened = page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true });
+      expect(await reopened.getByLabel("السعر", {exact:true}).inputValue()).toBe("");
+      expect(await reopened.getByRole("button", { name: "احفظ الاتفاق التاريخي" }).isEnabled()).toBe(false);
       expect((await db.query(`SELECT 1 FROM legacy_treatment_agreements WHERE patient_id = $1
         UNION ALL SELECT 1 FROM treatment_plans WHERE patient_id = $1 UNION ALL SELECT 1 FROM patient_opening_balances WHERE patient_id = $1`, [patientId])).rows)
         .toHaveLength(0);

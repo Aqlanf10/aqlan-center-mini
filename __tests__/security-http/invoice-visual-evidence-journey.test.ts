@@ -140,7 +140,7 @@ describe("required invoice visual evidence through retained CI stdout", () => {
     page.on("request", (request) => {
       const path = new URL(request.url()).pathname;
       if (!["GET", "HEAD", "OPTIONS"].includes(request.method())
-        && path !== "/api/invoices/clinical-preview" && !path.endsWith("/legacy-treatments/preview")) writes.push(`${request.method()} ${path}`);
+        && path !== "/api/invoices/clinical-preview" && !path.endsWith("/historical-documents/preview")) writes.push(`${request.method()} ${path}`);
     });
     const fits = async () => {
       expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
@@ -166,7 +166,7 @@ describe("required invoice visual evidence through retained CI stdout", () => {
       expect(await page.getByTestId("treatment-entry-open").count()).toBe(1);
       expect(await chooser.getByRole("button").count()).toBe(2);
       expect(await page.getByRole("region", { name: "فاتورة جديدة", exact: true }).count()).toBe(0);
-      expect(await page.getByTestId("legacy-treatment-form").count()).toBe(0);
+      expect(await page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true }).count()).toBe(0);
       expect(await page.getByTestId("account-treatment-details").getAttribute("open")).toBeNull();
       await page.getByTestId("account-canonical-balance").waitFor();
       expect(await page.getByTestId("account-canonical-balance").getAttribute("data-currency")).toBe("SAR");
@@ -214,8 +214,8 @@ describe("required invoice visual evidence through retained CI stdout", () => {
       expect(await chooser.count()).toBe(0); // consumed Plans request cannot reopen on a later visit
       await nativePageClick(page, page.getByTestId("treatment-entry-open"));
       await nativePageClick(page, chooser.getByRole("button", { name: "علاج بدأ قبل النظام", exact: true }));
-      const historical = page.getByTestId("legacy-treatment-form");
-      await historical.getByLabel("المبلغ المتفق عليه أصلًا").fill("300000");
+      const historical = page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true });
+      await historical.getByLabel("السعر", { exact: true }).fill("300000");
       await historical.getByLabel("المدفوع قبل النظام").fill("120000");
       await fits();
       await page.screenshot({ path: `.settings-ui-artifacts/unified-entry-history-${width}.png`, fullPage: true, animations: "disabled" });

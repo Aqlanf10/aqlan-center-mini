@@ -107,6 +107,11 @@
   .header h3 { font-size: 17px; }
   .originTabs button { font-size: 12px; gap: 6px; }
   .meta { gap: 8px; }
+  .layout { gap: 10px; }
+  .summary { gap: 8px; }
+  .summaryCard dl { gap: 4px; }
+  .summaryCard dl > div { padding: 6px; }
+  .summary [data-compact="true"] > div:first-of-type { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .saveActions { flex-direction: column; align-items: stretch; }
   .save, .review { flex-basis: auto; }
 }

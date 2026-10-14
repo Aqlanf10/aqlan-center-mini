@@ -48,7 +48,7 @@ import {
   type InvoiceSelection, type InvoiceSelectionPreviewState,
 } from "./dental/invoice-selection-state";
 import {
-  PER_TOOTH_SPLIT_NOTICE, applyToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
+  PER_TOOTH_SPLIT_NOTICE, applyToothSelection, applyHistoricalToothSelection, emptyToothFields, invoiceToothMode, removeRowAt, replaceRowService,
   selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
   type ToothRowLike, type ToothSelection,
 } from "./dental/invoice-tooth-selection";
@@ -1144,6 +1144,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   }, [patientId, authority, canSubmit]);
   const [historicalPaid, setHistoricalPaid] = useState("");
   const [historicalDate, setHistoricalDate] = useState("");
+  const [historicalNote, setHistoricalNote] = useState("");
   const [discount, setDiscount] = useState("");
   /* (FIN-4) الخصم وتغيير سعر خدمة الدليل قراران مسبَّبان — والحد من الإعدادات يفرضه الخادم. */
   const [discountReason, setDiscountReason] = useState("");
@@ -1208,7 +1209,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const selectionOwner = useMemo(() => ({ selectionScope, authority }), [selectionScope, authority]);
   const selected = selectionForOwner(selection, selectionOwner);
   // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
-  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, historicalPaid, historicalDate, idempotencyKey, base, retry: previewRetry,
+  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, historicalPaid, historicalDate, historicalNote, idempotencyKey, base, retry: previewRetry,
     authorityKey, selectionContextKey, existingPlanId: selected.existingPlanId, templateDraft,
     catalog: services.map((service) => [service.id, service.name, service.category, invoiceCatalogPrice(service, currency), service.isActive]),
     rows: rows.map((row, index) => ({ row, index })).filter(({ row }) => row.serviceId || row.description.trim())
@@ -1290,7 +1291,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const historicalPaidMinor = historicalPaid.trim() ? parseAmount(historicalPaid, currency) : 0;
   const historicalRemaining = historicalPaidMinor !== null && historicalPaidMinor >= 0 && historicalPaidMinor <= net ? net - historicalPaidMinor : null;
   const historicalSource = {
-    patientId,currency,discount,discountReason,idempotencyKey,previouslyPaidAmount:historicalPaid,historicalAsOf:historicalDate,note:null,
+    patientId,currency,discount,discountReason,idempotencyKey,previouslyPaidAmount:historicalPaid,historicalAsOf:historicalDate,note:historicalNote.trim()||null,
     items:(JSON.parse(previewKey) as {rows:Record<string,unknown>[]}).rows.map(row=>{
       const {key,clinical,inputProblem,planItemId,...item}=row;void key;void clinical;void inputProblem;void planItemId;return item;
     }),repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:0,repaymentVersion:0,repaymentSourceHash:null,
@@ -1374,7 +1375,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
     setRows((current) => {
       const at = current.findIndex((row) => row.key === key);
       return at < 0 || current[at].serviceId !== serviceId || modeOf(current[at]) !== expectedMode
-        ? current : applyToothSelection(current, at, mode, selection, nextRowKey);
+        ? current : (historical?applyHistoricalToothSelection:applyToothSelection)(current, at, mode, selection, nextRowKey);
     });
     const teeth = [...new Set(selection.teeth)].sort((a, b) => a - b);
     setSplitNotice(mode === "per_tooth_episode" && teeth.length > 1 ? `${PER_TOOTH_SPLIT_NOTICE}: ${teeth.join("، ")}.` : null);
@@ -1478,6 +1479,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
         {historical?<label><span>تاريخ الاتفاق الأصلي</span><input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event=>setHistoricalDate(event.target.value)} type="date"/></label>
           :<div><span>تاريخ الإصدار</span><time dir="ltr">{clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)}</time></div>}
       </div>
+      {historical ? <label className="mb-3 block text-xs font-bold">ملاحظة الاتفاق التاريخي<input aria-label="ملاحظة الاتفاق التاريخي" className="mt-1 w-full" maxLength={300} value={historicalNote} onChange={event=>setHistoricalNote(event.target.value)}/></label> : null}
       <h4 className={workspace.sectionTitle}>الخدمات العلاجية</h4>
       {!historical ? <button type="button" disabled={busy} aria-expanded={templateOpen}
         onClick={() => { if (editorEnabled()) setTemplateOpen(open => !open); }}

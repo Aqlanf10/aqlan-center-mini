@@ -245,14 +245,14 @@ export function ServiceSelect({
 
       {searchable && filteredServices.length === 0 ? <p role="status" className="text-xs text-slate-500">لا خدمة تطابق البحث.</p> : null}
 
-      {selectedService && !compact ? (
+      {selectedService ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
           <span className="font-semibold text-navy-800">
             {categoryDisplayName(normalizeCategory(selectedService.category))}
           </span>
-          <span className="font-bold text-emerald-700">
+          {!compact ? <span className="font-bold text-emerald-700">
             السعر القياسي: {priceLabel(selectedService)}
-          </span>
+          </span> : null}
         </div>
       ) : null}
     </div>

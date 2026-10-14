@@ -54,6 +54,8 @@ export function assertInvoiceViewportBounds(proof: ReturnType<typeof invoiceView
 }
 export async function revealInvoiceControlByWheel(page: Page, control: Locator) {
   expect(await control.count()).toBe(1);
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await settleBrowser(page);
   const before = await control.evaluate(invoiceViewportProof);
   expect(before.height).toBeGreaterThan(0);
   expect(before.height).toBeLessThanOrEqual(before.availableViewport.height);
@@ -72,13 +74,23 @@ export async function revealInvoiceControlByWheel(page: Page, control: Locator) 
   const deltaY = Math.abs(distance) < 1 ? 2 : distance;
   await page.mouse.move(pointer.x, pointer.y); await page.mouse.wheel(0, deltaY);
   await settleBrowser(page);
+  const wheelInputs = [deltaY];
   await expect.poll(async () => {
     const proof = await control.evaluate(invoiceViewportProof);
-    return proof.top >= proof.availableViewport.top && proof.bottom <= proof.availableViewport.bottom && proof.unobscured;
+    const reachable = proof.top >= proof.availableViewport.top && proof.bottom <= proof.availableViewport.bottom && proof.unobscured;
+    // Account siblings can settle after the first wheel. Reframe by actual
+    // native input; every final bounds and nine-point hit assertion still runs.
+    if (!reachable && wheelInputs.length < 5) {
+      const adjustment = proof.top + proof.height / 2 - y;
+      wheelInputs.push(Math.abs(adjustment) < 1 ? 2 : adjustment);
+      await page.mouse.move(pointer.x,pointer.y); await page.mouse.wheel(0,wheelInputs.at(-1)!);
+      await settleBrowser(page);
+    }
+    return reachable;
   }).toBe(true);
   await settleBrowser(page);
   const proof = await control.evaluate(invoiceViewportProof);
   assertInvoiceViewportBounds(proof, before.viewportWidth);
-  return { ...proof, reachability: { method: "native-mouse-wheel", pointer, deltaY,
+  return { ...proof, reachability: { method: "native-mouse-wheel", pointer, deltaY, wheelInputs,
     beforeTop: before.top, beforeBottom: before.bottom, beforeScrollY: before.scrollY, afterScrollY: proof.scrollY } };
 }

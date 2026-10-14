@@ -158,6 +158,9 @@ async function fixture(width: number) {
       if (target === prefix + "/legacy") { await json(route, { treatments: [], orphanPayments: [] }); return; }
       // (INV-LEGACY) The historical-agreement panel is another independent Account sibling read.
       if (target === prefix + "/legacy-treatments") { await json(route, { agreements: [], access: { add: false, edit: false, void: false } }); return; }
+      // Exact independent Account siblings. Unknown reads and every write still abort.
+      if (target === prefix + "/historical-documents") { await json(route, { documents: [] }); return; }
+      if (target === prefix + "/debt-repayments") { await json(route, { patientId: id, arrangements: [], targets: [] }); return; }
       if (target === prefix + "/documents") { await json(route, { documents: [], storageReady: false, storageMessage: null }); return; }
       if (target === `/api/visits/readiness?patientId=${id}`) { await json(route, { visit: null }); return; }
     }
