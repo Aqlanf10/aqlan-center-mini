@@ -548,6 +548,10 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
     }
   }, [patientId]);
 
+  const notifyFinancialChange = useCallback(() => {
+    if (readRef.current.active) onClinicalChange?.();
+  }, [onClinicalChange]);
+
   useEffect(() => {
     const lifetime = readRef.current; lifetime.active = true;
     void load();
@@ -576,6 +580,9 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
       }
       if (!accepted) { setWriteError("لم يُتحقّق من نتيجة الفاتورة. احتُفظ بالطلب نفسه لإعادة التحقق."); return null; }
       setWriteError(null);
+      // Opening writes notify after the accepted acknowledgement, before their
+      // ledger GET can stall. Bounded invoice owners retain their own notification.
+      if (!boundedInvoice) notifyFinancialChange();
       if (boundedInvoice) void load(); else await load();
       return payload;
     } catch {
@@ -585,7 +592,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
       writePending.current = false;
       setBusy(false);
     }
-  }, [busy, load, financialRecovery.ready]);
+  }, [busy, load, financialRecovery.ready, notifyFinancialChange]);
 
   if (loading && !ledger) {
     return <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>;
@@ -728,7 +735,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
         enabled={financialRecovery.ready&&!moneyRecovery&&!historicalRecovery&&!historicalCorrecting&&!recovery&&!revisionRecovery&&correcting===null&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
 
       {mode==="none"&&ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} enabled={!financialBlocked&&!busy&&!collectOpen&&correctingReceipt===null} onCorrect={document=>{if(!financialBlocked){setHistoricalCorrecting(document);setNotice(null);}}} />:null}
-      {moneyRecovery?<MoneyCommandRecovery command={moneyRecovery} onDone={(message,paymentId)=>{onMoneyRecoveryChange(null);setNotice(message);if(paymentId!==null)setLastReceiptId(paymentId);void load();}}/>:null}
+      {moneyRecovery?<MoneyCommandRecovery command={moneyRecovery} onDone={(message,paymentId)=>{onMoneyRecoveryChange(null);setNotice(message);if(paymentId!==null)setLastReceiptId(paymentId);void load();notifyFinancialChange();}}/>:null}
       {admin&&(historicalRecovery||historicalCorrecting)?<HistoricalCorrection key={historicalRecovery?.documentId??historicalCorrecting!.id}
         original={historicalRecovery?.original??historicalCorrecting!} recovery={historicalRecovery} onRecoveryChange={onHistoricalRecoveryChange} financialRecovery={financialRecovery}
         onCancel={()=>setHistoricalCorrecting(null)} onDone={message=>{setHistoricalCorrecting(null);setNotice(message);void load();onClinicalChange?.();}}/>:null}
@@ -776,6 +783,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
           setCollectOpen(false);
           setLastReceiptId(paymentId);
           void load();
+          notifyFinancialChange();
         }}
         invoices={(ledger?.invoices ?? [])
           .filter((invoice) => invoice.status === "open")
@@ -1037,6 +1045,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
                       setCorrectingReceipt(null); setNotice(message);
                       if (replacementId !== null) setLastReceiptId(replacementId);
                       void load();
+                      notifyFinancialChange();
                     }}
                   />
                 ) : null}
