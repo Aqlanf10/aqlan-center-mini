@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
 import { INVOICE_CORRECTION_SQL } from "../../lib/invoice-correction-schema";
+import { durableInvoiceRevision, readInvoiceRevisionReceipt, readInvoiceRevisionView, restoreInvoiceRevision, type InvoiceRevisionCommand } from "../../lib/invoice-revision-view";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv, createIsolatedDatabase, adminClient } from "./_setup";
 import type { SessionPayload } from "../../lib/auth";
 import { toInputAmount, type Currency } from "../../lib/money";
@@ -49,7 +50,16 @@ describe("immutable invoice replacement and original receipt settlement", () => 
       const invoice = await fixture(paid);
       const receipts = await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId]);
       const input = await command(invoice.id,after);
+      const view=readInvoiceRevisionView(await revision.readInvoiceRevision(invoice.id,session),invoice.patientId,invoice.id)!;
+      expect(view).not.toBeNull();
+      const retained:InvoiceRevisionCommand={key:input.idempotencyKey,actor:session.username,patientId:invoice.patientId,invoiceId:invoice.id,body:JSON.stringify(input),
+        expected:{original:view.invoice,lines:view.invoice.items.map(item=>({...item,unitPriceMinor:after,totalMinor:after})),discountMinor:0,settledMinor:paid,accountDueMinor:view.accountDueMinor,terms:input.repaymentTerms as InvoiceRevisionCommand["expected"]["terms"]},outcome:"pending",message:""};
+      expect(restoreInvoiceRevision(durableInvoiceRevision(retained),invoice.patientId,session.username)).toMatchObject({body:retained.body,outcome:"uncertain"});
+      expect(()=>restoreInvoiceRevision(durableInvoiceRevision(retained),invoice.patientId+1,session.username)).toThrow();
       const result = await revision.reviseInvoice(invoice.id,input,session);
+      expect(readInvoiceRevisionReceipt(result,retained)).not.toBeNull();
+      expect(readInvoiceRevisionReceipt({...result,patientId:invoice.patientId+1},retained)).toBeNull();
+      expect(readInvoiceRevisionReceipt({...result,settledMinor:paid+1},retained)).toBeNull();
       expect(result).toMatchObject({replayed:false,patientId:invoice.patientId,beforeMinor:10000,afterMinor:after,settledMinor:paid,
         remainingMinor:Math.max(0,after-paid),creditMinor:Math.max(0,paid-after),accountDueMinor:after-paid});
       const corrected = (await q("SELECT corrected_invoice_id FROM invoice_corrections WHERE original_invoice_id=$1",[invoice.id]))[0].corrected_invoice_id;
@@ -59,7 +69,9 @@ describe("immutable invoice replacement and original receipt settlement", () => 
       expect(await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(receipts);
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1 AND status<>'cancelled'",[invoice.patientId])).toHaveLength(1);
       expect(await q("SELECT id FROM audit_log WHERE action='invoice.correct' AND entity_id=$1",[String(invoice.id)])).toHaveLength(1);
-      expect(await revision.reviseInvoice(invoice.id,input,session)).toEqual({...result,replayed:true});
+      const replay=await revision.reviseInvoice(invoice.id,input,session);
+      expect(replay).toEqual({...result,replayed:true});
+      expect(readInvoiceRevisionReceipt(replay,retained)).not.toBeNull();
       const workspace = await debt.debtRepaymentWorkspace(invoice.patientId,"2026-10-14");
       expect(workspace.targets.reduce((sum,target)=>sum+target.remainingMinor,0)).toBe(Math.max(0,after-paid));
     }

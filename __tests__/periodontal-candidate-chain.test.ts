@@ -37,6 +37,9 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     const files=[...baseline(),invoice,legacy,coverage,{version:"0059",filename:"0059_invoice_debt_installments.sql"}];
     expect(periodontalCandidateMigrationVersion(files)).toBe("0060");
     expect(periodontalCandidateMigrationVersion([...files,{version:"0060",filename:"0060_historical_treatment_documents.sql"}])).toBe("0061");
+    const corrections=[...files,{version:"0060",filename:"0060_historical_treatment_documents.sql"},{version:"0061",filename:"0061_invoice_correction_lineage.sql"}];
+    expect(periodontalCandidateMigrationVersion(corrections)).toBe("0062");
+    expect(()=>periodontalCandidateMigrationVersion([...corrections.slice(0,-1),{version:"0061",filename:"0061_unreviewed.sql"}])).toThrow();
     expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0060",filename:"0060_unreviewed.sql"}])).toThrow();
     expect(()=>periodontalCandidateMigrationVersion([...files.slice(0,43),{version:"0059",filename:"0059_unreviewed.sql"}])).toThrow();
   });
