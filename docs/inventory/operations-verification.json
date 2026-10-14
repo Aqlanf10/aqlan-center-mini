@@ -1,0 +1,48 @@
+{
+  "base": "148fcbeac229cb279848e6ea37049d1599a4fafe",
+  "previousHead": "cfaa84acc0afd519e902496ecc10399830248bc4",
+  "fullAcceptanceExecuted": 0,
+  "environment": "Node22.23.3, isolated PG18.6 loopback54339, synthetic data, system Chromium151",
+  "gates": [
+    {
+      "path": "evidence/custody/build-operations-final.log",
+      "result": "passed",
+      "sha256": "942d8f563aab46a76c92fc39c04436fe6f1c76c85f52bd353767247354b1a596"
+    },
+    {
+      "path": "evidence/custody/typecheck-operations-final.log",
+      "result": "passed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/custody/lint-operations-capture.log",
+      "result": "passed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/custody/money-operations-final.log",
+      "result": "passed",
+      "sha256": "dfba1a83ced6fa3ddb0e7b6fcd132fa0d7b762ad000187b8215bb7b8afe14570"
+    },
+    {
+      "path": "evidence/custody/http-operations-capture.log",
+      "result": "passed",
+      "sha256": "dd9cebad67541ed34b945707b7188a8374250d4f93915c4c4a23a41d7850e053"
+    },
+    {
+      "path": "evidence/custody/pg-operations-final.log",
+      "result": "passed",
+      "sha256": "e017929b00c0f2ada249493a51898d6e2b62100f3098cb63f2016fd3ac0ea70b"
+    }
+  ],
+  "counts": {
+    "httpBrowser": 14,
+    "postgres": 25
+  },
+  "priorCI": {
+    "head": "cfaa84acc0afd519e902496ecc10399830248bc4",
+    "run": 38509790282,
+    "conclusion": "success"
+  },
+  "newHeadCI": "not yet submitted"
+}

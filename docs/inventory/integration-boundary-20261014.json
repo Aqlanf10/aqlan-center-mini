@@ -1,0 +1,30 @@
+{
+  "base": "148fcbeac229cb279848e6ea37049d1599a4fafe",
+  "publishedHead": "cfaa84acc0afd519e902496ecc10399830248bc4",
+  "invoice325Head": "5dbb29f9eff08874fbb739925801272bbb5abed9",
+  "overlapWith325": [
+    "lib/http-permissions.ts"
+  ],
+  "localUnmergedPaths": [],
+  "githubMergeableAgainstCurrentMain": true,
+  "integrationApproval": false,
+  "sharedEdits": {
+    "lib/http-permissions.ts": "one explicitly delegated procurement GET/POST CLINIC entry",
+    "lib/inventory.ts": "reorder equality/label only",
+    "lib/ai-tools/inventory-tools.ts": "existing summary read-failure truth/redaction; no new AI capability"
+  },
+  "untouched": [
+    "lib/db.ts",
+    "session/permissions implementations",
+    "invoice/signed-receipt/commission/payable/payment writers",
+    "migration registry/contracts",
+    "CI",
+    "shared sidebar/design files"
+  ],
+  "retainedInactiveProposals": [
+    "docs/inventory/proposals/movement-projection.patch",
+    "docs/inventory/proposals/historical-unit-lock.patch",
+    "docs/inventory/proposals/ATOMIC_WRITER.md"
+  ],
+  "retainedDelegatedProposal": "docs/inventory/proposals/procurement-http-registration.patch (one entry adopted only on inventory feature branch)"
+}

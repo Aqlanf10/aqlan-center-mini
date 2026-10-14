@@ -151,18 +151,136 @@
       "syntheticOnly": true,
       "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
       "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/operations-ar-1280.png",
+      "bytes": 246013,
+      "sha256": "98591495ca1c1b8ea897fcaef3d09ad890a8dfa82790860db6d96b61e906b0b1",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/operations-ar-390.png",
+      "bytes": 196531,
+      "sha256": "88a4966339d7a694c2911c77a3f8c50794610b13772b737b5eb8a1677cd46eb5",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-form-ar-1280.png",
+      "bytes": 58812,
+      "sha256": "7caf5d5e0b7861b6072416a519260bf32e3fae96c44a27d1da00070d2e258632",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-form-ar-390.png",
+      "bytes": 58232,
+      "sha256": "056ebef647b999697e8a8f72c71be45ad00a37e20a1f3c3c0976001e3c9e6da3",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-form-ar-1280.png",
+      "bytes": 49509,
+      "sha256": "9953830f310711272391070296e5d7bbd369b73f6a548324bd99a85b6af3d629",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-form-ar-390.png",
+      "bytes": 53355,
+      "sha256": "6856b851b704844005e2d59f4630c683c923dd8e66a2ad9fbf8ffe798aa639ed",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-form-ar-1280.png",
+      "bytes": 85210,
+      "sha256": "d2b94c38f586d9a88dc0f140c50972ac638f2bc70ca271b9df1011451c59f683",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-form-ar-390.png",
+      "bytes": 65540,
+      "sha256": "b4293463f52150acdc10fac7a032de8b21d2727363183ea7254da70f482a71db",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-missing-review-ar-390.png",
+      "bytes": 234993,
+      "sha256": "1503d8ad02f828455fdfe7b71224c3af8b7b3e430e4047eeb4fa703b27a042ce",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-ar-1280.pdf",
+      "bytes": 223925,
+      "sha256": "aa677654989087a7e2138e8011f08fa4e13d040feade19a6e56e78dc8a1b7920",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-ar-390.pdf",
+      "bytes": 223820,
+      "sha256": "a8605b0aa5e2100ef98e214c09f642aa223ff3c518a6bf2f7859918bf50e440d",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-ar-1280.pdf",
+      "bytes": 225810,
+      "sha256": "fdf1fa6f539f29ab0d956161853f6b7fffe6008c54fb70aa7a66f3f085d48e80",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-ar-390.pdf",
+      "bytes": 225798,
+      "sha256": "9e2e6630a652244b5f7c910f94347be78f958fac407579b425686fe1d7558db3",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-ar-1280.pdf",
+      "bytes": 225007,
+      "sha256": "1a8a83f8a6b3d70b0493fbe7438079daa3964d4f4a0d4af1a781463207584b02",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-ar-390.pdf",
+      "bytes": 224999,
+      "sha256": "be7cd758ef08c5ab203c77a15f739c2112b2c87c21688cf1b6cf904144318fa1",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
     }
   ],
   "patientData": false,
   "secrets": false,
   "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
   "remainingScreens": [
-    "purchase order editor",
-    "inspection/receipt editor",
-    "supplier invoice match editor",
-    "actual treatment case consumption/returns UI",
-    "D-A financial settlement posting UI",
-    "unique package closure/disposal evidence UI",
-    "English purchase request/administration copy"
-  ]
+    "English request/administration/operations copy",
+    "exact clinical consumption/returns integration",
+    "D-A financial account posting",
+    "unique safe package closure/disposal evidence"
+  ],
+  "deferredIntegration": "Invoice/receipt/commission/payable writers, financial posting and visit/invoice consumption links deferred until invoices stabilize and root coordinates ownership."
 }

@@ -229,3 +229,29 @@ export async function readProcurementCatalog(actor:InventoryActor){
     return {items:rows.rows.map(row=>({itemId:row.item_id,name:row.name,conversion:unitConversionSnapshot({itemId:row.item_id,version:row.version,baseUnit:row.base_unit,enteredUnit:row.entered_unit,baseUnitsPerEnteredUnit:row.factor,enteredPrecision:row.entered_precision,basePrecision:row.base_precision})})),scope:INVENTORY_CLINIC_SCOPE};
   });
 }
+/** Administrator-only source documents for the order/inspection workbench.
+ * Each page is a fresh authorized snapshot; posting still re-locks and validates
+ * all source quantities, budgets and party/location ownership in its transaction.
+ */
+export async function readProcurementWorkbench(actor:InventoryActor,requestOffset=0,orderOffset=0){
+  for(const offset of [requestOffset,orderOffset])invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");
+  await ready();return withTransaction(getPool(),async client=>{
+    await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    await requireInventoryActor(client,actor,true);
+    const requests=await client.query<{id:string;document:RequestRevision;decision:RequestApproval}>(`SELECT p.id,r.document,a.decision FROM purchase_requests p JOIN purchase_request_revisions r ON r.request_id=p.id AND r.version=p.current_version JOIN purchase_approval_events a ON a.request_id=p.id AND a.request_version=p.current_version WHERE p.branch_key=$1 AND p.status IN ('approved','partially_approved') ORDER BY p.created_at DESC,p.id LIMIT 21 OFFSET $2`,[INVENTORY_CLINIC_SCOPE,requestOffset]);
+    const sources=await client.query<{request_id:string;request_line_id:string;qty:string;amount:string;currency:PurchaseOrder["currency"]}>("SELECT request_id,request_line_id,currency,SUM(base_qty)::text AS qty,SUM(amount_minor)::text AS amount FROM purchase_order_source_allocations WHERE request_id=ANY($1::uuid[]) GROUP BY request_id,request_line_id,currency",[requests.rows.slice(0,20).map(row=>row.id)]);
+    invariant(sources.rows.every(row=>requests.rows.find(request=>request.id===row.request_id)?.decision.valueCeiling?.currency===row.currency),"currency_mismatch","Source allocations require their original approved currency");
+    const suppliers=await client.query<{id:number;name:string}>("SELECT id,name FROM parties WHERE kind='supplier' AND is_active ORDER BY name,id");
+    const locations=await client.query<{id:string;label:string;kind:string}>("SELECT id,label,kind FROM inventory_locations WHERE branch_key=$1 AND is_active ORDER BY label,id",[INVENTORY_CLINIC_SCOPE]);
+    const orders=await client.query<{id:string;document:IssuedPurchaseOrder}>("SELECT id,document FROM purchase_orders WHERE branch_key=$1 ORDER BY created_at DESC,id LIMIT 21 OFFSET $2",[INVENTORY_CLINIC_SCOPE,orderOffset]);
+    const orderIds=orders.rows.slice(0,20).map(row=>row.id);
+    const orderResults=await client.query<{result:{id:string;totalMinor:number;currency:PurchaseOrder["currency"]}}>("SELECT result FROM inventory_operations WHERE scope='order.issue' AND result->>'id'=ANY($1::text[])",[orderIds]);
+    const receiptHeaders=await client.query<{id:string;document:ReceiptRevision}>("SELECT id,document FROM goods_receipts WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
+    const receipts=await client.query<{id:string;order_id:string;document:InspectedReceiptLine}>("SELECT id,order_id,document FROM goods_receipt_lines WHERE order_id=ANY($1::uuid[]) ORDER BY receipt_id,id",[orderIds]);
+    const allocations=await client.query<{receipt_line_id:string;qty:string}>("SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id",[orderIds]);
+    const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>("SELECT id,order_id,document,match_plan FROM supplier_invoices WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
+    const itemIds=[...new Set([...requests.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId)),...orders.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId))])];
+    const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[itemIds]);
+    return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:orders.rows.slice(0,20),orderResults:orderResults.rows.map(row=>row.result),receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
+  });
+}

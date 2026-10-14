@@ -1,6 +1,6 @@
 # Acceptance audit — 69 scenarios
 
-Complete integrated scenarios executed: **0/69**. Subset tests below are not a complete acceptance claim. Migration, finance/clinical/settlement adapters and release remain coordinated root gates.
+Complete integrated scenarios executed: **0/69**. Subset evidence below is not a full acceptance claim. Finance/clinical integration is deferred until invoice stabilization and coordinated ownership; no migration number chosen.
 
 | ID | Status | Verified subset | Exact remaining work |
 |---|---|---|---|
@@ -9,8 +9,8 @@ Complete integrated scenarios executed: **0/69**. Subset tests below are not a c
 | P03 | partial-actual-PG-HTTP-browser | Admin monetary revision preserves old document/approval, requires fresh approval, serializes concurrent revisions and refuses demand revision after order allocation; actual390/1280 UI. | Quantity/supplier amendment workflow after ordering and full integrated scenario. |
 | P04 | partial-actual-PG-HTTP-browser | Fresh active actor/admin checks, exact API gate and frozen currency ceiling. | Delegation UI/policy configuration and branch model: base has one clinic scope. |
 | P05 | partial-domain-or-PG-fixture | Exact 3×50=150 and 150−2=148 arithmetic; frozen conversion; receipt PG. | Old manual/automatic issue writer and historical unit lock integration. |
-| P06 | partial-domain-or-PG-fixture | Cumulative source allocation and concurrent order requests cannot overspend approval. | Multi-request order creation UI. |
-| P07 | partial-domain-or-PG-fixture | Partial inspected receipt creates 100 pieces once with 50 remaining. | Receipt administration UI and coordinated migration. |
+| P06 | partial-actual-PG-HTTP-browser | Actual admin order form selects immutable approved sources; stored quantities/budget are rechecked in posting transaction. | Broader delegated capabilities and complete multi-request/multi-item acceptance on coordinated migration. |
+| P07 | partial-actual-PG-HTTP-browser | Actual390/1280 partial inspected receipt adds50 pieces; last partial reaches100 with preserved remaining; no debt/cash. | Complete damaged/replacement/quarantine release lifecycle and coordinated migration. |
 | P08 | partial-domain-or-PG-fixture | Rejected has no stock; quarantine not available; replacement fulfillment stays open. | Replacement document workflow and quarantine release approval. |
 | P09 | partial-domain-or-PG-fixture | Planner and locked receipt reject excessive arrival. | Explicit excess-arrival decision UI/policy. |
 | P10 | partial-domain-or-PG-fixture | Transactional audit failure rolls back receipt and stock. | Actual multi-item browser receipt failure scenario. |
@@ -18,11 +18,11 @@ Complete integrated scenarios executed: **0/69**. Subset tests below are not a c
 | P12 | partial-domain-or-PG-fixture | Two simultaneous different receipts cannot exceed locked remaining quantity. | Coordinated production schema; UI concurrent receipt journey. |
 | P13 | domain-only; legacy-issue-integration-blocked | Pure FEFO allocates exact valid lots and reservations. | Connect allocations to existing manual/automatic issue writers. |
 | P14 | domain-only; legacy-issue-integration-blocked | Pure FEFO rejects unsafe lots; new custody dispatch/accept also rejects unsafe lots. | Existing manual/automatic issue paths still permit expired-only stock: release blocker. |
-| P15 | partial-real-HTTP-browser; complete-scenario-unrun | Real HTTP/browser WAC completeness separates missing price and known free stock. | Finalize procurement invoice valuation adapter; historical valuation policy. |
-| P16 | partial-domain-or-PG-fixture | Three-way match reserves received quantity without additional movement or debt. | Shared finance owner must atomically create one existing payable and immutable links; no posting implemented. |
-| P17 | partial-domain-or-PG-fixture | Supplier/calendar-year duplicate identity and missing-number review; PG invoice duplication gate. | Finance posting transaction and supplier invoice review UI. |
+| P15 | partial-actual-PG-HTTP-browser | Real missing-vs-free valuation plus missing invoice price UI saves review with null total, never known zero. | Actual invoice valuation/adjustment adapter deferred to coordinated finance integration. |
+| P16 | partial-actual-PG-HTTP-browser | Actual invoice match UI spans two accepted receipts; persisted reservations and print; no duplicate stock/debt/cash. | One existing payable/payment integration deferred until invoices stabilize; complete financial acceptance unrun. |
+| P17 | partial-actual-PG-HTTP-browser | Duplicate supplier/year key and explicit unnumbered review; actual missing-number UI never fabricates number. | Approved held-document correction/review and financial posting integration. |
 | P18 | partial-domain-or-PG-fixture | Invoice before arrival held for match; never fabricates stock. | Authorized advance/exception path through existing supplier payment engine. |
-| P19 | partial-domain-or-PG-fixture | Price/quantity variances detected; no financial posting. | Variance approval policy and actual posting UI. |
+| P19 | partial-actual-PG-HTTP-browser | Actual UI displays match issues and price difference; deviations remain review with no financial posting. | Variance approval/posting policy deferred with financial ownership. |
 | P20 | unrun-full-scenario; limited-independent-evidence | Immutable FX arithmetic only; old supplier-payment regressions separately passed. | Procurement payable integration plus full cross-currency payment E2E has not run. |
 | P21 | unrun-full-scenario; limited-independent-evidence | No procurement advance allocation implemented. | Shared supplier advance allocation writer, permission/FX and cash-conservation E2E. |
 | P22 | unrun-full-scenario; limited-independent-evidence | No procurement supplier return/reversal writer implemented. | Independent stock/debt/cash return documents using existing finance writers. |
@@ -40,7 +40,7 @@ Complete integrated scenarios executed: **0/69**. Subset tests below are not a c
 | P34 | partial-domain-or-PG-fixture | Server rejects supplier role/activity/scope mismatch. | All related receipt/financial attachment access and authenticated spoofing matrix. |
 | P35 | partial-domain-or-PG-fixture | Existing audit writer in same transaction; mandatory audit failure rollback tested. | Finance approvals/posting/reversal audit and shared audit action vocabulary. |
 | P36 | partial-domain-or-PG-fixture | Partial example 100 received/50 remaining, invoice200SAR matched and no debt/cash. | Complete150/148, payable300SAR, payment100SAR, remaining200SAR requires shared finance/issue adapters. |
-| P37 | partial-actual-PG-HTTP-browser | Actual valuation/custody Arabic/English, Arabic request/administration and existing inventory/item/movement UI at390/1280; branded request/approval, valuation and custody PDFs generated and text inspected. | Order/inspection/match interfaces/prints and English request/administration copy. |
+| P37 | partial-actual-PG-HTTP-browser | Actual inventory/request/approval/order/inspection/match/custody/valuation UI and branded prints at390/1280; custody/valuation Arabic/English. | English request/administration/operations copy and full premium/acceptance audit. |
 | P38 | unrun-full-scenario; limited-independent-evidence | Synthetic local PG/build and prior exact-head CI passed; no orders/messages sent. | Coordinated migration upgrade/restore rehearsal and authorized later release: unrun. |
 | P39 | domain-only; persistence-HTTP-E2E-unrun | Exact3/1/8SAR and sub-minor cost arithmetic. | Package settings/admin UI and applied movement valuation. |
 | P40 | domain-only; persistence-HTTP-E2E-unrun | Custody transfer changes allocation only; empty evidence changes no stock. | Kit decomposition/component value persistence and UI. |

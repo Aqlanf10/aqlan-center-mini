@@ -5,3 +5,8 @@ These are actual built UI and generated branded request prints with synthetic da
 Implemented and pictured: existing stock overview/item entry/movement history and inbound movement form; request submission; administrator versioned monetary estimate and saved partial approval; doctor/admin custody; valuation. Request/approval, valuation and custody prints are generated from actual data with clinic identity. Quote costs appear only in administrator custody.
 
 Still incomplete: purchase-order/inspection/invoice-match administration interfaces, exact clinical consumption/returns, approved D-A account posting and unique safe package closure. New procurement/custody schemas remain unregistered; old manual/automatic paths still require coordinated lot/expiry enforcement. Existing manual forms pictured here do not certify that remaining integration. English request/administration copy remains pending; valuation/custody support Arabic/English. These pictures do not authorize deployment or represent production records.
+
+
+## Owned operations continuation
+
+Actual order/partial inspected receipt and inventory supplier-document match forms now have synthetic390/1280 browser evidence and generated order/receipt/match PDFs. One invoice spans two accepted receipts; missing price/number stays for review with no invented zero. This is inventory document evidence only: no existing invoice, signed-receipt, commission, payable or payment writer was edited or invoked, and no financial posting occurs. Root's updated priority is invoices, reception, shared design last. Finance and clinical integration remain explicitly deferred. The shared sidebar/design is untouched.

@@ -2863,7 +2863,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2872,11 +2873,13 @@
       "evidence": [
         "procurement-domain.log",
         "procurement-store-pg.log",
-        "pg-checkpoint.log"
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
-      "verifiedSubset": "Cumulative source allocation and concurrent order requests cannot overspend approval.",
-      "remainingBlocker": "Multi-request order creation UI.",
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual admin order form selects immutable approved sources; stored quantities/budget are rechecked in posting transaction.",
+      "remainingBlocker": "Broader delegated capabilities and complete multi-request/multi-item acceptance on coordinated migration.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -2888,7 +2891,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2900,12 +2904,14 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
+      "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
-      "verifiedSubset": "Partial inspected receipt creates 100 pieces once with 50 remaining.",
-      "remainingBlocker": "Receipt administration UI and coordinated migration.",
+      "verifiedSubset": "Actual390/1280 partial inspected receipt adds50 pieces; last partial reaches100 with preserved remaining; no debt/cash.",
+      "remainingBlocker": "Complete damaged/replacement/quarantine release lifecycle and coordinated migration.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -3090,7 +3096,9 @@
         "lib/inventory-domain/valuation.ts",
         "lib/inventory-domain/read.ts",
         "lib/inventory-domain/presentation.ts",
-        "components/inventory/InventoryValuationReview.tsx"
+        "components/inventory/InventoryValuationReview.tsx",
+        "components/inventory/ProcurementOperations.tsx",
+        "lib/inventory-domain/procurement-store.ts"
       ],
       "tests": [
         "__tests__/inventory-foundation.test.ts",
@@ -3103,11 +3111,13 @@
         "pg-checkpoint.log",
         "http-browser-premium.log",
         "browser/valuation-ar-390.png",
-        "browser/valuation-ar-1280.png"
+        "browser/valuation-ar-1280.png",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
-      "verifiedSubset": "Real HTTP/browser WAC completeness separates missing price and known free stock.",
-      "remainingBlocker": "Finalize procurement invoice valuation adapter; historical valuation policy.",
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Real missing-vs-free valuation plus missing invoice price UI saves review with null total, never known zero.",
+      "remainingBlocker": "Actual invoice valuation/adjustment adapter deferred to coordinated finance integration.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -3119,7 +3129,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -3131,12 +3142,14 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
+      "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
-      "verifiedSubset": "Three-way match reserves received quantity without additional movement or debt.",
-      "remainingBlocker": "Shared finance owner must atomically create one existing payable and immutable links; no posting implemented.",
+      "verifiedSubset": "Actual invoice match UI spans two accepted receipts; persisted reservations and print; no duplicate stock/debt/cash.",
+      "remainingBlocker": "One existing payable/payment integration deferred until invoices stabilize; complete financial acceptance unrun.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -3148,7 +3161,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -3157,11 +3171,13 @@
       "evidence": [
         "procurement-domain.log",
         "procurement-store-pg.log",
-        "pg-checkpoint.log"
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
-      "verifiedSubset": "Supplier/calendar-year duplicate identity and missing-number review; PG invoice duplication gate.",
-      "remainingBlocker": "Finance posting transaction and supplier invoice review UI.",
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Duplicate supplier/year key and explicit unnumbered review; actual missing-number UI never fabricates number.",
+      "remainingBlocker": "Approved held-document correction/review and financial posting integration.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -3198,7 +3214,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -3207,11 +3224,13 @@
       "evidence": [
         "procurement-domain.log",
         "procurement-store-pg.log",
-        "pg-checkpoint.log"
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
-      "verifiedSubset": "Price/quantity variances detected; no financial posting.",
-      "remainingBlocker": "Variance approval policy and actual posting UI.",
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual UI displays match issues and price difference; deviations remain review with no financial posting.",
+      "remainingBlocker": "Variance approval/posting policy deferred with financial ownership.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -3569,7 +3588,8 @@
         "lib/inventory-domain/presentation.ts",
         "components/inventory/InventoryValuationReview.tsx",
         "components/inventory/ProcurementAdministration.tsx",
-        "lib/inventory-domain/procurement-store.ts"
+        "lib/inventory-domain/procurement-store.ts",
+        "components/inventory/ProcurementOperations.tsx"
       ],
       "tests": [
         "__tests__/inventory-foundation.test.ts",
@@ -3587,12 +3607,14 @@
         "http-browser-checkpoint.log",
         "http-browser-authorized.log",
         "evidence/custody/http-visual-handoff.log",
-        "evidence/custody/pg-approval-regression.log"
+        "evidence/custody/pg-approval-regression.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
       ],
       "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
-      "verifiedSubset": "Actual valuation/custody Arabic/English, Arabic request/administration and existing inventory/item/movement UI at390/1280; branded request/approval, valuation and custody PDFs generated and text inspected.",
-      "remainingBlocker": "Order/inspection/match interfaces/prints and English request/administration copy.",
+      "verifiedSubset": "Actual inventory/request/approval/order/inspection/match/custody/valuation UI and branded prints at390/1280; custody/valuation Arabic/English.",
+      "remainingBlocker": "English request/administration/operations copy and full premium/acceptance audit.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -4660,5 +4682,11 @@
     "note": "Scenario numbering is requirements inventory, not number of executed tests. Fixture tables applied explicitly in synthetic PG; migration not registered. Prior CI green applies only to 659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
     "sourceCheckpoint": "659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
     "continuation": "Monetary request revision/approval and actual visual handoff verified; full integrated acceptance remains0/69. Exact source/evidence hashes in checkpoint manifests."
+  },
+  "latestScopeBoundary": {
+    "priority": "invoices first, reception next, shared design last",
+    "allowed": "owned inventory UI/request/order/inspection/receipt/custody with synthetic tests",
+    "deferred": "all shared invoice/signed-receipt/commission/payable writers, financial posting, clinical visit/invoice consumption links",
+    "mainOrDeployment": "not authorized"
   }
 }

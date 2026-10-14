@@ -79,3 +79,21 @@ Validation:14 procurement PG tests passed; combined procurement/custody PG24 pas
 Root explicitly authorized a GitHub visual fallback after the user requested all implemented screens urgently. Library helper retried and failed with hosted apps tools/list network error. Eight frozen8f4a394d pictures were committed/pushed in d6c6e451. New synthetic stock overview, item-entry form, movement history/inbound form, actual saved monetary approval and request PDFs are in docs/inventory/evidence with hashes/provenance. No patient data or secrets are pictured. The new source accompanies the later visual commit. These are actual browser captures/prints, not mockups; remaining screens are listed in evidence/README.md and visual-manifest.json.
 
 Next independent step: build approved-source purchase-order and inspected-receipt/invoice-match administration interfaces and printable documents on the current owned transaction contracts. Shared blockers and unnumbered22-table reservation remain unchanged. Root controls integration/release after invoices, HR and Ortho/Ceph; no deployment, supplier communication or live-data mutation occurred.
+
+
+## 2026-10-14 owned order/inspection interface checkpoint and scope update
+
+Added administrator-only coherent workbench reads, order creation from approved immutable package sources, partial inspected accepted/quarantined/rejected receipt inputs, multiple accepted receipt allocations for inventory supplier-document matching, explicit unknown price and unnumbered review, visible match issues, and actual order/receipt/match print documents. All commands reuse the existing owned inventory transaction contracts; no existing invoice/signed-receipt/commission/payable/payment writer changed or ran. No financial posting, supplier transmission, clinical consumption or shared design/sidebar change occurs. Prints identify current names explicitly, isolate UUIDs LTR and retain original quantity/unit/currency/valuation evidence.
+
+Verification:14/14 actual built HTTP/browser tests, including390/1280 order→partial receipt→match, two accepted receipts into one match, missing price/number null-cost review, role denials,6 generated PDF text checks and actual form captures.25/25 procurement/custody PG tests passed including administrator-only read coherence/no side effects. Build/full typecheck/targeted lint/money guard/diff pass; initial readonly/currency typing failures retained and fixed. Previous headcfaa84ac completed full CI38509790282 successfully. New operations head CI is pending. All69 full integrated scenarios remain unexecuted, with per-scenario partial evidence and blockers.
+
+Root's latest boundary: invoices first, reception next, shared design last. Continue only independent inventory UI/request/order/inspection/receipt/custody. Defer all shared invoice/signed-receipt/commission/payable writers, financial posting and clinical visit/invoice consumption links until invoices stabilize and ownership is coordinated. Existing proposals remain retained/inactive; only the previously delegated one-line procurement permission entry is adopted on the feature branch. No main merge or deployment.
+
+Fresh ownership check: main148fcbea and invoice325head5dbb29f9 unchanged; file overlap is lib/http-permissions.ts only; no local unmerged paths; PR331 mergeable against current main, which is not approval of later invoice integration. Exact shared edits/untouched surfaces are in integration-boundary-20261014.json. Unnumbered22-table proposals remain synthetic fixtures only.
+
+Next independent step: remaining English inventory request/administration/operations copy and existing main inventory read-error truth, then further inventory/custody audit subsets. Finance/clinical adapters and any schema registration remain root-coordinated, deferred integration.
+
+
+## Explicit pause — one active task
+
+User directive05:43 supersedes parallel inventory authorization: invoices are the only active task. Stopped inventory development at a safe checkpoint, retained every source/proposal/visual/evidence ledger and saved a WIP commit on the same feature branch. No new long test or CI polling started. Resume requires explicit root assignment; seePAUSED_CHECKPOINT.md for executed/unrun gates, ownership and exact next step.

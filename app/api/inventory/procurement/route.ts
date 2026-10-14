@@ -4,7 +4,7 @@ import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
 import { submitPurchaseRequest, revisePurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
-  recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
+  recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog,readProcurementWorkbench, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
 import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement } from "@/lib/inventory-domain/custody-store";
 import type { RequestRevision, PurchaseOrder, ReceiptRevision, SupplierInvoiceRevision } from "@/lib/inventory-domain/procurement";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ function shape(document:unknown,command:string){const source=record(document);in
   if(command==="receipt.post"){list(line.portions);}
   if(command==="invoice.match"){record(line.price);list(line.receiptAllocations);}
 }return source;}
-export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
+export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
 export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{
   const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=source.command;
   invariant(typeof source.operationKey==="string","invalid_operation_key","Operation key is required");
