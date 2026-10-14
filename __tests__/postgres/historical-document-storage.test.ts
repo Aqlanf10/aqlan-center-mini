@@ -245,3 +245,36 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
   },120000);
 
 });
+
+
+describe("daily close reads unified historical document facts once", () => {
+  it.each(["YER", "SAR", "USD"] as const)("keeps %s header corrections, line coverage and real opening receipts distinct", async currency => {
+    const {toInputAmount} = await import("../../lib/money");
+    const {loadDailyClinicReport,getDailyClinicReportToday} = await import("../../lib/daily-clinic-report");
+    await q("UPDATE services SET price_sar_minor=price_minor,price_usd_minor=price_minor WHERE id=ANY($1::int[])", [[endo,ortho]]);
+    const source = {...await command(),currency};
+    source.items = source.items.map(line => ({...line,price:toInputAmount(line.catalogPriceMinor,currency)}));
+    source.discount=toInputAmount(20000,currency);source.previouslyPaidAmount=toInputAmount(120000,currency);
+    const {document} = await documents.createHistoricalDocument(source.patientId,source,session);
+    await db.addVisit({patientId:source.patientId,patientName:"Synthetic mixed agreement",patientPhone:null,note:null});
+    let report = await loadDailyClinicReport(getDailyClinicReportToday());
+    expect(report.historicalDocuments?.filter(row=>row.patientId===source.patientId)).toEqual([expect.objectContaining({
+      id:document.id,currency,version:1,agreedMinor:300000,previouslyPaidMinor:120000,remainingAtStartMinor:180000,
+      lines:document.lines.map(line=>expect.objectContaining({agreementId:line.agreementId,planItemId:line.planItemId,caseId:line.caseId,coverageState:"verified"})),
+    })]);
+    expect(report.legacyAgreements.filter(row=>row.patientId===source.patientId)).toEqual([]);
+    expect((await db.recordPayment({patientId:source.patientId,openingCurrency:currency,invoiceId:null,planId:null,amountMinor:20000,currency,baseCurrency:"YER",exchangeRate:currency==="YER"?1:currency==="SAR"?140:530,kind:"payment",method:"cash",note:null,createdBy:session.username})).reason).toBeNull();
+    const correctionSource=await correction(document,"130000");
+    correctionSource.prices=document.lines.map(line=>toInputAmount(line.unitPriceMinor,currency));
+    correctionSource.discount=toInputAmount(document.discountMinor,currency);correctionSource.previouslyPaidAmount=toInputAmount(130000,currency);
+    const corrected=await documents.correctHistoricalDocument(source.patientId,document.id,correctionSource,session);
+    expect(corrected.document.version).toBe(2);
+    const footprint=async()=>({counts:await counts(source.patientId),revisions:await q("SELECT to_jsonb(r) AS value FROM legacy_treatment_document_revisions r WHERE document_id=$1 ORDER BY version",[document.id]),payments:await q("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id",[source.patientId])});
+    const before=await footprint(); report=await loadDailyClinicReport(getDailyClinicReportToday());expect(await footprint()).toEqual(before);
+    expect(report.historicalDocuments?.filter(row=>row.id===document.id)).toEqual([expect.objectContaining({version:2,currency,agreedMinor:300000,previouslyPaidMinor:130000,remainingAtStartMinor:170000})]);
+    expect(report.currentAccounts.find(row=>row.patientId===source.patientId)?.byCurrency[currency].receivableMinor).toBe(150000);
+    expect(report.receipts.filter(row=>row.patientId===source.patientId)).toEqual([expect.objectContaining({tenderMinor:20000,openingCurrency:currency,invoiceId:null})]);
+    expect(await q("SELECT previously_paid_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[document.id])).toEqual([{previously_paid_minor:"120000"},{previously_paid_minor:"130000"}]);
+    expect((await counts(source.patientId)).invoices).toBe(0);
+  });
+});

@@ -138,9 +138,19 @@ describe("real invoice signing, correction lineage and browser checkout", () => 
     expect((await post(`/api/payments/${f.receiptId}/correct`, { mode: "void", reason: "Unauthorized synthetic reversal" }, h.sessions.reception)).status).toBe(403);
     expect((await post(`/api/invoices/${f.original.id}/correct`, {}, h.sessions.reception)).status).toBe(403);
     const foreignCurrency = await post("/api/payments", { patientId: f.patientId, invoiceId: f.original.id, amount: "1", currency: "USD", kind: "payment", method: "cash" }, h.sessions.admin, `consumer-foreign-${f.patientId}`); expect(foreignCurrency.status).toBe(409);
-    await db.query("UPDATE visits SET invoice_id=$2 WHERE id=$1", [other.visitId, f.original.id]);
-    const invalid = await post(`/api/visits/${other.visitId}/clinical`, { action: "sign" }); expect(invalid.status).toBe(409);
-    const missing = await authedGet(`/api/visits/${other.visitId}/walkout`, h.sessions.admin); expect(missing.status).toBe(409); expect(await missing.json()).toMatchObject({ message: expect.stringMatching(/مراجعة مالية/) });
-    expect((await db.query("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [f.patientId])).rows).toEqual(before);
+    const originalLink = (await db.query("SELECT invoice_id FROM visits WHERE id=$1", [other.visitId])).rows[0].invoice_id;
+    try {
+      await db.query("UPDATE visits SET invoice_id=$2 WHERE id=$1", [other.visitId, f.original.id]);
+      const invalid = await post(`/api/visits/${other.visitId}/clinical`, { action: "sign" }); expect(invalid.status).toBe(409);
+      const missing = await authedGet(`/api/visits/${other.visitId}/walkout`, h.sessions.admin); expect(missing.status).toBe(409); expect(await missing.json()).toMatchObject({ message: expect.stringMatching(/مراجعة مالية/) });
+      expect((await db.query("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [f.patientId])).rows).toEqual(before);
+    } finally {
+      // The invalid ownership edge is deliberate only inside this security probe.
+      // Do not contaminate later real daily-report readers on the shared fixture.
+      await db.query("UPDATE visits SET invoice_id=$2 WHERE id=$1", [other.visitId, originalLink]);
+    }
+    const date = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Aden"}).format(new Date());
+    const report = await authedGet(`/api/reports/daily-clinic?date=${date}`, h.sessions.admin);
+    expect(report.status, await report.text()).toBe(200);
   });
 });

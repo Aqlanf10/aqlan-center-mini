@@ -423,6 +423,21 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
         voidReason: row.voidReason, planItemId: row.planItemId, caseId: row.caseId };
     });
 
+  uniqueMap(source.historicalDocuments ?? [], (row) => row.id);
+  const historicalDocuments = (source.historicalDocuments ?? []).filter((row) => patientNames.has(row.patientId)).map((row) => {
+    const currency = requireCurrency(row.currency, "وثيقة اتفاق تاريخي", row.id);
+    money(row.totalMinor, "historical document total", true); money(row.discountMinor, "historical document discount", true);
+    money(row.previouslyPaidMinor, "historical document paid", true); money(row.remainingMinor, "historical document remaining", true);
+    const agreedMinor = money(row.totalMinor - row.discountMinor, "historical document agreed", true);
+    if (row.totalMinor <= 0 || row.discountMinor >= row.totalMinor || row.version < 1 || !Number.isSafeInteger(row.version)
+      || row.previouslyPaidMinor + row.remainingMinor !== agreedMinor || !isDailyClinicReportDate(row.historicalAsOf)
+      || row.lines.length < 1 || row.lines.length > 40 || new Set(row.lines.map((line) => line.agreementId)).size !== row.lines.length) {
+      throw new DailyClinicReportIntegrityError("Historical document arithmetic or identity conflict");
+    }
+    const { remainingMinor, ...facts } = row;
+    return { ...facts, currency, patientName: patientNames.get(row.patientId)!, agreedMinor, remainingAtStartMinor: remainingMinor };
+  });
+
   const attendeeRows = [...attendees.values()];
   const totals: DailyClinicReport["totals"] = {
     attendeesCount: attendeeRows.length, visitsCount: source.visits.length, signedVisitsCount: signedVisits.size,
@@ -460,7 +475,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     date: source.date, clinicTimeZone: source.clinicTimeZone, generatedAt: source.generatedAt,
     selectedDayCutoff: source.selectedDayCutoff,
     basis: { cohort: "arrival_day", account: "current_at_generation", work: "signed_by_cutoff", receipts: "clinicwide_recorded_day" },
-    attendees: attendeeRows, agreements, work, currentAccounts, receipts, invoices, legacyAgreements, expenses: source.expenses, totals,
+    attendees: attendeeRows, agreements, work, currentAccounts, receipts, invoices, legacyAgreements, historicalDocuments, expenses: source.expenses, totals,
     warnings: [
       "الاتفاقات والمدفوع المربوط بها وأرصدة المرضى هي الحالة الحالية لحظة إعداد التقرير، وليست أرصدة تاريخية مجمدة.",
       "تفصيل العمل يقرأ السجلات الحالية للزيارات الموقعة قبل حد اليوم. أسماء الخدمات والجهات والروابط ليست لقطات تاريخية مجمدة؛ وقد تصف سطور الإجراء والتوثيق التخصصي العمل نفسه، فلا تجمع كعدد إجراءات مستقلة.",
@@ -469,7 +484,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
       "الحركات المالية تشمل كل سندات اليوم في المركز، بما فيها من لم يحضر؛ الاستردادات قد تشمل تصحيح التسجيل وليست جميعها ردًا نقديًا فعليًا.",
       ...(agreements.some((row) => !row.includedInTotals) ? ["خطط غير معتمدة أو ملغاة مستبعدة من إجماليات الاتفاقات؛ تفاصيلها ظاهرة للمراجعة."] : []),
       ...(invoices.some((row) => row.linkage === "mixed") ? ["فاتورة مختلطة تجمع أكثر من حالة أو بنودًا غير مرتبطة؛ دفعاتها تظهر على الفاتورة كاملة ولا توزع تقديريًا على الحالات."] : []),
-      ...(legacyAgreements.length > 0 ? ["العلاج السابق للنظام يظهر بحقائقه التاريخية: المدفوع قبل النظام ليس تحصيل اليوم. متبقي الاتفاق القائم داخل الرصيد الافتتاحي ولا يضاف مرة أخرى إلى الدين؛ ومتبقي الاتفاق المُبطل أُزيل من الرصيد عند الإبطال ويبقى رقمًا تاريخيًا فقط. الدين الحالي هو رصيد الحساب كاملًا، ولا توزع تحصيلات الرصيد الافتتاحي على الاتفاقات."] : []),
+      ...(legacyAgreements.length > 0 || historicalDocuments.length > 0 ? ["العلاج السابق للنظام يظهر بحقائقه التاريخية: المدفوع قبل النظام ليس تحصيل اليوم. متبقي الاتفاق القائم داخل الرصيد الافتتاحي ولا يضاف مرة أخرى إلى الدين؛ ومتبقي الاتفاق المُبطل أُزيل من الرصيد عند الإبطال ويبقى رقمًا تاريخيًا فقط. الدين الحالي هو رصيد الحساب كاملًا، ولا توزع تحصيلات الرصيد الافتتاحي على الاتفاقات. الوثيقة متعددة البنود تعرض حقائق أحدث إصدار مرة واحدة دون توزيع المدفوع قبل النظام أو المتبقي على بنود العلاج."] : []),
       ...(totals.lateSignedVisitsCount > 0 ? ["توجد زيارات وثقت بعد اليوم المختار؛ لا تدخل ضمن الأعمال الموثقة عند نهايته."] : []),
       ...(receipts.some((row) => !["cash", "transfer"].includes(row.method)) ? ["توجد طريقة دفع غير معروفة؛ تظهر ضمن الحركات الكلية ولا تنسب إلى النقد أو الحوالة."] : []),
     ],
