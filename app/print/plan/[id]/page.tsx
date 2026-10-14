@@ -11,6 +11,7 @@ import { requireSession } from "@/lib/session";
 import { clinicDateString } from "@/lib/schedule";
 import { buildInstallmentPlanAgreement } from "@/lib/plans";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { DebtRepaymentAgreementPrint } from "@/components/DebtRepaymentAgreementPrint";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  * وثيقة ملزمة تُطبع للمريض ليوقع عليها عند اعتماد خطة التقويم أو الزراعة.
  * تفصّل الاتفاق المالي، مواعيد استحقاق كل قسط، والالتزامات السريرية.
  */
-export default async function PlanAgreementPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PlanAgreementPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ source?: string; version?: string }> }) {
   const session = await requireSession();
   if (!session || !canHandleMoney(session.role)) notFound();
 
@@ -29,6 +30,9 @@ export default async function PlanAgreementPage({ params }: { params: Promise<{ 
   if (!Number.isInteger(id) || id <= 0) notFound();
 
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+  const query = await searchParams;
+  if (query?.source === "debt-repayment") return <DebtRepaymentAgreementPrint id={id} version={Number(query.version)} today={today} />;
+  if (query?.source !== undefined || query?.version !== undefined) notFound();
   const [plan, settings] = await Promise.all([getPlan(id, today), getSettingsSafe()]);
   if (!plan) notFound();
 

@@ -55,11 +55,13 @@ describe("receptionist monthly proposed-payment workspace", () => {
       await editor.getByLabel("أول استحقاق شهري", { exact: true }).fill("2027-01-31");
       expect(await editor.getByTestId("monthly-schedule-remainder").innerText()).toContain("1,010");
       for (const months of [12, 15, 18]) {
+        if(months!==12) await editor.locator("summary").click();
         await editor.getByRole("button", { name: `${months} شهرًا`, exact: true }).click();
         await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).click();
         expect(await editor.getByTestId("debt-repayment-row-fields").count()).toBe(months + 1);
         expect(await save.isEnabled()).toBe(true);
       }
+      await editor.locator("summary").click();
       await editor.getByLabel("عدد الأشهر", { exact: true }).fill("0");
       expect(await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).isDisabled()).toBe(true);
       await editor.getByLabel("عدد الأشهر", { exact: true }).fill("2");
@@ -67,11 +69,13 @@ describe("receptionist monthly proposed-payment workspace", () => {
       expect(await editor.getByLabel("مبلغ السداد 2", { exact: true }).inputValue()).toBe("505.00");
       expect(await editor.getByLabel("تاريخ السداد 3", { exact: true }).inputValue()).toBe("2027-02-28");
       await editor.getByLabel("مبلغ السداد 2", { exact: true }).fill("504"); expect(await save.isDisabled()).toBe(true);
+      await editor.locator("summary").click();
       await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).click();
       await page.getByLabel("الخصم", { exact: true }).fill("100");
       await page.getByLabel("سبب الخصم", { exact: true }).fill("Synthetic allowed receptionist discount");
       expect(await save.isDisabled()).toBe(true);
       expect(await editor.getByRole("status").innerText()).toContain("تغيّر مبلغ الدين");
+      await editor.locator("summary").click();
       await editor.getByLabel("عدد الأشهر", { exact: true }).fill("3");
       await editor.getByRole("button", { name: "توليد جدول الأقساط", exact: true }).click();
       expect(await editor.getByLabel("مبلغ السداد 2", { exact: true }).inputValue()).toBe("303.34");
@@ -119,7 +123,8 @@ describe("receptionist monthly proposed-payment workspace", () => {
     const { patientId, context, page } = await open();
     try {
       await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(converted));
-      expect(await page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true }).inputValue()).toBe("");
+      expect(await page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true }).inputValue()).toBe("5.00");
+      expect(await page.getByTestId("invoice-price-source-0").innerText()).toContain("محوّل مقترح");
       await page.screenshot({ path: ".settings-ui-artifacts/monthly-reception-converted-unpriced-sar-390.png", fullPage: true });
       const body = { patientId, currency: "SAR", items: [{ serviceId: native, doctorId: doctor, scope: "both", price: "1500", catalogPriceMinor: 150000 }] };
       expect((await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(body))).status).toBe(200);
@@ -134,10 +139,10 @@ describe("receptionist monthly proposed-payment workspace", () => {
       const invoice = await saved.json();
       const audit = (await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND entity_id=$1", [String(invoice.id)])).rows[0].details;
       expect(JSON.stringify(audit)).toContain("Synthetic explicit unpriced agreement");
-      // Record an existing policy gap without making its acceptance a regression
-      // contract: the reviewed follow-up does not change converted/manual pricing.
+      // Invoice-specific manual reason is now enforced in preview and save.
       const noReason = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify({ ...manual, items: [{ ...manual.items[0], priceReason: "" }] }));
-      writeFileSync(".settings-ui-artifacts/monthly-reception-pricing-audit.json", JSON.stringify({ synthetic: true, role: "reception", nativeSarMinor: 150000, convertedSar: quote.priceIn.SAR, convertedUsd: quote.priceIn.USD, nativeForeignFields: [quote.priceSarMinor, quote.priceUsdMinor], reasonedManualPreview: preview.status, reasonedManualSave: saved.status, unpricedNoReasonPreviewObserved: noReason.status, unpricedReasonRequirementImplemented: false, pricingPolicyChanged: false }, null, 2));
+      expect(noReason.status).toBe(400);
+      writeFileSync(".settings-ui-artifacts/monthly-reception-pricing-audit.json", JSON.stringify({ synthetic: true, role: "reception", nativeSarMinor: 150000, convertedSar: quote.priceIn.SAR, convertedUsd: quote.priceIn.USD, nativeForeignFields: [quote.priceSarMinor, quote.priceUsdMinor], reasonedManualPreview: preview.status, reasonedManualSave: saved.status, unpricedNoReasonPreviewObserved: noReason.status, unpricedReasonRequirementImplemented: true, convertedOfferImplemented: true }, null, 2));
     } finally { await context.close(); }
   });
 });

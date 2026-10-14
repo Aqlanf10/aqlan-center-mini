@@ -12,6 +12,7 @@ export interface DebtRepaymentDraft {
   generation?: {
     downPayment: string; downPaymentDate: string; months: string; firstMonthlyDate: string;
     generatedRemainingMinor?: number;
+    expanded?: boolean;
   };
 }
 
@@ -38,7 +39,7 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
   const newRow = () => ({ key: crypto.randomUUID(), dueDate: value.rows.at(-1)?.dueDate || today, amount: "", kind: "installment" as const });
   const firstDownPayment = value.rows[0]?.kind === "down_payment" ? value.rows[0] : null;
   const monthlyRows = value.rows.filter(row => row.kind === "installment" && row.amount.trim());
-  const generation = value.generation ?? {
+  const generation: NonNullable<DebtRepaymentDraft["generation"]> = value.generation ?? {
     downPayment: firstDownPayment?.amount ?? "", downPaymentDate: firstDownPayment?.dueDate ?? today,
     months: monthlyRows.length ? String(monthlyRows.length) : "12",
     firstMonthlyDate: monthlyRows[0]?.dueDate ?? monthlyDueDate(today, 1) ?? "",
@@ -66,8 +67,10 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
     {!compact?<p className="text-sm">الدين الذي سيُسدَّد: <strong>{formatMoney(remainingMinor,currency)}</strong></p>:null}
     <p className="text-xs leading-6 text-slate-600">اختيار طريقة السداد لا يسجّل مبلغًا محصّلًا. التحصيل الفعلي يُثبت بسند قبض مستقل.</p>
     {value.mode === "installments" ? <>
-      <section aria-label="توزيع الأقساط الشهرية" className="min-w-0 space-y-3 rounded-xl border border-sky-100 bg-sky-50/60 p-3">
-        <h4 className="text-sm font-bold">المقدمة والأقساط الشهرية</h4>
+      <details open={generation.expanded !== false} aria-label="توزيع الأقساط الشهرية" className="min-w-0 space-y-3 rounded-xl border border-sky-100 bg-sky-50/60 p-3">
+        <summary className="min-h-[44px] cursor-pointer text-sm font-bold" onClick={event=>{event.preventDefault();changeGeneration({expanded:generation.expanded===false});}}>
+          {generation.expanded === false ? "إعادة توزيع المقدمة والأقساط الشهرية" : "المقدمة والأقساط الشهرية"}
+        </summary>
         <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
           <label className="min-w-0 text-xs font-bold">الدفعة المقدمة المقترحة ({currency})
             <input aria-label="مبلغ الدفعة المقدمة المقترحة" inputMode="decimal" dir="ltr" value={generation.downPayment}
@@ -102,16 +105,16 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
         </div>
         {proposedRemainder === 0 ? <p className="text-xs">المقدمة المقترحة تغطي الدين؛ لن تُنشأ أقساط بمبلغ صفر.</p> : null}
         {!generated.ok ? <p role="alert" className="text-xs font-bold text-rose-800">{generated.message}</p> : null}
-        {generation.generatedRemainingMinor !== undefined && generation.generatedRemainingMinor !== remainingMinor
-          ? <p role="status" className="text-xs font-bold text-amber-900">تغيّر مبلغ الدين؛ أعد توليد الأقساط أو عدّل المواعيد لتوزيع المتبقي الجديد.</p> : null}
         <button type="button" disabled={disabled || !generated.ok} onClick={() => {
           if (disabled || !generated.ok) return;
           onChange({ mode: generated.terms.mode, rows: generated.terms.installments.map(row => ({ key: crypto.randomUUID(),
             dueDate: row.dueDate, amount: formatAmount(row.amountMinor, currency), kind: row.kind })),
-            generation: { ...generation, generatedRemainingMinor: remainingMinor } });
+            generation: { ...generation, generatedRemainingMinor: remainingMinor, expanded: false } });
         }} className="min-h-[44px] rounded-xl bg-sky-800 px-3 text-sm font-bold text-white disabled:opacity-50">توليد جدول الأقساط</button>
         <p className="text-xs text-slate-600">تُطبّق المقدمة والأشهر عند التوليد. يمكنك تعديل كل مبلغ وتاريخ في الجدول أدناه، وإعادة التوليد تستبدل مواعيد المسودة.</p>
-      </section>
+      </details>
+      {generation.generatedRemainingMinor !== undefined && generation.generatedRemainingMinor !== remainingMinor
+        ? <p role="status" className="text-xs font-bold text-amber-900">تغيّر مبلغ الدين؛ أعد توليد الأقساط أو عدّل المواعيد لتوزيع المتبقي الجديد.</p> : null}
       {!compact?<p className="text-xs leading-6 text-slate-600">أدخل المواعيد من الأقدم إلى الأحدث؛ الدفعة المقدمة المقترحة تكون أول موعد. يمكن جمع دفعات اليوم نفسه دون تغيير ترتيبها.</p>:null}
       <div className="space-y-2">
         {value.rows.map((row,index) => <div key={row.key} className="min-w-0 space-y-2 rounded-xl bg-slate-50 p-3">
@@ -130,7 +133,7 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
                 className="mt-1 min-h-[44px] w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 text-start" />
             </label>
           </div>
-          {index === 0 ? <label className="flex min-h-[44px] items-center gap-2 text-xs">
+          {index === 0 && value.generation?.generatedRemainingMinor === undefined ? <label className="flex min-h-[44px] items-center gap-2 text-xs">
             <input type="checkbox" checked={row.kind === "down_payment"} onChange={event => changeRow(row.key,{ kind:event.target.checked ? "down_payment" : "installment" })} />
             {compact?"دفعة مقدمة مقترحة (غير محصّلة)":"هذا الموعد دفعة مقدمة مقترحة، لم تُحصّل بعد"}
           </label> : null}

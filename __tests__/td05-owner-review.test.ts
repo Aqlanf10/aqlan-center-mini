@@ -241,9 +241,12 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
   });
 
   it("فاتورة USD بسعرٍ صريح تُخزَّن بالمبلغ الدقيق بعملتها", async () => {
+    const missingReason = await postInvoice(jsonRequest("http://localhost/api/invoices", { patientId:currencyPatientId,currency:"USD",items:[{serviceId:currencyServiceId,quantity:2,price:"12.34"}] }));
+    expect(missingReason.status).toBe(400);
+    expect((await missingReason.json()).message).toContain("سبب التسعير اليدوي");
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
       patientId: currencyPatientId, currency: "USD",
-      items: [{ serviceId: currencyServiceId, quantity: 2, price: "12.34" }],
+      items: [{ serviceId: currencyServiceId, quantity: 2, price: "12.34", priceReason: "Explicit synthetic USD agreement" }],
     }));
     expect(response.status).toBe(201);
     const invoice = await response.json();
@@ -252,9 +255,12 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
   });
 
   it("فاتورة SAR بسعرٍ صريح تُخزَّن صحيحة", async () => {
+    const missingReason = await postInvoice(jsonRequest("http://localhost/api/invoices", { patientId:currencyPatientId,currency:"SAR",items:[{serviceId:currencyServiceId,quantity:1,price:"250"}] }));
+    expect(missingReason.status).toBe(400);
+    expect((await missingReason.json()).message).toContain("سبب التسعير اليدوي");
     const response = await postInvoice(jsonRequest("http://localhost/api/invoices", {
       patientId: currencyPatientId, currency: "SAR",
-      items: [{ serviceId: currencyServiceId, quantity: 1, price: "250" }],
+      items: [{ serviceId: currencyServiceId, quantity: 1, price: "250", priceReason: "Explicit synthetic SAR agreement" }],
     }));
     expect(response.status).toBe(201);
     const invoice = await response.json();

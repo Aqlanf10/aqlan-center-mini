@@ -7,6 +7,7 @@ import { parseInvoiceInput, type ParsedInvoiceInput } from "./invoice-input";
 import { CLINIC_BASE_CURRENCY, isCurrency, toInputAmount } from "./money";
 import { foreignRatesFromSettings } from "./service-pricing";
 import { buildTemplateDrafts, effectiveTemplates, type TemplatePlanDraft } from "./specialty-templates";
+import { invoicePriceQuote, type InvoicePriceQuote } from "./invoice-price-quote";
 import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 
 export type InvoiceTemplateSelection = {
@@ -21,6 +22,7 @@ export type InvoiceTemplatePreviewLine = {
   line: number; stepKey: string; serviceId: number; description: string; quantity: number; unitPriceMinor: number;
   toothCode: number | null; scope: string | null; episodeTeeth: number[] | null; surfaces: string | null;
   caseId: number | null; doctorId: number | null; sessions: number; sessionPlan: TemplatePlanDraft["sessions"];
+  priceQuote?: InvoicePriceQuote;
 };
 export type InvoiceTemplatePreview = { templateId: string; version: string; lines: InvoiceTemplatePreviewLine[] };
 type Failure = { ok: false; status: 400 | 409; code: "INVOICE_TEMPLATE_INVALID" | "INVOICE_TEMPLATE_REVIEW_REQUIRED" | "INVOICE_TEMPLATE_STALE"; message: string };
@@ -48,10 +50,10 @@ function withRepayment(source: Record<string,unknown>, parsed: Success): Success
 export function parseInvoiceCommand(
   source: Record<string, unknown>, services: ReadonlyMap<number, Service>, doctors: ReadonlySet<number>,
   settings: Parameters<typeof foreignRatesFromSettings>[0], requireVersion: boolean,
-): Success | Failure | { ok: false; message: string; status?: undefined; code?: undefined } {
+): Success | Failure | { ok: false; message: string; status?: 409; code?: "INVOICE_PRICE_STALE" } {
   if (!object(source)) return invalid();
   if (!Object.hasOwn(source, "templateSelection") || source.templateSelection == null) {
-    const parsed = parseInvoiceInput(source, services, doctors);
+    const parsed = parseInvoiceInput(source, services, doctors, foreignRatesFromSettings(settings));
     return parsed.ok ? withRepayment(source,{ ...parsed, template: null }) : parsed;
   }
   const selection = source.templateSelection;
@@ -86,9 +88,9 @@ export function parseInvoiceCommand(
   }
   if (source.currency !== undefined && source.currency !== null && source.currency !== "" && !isCurrency(source.currency)) return invalid("عملة الفاتورة غير صالحة.");
   const currency = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
-  // An invoice agreement requires prices in its own currency; FX suggestions
-  // remain available to visit workflows but cannot silently price this agreement.
-  const built = buildTemplateDrafts(template, { teeth, steps }, [...services.values()], currency, {});
+  // Template invoice offers use the same configured FX and retain its snapshot
+  // in the reviewed version. Visit/plan template pricing policy is unchanged.
+  const built = buildTemplateDrafts(template, { teeth, steps }, [...services.values()], currency, foreignRatesFromSettings(settings));
   if (!built.ok) return invalid(built.message);
   const manual = source.items === undefined ? [] : source.items;
   if (!Array.isArray(manual) || manual.length + built.drafts.length > 40) return invalid("عدد بنود الفاتورة مع القالب يجب ألا يتجاوز ٤٠.");
@@ -129,11 +131,12 @@ export function parseInvoiceCommand(
       if (caseId !== null && (linkage.kind === "financial" || !linkage.needsCase)) return invalid("هذه الخطوة لا تُربط بحالة تخصصية.");
       const line = manual.length + lines.length;
       lines.push({ line, stepKey: step.key, serviceId: draft.serviceId, description: draft.serviceName,
+        priceQuote: invoicePriceQuote(services.get(draft.serviceId)!, currency, foreignRatesFromSettings(settings)),
         quantity: 1, unitPriceMinor: draft.unitPriceMinor, toothCode: site.toothCode, scope: site.scope,
         episodeTeeth: site.episodeTeeth, surfaces: site.surfaces, caseId, doctorId: doctorId as number | null,
         sessions: draft.sessions.length, sessionPlan: draft.sessions.map((session) => ({ ...session })),
       });
-      generated.push({ serviceId: draft.serviceId, quantity: 1, price: toInputAmount(draft.unitPriceMinor, currency),
+      generated.push({ priceQuote: invoicePriceQuote(services.get(draft.serviceId)!, currency, foreignRatesFromSettings(settings)), serviceId: draft.serviceId, quantity: 1, price: toInputAmount(draft.unitPriceMinor, currency),
         doctorId, toothCode: site.toothCode, scope: site.scope, episodeTeeth: site.episodeTeeth, surfaces: site.surfaces,
         caseId, sessions: draft.sessions.length,
       });
@@ -147,7 +150,7 @@ export function parseInvoiceCommand(
   ])).digest("hex");
   if (requireVersion && selection.version === undefined) return { ok: false, status: 409, code: "INVOICE_TEMPLATE_REVIEW_REQUIRED", message: "عاين بنود القالب ومبلغه وجدول جلساته قبل حفظ الفاتورة." };
   if (selection.version !== undefined && selection.version !== version) return { ok: false, status: 409, code: "INVOICE_TEMPLATE_STALE", message: "تغيّر القالب أو سعره أو اختياره منذ المعاينة؛ راجع المعاينة الجديدة قبل الحفظ." };
-  const parsed = parseInvoiceInput({ ...source, items: [...manual, ...generated] }, services, doctors);
+  const parsed = parseInvoiceInput({ ...source, items: [...manual, ...generated] }, services, doctors, foreignRatesFromSettings(settings));
   if (!parsed.ok) return parsed;
   for (const [index, draft] of schedules.entries()) {
     const line = manual.length + index;
@@ -162,7 +165,8 @@ export function parseInvoiceCommand(
 
 /** Ordinary historical fingerprints remain exact; template commands bind their reviewed version and schedule. */
 export function invoiceCommandFingerprint(parsed: ParsedInvoiceInput & { template: InvoiceTemplatePreview | null; repaymentTerms?: DebtRepaymentTerms }): string {
-  const original = invoiceRequestFingerprint({ ...parsed, currency: parsed.baseCurrency });
+  const unquoted = invoiceRequestFingerprint({ ...parsed, currency: parsed.baseCurrency });
+  const original = parsed.quotedFingerprint ? JSON.stringify([unquoted, parsed.quotedFingerprint]) : unquoted;
   const scoped=parsed.visitId!==undefined?JSON.stringify([original,{visitId:parsed.visitId}]):original;
   const financial = parsed.repaymentTerms ? JSON.stringify([scoped,parsed.repaymentTerms]) : scoped;
   return parsed.template === null ? financial : JSON.stringify([financial, { templateId: parsed.template.templateId,
@@ -179,7 +183,7 @@ export function invoiceTemplateRequestFingerprint(source: Record<string, unknown
  * Older unquoted API clients retain their existing canonical fingerprint contract. */
 export function hasInvoiceCatalogQuote(source: Record<string, unknown>): boolean {
   return source.visitId!=null || Object.hasOwn(source,"repaymentTerms") || Array.isArray(source.items) && source.items.some(item => item !== null && typeof item === "object"
-    && !Array.isArray(item) && Object.hasOwn(item, "catalogPriceMinor"));
+    && !Array.isArray(item) && (Object.hasOwn(item, "catalogPriceMinor") || Object.hasOwn(item, "priceQuote")));
 }
 
 export function invoiceCatalogRequestFingerprint(source: Record<string, unknown>, actor: { username: string; role: string; userId?: number | null }): string {

@@ -7,6 +7,7 @@ import { foreignRatesFromSettings } from "./service-pricing";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
 import { canHandleMoney } from "./roles";
+import { invoicePricingAudit } from "./invoice-price-settings-db";
 
 export type InvoiceTemplateAuthority = { source: Record<string, unknown>; fingerprint: string; session: SessionPayload };
 export class InvoiceTemplateAuthorizationError extends Error {
@@ -22,7 +23,7 @@ export async function assertInvoiceTemplateSession(client: DbClient, session: Se
 }
 export class InvoiceTemplateAuthorityError extends Error {
   readonly code = "INVOICE_TEMPLATE_STALE";
-  constructor() { super("تغيّر القالب أو دليله أو صلاحية سعره أثناء الحفظ؛ راجع المعاينة الجديدة قبل إعادة المحاولة."); }
+  constructor() { super("تغيّر القالب أو دليل الخدمات أو مصدر السعر أو سعر الصرف أو صلاحية السعر أثناء الحفظ؛ حدّث الأسعار والمعاينة قبل المحاولة مجددًا."); }
 }
 export class InvoiceTemplateBusyError extends Error {
   readonly code = "INVOICE_TEMPLATE_BUSY";
@@ -44,7 +45,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
   templateAuthority?: InvoiceTemplateAuthority; catalogueAuthority?: InvoiceTemplateAuthority; items: LinkedInvoiceLineInput[]; actorRole: string | null;
   idempotencyKey: string | null; requestHash: string | null;
   patientId: number;visitId?:number; baseCurrency: string; existingPlanId?: number | null; discountMinor: number; note: string | null;
-  createdBy: string;
+  createdBy: string; auditDetails?: Record<string, unknown>;
 }): Promise<void> {
   const usesTemplate = input.items.some((item) => item.templatePlan !== undefined);
   if (!usesTemplate && !input.catalogueAuthority) {
@@ -63,7 +64,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
   // This path performs only same-client DB work and synchronous validation under
   // the locks; no network, schema initialization, cache access or new transaction.
   await client.query("LOCK TABLE settings IN SHARE MODE");
-  const settings = await getSettingsInTransaction(client);
+  const settings = await getSettingsInTransaction(client, { requireStoredExchangeRates: true });
   const serviceIds = [...new Set(input.items.flatMap((item) => item.serviceId === null ? [] : [item.serviceId]))].sort((a, b) => a - b);
   type CatalogRow = {
     id: number; name: string; category: string | null; price_minor: string;
@@ -99,7 +100,7 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     || current.existingPlanId !== (input.existingPlanId ?? null) || (current.visitId??null)!==(input.visitId??null) || current.discountMinor !== input.discountMinor
     || current.note !== input.note || current.idempotencyKey !== input.idempotencyKey
     || itemsFingerprint(current.items) !== itemsFingerprint(input.items)) throw new InvoiceTemplateAuthorityError();
-  const pricing = checkInvoiceAuthority({
+  const pricing = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: current.authorityLines, currency: current.baseCurrency, rates: foreignRatesFromSettings(settings),
     role: input.actorRole ?? "", maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
     totalMinor: current.items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),
@@ -107,4 +108,5 @@ export async function validateInvoiceTemplateInTransaction(client: DbClient, inp
     discountReason: typeof authority.source.discountReason === "string" ? authority.source.discountReason : null,
   });
   if (!pricing.ok) throw new InvoiceTemplateAuthorityError();
+  if (input.auditDetails) input.auditDetails.invoicePriceSnapshots = invoicePricingAudit(current.pricingSnapshots);
 }

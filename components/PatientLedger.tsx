@@ -1,5 +1,7 @@
 "use client";
 
+import { invoiceOfferedPrice } from "@/lib/invoice-price-quote";
+
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
@@ -678,7 +680,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
       {mode === "invoice" ? (
         <InvoiceForm key={patientId}
           originControl={<TreatmentEntryChoice canAddLegacy={canAddLegacy} activeMode="invoice" disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode}/>}
-          patientId={patientId} visitId={visitId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
+          patientId={patientId} visitId={visitId} base={base} services={services} onReloadCatalogue={()=>void load()} busy={busy} selectionContextKey={selectionContextKey}
           financialRecovery={financialRecovery}
           canChangeDraft={() => financialRecovery.ready && !debtRecovery && readRef.current.active && readRef.current.authorized && !writePending.current}
           onRecoveryHold={value => { invoiceUnresolved.current = value; }}
@@ -710,7 +712,7 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
 
       {mode === "legacy" && canAddLegacy ? <InvoiceForm key={`historical-${patientId}`}
         originControl={<TreatmentEntryChoice canAddLegacy={canAddLegacy} activeMode="legacy" disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode}/>}
-        historical patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
+        historical patientId={patientId} base={base} services={services} onReloadCatalogue={()=>void load()} busy={busy} selectionContextKey={selectionContextKey}
         financialRecovery={financialRecovery}
         canChangeDraft={() => financialRecovery.ready && !debtRecovery && readRef.current.active && readRef.current.authorized && !writePending.current}
         recovery={recovery} onRecoveryHold={value=>{invoiceUnresolved.current=value;}} onRecoveryChange={onRecoveryChange}
@@ -1063,10 +1065,11 @@ const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
-function InvoiceForm({ patientId, visitId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery, originControl }: {
+function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery, originControl }: {
   patientId: number;visitId?:number;
   base: Currency;
   services: Service[];
+  onReloadCatalogue:()=>void;
   busy: boolean;
   historical?: boolean;
   originControl?: ReactNode;
@@ -1169,14 +1172,14 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
     setRepaymentDraft({mode:"full",rows:[]});
     setRows(current => current.map(row => {
       const service = services.find(one => String(one.id) === row.serviceId);
-      const price = service ? invoiceCatalogPrice(service, next) : null;
+      const price = service ? invoiceOfferedPrice(service, next) : null;
       return { ...row, price: price === null ? "" : formatAmount(price, next), priceReason: "" };
     }));
   };
   const selectorServices = services.map(service => {
-    const price = invoiceCatalogPrice(service, currency);
+    const price = invoiceOfferedPrice(service, currency);
     return { ...service, priceConfigured: price !== null,
-      priceIn: { [currency]: { minor: price, source: price === null ? "none" as const : "catalog" as const } } };
+      priceIn: { [currency]: { minor: price, source: service.invoiceQuotes?.[currency]?.source ?? (price === null ? "none" as const : "catalog" as const) } } };
   });
 
 
@@ -1185,7 +1188,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const manualTotal = useMemo(() => rows.reduce((sum, row) => {
     const service = services.find((item) => String(item.id) === row.serviceId);
     const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-    const unit = typed ?? (service ? invoiceCatalogPrice(service, currency) : null) ?? 0;
+    const unit = typed ?? (service ? invoiceOfferedPrice(service, currency) : null) ?? 0;
     const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
     return sum + unit * quantity;
   }, 0), [rows, services, currency]);
@@ -1194,7 +1197,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
     const row = rows[index];
     const service = services.find((item) => String(item.id) === row.serviceId);
     const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-    const unit = typed ?? (service ? invoiceCatalogPrice(service, currency) : null) ?? 0;
+    const unit = typed ?? (service ? invoiceOfferedPrice(service, currency) : null) ?? 0;
     return unit * Math.max(1, Math.round(Number(row.quantity) || 1));
   };
 
@@ -1209,7 +1212,10 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const inputProblems = rows.map(row => {
     if (!row.serviceId && !row.description.trim()) return null;
     const service = serviceOf(row.serviceId);
-    const catalogue = service ? invoiceCatalogPrice(service, currency) : null;
+    const catalogue = service ? invoiceOfferedPrice(service, currency) : null;
+    if (service && invoiceCatalogPrice(service, currency) === null
+      && !(service.invoiceQuotes?.[currency]?.source === "converted" && parseAmount(row.price, currency) === catalogue)
+      && (row.priceReason.trim().length < 3) && row.price.trim() && (parseAmount(row.price, currency) ?? 0) > 0) return "اكتب سبب التسعير اليدوي لهذه الخدمة قبل الحفظ.";
     if (service && catalogue === null && (!row.price.trim() || (parseAmount(row.price, currency) ?? 0) <= 0)) {
       return "لا يوجد سعر مقرر بهذه العملة؛ اكتب قيمة الاتفاق صراحةً أو اطلب تسعير الخدمة. لا يُحفظ سعر صفري تلقائيًا.";
     }
@@ -1217,17 +1223,18 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   });
   // Keep text/price/tooth drafts; only explicit identity selections expire on changed work/context.
   const selectionScope = JSON.stringify({ patientId, currency, base, selectionContextKey, templateDraft,
-    catalog: services.map((service) => [service.id, service.name, service.category, invoiceCatalogPrice(service, currency), service.isActive]), rows });
+    catalog: services.map((service) => [service.id, service.name, service.category, invoiceOfferedPrice(service, currency), service.isActive, service.invoiceQuotes?.[currency]]), rows });
   const selectionOwner = useMemo(() => ({ selectionScope, authority }), [selectionScope, authority]);
   const selected = selectionForOwner(selection, selectionOwner);
   // Changing any row identity or linkage input invalidates evidence during render, before the debounce/effect.
-  const previewKey = JSON.stringify({ patientId, currency, discount, discountReason, historicalPaid, historicalDate, historicalNote, idempotencyKey, base, retry: previewRetry,
+  const previewKey = JSON.stringify({ patientId, visitId, currency, discount, discountReason, historicalPaid, historicalDate, historicalNote, idempotencyKey, base, retry: previewRetry,
     authorityKey, selectionContextKey, existingPlanId: selected.existingPlanId, templateDraft,
-    catalog: services.map((service) => [service.id, service.name, service.category, invoiceCatalogPrice(service, currency), service.isActive]),
+    catalog: services.map((service) => [service.id, service.name, service.category, invoiceOfferedPrice(service, currency), service.isActive, service.invoiceQuotes?.[currency]]),
     rows: rows.map((row, index) => ({ row, index })).filter(({ row }) => row.serviceId || row.description.trim())
       .map(({ row, index }) => ({ key: row.key, clinical: isClinical(row.serviceId), inputProblem: inputProblems[index],
         serviceId: row.serviceId ? Number(row.serviceId) : undefined, description: row.description,
         catalogPriceMinor: serviceOf(row.serviceId) ? invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) : undefined,
+        priceQuote: serviceOf(row.serviceId)?.invoiceQuotes?.[currency],
         price: row.price, priceReason: row.priceReason, quantity: Number(row.quantity) || 1,
         caseId: isClinical(row.serviceId) && row.caseId ? Number(row.caseId) : undefined,
         planItemId: isClinical(row.serviceId) ? selected.itemIds.get(row.key) ?? null : null,
@@ -1244,12 +1251,12 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   useEffect(() => {
     if (historical || !canSubmit || commandLocked) return;
     const request = JSON.parse(previewKey) as {
-      patientId: number; currency: Currency; discount: string; discountReason: string; idempotencyKey: string;
+      patientId: number; visitId?:number; currency: Currency; discount: string; discountReason: string; idempotencyKey: string;
       existingPlanId: number | null;
       templateDraft: InvoiceTemplateDraft | null;
       rows: { key: string; clinical: boolean; planItemId?: number | null; [field: string]: unknown }[];
     };
-    if ((!request.templateDraft && !request.rows.some((row) => row.clinical)) || request.rows.some((row) => row.inputProblem)) return;
+    if ((!request.templateDraft && !request.rows.length) || request.rows.some((row) => row.inputProblem)) return;
     const controller = new AbortController();
     const unavailable = () => {
       if (!controller.signal.aborted) setPreviewState({ owner: previewOwner, requestKey: previewKey, status: "unavailable", byRow: new Map() });
@@ -1259,7 +1266,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
       deadline = setTimeout(() => { unavailable(); controller.abort(); }, 15_000);
       void fetch("/api/invoices/clinical-preview", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ patientId: request.patientId, currency: request.currency,
+        body: JSON.stringify({ patientId: request.patientId, ...(request.visitId!==undefined?{visitId:request.visitId}:{}), currency: request.currency,
           existingPlanId: request.existingPlanId,
           ...(request.templateDraft ? { templateSelection: request.templateDraft.selection } : {}),
           discount: request.discount, discountReason: request.discountReason, idempotencyKey: request.idempotencyKey,
@@ -1279,7 +1286,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
         }
         const evidence = response.ok ? request.templateDraft
           ? readInvoiceTemplatePreview(payload, request.rows, request.existingPlanId, {
-              template: request.templateDraft.template, selection: request.templateDraft.selection, catalogServices: services,
+              template: request.templateDraft.template, selection: request.templateDraft.selection, catalogServices: services, currency,
             })
           : readInvoiceSelectionPreview(payload, request.rows, request.existingPlanId) : null;
         if (!evidence) { unavailable(); return; }
@@ -1312,7 +1319,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const historicalServices=new Map(services.map(service=>[service.id,{...service,priceSarMinor:service.priceSarMinor??null,priceUsdMinor:service.priceUsdMinor??null,
     priceConfigured:service.priceConfigured??false,priceProvisional:service.priceProvisional??false,isActive:service.isActive===true,sortOrder:0}]));
   const historicalParsed=historical?parseHistoricalDocument(historicalSource,historicalServices,new Set(doctors.map(doctor=>doctor.id)),
-    {today:clinicDateString(new Date(),CLINIC_ZONE_FALLBACK),role:formSession?.role??"",maxDiscountPercent:100}):null;
+    {today:clinicDateString(new Date(),CLINIC_ZONE_FALLBACK),role:formSession?.role??"",maxDiscountPercent:100,rates:Object.fromEntries((["SAR","USD"] as const).map(code=>[code,services.find(service=>service.invoiceQuotes?.[code]?.source==="converted")?.invoiceQuotes?.[code]?.rate??null]))}):null;
   const [historicalState,setHistoricalState]=useState<{owner:object;status:"ready"|"unavailable"|"refused";message?:string;preview?:HistoricalPreview}|null>(null);
   const currentHistorical=historicalState?.owner===previewOwner?historicalState:null;
   useEffect(()=>{
@@ -1334,7 +1341,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
   const historicalEvidence=currentHistorical?.status==="ready"?currentHistorical.preview:null;
   const debtRemaining = historical ? historicalEvidence?.remainingMinor??historicalRemaining??0 : net;
   const repayment = readDebtRepaymentDraft(repaymentDraft,currency,debtRemaining);
-  const clinicalPreviewBlocked = historical ? !historicalEvidence || historicalEvidence.requiresAllocationReview || historicalEvidence.lines.some(line=>line.case.mode==="choose") : rows.some((row) => isClinical(row.serviceId)
+  const clinicalPreviewBlocked = historical ? !historicalEvidence || historicalEvidence.requiresAllocationReview || historicalEvidence.lines.some(line=>line.case.mode==="choose") : (rows.some(row=>row.serviceId||row.description.trim()) && currentPreview?.status!=="ready") || rows.some((row) => isClinical(row.serviceId)
     && previewForRow(currentPreview, previewKey, row.key).status !== "ready");
 
   /* (INV-LINK TOOTH) لا يُحفظ بندٌ يحتاج سنًّا بلا سن — والخادم يرفضه أيضًا. */
@@ -1365,7 +1372,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
       const service = serviceOf(row.serviceId);
       const fields = toothPayload(modeOf(row), row);
       const site = validateLineSite({ category: service?.category ?? null, ...fields, toothCode: fields.toothCode ?? null });
-      const price = row.price.trim() ? parseAmount(row.price, currency) : service ? invoiceCatalogPrice(service, currency) : null;
+      const price = row.price.trim() ? parseAmount(row.price, currency) : service ? invoiceOfferedPrice(service, currency) : null;
       if (!site.ok || price === null || !append("manual", { serviceId: service?.id ?? null, doctorId: row.doctorId ? Number(row.doctorId) : null,
         description: service?.name ?? row.description.trim().slice(0, 160), quantity: Math.max(1, Math.round(Number(row.quantity) || 1)), unitPriceMinor: price,
         toothCode: site.site.toothCode, surfaces: site.site.surfaces }, row.key, service?.category ?? null)) return null;
@@ -1509,6 +1516,9 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
         <h4 className="text-sm font-bold">{templateDraft.template.name} — مراجعة بنود القالب</h4>
         {currentTemplate ? <ol className="mt-2 space-y-2">{currentTemplate.lines.map(line => <li key={currentPreview?.rows?.[line.line]?.key ?? "missing-template-row"} className="min-w-0 break-words rounded-lg bg-slate-50 p-2 text-xs">
           <p className="font-bold">{line.description} · {line.toothCode !== null ? `سن ${line.toothCode}` : line.scope ?? "سجلات دون موضع علاجي"} · {formatMoney(line.unitPriceMinor * line.quantity, currency)}</p>
+          {line.priceQuote ? <p data-testid={`invoice-template-price-source-${line.line}`}>{line.priceQuote.source === "converted"
+            ? `سعر محوّل مقترح من اليمني · سعر الصرف ${line.priceQuote.rate} ر.ي لكل ${currency} · تقريب لأقرب وحدة كاملة`
+            : "سعر صريح مسجّل بعملة الفاتورة"}</p> : null}
           <p>الكمية: {line.quantity} · {line.sessions} جلسات</p>
           <ol className="mt-1 list-inside list-decimal">{line.sessionPlan.map(session => <li key={session.visitKey}>{session.visitTitle} — {session.title} · {session.minutes} دقيقة · بعد {session.afterDays} يوم</li>)}</ol>
           {(() => { const proof = currentPreview?.byRow.get(currentPreview?.rows?.[line.line]?.key ?? "missing-template-row"); return proof?.refusalMessage ? <p role="alert" className="mt-1 text-amber-800">{proof.refusalMessage}</p> : null; })()}
@@ -1568,7 +1578,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
                 onChange={(id, srv) => {
                   setRows((current) => replaceRowService(current, index, {
                     serviceId: id ? String(id) : "", doctorId: "",
-                    price: srv && invoiceCatalogPrice(srv, currency) !== null ? formatAmount(invoiceCatalogPrice(srv, currency)!, currency) : "",
+                    price: srv && invoiceOfferedPrice(srv, currency) !== null ? formatAmount(invoiceOfferedPrice(srv, currency)!, currency) : "",
                     description: srv ? srv.name : current[index].description,
                   }, invoiceToothMode(srv?.category)));
                 }}
@@ -1606,8 +1616,8 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
             {row.serviceId && (() => {
               const service = services.find((item) => String(item.id) === row.serviceId);
               const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-              const catalogue = service ? invoiceCatalogPrice(service, currency) : null;
-              const differs = service ? typed !== null && typed !== catalogue : false;
+              const catalogue = service ? invoiceOfferedPrice(service, currency) : null;
+              const differs = service ? typed !== null && (catalogue === null || typed !== catalogue) : false;
               return differs ? (
                 <input
                   value={row.priceReason}
@@ -1620,6 +1630,9 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
                 />
               ) : null;
             })()}
+            {row.serviceId ? <p className="text-[10px] leading-5 text-slate-600" data-testid={`invoice-price-source-${index}`}>{serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.source === "converted"
+              ? `${parseAmount(row.price,currency)!==serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor?"سعر يدوي بالاتفاق؛ ":""}سعر محوّل مقترح من اليمني ${formatMoney(serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor??0,currency)} · سعر الصرف ${serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.rate} ر.ي لكل ${currency} · تقريب لأقرب وحدة كاملة`
+              : serviceOf(row.serviceId) && invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) !== null ? "سعر صريح مسجّل بعملة الفاتورة" : "تسعير يدوي بعملة الفاتورة — السبب إلزامي"}</p> : null}
             <div className={workspace.quantity}>
               <label className="text-[11px] font-bold text-slate-500">الكمية:</label>
               <input
@@ -1766,8 +1779,8 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
           {discountMinor>0?<div className={workspace.discountReason}><dt>سبب الخصم</dt><dd><input value={discountReason} onChange={event=>setDiscountReason(event.target.value)} aria-label="سبب الخصم" maxLength={300} placeholder="سبب الخصم المعتمد"/></dd></div>:null}
           <div className={workspace.net}><dt>صافي المبلغ المتفق عليه</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate?"بانتظار اكتمال البنود":formatMoney(net,currency)}</dd></div>
           {historical?<div><dt><label htmlFor={`${summaryId}-paid`}>المدفوع قبل النظام</label></dt><dd><input id={`${summaryId}-paid`} aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event=>setHistoricalPaid(event.target.value)} inputMode="decimal" dir="ltr" placeholder="0"/></dd></div>
-            :<div><dt>المبلغ المحصّل بهذا الطلب</dt><dd>{formatMoney(0,currency)}</dd></div>}
-          <div className={workspace.remaining}><dt>{historical?"المتبقي التاريخي الافتتاحي":"المبلغ المتبقي"}</dt><dd>{totalInvalid||inputProblems.some(Boolean)||historical&&historicalRemaining===null?"راجع المبالغ":formatMoney(historical?historicalRemaining??0:debtRemaining,currency)}</dd></div>
+            :null}
+          {historical?<div className={workspace.remaining}><dt>المتبقي التاريخي الافتتاحي</dt><dd>{totalInvalid||inputProblems.some(Boolean)||historical&&historicalRemaining===null?"راجع المبالغ":formatMoney(historicalRemaining??0,currency)}</dd></div>:null}
         </dl>
         {historicalRemaining===null&&historical?<p role="alert">راجع المدفوع السابق؛ لا يتجاوز المتفق عليه بعد الخصم.</p>:null}
         <p className={workspace.moneyNote}>{historical?"المدفوع قبل النظام للتوثيق فقط؛ دون سند قبض أو حركة صندوق.":"حفظ الفاتورة لا يثبت تحصيلًا. التحصيل الفعلي بسند قبض."}</p>
@@ -1813,6 +1826,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
               .map((row) => ({
                 serviceId: row.serviceId ? Number(row.serviceId) : undefined,
                 catalogPriceMinor: serviceOf(row.serviceId) ? invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) : undefined,
+        priceQuote: serviceOf(row.serviceId)?.invoiceQuotes?.[currency],
                 doctorId: row.doctorId ? Number(row.doctorId) : undefined,
                 description: row.description,
                 price: row.price,
@@ -1831,7 +1845,8 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
       >
         <Save size={19} aria-hidden="true"/>{historical ? "احفظ الاتفاق التاريخي" : "احفظ الفاتورة"}
       </button>
-      <button type="button" className={workspace.review} onClick={()=>document.getElementById(summaryId)?.scrollIntoView({block:"start",behavior:"smooth"})}>مراجعة الاتفاق قبل الحفظ</button>
+      {(historical ? currentHistorical : currentPreview)?.status === "unavailable" || (historical ? currentHistorical : currentPreview)?.status === "refused" ? <button type="button" disabled={busy||commandLocked||!canSubmit} className={workspace.review} onClick={()=>{if(editorEnabled()){onReloadCatalogue();setPreviewRetry(value=>value+1);}}}>تحديث الأسعار والمعاينة</button> : null}
+      {((historical ? currentHistorical : currentPreview)?.message || inputProblems.some(Boolean)) ? <p role="alert" data-testid="invoice-save-reason" className="text-sm font-bold text-rose-800">{inputProblems.find(Boolean) || (historical ? currentHistorical : currentPreview)?.message}</p> : null}
       </div>
       </div>
       </fieldset>

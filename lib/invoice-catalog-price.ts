@@ -1,4 +1,5 @@
 import type { Currency } from "./money";
+import type { InvoicePriceQuote } from "./invoice-price-quote";
 
 /** Invoice agreements use the owner's price in the chosen currency. FX belongs
  * to actual collection settlement; a converted catalogue suggestion is not an agreement. */
@@ -8,6 +9,7 @@ export interface InvoiceCatalogService {
   isActive?: boolean;
   priceSarMinor?: number | null;
   priceUsdMinor?: number | null;
+  invoiceQuotes?: Partial<Record<Currency, InvoicePriceQuote>>;
   priceIn?: Partial<Record<Currency, { minor: number | null; source: "catalog" | "converted" | "none" }>>;
 }
 

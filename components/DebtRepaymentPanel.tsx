@@ -172,7 +172,10 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
             {row.terms.mode==="installments"?<ul>{row.terms.installments.map((term,index)=><li key={index}>{term.dueDate} · {formatMoney(term.amountMinor,target.target.currency)}</li>)}</ul>:null}</li>)}</ol></details>
         </>:null}
         {target.legacyActive?<p className="text-xs text-amber-900">لهذا الرصيد ترتيب سابق نشط. راجعه وألغِه صراحةً قبل إنشاء ترتيب جديد.</p>:null}
-        <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={!allowed||locked||!!editing||!!collecting} onClick={()=>startEdit(target)}>{current?"مراجعة أو تعديل السداد":"ترتيب سداد الدين"}</button>
+        <div className="flex flex-wrap gap-2">
+          {allowed && !locked && !editing && !collecting && current?.status === "active" && current.terms.mode === "installments" && current.available && !current.requiresReview
+            ? <a className={button+" inline-flex items-center"} href={`/print/plan/${current.id}?source=debt-repayment&version=${current.version}`} target="_blank" rel="noopener">طباعة عقد التقسيط</a> : null}
+          <button type="button" className={button} disabled={!allowed||locked||!!editing||!!collecting} onClick={()=>startEdit(target)}>{current?"مراجعة أو تعديل السداد":"ترتيب سداد الدين"}</button>
           {current?.status==="active"?<button type="button" className={button} disabled={!allowed||locked||!!editing||!!collecting||current.collectibleMinor<=0||!current.available}
             onClick={()=>{draftRevision.current=financialRecovery.revision;setCollecting(current);setEditing(null);setTender(current.target.currency);setAmount(formatAmount(Math.min(current.progress?.next?.remainingMinor??current.collectibleMinor,current.collectibleMinor),current.target.currency));setMethod("cash");setNote("");}}>تحصيل دفعة فعلية</button>:null}</div>
       </article>;

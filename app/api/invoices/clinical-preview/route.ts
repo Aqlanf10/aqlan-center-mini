@@ -1,7 +1,8 @@
+import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPool, getSettings, listParties, listServices } from "@/lib/db";
+import { getPool, listParties, listServices } from "@/lib/db";
 import { invoicePlanChoices, previewInvoiceLinkage } from "@/lib/invoice-linkage-db";
 import { INVOICE_LINKAGE_MESSAGE } from "@/lib/invoice-clinical-linkage";
 import { parseInvoiceCommand } from "@/lib/invoice-template";
@@ -23,10 +24,10 @@ export async function POST(request: Request) {
   try {
     const services = new Map((await listServices(true)).map((service) => [service.id, service]));
     const doctors = new Set((await listParties("doctor")).map((party) => party.id));
-    const settings = await getSettings();
+    const settings = await invoicePricingSettings();
     const parsed = parseInvoiceCommand(body, services, doctors, settings, false);
     if (!parsed.ok) return NextResponse.json({ message: parsed.message, ...(parsed.code ? { code: parsed.code } : {}) }, { status: parsed.status ?? 400 });
-    const authority = checkInvoiceAuthority({
+    const authority = checkInvoiceAuthority({ requireInvoiceManualReason:true,
       lines: parsed.authorityLines, currency: parsed.baseCurrency, rates: foreignRatesFromSettings(settings), role: session.role,
       maxDiscountPercent: Number(settings["billing.max_discount_percent"]),
       totalMinor: parsed.items.reduce((sum, item) => sum + item.quantity * item.unitPriceMinor, 0),

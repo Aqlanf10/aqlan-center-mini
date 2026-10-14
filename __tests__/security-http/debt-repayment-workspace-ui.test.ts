@@ -21,6 +21,9 @@ async function open(role:"admin"|"reception",width:number){
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`,{waitUntil:"domcontentloaded"});
   await page.getByTestId("treatment-entry-open").click();await page.getByRole("button",{name:"علاج جديد",exact:true}).click();
   await page.getByLabel("الخدمة",{exact:true}).selectOption(String(serviceId));await page.getByLabel("عملة الفاتورة",{exact:true}).selectOption("SAR");
+  // Financial-only lines now receive the same server price preview as clinical
+  // lines. Exercise duplicate submission only after that real gate admits save.
+  await expect.poll(()=>page.getByRole("button",{name:"احفظ الفاتورة",exact:true}).isEnabled()).toBe(true);
   return{patientId,context,page};
 }
 const scenarios=[{role:"admin" as const,width:1280},{role:"reception" as const,width:390}];

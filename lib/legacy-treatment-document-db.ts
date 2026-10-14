@@ -1,3 +1,5 @@
+import { foreignRatesFromSettings } from "./service-pricing";
+import { invoicePricingAudit } from "./invoice-price-settings-db";
 import type {SessionPayload} from "./auth";
 import {CLINIC_TIME_ZONE,ensureSchema,getPool,getSettingsInTransaction,setPatientOpeningBalanceInTx,clearPatientOpeningBalanceInTx,insertAuditRow,type DbClient,type Service} from "./db";
 import {assertDebtSession,DebtRepaymentError,debtRequestHash,readDebtPosition,writeDebtRepaymentInTransaction} from "./debt-installments-db";
@@ -52,11 +54,11 @@ function verifyPeriod(settings:Record<string,string>,dates:string[]){
 }
 async function inputInTx(client:DbClient,patientId:number,source:Record<string,unknown>,session:SessionPayload,lock:boolean){
   if(lock)await client.query("LOCK TABLE settings IN SHARE MODE");
-  const settings=await getSettingsInTransaction(client);
+  const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
   const access=openingBalanceAccess(session.role,settings["finance.reception_adds_opening_balance"]==="true");
   if(!access.add)bad("تغيّرت صلاحية تسجيل العلاج السابق ورصيده.","unauthorized");
   const {services,doctors}=await catalog(client,source,lock);
-  const parsed=parseHistoricalDocument({...source,patientId},services,doctors,{today:clinicDateString(new Date(),CLINIC_TIME_ZONE),role:session.role,maxDiscountPercent:Number(settings["billing.max_discount_percent"])});
+  const parsed=parseHistoricalDocument({...source,patientId},services,doctors,{today:clinicDateString(new Date(),CLINIC_TIME_ZONE),role:session.role,maxDiscountPercent:Number(settings["billing.max_discount_percent"]),rates:foreignRatesFromSettings(settings)});
   if(!parsed.ok)bad(parsed.message);
   const input=parsed.value;
   for(let index=0;index<input.lines.length;index++)if(input.lines.slice(0,index).some(prior=>prior.serviceId===input.lines[index].serviceId
@@ -162,7 +164,7 @@ export async function createHistoricalDocument(patientId:number,source:Record<st
     await insertRevision(client,{documentId:document.id,version:1,...input,lines:links,reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.create",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
       details:{documentId:document.id,currency:input.currency,agreedMinor:input.agreedMinor,previouslyPaidMinor:input.previouslyPaidMinor,remainingMinor:input.remainingMinor,discountMinor:input.discountMinor,discountReason:input.discountReason,
-        lines:links,openingHistoryId,receiptsCreated:0,invoicesCreated:0,historicalCashMovement:0}});
+        invoicePriceSnapshots:invoicePricingAudit(input.pricingSnapshots??[]),lines:links,openingHistoryId,receiptsCreated:0,invoicesCreated:0,historicalCashMovement:0}});
     await assertDebtSession(client,session);const receipt=await readHistoricalDocumentInTx(client,document.id,patientId,1);await client.query("COMMIT");return {document:receipt!,replayed:false};
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);if(error instanceof LegacyTreatmentWriteError)bad(LEGACY_TREATMENT_MESSAGE[error.reason],"conflict");throw error;}finally{client.release();}
 }
@@ -188,7 +190,7 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
     const after=prior.position.principalMinor-current.remainingMinor+input.remainingMinor;
     if(Math.max(0,after-prior.position.settledMinor)!==input.repaymentRemainingMinor)bad("جدول السداد لا يطابق المتبقي بعد التصحيح.","stale");
     await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
-    await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client);
+    await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client,{requireStoredExchangeRates:true});
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
     const reason=`تصحيح الاتفاق التاريخي #${documentId}: ${input.reason}`.slice(0,300);
     // The opening is owned by the current positive historical facts. An old
