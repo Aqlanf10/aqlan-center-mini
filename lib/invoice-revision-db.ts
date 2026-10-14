@@ -32,6 +32,8 @@ async function contextInTx(client: DbClient, invoiceId: number) {
       (i.status<>'planned' OR i.started_at IS NOT NULL OR i.sessions_completed>0
         OR EXISTS (SELECT 1 FROM visit_procedures p WHERE p.plan_item_id=i.id)
         OR EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.plan_item_id=i.id AND (s.status<>'planned' OR s.visit_id IS NOT NULL OR s.completed_at IS NOT NULL))
+        OR EXISTS (SELECT 1 FROM endo_treatments e WHERE e.case_id=i.case_id OR e.crown_plan_item_id=i.id)
+        OR c.ortho_case_id IS NOT NULL OR COALESCE(c.status<>'active',FALSE) OR length(btrim(COALESCE(c.problem,'')))>0
         OR EXISTS (SELECT 1 FROM visits v WHERE v.case_id=i.case_id)) AS clinical_locked,
       EXISTS (SELECT 1 FROM legacy_treatment_agreements a WHERE a.plan_item_id=i.id) AS legacy
      FROM plan_items i LEFT JOIN clinical_cases c ON c.id=i.case_id
@@ -85,7 +87,15 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     // Cash writers take shift before invoice/plan locks. We never take a receipt
     // row lock or alter a closed shift; existing cash remains immutable.
     await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
+    // The canonical correction relinks these exact visits. Fence them before
+    // plans/invoices so checkout cannot hold visit and wait on our invoice.
+    await client.query("SELECT id FROM visits WHERE invoice_id=$1 ORDER BY id FOR UPDATE",[invoiceId]);
     await lockPlanItemsBilledBy(client,invoiceId);
+    // Case-only assessments can be saved without a visit or a patient fence.
+    // Hold their identity while checking whether work shape may be corrected.
+    await client.query(`SELECT c.id FROM clinical_cases c WHERE c.id IN
+      (SELECT i.case_id FROM plan_items i JOIN invoice_items ii ON ii.plan_item_id=i.id WHERE ii.invoice_id=$1)
+      ORDER BY c.id FOR UPDATE`,[invoiceId]);
     await lockDebtAccountForSchedule(client,owner.patient_id);
     const waited = await replay();
     if (waited) { await authority(client,session); await client.query("COMMIT"); return { ...waited, replayed: true }; }

@@ -135,6 +135,31 @@ describe("immutable invoice replacement and original receipt settlement", () => 
     await q("UPDATE plan_items SET unit_price_minor=12001 WHERE id=$1",[item]);
     expect((await db.getInvoice(correctedId))?.items[0].financialReviewRequired).toBe(true);
   });
+  it.each(["structured-endo","case-assessment"])("protects %s evidence before any clinical visit exists while allowing an audited price correction",async evidence => {
+    const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic pre-visit clinical evidence') RETURNING id",[`INV-REV-DRAFT-${++serial}`]))[0].id;
+    const serviceId=(await q("INSERT INTO services(name,category,price_minor,is_active) VALUES('Synthetic pre-visit root treatment','rct',10000,TRUE) RETURNING id"))[0].id;
+    const doctorId=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic pre-visit treating doctor','doctor') RETURNING id"))[0].id;
+    const issued=await linked.createLinkedInvoice({patientId,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,actorRole:"admin",
+      items:[{serviceId,category:"rct",doctorId,description:"Synthetic pre-visit root treatment",quantity:1,unitPriceMinor:10000,toothCode:36,caseId:null,sessions:null}],
+      templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
+    if(!issued.ok)throw new Error("Expected linked clinical invoice");
+    const item=issued.links[0].planItemId!,caseId=issued.links[0].caseId!;
+    if(evidence==="structured-endo"){
+      const endo=await import("../../lib/endodontics-db");
+      expect(await endo.openEndoTreatment({patientId,caseId,toothCode:36,kind:"initial",actor:session.username,actorRole:session.role})).toMatchObject({ok:true});
+    }else await q("UPDATE clinical_cases SET problem='Synthetic saved clinical assessment' WHERE id=$1",[caseId]);
+    const beforeCase=await q("SELECT to_jsonb(c) AS evidence FROM clinical_cases c WHERE id=$1",[caseId]);
+    const beforeEndo=await q("SELECT to_jsonb(e) AS evidence FROM endo_treatments e WHERE patient_id=$1",[patientId]);
+    const view=await revision.readInvoiceRevision(issued.invoice.id,session);expect(view.work).toEqual([expect.objectContaining({id:item,clinical_locked:true})]);
+    const request=await command(issued.invoice.id,10000);
+    await expect(revision.reviseInvoice(issued.invoice.id,{...request,lines:[{...request.lines[0],quantity:2}],expectedRemainingMinor:20000,repaymentTerms:terms(20000)},session)).rejects.toMatchObject({code:"conflict"});
+    expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).toHaveLength(0);
+    await revision.reviseInvoice(issued.invoice.id,await command(issued.invoice.id,12000),session);
+    expect(await q("SELECT to_jsonb(c) AS evidence FROM clinical_cases c WHERE id=$1",[caseId])).toEqual(beforeCase);
+    expect(await q("SELECT to_jsonb(e) AS evidence FROM endo_treatments e WHERE patient_id=$1",[patientId])).toEqual(beforeEndo);
+    expect(await q("SELECT id FROM visits WHERE patient_id=$1",[patientId])).toHaveLength(0);
+    expect(await q("SELECT quantity,case_id FROM plan_items WHERE id=$1",[item])).toEqual([{quantity:1,case_id:caseId}]);
+  });
   it("restores correction lineage, immutable receipt acknowledgements and original payments through the canonical backup",async () => {
     expect(readFileSync("migrations/0061_invoice_correction_lineage.sql","utf8")).toBe(INVOICE_CORRECTION_SQL);
     const tables=["invoice_corrections","invoice_correction_lines","invoice_correction_receipts","payments","debt_repayment_revisions"];
