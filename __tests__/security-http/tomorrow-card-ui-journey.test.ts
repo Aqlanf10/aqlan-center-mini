@@ -79,6 +79,9 @@ describe("بطاقة الغد", () => {
 
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
     const card = page.locator("[data-tomorrow-card]");
+    await card.waitFor({ state: "attached", timeout: 30_000 });
+    expect(await card.isVisible()).toBe(false);
+    await page.getByText("مواعيد الغد وطلبات الحجز", { exact: true }).click();
     await card.waitFor({ state: "visible", timeout: 30_000 });
     const text = await card.textContent();
     expect(text).toMatch(/💬 \d+ لم يُذكَّروا/);
