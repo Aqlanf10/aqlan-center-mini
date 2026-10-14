@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/session";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
-import { submitPurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
+import { submitPurchaseRequest, revisePurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
   recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
 import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement } from "@/lib/inventory-domain/custody-store";
 import type { RequestRevision, PurchaseOrder, ReceiptRevision, SupplierInvoiceRevision } from "@/lib/inventory-domain/procurement";
@@ -30,6 +30,7 @@ export async function POST(request:Request){const session=await requireSession()
   invariant(command==="request.submit" || command==="custody.acknowledge" || session.role==="admin","operation_forbidden","This management transition requires administrator authority");
   const actor:InventoryActor={userId:session.userId,username:session.username,role:session.role};
   switch(command){
+    case "request.revise":{const revision=record(source.revision);record(revision.value);return NextResponse.json(await revisePurchaseRequest(actor,source.operationKey,revision as unknown as Parameters<typeof revisePurchaseRequest>[2]),{status:201});}
     case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return NextResponse.json(await dispatchCustodyTransfer(actor,source.operationKey,transfer as unknown as CustodyDispatch),{status:201});}
     case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return NextResponse.json(await acknowledgeCustodyTransfer(actor,source.operationKey,acknowledgement as unknown as CustodyAcknowledgement),{status:201});}
     case "request.submit":shape(source.document,command);return NextResponse.json(await submitPurchaseRequest(actor,source.operationKey,{...source.document as RequestRevision,requestedBy:actor.userId}),{status:201});

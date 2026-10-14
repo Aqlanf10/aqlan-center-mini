@@ -89,6 +89,26 @@ async function lockedRequest(client: DbClient,id:string) {
   const revision=await client.query<{ document:RequestRevision }>("SELECT document FROM purchase_request_revisions WHERE request_id=$1 AND version=$2",[id,row.rows[0].current_version]);
   return { ...row.rows[0],request:revision.rows[0].document };
 }
+/** Administration records a new monetary proposal before ordering.
+ * Previous document and approvals remain immutable; a new version is submitted
+ * and must be approved again. Once ordered, use a separately reviewed amendment
+ * workflow instead of authorizing the same demand again through a revision.
+ */
+export async function revisePurchaseRequest(actor:InventoryActor,key:string,input:{requestId:string;expectedVersion:number;value:RequestRevision["value"];reason:string}){
+  invariant(Number.isSafeInteger(input.expectedVersion)&&input.expectedVersion>0&&input.expectedVersion<100000,"stale_version","An exact current version is required");
+  invariant(typeof input.reason==="string"&&input.reason.trim().length>0&&input.reason.length<=2000,"reason_required","A bounded revision reason is required");
+  invariant(input.value!==null&&typeof input.value==="object","missing_valuation","Record an explicit monetary proposal");
+  return inventoryOperation(actor,key,"request.revise",input,true,async client=>{
+    const current=await lockedRequest(client,input.requestId);invariant(current.current_version===input.expectedVersion,"stale_version","The request changed; reload before revising");
+    const issued=await client.query("SELECT id FROM purchase_order_source_allocations WHERE request_id=$1 LIMIT 1 FOR SHARE",[input.requestId]);invariant(!issued.rows.length,"invalid_transition","An ordered request requires a separately approved amendment; its demand cannot be reused through revision");
+    const document:RequestRevision={...current.request,version:current.current_version+1,value:input.value};validateRequest(document);await verifyUnits(client,document.lines);
+    await client.query("INSERT INTO purchase_request_revisions(request_id,version,document) VALUES($1,$2,$3::jsonb)",[input.requestId,document.version,JSON.stringify(document)]);
+    for(const line of document.lines){const quantity=convertQuantity(line.quantity,line.conversion);await client.query("INSERT INTO purchase_request_lines(request_id,request_version,id,item_id,entered_qty,base_qty,conversion) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7::jsonb)",[input.requestId,document.version,line.id,line.itemId,quantity.enteredQuantity,quantity.baseQuantity,JSON.stringify(quantity.conversion)]);}
+    await client.query("UPDATE purchase_requests SET current_version=$2,status='submitted' WHERE id=$1",[input.requestId,document.version]);
+    await writeInventoryAudit(client,actor,"purchase_request",input.requestId,"revise",{previousVersion:input.expectedVersion,version:document.version,reason:input.reason,value:input.value});
+    return {id:input.requestId,version:document.version,status:"submitted" as const};
+  });
+}
 export async function approvePurchaseRequest(actor:InventoryActor,key:string,input:{ requestId:string; version:number; decisions: Parameters<typeof approveRequest>[0]["decisions"]; valuation:ValuationSnapshot|null; selfApprovalReason?:string|null }) {
   return inventoryOperation(actor,key,"request.approve",input,true,async client=>{
     const current=await lockedRequest(client,input.requestId);
@@ -195,7 +215,9 @@ export async function readProcurementRequests(actor:InventoryActor,offset=0){
       JOIN purchase_request_revisions r ON r.request_id=p.id AND r.version=p.current_version
       LEFT JOIN purchase_approval_events a ON a.request_id=p.id AND a.request_version=p.current_version
       WHERE p.branch_key=$1 AND ($2 OR p.requested_by=$3) ORDER BY p.created_at DESC,p.id LIMIT 21 OFFSET $4`,[INVENTORY_CLINIC_SCOPE,actor.role === "admin",actor.userId,offset]);
-    return {items:rows.rows.slice(0,20).map(row=>({id:row.id,version:row.current_version,status:row.status,document:actor.role === "admin"?row.document:{...row.document,value:null},decision:actor.role === "admin"?row.decision:row.decision?{...row.decision,valueCeiling:null}:null})),hasMore:rows.rows.length>20};
+    const shown=rows.rows.slice(0,20),ids=[...new Set(shown.flatMap(row=>row.document.lines.map(line=>line.itemId)))];
+    const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[ids]);
+    return {items:shown.map(row=>({id:row.id,version:row.current_version,status:row.status,document:actor.role === "admin"?row.document:{...row.document,value:null},decision:actor.role === "admin"?row.decision:row.decision?{...row.decision,valueCeiling:null}:null})),itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMore:rows.rows.length>20};
   });
 }
 export async function readProcurementCatalog(actor:InventoryActor){

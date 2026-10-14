@@ -1,13 +1,13 @@
 # Acceptance audit — 69 scenarios
 
-Full integrated acceptance scenarios executed: **0/69**. Successful subset tests are evidence below, not a completion claim. Migration activation, financial posting, clinical consumption and settlement integration remain pending root ownership review. No migration number was chosen.
+Complete integrated scenarios executed: **0/69**. Subset tests below are not a complete acceptance claim. Migration, finance/clinical/settlement adapters and release remain coordinated root gates.
 
 | ID | Status | Verified subset | Exact remaining work |
 |---|---|---|---|
 | P01 | partial-domain-or-PG-fixture | No stock/debt/cash; request API and UI persist once. | Coordinated migration activation; full approved deployment remains unrun. |
-| P02 | partial-domain-or-PG-fixture | Original requested quantity and reasoned partial approval persist. | Administration decision UI and rejection journey. |
-| P03 | partial-domain-or-PG-fixture | Changed version/content cannot reuse approval. | Revision-edit UI and persisted revised lifecycle. |
-| P04 | partial-domain-or-PG-fixture | Fresh active actor/admin checks, exact API gate and frozen currency ceiling. | Delegation UI/policy configuration and branch model: base has one clinic scope. |
+| P02 | partial-actual-PG-HTTP-browser | Actual Arabic admin UI and PG preserve original requested3boxes and save approved2boxes=100cartridges with reason and explicit value/FX snapshot. | English administration copy, policy/delegation setup UI and full integrated lifecycle. |
+| P03 | partial-actual-PG-HTTP-browser | Admin monetary revision preserves old document/approval, requires fresh approval, serializes concurrent revisions and refuses demand revision after order allocation; actual390/1280 UI. | Quantity/supplier amendment workflow after ordering and full integrated scenario. |
+| P04 | partial-actual-PG-HTTP-browser | Fresh active actor/admin checks, exact API gate and frozen currency ceiling. | Delegation UI/policy configuration and branch model: base has one clinic scope. |
 | P05 | partial-domain-or-PG-fixture | Exact 3×50=150 and 150−2=148 arithmetic; frozen conversion; receipt PG. | Old manual/automatic issue writer and historical unit lock integration. |
 | P06 | partial-domain-or-PG-fixture | Cumulative source allocation and concurrent order requests cannot overspend approval. | Multi-request order creation UI. |
 | P07 | partial-domain-or-PG-fixture | Partial inspected receipt creates 100 pieces once with 50 remaining. | Receipt administration UI and coordinated migration. |
@@ -40,7 +40,7 @@ Full integrated acceptance scenarios executed: **0/69**. Successful subset tests
 | P34 | partial-domain-or-PG-fixture | Server rejects supplier role/activity/scope mismatch. | All related receipt/financial attachment access and authenticated spoofing matrix. |
 | P35 | partial-domain-or-PG-fixture | Existing audit writer in same transaction; mandatory audit failure rollback tested. | Finance approvals/posting/reversal audit and shared audit action vocabulary. |
 | P36 | partial-domain-or-PG-fixture | Partial example 100 received/50 remaining, invoice200SAR matched and no debt/cash. | Complete150/148, payable300SAR, payment100SAR, remaining200SAR requires shared finance/issue adapters. |
-| P37 | partial-real-HTTP-browser; complete-scenario-unrun | Real valuation and custody Arabic/English at390/1280, Arabic request UI; generated branded valuation/custody prints checked for text and price redaction. | Monetary/admin procurement interfaces, request/order/receipt/match printable documents and English request copy. |
+| P37 | partial-actual-PG-HTTP-browser | Actual valuation/custody Arabic/English, Arabic request/administration and existing inventory/item/movement UI at390/1280; branded request/approval, valuation and custody PDFs generated and text inspected. | Order/inspection/match interfaces/prints and English request/administration copy. |
 | P38 | unrun-full-scenario; limited-independent-evidence | Synthetic local PG/build and prior exact-head CI passed; no orders/messages sent. | Coordinated migration upgrade/restore rehearsal and authorized later release: unrun. |
 | P39 | domain-only; persistence-HTTP-E2E-unrun | Exact3/1/8SAR and sub-minor cost arithmetic. | Package settings/admin UI and applied movement valuation. |
 | P40 | domain-only; persistence-HTTP-E2E-unrun | Custody transfer changes allocation only; empty evidence changes no stock. | Kit decomposition/component value persistence and UI. |

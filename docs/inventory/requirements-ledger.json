@@ -2746,7 +2746,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2758,12 +2759,14 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
+      "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
-      "verifiedSubset": "Original requested quantity and reasoned partial approval persist.",
-      "remainingBlocker": "Administration decision UI and rejection journey.",
+      "verifiedSubset": "Actual Arabic admin UI and PG preserve original requested3boxes and save approved2boxes=100cartridges with reason and explicit value/FX snapshot.",
+      "remainingBlocker": "English administration copy, policy/delegation setup UI and full integrated lifecycle.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -2775,7 +2778,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2784,11 +2788,13 @@
       "evidence": [
         "procurement-domain.log",
         "procurement-store-pg.log",
-        "pg-checkpoint.log"
+        "pg-checkpoint.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
-      "verifiedSubset": "Changed version/content cannot reuse approval.",
-      "remainingBlocker": "Revision-edit UI and persisted revised lifecycle.",
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Admin monetary revision preserves old document/approval, requires fresh approval, serializes concurrent revisions and refuses demand revision after order allocation; actual390/1280 UI.",
+      "remainingBlocker": "Quantity/supplier amendment workflow after ordering and full integrated scenario.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -2800,7 +2806,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2812,9 +2819,11 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
+      "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
       "verifiedSubset": "Fresh active actor/admin checks, exact API gate and frozen currency ceiling.",
       "remainingBlocker": "Delegation UI/policy configuration and branch model: base has one clinic scope.",
@@ -3558,7 +3567,9 @@
         "lib/inventory-domain/valuation.ts",
         "lib/inventory-domain/read.ts",
         "lib/inventory-domain/presentation.ts",
-        "components/inventory/InventoryValuationReview.tsx"
+        "components/inventory/InventoryValuationReview.tsx",
+        "components/inventory/ProcurementAdministration.tsx",
+        "lib/inventory-domain/procurement-store.ts"
       ],
       "tests": [
         "__tests__/inventory-foundation.test.ts",
@@ -3574,12 +3585,14 @@
         "browser/valuation-ar-390.png",
         "browser/valuation-ar-1280.png",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
       ],
-      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "status": "partial-actual-PG-HTTP-browser",
       "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
-      "verifiedSubset": "Real valuation and custody Arabic/English at390/1280, Arabic request UI; generated branded valuation/custody prints checked for text and price redaction.",
-      "remainingBlocker": "Monetary/admin procurement interfaces, request/order/receipt/match printable documents and English request copy.",
+      "verifiedSubset": "Actual valuation/custody Arabic/English, Arabic request/administration and existing inventory/item/movement UI at390/1280; branded request/approval, valuation and custody PDFs generated and text inspected.",
+      "remainingBlocker": "Order/inspection/match interfaces/prints and English request/administration copy.",
       "fullAcceptanceExecuted": false
     },
     {
@@ -4646,6 +4659,6 @@
     "completeAcceptanceExecuted": 0,
     "note": "Scenario numbering is requirements inventory, not number of executed tests. Fixture tables applied explicitly in synthetic PG; migration not registered. Prior CI green applies only to 659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
     "sourceCheckpoint": "659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
-    "continuation": "Custody continuation verified locally; exact commit/postimage hashes are in the delivered source manifest. 13 built HTTP/browser,33 PG and132 focused unit tests passed; no full acceptance scenario claim."
+    "continuation": "Monetary request revision/approval and actual visual handoff verified; full integrated acceptance remains0/69. Exact source/evidence hashes in checkpoint manifests."
   }
 }
