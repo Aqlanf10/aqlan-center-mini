@@ -123,10 +123,12 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
   const first = await invoiceDraft(patientId, category, tooth);
   const second = mode === "two_tabs" ? await invoiceDraft(patientId, category, tooth) : null;
   const keys: string[] = [];
+  const bodies: unknown[] = [];
   let dropped = false;
   if (mode === "lost_response") await first.page.route("**/api/invoices", async (route) => {
     if (route.request().method() !== "POST") { await route.continue(); return; }
     keys.push(String(route.request().postDataJSON().idempotencyKey ?? ""));
+    bodies.push(route.request().postDataJSON());
     if (!dropped) {
       dropped = true;
       const committed = await route.fetch();
@@ -139,10 +141,14 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
     await save.click();
     await first.page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).filter({ hasText: "تعذّر الاتصال بالخادم" }).waitFor();
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(1);
+    expect(await save.isEnabled()).toBe(false);
   }
-  const responsePromise = first.page.waitForResponse((response) => response.url().endsWith("/api/invoices") && response.request().method() === "POST");
-  if (mode === "double_click") await save.dblclick(); else await save.click();
-  const response = await responsePromise;
+  const [response] = await Promise.all([
+    first.page.waitForResponse((response) => response.url().endsWith("/api/invoices") && response.request().method() === "POST"),
+    mode === "lost_response"
+      ? first.page.getByRole("button", { name: "إعادة نفس طلب الفاتورة", exact: true }).click()
+      : mode === "double_click" ? save.dblclick() : save.click(),
+  ]);
   expect(response.status()).toBe(mode === "lost_response" ? 200 : 201);
   const result = await response.json() as Invoice;
   await first.page.getByTestId("invoice-clinical-notice").waitFor();
@@ -150,6 +156,7 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
     expect(keys).toHaveLength(2);
     expect(keys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
     expect(keys[1]).toBe(keys[0]);
+    expect(bodies[1]).toEqual(bodies[0]);
   }
   if (second) {
     const refused = second.page.waitForResponse((candidate) => candidate.url().endsWith("/api/invoices") && candidate.request().method() === "POST");

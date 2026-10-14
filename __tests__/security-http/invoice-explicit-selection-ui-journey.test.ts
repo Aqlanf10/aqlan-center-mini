@@ -172,9 +172,12 @@ describe("explicit invoice treatment selection in the built RTL application", ()
       expect(await page.getByTestId("invoice-existing-plan").inputValue()).toBe(String(chosen.id));
       expect(await page.getByTestId("invoice-plan-item-0").inputValue()).toBe(String(chosen.itemId));
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).toHaveLength(1);
-      const replay = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/invoices" && response.request().method() === "POST");
-      await save.click();
-      const response = await replay; expect(response.status()).toBe(200);
+      expect(await save.isEnabled()).toBe(false);
+      const [response] = await Promise.all([
+        page.waitForResponse((response) => new URL(response.url()).pathname === "/api/invoices" && response.request().method() === "POST"),
+        page.getByRole("button", { name: "إعادة نفس طلب الفاتورة", exact: true }).click(),
+      ]);
+      expect(response.status()).toBe(200);
       expect(bodies).toHaveLength(2); expect(bodies[1]).toEqual(bodies[0]);
       expect(bodies[0]).toMatchObject({ existingPlanId: chosen.id, items: [{ planItemId: chosen.itemId }] });
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).toHaveLength(1);

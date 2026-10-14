@@ -652,7 +652,7 @@ describe("invoice form preview safety and shared chart interruption journeys", (
     } finally { await context.close(); }
   });
 
-  it("uses an explicit provider choice for both preview and save, then clears it on a different service", async () => {
+  it("clears provider on service change, uses the explicit choice in preview/save and freezes it after an uncertain save", async () => {
     const { page, context, patientId } = await openInvoice();
     const requests: {
       saved: { items: { doctorId?: number }[] } | null;
@@ -677,13 +677,23 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await ready(page);
       expect(requests.previewed?.items[0].doctorId).toBe(doctorPartyId);
       expect(await page.getByTestId("invoice-provider-review-0").count()).toBe(0);
+      await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(consultation));
+      await selectFilling(page);
+      expect(await provider.inputValue()).toBe("");
+      await ready(page);
+      expect(requests.previewed?.items[0]).not.toHaveProperty("doctorId");
+      await provider.selectOption(String(doctorPartyId));
+      await ready(page);
+      expect(requests.previewed?.items[0].doctorId).toBe(doctorPartyId);
       await save(page).click();
       await expect.poll(() => requests.saved !== null).toBe(true);
       expect(requests.saved?.items[0].doctorId).toBe(doctorPartyId);
       await page.getByText("Synthetic stopped save: no write was sent.", { exact: true }).waitFor();
-      await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(consultation));
-      await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(filling));
-      expect(await page.getByTestId("invoice-provider-0").inputValue()).toBe("");
+      expect(await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).isEnabled()).toBe(false);
+      expect(await provider.isEnabled()).toBe(false);
+      expect(await provider.inputValue()).toBe(String(doctorPartyId));
+      expect(await save(page).isEnabled()).toBe(false);
+      expect(await page.getByRole("button", { name: "إعادة نفس طلب الفاتورة", exact: true }).isEnabled()).toBe(true);
       expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
     } finally { await context.close(); }
   });

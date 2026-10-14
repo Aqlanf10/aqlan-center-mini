@@ -53,6 +53,7 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
     const source=await command();const preview=await documents.previewHistoricalDocument(source.patientId,source,session);
     expect(preview).toMatchObject({remainingMinor:180000,accountDueMinor:180000,openingPrincipalMinor:180000,sourceHash:null,scheduleVersion:0});
     expect(preview.lines).toHaveLength(3);
+    expect(await counts(source.patientId)).toEqual({invoices:0,payments:0,cases:0,plans:0,items:0,documents:0,agreements:0,openings:0});
     const saved=await documents.createHistoricalDocument(source.patientId,source,session);
     expect(saved.document).toMatchObject({agreedMinor:300000,previouslyPaidMinor:120000,remainingMinor:180000,discountMinor:20000,version:1,currency:"YER"});
     expect(saved.document.lines.map(line=>line.discountMinor)).toEqual([3438,3437,13125]);
