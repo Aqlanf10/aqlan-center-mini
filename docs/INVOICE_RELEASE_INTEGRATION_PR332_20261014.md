@@ -1,0 +1,39 @@
+# Invoice release integration for PR332
+
+PR: https://github.com/Aqlanf10/aqlan-center-mini/pull/332. Continuation starts at verified invoice head `a15a7d8d11e1cb4e0cbd16c3c2e7572e9f7556bc`, with main `148fcbeac229cb279848e6ea37049d1599a4fafe` already an ancestor. The user now authorizes the minimum signing/walkout integration, invoice-only merge after all gates, and read-only monitoring of an automatic main deployment. No paused branch merge, reception redesign, manual deployment or Railway configuration change is authorized.
+
+## Observed release failures and repair
+
+The preserved release probe was **0 passed /3 failed /0 skipped** on unchanged a15. Its raw witnesses, source hashes and external probe source are in `/workspace/reviews/invoice-resume-20261014/invoice-release-blockers-pr332-a15a7d8d.zip` (SHA256 `eb9dfebe3f5fee96ed526fd58a1b681f6743bf9c468de67822db2f9d1ce9bca0`). No-fee signing cleared the exact explicit invoice link. After original1000/receipt400/replacement900, walkout reported paid0/remaining900 while the adapter correctly returned500 owed. After receipt1000/replacement900, walkout again reported paid0 while the adapter returned100 credit. The overall due-now clamp remained500/0 in those fixtures; an actual overcharge is not claimed.
+
+`lib/db.ts` now retains the owned invoice reference from the locked visit. It validates the exact invoice owner/currency after patient → visit locks; missing/foreign links refuse. A no-fee signature preserves even an explicitly cancelled owned reference, without selecting another invoice or creating money. Zero-priced procedures create no second invoice. New positive billable charges on an already linked visit refuse explicitly rather than overwrite the link or duplicate charges; the transaction rolls back its clinical effects. Unlinked positive-fee signing retains the existing writer.
+
+The generated-document return contract is preserved: domain `result.invoiceId` means an invoice created by this signature. `result.visit.invoiceId` is the actual retained visit reference. The clinical HTTP response exposes the latter as `invoiceId` and the former as `createdInvoiceId`; audit records both. This matches the separately inspected reception a91fec44 semantics.
+
+Walkout now reads its visit reference, invoice/items, canonical ledger and correction-lineage settlement in one `REPEATABLE READ READ ONLY` snapshot. Its invoice-paid value comes from `readInvoiceSettlementPosition`, including every explicit same-patient/currency ancestor receipt/refund once. The previous-balance projection excludes both that lineage's principal and its receipts, including older-day receipts, so they cannot become unrelated negative previous debt. Current patient balances still use the existing canonical money engine. Invalid lineage returns an explicit private/no-store409 from the walkout HTTP route; no fabricated zero is accepted. Original receipt invoice IDs remain unchanged.
+
+## Requirement-to-code/test evidence
+
+| Requirement | Code / regression |
+|---|---|
+| Preserve no-fee explicit invoice, native currency and original receipts | `lib/db.ts`, clinical route; `postgres/invoice-signing-integration.test.ts`,12cases |
+| Reject foreign ownership, changed links, unsafe additional fees and duplicate signatures | Same writer;12signature cases include real lock barriers; `invoice-walkout-lineage.test.ts` adds explicit additional-fee rollback |
+| Partial/full/unpaid settlement across multiple corrections; credit and ancestor refunds | Canonical adapter consumed by walkout;18lineage cases including YER/SAR/USD and prior-day receipts |
+| Coherent read under concurrent correction/refund | One walkout snapshot and existing ledger snapshot helper; real PostgreSQL interleaving checks old1000/paid400/current600 versus fresh900/paid200/current700 |
+| Historical debt remains opening-only through correction/signature/reversal | Historical database cases plus new real HTTP/browser journey in all3currencies; no historical invoice or pre-system cash receipt |
+| Real checkout preset, exact remainder collection and receipt reversal | `security-http/invoice-walkout-integration.test.ts`,10cases; actual built app/isolated PostgreSQL; native currency receipts and mobile/desktop PNGs |
+| Current role/privacy/currency isolation | Same HTTP file: signing/correction/reversal refusals, portal401, hidden foreign doctor visit404, foreign-currency payment409, foreign invoice owner409 and unchanged money footprint |
+
+The reviewed a91fec44 signature tests are ported into the invoice suite with provenance; the branch itself is not merged. The older doctor-identity query fixture now supplies the newly selected `invoice_id:null`, retaining all attribution/rollback assertions. No reception screen or workflow redesign is included.
+
+Focused evidence: original3probes pass after repair;54/54 database cases and43/43 targeted units pass. A fresh production build passes on application SHA256 `40782301e98ba7cefd22d71e09c53b75089bcc457ecdb15053bad1ebf26bfaec`; typecheck, focused lint (zero errors,8existing db warnings), money/body guards pass. Actual browser results and final committed-head full gates/CI remain mandatory; final receipts are written outside Git after the delivery commit, avoiding a new unverified documentation head.
+
+Exact commands and matching before/after hashes are stored by `/tmp/run-invoice-check.py` in `invoice-consumer-*.metadata.json` and `merge-release-boundary-after.*`. Initial diagnostic errors remain recorded: historical fixture omitted its required patientId (3fail/42pass), then17/17 passed after fixing the fixture; the older doctor mock omitted invoice_id (9fails), then43/43 passed after adding null. Browser fixture assertions initially expected5 rather than the modal's fixed5.00 and403 rather than the existing portal401/foreign-owner404 policy. No product guard or financial oracle was relaxed.
+
+## Verification and release handoff
+
+Use the existing Node22/npm11, Asia/Aden, loopback PostgreSQL18.6 synthetic environment. Run full units, full PostgreSQL, all192relevant invoice/currency/recovery/receipt/walkout HTTP/browser cases, operational journeys, full build/static/schema gates and required exact push/PR combined-head CI. Re-fetch main before merging; if it changes, recompute/review and verify the new combined head. Check PR review threads and statuses without bypassing protections. No release is ready while a mandatory gate fails or remains pending.
+
+Production metadata is read-only: project7f3b5a7b-4508-4b7f-be3d-ad268fc5675a / environment67548a29-d995-48e0-b2d4-e53014d7e8fc / web9c262b1a-a66b-402c-a0a2-2274d21cd9d3 tracks main with checkSuites=false. Thus the authorized merge can deploy automatically before post-merge CI. Finish all release verification before merging, monitor the exact resulting deployment, and verify the read-only `/api/health` route. No variable values, manual deployment or config mutation are needed. The initial direct health request was blocked by the workspace proxy before contacting production (403); Railway reported the old148fc deployment online. No new deployment or health pass is implied by those facts.
+
+Reception PR327/a91fec44 remains paused and unmerged. Its future owner must rebase on this invoice repair, preserve both linked/generated invoice identities and the shared snapshot/lineage consumer, and drop duplicate signature-retention hunks rather than copy its older `lib/db.ts`. Preserve its unrelated operational-checkout work and add the same adapter/proof contract there on its own combined head. The saved design integration8d50eb67 and designPR330/fec2249 remain excluded and do not contain this repair. HR/inventory branches and migrations44–58 remain excluded. No migration, security setting, dependency, mandatory CI assertion, evidence requirement or tracing timeout changes.

@@ -1,4 +1,5 @@
 import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
+import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { caseSiteOverlaps, validateLineSite, SITE_SCOPE_LABEL, type LineSite, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
 import { historicalClinicalProgress, combineClinicalProgress, type ClinicalProgressView } from "./historical-clinical-projection";
@@ -10392,17 +10393,23 @@ export async function patientLedger(patientId: number): Promise<{
     // receipt and invent a credit. All balance inputs, including invoice items,
     // must belong to one snapshot; this read takes no financial row locks.
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const invoices = await listPatientInvoices(patientId, client);
-    const openings = await getPatientOpeningBalances(patientId, client);
-    const payments = await listPatientPayments(patientId, client);
+    const ledger = await patientLedgerInSnapshot(patientId, client);
     await client.query("COMMIT");
-    return { invoices, payments, openings };
+    return ledger;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client.release();
   }
+}
+
+/** Caller owns a coherent read snapshot; never acquire another pool connection. */
+async function patientLedgerInSnapshot(patientId: number, client: DbClient) {
+  const invoices = await listPatientInvoices(patientId, client);
+  const openings = await getPatientOpeningBalances(patientId, client);
+  const payments = await listPatientPayments(patientId, client);
+  return { invoices, payments, openings };
 }
 
 /**
@@ -14601,11 +14608,11 @@ export async function getPlanCurrency(planId: number): Promise<Currency | null> 
  * للدفعات المقيدة على خططها (المقدَّمة قبل الفوترة): دفعة بلا فاتورة وبخطةٍ
  * تحمل عملتها، تسوّي دلو عملة الخطة لا دلو الأساس.
  */
-export async function patientPlanCurrencies(patientId: number): Promise<Map<number, DocumentCurrencyRef>> {
-  await ensureSchema();
+export async function patientPlanCurrencies(patientId: number, client?: DbClient): Promise<Map<number, DocumentCurrencyRef>> {
+  if (!client) await ensureSchema();
   // (P-01 owner review — تصحيح ٣) عملة الخطة تُتحقَّق — fail-closed — قبل أن
   // تصبح هدف تسوية دفعة: فسادُ العملة يُقال لا يُوسَم أساسًا.
-  const { rows } = await getPool().query<{ id: number; base_currency: string }>(
+  const { rows } = await (client ?? getPool()).query<{ id: number; base_currency: string }>(
     `SELECT id, base_currency
        FROM treatment_plans WHERE patient_id = $1`,
     [patientId],
@@ -17402,9 +17409,10 @@ export async function signClinicalVisit(input: {
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
       planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
       diagnosis: string | null; treatment_done: string | null; billing_currency: string | null; case_id: number | null;
+      invoice_id: number | null;
     }>(
       `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done,
-              billing_currency, case_id
+              billing_currency, case_id, invoice_id
          FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
@@ -17428,6 +17436,18 @@ export async function signClinicalVisit(input: {
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [patientId]);
+
+    // Preserve only the explicit owned reference, under patient → visit → invoice
+    // locks. Signing never guesses a replacement or repairs a foreign link.
+    let retainedInvoice: { id: number; currency: Currency } | null = null;
+    if (locked[0].invoice_id !== null) {
+      const { rows: [invoice] } = await client.query<{ id: number; patient_id: number; base_currency: string }>(
+        "SELECT id, patient_id, base_currency FROM invoices WHERE id = $1 FOR UPDATE", [locked[0].invoice_id]);
+      if (!invoice || invoice.patient_id !== patientId) {
+        throw new ClinicalPlanConflict("فاتورة الزيارة المرتبطة لا تخص ملف هذا المريض؛ راجع الرابط قبل التوقيع.");
+      }
+      retainedInvoice = { id: invoice.id, currency: requireCurrency(invoice.base_currency, "فاتورة الزيارة", input.visitId) };
+    }
 
     // Re-read procedures under the visit lock; another save may have completed since the preview.
     const { rows: currentProcedures } = await client.query<ProcedureRow>(
@@ -17679,6 +17699,9 @@ export async function signClinicalVisit(input: {
     const billable = existing.procedures.filter((line) =>
       (lineBillingClasses.get(line.id) ?? "NEW_BILLABLE") === "NEW_BILLABLE");
     const duesMinor = visitTotal(billable);
+    if (retainedInvoice && duesMinor > 0) {
+      throw new ClinicalPlanConflict("للزيارة فاتورة مرتبطة بالفعل؛ راجع الرسوم الإضافية في تصحيح مالي صريح قبل التوقيع، حتى لا يُستبدل الرابط أو تتكرر الفوترة.");
+    }
     /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. تُقرأ من الصف المقفول
        (review): حفظٌ موازٍ غيّر العملة قبل القفل تُقرأ عملته الجديدة مع إجراءاته الجديدة. */
     const lockedCurrency = locked[0]?.billing_currency;
@@ -17686,7 +17709,7 @@ export async function signClinicalVisit(input: {
     let invoiceCurrency = visitCurrency;
     /* (BILL-1) الفاتورة من السطور المستحقة وحدها: جلسة خطةٍ ممولة بالأقساط مشمولة — تُنجَز
        ولا تدخل الفاتورة ولا فحص عملتها. زيارةٌ كلها مشمولة لا تولّد فاتورة أصلًا. */
-    if (billable.length > 0) {
+    if (billable.length > 0 && duesMinor > 0) {
       const linkedCount = billable.filter((line) => line.planItemId !== null).length;
       const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
         `SELECT DISTINCT t.base_currency
@@ -17826,11 +17849,15 @@ export async function signClinicalVisit(input: {
       );
     }
 
+    // invoiceId is a document generated by this signature. A no-charge signature
+    // retains its exact owned link (even a cancelled reference) without new cash.
+    const linkedInvoiceId = invoiceId ?? retainedInvoice?.id ?? null;
+    if (invoiceId === null && retainedInvoice) invoiceCurrency = retainedInvoice.currency;
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
         WHERE id = $1`,
-      [input.visitId, input.signedBy, invoiceId],
+      [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
     await client.query("COMMIT");
@@ -28277,7 +28304,21 @@ export interface VisitWalkout {
  */
 export async function visitWalkout(visitId: number): Promise<VisitWalkout | null> {
   await ensureSchema();
-  const pool = getPool();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const walkout = await visitWalkoutInSnapshot(client, visitId);
+    await client.query("COMMIT");
+    return walkout;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<VisitWalkout | null> {
   const { rows } = await pool.query<{
     id: number; patient_id: number | null; patient_name: string; patient_number: string | null;
     arrived_at: Date; signed_at: Date | null; doctor_name: string | null; treatment_done: string | null;
@@ -28358,10 +28399,15 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
   const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
     const [ledger, planCurrencies, appointments] = await Promise.all([
-      patientLedger(visit.patient_id),
-      patientPlanCurrencies(visit.patient_id),
+      patientLedgerInSnapshot(visit.patient_id, pool),
+      patientPlanCurrencies(visit.patient_id, pool),
       patientAppointmentsFrom(visit.patient_id, visit.today),
     ]);
+    const settlement = visit.invoice_id === null ? null : await readInvoiceSettlementPosition(pool, {
+      patientId: visit.patient_id, invoiceId: visit.invoice_id,
+      currency: requireCurrency(visit.invoice_currency, "فاتورة الزيارة", visit.invoice_id),
+    });
+    const invoiceLineage = new Set(settlement?.lineageInvoiceIds ?? []);
     payments = ledger.payments
       .filter((payment) => clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day)
       .map((payment) => ({
@@ -28378,8 +28424,9 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
     const todayPayment = (payment: Payment) =>
       clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
     const before = ledgerBalancesByCurrency(visit.patient_id, {
-      invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
-      payments: ledger.payments.filter((payment) => !todayPayment(payment)),
+      invoices: ledger.invoices.filter((invoice) => !invoiceLineage.has(invoice.id)),
+      payments: ledger.payments.filter((payment) => !todayPayment(payment)
+        && (payment.invoiceId === null || !invoiceLineage.has(payment.invoiceId))),
       openings: ledger.openings,
     }, planCurrencies);
     for (const currency of CURRENCIES) {
@@ -28401,15 +28448,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
       openingByCurrency.set(target, (openingByCurrency.get(target) ?? 0) + (payment.kind === "refund" ? -settled : settled));
     }
     checkout.openingPaidToday = [...openingByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
-    if (visit.invoice_id !== null) {
-      checkout.invoicePaidMinor = ledger.payments
-        .filter((payment) => payment.invoiceId === visit.invoice_id)
-        .reduce((sum, payment) => {
-          const settled = payment.currency === invoiceCurrency ? payment.amountMinor
-            : invoiceCurrency === CLINIC_BASE_CURRENCY ? payment.baseAmountMinor : 0;
-          return sum + (payment.kind === "refund" ? -settled : settled);
-        }, 0);
-    }
+    checkout.invoicePaidMinor = settlement?.settledMinor ?? 0;
     const next = appointments.find((appointment) => appointment.status === "booked");
     nextAppointment = next ? { date: next.scheduledDate, time: next.scheduledTime } : null;
   }

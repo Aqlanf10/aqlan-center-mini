@@ -1,5 +1,7 @@
 # Invoice execution requirements and evidence
 
+Current release scope and consumer checklist: [PR332 integration](INVOICE_RELEASE_INTEGRATION_PR332_20261014.md). The explicit invoice-only merge authorization now includes minimal signing retention and canonical walkout lineage integration. Earlier deferred-reception/no-merge status below is historical; no actual merge is ready until the repaired final head passes every gate and review blocker is cleared.
+
 Latest invoice-only repair: **13634e1f**, [parent financial refresh checklist](INVOICE_FINANCIAL_REFRESH_REPAIR_20261014.md). Collection/recovery/receipt/opening acknowledgement callbacks now invalidate parent workflow authority through the existing contract. Root before9 failed; after10 passed; focused units109 passed; build/static passed. Full final-head verification remains required. No design-owned file, new merge or deployment is included.
 
 Branch: `feat/invoice-resume-20261014`. Execution resumed from independently verified remote `d8822f30660bd3f5cd19b99c2c4f3f1714bbf263`. Only the invoice writer is active. No main merge, Production access or patient-data access is authorized. No deployment has occurred. The latest scope permits invoice-only currency defect verification; no further merge or deployment is currently authorized.
