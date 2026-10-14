@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Service } from "../lib/db";
-import { invoicePriceQuote, invoiceOfferedPrice, readInvoicePriceQuote, sameInvoicePriceQuote } from "../lib/invoice-price-quote";
+import { invoicePriceQuote, invoiceOfferedPrice, readInvoicePriceQuote, sameInvoicePriceQuote, INVOICE_ZERO_CONVERSION_MESSAGE } from "../lib/invoice-price-quote";
 import { parseInvoiceInput } from "../lib/invoice-input";
 import { checkInvoiceAuthority } from "../lib/invoice-pricing";
 import { invoiceCommandFingerprint } from "../lib/invoice-template";
@@ -16,6 +16,25 @@ const authority = (price: string, reason?: string, role = "reception") => {
   return checkInvoiceAuthority({ requireInvoiceManualReason:true, lines: parsed.authorityLines, currency: "SAR", rates, role, maxDiscountPercent: 10, totalMinor: Number(price) * 100, discountMinor: 0, discountReason: null });
 };
 describe("invoice native/converted offers without changing unpriced authority", () => {
+  it.each(["SAR","USD"] as const)("%s rounded-zero conversion is source evidence, never an automatically accepted free offer",currency=>{
+    const tiny={...service,priceMinor:1};const tinyQuote=invoicePriceQuote(tiny,currency,rates);
+    expect(tinyQuote).toMatchObject({source:"converted",minor:0,basePriceMinor:1,rounding:"nearest-major-unit"});
+    expect(readInvoicePriceQuote(tinyQuote,currency)).toEqual(tinyQuote);
+    expect(invoiceOfferedPrice({...tiny,invoiceQuotes:{[currency]:tinyQuote}},currency)).toBeNull();
+    const source={patientId:1,currency,items:[{serviceId:1,price:"0",priceQuote:tinyQuote}]};
+    expect(parseInvoiceInput(source,new Map([[1,tiny]]),new Set(),rates)).toEqual({ok:false,message:INVOICE_ZERO_CONVERSION_MESSAGE});
+    const positive=parseInvoiceInput({...source,items:[{...source.items[0],price:"7.25"}]},new Map([[1,tiny]]),new Set(),rates);
+    if(!positive.ok)throw new Error(positive.message);
+    for(const role of ["admin","reception"]){
+      const input={requireInvoiceManualReason:true,lines:positive.authorityLines,currency,rates,role,maxDiscountPercent:10,totalMinor:725,discountMinor:0,discountReason:null};
+      expect(checkInvoiceAuthority(input).ok).toBe(false);
+      expect(checkInvoiceAuthority({...input,lines:input.lines.map(line=>({...line,reason:"Documented positive manual price"}))}).ok).toBe(true);
+    }
+    const half=rates[currency]/2;
+    expect(invoicePriceQuote({...tiny,priceMinor:half-1},currency,rates).minor).toBe(0);
+    expect(invoicePriceQuote({...tiny,priceMinor:half},currency,rates).minor).toBe(100);
+    expect(invoiceOfferedPrice({...tiny,...(currency==="SAR"?{priceSarMinor:0}:{priceUsdMinor:0}),invoiceQuotes:{[currency]:tinyQuote}},currency)).toBe(0);
+  });
   it("snapshots configured source, rate and the existing whole-major-unit rounding", () => {
     expect(quote).toEqual({ version: 1, baseCurrency: "YER", currency: "SAR", source: "converted", minor: 500, basePriceMinor: 2200, rate: 440, rateSource: "finance.rate.SAR", rounding: "nearest-major-unit" });
     expect(invoicePriceQuote(service, "USD", rates).minor).toBe(100);

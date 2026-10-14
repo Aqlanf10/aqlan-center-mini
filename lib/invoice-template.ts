@@ -88,6 +88,12 @@ export function parseInvoiceCommand(
   }
   if (source.currency !== undefined && source.currency !== null && source.currency !== "" && !isCurrency(source.currency)) return invalid("عملة الفاتورة غير صالحة.");
   const currency = isCurrency(source.currency) ? source.currency : CLINIC_BASE_CURRENCY;
+  for (const choice of steps) {
+    if (!choice.include || choice.serviceId === null) continue;
+    const service = services.get(choice.serviceId);
+    const quote = service ? invoicePriceQuote(service,currency,foreignRatesFromSettings(settings)) : null;
+    if (quote?.source === "converted" && quote.minor === 0) return invalid(`تقريب تحويل «${service!.name}» نتج عنه صفر؛ لا يُعتمد كسعر مجاني. ألغِ اختيار القالب وأضف الخدمة كبند عادي بسعر يدوي موجب وسبب تسعير.`);
+  }
   // Template invoice offers use the same configured FX and retain its snapshot
   // in the reviewed version. Visit/plan template pricing policy is unchanged.
   const built = buildTemplateDrafts(template, { teeth, steps }, [...services.values()], currency, foreignRatesFromSettings(settings));

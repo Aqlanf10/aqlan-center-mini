@@ -4,7 +4,7 @@ import type { InvoiceLineAuthorityInput } from "./invoice-pricing";
 import { INVOICE_IDEMPOTENCY_PATTERN, parseLineSiteFields } from "./invoice-clinical-linkage";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
 import { invoiceCatalogPrice } from "./invoice-catalog-price";
-import { invoicePriceQuote, sameInvoicePriceQuote, type InvoicePriceQuote } from "./invoice-price-quote";
+import { invoicePriceQuote, sameInvoicePriceQuote, INVOICE_ZERO_CONVERSION_MESSAGE, type InvoicePriceQuote } from "./invoice-price-quote";
 import type { ForeignRates } from "./service-pricing";
 
 export type ParsedInvoiceInput = {
@@ -105,6 +105,7 @@ export function parseInvoiceInput(
       return { ok: false, message: `اكتب سعرًا صحيحًا لبند «${description}».` };
     }
     if (service && invoiceCatalogPrice(service, base) === null && unitPriceMinor <= 0) {
+      if (quote?.source === "converted" && quote.minor === 0) return { ok:false, message:INVOICE_ZERO_CONVERSION_MESSAGE };
       return { ok: false, message: `لا يوجد سعر مقرر لـ «${description}» بهذه العملة؛ اكتب قيمة الاتفاق صراحةً أو اطلب تسعير الخدمة.` };
     }
 

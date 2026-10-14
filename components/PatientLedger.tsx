@@ -1,6 +1,6 @@
 "use client";
 
-import { invoiceOfferedPrice } from "@/lib/invoice-price-quote";
+import { invoiceOfferedPrice, INVOICE_ZERO_CONVERSION_MESSAGE } from "@/lib/invoice-price-quote";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
@@ -1213,6 +1213,8 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
     if (!row.serviceId && !row.description.trim()) return null;
     const service = serviceOf(row.serviceId);
     const catalogue = service ? invoiceOfferedPrice(service, currency) : null;
+    if(service?.invoiceQuotes?.[currency]?.source === "converted" && service.invoiceQuotes[currency]?.minor === 0
+      && (!row.price.trim() || (parseAmount(row.price,currency)??0)<=0)) return INVOICE_ZERO_CONVERSION_MESSAGE;
     if (service && invoiceCatalogPrice(service, currency) === null
       && !(service.invoiceQuotes?.[currency]?.source === "converted" && parseAmount(row.price, currency) === catalogue)
       && (row.priceReason.trim().length < 3) && row.price.trim() && (parseAmount(row.price, currency) ?? 0) > 0) return "اكتب سبب التسعير اليدوي لهذه الخدمة قبل الحفظ.";
@@ -1294,7 +1296,7 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
       }).catch(unavailable).finally(() => clearTimeout(deadline));
     }, 350);
     return () => { controller.abort(); clearTimeout(timer); clearTimeout(deadline); };
-  }, [previewKey, previewOwner, canSubmit, commandLocked, services, historical]);
+  }, [previewKey, previewOwner, canSubmit, commandLocked, services, historical, currency]);
   const currentPreview = previewState?.owner === previewOwner ? previewState : null;
   const selectionEvidence = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.selections : undefined;
   const currentTemplate = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.template ?? null : null;
@@ -1617,13 +1619,14 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               const service = services.find((item) => String(item.id) === row.serviceId);
               const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
               const catalogue = service ? invoiceOfferedPrice(service, currency) : null;
-              const differs = service ? typed !== null && (catalogue === null || typed !== catalogue) : false;
+              const roundedZero = service?.invoiceQuotes?.[currency]?.source === "converted" && service.invoiceQuotes[currency]?.minor === 0;
+              const differs = service ? roundedZero || typed !== null && (catalogue === null || typed !== catalogue) : false;
               return differs ? (
                 <input
                   value={row.priceReason}
                   onChange={(event) => setRows((current) => current.map((item, i) =>
                     i === index ? { ...item, priceReason: event.target.value } : item))}
-                  placeholder="سبب تغيير السعر عن الدليل"
+                  placeholder={catalogue===null?"سبب التسعير اليدوي بهذه العملة":"سبب تغيير السعر عن الدليل"}
                   aria-label="سبب تغيير السعر"
                   maxLength={300}
                   className={`${workspace.priceReason} w-full rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs`}
@@ -1631,7 +1634,9 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
               ) : null;
             })()}
             {row.serviceId ? <p className="text-[10px] leading-5 text-slate-600" data-testid={`invoice-price-source-${index}`}>{serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.source === "converted"
-              ? `${parseAmount(row.price,currency)!==serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor?"سعر يدوي بالاتفاق؛ ":""}سعر محوّل مقترح من اليمني ${formatMoney(serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor??0,currency)} · سعر الصرف ${serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.rate} ر.ي لكل ${currency} · تقريب لأقرب وحدة كاملة`
+              ? serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor===0
+                ? `مصدر الحساب: تحويل من اليمني بسعر صرف ${serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.rate}؛ قُرّب إلى صفر ويتطلب تسعيرًا يدويًا موجبًا.`
+                : `${parseAmount(row.price,currency)!==serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor?"سعر يدوي بالاتفاق؛ ":""}سعر محوّل مقترح من اليمني ${formatMoney(serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.minor??0,currency)} · سعر الصرف ${serviceOf(row.serviceId)?.invoiceQuotes?.[currency]?.rate} ر.ي لكل ${currency} · تقريب لأقرب وحدة كاملة`
               : serviceOf(row.serviceId) && invoiceCatalogPrice(serviceOf(row.serviceId)!, currency) !== null ? "سعر صريح مسجّل بعملة الفاتورة" : "تسعير يدوي بعملة الفاتورة — السبب إلزامي"}</p> : null}
             <div className={workspace.quantity}>
               <label className="text-[11px] font-bold text-slate-500">الكمية:</label>

@@ -2,7 +2,11 @@ import { invoiceCatalogPrice, type InvoiceCatalogService } from "./invoice-catal
 import { catalogPriceIn, type ForeignRates } from "./service-pricing";
 import type { Currency } from "./money";
 
-/** Immutable invoice offer. Converted prices never become native authority. */
+export const INVOICE_ZERO_CONVERSION_MESSAGE = "نتيجة التحويل بعد التقريب صفر؛ لا تُعتمد كسعر مجاني. اكتب سعرًا يدويًا موجبًا لهذه العملة وسبب التسعير قبل الحفظ.";
+
+/** Immutable source snapshot. A converted zero is audit evidence only: the UI
+ * offer selector refuses it and requires positive, reasoned manual pricing.
+ * Converted prices never become native authority. */
 export interface InvoicePriceQuote {
   version: 1; baseCurrency:"YER"; currency: Currency; source: "catalog" | "converted" | "none";
   minor: number | null; basePriceMinor: number | null;
@@ -47,5 +51,5 @@ export function invoiceOfferedPrice(service: InvoiceCatalogService, currency: Cu
   const native = invoiceCatalogPrice(service, currency);
   if (native !== null) return native;
   const offer = service.invoiceQuotes?.[currency];
-  return offer?.source === "converted" && offer.currency === currency && offer.minor !== null && Number.isSafeInteger(offer.minor) && offer.minor >= 0 ? offer.minor : null;
+  return offer?.source === "converted" && offer.currency === currency && offer.minor !== null && Number.isSafeInteger(offer.minor) && offer.minor > 0 ? offer.minor : null;
 }

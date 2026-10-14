@@ -8,6 +8,8 @@ Preview and save compare the full versioned source/rate/base amount/currency/rou
 
 The UI shows source/rate, manual-reason and server-refusal messages and a refresh-prices/preview action. `invoice-price-quote`, strict template preview, locked PostgreSQL catalogue authority and actual admin/reception HTTP/browser tests cover this policy. See the latest committed handoff/evidence manifest for exact results and remaining CI status.
 
+Owner review of checkpoint7c6df4be identified one bounded display edge: a positive YER source can round to0 in a foreign currency. The rounded0 remains source evidence for audit/validation, but `invoiceOfferedPrice` refuses it as an automatic offer. The invoice leaves price blank, explains the zero-rounding result and requires a positive manual price/reason; the server still refuses unpriced0. Templates give the same explicit manual-line direction. Native explicitly configured0 remains valid, and rounding itself is unchanged. SAR/USD just-below-half/at-half tests and actual admin/reception save/refusal footprints verify this distinction.
+
 ## Archived proposal (superseded by the implementation above)
 
 Status: proposal only. No pricing, permission, API, schema, catalogue or FX changes are included in the monthly-schedule follow-up.

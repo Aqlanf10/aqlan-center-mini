@@ -4,7 +4,7 @@ import { Client } from "pg";
 import { mkdirSync } from "node:fs";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
 
-let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser, converted: number, native: number, zero: number, doctor: number, serial = 0;
+let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser, converted: number, native: number, zero: number, roundedZero: number, doctor: number, serial = 0;
 const keys = ["finance.rate.SAR", "finance.rate.USD", "billing.max_discount_percent", "finance.reception_adds_opening_balance", "plans.specialty_templates"];
 let prior: { key: string; value: string }[] = [];
 beforeAll(async () => {
@@ -15,6 +15,8 @@ beforeAll(async () => {
   converted = await create("Synthetic converted contract ortho", "ortho", null, null);
   native = await create("Synthetic native contract ortho", "ortho", 150000, 50000);
   zero = await create("Synthetic configured zero", "consultation", 0, 0);
+  roundedZero=await create("Synthetic rounded zero conversion","consultation",null,null);
+  await db.query("UPDATE services SET price_minor=1 WHERE id=$1",[roundedZero]);
   prior = (await db.query("SELECT key,value FROM settings WHERE key=ANY($1::text[])", [keys])).rows;
   await db.query("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','440'),('finance.rate.USD','2200'),('billing.max_discount_percent','10'),('finance.reception_adds_opening_balance','true') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
   const settings=await (await authedGet("/api/settings",h.sessions.admin)).json();
@@ -51,6 +53,30 @@ async function facts(patientId: number) {
     (SELECT count(*)::int FROM plan_items i JOIN treatment_plans p ON p.id=i.plan_id WHERE p.patient_id=$1) AS items`, [patientId])).rows[0];
 }
 describe("invoice converted source, manual reasons and saved contract", () => {
+  it.each(["admin","reception"] as const)("%s gets a clear positive manual-price path for a rounded-zero conversion and cannot save free accidentally",async role=>{
+    const {patientId,context,page,row,width}=await open(role);
+    try{
+      await page.getByLabel("عملة الفاتورة",{exact:true}).selectOption("SAR");
+      await row.getByLabel("الخدمة",{exact:true}).selectOption(String(roundedZero));
+      const price=row.getByLabel("السعر",{exact:true});expect(await price.inputValue()).toBe("");
+      const save=page.getByRole("button",{name:"احفظ الفاتورة",exact:true});expect(await save.isDisabled()).toBe(true);
+      expect(await page.getByTestId("invoice-input-problem-0").innerText()).toContain("نتيجة التحويل بعد التقريب صفر");
+      expect(await page.getByTestId("invoice-price-source-0").innerText()).not.toContain("سعر محوّل مقترح");
+      await row.getByLabel("سبب تغيير السعر",{exact:true}).waitFor();
+      const catalog=await (await authedGet("/api/services",h.sessions[role])).json();
+      const quote=catalog.find((service:{id:number})=>service.id===roundedZero).invoiceQuotes.SAR;
+      const refused=await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify({patientId,currency:"SAR",items:[{serviceId:roundedZero,price:"0",catalogPriceMinor:null,priceQuote:quote}],idempotencyKey:`zero-rounded-refuse-${patientId}`}));
+      expect(refused.status).toBe(400);expect((await refused.json()).message).toContain("نتيجة التحويل بعد التقريب صفر");
+      expect(await facts(patientId)).toEqual({invoices:0,payments:0,plans:0,cases:0,schedules:0,items:0});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-rounded-zero-${role}-${width}.png`,fullPage:true});
+      await price.fill("7.25");expect(await save.isDisabled()).toBe(true);
+      await row.getByLabel("سبب تغيير السعر",{exact:true}).fill("Synthetic positive price after rounded zero");
+      await expect.poll(()=>save.isEnabled()).toBe(true);await save.click();
+      await page.getByRole("region",{name:"فاتورة جديدة",exact:true}).waitFor({state:"detached"});
+      expect((await db.query("SELECT total_minor::int AS total FROM invoices WHERE patient_id=$1",[patientId])).rows).toEqual([{total:725}]);
+      expect(await facts(patientId)).toEqual({invoices:1,payments:0,plans:0,cases:0,schedules:1,items:0});
+    }finally{await context.close();}
+  });
   it.each(["admin","reception"] as const)("%s reviews and saves a converted template with its exact source and one canonical work item",async role=>{
     const {patientId,context,page,row,width}=await open(role);
     try{
