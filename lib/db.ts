@@ -17702,6 +17702,9 @@ export async function signClinicalVisit(input: {
     if (retainedInvoice && duesMinor > 0) {
       throw new ClinicalPlanConflict("للزيارة فاتورة مرتبطة بالفعل؛ راجع الرسوم الإضافية في تصحيح مالي صريح قبل التوقيع، حتى لا يُستبدل الرابط أو تتكرر الفوترة.");
     }
+    if (retainedInvoice && billable.some(line => line.planItemId !== null)) {
+      throw new ClinicalPlanConflict("جلسة الخطة تحتاج مصدر استحقاق العمولة حتى إن كان مبلغها الآن صفراً؛ راجع ربطها المالي قبل التوقيع حتى لا يضيع المصدر أو يُستبدل رابط الفاتورة الحالية.");
+    }
     /* (DAY1) عملة الزيارة كما اختارها الطاقم — الأساس إن لم تُختر. تُقرأ من الصف المقفول
        (review): حفظٌ موازٍ غيّر العملة قبل القفل تُقرأ عملته الجديدة مع إجراءاته الجديدة. */
     const lockedCurrency = locked[0]?.billing_currency;
@@ -17709,7 +17712,10 @@ export async function signClinicalVisit(input: {
     let invoiceCurrency = visitCurrency;
     /* (BILL-1) الفاتورة من السطور المستحقة وحدها: جلسة خطةٍ ممولة بالأقساط مشمولة — تُنجَز
        ولا تدخل الفاتورة ولا فحص عملتها. زيارةٌ كلها مشمولة لا تولّد فاتورة أصلًا. */
-    if (billable.length > 0 && duesMinor > 0) {
+    // Unlinked plan milestones retain their zero-value source invoices: those
+    // rows freeze commission attribution. Only an already owned visit link
+    // suppresses a second free document; unsafe plan-source loss refuses above.
+    if (billable.length > 0 && retainedInvoice === null) {
       const linkedCount = billable.filter((line) => line.planItemId !== null).length;
       const { rows: planCurrencyRows } = await client.query<{ base_currency: string }>(
         `SELECT DISTINCT t.base_currency

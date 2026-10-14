@@ -97,6 +97,26 @@ describe("invoice release integration with signing and canonical walkout lineage
     expect(await q("SELECT invoice_id,signed_at FROM visits WHERE id=$1", [f.visitId])).toEqual([{ invoice_id: f.invoice.id, signed_at: null }]);
     expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [f.patientId])).toEqual([{ id: f.invoice.id }]); expect(await footprint(f.patientId)).toEqual(before);
   });
+  it("refuses a zero-valued plan milestone that would lose its separate commission source behind an existing invoice link", async () => {
+    const f = await fixture("YER");
+    const plan = await db.createPlanV2({ patientId: f.patientId, title: "Synthetic completion milestone", specialty: null, primaryDoctorId: doctorId,
+      billingMode: "per_procedure", baseCurrency: "YER", startDate: "2026-10-01", note: null, createdBy: session.username,
+      items: [{ serviceId, serviceName: "Synthetic historical group", category: "ortho", toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 1500,
+        billingRule: "on_completion", sessionCount: 2, note: null }], installments: [] });
+    if (!plan.ok) throw new Error(plan.message);
+    expect(await db.recordPlanConsent({ planId: plan.planId, actor: session.username, note: null })).toMatchObject({ ok: true });
+    const itemId = (await q("SELECT id FROM plan_items WHERE plan_id=$1", [plan.planId]))[0].id as number;
+    await db.setVisitProcedures({ visitId: f.visitId, procedures: [{ serviceId, doctorId, toothCode: null, surfaces: null, quantity: 1, unitPriceMinor: 0, priceReason: null, note: null, planItemId: itemId }] });
+    const state = () => q(`SELECT jsonb_build_object(
+      'item',(SELECT to_jsonb(i) FROM plan_items i WHERE id=$1),
+      'sessions',(SELECT jsonb_agg(s ORDER BY id) FROM treatment_sessions s WHERE visit_id=$2),
+      'visit',(SELECT to_jsonb(v) FROM visits v WHERE id=$2),
+      'invoices',(SELECT jsonb_agg(i ORDER BY id) FROM invoices i WHERE patient_id=$3),
+      'payments',(SELECT jsonb_agg(p ORDER BY id) FROM payments p WHERE patient_id=$3)) AS value`, [itemId, f.visitId, f.patientId]);
+    const before = await state();
+    await expect(db.signClinicalVisit({ visitId: f.visitId, baseCurrency: "YER", signedBy: session.username, signerRole: "admin", signerDoctorPartyId: doctorId })).rejects.toThrow(/مصدر.*استحقاق|مصدر.*عمولة/);
+    expect(await state()).toEqual(before);
+  });
   it.each(["YER", "SAR", "USD"] as const)("keeps historical %s opening-only facts and corrections separate from a visit invoice", async currency => {
     const f = await fixture(currency);
     await q("UPDATE visits SET invoice_id=NULL WHERE id=$1", [f.visitId]);
