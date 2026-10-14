@@ -90,6 +90,7 @@ function protocol(line: Procedure, visitDoctor: number | null = 11) {
     if (sql.includes("FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE")) return { rows: state.signed ? [] : [{
       id: 201, patient_id: 101, patient_name: "Synthetic patient", patient_phone: null, planned_visit_id: null,
       appointment_id: null, doctor_id: state.doctorId, diagnosis: state.diagnosis, treatment_done: null, billing_currency: "YER",
+      invoice_id: null,
     }] };
     if (sql.includes("FROM visit_procedures p JOIN services")) return { rows: state.procedures.map((p) => ({
       id: p.id, service_id: p.serviceId, service_name: p.serviceName, category: p.category,

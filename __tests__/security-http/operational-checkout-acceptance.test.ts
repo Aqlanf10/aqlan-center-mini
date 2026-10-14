@@ -96,7 +96,24 @@ function decisionBody(value: OperationalCheckoutRead, status: "handled" | "defer
   return { patientId: value.item.patientId, finishVersion: value.item.finishVersion, receivable: value.receivable, status, reason: " مراجعة تشغيلية اصطناعية موثّقة " };
 }
 
-it.each(["YER", "SAR", "USD"] as const)("real unsigned checkout → no-charge signature link-loss review → former-invoice refund preserves %s debt", async currency => {
+it("manager no-charge sign echoes the retained exact invoice without claiming a newly generated document", async () => {
+  const f = await fixture();
+  await accepted(await write("admin", `/api/visits/${f.visitId}/clinical`, "POST", { action: "save", doctorId,
+    diagnosis: "توثيق مدير اصطناعي", treatmentDone: "مراجعة دون رسوم إضافية", procedures: [] }));
+  const before = await ledger(f), invoices = (await db.query(`SELECT id, total_minor FROM invoices WHERE patient_id = $1 ORDER BY id`, [f.patientId])).rows;
+  const result = await accepted<{ invoiceId: number | null; createdInvoiceId: number | null; invoiceCurrency: string; duesMinor: number; doctorId: number; signedBy: string }>(
+    await write("admin", `/api/visits/${f.visitId}/clinical`, "POST", { action: "sign" }));
+  expect((await db.query(`SELECT invoice_id FROM visits WHERE id = $1`, [f.visitId])).rows).toEqual([{ invoice_id: f.invoiceId }]);
+  expect(result).toMatchObject({ invoiceId: f.invoiceId, createdInvoiceId: null, invoiceCurrency: "YER", duesMinor: 0, doctorId, signedBy: "secadmin" });
+  const audit = (await db.query(`SELECT details FROM audit_log WHERE action = 'visit.sign' AND entity_id = $1`, [String(f.visitId)])).rows;
+  expect(audit).toHaveLength(1);
+  expect(audit[0].details).toMatchObject({ الفاتورة: null, الفاتورة_المرتبطة_بالزيارة: f.invoiceId });
+  expect((await write("admin", `/api/visits/${f.visitId}/clinical`, "POST", { action: "sign" })).status).toBe(409);
+  expect(await ledger(f)).toEqual(before);
+  expect((await db.query(`SELECT id, total_minor FROM invoices WHERE patient_id = $1 ORDER BY id`, [f.patientId])).rows).toEqual(invoices);
+});
+
+it.each(["YER", "SAR", "USD"] as const)("real unsigned checkout → retained no-charge signature → current-invoice refund and re-review preserve %s debt", async currency => {
   const f = await fixture(currency), initial = await read(f);
   expect(initial.item).toMatchObject({ signedAt: null, status: "pending", visitInvoiceSettled: false });
   expect((await queue()).filter(row => row.visitId === f.visitId)).toHaveLength(1);
@@ -118,17 +135,17 @@ it.each(["YER", "SAR", "USD"] as const)("real unsigned checkout → no-charge si
   expect(await accepted(await write("reception", path, "POST", { ...finalBody, status: "deferred", reason: "إعادة لا تغيّر السبب الأول" }))).toEqual(decision);
   expect(await ledger(f)).toEqual(beforeDecision);
   await sign(f);
-  // Link loss itself must flag review before any later refund. Never infer a replacement invoice.
-  expect((await db.query(`SELECT invoice_id FROM visits WHERE id = $1`, [f.visitId])).rows[0].invoice_id).toBeNull();
+  // Signing creates no new document and preserves the exact owned reference.
+  expect((await db.query(`SELECT invoice_id FROM visits WHERE id = $1`, [f.visitId])).rows[0].invoice_id).toBe(f.invoiceId);
   const afterSign = (await queue()).filter(row => row.visitId === f.visitId);
   expect(afterSign).toHaveLength(1);
   expect(afterSign[0]).toMatchObject({ eligibility: "signed", status: finalBody.status,
-    financialReviewRequired: true, visitInvoiceSettled: false });
-  expect((await proof(f)).receivable).toBeNull();
+    financialReviewRequired: false, visitInvoiceSettled: true });
+  expect((await proof(f)).receivable).toEqual(paid.receivable);
   expect(await ledger(f)).toEqual(beforeDecision);
   const originalAudit = (await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1`, [String(f.visitId)])).rows;
-  const oldProof = { ...await proof(f), receivable: paid.receivable };
-  // The former-invoice refund changes account debt; it is not the cause of the already-raised link-loss flag.
+  const oldProof = await proof(f);
+  // The refund itself must raise review; there is no pre-existing link-loss flag.
   await collect(f, "100", "admin", partial.id);
   const flagged = (await queue()).find(row => row.visitId === f.visitId)!;
   expect(flagged).toMatchObject({ status: finalBody.status, financialReviewRequired: true, visitInvoiceSettled: false });
@@ -144,6 +161,17 @@ it.each(["YER", "SAR", "USD"] as const)("real unsigned checkout → no-charge si
   expect((await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1`, [String(f.visitId)])).rows).toEqual(originalAudit);
   const walkout = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
   expect(walkout.balances).toEqual(debtBeforeReview.balances);
+  const reviewedProof = await proof(f);
+  await collect(f, "50", "admin", partial.id);
+  expect((await queue()).find(row => row.visitId === f.visitId)).toMatchObject({ status: finalBody.status, financialReviewRequired: true });
+  expect((await write("reception", `/api/visits/${f.visitId}/reception-verification`, "POST", { ...reviewedProof, reason: "إثبات قديم بعد استرداد لاحق" })).status).toBe(409);
+  const latest = await proof(f), beforeSecondReview = await ledger(f);
+  await accepted(await write("reception", `/api/visits/${f.visitId}/reception-verification`, "POST", { ...latest, reason: "مراجعة الاسترداد اللاحق مع بقاء الدين" }));
+  expect(await ledger(f)).toEqual(beforeSecondReview);
+  expect((await queue()).find(row => row.visitId === f.visitId)).toMatchObject({ status: finalBody.status, financialReviewRequired: false });
+  expect((await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception))).balances)
+    .toEqual([{ currency, balanceMinor: currency === "YER" ? 150 : 15000 }]);
+  expect((await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1`, [String(f.visitId)])).rows).toEqual(originalAudit);
   expect((await authedGet(`/api/invoices?patientId=${f.patientId}`, h.sessions.accountant)).status).toBe(200);
 });
 

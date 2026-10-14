@@ -17333,9 +17333,10 @@ export async function signClinicalVisit(input: {
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
       planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
       diagnosis: string | null; treatment_done: string | null; billing_currency: string | null; case_id: number | null;
+      invoice_id: number | null;
     }>(
       `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done,
-              billing_currency, case_id
+              billing_currency, case_id, invoice_id
          FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
@@ -17359,6 +17360,17 @@ export async function signClinicalVisit(input: {
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [patientId]);
+    // Keep only the exact current owned reference. Signing never repairs an
+    // invalid link by selecting another invoice or silently unlinking it.
+    let retainedInvoice: { id: number; currency: Currency } | null = null;
+    if (locked[0].invoice_id !== null) {
+      const { rows: [invoice] } = await client.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices WHERE id = $1 FOR UPDATE`, [locked[0].invoice_id]);
+      if (!invoice || invoice.patient_id !== patientId) {
+        throw new ClinicalPlanConflict("فاتورة الزيارة المرتبطة لا تخص ملف هذا المريض أو تغيّر رابطها؛ راجع الرابط قبل التوقيع.");
+      }
+      retainedInvoice = { id: invoice.id, currency: requireCurrency(invoice.base_currency, "فاتورة الزيارة", `زيارة #${input.visitId}`) };
+    }
 
     // Re-read procedures under the visit lock; another save may have completed since the preview.
     const { rows: currentProcedures } = await client.query<ProcedureRow>(
@@ -17643,29 +17655,31 @@ export async function signClinicalVisit(input: {
         await client.query("ROLLBACK");
         return emptyResult("mixed_plan_currencies", { visit: existing });
       }
-      const { rows: invoiceRows } = await client.query<{ id: number }>(
-        `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
-         VALUES (${documentNumberSql("invoice")},
-                 $1, $2, $3, 0, $4::text, $5)
-         RETURNING id`,
-        [patientId, invoiceCurrency, duesMinor,
-         `من الزيارة رقم ${existing.id}`, input.signedBy],
-      );
-      invoiceId = invoiceRows[0].id;
-
-      for (const line of billable) {
-        const session = sessionOutcome.byProcedure.get(line.id);
-        const description = session
-          ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`
-          : line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName;
-        await client.query(
-          `INSERT INTO invoice_items
-             (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
-              source_type, source_id)
-           VALUES ($1, $2, $3::int, $4, $5, $6, $7, 'visit_procedure', $8)`,
-          [invoiceId, line.serviceId, line.doctorId, description,
-           line.quantity, line.unitPriceMinor, line.totalMinor, line.id],
+      if (duesMinor > 0) {
+        const { rows: invoiceRows } = await client.query<{ id: number }>(
+          `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
+           VALUES (${documentNumberSql("invoice")},
+                   $1, $2, $3, 0, $4::text, $5)
+           RETURNING id`,
+          [patientId, invoiceCurrency, duesMinor,
+           `من الزيارة رقم ${existing.id}`, input.signedBy],
         );
+        invoiceId = invoiceRows[0].id;
+
+        for (const line of billable) {
+          const session = sessionOutcome.byProcedure.get(line.id);
+          const description = session
+            ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`
+            : line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName;
+          await client.query(
+            `INSERT INTO invoice_items
+               (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
+                source_type, source_id)
+             VALUES ($1, $2, $3::int, $4, $5, $6, $7, 'visit_procedure', $8)`,
+            [invoiceId, line.serviceId, line.doctorId, description,
+             line.quantity, line.unitPriceMinor, line.totalMinor, line.id],
+          );
+        }
       }
     }
 
@@ -17757,11 +17771,16 @@ export async function signClinicalVisit(input: {
       );
     }
 
+    // invoiceId denotes a document generated by this signature. A no-charge
+    // signature retains its already-owned visit link, including a cancelled
+    // historical reference; cancellation/correction belongs to its audited path.
+    const linkedInvoiceId = invoiceId ?? retainedInvoice?.id ?? null;
+    if (invoiceId === null && retainedInvoice) invoiceCurrency = retainedInvoice.currency;
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
         WHERE id = $1`,
-      [input.visitId, input.signedBy, invoiceId],
+      [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
     await client.query("COMMIT");
