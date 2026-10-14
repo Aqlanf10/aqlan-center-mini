@@ -244,6 +244,112 @@
         "files": 1937
       },
       "logSha256": "76162e465989f3f070a9de8db711fbf358e53b74d09ce1bbdb57c727e4c4a16d"
+    },
+    {
+      "label": "invoice-ci-5a4df-reproduce-remaining",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/td05-currency-safety.test.ts",
+        "__tests__/security-http/plan-price-authority-http.test.ts",
+        "__tests__/security-http/service-raw-category-display.test.ts"
+      ],
+      "startedUtc": "2026-10-14T22:37:59.858368+00:00",
+      "seconds": 13.696,
+      "exitCode": 1,
+      "before": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "after": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "logSha256": "64bb23eafdcd79157b0beea7260bd5d03d0ed1ba0226a752ea9cde3e71775224"
+    },
+    {
+      "label": "invoice-ci-remaining-repaired-focused",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/td05-currency-safety.test.ts",
+        "__tests__/security-http/plan-price-authority-http.test.ts",
+        "__tests__/security-http/service-raw-category-display.test.ts"
+      ],
+      "startedUtc": "2026-10-14T22:39:23.486997+00:00",
+      "seconds": 13.126,
+      "exitCode": 0,
+      "before": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "after": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "logSha256": "d274283baa68cdf5faa0f46c41ab1c252b592a9fcc75090cb14172824cf28c45"
+    },
+    {
+      "label": "invoice-ci-remaining-typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "startedUtc": "2026-10-14T22:39:40.439450+00:00",
+      "seconds": 6.474,
+      "exitCode": 0,
+      "before": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "after": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "logSha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060"
+    },
+    {
+      "label": "invoice-ci-remaining-lint",
+      "command": [
+        "npx",
+        "eslint",
+        "__tests__/security-http/td05-currency-safety.test.ts",
+        "__tests__/security-http/plan-price-authority-http.test.ts",
+        "__tests__/security-http/service-raw-category-display.test.ts"
+      ],
+      "startedUtc": "2026-10-14T22:39:40.439304+00:00",
+      "seconds": 1.761,
+      "exitCode": 0,
+      "before": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "after": {
+        "head": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "423c213ce6275fb7cb5f76c3548615c7aacc990b7b4a7accbce486ea5ee6411b",
+        "files": 1937
+      },
+      "logSha256": "76162e465989f3f070a9de8db711fbf358e53b74d09ce1bbdb57c727e4c4a16d"
     }
   ],
   "beforeCounts": {
@@ -257,5 +363,84 @@
     "files": 3
   },
   "applicationUnchanged": true,
-  "requiredFinalCI": "Must succeed on exact repair head; final run IDs/result kept in external receipt and PR body. No merge/deployment."
+  "requiredFinalCI": "Must succeed on exact repair head; final run IDs/result kept in external receipt and PR body. No merge/deployment.",
+  "remainingFullSuite": {
+    "failedHead": "5a4df4d8259a81b1f5944842b27a4e8e0564ecd0",
+    "run": 38644736666,
+    "job": 116128683122,
+    "before": {
+      "failed": 4,
+      "passed": 27,
+      "files": 3
+    },
+    "after": {
+      "failed": 0,
+      "passed": 34,
+      "files": 3
+    },
+    "previewTransport": "all non-GET/HEAD still aborted in display journey; exact owned same-origin clinical-preview POST classified as blocked read; unknown writes still fail",
+    "newReadOnlyPreviewCases": 3,
+    "ciAnnotations": [
+      {
+        "path": ".github",
+        "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/5a4df4d8259a81b1f5944842b27a4e8e0564ecd0/.github",
+        "start_line": 6451,
+        "start_column": null,
+        "end_line": 6451,
+        "end_column": null,
+        "annotation_level": "failure",
+        "title": "",
+        "message": "Process completed with exit code 1.",
+        "raw_details": ""
+      },
+      {
+        "path": "__tests__/security-http/td05-currency-safety.test.ts",
+        "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/5a4df4d8259a81b1f5944842b27a4e8e0564ecd0/__tests__/security-http/td05-currency-safety.test.ts",
+        "start_line": 178,
+        "start_column": null,
+        "end_line": 178,
+        "end_column": null,
+        "annotation_level": "failure",
+        "title": "__tests__/security-http/td05-currency-safety.test.ts > مسار HTTP المباشر: فاتورة أجنبية بلا سعر صريح > فاتورة SAR بلا سعر ⇒ 400، وبسعرٍ صريح تُخزَّن بعملتها",
+        "message": "AssertionError: expected 400 to be 201 // Object.is equality\n\n- Expected\n+ Received\n\n- 201\n+ 400\n\n ❯ __tests__/security-http/td05-currency-safety.test.ts:178:29\n\n",
+        "raw_details": ""
+      },
+      {
+        "path": "__tests__/security-http/service-raw-category-display.test.ts",
+        "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/5a4df4d8259a81b1f5944842b27a4e8e0564ecd0/__tests__/security-http/service-raw-category-display.test.ts",
+        "start_line": 259,
+        "start_column": null,
+        "end_line": 259,
+        "end_column": null,
+        "annotation_level": "failure",
+        "title": "__tests__/security-http/service-raw-category-display.test.ts > reachable raw category labels on the actual built app > selects raw prototype-named services in the real patient Account at RTL 390px with zero writes",
+        "message": "AssertionError: expected [ 'POST' ] to deeply equal []\n\n- Expected\n+ Received\n\n- []\n+ [\n+   \"POST\",\n+ ]\n\n ❯ __tests__/security-http/service-raw-category-display.test.ts:259:50\n\n",
+        "raw_details": ""
+      },
+      {
+        "path": "__tests__/security-http/service-raw-category-display.test.ts",
+        "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/5a4df4d8259a81b1f5944842b27a4e8e0564ecd0/__tests__/security-http/service-raw-category-display.test.ts",
+        "start_line": 259,
+        "start_column": null,
+        "end_line": 259,
+        "end_column": null,
+        "annotation_level": "failure",
+        "title": "__tests__/security-http/service-raw-category-display.test.ts > reachable raw category labels on the actual built app > selects raw prototype-named services in the real patient Account at RTL 1280px with zero writes",
+        "message": "AssertionError: expected [ 'POST' ] to deeply equal []\n\n- Expected\n+ Received\n\n- []\n+ [\n+   \"POST\",\n+ ]\n\n ❯ __tests__/security-http/service-raw-category-display.test.ts:259:50\n\n",
+        "raw_details": ""
+      },
+      {
+        "path": "__tests__/security-http/plan-price-authority-http.test.ts",
+        "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/5a4df4d8259a81b1f5944842b27a4e8e0564ecd0/__tests__/security-http/plan-price-authority-http.test.ts",
+        "start_line": 144,
+        "start_column": null,
+        "end_line": 144,
+        "end_column": null,
+        "annotation_level": "failure",
+        "title": "__tests__/security-http/plan-price-authority-http.test.ts > (FIN-5) invoice-created plan item prices follow the catalog and the discount limit > an unpriced catalog service keeps its typed price on the linked clinical item",
+        "message": "AssertionError: expected 400 to be 201 // Object.is equality\n\n- Expected\n+ Received\n\n- 201\n+ 400\n\n ❯ __tests__/security-http/plan-price-authority-http.test.ts:144:29\n\n",
+        "raw_details": ""
+      }
+    ]
+  }
 }
