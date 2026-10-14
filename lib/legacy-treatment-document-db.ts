@@ -191,7 +191,17 @@ export async function correctHistoricalDocument(patientId:number,documentId:numb
     await client.query("LOCK TABLE settings IN SHARE MODE");const settings=await getSettingsInTransaction(client);
     verifyPeriod(settings,[current.historicalAsOf,input.historicalAsOf,...(prior.opening?[prior.opening.asOfDate]:[])]);
     const reason=`تصحيح الاتفاق التاريخي #${documentId}: ${input.reason}`.slice(0,300);
-    const openingHistoryId=await writeOpening(client,{patientId,currency:current.currency,after,asOf:prior.opening?.asOfDate??input.historicalAsOf,prior,reason,session,addOnly:false,allowCredit:true});
+    // The opening is owned by the current positive historical facts. An old
+    // revision date cannot remain authoritative after that fact is corrected.
+    const {rows:[dates]}=await client.query<{as_of:string|null}>(`SELECT min(day)::text AS as_of FROM (
+      SELECT historical_as_of AS day FROM legacy_treatment_agreements
+        WHERE patient_id=$1 AND currency=$2 AND document_id IS NULL AND status='live' AND remaining_minor>0 AND opening_effect<>'none'
+      UNION ALL SELECT r.historical_as_of FROM legacy_treatment_documents d JOIN LATERAL
+        (SELECT historical_as_of,remaining_minor FROM legacy_treatment_document_revisions WHERE document_id=d.id ORDER BY version DESC LIMIT 1) r ON TRUE
+        WHERE d.patient_id=$1 AND d.currency=$2 AND d.id<>$3 AND r.remaining_minor>0
+      UNION ALL SELECT $4::date WHERE $5::bigint>0
+    ) current_facts`,[patientId,current.currency,documentId,input.historicalAsOf,input.remainingMinor]);
+    const openingHistoryId=await writeOpening(client,{patientId,currency:current.currency,after,asOf:dates.as_of??input.historicalAsOf,prior,reason,session,addOnly:false,allowCredit:true});
     const repayment=await writeTerms(client,{...input,patientId,currency:current.currency},`historical-document:${documentId}:v${current.version+1}`,reason,session);
     const allocations=allocateHistoricalDiscount(input.prices,input.discountMinor);
     const lines=current.lines.map((line,index)=>({...line,unitPriceMinor:input.prices[index],...allocations[index]}));

@@ -10,9 +10,10 @@ import { durableInvoiceRevision, readInvoiceRevisionReceipt, readInvoiceRevision
   type InvoiceRevisionCommand, type InvoiceRevisionView } from "@/lib/invoice-revision-view";
 import type { FinancialRecoveryControl } from "@/lib/financial-command-journal";
 import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
+import {lineLinkage,validateLineSite,caseSiteScope} from "@/lib/invoice-clinical-linkage";
 import { useSession } from "./SessionProvider";
 
-type Draft={keep:boolean;quantity:string;price:string};
+type Draft={keep:boolean;quantity:string;price:string;serviceId:string;doctorId:string;tooth:string;surfaces:string};
 const button="min-h-11 rounded-xl border px-4 py-2 text-sm font-bold disabled:opacity-50";
 const input="mt-1 min-h-11 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-sm";
 export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange,financialRecovery,onDone,onCancel}:{
@@ -37,7 +38,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       const next=response.ok?readInvoiceRevisionView(payload,patientId,invoiceId):null;
       if(!next||next.invoice.status==="cancelled")throw new Error(revisionRecord(payload)&&typeof payload.message==="string"?payload.message:"تعذّر قراءة الفاتورة الحالية. حدّث الحساب.");
       setView(next);setError(null);setDiscount(toInputAmount(next.invoice.discountMinor,next.invoice.baseCurrency));
-      setDrafts(Object.fromEntries(next.invoice.items.map(item=>[item.id,{keep:true,quantity:String(item.quantity),price:toInputAmount(item.unitPriceMinor,next.invoice.baseCurrency)}])));
+      setDrafts(Object.fromEntries(next.invoice.items.map(item=>[item.id,{keep:true,quantity:String(item.quantity),price:toInputAmount(item.unitPriceMinor,next.invoice.baseCurrency),serviceId:String(item.serviceId??""),doctorId:String(item.doctorId??""),tooth:String(item.toothCode??""),surfaces:item.surfaces??""}])));
       // Existing terms can include already settled rows. Require deliberate redistribution when their sum differs.
       setTerms({mode:next.repaymentTerms.mode,rows:next.repaymentTerms.installments.map((row,index)=>({key:String(index),dueDate:row.dueDate,kind:row.kind,amount:toInputAmount(row.amountMinor,next.invoice.baseCurrency)}))});
     }catch(problem){if(lifetime.current.active&&generation===lifetime.current.generation){setView(null);setError(problem instanceof Error?problem.message:"تعذّر قراءة الفاتورة.");}}
@@ -49,7 +50,17 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       const quantity=Number(draft.quantity),unitPriceMinor=parseAmount(draft.price,view.invoice.baseCurrency);
       if(!Number.isSafeInteger(quantity)||quantity<1||unitPriceMinor===null)return null;
       const totalMinor=quantity*unitPriceMinor;total+=totalMinor;if(!Number.isSafeInteger(total))return null;
-      lines.push({...item,quantity,unitPriceMinor,totalMinor});}
+      const serviceId=draft.serviceId?Number(draft.serviceId):null,doctorId=draft.doctorId?Number(draft.doctorId):null;
+      const service=view.identityCatalog?.services.find(row=>row.id===serviceId);
+      const category=service?.category??view.work.find(row=>row.id===item.planItemId)?.category??null;
+      const toothCode=draft.tooth?Number(draft.tooth):null,surfaces=draft.surfaces||null;
+      const changed=serviceId!==item.serviceId||doctorId!==item.doctorId||toothCode!==(item.toothCode??null)||surfaces!==(item.surfaces??null);
+      const caseSite=view.work.find(row=>row.id===item.planItemId)?.case_site;
+      const scope=caseSiteScope(caseSite);
+      const site=changed?validateLineSite({category,toothCode,surfaces,...(scope?{scope}:{})}):null;
+      if(site&&!site.ok)return null;
+      lines.push({...item,quantity,unitPriceMinor,totalMinor,serviceId,doctorId,description:serviceId!==item.serviceId?service?.name??item.description:item.description,
+        toothCode:site?.ok?site.site.toothCode:item.toothCode,surfaces:site?.ok?site.site.surfaces:item.surfaces});}
     const discountMinor=parseAmount(discount,view.invoice.baseCurrency);if(!lines.length||discountMinor===null||discountMinor>total)return null;
     const after=total-discountMinor,remaining=Math.max(0,after-view.settledMinor);
     return {lines,total,discountMinor,after,remaining,credit:Math.max(0,view.settledMinor-after),before:view.invoice.totalMinor-view.invoice.discountMinor};
@@ -75,7 +86,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
   const submit=()=>{
     if(!view||!preview||!checked?.ok||recovery||!allowed||pending.current||reason.trim().length<3||preview.discountMinor>0&&discountReason.trim().length<3)return;
     const key=newIdempotencyKey();draftRevision.current=financialRecovery.revision;
-    const body={idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,view.invoice.baseCurrency)})),
+    const body={idempotencyKey:key,expectedSourceHash:view.sourceHash,reason:reason.trim(),lines:preview.lines.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:toInputAmount(item.unitPriceMinor,view.invoice.baseCurrency),serviceId:item.serviceId,doctorId:item.doctorId,toothCode:item.toothCode??null,surfaces:item.surfaces??null})),
       discount:toInputAmount(preview.discountMinor,view.invoice.baseCurrency),discountReason:discountReason.trim()||null,repaymentTerms:checked.value,expectedRemainingMinor:preview.remaining};
     void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor:view.settledMinor,accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
   };
@@ -94,12 +105,31 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       {recovery.outcome==="refused"?<button type="button" className={button} disabled={busy} onClick={()=>void clearRefused()}>مراجعة التصحيح بعد الرفض</button>:null}
     </div>:null}
     {view?<><fieldset disabled={locked} className="space-y-3">
-      {view.invoice.items.map((item,index)=>{const draft=drafts[item.id];const clinical=view.work.find(row=>row.id===item.planItemId)?.clinical_locked;return <div key={item.id} className="grid min-w-0 gap-3 rounded-xl border p-3 sm:grid-cols-3">
+      {view.invoice.items.map((item,index)=>{const draft=drafts[item.id];const work=view.work.find(row=>row.id===item.planItemId),clinical=work?.clinical_locked;
+        const canAmend=!locked&&view.identityAmendmentAvailable===true&&!clinical&&!!view.identityCatalog;
+        const oldCategory=work?.category??view.identityCatalog?.services.find(row=>row.id===item.serviceId)?.category??null;
+        const choices=view.identityCatalog?.services.filter(row=>work?row.category===oldCategory:lineLinkage({serviceId:row.id,category:row.category}).kind==="financial")??[];
+        const change=(patch:Partial<Draft>)=>setDrafts(current=>({...current,[item.id]:{...current[item.id],...patch}}));
+        return <div key={item.id} className="grid min-w-0 gap-3 rounded-xl border p-3 sm:grid-cols-3">
         <div className="text-sm"><strong>{item.description}</strong>{item.toothCode?<span> · سن {item.toothCode}</span>:null}
           <label className="mt-2 flex min-h-11 items-center gap-2"><input type="checkbox" checked={draft?.keep??false} disabled={locked||clinical} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],keep:event.target.checked}}))}/>إبقاء البند</label>
           {clinical?<p className="text-xs leading-6 text-amber-900">له عمل أو مسودة سريرية؛ تبقى هويته وكميته محفوظتين.</p>:null}</div>
         <label className="min-w-0 text-xs font-bold">الكمية<input aria-label={`كمية التصحيح ${index+1}`} className={input} inputMode="numeric" disabled={locked||clinical} value={draft?.quantity??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],quantity:event.target.value}}))}/></label>
         <label className="min-w-0 text-xs font-bold">السعر ({view.invoice.baseCurrency})<input aria-label={`سعر التصحيح ${index+1}`} className={input} inputMode="decimal" dir="ltr" value={draft?.price??""} onChange={event=>setDrafts(current=>({...current,[item.id]:{...current[item.id],price:event.target.value}}))}/></label>
+        <details className="min-w-0 text-xs sm:col-span-3"><summary className="min-h-11 cursor-pointer py-3 font-bold">تصحيح الخدمة والطبيب والموضع</summary>
+          <p className="mb-2 leading-6">تُقبل قبل بدء العمل فقط. التحصيل أو المسودة السريرية أو العمولة المعتمدة يحفظ الهوية الأصلية؛ التصحيح المالي يبقى متاحًا.</p>
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <label>الخدمة<select aria-label={`خدمة التصحيح ${index+1}`} className={input} value={draft?.serviceId??""} disabled={!canAmend} onChange={event=>change({serviceId:event.target.value})}>
+              {!choices.some(row=>String(row.id)===draft?.serviceId)?<option value={draft?.serviceId??""}>{item.description}</option>:null}
+              {choices.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
+            </select></label>
+            <label>الطبيب المعالج<select aria-label={`طبيب التصحيح ${index+1}`} className={input} value={draft?.doctorId??""} disabled={!canAmend} onChange={event=>change({doctorId:event.target.value})}>
+              <option value="">دون طبيب</option>{view.identityCatalog?.doctors.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
+            </select></label>
+            {item.toothCode?<><label>السن<input aria-label={`سن التصحيح ${index+1}`} className={input} inputMode="numeric" value={draft?.tooth??""} disabled={!canAmend} onChange={event=>change({tooth:event.target.value})}/></label>
+              <label>الأسطح (MODBL)<input aria-label={`أسطح التصحيح ${index+1}`} className={input} value={draft?.surfaces??""} disabled={!canAmend} onChange={event=>change({surfaces:event.target.value})}/></label></>:null}
+          </div>
+        </details>
       </div>;})}
       <div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold">الخصم<input aria-label="خصم التصحيح" className={input} value={discount} onChange={event=>setDiscount(event.target.value)} inputMode="decimal"/></label>
         <label className="text-xs font-bold">سبب الخصم<input aria-label="سبب خصم التصحيح" className={input} value={discountReason} maxLength={300} onChange={event=>setDiscountReason(event.target.value)}/></label></div>

@@ -316,3 +316,15 @@ export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   legacy_covered: "هذا العلاج له اتفاق تاريخي قائم؛ المتبقي في الرصيد السابق ولا يُفوتر العمل نفسه مرة ثانية.",
   already_billed: "هذا العلاج له فاتورة قائمة — استخدم البند الأصلي؛ الإلغاء والتصحيح لا يسمحان بفوترة العمل نفسه من جديد.",
 };
+
+/** Arch/region catalogue prices cover that scope once. Per-tooth and ordinary
+ * financial units may carry their explicit quantity; teeth are never inferred. */
+export function invoiceQuantityAllowed(category:string|null,quantity:number):boolean {
+  const mode=toothScope(category);
+  return Number.isSafeInteger(quantity)&&quantity>=1&&quantity<=999&&(!(mode==="arch"||mode==="region")||quantity===1);
+}
+
+/** Canonical scope labels and keys only; unknown free-text sites stay unknown. */
+export function caseSiteScope(raw:string|null|undefined):SiteScope|undefined {
+  return (Object.keys(SITE_SCOPE_LABEL) as SiteScope[]).find(key=>raw===key||raw===SITE_SCOPE_LABEL[key]);
+}

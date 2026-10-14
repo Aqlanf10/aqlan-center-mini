@@ -55,3 +55,48 @@ describe("shared collection from the patient header and durable financial recove
     }finally{await context.close();}
   },90000);
 });
+
+describe("two-tab durable money command arbitration",()=>{
+  it.each(["collection","receipt-correction"] as const)("allows one %s intent from competing tabs",async mode=>{
+    const stamp=`${mode}-${Date.now()}`;
+    const patientId=(await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'مريض تسابق مالي اصطناعي') RETURNING id",[`MONEY-TABS-${stamp}`])).rows[0].id;
+    const invoiceId=(await db.query("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by) VALUES($1,$2,25000,0,'YER','synthetic') RETURNING id",[`MONEY-TABS-${stamp}`,patientId])).rows[0].id;
+    let originalReceipt=0;
+    if(mode==="receipt-correction"){
+      const response=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({patientId,invoiceId,amount:"500",currency:"YER",kind:"payment",method:"cash"}),{"Idempotency-Key":`tabs-original-${patientId}`});
+      expect(response.status).toBe(201);originalReceipt=(await response.json()).id;
+    }
+    const context=await browser.newContext({viewport:{width:390,height:1000},locale:"ar-YE",serviceWorkers:"block"});
+    const [name,...value]=h.sessions.admin.cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);
+    const pages=await Promise.all([context.newPage(),context.newPage()]),commands:{key:string;body:string|null}[]=[];
+    await context.route(mode==="collection"?"**/api/payments":`**/api/payments/${originalReceipt}/correct`,async route=>{
+      if(route.request().method()==="POST")commands.push({key:route.request().headers()["idempotency-key"],body:route.request().postData()});
+      await route.continue();
+    });
+    try{
+      await Promise.all(pages.map(async(page,index)=>{
+        await page.goto(`${baseUrl}/patients/${patientId}?tab=account`,{waitUntil:"domcontentloaded"});
+        if(mode==="collection"){
+          await page.getByRole("button",{name:"تحصيل دفعة",exact:true}).click();
+          const modal=page.getByRole("dialog",{name:"تحصيل دفعة",exact:true});
+          await expect.poll(()=>modal.getByLabel("المبلغ",{exact:true}).isEnabled()).toBe(true);
+          await modal.getByLabel("المبلغ",{exact:true}).fill(index?"700":"500");
+        }else{
+          const print=page.getByRole("link",{name:"السند",exact:true}).and(page.locator(`a[href="/print/receipt/${originalReceipt}"]`));
+          await page.getByRole("region",{name:"الدفعات"}).locator("li").filter({has:print}).getByRole("button",{name:"تصحيح السند",exact:true}).click();
+          const editor=page.getByRole("group",{name:/^تصحيح /});
+          await editor.getByLabel("المبلغ الصحيح").fill(index?"100":"50");
+          await editor.getByLabel("سبب تصحيح السند").fill("تصحيح اصطناعي متزامن");
+        }
+      }));
+      await Promise.all(pages.map(page=>page.getByRole("button",{name:mode==="collection"?"سجّل الدفعة واطبع السند":"صحّح السند",exact:true}).click()));
+      const expected=mode==="collection"?1:3;
+      const count=async()=>Number((await db.query("SELECT count(*) FROM payments WHERE patient_id=$1",[patientId])).rows[0].count);
+      await expect.poll(count).toBe(expected);
+      await expect.poll(async()=> (await Promise.all(pages.map(page=>page.getByRole("status").allTextContents()))).flat().some(text=>/السند|الدفعة|العملية|الطلب/.test(text))).toBe(true);
+      expect(new Set(commands.map(command=>command.key)).size).toBe(1);expect(new Set(commands.map(command=>command.body)).size).toBe(1);
+      expect(await count()).toBe(expected);
+      if(mode==="receipt-correction")expect((await db.query("SELECT id FROM payments WHERE reversal_of_id=$1",[originalReceipt])).rows).toHaveLength(1);
+    }finally{await context.close();}
+  });
+});

@@ -1,4 +1,6 @@
 import type {DbClient} from "./db";
+import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
+import {isCurrency} from "./money";
 export class InvoiceVisitContextError extends Error {
   constructor(){super("الزيارة المحددة لا تخص هذا المريض أو لم تعد متاحة لربط الفاتورة. حدّث الزيارة واختر سياقها صراحةً.");}
 }
@@ -14,6 +16,14 @@ export async function lockInvoiceVisitContext(client:DbClient,patientId:number,v
  * that a different workflow erased or reassigned. No replay repairs or posts it. */
 export async function readInvoiceVisitContext(client:DbClient,patientId:number,visitId:number,invoiceId:number){
   const {rows:[visit]}=await client.query<{patient_id:number|null;invoice_id:number|null}>("SELECT patient_id,invoice_id FROM visits WHERE id=$1 FOR SHARE",[visitId]);
-  if(!visit||visit.patient_id!==patientId||visit.invoice_id!==invoiceId)throw new InvoiceVisitContextError();
+  if(!visit||visit.patient_id!==patientId||visit.invoice_id===null)throw new InvoiceVisitContextError();
+  if(visit.invoice_id!==invoiceId){
+    const {rows:[original]}=await client.query<{patient_id:number;base_currency:string}>("SELECT patient_id,base_currency FROM invoices WHERE id=$1",[invoiceId]);
+    if(!original||original.patient_id!==patientId||!isCurrency(original.base_currency))throw new InvoiceVisitContextError();
+    try{
+      const position=await readInvoiceSettlementPosition(client,{patientId,invoiceId:visit.invoice_id,currency:original.base_currency});
+      if(!position.lineageInvoiceIds.includes(invoiceId))throw new InvoiceVisitContextError();
+    }catch{throw new InvoiceVisitContextError();}
+  }
   return visitId;
 }

@@ -90,6 +90,8 @@ export interface HistoricalDocumentReceipt {
 }
 export function parseHistoricalCorrection(source:Record<string,unknown>,current:HistoricalDocumentReceipt,today:string) {
   const bad=(message:string)=>({ok:false as const,message});
+  if(["lines","serviceId","doctorId","toothCode","surfaces","site","caseId","planItemId"].some(key=>Object.hasOwn(source,key)))
+    return bad("العلاج التاريخي بدأ قبل النظام؛ تغيير خدمته أو طبيبه أو موضعه قد يعيد كتابة علاج منفّذ. تبقى هويته الأصلية محفوظة ويلزم تصحيح سريري مستقل؛ لم يُغيّر الاتفاق.");
   if(Object.keys(source).some(key=>!["idempotencyKey","expectedVersion","expectedSourceHash","prices","discount","discountReason","previouslyPaidAmount","historicalAsOf","note","reason","repaymentTerms","repaymentRemainingMinor","repaymentVersion"].includes(key)))return bad("حقول التصحيح غير صالحة.");
   if(typeof source.idempotencyKey!=="string"||!/^[A-Za-z0-9._:-]{8,128}$/.test(source.idempotencyKey)||source.expectedVersion!==current.version
     ||typeof source.expectedSourceHash!=="string"||!/^[a-f0-9]{64}$/.test(source.expectedSourceHash))return bad("تغيّر الاتفاق؛ أعد قراءة النسخة الحالية قبل التصحيح.");

@@ -35,6 +35,59 @@ describe("explicit invoice visit binding without generic visit inference",()=>{
     expect(await linked.recoverLinkedInvoice({patientId:owner,visitId:context,idempotencyKey:input.idempotencyKey!,requestHash:input.requestHash,createdBy:session.username,session})).toMatchObject({ok:true,replayed:true,visitId:context,invoice:{id:results[0].invoice.id}});
     expect(await count(owner)).toEqual({invoices:1,payments:0,plans:0});
   });
+  it("recovers the original explicit command after two corrections relink the same visit",async()=>{
+    const owner=await patient(),context=await visit(owner),{input}=await command(owner,context);
+    const saved=await linked.createLinkedInvoice(input);if(!saved.ok)throw new Error("Fixture invoice");
+    const revision=await import("../../lib/invoice-revision-db");
+    let current=saved.invoice.id;
+    for(const amount of [2900,2800]){
+      const view=await revision.readInvoiceRevision(current,session);
+      const corrected=await revision.reviseInvoice(current,{idempotencyKey:`visit-lineage-${owner}-${amount}`,expectedSourceHash:view.sourceHash,reason:"Synthetic correction before reply recovery",
+        lines:view.invoice.items.map(item=>({itemId:item.id,quantity:item.quantity,unitPrice:String(amount)})),discount:"0",discountReason:null,
+        repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:amount},session);
+      if(!("corrected" in corrected)||!corrected.corrected)throw new Error("Expected correction");
+      current=corrected.corrected.id;
+    }
+    const before=await count(owner);
+    const replay=await linked.createLinkedInvoice(input);
+    expect(replay).toMatchObject({ok:true,replayed:true,visitId:context,invoice:{id:saved.invoice.id,status:"cancelled"}});
+    expect(await linked.recoverLinkedInvoice({patientId:owner,visitId:context,idempotencyKey:input.idempotencyKey!,requestHash:input.requestHash,createdBy:session.username,session})).toMatchObject({ok:true,replayed:true,visitId:context,invoice:{id:saved.invoice.id}});
+    expect(await q("SELECT invoice_id FROM visits WHERE id=$1",[context])).toEqual([{invoice_id:current}]);
+    expect(await count(owner)).toEqual(before);
+    await db.setInvoiceStatus(current,"cancelled",{actor:session.username,actorRole:session.role});
+    expect(await linked.recoverLinkedInvoice({patientId:owner,visitId:context,idempotencyKey:input.idempotencyKey!,requestHash:input.requestHash,createdBy:session.username,session})).toMatchObject({ok:true,replayed:true,visitId:context,invoice:{id:saved.invoice.id}});
+    const unrelated=await linked.createLinkedInvoice((await command(owner)).input);if(!unrelated.ok)throw new Error("Fixture");
+    await q("UPDATE visits SET invoice_id=$2 WHERE id=$1",[context,unrelated.invoice.id]);
+    expect(await linked.createLinkedInvoice(input)).toMatchObject({ok:false,reason:"visit_context_invalid"});
+  });
+  it("waits on a linked visit before acquiring any invoice lock for repayment terms",async()=>{
+    const owner=await patient(),context=await visit(owner),created=await linked.createLinkedInvoice((await command(owner,context)).input);
+    if(!created.ok)throw new Error("Fixture invoice");
+    const schedules=await import("../../lib/debt-installments-db");
+    const workspace=await schedules.debtRepaymentWorkspace(owner,"2026-10-14");
+    const target=workspace.targets.find(row=>row.target.invoiceId===created.invoice.id)!;
+    const blocker=await db.getPool().connect(),observer=await db.getPool().connect();let pending:Promise<unknown>|null=null;
+    try{
+      await blocker.query("BEGIN");await blocker.query("SELECT id FROM visits WHERE id=$1 FOR UPDATE",[context]);
+      const blockerPid=(await blocker.query("SELECT pg_backend_pid() AS id")).rows[0].id;
+      let done=false;
+      pending=schedules.saveDebtRepayment({target:target.target,terms:{mode:"full",installments:[]},expectedVersion:target.version,
+        expectedRemainingMinor:target.remainingMinor,expectedSourceHash:target.sourceHash,reason:"Synthetic lock order",idempotencyKey:`visit-lock-order-${owner}`,session});
+      void pending.then(()=>{done=true;},()=>{done=true;});
+      const deadline=Date.now()+3000;let waiting=false;
+      while(!waiting&&!done&&Date.now()<deadline){
+        waiting=(await observer.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting",[blockerPid])).rows[0].waiting;
+        if(!waiting)await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      expect(waiting).toBe(true);expect(done).toBe(false);
+      await observer.query("BEGIN");
+      await observer.query("SELECT id FROM invoices WHERE id=$1 FOR UPDATE NOWAIT",[created.invoice.id]);
+      await observer.query("ROLLBACK");await blocker.query("COMMIT");await pending;
+      expect(await count(owner)).toEqual({invoices:1,payments:0,plans:0});
+    }finally{
+      await observer.query("ROLLBACK");await blocker.query("ROLLBACK");await pending?.catch(()=>undefined);observer.release();blocker.release();
+    }
+  });
   it("leaves all nearby open visits untouched for an independent invoice",async()=>{
     const owner=await patient();await visit(owner);await visit(owner);const {input}=await command(owner);
     expect(await linked.createLinkedInvoice(input)).toMatchObject({ok:true});expect(await q("SELECT invoice_id FROM visits WHERE patient_id=$1",[owner])).toEqual([{invoice_id:null},{invoice_id:null}]);

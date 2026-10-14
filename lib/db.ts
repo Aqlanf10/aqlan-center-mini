@@ -1,3 +1,4 @@
+import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
 import { caseSiteOverlaps, validateLineSite, SITE_SCOPE_LABEL, type LineSite, type SiteScope } from "./invoice-clinical-linkage";
 import { lockClinicalDoctors } from "./clinical-doctor-identity";
 import { historicalClinicalProgress, combineClinicalProgress, type ClinicalProgressView } from "./historical-clinical-projection";
@@ -8945,10 +8946,18 @@ async function itemsFor(invoiceIds: number[], client?: DbClient): Promise<Map<nu
     description: string; quantity: number; unit_price_minor: string; total_minor: string;
   }>(
     `SELECT ii.id, ii.invoice_id, ii.service_id, ii.doctor_id, ii.description, ii.quantity, ii.unit_price_minor, ii.total_minor,
-       ii.plan_item_id, i.case_id, i.tooth_code, i.surfaces, i.origin_invoice_id, i.billing_status,
+       ii.plan_item_id,
+       CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'caseId')::int ELSE i.case_id END AS case_id,
+       CASE WHEN archived.value IS NOT NULL THEN (archived.value->>'toothCode')::int ELSE i.tooth_code END AS tooth_code,
+       CASE WHEN archived.value IS NOT NULL THEN archived.value->>'surfaces' ELSE i.surfaces END AS surfaces,
+       i.origin_invoice_id, i.billing_status,
        COALESCE(${PLAN_ITEM_FINANCIAL_REVIEW_SQL}, false) AS financial_review
        FROM invoice_items ii LEFT JOIN plan_items i ON i.id = ii.plan_item_id
        LEFT JOIN treatment_plans t ON t.id = i.plan_id
+       LEFT JOIN LATERAL (SELECT line.value FROM invoice_corrections correction
+         JOIN invoice_correction_receipts receipt ON receipt.correction_id=correction.id
+         CROSS JOIN LATERAL jsonb_array_elements(receipt.receipt#>'{original,items}') line
+         WHERE correction.original_invoice_id=ii.invoice_id AND (line.value->>'id')::int=ii.id LIMIT 1) archived ON TRUE
        WHERE ii.invoice_id = ANY($1::int[]) ORDER BY ii.id`,
     [invoiceIds],
   );
@@ -9187,7 +9196,7 @@ export interface InvoiceCorrectionWrite {
 
 /** Transaction-owned existing reversal/replacement writer. The revision option
  * is internal; callers must validate current authority, locks and intent first. */
-export async function correctInvoiceInTransaction(client: DbClient, input: InvoiceCorrectionWrite, revision?: { discountMinor: number }) {
+export async function correctInvoiceInTransaction(client: DbClient, input: InvoiceCorrectionWrite, revision?: { discountMinor: number; amendments?: Map<number,InvoiceIdentityAmendment> }) {
     await lockPlanItemsBilledBy(client, input.invoiceId);
     const { rows: [original] } = await client.query<{
       id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
@@ -9235,11 +9244,12 @@ export async function correctInvoiceInTransaction(client: DbClient, input: Invoi
     const itemById = new Map(items.map((item) => [item.id, item]));
     for (const line of plan.lines) {
       const item = itemById.get(line.itemId)!;
+      const amended=revision?.amendments?.get(line.itemId);
       await client.query(
         `INSERT INTO invoice_items (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
                                     plan_item_id)
          VALUES ($1, $2::int, $3::int, $4, $5, $6, $7, $8::int)`,
-        [created.id, item.service_id, item.doctor_id, item.description, line.quantity, line.unitPriceMinor, line.totalMinor,
+        [created.id, amended?amended.serviceId:item.service_id, amended?amended.doctorId:item.doctor_id, amended?amended.description:item.description, line.quantity, line.unitPriceMinor, line.totalMinor,
           item.plan_item_id],
       );
     }

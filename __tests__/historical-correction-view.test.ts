@@ -1,3 +1,4 @@
+import {parseHistoricalCorrection} from "../lib/legacy-treatment-document";
 import {describe,it,expect} from "vitest";
 import {durableHistoricalCorrection,readHistoricalCorrectionReceipt,readHistoricalDocuments,restoreHistoricalCorrection,type HistoricalCorrectionCommand,type HistoricalDocumentView} from "../lib/historical-correction-view";
 
@@ -36,5 +37,18 @@ describe("historical correction immutable command and full acknowledgement",()=>
   it("reads account credit without clamping debt and rejects inconsistent aggregate opening or history",()=>{
     const {original}=fixture();expect(readHistoricalDocuments({documents:[{...original,accountDueMinor:-10000}]},9)).not.toBeNull();
     for(const change of [{openingRemainingMinor:180000},{history:[]},{currency:"EUR"},{correctionAvailable:undefined}])expect(readHistoricalDocuments({documents:[{...original,...change}]},9)).toBeNull();
+  });
+});
+
+
+describe("explicit historical correction safety refusals",()=>{
+  it("does not assert an unverified pre-system credit or rewrite a historical clinical identity",()=>{
+    const {original,body}=fixture();
+    const credit=parseHistoricalCorrection({...body,previouslyPaidAmount:"4000"},original,"2026-10-14");
+    expect(credit.ok).toBe(false);if(!credit.ok)expect(credit.message).toContain("مراجعة مستقلة");
+    for(const fields of [{doctorId:8},{serviceId:8},{toothCode:17},{lines:[]}]){
+      const clinical=parseHistoricalCorrection({...body,...fields},original,"2026-10-14");
+      expect(clinical.ok).toBe(false);if(!clinical.ok)expect(clinical.message).toContain("تصحيح سريري مستقل");
+    }
   });
 });

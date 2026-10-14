@@ -1,3 +1,5 @@
+import {invoiceQuantityAllowed} from "./invoice-clinical-linkage";
+import {invoiceIdentityCatalog,validateInvoiceIdentityAmendments} from "./invoice-identity-amendments";
 import type { SessionPayload } from "./auth";
 import { CLINIC_TIME_ZONE, correctInvoiceInTransaction, ensureSchema, getInvoice, getPool, getSettingsInTransaction,
   insertAuditRow, lockPlanItemsBilledBy, recomputePlanTotal, type DbClient } from "./db";
@@ -34,7 +36,13 @@ async function contextInTx(client: DbClient, invoiceId: number) {
         OR EXISTS (SELECT 1 FROM treatment_sessions s WHERE s.plan_item_id=i.id AND (s.status<>'planned' OR s.visit_id IS NOT NULL OR s.completed_at IS NOT NULL))
         OR EXISTS (SELECT 1 FROM endo_treatments e WHERE e.case_id=i.case_id OR e.crown_plan_item_id=i.id)
         OR c.ortho_case_id IS NOT NULL OR COALESCE(c.status<>'active',FALSE) OR length(btrim(COALESCE(c.problem,'')))>0
-        OR EXISTS (SELECT 1 FROM visits v WHERE v.case_id=i.case_id)) AS clinical_locked,
+        OR EXISTS (SELECT 1 FROM visits v WHERE v.case_id=i.case_id)
+        OR length(btrim(COALESCE(c.outcome,'')))>0
+        OR EXISTS (SELECT 1 FROM patient_problems p WHERE p.case_id=i.case_id OR p.plan_item_id=i.id)
+        OR EXISTS (SELECT 1 FROM patient_referrals r WHERE r.case_id=i.case_id OR r.blocks_case_id=i.case_id OR r.plan_item_id=i.id)
+        OR EXISTS (SELECT 1 FROM plan_item_dependencies d WHERE d.item_id=i.id OR d.requires_item_id=i.id)
+        OR (SELECT count(*) FROM plan_items shared WHERE shared.case_id=i.case_id)>1
+        OR EXISTS (SELECT 1 FROM commission_case_overrides o WHERE o.case_id=i.case_id OR o.plan_id=i.plan_id)) AS clinical_locked,
       EXISTS (SELECT 1 FROM legacy_treatment_agreements a WHERE a.plan_item_id=i.id) AS legacy
      FROM plan_items i LEFT JOIN clinical_cases c ON c.id=i.case_id
      WHERE i.id IN (SELECT plan_item_id FROM invoice_items WHERE invoice_id=$1) ORDER BY i.id`, [invoiceId]);
@@ -43,7 +51,10 @@ async function contextInTx(client: DbClient, invoiceId: number) {
       (SELECT version,status,terms FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
       WHERE a.patient_id=$1 AND a.invoice_id=$2`, [invoice.patientId,invoice.id]);
   const accountDueMinor = (await debtAccountDue(client,invoice.patientId,invoice.baseCurrency)).due;
-  const facts = { invoice, work, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
+  const identityCatalog=await invoiceIdentityCatalog(client);
+  const {rows:[bound]}=await client.query<{bound:boolean}>("SELECT EXISTS(SELECT 1 FROM invoice_items WHERE invoice_id=$1 AND (source_type IS NOT NULL OR source_id IS NOT NULL) AND source_type IS DISTINCT FROM 'plan_item') AS bound",[invoiceId]);
+  const identityAmendmentAvailable=Array.isArray(position.sourceSnapshot.payments)&&position.sourceSnapshot.payments.length===0&&!bound.bound;
+  const facts = { invoice, work,identityCatalog,identityAmendmentAvailable, settledMinor: position.settledMinor, remainingMinor: position.remainingMinor,
     accountDueMinor,settlementProofHash:position.settlementProofHash, repaymentVersion: schedule?.version ?? 0, repaymentTerms: schedule?.status === "active" ? schedule.terms : { mode: "full", installments: [] } };
   return { ...facts, sourceHash: debtRequestHash(facts), schedule, target };
 }
@@ -108,11 +119,12 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     if (settings["finance.locked_before"]?.trim() && date < settings["finance.locked_before"].trim()) bad("الفاتورة في فترة مقفلة؛ يلزم تصحيح معتمد في فترة مفتوحة.", "conflict");
     if (!Array.isArray(source.lines) || source.lines.length > 200 || !source.lines.every(record)) bad("بنود التصحيح غير صالحة.");
     const lines = source.lines.map(line => {
-      if (Object.keys(line).some(key => !["itemId","quantity","unitPrice"].includes(key))) bad("حقول بند التصحيح غير مدعومة.");
+      if (Object.keys(line).some(key => !["itemId","quantity","unitPrice","serviceId","doctorId","toothCode","surfaces"].includes(key))) bad("حقول بند التصحيح غير مدعومة.");
       const unitPriceMinor = typeof line.unitPrice === "string" ? parseAmount(line.unitPrice,before.invoice.baseCurrency) : null;
       if (unitPriceMinor === null || typeof line.itemId !== "number" || typeof line.quantity !== "number") bad("السعر والكمية وهوية البند مطلوبة.");
       return { itemId: line.itemId, quantity: line.quantity, unitPriceMinor };
     });
+    const amendments=await validateInvoiceIdentityAmendments(client,before.invoice,source.lines,before.work,before.identityAmendmentAvailable);
     const discountMinor = typeof source.discount === "string" ? parseAmount(source.discount,before.invoice.baseCurrency) : null;
     if (discountMinor === null) bad("الخصم غير صالح.");
     const discountReason = typeof source.discountReason === "string" ? source.discountReason.trim() : "";
@@ -128,6 +140,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       const original = before.invoice.items.find(item=>item.planItemId===work.id);
       if (!original || work.legacy) bad("البند مرتبط باتفاق تاريخي؛ صحّح وثيقته التاريخية من مسارها.","conflict");
       const line = lines.find(item=>item.itemId===original.id);
+      if(line&&line.quantity!==work.quantity&&!invoiceQuantityAllowed(work.category,line.quantity))bad("سعر هذه الخدمة يغطي النطاق مرة واحدة؛ لا تُضاعف قيمة الفك أو الحالة بالكمية.","conflict");
       if ((!line || line.quantity !== work.quantity) && work.clinical_locked) bad("للبند عمل أو مسودة سريرية محفوظة؛ لا يُحذف ولا تتغيّر كميته. أبقِ هويته وصحّح المبلغ كتسوية مالية.","conflict");
       if (line && original.financialReviewRequired) bad("الرابط المالي لهذا العلاج يحتاج مراجعة قبل التصحيح؛ لم تتغيّر السجلات السريرية.","conflict");
     }
@@ -135,7 +148,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       await writeDebtRepaymentInTransaction(client,{target:before.target,terms:{mode:"full",installments:[]},expectedVersion:before.repaymentVersion,
         expectedRemainingMinor:before.remainingMinor,cancel:true,reason,idempotencyKey:`invoice-revision:${hash}:old-terms`,session});
     }
-    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor});
+    const result = await correctInvoiceInTransaction(client,{invoiceId,lines,reason,actor:session.username,actorRole:session.role},{discountMinor,amendments});
     if (!result.ok) bad(result.message,result.reason === "not_found" ? "missing" : "conflict");
     const { rows: [revision] } = await client.query<{ id: number }>(
       `INSERT INTO invoice_corrections(patient_id,currency,original_invoice_id,corrected_invoice_id,idempotency_key,request_hash,reason,created_by)
@@ -146,6 +159,12 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       const original = before.invoice.items.find(item=>item.planItemId===work.id)!;
       const line = lines.find(item=>item.itemId===original.id);
       if (line) {
+        const identity=amendments.get(original.id);
+        if(identity){
+          await client.query("UPDATE plan_items SET service_id=$2,doctor_id=$3,service_name=$4,category=$5,tooth_code=$6,surfaces=$7 WHERE id=$1",
+            [work.id,identity.serviceId,identity.doctorId,identity.description,identity.category,identity.toothCode,identity.surfaces]);
+          if(work.case_id!==null)await client.query("UPDATE clinical_cases SET site=$2,responsible_party_id=$3 WHERE id=$1",[work.case_id,identity.caseSite,identity.doctorId]);
+        }
         await client.query("UPDATE plan_items SET quantity=$2,unit_price_minor=$3,billed_invoice_id=$4,billing_status='billed' WHERE id=$1",
           [work.id,line.quantity,line.unitPriceMinor,result.correctedId]);
         await client.query(`INSERT INTO invoice_correction_lines(correction_id,original_item_id,corrected_item_id,plan_item_id,approved_work)
@@ -162,14 +181,14 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     const repayment = remainingMinor > 0 ? await writeDebtRepaymentInTransaction(client,{
       target:{...before.target,invoiceId:result.correctedId},terms:terms.value,expectedVersion:0,expectedRemainingMinor:remainingMinor,
       reason,idempotencyKey:`invoice-revision:${hash}:new-terms`,session }) : null;
-    const corrected = await getInvoice(result.correctedId,client), original = await getInvoice(invoiceId,client);
+    const corrected = await getInvoice(result.correctedId,client), original = {...before.invoice,status:"cancelled" as const};
     const receipt = { original, corrected, patientId:owner.patient_id,currency:before.invoice.baseCurrency,idempotencyKey:key,createdBy:session.username,
       beforeMinor:before.invoice.totalMinor-before.invoice.discountMinor,afterMinor:netMinor,settledMinor:before.settledMinor,remainingMinor,
       creditMinor:Math.max(0,before.settledMinor-netMinor),accountCreditMinor:Math.max(0,-afterDueMinor),accountDueMinor:afterDueMinor,repayment };
     await client.query("INSERT INTO invoice_correction_receipts(correction_id,receipt) VALUES($1,$2::jsonb)",[revision.id,JSON.stringify(receipt)]);
     await insertAuditRow(client,{action:"invoice.correct",entity:"invoice",entityId:invoiceId,actor:session.username,actorRole:session.role,
       details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor:before.settledMinor,remainingMinor,
-        creditMinor:receipt.creditMinor,repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key}});
+        creditMinor:receipt.creditMinor,identityAmendments:[...amendments].map(([itemId,after])=>({itemId,before:before.invoice.items.find(item=>item.id===itemId),after})),repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key}});
     await authority(client,session); await client.query("COMMIT"); return { ...receipt, replayed:false };
   } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }

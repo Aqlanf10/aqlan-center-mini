@@ -30,7 +30,7 @@ import { lockDebtAccountForSchedule } from "./debt-account-position";
 import {InvoiceVisitContextError,lockInvoiceVisitContext,readInvoiceVisitContext} from "./invoice-visit-context";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
-  validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
+  validateLineSite, invoiceQuantityAllowed, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
@@ -395,7 +395,7 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     const doctors = await lockClinicalDoctors(client, [], clinicalDoctorIds);
     input.items.forEach((item, line) => {
       if (scheduled[line] && item.doctorId !== null && !doctors.has(item.doctorId)) throw new Refusal("bad_provider", line);
-      if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
+      if (!invoiceQuantityAllowed(item.category,item.quantity) || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
         throw new Refusal("shape_mismatch", line);
       }
     });

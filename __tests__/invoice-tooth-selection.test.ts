@@ -1,3 +1,4 @@
+import {invoiceQuantityAllowed} from "../lib/invoice-clinical-linkage";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createElement } from "react";
@@ -175,5 +176,13 @@ describe("historical original episode pricing", () => {
   });
   it("keeps independent root canal teeth as independent lines", () => {
     expect(applyHistoricalToothSelection([row()],0,"per_tooth_episode",{teeth:[16,17],surfaces:"",scope:null},key).map(row=>row.toothCode)).toEqual([16,17]);
+  });
+});
+
+
+describe("service pricing unit quantities",()=>{
+  it("prices an arch or region once while preserving per-tooth and financial units",()=>{
+    for(const category of ["ortho","cleaning"]){expect(invoiceQuantityAllowed(category,1)).toBe(true);expect(invoiceQuantityAllowed(category,2)).toBe(false);}
+    expect(invoiceQuantityAllowed("rct",2)).toBe(true);expect(invoiceQuantityAllowed("xray",2)).toBe(true);
   });
 });

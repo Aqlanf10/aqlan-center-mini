@@ -28,7 +28,7 @@ export async function collectDebtInstallment(input: {
     if(early){paymentId=early;replayed=true;await client.query("COMMIT");}
     else{
       // Same financial order as canonical recovery: patient FK fence -> shift ->
-      // opening-table fence -> sorted invoices -> sorted plans -> arrangement.
+      // linked visits -> opening-table fence -> sorted invoices -> sorted plans -> arrangement.
       // No original-receipt lock is acquired: this path creates only new payments.
       await client.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE",[input.patientId]);
       const {rows:shifts}=await client.query("SELECT id FROM cashier_shifts WHERE status='open' FOR UPDATE");
@@ -36,6 +36,7 @@ export async function collectDebtInstallment(input: {
       if(waited){paymentId=waited;replayed=true;await client.query("COMMIT");}
       else{
         if(!shifts.length)throw new DebtRepaymentError("stale","لا توجد وردية مفتوحة؛ افتح الوردية قبل التحصيل.");
+        await client.query("SELECT id FROM visits WHERE patient_id=$1 AND invoice_id IS NOT NULL ORDER BY id FOR UPDATE",[input.patientId]);
         await client.query("LOCK TABLE patient_opening_balances IN SHARE MODE");
         const invoices=(await client.query<{id:number}>("SELECT id FROM invoices WHERE patient_id=$1 ORDER BY id FOR UPDATE",[input.patientId])).rows;
         const plans=(await client.query<{id:number}>("SELECT id FROM treatment_plans WHERE patient_id=$1 ORDER BY id FOR SHARE",[input.patientId])).rows;

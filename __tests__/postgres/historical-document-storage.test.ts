@@ -172,6 +172,22 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
     expect(await documents.correctHistoricalDocument(source.patientId,document.id,change,session)).toEqual({...saved,replayed:true});
     expect((await schedules.listDebtRepayments(source.patientId,"2026-10-14"))[0]).toMatchObject({status:"cancelled",remainingMinor:0});
   });
+  it("recalculates the owned opening date from current positive document versions",async()=>{
+    const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);
+    const change={...await correction(document,"120000"),historicalAsOf:"2026-10-10"};
+    await documents.correctHistoricalDocument(source.patientId,document.id,change,session);
+    expect(await q("SELECT as_of_date::text FROM patient_opening_balances WHERE patient_id=$1",[source.patientId])).toEqual([{as_of_date:"2026-10-10"}]);
+    const first=(await documents.listHistoricalDocuments(source.patientId))[0];
+    const next={...source,items:[{serviceId:endo,quantity:1,price:"55000",catalogPriceMinor:55000,toothCode:26}],discount:"0",discountReason:null,previouslyPaidAmount:"0",historicalAsOf:"2026-09-01",idempotencyKey:`date-second-${++serial}`,
+      repaymentSourceHash:first.sourceHash,repaymentVersion:first.scheduleVersion,repaymentRemainingMinor:235000,repaymentTerms:terms(235000)};
+    const second=await documents.createHistoricalDocument(source.patientId,next,session);
+    expect(await q("SELECT as_of_date::text FROM patient_opening_balances WHERE patient_id=$1",[source.patientId])).toEqual([{as_of_date:"2026-09-01"}]);
+    const [secondView]= (await documents.listHistoricalDocuments(source.patientId)).filter(row=>row.id===second.document.id);
+    await documents.correctHistoricalDocument(source.patientId,second.document.id,{...await correction(second.document,"0"),expectedSourceHash:secondView.sourceHash,repaymentVersion:secondView.scheduleVersion,
+      historicalAsOf:"2026-10-12",repaymentRemainingMinor:235000,repaymentTerms:terms(235000)},session);
+    expect(await q("SELECT as_of_date::text FROM patient_opening_balances WHERE patient_id=$1",[source.patientId])).toEqual([{as_of_date:"2026-10-10"}]);
+    expect(await counts(source.patientId)).toMatchObject({invoices:0,payments:0,documents:2});
+  });
   it("reopens a cleared historical opening with the reviewed date and a new schedule version",async()=>{
     const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);
     const cleared=await documents.correctHistoricalDocument(source.patientId,document.id,await correction(document,"300000"),session);

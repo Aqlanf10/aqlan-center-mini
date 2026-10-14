@@ -26,13 +26,19 @@ function invoiceValue(value: unknown): value is Invoice {
 export interface InvoiceRevisionView {
   invoice: Invoice; sourceHash: string; settledMinor: number; remainingMinor: number; accountDueMinor: number;
   repaymentVersion: number; repaymentTerms: DebtRepaymentTerms;
-  work: { id:number; clinical_locked:boolean }[];
+  work: { id:number; clinical_locked:boolean; category?:string|null; case_site?:string|null }[];
+  identityAmendmentAvailable?:boolean;
+  identityCatalog?:{services:{id:number;name:string;category:string|null}[];doctors:{id:number;name:string}[]};
 }
 export function readInvoiceRevisionView(value: unknown, patientId: number, invoiceId: number): InvoiceRevisionView | null {
   if (!revisionRecord(value) || !invoiceValue(value.invoice) || value.invoice.patientId !== patientId || value.invoice.id !== invoiceId
     || typeof value.sourceHash !== "string" || !/^[a-f0-9]{64}$/.test(value.sourceHash) || !integer(value.settledMinor)
     || !minor(value.remainingMinor) || !integer(value.accountDueMinor) || !minor(value.repaymentVersion)
     || !Array.isArray(value.work) || !value.work.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.clinical_locked==="boolean")) return null;
+  if(value.identityAmendmentAvailable!==undefined&&typeof value.identityAmendmentAvailable!=="boolean")return null;
+  if(value.identityCatalog!==undefined&&(!revisionRecord(value.identityCatalog)||!Array.isArray(value.identityCatalog.services)||!Array.isArray(value.identityCatalog.doctors)
+    ||!value.identityCatalog.services.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.name==="string"&&(row.category===null||typeof row.category==="string"))
+    ||!value.identityCatalog.doctors.every(row=>revisionRecord(row)&&id(row.id)&&typeof row.name==="string")))return null;
   const terms=validateDebtRepaymentTerms(value.repaymentTerms,
     revisionRecord(value.repaymentTerms)&&Array.isArray(value.repaymentTerms.installments)
       ? value.repaymentTerms.installments.reduce((sum,row)=>sum+(revisionRecord(row)&&minor(row.amountMinor)?row.amountMinor:NaN),0) : NaN);
@@ -60,7 +66,8 @@ export function restoreInvoiceRevision(command:FinancialCommand,patientId:number
   const original=value.expected.original,bodyLines=body.lines;
   if (!value.expected.lines.every((line,index)=>revisionRecord(line)&&original.items.some(item=>item.id===line.id)&&id(line.quantity)&&minor(line.unitPriceMinor)
     &&revisionRecord(bodyLines[index])&&bodyLines[index].itemId===line.id&&bodyLines[index].quantity===line.quantity
-    &&parseAmount(String(bodyLines[index].unitPrice),original.baseCurrency)===line.unitPriceMinor)) throw new FinancialRecoveryError("invalid");
+    &&parseAmount(String(bodyLines[index].unitPrice),original.baseCurrency)===line.unitPriceMinor
+    &&["serviceId","doctorId","toothCode","surfaces"].every(key=>!Object.hasOwn(bodyLines[index],key)||bodyLines[index][key]===line[key]))) throw new FinancialRecoveryError("invalid");
   const restored=value as unknown as InvoiceRevisionCommand;
   const remaining=Math.max(0,restored.expected.lines.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0)-restored.expected.discountMinor-restored.expected.settledMinor);
   if(!sameTerms(restored.expected.terms,body.repaymentTerms,remaining)||body.expectedRemainingMinor!==remaining

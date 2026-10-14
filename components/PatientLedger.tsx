@@ -40,7 +40,7 @@ import { DebtRepaymentPanel, restoreDebtCommand, type DebtRepaymentCommand } fro
 import { readFinancialJournal, reserveFinancialCommand, acknowledgeFinancialCommand, FinancialRecoveryError, type FinancialCommand, type FinancialRecoveryControl } from "@/lib/financial-command-journal";
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
-import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, validateLineSite, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
+import { SITE_SCOPE_LABEL, allowedScopes, lineLinkage, invoiceQuantityAllowed, validateLineSite, type ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
 import { invoiceLineInputProblem, previewForRow } from "./dental/invoice-preview-state";
 import {
@@ -1566,7 +1566,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
                 ariaLabel="الخدمة" compact
               />
-              {isClinical(row.serviceId)?<span className={workspace.unit}>{modeOf(row)==="per_tooth_episode"||modeOf(row)==="tooth_surfaces"?"لكل سن":"للمجموعة / الحالة"}</span>:null}
+              {isClinical(row.serviceId)?<span className={workspace.unit}>{modeOf(row)==="per_tooth_episode"||modeOf(row)==="tooth_surfaces"||!historical&&modeOf(row)==="multi_tooth_episode"?"لكل سن":"للمجموعة / الحالة"}</span>:null}
             </div>
             {!row.serviceId ? (
               <input
@@ -1615,6 +1615,7 @@ function InvoiceForm({ patientId, visitId, base, services, busy, historical = fa
                 onChange={(event) => setRows((current) => current.map((item, i) =>
                   i === index ? { ...item, quantity: event.target.value } : item))}
                 aria-label="الكمية"
+                disabled={historical&&isClinical(row.serviceId)||!invoiceQuantityAllowed(serviceOf(row.serviceId)?.category??null,2)}
                 inputMode="numeric"
                 dir="ltr"
                 className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-center"

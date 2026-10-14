@@ -82,6 +82,7 @@ export function HistoricalCorrection({original,recovery,onRecoveryChange,financi
     <div className="flex flex-wrap justify-between gap-2"><h3 className="font-extrabold">تصحيح الاتفاق التاريخي #{view.id} · النسخة {view.version}</h3>
       <button type="button" className={button} disabled={busy||!!recovery} onClick={onCancel}>إغلاق التصحيح التاريخي</button></div>
     <p className="text-sm leading-7 text-slate-600">تُحفظ النسخة السابقة وسبب التصحيح. المدفوع قبل النظام معلومة تاريخية؛ لا يُنشئ التصحيح فاتورة أو سند قبض أو ردّ نقدي.</p>
+    <p className="text-xs leading-7 text-slate-600">هوية الخدمة والطبيب والموضع محفوظة لأن العلاج بدأ قبل النظام. تغييرها قد يعيد كتابة عمل منفّذ؛ يلزم تصحيح سريري مستقل.</p>
     {error?<p role="alert" className="text-sm text-rose-800">{error}</p>:null}
     {recovery?<div role="status" data-testid="historical-correction-recovery" className="space-y-3 rounded-xl bg-amber-50 p-3">
       <p>{busy?"جارٍ حفظ التصحيح…":recovery.message}</p><button type="button" className={button} disabled={busy||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب تصحيح الاتفاق</button>
@@ -104,7 +105,7 @@ export function HistoricalCorrection({original,recovery,onRecoveryChange,financi
       <p>المتفق عليه سابقًا: {formatMoney(view.agreedMinor,view.currency)}</p><p>المتفق عليه بعد التصحيح: <strong>{formatMoney(preview.agreed,view.currency)}</strong></p>
       <p>المتبقي التاريخي المصحح: {formatMoney(preview.remaining,view.currency)}</p><p>المتبقي الفعلي لكامل الرصيد السابق: <strong>{formatMoney(preview.openingRemaining,view.currency)}</strong></p>
       {preview.credit>0?<p className="font-bold text-sky-900">رصيد لصالح المريض: {formatMoney(preview.credit,view.currency)}. لم يُصرف ردّ نقدي.</p>:null}
-    </div><DebtRepaymentEditor compact value={terms} onChange={setTerms} currency={view.currency} remainingMinor={preview.openingRemaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={locked}/></>:<p role="alert" className="text-sm text-rose-800">راجع الأسعار والخصم والمدفوع السابق؛ يجب ألا يتجاوز المدفوع القديم الاتفاق المصحح.</p>}
+    </div><DebtRepaymentEditor compact value={terms} onChange={setTerms} currency={view.currency} remainingMinor={preview.openingRemaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={locked}/></>:<p role="alert" className="text-sm text-rose-800">راجع الأسعار والخصم والمدفوع السابق. إذا صار الاتفاق أقل من المدفوع قبل النظام، يلزم تحقق مستقل من الرصيد الدائن التاريخي والتسويات السابقة؛ لم يُنشأ سند أو ردّ نقدي.</p>}
     <button type="button" className={button+" bg-navy-800 text-white"} disabled={locked||!preview||!checked?.ok||reason.trim().length<3||!date||(parseAmount(discount,view.currency)??0)>0&&discountReason.trim().length<3} onClick={submit}>تأكيد تصحيح الاتفاق</button>
   </section>;
 }
