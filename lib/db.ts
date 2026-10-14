@@ -9103,12 +9103,12 @@ export async function getInvoice(id: number, client?: DbClient): Promise<Invoice
   return toInvoice(rows[0], items.get(id) ?? []);
 }
 
-export async function listPatientInvoices(patientId: number): Promise<Invoice[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<InvoiceRow>(
+export async function listPatientInvoices(patientId: number, client?: DbClient): Promise<Invoice[]> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<InvoiceRow>(
     `${INVOICE_SELECT} WHERE i.patient_id = $1 ORDER BY i.created_at DESC, i.id DESC`, [patientId],
   );
-  const items = await itemsFor(rows.map((row) => row.id));
+  const items = await itemsFor(rows.map((row) => row.id), client);
   return rows.map((row) => toInvoice(row, items.get(row.id) ?? []));
 }
 
@@ -9310,9 +9310,9 @@ export async function correctInvoice(input: InvoiceCorrectionWrite): Promise<Inv
   return { ok: true, original: original!, corrected: corrected! };
 }
 
-export async function listPatientPayments(patientId: number): Promise<Payment[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(
+export async function listPatientPayments(patientId: number, client?: DbClient): Promise<Payment[]> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<PaymentRow>(
     `${PAYMENT_SELECT} WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC`, [patientId],
   );
   return rows.map(toPayment);
@@ -10385,12 +10385,24 @@ export async function patientLedger(patientId: number): Promise<{
   /** (P1-5ب) الأرصدة الافتتاحية بعملاتها — صفٌّ لكل عملة. */
   openings: OpeningBalance[];
 }> {
-  const [invoices, payments, openings] = await Promise.all([
-    listPatientInvoices(patientId),
-    listPatientPayments(patientId),
-    getPatientOpeningBalances(patientId),
-  ]);
-  return { invoices, payments, openings };
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    // Independent pool reads can combine old principal with a newly committed
+    // receipt and invent a credit. All balance inputs, including invoice items,
+    // must belong to one snapshot; this read takes no financial row locks.
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const invoices = await listPatientInvoices(patientId, client);
+    const openings = await getPatientOpeningBalances(patientId, client);
+    const payments = await listPatientPayments(patientId, client);
+    await client.query("COMMIT");
+    return { invoices, payments, openings };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -18490,9 +18502,9 @@ export async function getPatientOpeningBalance(
 }
 
 /** (P1-5ب) أرصدة المريض الافتتاحية بكل عملاته — صفٌّ لكل عملة. */
-export async function getPatientOpeningBalances(patientId: number): Promise<OpeningBalance[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<OpeningRow>(
+export async function getPatientOpeningBalances(patientId: number, client?: DbClient): Promise<OpeningBalance[]> {
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<OpeningRow>(
     `${OPENING_SELECT} WHERE o.patient_id = $1 ORDER BY o.currency`,
     [patientId],
   );
