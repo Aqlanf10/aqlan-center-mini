@@ -6,7 +6,7 @@ import { baseUrl, harness } from "./_server";
 
 // Real React/StrictMode source gate in the existing isolated HTTP job.
 // No production route, external network, real study write or browser credentials.
-let browser: Browser, script = "";
+let browser: Browser, script = "", styles = "";
 const fixturePath = "/__test_only_patient_ceph__/", scriptPath = fixturePath + "fixture.js";
 const NEW = "+ دراسة سيفالومترية جديدة", OPEN = "📐 افتح مساحة التتبع والتحليل", BUSY = "جارٍ فتح كابينة الرسم…";
 const linkOnly: Plugin = { name: "ceph-next-link-anchor", setup(builder) {
@@ -22,17 +22,25 @@ beforeAll(async () => {
   expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
   const bundle = await build({ absWorkingDir: process.cwd(),
     entryPoints: ["__tests__/fixtures/patient-ceph-post-real-react.tsx"], bundle: true, write: false,
+    // Keep the component's real CSS module in this isolated browser fixture.
+    // write:false still prevents filesystem output; an output path lets esbuild
+    // emit the accompanying stylesheet and its matching class-name mapping.
+    outdir: "__test_only_patient_ceph_bundle__",
     platform: "browser", format: "iife", jsx: "automatic", tsconfig: "tsconfig.json", metafile: true,
     define: { "process.env.NODE_ENV": JSON.stringify("development") }, plugins: [linkOnly],
   });
-  expect(bundle.outputFiles).toHaveLength(1);
+  expect(bundle.outputFiles).toHaveLength(2);
+  const javascript = bundle.outputFiles.filter((file) => file.path.endsWith(".js"));
+  const stylesheet = bundle.outputFiles.filter((file) => file.path.endsWith(".css"));
+  expect(javascript).toHaveLength(1); expect(stylesheet).toHaveLength(1);
   const inputs = Object.keys(bundle.metafile!.inputs);
-  for (const real of ["components/PatientCeph.tsx", "components/SessionProvider.tsx", "node_modules/react-dom/client.js"]) {
+  for (const real of ["components/PatientCeph.tsx", "components/patient/PatientProfile.module.css", "components/SessionProvider.tsx", "node_modules/react-dom/client.js"]) {
     expect(inputs.some((path) => path.endsWith(real))).toBe(true);
   }
   expect(inputs.some((path) => /(?:^|\/)lib\/db(?:\.|\/)|node_modules\/(?:next|pg|@electric-sql)\//.test(path))).toBe(false);
   expect(inputs.filter((path) => path.startsWith("ceph-link:"))).toEqual(["ceph-link:next-link"]);
-  script = bundle.outputFiles[0].text;
+  script = javascript[0].text; styles = stylesheet[0].text;
+  expect(styles.trim().length).toBeGreaterThan(0);
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); });
@@ -48,7 +56,7 @@ async function open() {
     }
     if (url.pathname === fixturePath) await route.fulfill({ status: 200, contentType: "text/html", headers: {
       "Content-Security-Policy": "default-src 'none'; script-src 'self'; connect-src 'none'; style-src 'unsafe-inline'; base-uri 'none'",
-    }, body: '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Synthetic Ceph acceptance</title></head><body><div id="root"></div><script src="' + scriptPath + '"></script></body></html>' });
+    }, body: '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Synthetic Ceph acceptance</title><style>' + styles + '</style></head><body><div id="root"></div><script src="' + scriptPath + '"></script></body></html>' });
     else if (url.pathname === scriptPath) await route.fulfill({ status: 200, contentType: "text/javascript", body: script });
     else if (url.pathname === "/favicon.ico") await route.fulfill({ status: 204, body: "" });
     else { external.push(request.method() + " " + url.pathname); await route.abort(); }

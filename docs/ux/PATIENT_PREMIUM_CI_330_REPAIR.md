@@ -44,3 +44,15 @@ The 15-reference comparison gallery and runner evidence are updated in `evidence
 - The portable gallery verified 90 viewport/full-page image hashes and loaded all three width selections in Chromium without JavaScript errors. It includes 12 additional clinical detail captures and the 15 original references/difference maps.
 
 See [runner results](evidence/final/repair-verification-results.txt), [the failed-head reproduction](evidence/final/pending-notes-before.log), [remote failure annotations](evidence/final/failed-ci-annotations.json), and [source/capture provenance](evidence/final/capture-context.json). Final GitHub CI is tracked by exact SHA on PR #330; local results do not replace it.
+
+## Full-suite follow-up: native CSS in the Ceph StrictMode fixture
+
+The full local HTTP run on checkpoint `99a3f142` uncovered another setup regression inherited from `2d1c9cb2`: `patient-ceph-post-real-react.test.ts` bundled the real `PatientCeph` component without an output path. The new `PatientProfile.module.css` import therefore stopped esbuild before any of that file's 27 cases could execute. Those cases were reported skipped because setup failed; they were not deliberately disabled. The file and component were unchanged between those two heads.
+
+The fixture now supplies a virtual output directory with `write:false`, verifies that both the JavaScript and CSS outputs exist, verifies the actual CSS module is among the bundle inputs, and injects the generated stylesheet into its isolated HTML page under the existing CSP. It preserves the class-name mapping and all original StrictMode, patient/case/principal/permission lifetime and navigation assertions. No product component or screenshot changed in this follow-up.
+
+The preceding full local run recorded 1308 passed, two native-PDF test failures, and this one suite setup failure (27 cases not run). The two PDF failures concern Arabic glyph extraction/geometry in unchanged lab and receipt print tests under local Chromium 151 / Poppler 25.03. CI installs locked Chromium 153. The official matching-browser download was blocked with HTTP 403; the PDF oracles were not weakened. The observed receipt gap is 1.832742pt against the existing 0–0.5pt CI calibration; the lab label colon is attached to a word locally rather than extracted separately. Their final CI outcome is reported on the exact-head run, not inferred from local results.
+
+The full local unit run had 9179 passes and one unchanged runtime-tracing 5000ms timeout (8257ms). Its isolated recheck passed 5/5, with that assertion taking 4387ms. The checkpoint's GitHub unit stage also passed. See the retained full-HTTP failure summary and subsequent Ceph/pending-note runner log in `evidence/final`.
+
+After the fixture repair, all 27 Ceph cases and all five pending-note cases passed together (32/32), with typecheck and lint also passing. The application source and visual capture hashes remain unchanged from checkpoint `99a3f142`.
