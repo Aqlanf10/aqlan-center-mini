@@ -929,10 +929,13 @@ function PatientLedgerContent({ patientId, visitId, selectionContextKey = "", on
               }`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-extrabold">{invoice.invoiceNumber}</span>
-                  <span className="text-[11px] text-slate-500">
-                    {friendlyDateLong(invoice.createdAt.slice(0, 10))} · <InvoiceSettlementStatus invoice={invoice}
-                      patientId={patientId} evidence={ledger.installmentRecovery}
-                      ready={!loading && !error && ledger.invoices.filter((row) => row.id === invoice.id).length === 1} />
+                  <span className="flex max-w-full flex-wrap items-start gap-x-1 text-[11px] leading-5 text-slate-500">
+                    <span>{friendlyDateLong(invoice.createdAt.slice(0, 10))} ·</span>
+                    <span className="max-w-full">
+                      <InvoiceSettlementStatus invoice={invoice}
+                        patientId={patientId} evidence={ledger.installmentRecovery}
+                        ready={!loading && !error && ledger.invoices.filter((row) => row.id === invoice.id).length === 1} />
+                    </span>
                   </span>
                 </div>
                 <ul className="mt-2 space-y-0.5">

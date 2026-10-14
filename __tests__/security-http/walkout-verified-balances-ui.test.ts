@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Route } from "playwright";
 import { baseUrl, harness } from "./_server";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
-import { formatMoney } from "../../lib/money";
+import { formatMoney, parseAmount, toBaseAmount } from "../../lib/money";
 import { isTreatmentFinancialContext } from "../../lib/treatment-financial-context-validation";
 import type { TreatmentFinancialContext } from "../../lib/treatment-financial-context";
 import { MONEY_UNCERTAIN } from "../../lib/money-attempt";
@@ -56,7 +56,16 @@ describe("built patient walkout verifies balances for reception", () => {
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${path}`); await route.abort(); return; }
       if (method === "POST" && path === "/api/payments" && paidInvoice) {
         paymentAttempts.push({ body: request.postDataJSON() as Record<string, unknown>, key: request.headers()["idempotency-key"] });
-        await json(route, paymentAttempts.length === 1 ? { message: "Synthetic retry" } : { id: 98785 }, paymentAttempts.length === 1 ? 500 : 200);
+        const submitted = request.postDataJSON() as { amount: string; currency: "YER" | "SAR" | "USD"; openingCurrency?: "YER" | "SAR" | "USD" };
+        const amountMinor = parseAmount(submitted.amount, submitted.currency);
+        if (amountMinor === null) throw new Error("Invalid synthetic receipt amount");
+        const exchangeRate = submitted.currency === "YER" ? 1 : submitted.currency === "SAR" ? 140 : 530;
+        await json(route, paymentAttempts.length === 1 ? { message: "Synthetic retry" } : {
+          id: 98785, receiptNumber: "SYNTHETIC-RECEIPT-98785", patientId, kind: "payment", amountMinor,
+          currency: submitted.currency, invoiceId: null, planId: null, openingCurrency: submitted.openingCurrency ?? null, method: "cash", note: null,
+          createdBy: "secreception", shiftId: 1, createdAt: "2026-10-14T09:00:00Z", baseCurrency: "YER",
+          baseAmountMinor: toBaseAmount(amountMinor, submitted.currency, "YER", exchangeRate), exchangeRate, idempotencyKey: request.headers()["idempotency-key"],
+        }, paymentAttempts.length === 1 ? 500 : 200);
         return; // Synthetic fulfillment; no payment request reaches the application server.
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { writes.push(`${method} ${path}`); await json(route, {}, 409); return; }
@@ -122,7 +131,9 @@ describe("built patient walkout verifies balances for reception", () => {
         if (fault === "amount") (body.checkout.current as { YER: unknown }).YER = "0";
         if (fault === "foreign") body.patientId++;
         await json(route, body);
-      } else if (path === "/api/visits/readiness") await json(route, { visit: null });
+      } else if (path === `/api/patients/${patientId}/historical-documents`) await json(route, { documents: [] });
+      else if (path === `/api/patients/${patientId}/debt-repayments`) await json(route, { patientId, arrangements: [], targets: [] });
+      else if (path === "/api/visits/readiness") await json(route, { visit: null });
       else if (path === "/api/visits") await json(route, []);
       else if (path === "/api/booking-requests") await json(route, []);
       else if (path === "/api/lab") await json(route, { late: 0 });

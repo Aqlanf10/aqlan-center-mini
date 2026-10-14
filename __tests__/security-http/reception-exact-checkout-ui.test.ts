@@ -69,7 +69,11 @@ describe("exact reception checkout on the built patient workspace", () => {
         expect(body).not.toHaveProperty("openingCurrency");
         writes.push({ body, key: request.headers()["idempotency-key"] });
         collected = true; mode = "failed";
-        await json(route, { id: 98891 }); return; // Fulfilled synthetic response; never a real payment write.
+        await json(route, { id: 98891, receiptNumber: "SYNTHETIC-RECEIPT-98891", patientId,
+          kind: "payment", amountMinor: 5000, currency: "SAR", invoiceId, planId: null, openingCurrency: null,
+          method: "cash", note: null, createdBy: "secreception", shiftId: 1, createdAt: "2026-10-14T09:00:00Z",
+          baseCurrency: "YER", baseAmountMinor: 7000, exchangeRate: 140,
+          idempotencyKey: request.headers()["idempotency-key"] }); return; // Canonical synthetic acknowledgement; never a real payment write.
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { unexpected.push(`${method} ${path}`); await route.abort(); return; }
       if (path === `/api/patients/${patientId}/workflow`) { await json(route, workflow()); return; }

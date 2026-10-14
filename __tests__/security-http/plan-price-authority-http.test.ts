@@ -114,8 +114,17 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
     expect(await storedItems(planId)).toEqual([{ name: `تاج سلطة الخطة ${stamp}`, price: 15000 }]);
   });
 
+  it("rejects an unknown catalogue reference without silently creating a financial fallback", async () => {
+    const response = await createTreatment("reception", [{ serviceId: 99999999, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
+    expect(response.status).toBe(400);
+    const { rows: [patient] } = await db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number=$1", [`FIN5-${stamp}-${sequence}`]);
+    for (const table of ["invoices", "treatment_plans", "clinical_cases", "payments"]) {
+      expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [patient.id])).rows).toEqual([]);
+    }
+  });
+
   it("manual descriptions remain financial-only and cannot invent clinical catalog work", async () => {
-    for (const serviceId of [undefined, 99999999]) {
+    for (const serviceId of [undefined]) {
       const response = await createTreatment("reception", [{ serviceId, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
       expect(response.status).toBe(201);
       const invoice = await response.json() as { id: number; patientId: number; clinical: { planId: null; links: unknown[] } };
