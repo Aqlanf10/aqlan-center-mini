@@ -1,0 +1,20 @@
+{
+  "status": "WIP — not accepted; stopped by user before further development",
+  "capturedFromParent": "add3b2b5076964dcf39c106075970018b0dac096",
+  "savedAt": "2026-10-14T08:44:15.824221+03:00",
+  "files": {
+    "__tests__/security-http/patient-premium-visual-ui.test.ts": "49566226230b2223147e0fd2aa5ec40be52faeccb6bb14a0d1451624cafce3b0",
+    "app/patients/[id]/page.tsx": "45055673559649c6b9a9ff84fc930fb9141be507f77d7927a218e5950cc7e318",
+    "app/patients/[id]/patient-premium.module.css": "1019938bfcd7cce52d4a8e48613c6a38467e2a9b68357f994d247f396b7272a3",
+    "components/ClinicalVisit.tsx": "6fa04411b2116b94b0a62289d98b9b547e40bb84bf341adbde0a35ce00bf2a5d",
+    "components/DentalChart.tsx": "820d6cbfa52ea081aee9d9227da704b7cf0ac9ca751e43319e57057cf723fbf1",
+    "components/PatientPlans.tsx": "99e8b8d07f861bbd54761e03af2dfd667c88d183dcd8b31d56d4a9d3ead8fa1e",
+    "components/patient/PatientClinical.module.css": "9a9f44bbe5228bd4fe69af3699d363270b55faf69ac42b85ec7016343ad03150",
+    "components/patient/PatientCockpit.tsx": "5ba038191a2f31ad6683c6ce0b45ab9501ddd6e932d0dc01c12227cd0b53747b",
+    "components/patient/PatientOverview.module.css": "7642bcf9f5daeab80122f2e6980c7009e4140098c307bf6f3f94720a9441aa3d",
+    "components/patient/PatientPremiumAccountOverview.tsx": "c15fe8efc38dce62470a8092253f969d26da643f49e2bfd0ea72678cb96694d3",
+    "components/patient/SummaryTab.tsx": "b2543e59941843a1c1a73698db304616f7d7e38ecea6735f70dae41d969942b6",
+    "components/patient/TodayVisitTab.tsx": "750fe418168f971db01fd4055b232cff161b7a69c53a26bfb8cd888f2356d37c",
+    "components/patient/PatientPlans.module.css": "a51f6e0f25ff52553c6ff1d63863a2e8b4addf06c9dad240334159b73bd9416a"
+  }
+}

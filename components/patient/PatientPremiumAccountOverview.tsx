@@ -49,27 +49,24 @@ export function PatientPremiumAccountOverview({
   return (
     <section aria-label="الملخص المالي الحالي" data-testid="patient-premium-account-overview"
       className={styles.metrics}>
-      <div className={styles.currencyChoices} role="group" aria-label="عملات ملخص الحساب">
-        {entries.map(({currency}) => <button key={currency} type="button" aria-pressed={currency === currentCurrency}
-          onClick={() => setSelectedCurrency(currency)}>{CURRENCY_LABEL[currency]}</button>)}
-        {entries.length > 1 ? <span>حساب مستقل لكل عملة</span> : null}
-      </div>
       {entries.map(({ currency, row }) => {
         const due = row.balanceMinor;
         const agreementRemaining = row.agreementRemainingMinor;
-        const cards: { label: string; amount: number | undefined; tone: string; icon: IconName }[] = [
+        const cards: { label: string; amount: number | undefined; tone: string; icon: IconName; currentDues?: boolean }[] = [
           { label: "إجمالي الاتفاق المسجل", amount: row.agreedMinor, tone: "agreed", icon: "clipboard" },
           { label: "المسدّد من الاتفاق", amount: row.agreementPaidMinor, tone: "paid", icon: "check" },
           { label: "المتبقي من الاتفاق", amount: agreementRemaining, tone: "remaining", icon: "wallet" },
           { label: due > 0 ? "الرصيد المستحق حالياً" : due < 0 ? "رصيد لصالح المريض" : "الرصيد الحالي",
-            amount: Number.isFinite(due) ? Math.abs(due) : undefined, tone: due > 0 ? "due" : "paid", icon: "wallet" },
+            amount: Number.isFinite(due) ? Math.abs(due) : undefined, tone: due > 0 ? "due" : "paid", icon: "wallet", currentDues: true },
         ];
         return (
           <div key={currency} hidden={currency !== currentCurrency} aria-label={CURRENCY_LABEL[currency]}>
             <div className={styles.metricGrid} data-testid={`patient-finance-overview-${currency}`}>
               {cards.map((card) => (
                 <div key={card.label} className={styles.metric} data-tone={card.tone}>
-                  <dl><dt>{card.label}</dt><dd>{typeof card.amount === "number" && Number.isFinite(card.amount) ? formatMoney(card.amount, currency) : "غير متاح"}</dd></dl>
+                  <dl><dt>{card.label}</dt>{card.currentDues && entries.length > 1
+                    ? <dd className={styles.nativeDues} aria-label="الأرصدة الحالية بكل عملة">{entries.map(entry => <span key={entry.currency} data-currency={entry.currency}><small>{CURRENCY_LABEL[entry.currency]}</small><strong>{Number.isFinite(entry.row.balanceMinor) ? formatMoney(Math.abs(entry.row.balanceMinor), entry.currency) : "غير متاح"}</strong>{entry.row.balanceMinor < 0 ? <small>لصالح المريض</small> : null}</span>)}</dd>
+                    : <dd>{typeof card.amount === "number" && Number.isFinite(card.amount) ? formatMoney(card.amount, currency) : "غير متاح"}</dd>}</dl>
                   <span className={styles.metricIcon} aria-hidden="true"><Icon name={card.icon} className="h-6 w-6" /></span>
                 </div>
               ))}
@@ -77,7 +74,12 @@ export function PatientPremiumAccountOverview({
           </div>
         );
       })}
-      <p className={styles.note}>
+      <div className={styles.currencyChoices} role="group" aria-label="عملات ملخص الحساب">
+      {entries.map(({currency}) => <button key={currency} type="button" aria-pressed={currency === currentCurrency}
+          onClick={() => setSelectedCurrency(currency)}>{CURRENCY_LABEL[currency]}</button>)}
+        {entries.length > 1 ? <span>حساب مستقل لكل عملة</span> : null}
+      </div>
+        <p className={styles.note}>
         الرصيد الحالي مستقل عن المبلغ المتبقي من اتفاق العلاج؛ لا يُضاف أحدهما إلى الآخر.
       </p>
     </section>

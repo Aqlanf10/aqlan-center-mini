@@ -1,0 +1,26 @@
+--- a/components/PatientLedger.tsx
++++ b/components/PatientLedger.tsx
+@@ -478,6 +478,8 @@
+         <p role="status" className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800">{notice}</p>
+       ) : null}
+ 
++      <section aria-label="الرصيد الحالي المستحق" data-testid="account-balance-region">
++        <h2>الرصيد الحالي المستحق</h2>
+       {ledger && !loading && !error ? (
+         /* (TD-05) رصيدٌ لكل عملة ذات نشاط: عملةٌ واحدة تُعرض كما كان دائمًا،
+            وعملات اتفاقٍ متعددة تُعرض كلٌّ ببطاقتها الموسومة — لا رقمٌ واحد يمزجها. */
+@@ -505,11 +507,13 @@
+         ))
+       ) : null}
+ 
++      </section>
++
+       {ledger && (loading || error) ? <p role="status" data-testid="account-balance-unavailable" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+         {loading ? "جارٍ التحقق من رصيد الحساب…" : "رصيد الحساب غير متاح حتى تنجح إعادة القراءة؛ لا يُعدّ ذلك رصيدًا صفريًا."}
+       </p> : null}
+ 
+-      <div className="mb-3 flex flex-wrap gap-1.5">
++      <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="إجراءات الحساب السريعة">
+         <button type="button" data-testid="treatment-entry-open" disabled={busy || (!canStartTreatment && mode === "none")}
+           onClick={() => changeMode(mode === "none" || mode === "opening" ? "entry" : "none")}
+           aria-expanded={mode === "entry" || mode === "invoice" || mode === "legacy"}

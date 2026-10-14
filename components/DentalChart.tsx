@@ -29,17 +29,17 @@ const ORDERED_CONDITIONS: ToothCondition[] = [
   "bracket", "impacted", "fracture", "mobility", "extracted", "missing", "healthy",
 ];
 
-export function DentalChart({ patientId }: { patientId: number }) {
+export function DentalChart({ patientId, readOnly = false }: { patientId: number; readOnly?: boolean }) {
   const session = useSession();
   // A chart and its unsaved tooth editor belong to this patient and principal.
   // A keyed lifetime also protects A → B → A navigation from older callbacks.
-  const owner = JSON.stringify([patientId, session?.username, session?.role,
+  const owner = JSON.stringify([patientId, readOnly, session?.username, session?.role,
     Object.entries(session?.permissions ?? {}).sort(([a], [b]) => a.localeCompare(b))]);
-  return <DentalChartWorkspace key={owner} patientId={patientId} session={session} />;
+  return <DentalChartWorkspace key={owner} patientId={patientId} session={session} readOnly={readOnly} />;
 }
 
-function DentalChartWorkspace({ patientId, session }: { patientId: number; session: SessionInfo | null }) {
-  const canEdit = isAdmin(session?.role) || session?.role === "doctor";
+function DentalChartWorkspace({ patientId, session, readOnly }: { patientId: number; session: SessionInfo | null; readOnly: boolean }) {
+  const canEdit = !readOnly && (isAdmin(session?.role) || session?.role === "doctor");
 
   const [records, setRecords] = useState<ToothRecord[]>([]);
   const [loading, setLoading] = useState(true);

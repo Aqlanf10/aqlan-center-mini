@@ -15,12 +15,14 @@ beforeAll(async () => {
   const doctor = (await db.query("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0].party_id;
   patientId = (await db.query(`INSERT INTO patients (patient_number,full_name,phone,gender,birth_date,primary_doctor_id,medical_alert)
     VALUES ($1,'أحمد محمد — ملف اصطناعي','777123456','male','1998-01-15',$2,'حساسية بنسلين — تنبيه اختبار اصطناعي') RETURNING id`, [`VISUAL-${Date.now()}`, doctor])).rows[0].id;
-  for (const [title, currency, total] of [["خطة ترميم الأسنان", "YER", 30000000], ["خطة متابعة مستقلة", "SAR", 300000]] as const) {
+  for (const [title, currency, total] of [["خطة ترميم الأسنان", "YER", 30000000], ["خطة متابعة مستقلة", "SAR", 300000], ["خطة مستقلة بالدولار", "USD", 20000]] as const) {
     const plan = (await db.query(`INSERT INTO treatment_plans (patient_id,title,total_minor,base_currency,status,consent_at) VALUES ($1,$2,$3,$4,'active',NOW()) RETURNING id`, [patientId,title,total,currency])).rows[0].id;
     await db.query(`INSERT INTO plan_items (plan_id,service_name,tooth_code,unit_price_minor,status) VALUES ($1,'حشوة تجريبية',26,$2,'done'),($1,'متابعة تجريبية',36,$2,'planned')`,[plan,total / 2]);
   }
   await db.query(`INSERT INTO visits (patient_name,patient_id,doctor_id,status) VALUES ('أحمد محمد — ملف اصطناعي',$1,$2,'in_chair')`,[patientId,doctor]);
-  await db.query(`INSERT INTO invoices (invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by) VALUES ($1,$2,2500000,0,'YER','secadmin')`,[`VISUAL-INV-${Date.now()}`,patientId]);
+  for (const [currency, amount] of [["YER",2500000],["SAR",15000],["USD",5000]] as const) {
+    await db.query(`INSERT INTO invoices (invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by) VALUES ($1,$2,$3,0,$4,'secadmin')`,[`VISUAL-INV-${currency}-${Date.now()}`,patientId,amount,currency]);
+  }
   const caseId = (await db.query(`INSERT INTO clinical_cases (patient_id,specialty,title,responsible_party_id,created_by) VALUES ($1,'endodontics','حالة عصب اصطناعية — سن 36',$2,'secadmin') RETURNING id`,[patientId,doctor])).rows[0].id;
   await db.query(`INSERT INTO endo_treatments (patient_id,case_id,tooth_code,created_by) VALUES ($1,$2,36,'secadmin')`,[patientId,caseId]);
   orthoId = (await db.query(`INSERT INTO ortho_cases (patient_id,created_by,bracket_system,upper_wire,lower_wire) VALUES ($1,'secadmin','SYNTHETIC','014 NiTi','012 NiTi') RETURNING id`,[patientId])).rows[0].id;
@@ -157,14 +159,14 @@ describe("premium UI authority and draft ownership",()=>{
       await page.getByTestId("patient-tab-summary").click(); await accepted;
       await page.getByTestId("summary-current-work").waitFor();
       const currencies=page.getByRole("group",{name:"عملات ملخص الحساب"});
-      for(const label of ["ريال سعودي","ريال يمني"]) {
+      for(const label of ["ريال سعودي","دولار","ريال يمني"]) {
         await currencies.getByRole("button",{name:label,exact:true}).click();
         expect(await currencies.getByRole("button",{name:label,exact:true}).getAttribute("aria-pressed")).toBe("true");
       }
       const account=page.getByRole("region",{name:"الحساب",exact:true});
       expect(await page.getByRole("button",{name:"تحصيل دفعة",exact:true}).count()).toBe(1);
       const disclosures=account.locator("details");
-      expect(await disclosures.count()).toBe(2);
+      expect(await disclosures.count()).toBe(3);
       for(const disclosure of await disclosures.all()) {
         expect(await disclosure.getAttribute("open")).toBeNull();
         await disclosure.locator("summary").click();
@@ -175,7 +177,7 @@ describe("premium UI authority and draft ownership",()=>{
       }
       const select=page.getByLabel("الخطة المعروضة في الملخص",{exact:true});
       const choices=await select.locator("option").evaluateAll(options=>options.map(option=>({value:(option as HTMLOptionElement).value,title:option.textContent})));
-      expect(choices.length).toBe(2);
+      expect(choices.length).toBe(3);
       for(const choice of choices) {
         await select.selectOption(choice.value);
         expect(await page.getByRole("region",{name:"تقدم الخطة المختارة"}).innerText()).toContain(choice.title);

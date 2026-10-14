@@ -1,0 +1,133 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/patient-premium-visual-ui.test.ts __tests__/security-http/clinical-visit-pending-notes-ui.test.ts __tests__/security-http/patient-navigation-ui-journey.test.ts __tests__/security-http/patient-more-menu-ui.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts (13 tests | 2 failed | 2 skipped) 34203ms
+       × keeps add/replace/remove visible through failed canonical GETs at 1280px 2698ms
+       × keeps add/replace/remove visible through failed canonical GETs at 390px 2963ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 1280px
+AssertionError: expected 'ما\nمريض اختبار التنقل — ليس حقيقياً\…' not to contain 'تحذير جديد مؤكد'
+
+- Expected
++ Received
+
++ ما
++ مريض اختبار التنقل — ليس حقيقياً
++ #NAV-1791956298073
++ غير محدد · العمر غير مسجّل
++ الطبيب المسؤول عن الخطة
++ غير محدد
++ رقم الجوال
++ غير مسجل
++ العمر
++ العمر غير مسجّل
++ الموعد القادم
++ غير متاح
++ رقم الملف
++ NAV-1791956298073
++ ⚠️ تحذير تاريخ طبي مستقل لا يُزال مع تنبيه الملف
++ 🪑 حالة الزيارة غير متاحة الآن
++ ⚠️
++ تنبيه أمان سريري:
+  تحذير جديد مؤكد
++ ✏️ تعديل التنبيهات
++ علامات حيوية: غير مسجلة
++
++ تعذّر التحقق من الزيارة؛ إدخال الكرسي متوقف حتى التحديث.
++ إعادة التحقق
+
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:245:49
+    243|           await expect.poll(() => patientWarning.innerText()).toContai…
+    244|           expect(await patientWarning.isVisible()).toBe(true);
+    245|           expect(await cockpit.innerText()).not.toContain(alert);
+       |                                                 ^
+    246|         } else expect(await patientWarning.count()).toBe(0);
+    247|         if (index > 0) {
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:223:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 1280px
+ FAIL  __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 390px
+AssertionError: expected [ 'تحذير جديد مؤكد' ] to deeply equal [ 'تحذير جديد مؤكد', …(2) ]
+
+- Expected
++ Received
+
+  [
+    "تحذير جديد مؤكد",
+-   "تحذير بديل مؤكد",
+-   "",
+  ]
+
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:287:22
+    285|       expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+    286|     }, () => {
+    287|       expect(writes).toEqual(["تحذير جديد مؤكد", "تحذير بديل مؤكد", ""…
+       |                      ^
+    288|       expect(unexpected).toEqual([]); expect(errors).toEqual([]);
+    289|     });
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:66:13
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:223:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/security-http/patient-navigation-ui-journey.test.ts > patient context navigation on the built application > confirmed patient alert freshness beside an unchanged ENDO draft > keeps add/replace/remove visible through failed canonical GETs at 390px
+AssertionError: expected 'ما\nمريض اختبار التنقل — ليس حقيقياً\…' not to contain 'تحذير جديد مؤكد'
+
+- Expected
++ Received
+
++ ما
++ مريض اختبار التنقل — ليس حقيقياً
++ #NAV-1791956298073
++ غير محدد · العمر غير مسجّل
++ الطبيب المسؤول عن الخطة
++ غير محدد
++ رقم الجوال
++ غير مسجل
++ العمر
++ العمر غير مسجّل
++ ⚠️ تحذير تاريخ طبي مستقل لا يُزال مع تنبيه الملف
++ 🪑 حالة الزيارة غير متاحة الآن
++ ⚠️
++ تنبيه أمان سريري:
+  تحذير جديد مؤكد
++ ✏️ تعديل التنبيهات
++ علامات حيوية: غير مسجلة
++
++ تعذّر التحقق من الزيارة؛ إدخال الكرسي متوقف حتى التحديث.
++ إعادة التحقق
+
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:245:49
+    243|           await expect.poll(() => patientWarning.innerText()).toContai…
+    244|           expect(await patientWarning.isVisible()).toBe(true);
+    245|           expect(await cockpit.innerText()).not.toContain(alert);
+       |                                                 ^
+    246|         } else expect(await patientWarning.count()).toBe(0);
+    247|         if (index > 0) {
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/patient-navigation-ui-journey.test.ts:223:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed | 2 passed | 1 skipped (4)
+      Tests  2 failed | 29 passed | 6 skipped (37)
+   Start at  05:36:10
+   Duration  161.88s (transform 310ms, setup 0ms, import 726ms, tests 155.34s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

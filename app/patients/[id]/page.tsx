@@ -637,11 +637,30 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           </div>
         ) : null;
 
+  const summaryNavigation = (!isRestrictedRole(session?.role) ? <nav aria-label="تفاصيل الملخص" className={patientPremium.summaryViews}>
+            {([ ["overview","ملخص الرحلة"], ["identity","البيانات الشخصية"], ["medical","التاريخ الطبي"] ] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={summaryView === value} onClick={() => showSummaryView(value)}>{label}</button>)}
+          </nav> : null);
+
   return (
     <main className={`${patientPremium.root} mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28`} data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
       <div className={patientPremium.pageHeading}>
         <p>ملف المريض — {TABS.find(([key]) => key === tab)?.[1]}</p>
+        {tab === "summary" ? summaryNavigation : null}
+        <div className={patientPremium.headingActions}>
+          {compactWorkspace && primaryAction ? <button type="button" onClick={primaryAction.run} disabled={busyAction}
+            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
+            {primaryAction.label}
+          </button> : null}
+          {compactWorkspace ? <button type="button" onClick={() => {
+            setMoreOpen(false);
+            setPatientDetailsOpen((open) => !open);
+          }}
+            aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
+            className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
+            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
+          </button> : null}
         <a href="/patients"><Icon name="arrow" className="h-3.5 w-3.5" /> عودة للمرضى</a>
+        </div>
       </div>
       {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
@@ -652,6 +671,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         confirmedAlert={confirmedAlert?.owner === alertOwner ? confirmedAlert.alert : undefined}
         summary={summary}
         compact={compactWorkspace}
+        showFinancialBalances={!(summary?.canSeeFinancial && summary.financial && (tab === "summary" || tab === "account"))}
         displayedPatientAlert={compactWorkspace ? patient.medicalAlert : null}
         identity={compactWorkspace ? (
           <div className={patientPremium.identity} data-testid="patient-compact-identity">
@@ -678,25 +698,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             </dl>
           </div>
         ) : undefined}
-        primaryAction={compactWorkspace && primaryAction ? (
-          <button type="button" onClick={primaryAction.run} disabled={busyAction}
-            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
-            {primaryAction.label}
-          </button>
-        ) : undefined}
-        secondaryActions={compactWorkspace ? (
-          <button type="button" onClick={() => {
-            setMoreOpen(false);
-            setPatientDetailsOpen((open) => !open);
-          }}
-            aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
-            className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
-            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
-          </button>
-        ) : undefined}
         safety={compactWorkspace ? <>
+          {medicalAlertBanner}
           <PatientFlagChips flags={patient.flags} />
-          {!vitals ? <span className="text-[11px] text-slate-500">العلامات الحيوية في تنبيه الملف: غير مسجلة</span> : null}
+          {!vitals ? <span className="text-[11px] text-slate-500">علامات حيوية: غير مسجلة</span> : null}
           {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
             <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
               className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
@@ -713,7 +718,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         }}
         onChanged={() => void load()}
       />
-      {compactWorkspace ? medicalAlertBanner : null}
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
         className="mb-4 min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-gradient-to-b from-white to-sky-50/30 p-3 shadow-card sm:p-5" data-testid="patient-details-panel">
@@ -1147,11 +1151,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
-          {!isRestrictedRole(session?.role) ? <nav aria-label="تفاصيل الملخص" className={patientPremium.summaryViews}>
-            {([ ["overview","ملخص الرحلة"], ["identity","البيانات الشخصية"], ["medical","التاريخ الطبي"] ] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={summaryView === value} onClick={() => showSummaryView(value)}>{label}</button>)}
-          </nav> : null}
+
           <div hidden={summaryView !== "overview"}>
           <SummaryTab
+
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
             patientId={patient.id}
@@ -1168,6 +1171,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onGoToTab={goTo}
           />
           </div>
+
           <div hidden={summaryView !== "identity"}>
             {!isRestrictedRole(session?.role) ? <PatientIdentityOverview patient={patient} onEdit={() => setEditing(true)} /> : null}
           </div>

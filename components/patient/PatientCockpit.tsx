@@ -32,7 +32,7 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
-  compact = false, identity, primaryAction, secondaryActions, safety,
+  compact = false, identity, primaryAction, secondaryActions, safety, showFinancialBalances = true,
   confirmedAlert, displayedPatientAlert,
 }: {
   patientId: number;
@@ -48,6 +48,7 @@ export function PatientCockpit({
   onChanged: () => void;
   /** Presentation slots reuse the patient page's existing identity and actions. */
   compact?: boolean;
+  showFinancialBalances?: boolean;
   identity?: ReactNode;
   primaryAction?: ReactNode;
   secondaryActions?: ReactNode;
@@ -105,15 +106,16 @@ export function PatientCockpit({
       ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
       : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
       aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
-          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
+      {compact && identity ? <div className="w-full min-w-0" data-testid="patient-context-identity">{identity}</div> : null}
+      <div data-testid="patient-context-body">
+      <div data-testid="patient-context-information" className="flex flex-wrap items-center gap-1.5 text-xs">
+        {!compact || !identity ? <span className="truncate text-sm font-black text-navy-900">{patientName}</span> : null}
         {visibleAlerts.length > 0 ? (
           <span data-testid="patient-readiness-alerts" className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={visibleAlerts.join(" • ")}>
             ⚠️ {visibleAlerts.join(" • ")}
           </span>
         ) : null}
-        {(visit?.balances ?? []).map((line) => (
+        {(showFinancialBalances ? visit?.balances ?? [] : []).map((line) => (
           <span key={line.currency}
             className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
             عليه {formatMoney(line.dueMinor, line.currency)}
@@ -126,7 +128,7 @@ export function PatientCockpit({
         ) : null}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <div data-testid="patient-context-actions" className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {!compact ? visitSteps : null}
 
         <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
@@ -172,6 +174,8 @@ export function PatientCockpit({
             </button>
           ) : null}
         </div>
+      </div>
+
       </div>
 
       {readiness !== "ready" || chairsState !== "ready" || !coherent ? (

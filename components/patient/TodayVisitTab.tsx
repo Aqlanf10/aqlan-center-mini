@@ -363,6 +363,7 @@ function OwnedTodayVisitTab({
             </div>
           </div>
           <ClinicalVisit
+            showPatientChart
             visitId={openVisit.id}
             expectedPatientId={patientId}
             onNavigationGuardChange={onNavigationGuardChange}

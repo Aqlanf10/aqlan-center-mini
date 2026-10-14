@@ -172,6 +172,7 @@ export function SummaryTab({
         </p>
       ) : null}
 
+      <PatientPremiumAccountOverview summary={summary} base={base} />
       {summary.alerts.length > 0 ? (
         <ul className={styles.alerts}>
           {summary.alerts.map((alert, index) => (
@@ -182,7 +183,6 @@ export function SummaryTab({
         </ul>
       ) : null}
 
-      <PatientPremiumAccountOverview summary={summary} base={base} />
       <div className={styles.workGrid} data-testid="summary-current-work">
         <section className={styles.card} aria-label="ملخص الحالة السريرية">
           <h2 className={styles.heading}><Icon name="clipboard" className="h-4 w-4" />ملخص الحالة السريرية</h2>

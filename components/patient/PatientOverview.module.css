@@ -58,3 +58,7 @@
 .amountRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 9px; border-bottom: 1px solid #e0eefc; }
 .amountRow:last-child { border-bottom: 0; }
 @media (max-width: 767px) { .accountCurrencies { grid-template-columns: minmax(0,1fr); } .accountActions > *, .amountDetails summary { min-height: 44px; } }
+
+.metrics { display: flex; flex-direction: column; gap: 6px; }.currencyChoices { margin: 0; }
+.nativeDues { display: flex; flex-direction: column; gap: 4px; }.metric .nativeDues { font-size: 14px; }.nativeDues > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }.nativeDues small { color: #52779e; font-size: 10px; font-weight: 400; }
+.metric:has(.nativeDues) { align-items: flex-start; }.metricGrid { align-items: stretch; }

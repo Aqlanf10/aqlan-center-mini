@@ -1,6 +1,6 @@
 /* Measured from the approved 1448 × 1024 gallery. Patient scope only. */
-.root { --patient-blue: #0878d2; --patient-blue-dark: #104e89; --patient-orange: #ff921e; --patient-outline: #d5e8fa; width: 100%; max-width: none; color: #174777; background: #eff8ff; padding: 12px 21px 96px; }
-.pageHeading { min-height: 35px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.root { --patient-blue: #0878d2; --patient-blue-dark: #104e89; --patient-orange: #ff921e; --patient-outline: #d5e8fa; width: 100%; max-width: none; color: #174777; background: #eff8ff; padding: 10px 21px 96px; }
+.pageHeading { min-height: 35px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .pageHeading p { color: #085ca3; font-size: 17px; font-weight: 700; }
 .pageHeading a { display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 1px solid var(--patient-outline); border-radius: 7px; padding: 8px 12px; color: #077acb; font-size: 11px; }
 .identity { display: flex; align-items: center; gap: 14px; width: 100%; }
@@ -66,8 +66,8 @@
 .root :global([data-testid="patient-cases"] > section > ul) { grid-template-columns: minmax(0,1fr); }
 .root :global([data-testid="patient-cases"] h3), .root :global([data-testid="patient-endo"] h3), .root :global([data-testid="patient-ortho-workspace"] h3), .root :global([data-testid="patient-ortho-workspace"] h4) { color: #0476c9; }
 .root :global([data-testid="patient-cases"] > section > div:first-child) { padding-bottom: 10px; border-bottom: 1px solid #dfedfb; }
-.root :global([data-testid="patient-plans-content"] > ul) { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; }
-.root :global([data-testid="patient-plans-content"] > ul > li) { margin: 0; padding: 14px; border: 1px solid var(--patient-outline); }
+.root :global([data-testid="patient-plans-content"] > ul) { display: grid; gap: 12px; grid-template-columns: minmax(0,1fr); align-items: start; }
+.root :global([data-testid="patient-plans-content"] > ul > li) { margin: 0; padding: 0; border: 0; background: transparent; }
 .root :global([data-testid="plan-amount-summary"] > div) { border: 1px solid #e0effa; border-radius: 7px; padding: 13px 6px; }
 .root :global([data-testid="patient-endo"]) { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.8fr); gap: 10px; align-items: start; }
 .root :global([data-testid="patient-endo"] > *) { min-width: 0; grid-column: 1 / -1; margin-top: 0; }
@@ -148,3 +148,56 @@
 /* Long specialty names and their badges must not compete for the same line. */
 .root :global([aria-label="أقسام العلاج"] > button) { flex-direction: column; gap: 3px; min-height: 44px; }
 .root :global([aria-label="أقسام العلاج"] > button > div) { min-width: 0; white-space: normal; overflow: visible; justify-content: center; text-align: center; }
+
+.headingActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.headingActions > button, .headingActions > a { min-height: 32px; padding: 6px 10px; font-size: 11px; }
+.root :global([data-testid="patient-context-strip"][data-compact="true"]) { padding: 8px 12px; }
+.root :global([data-testid="patient-context-information"] > div:first-child) { margin-bottom: 2px; }
+.root :global([data-testid="patient-context-actions"]) { padding-top: 0; border-top: 0; margin-top: 3px; }
+.root :global([data-testid="patient-context-actions"]:has(> div:empty)) { display: none; }
+.root :global([data-testid="patient-medical-alert-banner"]) { padding: 4px 8px; margin: 0; font-size: 11px; box-shadow: none; }
+.root :global([data-testid="patient-medical-alert-banner"] > div) { gap: 4px; }
+.root :global([data-testid="patient-medical-alert-banner"] button) { padding: 3px 8px; }
+.root :global([data-testid="patient-readiness-alerts"]) { font-size: 10px; }
+.identityName h1 { line-height: 1.4; }.identityName > img, .identityName > span { width: 40px; height: 40px; }
+.identityFacts dt { margin-bottom: 3px; }.identityFacts > div { padding-block: 2px; }
+.summaryViews { margin: 0; }.summaryViews button { min-height: 30px; padding: 5px 10px; font-size: 11px; }
+/* Account region geometry is owned here; the shared ledger is not edited. */
+@media (min-width: 1100px) {
+ .ledger > div > :global([data-testid="account-canonical-balance"]), .ledger > div > :global([data-testid="account-treatment-details"]), .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])), .ledger > div > :global(section[aria-label="معاينة بيانات مالية سابقة"]:has(> button[aria-expanded="false"])) { min-height: 170px; }
+ .ledger > div > :global([data-testid="account-canonical-balance"]) p:first-child { margin-top: 16px; font-size: 22px; }
+ .ledger > div > :global([data-testid="account-canonical-balance"]) { align-content: center; }
+}
+@media (max-width: 767px) {
+ .pageHeading { flex-direction: column; align-items: stretch; gap: 6px; }.headingActions { gap: 5px; }.headingActions > button, .headingActions > a { min-height: 44px; padding: 6px 8px; font-size: 10px; }
+ .identity { gap: 6px; }.identityFacts { grid-template-columns: repeat(3,minmax(0,1fr)); row-gap: 4px; }.identityFacts dt { margin-bottom: 2px; }.identityFacts dd { font-size: 10px; }
+ .root :global([data-testid="patient-context-strip"][data-compact="true"]) { padding: 8px; }
+ .root :global([data-testid="patient-medical-alert-banner"]) { width: 100%; padding: 5px 7px; }
+ .root :global([data-testid="patient-medical-alert-banner"] button),.summaryViews button { min-height: 44px; }
+ .root :global([data-testid="patient-context-information"]) { gap: 4px; }
+ .root :global([data-testid="patient-visit-details"] > summary) { min-height: 44px; }
+}
+
+/* Keep identity, safety and operational controls in two compact, wrapping rows. */
+.root :global([data-testid="patient-context-strip"][data-compact="true"] > [data-testid="patient-context-body"]) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 0; border: 0; margin-top: 4px; }
+.root :global([data-testid="patient-context-body"] > [data-testid="patient-context-information"]) { flex: 1 1 500px; }
+.root :global([data-testid="patient-context-body"] > [data-testid="patient-context-actions"]) { flex: 0 1 auto; margin: 0; padding: 0; border: 0; }
+.root :global([data-testid="patient-context-actions"] > div) { width: auto; }
+.root :global([data-testid="patient-context-information"] > [data-testid="patient-medical-alert-banner"]) { flex: 1 1 300px; }
+@media (min-width: 1100px) {
+ .ledger > div { grid-template-columns: repeat(4,minmax(0,1fr)); }
+ .ledger > div > :global([data-testid="account-canonical-balance"]) { grid-column: 2; min-height: 0; padding: 12px; }
+ .ledger > div > :global([data-testid="account-canonical-balance"]) p:first-child { margin-top: 0; font-size: 19px; }
+ .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { grid-column: 1; grid-row: 1 / span 3; min-height: 0; }
+ .ledger > div > :global([data-testid="account-treatment-details"]:not([open])) { grid-column: 3; grid-row: 1 / span 3; min-height: 0; }
+ .ledger > div > :global(section[aria-label="معاينة بيانات مالية سابقة"]:has(> button[aria-expanded="false"])) { grid-column: 4; grid-row: 1 / span 3; min-height: 0; }
+ .ledger > div > :global(section[aria-label="الفواتير"]) { grid-column: 1 / span 2; grid-row: 4; }
+ .ledger > div > :global(section[aria-label="الدفعات"]) { grid-column: 3 / span 2; grid-row: 4; }
+ .ledger > div > :global([data-testid="account-treatment-details"][open]) { grid-column: 1 / -1; grid-row: auto; }
+}
+@media (max-width: 767px) {
+ .pageHeading > nav { order: 3; }.summaryViews { gap: 5px; }.summaryViews button { flex: 1; }
+ .root :global([data-testid="patient-context-body"] > [data-testid="patient-context-information"]) { flex-basis: 100%; }
+ .root :global([data-testid="patient-context-body"] > [data-testid="patient-context-actions"]) { width: 100%; }
+ .root :global([data-testid="patient-context-actions"] > div) { width: 100%; }
+}
