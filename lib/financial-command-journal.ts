@@ -16,6 +16,13 @@ export interface FinancialCommand {
   payload: string;
 }
 export interface FinancialJournal { revision: number; command: FinancialCommand | null }
+export interface FinancialRecoveryControl {
+  ready: boolean;
+  revision: number;
+  error: string | null;
+  reserve: (command: FinancialCommand, revision: number) => Promise<boolean>;
+  acknowledge: (command: FinancialCommand) => Promise<void>;
+}
 type StoredJournal = FinancialJournal & { scope: string };
 const DATABASE = "aqlan-financial-command-recovery";
 const STORE = "patient-commands";

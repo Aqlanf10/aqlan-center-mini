@@ -4,7 +4,6 @@ import { PatientLedger } from "../components/PatientLedger";
 import { formatMoney } from "../lib/money";
 import { ServiceSelect } from "../components/ServiceSelect";
 import { ToothSelectionDialog } from "../components/dental/ToothSelectionDialog";
-import { LegacyTreatmentForm } from "../components/LegacyTreatmentForm";
 import { TreatmentEntryChoice } from "../components/TreatmentEntryChoice";
 import {readInvoiceCommandReceipt,type InvoiceTemplateReceiptExpectation} from "../lib/invoice-template-receipt";
 
@@ -17,6 +16,12 @@ const hooks = vi.hoisted(() => {
   const make = (): Store => ({ values: [], cursor: 0, changed: false, effects: new Map(), memos: new Map(), pending: [] });
   return { make, current: make(), outer: make(), inner: make(), form: make() };
 });
+// Browser-storage behaviour has separate real Chromium coverage. These hook
+// fixtures isolate ledger reads/feedback and provide an empty durable journal.
+vi.mock("../lib/financial-command-journal", async original => ({
+  ...await original<typeof import("../lib/financial-command-journal")>(),
+  readFinancialJournal: async () => ({ revision: 0, command: null }),
+}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ username: "synthetic-feedback-owner", role: "admin" }) }));
 vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
@@ -34,8 +39,10 @@ vi.mock("react", async original => {
   };
   return { ...react,
     useState: (initial: unknown) => { const h = hooks.current, index = slot(typeof initial === "function" ? initial() : initial);
-      return [h.values[index], (value: unknown) => { const next = typeof value === "function" ? value(h.values[index]) : value;
-        if (!Object.is(next, h.values[index])) h.changed = true; h.values[index] = next; }]; },
+      if (!h.memos.has(index)) h.memos.set(index, { value: (value: unknown) => { const next = typeof value === "function" ? value(h.values[index]) : value;
+        if (!Object.is(next, h.values[index])) h.changed = true; h.values[index] = next; } });
+      return [h.values[index], h.memos.get(index)!.value]; },
+    useId: () => `synthetic-form-${slot("id")}`,
     useRef: (initial: unknown) => hooks.current.values[slot({ current: initial })],
     useMemo: memo, useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
     useEffect: effect, useLayoutEffect: effect,
@@ -90,17 +97,16 @@ beforeEach(() => {
     clinical: { planId: 801, links: [{ line: 0, kind: "clinical", specialty: "endodontics", planItemId: 811, planItemCreated: true, caseCreated: true, caseId: 601, scheduled: true }] }, replayed: false }, 201);
   fetchMock.mockImplementation((url: string, init?: RequestInit) => init?.method === "POST" ? write()
     : url === "/api/patients/901/ledger" ? Promise.resolve(json(ledger))
-    : url === "/api/services" ? Promise.resolve(json([{ id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000 }])) : Promise.reject(new Error("Unexpected synthetic route")));
+    : url === "/api/services" ? Promise.resolve(json([{ id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000, priceConfigured: true, isActive: true }])) : url === "/api/parties?kind=doctor" ? Promise.resolve(json([])) : Promise.reject(new Error("Unexpected synthetic route")));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => { for (const h of [hooks.outer, hooks.inner, hooks.form]) h.effects.forEach(effect => effect.cleanup?.()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function renderLegacy(): ReactNode {
-  const form = find(node => node.type === LegacyTreatmentForm); expect(form).toBeDefined();
+  const form = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && node.props.historical === true); expect(form).toBeDefined();
   for (let round = 0; round < 30; round++) {
     hooks.current = hooks.form; hooks.form.cursor = 0; hooks.form.changed = false;
-    const wrapper = (form!.type as (props: Record<string, unknown>) => ReactNode)(form!.props) as Element;
-    const tree = (wrapper.type as (props: Record<string, unknown>) => ReactNode)(wrapper.props);
+    const tree = (form!.type as (props: Record<string, unknown>) => ReactNode)(form!.props);
     hooks.form.pending.splice(0).forEach(run => run());
     if (!hooks.form.changed) return tree;
   }
@@ -120,24 +126,24 @@ describe("PatientLedger operation-scoped success feedback", () => {
     (choice.props.onSelect as (kind: "legacy") => void)("legacy"); render();
     vi.useFakeTimers();
     const realRead = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/patients/901/legacy-treatments/preview"
-      ? Promise.resolve(json({ refusal: "open_item_exists", refusalMessage: "Synthetic preview refusal" })) : realRead(url, init));
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === "/api/patients/901/historical-documents/preview"
+      ? Promise.resolve(json({ message: "Synthetic preview refusal" }, 409)) : realRead(url, init));
     const pickService = elements(renderLegacy()).find(node => node.type === ServiceSelect)!;
-    (pickService.props.onChange as (id: number) => void)(31); renderLegacy();
-    const toothButton = elements(renderLegacy()).find(node => node.props["data-testid"] === "legacy-tooth-button")!;
+    (pickService.props.onChange as (id: number, service: unknown) => void)(31, { id: 31, name: "Synthetic root canal", category: "rct", priceMinor: 180000, priceConfigured: true, isActive: true }); renderLegacy();
+    const toothButton = elements(renderLegacy()).find(node => node.props["data-testid"] === "invoice-tooth-button-0")!;
     (toothButton.props.onClick as () => void)();
     const dialog = elements(renderLegacy()).find(node => node.type === ToothSelectionDialog)!;
     (dialog.props.onConfirm as (selection: { teeth: number[]; surfaces: string; scope: null }) => void)({ teeth: [36], surfaces: "", scope: null });
-    for (const [label, value] of [["المبلغ المتفق عليه أصلًا", "300000"], ["المدفوع قبل النظام", "120000"], ["تاريخ المعلومات التاريخية", "2026-01-01"]]) {
+    for (const [label, value] of [["السعر", "300000"], ["سبب تغيير السعر", "Synthetic historical agreed price"], ["المدفوع قبل النظام", "120000"], ["تاريخ المعلومات التاريخية", "2026-01-01"]]) {
       const input = elements(renderLegacy()).find(node => node.type === "input" && node.props["aria-label"] === label)!;
       (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
     }
-    renderLegacy(); await vi.advanceTimersByTimeAsync(301);
+    renderLegacy(); await vi.advanceTimersByTimeAsync(351);
     const refused = renderLegacy(); expect(text(refused)).toContain("Synthetic preview refusal");
-    const save = elements(refused).find(node => node.type === "button" && text(node).trim() === "احفظ العلاج السابق")!;
+    const save = elements(refused).find(node => node.type === "button" && text(node).trim() === "احفظ الاتفاق التاريخي")!;
     expect(save.props.disabled).toBe(true); await (save.props.onClick as () => Promise<void>)();
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/legacy-treatments/preview")).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/legacy-treatments")).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/historical-documents/preview")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/historical-documents")).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/invoices")).toHaveLength(1);
     expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeUndefined();
     expect(text(find(node => node.props["data-testid"] === "account-canonical-balance"))).toContain(formatMoney(180000, "YER"));
@@ -147,26 +153,29 @@ describe("PatientLedger operation-scoped success feedback", () => {
     const invoice = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm"); expect(invoice).toBeDefined();
     await (invoice!.props.onSubmit as (body: Record<string, unknown>,validate:(value:unknown)=>boolean) => Promise<unknown>)({ currency: "YER", items: [{ serviceId: 31, toothCode: 36, description: "Synthetic feedback seed", price: "180000", quantity: "1" }], idempotencyKey: "synthetic-first" },validateInvoice);
     await settle(); expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeDefined();
-    open("legacy"); const form = find(node => node.type === LegacyTreatmentForm)!; expect(form).toBeDefined();
+    open("legacy"); const form = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && node.props.historical === true)!; expect(form).toBeDefined();
     let release!: (value: Response) => void; write = () => new Promise(resolve => { release = resolve; });
     const body = { serviceId: 31, currency: "YER", agreedAmount: "300000", previouslyPaidAmount: "120000", idempotencyKey: "synthetic-legacy-same-key" };
-    const pending = (form.props.onSubmit as (body: Record<string, unknown>) => Promise<void>)(body);
+    const pending = (form.props.onSubmit as (body: Record<string, unknown>, validate: (value: unknown) => boolean) => Promise<unknown>)(body, () => false);
     // The old success is retired synchronously, before even the new headers arrive.
     expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeUndefined();
+    // The bounded transport schedules fetch on a microtask; the notice retired before it.
+    await Promise.resolve();
     release(json({ message: "Synthetic explicit refusal" }, status)); await pending; await settle();
     expect(find(node => node.props["aria-label"] === "تعذّر حفظ إجراء الحساب")).toBeDefined();
     expect(text(render())).toContain("Synthetic explicit refusal");
     expect(find(node => node.props["data-testid"] === "invoice-clinical-notice")).toBeUndefined();
-    expect(find(node => node.type === LegacyTreatmentForm)?.type).toBe(form.type);
+    expect(find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && node.props.historical === true)?.type).toBe(form.type);
     expect(text(find(node => node.props["data-testid"] === "account-canonical-balance"))).toContain(formatMoney(180000, "YER"));
     expect(find(node => node.props["data-testid"] === "account-balance-unavailable")).toBeUndefined();
     // The current successful retry gets its own notice; neither the key nor command is replaced here.
-    write = async () => json({ agreement: { remainingMinor: 180000, caseId: 601 } }, 201);
-    const retry = find(node => node.type === LegacyTreatmentForm)!;
-    await (retry.props.onSubmit as (body: Record<string, unknown>) => Promise<void>)(body); await settle();
+    const accepted = { document: { remainingMinor: 180000, id: 71 }, replayed: true };
+    write = async () => json(accepted, 201);
+    const retry = find(node => typeof node.type === "function" && node.type.name === "InvoiceForm" && node.props.historical === true)!;
+    await (retry.props.onSubmit as (body: Record<string, unknown>, validate: (value: unknown) => boolean) => Promise<unknown>)(body, value => JSON.stringify(value) === JSON.stringify(accepted)); await settle();
     expect(find(node => node.props["aria-label"] === "تعذّر حفظ إجراء الحساب")).toBeUndefined();
-    expect(text(find(node => node.props["data-testid"] === "invoice-clinical-notice"))).toContain("سُجّل العلاج السابق للنظام");
-    const legacyWrites = fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/legacy-treatments");
+    expect(text(find(node => node.props["data-testid"] === "invoice-clinical-notice"))).toContain("حُفظ الاتفاق التاريخي");
+    const legacyWrites = fetchMock.mock.calls.filter(([url]) => url === "/api/patients/901/historical-documents");
     expect(legacyWrites).toHaveLength(2); expect(legacyWrites[0][1].body).toBe(legacyWrites[1][1].body);
   });
 });

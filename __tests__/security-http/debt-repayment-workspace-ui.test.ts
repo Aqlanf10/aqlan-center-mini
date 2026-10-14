@@ -54,11 +54,11 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
       expect(errors).toEqual([]);await page.screenshot({path:`.settings-ui-artifacts/debt-repayment-${role}-${width}.png`,fullPage:true});
     }finally{await context.close();}
   });
-  it.each(scenarios.flatMap(s=>["lost","malformed"].map(fault=>({...s,fault}))))("$role ordinary$fault acknowledgement keeps exact intent at$width and closes only after verified replay",async({role,width,fault})=>{
+  it.each(scenarios.flatMap(s=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({...s,fault}))))("$role ordinary$fault acknowledgement keeps exact intent at$width and closes only after verified replay",async({role,width,fault})=>{
     const {patientId,context,page}=await open(role,width);const commands:string[]=[];const receipts:Record<string,unknown>[]=[];
     await page.route("**/api/invoices",async route=>{
       if(route.request().method()!=="POST")return route.continue();commands.push(route.request().postData()!);const response=await route.fetch();const receipt=await response.json();receipts.push(receipt);
-      if(commands.length===1){expect(response.status()).toBe(201);if(fault==="lost")return route.abort("failed");return route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({...receipt,repayment:null})});}
+      if(commands.length===1){expect(response.status()).toBe(201);if(fault.startsWith("lost"))return route.abort("failed");return route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({...receipt,repayment:null})});}
       return route.fulfill({response});
     });
     try{
@@ -67,6 +67,11 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
       expect(commands).toHaveLength(1);expect(await save.isDisabled()).toBe(true);expect(await page.getByLabel("عملة الفاتورة",{exact:true}).isDisabled()).toBe(true);
       await page.getByTestId("treatment-entry-open").click();expect(await page.getByRole("region",{name:"فاتورة جديدة",exact:true}).count()).toBe(1);
       await page.getByTestId("patient-tab-summary").click();expect(new URL(page.url()).searchParams.get("tab")).toBe("account");
+      if(fault.endsWith("reload")){
+        page.once("dialog",dialog=>dialog.accept());await page.reload({waitUntil:"domcontentloaded"});
+        await page.getByRole("button",{name:"استعادة الطلب للتحقق بنفس المفتاح",exact:true}).click();
+        await expect.poll(()=>recovery.innerText()).toContain("نتيجة الطلب غير مؤكدة");
+      }
       await recovery.getByRole("button",{name:"إعادة نفس طلب الفاتورة",exact:true}).click();await page.getByRole("region",{name:"فاتورة جديدة",exact:true}).waitFor({state:"detached"});
       expect(commands).toHaveLength(2);expect(commands[1]).toBe(commands[0]);expect(receipts[1]).toMatchObject({id:receipts[0].id,replayed:true});
       expect((await db.query("SELECT count(*)::int AS n FROM invoices WHERE patient_id=$1",[patientId])).rows[0].n).toBe(1);

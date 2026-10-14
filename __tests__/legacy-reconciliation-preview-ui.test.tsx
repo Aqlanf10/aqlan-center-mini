@@ -20,6 +20,12 @@ const hooks = vi.hoisted(() => {
   return { make, current: make(), outer: make(), inner: make(), lateUpdates: 0,
     key: null as string | null, session: null as SessionInfo | null };
 });
+// Browser-storage behaviour has separate real Chromium coverage. These hook
+// fixtures isolate ledger reads/feedback and provide an empty durable journal.
+vi.mock("../lib/financial-command-journal", async original => ({
+  ...await original<typeof import("../lib/financial-command-journal")>(),
+  readFinancialJournal: async () => ({ revision: 0, command: null }),
+}));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/ServiceSelect", () => ({ ServiceSelect: () => null }));
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
@@ -43,12 +49,13 @@ vi.mock("react", async (original) => {
   return { ...react,
     useState: (initial: unknown) => {
       const h = hooks.current, index = slot(typeof initial === "function" ? initial() : initial);
-      return [h.values[index], (value: unknown) => {
+      if (!h.memos.has(index)) h.memos.set(index, { value: (value: unknown) => {
         if (!h.active) hooks.lateUpdates++;
         const next = typeof value === "function" ? value(h.values[index]) : value;
         if (h.active && !Object.is(next, h.values[index])) h.changed = true;
         h.values[index] = next;
-      }];
+      } });
+      return [h.values[index], h.memos.get(index)!.value];
     },
     useRef: (initial: unknown) => hooks.current.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),

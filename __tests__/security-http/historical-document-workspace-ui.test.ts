@@ -57,11 +57,11 @@ describe("approved historical workspace persists one mixed document",()=>{
       const geometry=await page.evaluate(()=>({viewport:innerWidth,width:document.documentElement.scrollWidth}));expect(geometry.width).toBeLessThanOrEqual(geometry.viewport+1);expect(errors).toEqual([]);
     }finally{await context.close();}
   });
-  it.each(scenarios.flatMap(scenario=>["lost","malformed"].map(fault=>({...scenario,fault}))))("$role $fault acknowledgement retains exact actor/patient command at$width",async scenario=>{
+  it.each(scenarios.flatMap(scenario=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({...scenario,fault}))))("$role $fault acknowledgement retains exact actor/patient command at$width",async scenario=>{
     const {patientId,context,page,errors}=await open(scenario);const bodies:string[]=[];const receipts:Record<string,unknown>[]=[];
     await page.route(`**/api/patients/${patientId}/historical-documents`,async route=>{
       if(route.request().method()!=="POST")return route.continue();bodies.push(route.request().postData()!);const response=await route.fetch();const payload=await response.json();receipts.push(payload);
-      if(bodies.length===1){expect(response.status(),JSON.stringify(payload)).toBe(201);if(scenario.fault==="lost")return route.abort("failed");return route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({...payload,document:{...payload.document,lines:[]}})});}
+      if(bodies.length===1){expect(response.status(),JSON.stringify(payload)).toBe(201);if(scenario.fault.startsWith("lost"))return route.abort("failed");return route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({...payload,document:{...payload.document,lines:[]}})});}
       return route.fulfill({response});
     });
     try{
@@ -69,6 +69,11 @@ describe("approved historical workspace persists one mixed document",()=>{
       const recovery=page.getByTestId("invoice-command-recovery");await expect.poll(()=>recovery.innerText()).toContain("نتيجة الطلب غير مؤكدة");
       expect(bodies).toHaveLength(1);expect(await save.isDisabled()).toBe(true);expect(await page.getByLabel("عملة الاتفاق",{exact:true}).isDisabled()).toBe(true);
       await page.getByTestId("patient-tab-summary").click();expect(new URL(page.url()).searchParams.get("tab")).toBe("account");
+      if(scenario.fault.endsWith("reload")){
+        page.once("dialog",dialog=>dialog.accept());await page.reload({waitUntil:"domcontentloaded"});
+        await page.getByRole("button",{name:"استعادة الطلب للتحقق بنفس المفتاح",exact:true}).click();
+        await expect.poll(()=>recovery.innerText()).toContain("نتيجة الطلب غير مؤكدة");
+      }
       await recovery.getByRole("button",{name:"إعادة نفس طلب الاتفاق",exact:true}).click();await page.getByRole("region",{name:"اتفاق تاريخي متعدد البنود",exact:true}).waitFor({state:"detached"});
       expect(bodies).toHaveLength(2);expect(bodies[1]).toBe(bodies[0]);expect(receipts[1]).toMatchObject({replayed:true,document:(receipts[0] as {document:unknown}).document});
       expect(await facts(patientId)).toMatchObject({documents:1,lines:3,invoices:0,payments:0});expect(errors).toEqual([]);

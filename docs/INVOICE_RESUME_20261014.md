@@ -37,3 +37,22 @@ Observed on preserved application build `Vpjrxt770vqdC8eIXBAep`, disposable loca
 Raw logs/command records remain in `/workspace/reviews/invoice-workspace/`. No patient data, credentials, build outputs or bulky evidence are committed. No live database, deployment, merge or CI alteration.
 
 Migration ownership remains 0059/0060 as documented in `INVOICE_INSTALLMENTS_COORDINATION.md`; no new number allocated or migration added. Shared integration review with reception must cover `lib/db.ts`, `lib/http-permissions.ts`, `lib/audit.ts`. Its checkout implementation was not copied.
+
+## Second checkpoint — recovery connected to writes
+
+Invoice and historical entry now persist the complete original command and receipt expectations before network submission, restore them on reload, and clear them only after a fully validated receipt. Debt arrangement and collection use the same journal. Competing tabs adopt the already-persisted command instead of sending their own different key. Other financial entry controls stay blocked while recovery is unresolved. This does not yet cover general collection or correction dialogs; those remain open integration work.
+
+Observed evidence (disposable loopback PostgreSQL and synthetic actors/patients only):
+
+- Production build passed: `build-resume-20261014-journal-wired`, build `cE0exICVXG-3F-wNypNtt`, source snapshot `34249848dfd7e4606e6c029a277cf86494de47fef77386ba0bee49044d94f7d4`, log SHA256 `c5e905ef0cceb3caf4f43ba49bd643f4fa2f8f0e9b78a107c3b4f14ba5fadb95`.
+- Focused lint at that source passed with zero errors and one existing `previewOwner` dependency warning; log SHA256 `67ccc07b0c6c79ec81ad804cb9eb1261d4ec9485e72f0034b04fab9854bc486a`.
+- `resume-20261014-reload-http-first`: **22/22 passed** at that same source/build. New invoice and historical document journeys include lost and malformed replies, reload, exact-body/key replay, and one persisted document, for admin desktop and reception mobile. Log SHA256 `706948a1e7b316c0f44df7b86535e76ea52ec143ed4dc9f1a1af31e1de41b1e3`.
+- Bounded React hook fixtures now expose stable setter identities and an empty ready journal; real storage remains covered by Chromium tests. Existing feedback tests were adapted from the retired single-line legacy form to the historical invoice form, preserving refusal/notice/body assertions. `resume-20261014-feedback-microtask`: **4/4 passed**, source `a188ca8362bde4b3a00488af5aed0f156dd33a94ea8eaa0df2447a9dcea0f8ef`, log SHA256 `0da084d96284c9050c4cce833860bb0dd632d5cc507805db2ad0eec70e21a381`. The transport schedules fetch in a microtask; success retirement is asserted before that microtask runs.
+
+CI for checkpoint `62f22cba` failed at the money aggregation guard. Local reproduction identifies `unallocatedPaidGuard` in `legacy-treatment-document-db.ts`: refunds already join on the payment currency but the explicit GROUP BY omits that currency. This needs a product SQL correction, not a CI/allowlist exception. Remaining artifact-upload failures occurred after the first guard failure; no green CI or final acceptance claimed.
+
+Owner subsequently requested two proposed invoice/historical images matching the designer's premium gallery before visual publication. Generated proposals are review material, not actual app screenshots; no redesign was applied here. Exact reference HTML download is blocked, so its reported hash is not locally verified. Designer branch `4538f57bb0171ee8d4b9428316633b331e024c0b` supplied the inspected account/summary reference images.
+
+The owner supplied `invoice-cloud-handoff.zip` on 2026-10-14. Library metadata resolves a 222,059-byte archive (`libfile_a62b086db2bc8191abde49338cfe59dd`), but signed download returns proxy 403, including after approved network escalation. Its contents have **not** been read, verified, or applied. The unpublished coordinator continuation remains unavailable; an accessible Git ref was requested.
+
+Final bounded checkpoint checks: `resume-20261014-checkpoint-types` passed; `resume-20261014-checkpoint-units` passed **133/133** across recovery labels, legacy reconciliation preview and write feedback. Both tested source `e12a260914b5cfec12614f4bae8a7b67eaed4d4195c1a232b58eaff85931dce9`; respective log SHA256 values `494c5900ca50ac372426c03ff676bd53571e0b70b3e4fe8eed6ce84138fd526d` and `682b6319044e5dc43ca4b80fbf39bf6d04640c535ebbe9941ab1377c512aae40`. Only this evidence paragraph was added afterward. No broader suite pass implied.

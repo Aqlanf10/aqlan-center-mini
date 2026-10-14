@@ -10,12 +10,27 @@ import { debtRecord, readDebtRepaymentWorkspace, type DebtRepaymentChoice, type 
 import { validateDebtRepaymentTerms, type DebtRepaymentTerms } from "@/lib/debt-installments";
 import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
 import { useSession } from "./SessionProvider";
+import { FinancialRecoveryError, type FinancialCommand, type FinancialRecoveryControl } from "@/lib/financial-command-journal";
 
 /** Retained by the patient/actor owner above this panel, including A -> B -> A. */
 export interface DebtRepaymentCommand {
   url:string;body:string;key:string;target:DebtRepaymentTarget;actor:string;
   expected:{kind:"schedule";version:number;terms:DebtRepaymentTerms;status:"active"|"cancelled"}|{kind:"collection";amountMinor:number;currency:Currency;method:string};
   outcome:"pending"|"uncertain"|"refused";message:string;
+}
+function durableDebtCommand(command: DebtRepaymentCommand): FinancialCommand {
+  const { url, body, key, target, actor, expected } = command;
+  return { kind: "debt", key, original: JSON.stringify({ url, body, key, target, actor, expected }), payload: JSON.stringify(command) };
+}
+export function restoreDebtCommand(command: FinancialCommand, patientId: number, actor: string): DebtRepaymentCommand {
+  const value: unknown = JSON.parse(command.payload);
+  if (!debtRecord(value) || value.actor !== actor || value.key !== command.key || typeof value.url !== "string"
+    || !new RegExp(`^/api/patients/${patientId}/debt-repayments(?:/[1-9][0-9]*/collect)?$`).test(value.url)
+    || typeof value.body !== "string" || !debtRecord(value.target) || value.target.patientId !== patientId
+    || !debtRecord(value.expected) || !["schedule", "collection"].includes(String(value.expected.kind))) throw new FinancialRecoveryError("invalid");
+  const restored = value as unknown as DebtRepaymentCommand;
+  if (durableDebtCommand(restored).original !== command.original) throw new FinancialRecoveryError("invalid");
+  return { ...restored, outcome: "uncertain", message: "استُعيد طلب سابق لهذا المريض والمستخدم. تحقّق بنفس المفتاح قبل أي عملية جديدة." };
 }
 const button="min-h-[44px] rounded-xl border border-slate-300 px-3 text-sm font-bold disabled:opacity-50";
 const sameTarget=(left:Record<string,unknown>,right:DebtRepaymentTarget)=>left.patientId===right.patientId&&left.currency===right.currency&&left.invoiceId===right.invoiceId&&left.openingCurrency===right.openingCurrency;
@@ -40,9 +55,10 @@ function verifiedReceipt(value:unknown,command:DebtRepaymentCommand):number|null
   return payment.id;
 }
 
-export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChange,onHold,onChanged,enabled}:{
+export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChange,onHold,onChanged,enabled,financialRecovery}:{
   patientId:number;refreshKey:unknown;recovery:DebtRepaymentCommand|null;onRecoveryChange:(command:DebtRepaymentCommand|null)=>void;
   onHold:(held:boolean)=>void;onChanged:()=>void;enabled:boolean;
+  financialRecovery: FinancialRecoveryControl;
 }){
   const session=useSession();
   const [data,setData]=useState<DebtRepaymentWorkspace|null>(null);
@@ -59,6 +75,7 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   const [note,setNote]=useState("");
   const [writing,setWriting]=useState(false);
   const pending=useRef(false);
+  const draftRevision=useRef(financialRecovery.revision);
   const lifetime=useRef({active:false,generation:0});
   useLayoutEffect(()=>{const owner=lifetime.current;owner.active=true;return()=>{owner.active=false;owner.generation++;};},[]);
   const held=writing||Boolean(recovery&&recovery.outcome!=="refused")||Boolean(editing||collecting);
@@ -77,18 +94,21 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
     }catch(problem){if(lifetime.current.active&&generation===lifetime.current.generation){setData(null);setError(problem instanceof Error?problem.message:"تعذّر التحميل.");}}
   },[enabled,patientId]);
   useEffect(()=>{void load();},[load,refreshKey]);
-  const allowed=enabled&&!!session&&["admin","reception"].includes(session.role);
+  const allowed=enabled&&financialRecovery.ready&&!!session&&["admin","reception"].includes(session.role);
   const send=async(command:DebtRepaymentCommand)=>{
     if(!allowed||pending.current||!lifetime.current.active||command.actor!==session.username||command.target.patientId!==patientId)return;
     pending.current=true;setWriting(true);onHold(true);setNotice(null);setReceiptId(null);
     onRecoveryChange({...command,outcome:"pending",message:"جارٍ حفظ الطلب…"});
     try{
+      const durable=durableDebtCommand(command);
+      if(!await financialRecovery.reserve(durable,draftRevision.current)||!lifetime.current.active)return;
       const {response,payload}=await readInvoiceCommandResponse(signal=>fetch(command.url,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":command.key},body:command.body,signal}),response=>{
         if(lifetime.current.active&&(response.status===401||response.status===403))setData(null);
       });
       if(!lifetime.current.active)return;
       const verified=(response.status===200||response.status===201)&&!response.redirected?verifiedReceipt(payload,command):null;
       if(verified!==null){
+        await financialRecovery.acknowledge(durable);
         onRecoveryChange(null);setEditing(null);setCollecting(null);setReason("");
         setNotice(command.expected.kind==="collection"?"ثُبّت التحصيل بسند قبض.":"حُفظ ترتيب سداد الدين القائم؛ لم تُنشأ فاتورة أو دفعة.");
         if(verified>0)setReceiptId(verified);
@@ -102,6 +122,7 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
   };
   const startEdit=(target:DebtRepaymentChoice)=>{
     if(!allowed||recovery||pending.current)return;
+    draftRevision.current=financialRecovery.revision;
     const current=data?.arrangements.find(row=>row.id===target.arrangementId);
     setEditing(target);setCollecting(null);setReason("");
     setDraft(current?.terms.mode==="installments"?{mode:"installments",rows:(current.progress?.rows??[]).filter(row=>row.remainingMinor>0).map((row,index)=>({key:String(index),dueDate:row.dueDate,kind:row.kind,amount:formatAmount(row.remainingMinor,target.target.currency)}))}:{mode:"full",rows:[]});
@@ -133,7 +154,7 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
     {recovery?<div role="status" data-testid="debt-command-recovery" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
       <p>{writing?"جارٍ حفظ الطلب…":recovery.message||"يوجد طلب محفوظ يحتاج إعادة التحقق."}</p>
       <button type="button" className={button} disabled={writing||!allowed} onClick={()=>void send(recovery)}>إعادة نفس طلب السداد</button>
-      {recovery.outcome==="refused"?<button type="button" className={button} disabled={writing} onClick={()=>{onRecoveryChange(null);setEditing(null);setCollecting(null);void load();}}>مراجعة الحساب بعد الرفض</button>:null}
+      {recovery.outcome==="refused"?<button type="button" className={button} disabled={writing} onClick={()=>{void load();}}>مراجعة الحساب بعد الرفض</button>:null}
     </div>:null}
     {!enabled?<p role="status" className="text-xs text-slate-500">تُراجع ترتيبات السداد بعد إغلاق إدخال العلاج والتحقق من الحساب.</p>:null}
     {enabled&&data?.targets.length===0?<p className="text-sm text-slate-500">لا يوجد دين قائم يحتاج ترتيب سداد.</p>:null}
@@ -153,7 +174,7 @@ export function DebtRepaymentPanel({patientId,refreshKey,recovery,onRecoveryChan
         {target.legacyActive?<p className="text-xs text-amber-900">لهذا الرصيد ترتيب سابق نشط. راجعه وألغِه صراحةً قبل إنشاء ترتيب جديد.</p>:null}
         <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={!allowed||locked||!!editing||!!collecting} onClick={()=>startEdit(target)}>{current?"مراجعة أو تعديل السداد":"ترتيب سداد الدين"}</button>
           {current?.status==="active"?<button type="button" className={button} disabled={!allowed||locked||!!editing||!!collecting||current.collectibleMinor<=0||!current.available}
-            onClick={()=>{setCollecting(current);setEditing(null);setTender(current.target.currency);setAmount(formatAmount(Math.min(current.progress?.next?.remainingMinor??current.collectibleMinor,current.collectibleMinor),current.target.currency));setMethod("cash");setNote("");}}>تحصيل دفعة فعلية</button>:null}</div>
+            onClick={()=>{draftRevision.current=financialRecovery.revision;setCollecting(current);setEditing(null);setTender(current.target.currency);setAmount(formatAmount(Math.min(current.progress?.next?.remainingMinor??current.collectibleMinor,current.collectibleMinor),current.target.currency));setMethod("cash");setNote("");}}>تحصيل دفعة فعلية</button>:null}</div>
       </article>;
     })}
     {editing?<div className="space-y-3 rounded-xl border border-sky-300 bg-sky-50 p-3" aria-label="تعديل ترتيب السداد">
