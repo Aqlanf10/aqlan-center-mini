@@ -1,0 +1,59 @@
+{
+  "branch": "feat/invoice-monthly-schedule-20261014",
+  "base": "9b1ddc0e7d0d2bcf5a5159089e3dc55be6da8216",
+  "syntheticOnly": true,
+  "appSourceSha256": "4f16a55bfb65992964d07eb78d44feb607e09a8025b4f0fcadb066dfbe01bed0",
+  "sourceAndTestsSha256": "fff7d34de9d3826ee2454244618b1c6d85a8b080876f55a710865fd1543630ea",
+  "artifactRoot": "/workspace/invoice-monthly-followup-20261014/.settings-ui-artifacts",
+  "archive": "/workspace/reviews/invoice-resume-20261014/invoice-monthly-schedule-evidence-20261014.zip",
+  "archiveSha256": "f2c9331f20231751702b43a2de66d3258e144a6d784dae3e301614a8748121e4",
+  "artifacts": [
+    {
+      "name": "monthly-reception-converted-unpriced-sar-390.png",
+      "bytes": 152876,
+      "sha256": "be6f01ced12c55c87415e290ffd55a83f6f19ea13fee36b3000a7c653ca6ae4f"
+    },
+    {
+      "name": "monthly-reception-historical-sar-390.png",
+      "bytes": 219896,
+      "sha256": "886e4d49a2af3fd3d3dfd6235e1a11625452c8854274d642ed7f3f2208e8b944"
+    },
+    {
+      "name": "monthly-reception-pricing-audit.json",
+      "bytes": 448,
+      "sha256": "547f1029938dd37a47295c16039ca42176568d43d82427c48a5aced129a1ba38"
+    },
+    {
+      "name": "monthly-reception-sar-1280.png",
+      "bytes": 280929,
+      "sha256": "4cd5c96b2a23012c74a8d9ff2fd42845cea471db1533f6f50642504370e1fa3d"
+    },
+    {
+      "name": "monthly-reception-sar-390.png",
+      "bytes": 229834,
+      "sha256": "24e6a47423c9da8de4e2a6cc27e6979e5fb0a3b0175d75cdc3e92294a83cd20d"
+    }
+  ],
+  "receptionistPricingAudit": {
+    "synthetic": true,
+    "role": "reception",
+    "nativeSarMinor": 150000,
+    "convertedSar": {
+      "minor": 500,
+      "source": "converted"
+    },
+    "convertedUsd": {
+      "minor": 100,
+      "source": "converted"
+    },
+    "nativeForeignFields": [
+      null,
+      null
+    ],
+    "reasonedManualPreview": 200,
+    "reasonedManualSave": 201,
+    "unpricedNoReasonPreviewObserved": 200,
+    "unpricedReasonRequirementImplemented": false,
+    "pricingPolicyChanged": false
+  }
+}
