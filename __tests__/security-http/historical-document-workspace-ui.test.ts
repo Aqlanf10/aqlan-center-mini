@@ -9,6 +9,9 @@ beforeAll(async()=>{
   const service=async(category:string,amount:number)=>(await db.query("INSERT INTO services(name,category,price_minor,price_sar_minor,price_configured,is_active) VALUES($1,$2,$3,$4,TRUE,TRUE) RETURNING id",[`Synthetic historical ${category}`,category,amount,amount*100])).rows[0].id;
   endo=await service("rct",55000);ortho=await service("ortho",210000);
   await db.query("INSERT INTO settings(key,value) VALUES('finance.reception_adds_opening_balance','true') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+  // The positive reception journey has a documented 6.25% discount. Grant its
+  // synthetic fixture a 10% limit; application/default authority is unchanged.
+  await db.query("INSERT INTO settings(key,value) VALUES('billing.max_discount_percent','10') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
 },180000);
 afterAll(async()=>{await browser?.close();await db?.end();});
 const scenarios=[{role:"admin" as const,width:1280,currency:"YER"},{role:"reception" as const,width:390,currency:"SAR"}];
