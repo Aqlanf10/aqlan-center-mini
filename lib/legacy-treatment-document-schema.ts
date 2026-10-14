@@ -33,6 +33,43 @@ ALTER TABLE legacy_treatment_agreements ADD CONSTRAINT legacy_treatment_agreemen
 );
 CREATE UNIQUE INDEX IF NOT EXISTS legacy_treatment_document_line_uniq ON legacy_treatment_agreements(document_id, document_line) WHERE document_id IS NOT NULL;
 
+-- Single teeth retain their original uniqueness. Separate jaw groups can use
+-- separate cases; the immutable coverage guard below rejects actual overlap.
+DROP INDEX IF EXISTS legacy_treatment_agreements_live_scope_uniq;
+CREATE UNIQUE INDEX legacy_treatment_agreements_live_scope_uniq
+  ON legacy_treatment_agreements (patient_id, service_id, COALESCE(tooth_code, 0),
+    (CASE WHEN tooth_code IS NULL THEN COALESCE(case_id, 0) ELSE 0 END)) WHERE status = 'live';
+CREATE OR REPLACE FUNCTION aqlan_legacy_document_coverage_overlap_guard() RETURNS trigger AS $$
+DECLARE owner legacy_treatment_agreements%ROWTYPE;
+BEGIN
+  SELECT * INTO owner FROM legacy_treatment_agreements WHERE id = NEW.agreement_id;
+  IF owner.status <> 'live' THEN RETURN NEW; END IF;
+  PERFORM id FROM patients WHERE id = owner.patient_id FOR NO KEY UPDATE;
+  IF EXISTS (
+    SELECT 1 FROM legacy_treatment_agreements a
+      LEFT JOIN legacy_treatment_coverage_snapshots c ON c.agreement_id = a.id
+    WHERE a.patient_id = owner.patient_id AND a.service_id = owner.service_id
+      AND a.status = 'live' AND a.id <> owner.id
+      AND (owner.document_id IS NOT NULL OR a.document_id IS NOT NULL)
+      AND CASE
+        WHEN c.agreement_id IS NULL THEN TRUE
+        WHEN NEW.snapshot_scope IN ('both', 'full_mouth') OR c.snapshot_scope IN ('both', 'full_mouth') THEN TRUE
+        WHEN NEW.snapshot_scope IS NOT NULL AND c.snapshot_scope IS NOT NULL THEN NEW.snapshot_scope = c.snapshot_scope
+        WHEN NEW.snapshot_scope IN ('upper', 'lower') THEN EXISTS (
+          SELECT 1 FROM unnest(c.snapshot_tooth_codes) tooth WHERE (tooth / 10 IN (1,2,5,6)) = (NEW.snapshot_scope = 'upper'))
+        WHEN c.snapshot_scope IN ('upper', 'lower') THEN EXISTS (
+          SELECT 1 FROM unnest(NEW.snapshot_tooth_codes) tooth WHERE (tooth / 10 IN (1,2,5,6)) = (c.snapshot_scope = 'upper'))
+        ELSE NEW.snapshot_tooth_codes && c.snapshot_tooth_codes
+      END
+  ) THEN RAISE EXCEPTION 'historical document coverage overlaps an existing live agreement'; END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS legacy_treatment_document_coverage_overlap_guard ON legacy_treatment_coverage_snapshots;
+CREATE CONSTRAINT TRIGGER legacy_treatment_document_coverage_overlap_guard
+  AFTER INSERT ON legacy_treatment_coverage_snapshots DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION aqlan_legacy_document_coverage_overlap_guard();
+
 CREATE TABLE IF NOT EXISTS legacy_treatment_document_revisions (
   id SERIAL PRIMARY KEY,
   document_id INTEGER NOT NULL REFERENCES legacy_treatment_documents(id) ON DELETE CASCADE,

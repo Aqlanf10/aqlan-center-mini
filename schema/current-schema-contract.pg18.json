@@ -6,9 +6,9 @@
   "counts": {
     "tables": 92,
     "columns": 1206,
-    "constraints": 1164,
+    "constraints": 1165,
     "indexes": 288,
-    "triggers": 35
+    "triggers": 36
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -4876,6 +4876,12 @@
             "INSERT",
             "DELETE",
             "UPDATE"
+          ]
+        },
+        "legacy_treatment_document_coverage_overlap_guard": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
           ]
         }
       }

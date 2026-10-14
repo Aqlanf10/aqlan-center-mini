@@ -23,7 +23,8 @@ export interface FinancialRecoveryControl {
   reserve: (command: FinancialCommand, revision: number) => Promise<boolean>;
   acknowledge: (command: FinancialCommand) => Promise<void>;
 }
-type StoredJournal = FinancialJournal & { scope: string };
+type AcknowledgedCommand = { key: string; kind: FinancialCommand["kind"]; originalHash: string };
+type StoredJournal = FinancialJournal & { scope: string; acknowledged?: AcknowledgedCommand };
 const DATABASE = "aqlan-financial-command-recovery";
 const STORE = "patient-commands";
 const MAX_BYTES = 1024 * 1024;
@@ -55,8 +56,19 @@ function readStored(value: unknown, scope: string): StoredJournal {
   const row = value as StoredJournal;
   if (row.scope !== scope || !Number.isSafeInteger(row.revision) || row.revision < 0
     || (row.command !== null && !validateCommand(row.command))) throw new FinancialRecoveryError("invalid");
+  if (row.acknowledged !== undefined && (!row.acknowledged || typeof row.acknowledged !== "object"
+    || !kinds.has(row.acknowledged.kind) || typeof row.acknowledged.key !== "string"
+    || !/^[A-Za-z0-9._:-]{8,128}$/.test(row.acknowledged.key) || !/^[a-f0-9]{64}$/.test(row.acknowledged.originalHash))) throw new FinancialRecoveryError("invalid");
   return row;
 }
+async function fingerprint(command: FinancialCommand): Promise<AcknowledgedCommand> {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(command.original));
+    return { key: command.key, kind: command.kind, originalHash: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("") };
+  } catch { throw new FinancialRecoveryError("unavailable"); }
+}
+const sameAcknowledgement = (left: AcknowledgedCommand | undefined, right: AcknowledgedCommand) =>
+  left?.key === right.key && left.kind === right.kind && left.originalHash === right.originalHash;
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") return reject(new FinancialRecoveryError("unavailable"));
@@ -106,24 +118,32 @@ export function readFinancialJournal(scope: FinancialCommandScope): Promise<Fina
 
 /** Returns the existing command when another tab won; callers must not send their
  * proposed body unless the returned key and immutable original match it. */
-export function reserveFinancialCommand(scope: FinancialCommandScope, revision: number, command: FinancialCommand): Promise<FinancialJournal> {
-  if (!validateCommand(command)) return Promise.reject(new FinancialRecoveryError("invalid"));
+export async function reserveFinancialCommand(scope: FinancialCommandScope, revision: number, command: FinancialCommand): Promise<FinancialJournal> {
+  if (!validateCommand(command) || !Number.isSafeInteger(revision) || revision < 0) throw new FinancialRecoveryError("invalid");
+  // Hash before opening the transaction; awaiting crypto inside an IndexedDB
+  // transaction would let it auto-close before the write.
+  const identity = await fingerprint(command);
   return transaction(scope, current => {
     if (current.command) {
       if (current.command.key !== command.key || current.command.kind !== command.kind) return current;
       if (current.command.original !== command.original) throw new FinancialRecoveryError("changed");
       return { ...current, command };
     }
-    if (current.revision !== revision) throw new FinancialRecoveryError("changed");
+    if (current.revision !== revision && !sameAcknowledgement(current.acknowledged, identity)) throw new FinancialRecoveryError("changed");
     return { ...current, command };
   });
 }
 /** Only after a fully validated receipt. Missing/denied/failed reads never clear
  * an uncertain command. Keep the revision, discard sensitive command contents. */
-export function acknowledgeFinancialCommand(scope: FinancialCommandScope, command: FinancialCommand): Promise<FinancialJournal> {
+export async function acknowledgeFinancialCommand(scope: FinancialCommandScope, command: FinancialCommand): Promise<FinancialJournal> {
+  if (!validateCommand(command)) throw new FinancialRecoveryError("invalid");
+  const identity = await fingerprint(command);
   return transaction(scope, current => {
+    // A second tab can receive the same validated receipt after the first tab
+    // erased its payload. Keep completion idempotent without retaining PHI.
+    if (!current.command && sameAcknowledgement(current.acknowledged, identity)) return current;
     if (!current.command || current.command.key !== command.key || current.command.kind !== command.kind
       || current.command.original !== command.original) throw new FinancialRecoveryError("changed");
-    return { scope: current.scope, revision: current.revision + 1, command: null };
+    return { scope: current.scope, revision: current.revision + (sameAcknowledgement(current.acknowledged, identity) ? 0 : 1), command: null, acknowledged: identity };
   });
 }

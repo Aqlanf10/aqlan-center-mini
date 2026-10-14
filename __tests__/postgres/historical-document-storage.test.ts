@@ -85,6 +85,39 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
     expect(await counts(source.patientId)).toMatchObject({documents:0,items:0,cases:0,openings:1});
     expect(await q("SELECT amount_minor::text FROM patient_opening_balances WHERE patient_id=$1",[source.patientId])).toEqual([{amount_minor:"25000"}]);
   });
+  it("accepts separate upper and lower jaw groups of one service but rejects overlapping groups atomically",async()=>{
+    const draft=await command();
+    const source={...draft,items:["upper","lower"].map(scope=>({serviceId:ortho,quantity:1,price:"210000",catalogPriceMinor:210000,scope})),repaymentRemainingMinor:280000,repaymentTerms:terms(280000)};
+    const saved=await documents.createHistoricalDocument(source.patientId,source,session);
+    expect(saved.document.lines.map(line=>line.site.scope)).toEqual(["upper","lower"]);
+    expect(new Set(saved.document.lines.map(line=>line.caseId)).size).toBe(2);
+    expect(await counts(source.patientId)).toMatchObject({invoices:0,payments:0,documents:1,items:2,cases:2});
+    const overlap={...await command(),items:source.items.map((line,index)=>({...line,scope:index===0?"both":"upper"})),repaymentRemainingMinor:280000,repaymentTerms:terms(280000)};
+    await expect(documents.createHistoricalDocument(overlap.patientId,overlap,session)).rejects.toMatchObject({code:"conflict"});
+    expect(await counts(overlap.patientId)).toMatchObject({documents:0,items:0,cases:0,openings:0});
+  });
+  it("records fully paid earlier work without changing an existing opening date or its audited amount",async()=>{
+    const first=await command();await documents.createHistoricalDocument(first.patientId,first,session);
+    const before=await q("SELECT to_jsonb(b) AS value FROM patient_opening_balances b WHERE patient_id=$1",[first.patientId]);
+    const history=await q("SELECT to_jsonb(h) AS value FROM patient_opening_balance_history h WHERE patient_id=$1 ORDER BY id",[first.patientId]);
+    const next={...first,items:[{serviceId:endo,quantity:1,price:"55000",catalogPriceMinor:55000,toothCode:26}],discount:"0",discountReason:null,previouslyPaidAmount:"55000",historicalAsOf:"2026-09-01",idempotencyKey:`historical-fully-paid-${++serial}`};
+    const preview=await documents.previewHistoricalDocument(first.patientId,next,session);
+    const saved=await documents.createHistoricalDocument(first.patientId,{...next,repaymentRemainingMinor:preview.remainingMinor,repaymentVersion:preview.scheduleVersion,repaymentSourceHash:preview.sourceHash},session);
+    expect(saved.document).toMatchObject({remainingMinor:0,historicalAsOf:"2026-09-01"});
+    expect(await q("SELECT to_jsonb(b) AS value FROM patient_opening_balances b WHERE patient_id=$1",[first.patientId])).toEqual(before);
+    expect(await q("SELECT to_jsonb(h) AS value FROM patient_opening_balance_history h WHERE patient_id=$1 ORDER BY id",[first.patientId])).toEqual(history);
+    expect(await counts(first.patientId)).toMatchObject({invoices:0,payments:0,documents:2,openings:1});
+  });
+  it("keeps historical evidence readable after a manual opening correction while refusing further historical writes",async()=>{
+    const source=await command();const {document}=await documents.createHistoricalDocument(source.patientId,source,session);
+    const change=await correction(document);
+    await db.setPatientOpeningBalance({patientId:source.patientId,currency:"YER",amountMinor:190000,asOfDate:"2026-10-01",note:"Synthetic external reconciliation",createdBy:session.username,reason:"External reconciliation"});
+    const [view]=await documents.listHistoricalDocuments(source.patientId);
+    expect(view).toMatchObject({id:document.id,version:1,openingRemainingMinor:190000,correctionAvailable:false});
+    expect(view.history).toHaveLength(1);
+    await expect(documents.correctHistoricalDocument(source.patientId,document.id,change,session)).rejects.toMatchObject({code:"conflict"});
+    expect(await counts(source.patientId)).toMatchObject({documents:1,items:3,invoices:0,payments:0});
+  });
   it("adds a second document to the whole opening bucket and supersedes its single schedule with explicit aggregate terms",async()=>{
     const first=await command();await documents.createHistoricalDocument(first.patientId,first,session);
     const second={...first,items:[{serviceId:endo,quantity:1,price:"55000",catalogPriceMinor:55000,toothCode:26}],discount:"0",discountReason:null,previouslyPaidAmount:"5000",idempotencyKey:`historical-second-${++serial}`};

@@ -32,18 +32,19 @@ async function currentScheduleVersion(client:DbClient,patientId:number,currency:
     WHERE a.patient_id=$1 AND a.opening_currency=$2`,[patientId,currency]);
   return row?.version??0;
 }
-async function openingEvidence(client:DbClient,patientId:number,currency:Currency){
+async function openingEvidence(client:DbClient,patientId:number,currency:Currency,enforceOwnership=true){
   const position=await readDebtPosition(client,target(patientId,currency));
   const {rows:[opening]}=await client.query<{amount_minor:string;as_of_date:string;note:string|null}>("SELECT amount_minor::text,as_of_date::text,note FROM patient_opening_balances WHERE patient_id=$1 AND currency=$2",[patientId,currency]);
-  if((opening?minor(opening.amount_minor):0)!==await liveAgreementRemaining(client,patientId,currency))bad(LEGACY_TREATMENT_MESSAGE.opening_not_owned,"conflict");
-  return {position,opening:opening?{amountMinor:minor(opening.amount_minor),asOfDate:opening.as_of_date,note:opening.note}:null,
+  const owned=(opening?minor(opening.amount_minor):0)===await liveAgreementRemaining(client,patientId,currency);
+  if(enforceOwnership&&!owned)bad(LEGACY_TREATMENT_MESSAGE.opening_not_owned,"conflict");
+  return {position,owned,opening:opening?{amountMinor:minor(opening.amount_minor),asOfDate:opening.as_of_date,note:opening.note}:null,
     sourceHash:position.available?position.sourceHash:null,scheduleVersion:await currentScheduleVersion(client,patientId,currency)};
 }
 async function unallocatedPaidGuard(client:DbClient,patientId:number,previouslyPaid:number){
   if(previouslyPaid<=0)return;
   const {rows}=await client.query(`SELECT p.id FROM payments p LEFT JOIN payments r ON r.reversal_of_id=p.id AND r.kind='refund' AND r.currency=p.currency
     WHERE p.patient_id=$1 AND p.kind='payment' AND p.invoice_id IS NULL AND p.plan_id IS NULL AND p.opening_currency IS NULL AND p.reversal_of_id IS NULL
-    GROUP BY p.id HAVING p.amount_minor>COALESCE(SUM(r.amount_minor),0)`,[patientId]);
+    GROUP BY p.id,p.currency HAVING p.amount_minor>COALESCE(SUM(r.amount_minor),0)`,[patientId]);
   if(rows.length)bad(LEGACY_TREATMENT_MESSAGE.prior_receipts_review,"conflict");
 }
 function verifyPeriod(settings:Record<string,string>,dates:string[]){
@@ -59,7 +60,7 @@ async function inputInTx(client:DbClient,patientId:number,source:Record<string,u
   if(!parsed.ok)bad(parsed.message);
   const input=parsed.value;
   for(let index=0;index<input.lines.length;index++)if(input.lines.slice(0,index).some(prior=>prior.serviceId===input.lines[index].serviceId
-    &&(prior.site.toothCode===input.lines[index].site.toothCode||caseSiteOverlaps(siteText(prior.site),input.lines[index].site))))bad("يتكرر العمل نفسه ضمن الاتفاق؛ راجع الأسنان ونطاق البنود.","conflict");
+    &&caseSiteOverlaps(siteText(prior.site),input.lines[index].site)))bad("يتكرر العمل نفسه ضمن الاتفاق؛ راجع الأسنان ونطاق البنود.","conflict");
   await unallocatedPaidGuard(client,patientId,input.previouslyPaidMinor);
   return {input,settings,access};
 }
@@ -156,7 +157,7 @@ export async function createHistoricalDocument(patientId:number,source:Record<st
     }
     const reason=`تسجيل اتفاق تاريخي متعدد البنود #${document.id}`;
     const openingHistoryId=await writeOpening(client,{patientId,currency:input.currency,after:prior.position.principalMinor+input.remainingMinor,
-      asOf:prior.opening&&prior.opening.asOfDate<input.historicalAsOf?prior.opening.asOfDate:input.historicalAsOf,prior,reason,session,addOnly:!access.edit});
+      asOf:prior.opening&&(input.remainingMinor===0||prior.opening.asOfDate<input.historicalAsOf)?prior.opening.asOfDate:input.historicalAsOf,prior,reason,session,addOnly:!access.edit});
     const repayment=await writeTerms(client,input,`historical-document:${document.id}:v1`,reason,session);
     await insertRevision(client,{documentId:document.id,version:1,...input,lines:links,reason,openingHistoryId,repayment,hash,session});
     await insertAuditRow(client,{action:"legacy_document.create",entity:"patient",entityId:patientId,actor:session.username,actorRole:session.role,
@@ -208,8 +209,11 @@ export async function listHistoricalDocuments(patientId:number){
   try{await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const ids=(await client.query<{id:number}>("SELECT id FROM legacy_treatment_documents WHERE patient_id=$1 ORDER BY id DESC",[patientId])).rows;
     const documents=[];for(const {id} of ids){const document=await readHistoricalDocumentInTx(client,id,patientId);if(!document)continue;
-      const opening=await openingEvidence(client,patientId,document.currency);const history=(await client.query("SELECT version,reason,created_by,created_at::text,total_minor::text,discount_minor::text,previously_paid_minor::text,remaining_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[id])).rows;
-      documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,history});}
+      // Historical facts stay readable after an independent account correction.
+      // Mutation paths still require exact ownership under their write locks.
+      const opening=await openingEvidence(client,patientId,document.currency,false);const history=(await client.query("SELECT version,reason,created_by,created_at::text,total_minor::text,discount_minor::text,previously_paid_minor::text,remaining_minor::text FROM legacy_treatment_document_revisions WHERE document_id=$1 ORDER BY version",[id])).rows;
+      documents.push({...document,sourceHash:opening.sourceHash??debtRequestHash(null),openingRemainingMinor:opening.position.remainingMinor,accountDueMinor:(await debtAccountDue(client,patientId,document.currency)).due,scheduleVersion:opening.scheduleVersion,
+        correctionAvailable:opening.owned,correctionMessage:opening.owned?null:LEGACY_TREATMENT_MESSAGE.opening_not_owned,history});}
     await client.query("COMMIT");return documents;
   }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
 }

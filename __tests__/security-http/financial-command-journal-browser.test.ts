@@ -70,6 +70,26 @@ describe("durable financial command journal in real browser storage", () => {
       }, { scope, changed: { ...intent, original: JSON.stringify({ patientId: 992 }) } })).toBe("changed");
     } finally { await context.close(); }
   });
+  it("allows the same original recovery after another tab acknowledged, without accepting a different draft", async () => {
+    const context = await browser.newContext();
+    try {
+      const [first, second] = await Promise.all([pageIn(context), pageIn(context)]);
+      const intent = command("journal:two-tab-ack:one");
+      await first.evaluate(({ scope, intent }) => window.financialJournal.reserveFinancialCommand(scope, 0, intent), { scope, intent });
+      const acknowledgements = await Promise.all([first, second].map(page => page.evaluate(({ scope, intent }) => window.financialJournal.acknowledgeFinancialCommand(scope, intent), { scope, intent })));
+      expect(acknowledgements).toEqual([{ revision: 1, command: null }, { revision: 1, command: null }]);
+      expect(await second.evaluate(({ scope, intent }) => window.financialJournal.reserveFinancialCommand(scope, 0, intent), { scope, intent })).toEqual({ revision: 1, command: intent });
+      await second.reload({ waitUntil: "domcontentloaded" }); await second.evaluate(source);
+      expect(await second.evaluate(scope => window.financialJournal.readFinancialJournal(scope), scope)).toEqual({ revision: 1, command: intent });
+      expect(await second.evaluate(({ scope, intent }) => window.financialJournal.acknowledgeFinancialCommand(scope, intent), { scope, intent })).toEqual({ revision: 1, command: null });
+      for (const wrong of [command("journal:two-tab-ack:different"), { ...intent, original: JSON.stringify({ patientId: 992 }) }]) {
+        expect(await second.evaluate(async ({ scope, wrong }) => {
+          try { await window.financialJournal.reserveFinancialCommand(scope, 0, wrong); return "unexpected"; }
+          catch (error) { return (error as Journal.FinancialRecoveryError).code; }
+        }, { scope, wrong })).toBe("changed");
+      }
+    } finally { await context.close(); }
+  });
   it("fails closed when browser persistence is unavailable", async () => {
     const context = await browser.newContext();
     try {
