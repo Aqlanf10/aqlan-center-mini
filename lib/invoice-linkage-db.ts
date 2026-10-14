@@ -22,12 +22,28 @@ import { normalizeSurfaces } from "./dental";
 import type { Currency } from "./money";
 import { clinicDateString } from "./schedule";
 import type { SpecialtyTemplate } from "./specialty-templates";
+import type { BillingRule } from "./workflow";
+import { assertInvoiceTemplateSession, validateInvoiceTemplateInTransaction, type InvoiceTemplateAuthority } from "./invoice-template-db";
+import type { SessionPayload } from "./auth";
+import { writeDebtRepaymentInTransaction } from "./debt-installments-db";
+import { lockDebtAccountForSchedule } from "./debt-account-position";
+import {InvoiceVisitContextError,lockInvoiceVisitContext,readInvoiceVisitContext} from "./invoice-visit-context";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
-  validateLineSite, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
+  validateLineSite, invoiceQuantityAllowed, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
+  /** Server-resolved template metadata only. Public requests provide a template reference, never this object. */
+  templatePlan?: {
+    templateId: string;
+    version: string;
+    stepKey: string;
+    billingRule: BillingRule;
+    sessionPlan: { title: string; minutes: number; afterDays: number; visitKey: string; visitTitle: string }[];
+  };
+  /** Exact existing item selected by the user. A stale selection never creates replacement work. */
+  planItemId?: number | null;
   serviceId: number | null;
   category: string | null;
   doctorId: number | null;
@@ -55,10 +71,12 @@ export interface LineLink {
   planItemCreated: boolean;
   caseId: number | null;
   caseCreated: boolean;
+  /** Includes explicitly scheduled, non-specialty template work such as a consultation. */
+  scheduled?: boolean;
 }
 
 export type CreateLinkedInvoiceResult =
-  | { ok: true; invoice: Invoice; replayed: boolean; planId: number | null; links: LineLink[] }
+  | { ok: true; invoice: Invoice; replayed: boolean; planId: number | null; links: LineLink[];visitId?:number }
   | { ok: false; reason: InvoiceLinkageRefusal | "no_patient"; line: number | null };
 
 class Refusal extends Error {
@@ -68,24 +86,28 @@ class Refusal extends Error {
 const OPEN_CASE = `status IN ('active', 'waiting')`;
 
 interface ExistingWork {
-  id: number; quantity: number; unit_price_minor: string; case_id: number | null;
+  id: number; plan_id: number; quantity: number; unit_price_minor: string; case_id: number | null;
   session_count: number; surfaces: string | null; doctor_id: number | null; tooth_code: number | null;
   plan_status: string; base_currency: string; status: string; started_at: Date | null;
   billing_status: string; has_invoice_lineage: boolean; has_legacy_lineage: boolean; legacy_covered: boolean; legacy_context: unknown; has_sessions: boolean; installments: boolean;
   case_site: string | null; case_status: string | null; financial_review: boolean;
 }
 
-type WorkInspection = { item: ExistingWork | null; refusal: InvoiceLinkageRefusal | null };
+type WorkInspection = {
+  item: ExistingWork | null; refusal: InvoiceLinkageRefusal | null;
+  candidates?: { id: number; planId: number; clinicalCaseId: number | null }[];
+};
 
 /** The same evidence/shape rules feed save and preview. Never erase historical work identity. */
 async function inspectExistingWork(
   db: Pick<DbClient, "query">, patientId: number, currency: Currency,
-  item: { serviceId: number | null; quantity: number; unitPriceMinor: number; sessions?: number | null; caseId: number | null },
+  item: { serviceId: number | null; quantity: number; unitPriceMinor: number; sessions?: number | null; caseId: number | null; planItemId?: number | null },
   site: LineSite, claimed: readonly number[],
+  existingPlanId: number | null = null,
 ): Promise<WorkInspection> {
   // Match immutable patient/service identity too: current plan/item edits cannot hide historical work.
   const { rows } = await db.query<ExistingWork>(
-    `SELECT i.id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces, i.doctor_id, i.tooth_code,
+    `SELECT i.id, i.plan_id, i.quantity, i.unit_price_minor, i.case_id, i.session_count, i.surfaces, i.doctor_id, i.tooth_code,
        t.status AS plan_status, t.base_currency, i.status, i.started_at, i.billing_status, c.site AS case_site, c.status AS case_status, ${PLAN_ITEM_FINANCIAL_REVIEW_SQL} AS financial_review,
        (i.billed_invoice_id IS NOT NULL OR i.origin_invoice_id IS NOT NULL OR EXISTS (
          SELECT 1 FROM invoice_items ii WHERE ii.plan_item_id = i.id OR (ii.source_type = 'plan_item' AND ii.source_id = i.id))) AS has_invoice_lineage, ${PLAN_ITEM_LEGACY_LINEAGE_SQL} AS has_legacy_lineage, ${PLAN_ITEM_LEGACY_COVERED_SQL} AS legacy_covered, ${PLAN_ITEM_LEGACY_CONTEXT_SQL} AS legacy_context,
@@ -120,7 +142,7 @@ async function inspectExistingWork(
   if (scoped.some((row) => row.base_currency !== currency || row.installments || row.billing_status !== "unbilled")) {
     return { item: null, refusal: "incompatible_plan" };
   }
-  if (scoped.length === 0) return { item: null, refusal: null };
+  if (scoped.length === 0) return { item: null, refusal: item.planItemId != null ? "selected_item_mismatch" : null };
   const priced = scoped.filter((row) => Number(row.unit_price_minor) === item.unitPriceMinor);
   if (priced.length === 0) return { item: null, refusal: "amount_mismatch" };
   const exact = priced.filter((row) => row.tooth_code === site.toothCode
@@ -128,10 +150,16 @@ async function inspectExistingWork(
     && row.quantity === item.quantity && normalizeSurfaces(row.surfaces) === site.surfaces
     && (item.sessions == null || row.session_count === item.sessions));
   if (exact.length === 0) return { item: null, refusal: "shape_mismatch" };
-  if (exact.length > 1) return { item: null, refusal: "ambiguous_item" };
-  const match = exact[0];
+  const candidates = exact.map((row) => ({ id: row.id, planId: row.plan_id, clinicalCaseId: row.case_id }));
+  // Resolve only within the canonical compatible set, AFTER every financial/history fence above.
+  // Plan selection alone must not erase item ambiguity.
+  const selected = item.planItemId == null ? exact : exact.filter((row) => row.id === item.planItemId);
+  if (selected.length === 0) return { item: null, refusal: "selected_item_mismatch", candidates };
+  if (selected.length > 1) return { item: null, refusal: "ambiguous_item", candidates };
+  const match = selected[0];
+  if (existingPlanId !== null && match.plan_id !== existingPlanId) return { item: null, refusal: "incompatible_plan" };
   if (item.caseId !== null && match.case_id !== null && item.caseId !== match.case_id) return { item: null, refusal: "case_mismatch" };
-  return { item: match, refusal: null };
+  return { item: match, refusal: null, candidates };
 }
 
 /** Reclassifying a catalog service cannot erase an existing therapeutic financial identity. */
@@ -154,11 +182,27 @@ async function financialOnlyLineRefusal(
   return protectedWork ? "needs_financial_review" : null;
 }
 
-export async function reusableMaster(db: Pick<DbClient, "query">, patientId: number, currency: Currency): Promise<number | null | false> {
+/** A manual financial line cannot bill the same service alongside its template-covered schedule. */
+function duplicatesScheduledFinancialWork(
+  items: readonly { serviceId: number | null; templatePlan?: LinkedInvoiceLineInput["templatePlan"] }[], line: number,
+): boolean {
+  const item = items[line];
+  return item.serviceId !== null && items.some((other, index) => index !== line
+    && other.serviceId === item.serviceId && (item.templatePlan !== undefined || other.templatePlan !== undefined));
+}
+
+/** Authoritative add-to-plan compatibility; shared by automatic selection, explicit selection and preview. */
+export async function invoicePlanChoices(db: Pick<DbClient, "query">, patientId: number, currency: Currency) {
   const { rows } = await db.query<{ id: number; compatible: boolean }>(
     `SELECT t.id, (t.consent_at IS NULL AND t.base_currency = $2 AND t.billing_mode = 'per_procedure'
       AND t.total_from_items AND NOT EXISTS (SELECT 1 FROM plan_installments pi WHERE pi.plan_id = t.id)) AS compatible
      FROM treatment_plans t WHERE t.patient_id = $1 AND t.status = 'active' ORDER BY t.id`, [patientId, currency]);
+  return rows;
+}
+
+export async function reusableMaster(db: Pick<DbClient, "query">, patientId: number, currency: Currency, existingPlanId: number | null = null): Promise<number | null | false> {
+  const rows = await invoicePlanChoices(db, patientId, currency);
+  if (existingPlanId !== null) return rows.find((row) => row.id === existingPlanId && row.compatible)?.id ?? false;
   if (rows.length === 0) return null;
   return rows.length === 1 && rows[0].compatible ? rows[0].id : false;
 }
@@ -179,17 +223,81 @@ async function existingLinks(client: Pick<DbClient, "query">, invoiceId: number)
   const links = rows.map((row, line) => {
     const linkage = lineLinkage({ serviceId: row.service_id, category: row.category });
     return {
-      line, kind: row.plan_item_id === null ? "financial" as const : "clinical" as const,
+      line, kind: row.plan_item_id !== null && linkage.kind === "clinical" ? "clinical" as const : "financial" as const,
       specialty: row.plan_item_id !== null && linkage.kind === "clinical" ? linkage.specialty : null,
       planItemId: row.plan_item_id, planItemCreated: false,
       caseId: row.case_id, caseCreated: false,
+      ...(row.plan_item_id !== null ? { scheduled: true } : {}),
     };
   });
   return { planId: created?.plan_id ?? null, links };
 }
 
+/** Build the canonical DTO and its links coherently under the caller's patient lock. */
+async function lockedInvoiceReceipt(client: DbClient, invoiceId: number,
+  input: { patientId: number; createdBy: string; requestHash: string | null }) {
+  // Same lock order as cancellation/correction: patient -> sorted plans/items -> invoice.
+  await client.query(`SELECT t.id FROM treatment_plans t WHERE t.id IN (
+    SELECT i.plan_id FROM plan_items i JOIN invoice_items ii ON ii.plan_item_id = i.id WHERE ii.invoice_id = $1)
+    ORDER BY t.id FOR SHARE`, [invoiceId]);
+  await client.query(`SELECT i.id FROM plan_items i JOIN invoice_items ii ON ii.plan_item_id = i.id
+    WHERE ii.invoice_id = $1 ORDER BY i.id FOR SHARE OF i`, [invoiceId]);
+  const { rows: [locked] } = await client.query<{ patient_id: number; created_by: string; idempotency_request_hash: string | null }>(
+    `SELECT patient_id, created_by, idempotency_request_hash FROM invoices WHERE id = $1 FOR SHARE`, [invoiceId]);
+  if (!locked || locked.patient_id !== input.patientId || locked.created_by !== input.createdBy
+    || locked.idempotency_request_hash !== input.requestHash) throw new Refusal("idempotency_conflict", null);
+  const { rows: crossPatient } = await client.query(`SELECT 1 FROM invoice_items ii JOIN plan_items i ON i.id = ii.plan_item_id
+    JOIN treatment_plans t ON t.id = i.plan_id LEFT JOIN clinical_cases c ON c.id = i.case_id
+    WHERE ii.invoice_id = $1 AND (t.patient_id <> $2 OR (c.id IS NOT NULL AND c.patient_id <> $2)) LIMIT 1`, [invoiceId, input.patientId]);
+  if (crossPatient.length) throw new Refusal("idempotency_conflict", null);
+  const receipt = await existingLinks(client, invoiceId);
+  if (receipt.planId !== null) {
+    const { rows: plan } = await client.query(`SELECT t.id FROM treatment_plans t WHERE t.id = $1 AND t.patient_id = $2
+      AND EXISTS (SELECT 1 FROM invoice_items ii JOIN plan_items i ON i.id = ii.plan_item_id
+        WHERE ii.invoice_id = $3 AND i.plan_id = t.id AND i.origin_invoice_id = $3)`, [receipt.planId, input.patientId, invoiceId]);
+    if (!plan.length) throw new Refusal("idempotency_conflict", null);
+  }
+  const invoice = await getInvoice(invoiceId, client);
+  if (!invoice || invoice.id !== invoiceId || invoice.patientId !== input.patientId || invoice.items.length !== receipt.links.length
+    || invoice.items.some((item, line) => (item.planItemId ?? null) !== receipt.links[line].planItemId
+      || (item.caseId ?? null) !== receipt.links[line].caseId)) throw new Refusal("idempotency_conflict", null);
+  return { invoice, planId: receipt.planId, links: receipt.links };
+}
+
+/** Recover only an authenticated caller's exact immutable template command, before current template expansion. */
+export async function recoverLinkedInvoice(input: {
+  patientId: number; idempotencyKey: string; requestHash: string; createdBy: string;
+  session: SessionPayload;visitId?:number;
+}): Promise<CreateLinkedInvoiceResult | null> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: patient } = await client.query("SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE", [input.patientId]);
+    if (!patient[0]) throw new Refusal("no_patient", null);
+    await assertInvoiceTemplateSession(client, input.session, { createdBy: input.createdBy, actorRole: input.session.role });
+    const { rows: [prior] } = await client.query<{ id: number; patient_id: number; created_by: string; idempotency_request_hash: string | null }>(
+      "SELECT id, patient_id, created_by, idempotency_request_hash FROM invoices WHERE idempotency_key = $1", [input.idempotencyKey]);
+    if (!prior) { await client.query("ROLLBACK"); return null; }
+    if (prior.patient_id !== input.patientId || prior.created_by !== input.createdBy || prior.idempotency_request_hash !== input.requestHash) {
+      throw new Refusal("idempotency_conflict", null);
+    }
+    if(input.visitId!==undefined)await readInvoiceVisitContext(client,input.patientId,input.visitId,prior.id);
+    const receipt = await lockedInvoiceReceipt(client, prior.id, input);
+    await assertInvoiceTemplateSession(client, input.session, { createdBy: input.createdBy, actorRole: input.session.role });
+    await client.query("ROLLBACK");
+    return { ok: true, ...receipt, replayed: true,...(input.visitId!==undefined?{visitId:input.visitId}:{}) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
+    if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
+    throw error;
+  } finally { client.release(); }
+}
+
 export async function createLinkedInvoice(input: {
-  patientId: number;
+  patientId: number;visitId?:number;
+  existingPlanId?: number | null;
   baseCurrency: Currency;
   discountMinor: number;
   note: string | null;
@@ -199,23 +307,29 @@ export async function createLinkedInvoice(input: {
   templates: readonly SpecialtyTemplate[];
   idempotencyKey: string | null;
   requestHash: string | null;
+  /** Exact source selection and preflight fingerprint; revalidated under transaction-owned catalogue locks. */
+  templateAuthority?: InvoiceTemplateAuthority;
+  /** Ordinary invoice commands receive the same locked catalogue/session checks. */
+  catalogueAuthority?: InvoiceTemplateAuthority;
   /** تفاصيل سطر تدقيق `invoice.create` (السلطة السعرية) — يُكتب داخل المعاملة نفسها. */
   auditDetails: Record<string, unknown>;
 }): Promise<CreateLinkedInvoiceResult> {
   await ensureSchema();
-  /* القراءة النهائية بعد تحرير اتصال المعاملة: إمساكُ اتصالٍ وطلبُ آخر تحت التزامن يستنفد المجمّع. */
+  /* Ordinary receipts retain the established post-release read. Template receipts are
+     already mapped on the transaction client: no second pool connection while locks are held. */
   const written = await writeLinkedInvoice(input);
   if (!written.ok) return written;
-  const invoice = await getInvoice(written.invoiceId);
-  return { ok: true, invoice: invoice as Invoice, replayed: written.replayed, planId: written.planId, links: written.links };
+  const invoice = written.invoice ?? await getInvoice(written.invoiceId);
+  return { ok: true, invoice: invoice as Invoice, replayed: written.replayed, planId: written.planId, links: written.links,...(input.visitId!==undefined?{visitId:input.visitId}:{}) };
 }
 
 type Written =
-  | { ok: true; invoiceId: number; replayed: boolean; planId: number | null; links: LineLink[] }
+  | { ok: true; invoiceId: number; invoice?: Invoice; replayed: boolean; planId: number | null; links: LineLink[];visitId?:number }
   | Extract<CreateLinkedInvoiceResult, { ok: false }>;
 
 async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[0]): Promise<Written> {
   const client = await getPool().connect();
+  const authority = input.templateAuthority ?? input.catalogueAuthority;
   try {
     await client.query("BEGIN");
     const { rows: patient } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
@@ -225,38 +339,63 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       const { rows: [prior] } = await client.query<{ id: number; idempotency_request_hash: string | null; patient_id: number }>(
         `SELECT id, idempotency_request_hash, patient_id FROM invoices WHERE idempotency_key = $1`, [input.idempotencyKey]);
       if (prior) {
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
         if (prior.idempotency_request_hash !== input.requestHash || prior.patient_id !== input.patientId) {
           throw new Refusal("idempotency_conflict", null);
         }
-        const replay = await existingLinks(client, prior.id);
+        if(input.visitId!==undefined)await readInvoiceVisitContext(client,input.patientId,input.visitId,prior.id);
+        const replay = authority
+          ? await lockedInvoiceReceipt(client, prior.id, input)
+          : await existingLinks(client, prior.id);
+        if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
         await client.query("ROLLBACK");
         return { ok: true, invoiceId: prior.id, replayed: true, ...replay };
       }
     }
 
+    if(input.visitId!==undefined||authority&&Object.hasOwn(authority.source,"repaymentTerms")){
+      await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
+    }
+    if(input.visitId!==undefined){
+      if(!authority||!input.idempotencyKey)throw new InvoiceVisitContextError();
+      await assertInvoiceTemplateSession(client,authority.session,input);
+      await lockInvoiceVisitContext(client,input.patientId,input.visitId);
+    }
+    await validateInvoiceTemplateInTransaction(client, input);
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [input.patientId]);
+    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) await lockDebtAccountForSchedule(client,input.patientId);
     const linkages = input.items.map((item) => lineLinkage({ serviceId: item.serviceId, category: item.category }));
+    // A selected template may schedule consultation/records without manufacturing a specialty case.
+    const scheduled = input.items.map((item, line) => linkages[line].kind === "clinical" || item.templatePlan !== undefined);
+    if (input.existingPlanId != null) {
+      const { rows: [selectedPlan] } = await client.query(
+        `SELECT id FROM treatment_plans WHERE id = $1 AND patient_id = $2 AND status = 'active' AND base_currency = $3`,
+        [input.existingPlanId, input.patientId, input.baseCurrency]);
+      if (!selectedPlan || !scheduled.some(Boolean)) throw new Refusal("incompatible_plan", null);
+    }
     for (const [line, item] of input.items.entries()) {
       if (linkages[line].kind === "financial") {
+        if (duplicatesScheduledFinancialWork(input.items, line)) throw new Refusal("existing_work", line);
+        if (item.planItemId != null && !scheduled[line]) throw new Refusal("selected_item_mismatch", line);
         const refusal = await financialOnlyLineRefusal(client, input.patientId, item.serviceId);
         if (refusal) throw new Refusal(refusal, line);
       }
     }
     /* (INV-LINK TOOTH) موضع كل بندٍ علاجي يُتحقق قبل أي كتابة: خدمةٌ تخص سنًّا بلا سن لا تُحفظ مرتبطةً (fail closed). */
     const sites: (LineSite | null)[] = input.items.map((item, line) => {
-      if (linkages[line].kind !== "clinical") return null;
+      if (!scheduled[line]) return null;
       const checked = validateLineSite(item);
       if (!checked.ok) throw new Refusal(checked.reason, line);
       return checked.site;
     });
 
-    const clinicalDoctorIds = input.items.flatMap((item, line) => linkages[line].kind === "clinical" && item.doctorId !== null ? [item.doctorId] : []);
+    const clinicalDoctorIds = input.items.flatMap((item, line) => scheduled[line] && item.doctorId !== null ? [item.doctorId] : []);
     const doctors = await lockClinicalDoctors(client, [], clinicalDoctorIds);
     input.items.forEach((item, line) => {
-      if (linkages[line].kind === "clinical" && item.doctorId !== null && !doctors.has(item.doctorId)) throw new Refusal("bad_provider", line);
-      if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
+      if (scheduled[line] && item.doctorId !== null && !doctors.has(item.doctorId)) throw new Refusal("bad_provider", line);
+      if (!invoiceQuantityAllowed(item.category,item.quantity) || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
         throw new Refusal("shape_mismatch", line);
       }
     });
@@ -275,22 +414,25 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
     const links: LineLink[] = input.items.map((_, line) => ({
       line, kind: linkages[line].kind, specialty: linkages[line].kind === "clinical" ? (linkages[line] as { specialty: LinkageSpecialty }).specialty : null,
       planItemId: null, planItemCreated: false, caseId: null, caseCreated: false,
+      ...(scheduled[line] ? { scheduled: true } : {}),
     }));
     const financialDoctors = input.items.map((item) => item.doctorId);
     const claimed: number[] = [];
     const fresh: number[] = [];
     const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
     for (const [line, item] of input.items.entries()) {
-      if (linkages[line].kind !== "clinical") continue;
+      if (!scheduled[line]) continue;
       const site = sites[line]!;
       if (requestedWork.some((prior) => prior.serviceId === item.serviceId && (
         (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
           && caseSiteOverlaps(siteText(prior.site), site))))) throw new Refusal("existing_work", line);
       requestedWork.push({ serviceId: item.serviceId, site });
-      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed);
+      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed, input.existingPlanId ?? null);
       if (inspection.refusal) throw new Refusal(inspection.refusal, line);
       const match = inspection.item;
       if (!match) { fresh.push(line); continue; }
+      // A template must never silently replace an existing item's clinical schedule.
+      if (item.templatePlan) throw new Refusal("shape_mismatch", line);
       if (match.doctor_id !== null && item.doctorId !== null && match.doctor_id !== item.doctorId) throw new Refusal("bad_provider", line);
       financialDoctors[line] = match.doctor_id ?? item.doctorId;
       if (financialDoctors[line] !== null && !(await lockClinicalDoctors(client, [], [financialDoctors[line]])).has(financialDoctors[line]!)) {
@@ -310,14 +452,18 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
 
     let planId: number | null = null;
     if (fresh.length > 0) {
-      const masterId = await reusableMaster(client, input.patientId, input.baseCurrency);
+      const masterId = await reusableMaster(client, input.patientId, input.baseCurrency, input.existingPlanId ?? null);
       if (masterId === false) throw new Refusal("incompatible_plan", fresh[0]);
-      const specialties = [...new Set(fresh.map((line) => links[line].specialty))];
+      const specialties = [...new Set(fresh.flatMap((line) => links[line].specialty === null ? [] : [links[line].specialty!]))];
+      const templateDoctors = [...new Set(fresh.filter((line) => input.items[line].templatePlan).map((line) => financialDoctors[line]))];
+      // The inserter has one visit doctor. Keep it unset if mixed manual work has a different doctor.
+      const templateDoctor = templateDoctors.length === 1 && templateDoctors[0] !== null
+        && fresh.every((line) => financialDoctors[line] === templateDoctors[0]) ? templateDoctors[0] : null;
       const plan = await insertPlanV2InTx(client, {
         patientId: input.patientId,
         title: `علاج مفوتر — ${created.invoice_number}`,
         specialty: specialties.length === 1 ? specialties[0] : null,
-        primaryDoctorId: null,
+        primaryDoctorId: templateDoctor,
         billingMode: "per_procedure",
         baseCurrency: input.baseCurrency,
         startDate: clinicDateString(new Date(), CLINIC_TIME_ZONE),
@@ -328,8 +474,9 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
             serviceId: item.serviceId, serviceName: item.description, category: item.category,
             toothCode: sites[line]!.toothCode, surfaces: sites[line]!.surfaces,
             quantity: Math.max(1, Math.round(item.quantity)), unitPriceMinor: Math.round(item.unitPriceMinor),
-            billingRule: "on_completion" as const,
-            sessionCount: sessionsFor(item.category, item.sessions, input.templates), note: scopeNote(sites[line]!),
+            billingRule: item.templatePlan?.billingRule ?? "on_completion" as const,
+            sessionCount: item.templatePlan?.sessionPlan.length ?? sessionsFor(item.category, item.sessions, input.templates), note: scopeNote(sites[line]!),
+            ...(item.templatePlan ? { sessionPlan: item.templatePlan.sessionPlan } : {}),
           };
         }),
         installments: [],
@@ -448,12 +595,16 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
           source === null ? null : "plan_item", source, source]);
     }
 
+    if(input.visitId!==undefined){
+      const linked=await client.query("UPDATE visits SET invoice_id=$3 WHERE id=$1 AND patient_id=$2 AND invoice_id IS NULL RETURNING id",[input.visitId,input.patientId,invoiceId]);
+      if(linked.rows.length!==1)throw new InvoiceVisitContextError();
+    }
     const clinical = links.filter((link) => link.kind === "clinical");
     await audit(client, {
       action: "invoice.create", entity: "invoice", entityId: invoiceId, entityLabel: created.invoice_number,
       details: {
         المريض: input.patientId, الإجمالي: total, الخصم: discount, عدد_البنود: input.items.length,
-        ...input.auditDetails,
+        ...input.auditDetails,...(input.visitId!==undefined?{زيارة_السياق:input.visitId}:{}),
         ...(clinical.length ? {
           الربط_بالعلاج: clinical.map((link) =>
             `${LINKAGE_SPECIALTY_LABEL[link.specialty!]}: بند ${link.planItemId}${link.planItemCreated ? " (جديد)" : " (قائم)"}`
@@ -462,10 +613,24 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       },
       actor: input.createdBy, actorRole: input.actorRole,
     });
+    if (authority && Object.hasOwn(authority.source,"repaymentTerms")) {
+      await writeDebtRepaymentInTransaction(client,{
+        target:{patientId:input.patientId,currency:input.baseCurrency,invoiceId,openingCurrency:null},
+        terms:authority.source.repaymentTerms,expectedVersion:0,
+        expectedRemainingMinor:input.items.reduce((sum,item)=>sum+item.quantity*item.unitPriceMinor,0)-input.discountMinor,
+        reason:"طريقة السداد عند إنشاء الاتفاق",idempotencyKey:`invoice:${invoiceId}:repayment`,session:authority.session,
+      });
+    }
+    const templateInvoice = authority ? await getInvoice(invoiceId, client) : null;
+    if (authority && (!templateInvoice || templateInvoice.id !== invoiceId || templateInvoice.patientId !== input.patientId
+      || templateInvoice.items.length !== links.length || templateInvoice.items.some((item, line) =>
+        (item.planItemId ?? null) !== links[line].planItemId || (item.caseId ?? null) !== links[line].caseId))) throw new Refusal("idempotency_conflict", null);
+    if (authority) await assertInvoiceTemplateSession(client, authority.session, input);
     await client.query("COMMIT");
-    return { ok: true, invoiceId, replayed: false, planId, links };
+    return { ok: true, invoiceId, ...(templateInvoice ? { invoice: templateInvoice } : {}), replayed: false, planId, links };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
+    if(error instanceof InvoiceVisitContextError)return {ok:false,reason:"visit_context_invalid",line:null};
     if (error instanceof Refusal) return { ok: false, reason: error.reason, line: error.line };
     // مفتاحٌ واحد لطلبين متزامنين لمريضين مختلفين: الفهرس الفريد يحسم — تعارضٌ لا فاتورة ثانية.
     if ((error as { code?: string; constraint?: string }).code === "23505"
@@ -493,6 +658,10 @@ export interface LinePreview {
   /** سبب رفضٍ متوقَّع (المعاينة تحذّر؛ الحفظ يرفض فعلًا). */
   refusal: InvoiceLinkageRefusal | null;
   financialReviewRequired?: boolean;
+  /** Canonical inspected candidates; selection still requires save-time revalidation under patient locks. */
+  itemCandidates?: { id: number; planId: number; clinicalCaseId: number | null }[];
+  /** Explicitly scheduled work can remain financial-only and have no specialty case. */
+  scheduled?: boolean;
 }
 
 /**
@@ -501,29 +670,55 @@ export interface LinePreview {
  */
 export async function previewInvoiceLinkage(input: {
   patientId: number; baseCurrency: Currency;
+  existingPlanId?: number | null;
   items: { serviceId: number | null; category: string | null; quantity: number; unitPriceMinor: number;
     toothCode: number | null; caseId: number | null; sessions?: number | null;
-    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null }[];
+    surfaces?: string | null; episodeTeeth?: number[] | null; scope?: string | null; doctorId?: number | null; planItemId?: number | null;
+    templatePlan?: LinkedInvoiceLineInput["templatePlan"] }[];
 }): Promise<LinePreview[]> {
   await ensureSchema();
   const pool = getPool();
+  const selectedPlanValid = input.existingPlanId == null || (await pool.query(
+    `SELECT id FROM treatment_plans WHERE id = $1 AND patient_id = $2 AND status = 'active' AND base_currency = $3`,
+    [input.existingPlanId, input.patientId, input.baseCurrency])).rows.length === 1;
   const claimed: number[] = [];
   const newCaseForGroup = new Set<string>();
   const previews: LinePreview[] = [];
   const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
   for (const [line, item] of input.items.entries()) {
     const linkage = lineLinkage({ serviceId: item.serviceId, category: item.category });
-    if (linkage.kind !== "clinical") {
-      const refusal = await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
+    const scheduled = linkage.kind === "clinical" || item.templatePlan !== undefined;
+    const duplicateFinancial = linkage.kind === "financial" && duplicatesScheduledFinancialWork(input.items, line);
+    if (!scheduled) {
+      const refusal = duplicateFinancial ? "existing_work" as const : item.planItemId != null ? "selected_item_mismatch" as const
+        : input.existingPlanId != null && !input.items.some((one) => lineLinkage(one).kind === "clinical" || one.templatePlan !== undefined) ? "incompatible_plan" as const
+        : await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
       previews.push({ line, kind: "financial", specialty: null, specialtyLabel: null, item: null, case: null,
         refusal, financialReviewRequired: refusal !== null });
       continue;
     }
     const preview: LinePreview = {
-      line, kind: "clinical", specialty: linkage.specialty, specialtyLabel: LINKAGE_SPECIALTY_LABEL[linkage.specialty],
-      item: { mode: "new", id: null }, case: linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
-      refusal: null,
+      line, kind: linkage.kind,
+      specialty: linkage.kind === "clinical" ? linkage.specialty : null,
+      specialtyLabel: linkage.kind === "clinical" ? LINKAGE_SPECIALTY_LABEL[linkage.specialty] : null,
+      item: { mode: "new", id: null }, case: linkage.kind === "clinical" && linkage.needsCase ? null : { mode: "none", id: null, title: null, options: [] },
+      refusal: selectedPlanValid ? null : "incompatible_plan",
+      scheduled: true,
     };
+    if (duplicateFinancial) {
+      preview.refusal = "existing_work";
+      previews.push(preview);
+      continue;
+    }
+    if (linkage.kind === "financial") {
+      const financialRefusal = await financialOnlyLineRefusal(pool, input.patientId, item.serviceId);
+      if (financialRefusal) {
+        preview.refusal = financialRefusal;
+        preview.financialReviewRequired = true;
+        previews.push(preview);
+        continue;
+      }
+    }
     const checked = validateLineSite(item);
     if (!checked.ok) { preview.refusal = checked.reason; previews.push(preview); continue; }
     const site = checked.site;
@@ -534,11 +729,17 @@ export async function previewInvoiceLinkage(input: {
     const { rows: [doctor] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [item.doctorId ?? null]);
     if (item.doctorId != null && !doctor) preview.refusal = "bad_provider";
     preview.financialReviewRequired = item.doctorId == null;
-    const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed);
+    const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed, input.existingPlanId ?? null);
+    preview.itemCandidates = inspected.candidates ?? [];
     preview.refusal = inspected.refusal ?? preview.refusal;
     const match = inspected.item;
     let linkedCase: number | null = null;
     if (match) {
+      if (item.templatePlan) {
+        preview.refusal = "shape_mismatch";
+        previews.push(preview);
+        continue;
+      }
       if (match.doctor_id !== null && item.doctorId != null && item.doctorId !== match.doctor_id) preview.refusal = "bad_provider";
       preview.financialReviewRequired = (match.doctor_id ?? item.doctorId) == null;
       if (match.doctor_id !== null) {
@@ -548,10 +749,10 @@ export async function previewInvoiceLinkage(input: {
       claimed.push(match.id);
       preview.item = { mode: "existing", id: match.id };
       linkedCase = match.case_id;
-    } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency) === false) {
+    } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency, input.existingPlanId ?? null) === false) {
       preview.refusal = "incompatible_plan";
     }
-    if (linkage.needsCase) {
+    if (linkage.kind === "clinical" && linkage.needsCase) {
       const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(
         `SELECT id, title, site FROM clinical_cases WHERE patient_id = $1 AND specialty = $2 AND ${OPEN_CASE}
           AND (ortho_case_id IS NULL OR EXISTS (SELECT 1 FROM ortho_cases o WHERE o.id = ortho_case_id AND o.patient_id = $1 AND o.status IN ('active', 'retention')))
@@ -602,4 +803,3 @@ export async function previewInvoiceLinkage(input: {
   }
   return previews;
 }
-

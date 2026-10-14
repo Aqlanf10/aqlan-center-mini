@@ -221,3 +221,16 @@ export const MODE_HINT: Record<ToothScopeMode, string> = {
 };
 
 export const PER_TOOTH_SPLIT_NOTICE = "سيُنشأ سطر وحالة مستقلة لكل سن";
+
+/** Historical prosthetic value belongs to the recorded episode as a whole.
+ * Splitting its original agreement would invent per-tooth prices and overlapping
+ * historical coverage. Other service units retain their existing rules. */
+export function applyHistoricalToothSelection<R extends ToothRowLike>(
+  rows: readonly R[], index: number, mode: ToothScopeMode, selection: ToothSelection, makeKey: () => string,
+): R[] {
+  if (mode !== "multi_tooth_episode") return applyToothSelection(rows,index,mode,selection,makeKey);
+  const teeth=sorted(selection.teeth),row=rows[index];
+  if(!row)return [...rows];
+  return rows.map((other,i)=>i!==index?other:{...other,toothCode:teeth[0]??null,episodeTeeth:teeth.length?teeth:null,
+    surfaces:"",scope:null,groupId:null,caseId:JSON.stringify(selectionOfRow(row).teeth)===JSON.stringify(teeth)?row.caseId:""});
+}

@@ -252,12 +252,22 @@ export function DailyClinicReportBody({ report, clinicName, printScope = "summar
 
     <TablePanel id="daily-clinic-legacy" title="علاج بدأ قبل النظام: الحقائق التاريخية" note="المدفوع قبل النظام ليس تحصيل اليوم ولا سندًا. «المتبقي عند البداية» رقم تاريخي، وأثره الحالي في عمود مستقل: داخل الرصيد الافتتاحي للاتفاق القائم، أو أُزيل عند الإبطال. الدين الحالي هو رصيد الحساب كاملًا، ولا توزع تحصيلات الرصيد الافتتاحي على الاتفاقات. التغطية من اللقطة الثابتة بعد التحقق منها؛ غيابها أو تعارضها يعني مراجعة لا تخمينًا.">
       <table className={styles.detailsTable} data-testid="daily-clinic-legacy"><thead><tr><th scope="col">المريض / العلاج</th><th scope="col">التغطية</th><th scope="col">العملة</th><th scope="col">المتفق عليه</th><th scope="col">المدفوع قبل النظام</th><th scope="col">المتبقي عند البداية</th><th scope="col">أثره الحالي</th><th scope="col">حتى تاريخ</th><th scope="col">الحالة</th></tr></thead>
-        <tbody>{report.legacyAgreements.length === 0 ? <tr><td colSpan={9}>لا علاج سابق للنظام لمراجعي اليوم.</td></tr> : report.legacyAgreements.map((row) => <tr key={row.id} data-legacy-id={row.id}>
+        <tbody>{report.legacyAgreements.length === 0 && !report.historicalDocuments?.length ? <tr><td colSpan={9}>لا علاج سابق للنظام لمراجعي اليوم.</td></tr> : report.legacyAgreements.map((row) => <tr key={row.id} data-legacy-id={row.id}>
           <th scope="row">{row.patientName}<small>حالة بدأت قبل النظام · {row.serviceName} · اتفاق #{row.id}</small></th>
           <td data-legacy-coverage={row.coverageState}>{row.coverageState === "verified" && row.coverageLabel ? row.coverageLabel : <span className={styles.unknown}>{row.coverageState === "conflict" ? "التغطية المسجّلة متعارضة — تحتاج مراجعة" : "التغطية غير مثبتة — تحتاج مراجعة"}</span>}{row.toothCode !== null ? <small>السن المرجعي {row.toothCode}</small> : null}</td>
           <td><bdi>{row.currency}</bdi></td><td><Money minor={row.agreedMinor} currency={row.currency} /></td><td><Money minor={row.previouslyPaidMinor} currency={row.currency} /></td><td><Money minor={row.remainingAtStartMinor} currency={row.currency} /></td>
           <td data-legacy-current-effect={row.currentOpeningEffect}>{({ in_opening: "داخل الرصيد الافتتاحي الحالي", removed_by_void: "أُزيل من الرصيد عند الإبطال", none: "لا أثر — مسدَّد تاريخيًا" })[row.currentOpeningEffect]}</td>
           <td><bdi dir="ltr">{row.historicalAsOf}</bdi></td><td>{row.status === "live" ? "قائم" : "مُبطل"}{row.voidReason ? <small>{row.voidReason}</small> : null}</td>
+        </tr>)}{(report.historicalDocuments ?? []).map((row) => <tr key={`document-${row.id}`} data-historical-document-id={row.id} data-historical-version={row.version}>
+          <th scope="row">{row.patientName}<small>وثيقة اتفاق قبل النظام #{row.id} · الإصدار {row.version}</small><small>حقائق الوثيقة الحالية مرة واحدة؛ المدفوع والمتبقي لا يوزعان على بنود العلاج.</small></th>
+          <td>{row.lines.map((line) => <div key={line.agreementId} data-historical-agreement-id={line.agreementId}>
+            <strong>{line.serviceName}</strong><small data-legacy-coverage={line.coverageState}>{line.coverageState === "verified" && line.coverageLabel ? line.coverageLabel : "التغطية تحتاج مراجعة"}</small>
+            <small>اتفاق #{line.agreementId} · بند #{line.planItemId}{line.caseId !== null ? ` · حالة #${line.caseId}` : ""}</small>
+          </div>)}</td>
+          <td><bdi className={styles.amount}>{row.currency}</bdi></td><td><Money minor={row.agreedMinor} currency={row.currency} /></td>
+          <td><Money minor={row.previouslyPaidMinor} currency={row.currency} /></td><td><Money minor={row.remainingAtStartMinor} currency={row.currency} /></td>
+          <td>{row.remainingAtStartMinor > 0 ? "ضمن وعاء الرصيد الافتتاحي؛ الدين الحالي في الحساب بعد التحصيل والتصحيحات" : "لا متبقي تاريخي على الوثيقة"}</td>
+          <td><bdi dir="ltr">{row.historicalAsOf}</bdi></td><td>قائم · الحقائق المصححة حتى إعداد الكشف</td>
         </tr>)}</tbody>
       </table>
     </TablePanel>

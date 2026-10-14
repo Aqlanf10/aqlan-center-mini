@@ -77,8 +77,8 @@ beforeAll(async () => {
   );
   invoicePatientId = invoicePatient.id;
   const { rows: [invoiceService] } = await db.query<{ id: number }>(
-    `INSERT INTO services (name, category, price_minor, is_active)
-     VALUES ('SYNTHETIC currency-only financial service', NULL, 15000, TRUE) RETURNING id`,
+    `INSERT INTO services (name, category, price_minor, price_configured, is_active)
+     VALUES ('SYNTHETIC currency-only financial service', NULL, 15000, TRUE, TRUE) RETURNING id`,
   );
   invoiceServiceId = invoiceService.id;
 

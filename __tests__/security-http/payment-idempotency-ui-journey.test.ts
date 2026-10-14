@@ -117,12 +117,14 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
     }
   }, 120_000);
 
-  it("an uncertain request freezes its amount through close/reopen and reuses its key", async () => {
+  it("an uncertain request freezes its amount through close and recovers the saved command with its key", async () => {
     const { context, page } = await openCollect();
     const keys: string[] = [];
+    const bodies: string[] = [];
     let failFirst = true;
     await page.route("**/api/payments", async (route) => {
       keys.push(route.request().headers()["idempotency-key"] ?? "");
+      bodies.push(route.request().postData() ?? "");
       if (failFirst) {
         failFirst = false;
         await route.abort("failed"); // لم يصل الخادم أصلًا
@@ -139,12 +141,28 @@ describe("نافذة التحصيل — سندٌ واحد مهما أُعيد ا
       await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
       expect(await dialog.getByLabel("المبلغ").isDisabled()).toBe(true);
       await dialog.getByRole("button", { name: "إغلاق", exact: true }).click();
-      await page.getByRole("button", { name: "قبض دفعة", exact: true }).click();
-      await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
-      await dialog.waitFor({ state: "hidden" });
-      expect(await paymentsCount()).toBe(before + 1);
+      expect(await page.getByRole("button", { name: "قبض دفعة", exact: true }).isDisabled()).toBe(true);
+      const recovery = page.getByTestId("money-command-recovery");
+      await expect.poll(() => recovery.innerText()).toContain("500 YER");
+      const replay = page.waitForResponse(response => response.url().endsWith("/api/payments") && response.request().method() === "POST");
+      await recovery.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }).click();
+      expect((await replay).status()).toBe(201); // The first attempt never reached the server.
+      await expect.poll(paymentsCount).toBe(before + 1);
+      await expect.poll(() => recovery.count()).toBe(0);
       expect(keys).toHaveLength(2);
       expect(keys[1]).toBe(keys[0]);
+      expect(bodies[1]).toBe(bodies[0]);
+      // The completed recovery releases the user; a separate intent gets a new
+      // key while the recovered original remains one receipt for its amount.
+      const collect = page.getByRole("button", { name: "قبض دفعة", exact: true });
+      await expect.poll(() => collect.isEnabled()).toBe(true);
+      await collect.click();
+      await dialog.getByLabel("المبلغ").fill("700");
+      await dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true }).click();
+      await dialog.waitFor({ state: "hidden" });
+      expect(await paymentsCount()).toBe(before + 2);
+      expect(keys).toHaveLength(3);expect(keys[2]).not.toBe(keys[0]);
+      expect(JSON.parse(bodies[2]).amount).toBe("700");
     } finally {
       await context.close();
     }

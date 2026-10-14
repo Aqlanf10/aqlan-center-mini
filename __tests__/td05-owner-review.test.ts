@@ -20,7 +20,11 @@ vi.stubEnv("NODE_ENV", "test");
 vi.stubEnv("RAILWAY_PROJECT_ID", "");
 
 const sessionMock = vi.hoisted(() => ({ requireSession: vi.fn() }));
-vi.mock("@/lib/session", () => ({ requireSession: sessionMock.requireSession }));
+vi.mock("@/lib/session", () => ({ requireSession: sessionMock.requireSession,
+  // This currency-route fixture supplies its admitted actor at both boundaries;
+  // real credential revocation is exercised by the PostgreSQL/HTTP suites.
+  revalidateSessionInTransaction: sessionMock.requireSession,
+}));
 
 const {
   getPool, resetPoolForTesting, ensureSchema, openShift, recordPayment,
@@ -212,8 +216,8 @@ describe("مراجعة المالك ٣: فاتورة يدوية بعملة ات�
     );
     currencyPatientId = patient.id;
     const { rows: [service] } = await getPool().query(
-      `INSERT INTO services (name, category, price_minor, is_active)
-       VALUES ('رسم مالي لاختبار العملات', NULL, 15000, TRUE) RETURNING id`,
+      `INSERT INTO services (name, category, price_minor, price_configured, is_active)
+       VALUES ('رسم مالي لاختبار العملات', NULL, 15000, TRUE, TRUE) RETURNING id`,
     );
     currencyServiceId = service.id;
   });

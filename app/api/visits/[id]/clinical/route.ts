@@ -166,6 +166,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           الإجراءات: result.visit?.procedures.length ?? 0,
           الإجمالي: result.duesMinor,
           الفاتورة: result.invoiceId,
+          الفاتورة_المرتبطة_بالزيارة: result.visit?.invoiceId ?? result.invoiceId,
           عملة_الفاتورة: result.invoiceCurrency,
           تحديثات_المخطط: result.chartUpdates,
           بنود_اكتملت: result.planItemsDone,
@@ -192,7 +193,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        */
       return NextResponse.json({
         ...result.visit,
-        invoiceId: result.invoiceId,
+        invoiceId: result.visit?.invoiceId ?? result.invoiceId,
+        createdInvoiceId: result.invoiceId,
         invoiceCurrency: result.invoiceCurrency,
         duesMinor: result.duesMinor,
         sessionsCompleted: result.sessionsCompleted,

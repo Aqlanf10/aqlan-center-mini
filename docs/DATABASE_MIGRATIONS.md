@@ -12,6 +12,12 @@
 
 ## البنية
 
+إضافات فرع الفاتورة الموحدة (اختُبرت على PostgreSQL محلي معزول فقط):
+
+- `0059_invoice_debt_installments.sql`: جداول سداد الدين وإصداراتها وتخصيص التحصيل، دون إنشاء دين إضافي.
+- `0060_historical_treatment_documents.sql`: مستند تاريخي متعدد البنود وإصدارات تصحيحه الإلحاقية، مع حماية نطاق العلاج؛ المتبقي وحده رصيد افتتاحي، دون فاتورة أو سند للمدفوع السابق.
+- `0061_invoice_correction_lineage.sql`: تسلسل تصحيح الفواتير وإقراراته وبصمة ربط العلاج، مع بقاء إيصالات الأصل وتسوية المتبقي عبر التسلسل دون تكرار التحصيل.
+
 ```
 migrations/
   0001_baseline_schema.sql                 ← خط الأساس: DDL + مزامنة عدادات الأعمال عبر setval
@@ -449,6 +455,13 @@ harness callers retain their existing template choice; it is not shipped in the 
 It never expands policy from live catalog content. Review source changes before
 committing any regenerated policy; do not add Production unknowns automatically.
 CI regenerates the policy from fresh source schemas and checks exact equality.
+
+Invoice continuation, 2026-10-14: regenerated the disclosure candidate on disposable
+PG18.6 from the reviewed 0059–0061 source additions. The two removed/replaced legacy
+constraint fingerprints follow 0060's explicit amount/opening constraint replacements;
+the remaining differences describe the new debt, historical-document and invoice-correction
+objects. No operator database was queried. Exact regeneration and the private template1
+canary tests passed; the equality and disclosure guards remain unchanged.
 
 Each selector invocation has its own read-only snapshot. Combine captures only
 when **all eleven aggregate hashes/counts, registry evidence, source/projector/

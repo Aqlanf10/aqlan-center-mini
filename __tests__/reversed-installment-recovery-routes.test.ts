@@ -11,7 +11,7 @@ vi.mock("@/lib/db", () => ({
   recordReversedInstallmentRecovery: mock.recovery, recordPayment: mock.ordinary,
   recordPlanInstallment: mock.installment, recordAudit: mock.audit,
   getPlan: mock.plan, isPlanFundedByAgreement: mock.funded, getPayment: mock.payment,
-  listPaymentsByDate: vi.fn(), setPlanStatus: vi.fn(),
+  getPaymentByIdempotencyKey: vi.fn().mockResolvedValue(null), listPaymentsByDate: vi.fn(), setPlanStatus: vi.fn(),
   patientReversedInstallmentRecoveries: mock.readRecovery, patientLedger: mock.ledger,
   listPatientPlans: mock.plans, patientReceiptRemainders: vi.fn().mockResolvedValue({}),
   openingMinorsOf: () => ({ YER: 0, SAR: 0, USD: 0 }),
@@ -60,7 +60,7 @@ describe("explicit recovery payment route", () => {
     mock.settings.mockRejectedValue(new Error("current FX unavailable"));
     mock.recovery.mockResolvedValue({ payment: { id: 50 }, reason: null, replayed: true });
     const response = await postPayment(request());
-    expect(response.status).toBe(200); expect(await response.json()).toEqual({ id: 50 });
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ id: 50, idempotencyKey:"recover-route-001" });
     expect(mock.settings).not.toHaveBeenCalled(); expect(mock.audit).not.toHaveBeenCalled();
   });
   it.each([{ purpose: "unknown" }, { planId: 7 }, { openingCurrency: "SAR" }, { exchangeRate: 140 }, { reversalOfId: 9 }, { amount: "-1" }, { invoiceId: 0 }])("fails closed for explicit invalid fields %j", async (override) => {

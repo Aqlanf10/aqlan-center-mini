@@ -1,6 +1,6 @@
 import { newIdempotencyKey } from "./idempotency-key";
 
-export const MONEY_UNCERTAIN = "تعذّر تأكيد نتيجة العملية. قد تكون سُجّلت ماليًا. أعد التحقق بنفس الطلب قبل تسجيل عملية أخرى، ولا تعِد تحميل الصفحة.";
+export const MONEY_UNCERTAIN = "تعذّر تأكيد نتيجة العملية. قد تكون سُجّلت ماليًا. أعد التحقق بنفس الطلب قبل تسجيل عملية أخرى.";
 export type MoneyRequest = Readonly<{
   url: string;
   body: string;

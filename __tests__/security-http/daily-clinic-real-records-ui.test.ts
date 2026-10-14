@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { Client } from "pg";
 import { authedMutation, baseUrl, harness } from "./_server";
 import { emitAcceptedEvidence, type EvidenceFile } from "./_synthetic-evidence-log";
+import { toInputAmount, type Currency } from "../../lib/money";
 
 /**
  * (INV-LINK REPORT, Dot review 5461818993 evidence gap) The daily clinic close rendered by the built app from records
@@ -23,12 +24,15 @@ let patientId = 0;
 let invoiceId = 0;
 let invoiceNumber = "";
 let agreementId = 0;
+const historicalRecords: {id:number;patientId:number;currency:Currency;agreementIds:number[]}[] = [];
 // Dot review 5461818993/5461563181: this run's own screens and PDF are retained in the CI log (bounded, checksummed,
 // with run/checkout identity), accepted per scenario only after all its assertions passed, emitted only when complete.
 const EVIDENCE = new Map<string, EvidenceFile["mime"]>([
   ...[1280, 390].flatMap((width) => ["invoices", "legacy"].map((name) => [`daily-clinic-real-${name}-${width}.png`, "image/png"] as const)),
   ["daily-clinic-real-invoices-390-scrolled.png", "image/png"], ["daily-clinic-real-legacy-390-scrolled.png", "image/png"],
   ["daily-clinic-real-a4.pdf", "application/pdf"],
+  ...[1280,390].flatMap(width => (["YER","SAR","USD"] as const).map(currency => [`daily-clinic-real-document-${currency}-${width}.png`,"image/png"] as const)),
+  ...(["YER","SAR","USD"] as const).map(currency => [`daily-clinic-real-document-${currency}-390-scrolled.png`,"image/png"] as const),
 ]);
 const accepted: EvidenceFile[] = [];
 const accept = async (names: string[]) => { for (const filename of names) {
@@ -72,6 +76,23 @@ beforeAll(async () => {
   expect(legacy.status).toBe(201);
   agreementId = (await legacy.json() as { agreement: { id: number } }).agreement.id;
   expect((await pay({ amount: "20000", invoiceId: null, openingCurrency: "YER" })).status).toBeLessThan(300);
+
+  await db.query("UPDATE services SET price_sar_minor=price_minor,price_usd_minor=price_minor WHERE id=ANY($1::int[])", [[rct,legacyRct]]);
+  for (const currency of ["YER","SAR","USD"] as const) {
+    const {rows:[patient]}=await db.query<{id:number}>("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$2,$3) RETURNING id", [`DCR-DOC-${currency}-${stamp}`,`اتفاق تاريخي اصطناعي ${currency}`,doctorId]);
+    await db.query("INSERT INTO visits(patient_id,patient_name,doctor_id) VALUES($1,$2,$3)", [patient.id,`اتفاق تاريخي اصطناعي ${currency}`,doctorId]);
+    const path=`/api/patients/${patient.id}/historical-documents`;
+    const source={patientId:patient.id,currency,items:[{serviceId:rct,quantity:1,price:toInputAmount(150000,currency),catalogPriceMinor:150000,toothCode:16},{serviceId:legacyRct,quantity:1,price:toInputAmount(150000,currency),catalogPriceMinor:150000,toothCode:26}],
+      discount:toInputAmount(20000,currency),discountReason:"Synthetic report historical discount",previouslyPaidAmount:toInputAmount(120000,currency),historicalAsOf:"2026-10-01",note:null,idempotencyKey:`daily-doc-${currency}-${stamp}`,
+      repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:160000,repaymentVersion:0,repaymentSourceHash:null};
+    const create=await authedMutation(path,h.sessions.admin,"POST",JSON.stringify(source));const created=await create.json();expect(create.status,JSON.stringify(created)).toBe(201);
+    const payment=await authedMutation("/api/payments",h.sessions.admin,"POST",JSON.stringify({patientId:patient.id,openingCurrency:currency,invoiceId:null,planId:null,amount:toInputAmount(20000,currency),currency,kind:"payment",method:"cash"}),{"Idempotency-Key":`daily-doc-payment-${currency}-${stamp}`});expect(payment.status,await payment.text()).toBe(201);
+    const view=(await (await fetch(`${baseUrl}${path}`,{headers:{Cookie:h.sessions.admin.cookie}})).json()).documents[0];
+    const correct=await authedMutation(`${path}/${created.document.id}/correct`,h.sessions.admin,"POST",JSON.stringify({idempotencyKey:`daily-doc-correction-${currency}-${stamp}`,expectedVersion:1,expectedSourceHash:view.sourceHash,
+      prices:[toInputAmount(150000,currency),toInputAmount(150000,currency)],discount:toInputAmount(20000,currency),discountReason:source.discountReason,previouslyPaidAmount:toInputAmount(130000,currency),historicalAsOf:source.historicalAsOf,note:null,reason:"Synthetic report corrected historical facts",
+      repaymentTerms:{mode:"full",installments:[]},repaymentRemainingMinor:130000,repaymentVersion:view.scheduleVersion}));const corrected=await correct.json();expect(correct.status,JSON.stringify(corrected)).toBe(200);
+    historicalRecords.push({id:created.document.id,patientId:patient.id,currency,agreementIds:created.document.lines.map((line:{agreementId:number})=>line.agreementId)});
+  }
 }, 240_000);
 afterAll(async () => {
   await browser?.close(); await db?.end();
@@ -138,7 +159,24 @@ describe("(INV-LINK REPORT) daily close from real records", () => {
         await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
         await writeFile(`${ARTIFACTS}/daily-clinic-real-${name}-390-scrolled.png`, await page.screenshot());
       }
+      for (const document of historicalRecords) {
+        const row=page.locator(`tr[data-historical-document-id="${document.id}"]`);
+        expect(await row.count()).toBe(1);expect(await row.getAttribute("data-historical-version")).toBe("2");expect(await row.innerText()).toContain(document.currency);
+        expect(await row.locator("[data-minor]").evaluateAll(nodes=>nodes.map(node=>node.getAttribute("data-minor")))).toEqual(["280000","130000","150000"]);
+        expect(await row.locator("[data-historical-agreement-id]").evaluateAll(nodes=>nodes.map(node=>Number(node.getAttribute("data-historical-agreement-id"))))).toEqual(document.agreementIds);
+        expect(await row.locator('[data-legacy-coverage="verified"]').count()).toBe(2);
+        expect(await page.locator(`tr[data-legacy-id]`).evaluateAll((nodes,ids)=>nodes.some(node=>ids.includes(Number(node.getAttribute("data-legacy-id")))),document.agreementIds)).toBe(false);
+        const {rows:receipts}=await db.query("SELECT amount_minor::text,kind,invoice_id,opening_currency FROM payments WHERE patient_id=$1",[document.patientId]);
+        expect(receipts).toEqual([{amount_minor:"20000",kind:"payment",invoice_id:null,opening_currency:document.currency}]);
+        await row.evaluate(element=>{const box=element.closest("table")?.parentElement;if(box)box.scrollLeft=0;});
+        await row.scrollIntoViewIfNeeded();await writeFile(`${ARTIFACTS}/daily-clinic-real-document-${document.currency}-${width}.png`,await page.screenshot());
+        if(width===390){
+          expect(await row.evaluate(element=>{const box=element.closest("table")?.parentElement;if(!box||box.scrollWidth<=box.clientWidth+1)return false;box.scrollLeft=-box.scrollWidth;return true;})).toBe(true);
+          await writeFile(`${ARTIFACTS}/daily-clinic-real-document-${document.currency}-390-scrolled.png`,await page.screenshot());
+        }
+      }
       expect(errors).toEqual([]);
+      await accept(historicalRecords.flatMap(document=>[`daily-clinic-real-document-${document.currency}-${width}.png`,...(width===390?[`daily-clinic-real-document-${document.currency}-390-scrolled.png`]:[])]));
       await accept(["invoices", "legacy"].flatMap((name) => [`daily-clinic-real-${name}-${width}.png`,
         ...(width === 390 ? [`daily-clinic-real-${name}-390-scrolled.png`] : [])]));
     } finally { await context.close(); }

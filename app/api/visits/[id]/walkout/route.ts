@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { canSeeWalkout } from "@/lib/walkout-access";
 import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 import { readReceptionHandoff } from "@/lib/reception-handoff-db";
+import { InvoiceSettlementError } from "@/lib/invoice-settlement-position";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ ...walkout, summary, signedToday,
       ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch {
+  } catch (error) {
+    if (error instanceof InvoiceSettlementError) {
+      return NextResponse.json({ message: error.message }, { status: 409, headers: { "Cache-Control": "private, no-store" } });
+    }
     return NextResponse.json({ message: "تعذّر تحميل ملخّص المغادرة." }, { status: 500 });
   }
 }

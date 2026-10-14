@@ -11,9 +11,13 @@
  * التصميم: docs/INVOICE_FIRST_LEGACY_TREATMENT.md.
  */
 import { createHash } from "node:crypto";
+import type { SessionPayload } from "./auth";
+import { assertDebtSession, DebtRepaymentError, debtRequestHash, writeDebtRepaymentInTransaction } from "./debt-installments-db";
+import { lockDebtAccountForSchedule } from "./debt-account-position";
+import { openingBalanceAccess } from "./opening-access";
 import {
   CLINIC_TIME_ZONE, OpeningBalanceChanged, OpeningBalanceExists, PLAN_ITEM_FINANCIAL_LINEAGE_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL, PLAN_ITEM_LEGACY_LINEAGE_SQL, PLAN_ITEM_LEGACY_CONTEXT_SQL, clearPatientOpeningBalanceInTx, ensureSchema,
-  getPool, insertAuditRow, insertPlanV2InTx, isPeriodLocked, setPatientOpeningBalanceInTx,
+  getPool, getSettingsInTransaction, insertAuditRow, insertPlanV2InTx, isPeriodLocked, setPatientOpeningBalanceInTx,
   type AuditInput, type DbClient,
 } from "./db";
 import {
@@ -34,6 +38,7 @@ import type { SpecialtyTemplate } from "./specialty-templates";
 
 export interface LegacyAgreementView {
   id: number;
+  documentId: number | null;
   patientId: number;
   planItemId: number;
   planId: number;
@@ -46,8 +51,8 @@ export interface LegacyAgreementView {
   toothCode: number | null;
   currency: Currency;
   agreedMinor: number;
-  previouslyPaidMinor: number;
-  remainingMinor: number;
+  previouslyPaidMinor: number | null;
+  remainingMinor: number | null;
   historicalAsOf: string;
   openingEffect: "none" | "created" | "increased";
   openingHistoryId: number | null;
@@ -63,9 +68,9 @@ export interface LegacyAgreementView {
 }
 
 interface AgreementRow {
-  id: number; patient_id: number; plan_item_id: number; plan_id: number; case_id: number | null; case_title: string | null;
+  id: number; document_id: number | null; patient_id: number; plan_item_id: number; plan_id: number; case_id: number | null; case_title: string | null;
   service_id: number; service_name: string; specialty: string; tooth_code: number | null; currency: string;
-  agreed_minor: string; previously_paid_minor: string; remaining_minor: string; historical_as_of: string;
+  agreed_minor: string; previously_paid_minor: string | null; remaining_minor: string | null; historical_as_of: string;
   opening_effect: "none" | "created" | "increased"; opening_history_id: number | null; note: string | null;
   created_by: string; created_at: Date; status: "live" | "void"; voided_by: string | null; voided_at: Date | null;
   void_reason: string | null;
@@ -73,7 +78,7 @@ interface AgreementRow {
 }
 
 const AGREEMENT_SELECT = `
-  SELECT a.id, a.patient_id, a.plan_item_id, i.plan_id, a.case_id, c.title AS case_title, a.service_id, a.service_name,
+  SELECT a.id, a.document_id, a.patient_id, a.plan_item_id, i.plan_id, a.case_id, c.title AS case_title, a.service_id, a.service_name,
          a.specialty, a.tooth_code, a.currency, a.agreed_minor::text, a.previously_paid_minor::text,
          a.remaining_minor::text, a.historical_as_of::text, a.opening_effect, a.opening_history_id, a.note,
          a.created_by, a.created_at, a.status, a.voided_by, a.voided_at, a.void_reason, to_jsonb(cs) AS coverage_snapshot
@@ -88,13 +93,13 @@ function toView(row: AgreementRow): LegacyAgreementView {
   });
   if (!isCurrency(row.currency)) throw new Error(`عملة اتفاق تاريخي غير صالحة: ${row.currency}`);
   return {
-    id: row.id, patientId: row.patient_id, planItemId: row.plan_item_id, planId: row.plan_id,
+    id: row.id, documentId: row.document_id, patientId: row.patient_id, planItemId: row.plan_item_id, planId: row.plan_id,
     caseId: row.case_id, caseTitle: row.case_title, serviceId: row.service_id, serviceName: row.service_name,
     specialty: row.specialty,
     specialtyLabel: (LINKAGE_SPECIALTY_LABEL as Record<string, string>)[row.specialty] ?? row.specialty,
     toothCode: row.tooth_code, currency: row.currency,
-    agreedMinor: Number(row.agreed_minor), previouslyPaidMinor: Number(row.previously_paid_minor),
-    remainingMinor: Number(row.remaining_minor), historicalAsOf: row.historical_as_of,
+    agreedMinor: Number(row.agreed_minor), previouslyPaidMinor: row.previously_paid_minor === null ? null : Number(row.previously_paid_minor),
+    remainingMinor: row.remaining_minor === null ? null : Number(row.remaining_minor), historicalAsOf: row.historical_as_of,
     openingEffect: row.opening_effect, openingHistoryId: row.opening_history_id, note: row.note,
     createdBy: row.created_by, createdAt: row.created_at.toISOString(), status: row.status,
     voidedBy: row.voided_by, voidedAt: row.voided_at?.toISOString() ?? null, voidReason: row.void_reason,
@@ -121,10 +126,13 @@ class Refusal extends Error {
 async function audit(client: DbClient, entry: AuditInput) { await insertAuditRow(client, entry); }
 
 /** الرصيد السابق بهذه العملة «ملك الاتفاقات» إن كان أصله مجموعَ متبقيات الاتفاقات الحيّة التي أنشأته أو زادته بالضبط. */
-async function liveAgreementRemaining(client: DbClient, patientId: number, currency: Currency): Promise<number> {
+export async function liveAgreementRemaining(client: DbClient, patientId: number, currency: Currency): Promise<number> {
   const { rows: [row] } = await client.query<{ total: string }>(
-    `SELECT COALESCE(SUM(remaining_minor), 0)::text AS total FROM legacy_treatment_agreements
-      WHERE patient_id = $1 AND currency = $2 AND status = 'live' AND opening_effect <> 'none'`,
+    `SELECT ((SELECT COALESCE(SUM(remaining_minor),0) FROM legacy_treatment_agreements
+      WHERE patient_id=$1 AND currency=$2 AND status='live' AND document_id IS NULL AND opening_effect<>'none')
+      + (SELECT COALESCE(SUM(r.remaining_minor),0) FROM legacy_treatment_documents d
+         JOIN LATERAL (SELECT remaining_minor FROM legacy_treatment_document_revisions WHERE document_id=d.id ORDER BY version DESC LIMIT 1) r ON TRUE
+         WHERE d.patient_id=$1 AND d.currency=$2))::text AS total`,
     [patientId, currency]);
   return Number(row.total);
 }
@@ -148,6 +156,7 @@ export async function createLegacyTreatment(input: {
   /** من يملك تعديل الرصيد السابق (المدير): يضيف المتبقي إلى رصيدٍ أنشأته اتفاقاتٌ سابقة. وغيره يُنشئ فقط. */
   canEditOpening: boolean;
   templates: readonly SpecialtyTemplate[];
+  session?: SessionPayload;
 }): Promise<CreateLegacyTreatmentResult> {
   await ensureSchema();
   const written = await writeLegacyTreatment(input);
@@ -180,7 +189,7 @@ interface LegacyDecision {
  * القرار الواحد للحفظ والمعاينة. `lock` للكاتب وحده (FOR UPDATE)؛ المعاينة تقرأ في معاملة قراءة فقط.
  * ترمي `Refusal` بالسبب نفسه الذي يرفض به الحفظ.
  */
-async function decideLegacyTreatment(client: DbClient, input: {
+export async function decideLegacyTreatment(client: DbClient, input: {
   patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean;
 }, lock: boolean): Promise<LegacyDecision> {
   const { patientId, request } = input;
@@ -372,17 +381,33 @@ export async function previewLegacyTreatment(input: {
   }
 }
 
-async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatment>[0]):
+export type LegacyDocumentLineContext = { documentId: number; line: number; doctorId: number | null };
+/** Internal composition entry: outer writer owns all financial locks and transaction rollback. */
+export async function writeLegacyDocumentLine(client: DbClient, input: Parameters<typeof createLegacyTreatment>[0], document: LegacyDocumentLineContext) {
+  return writeLegacyTreatment(input, { client, document });
+}
+
+async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatment>[0], composition?: { client: DbClient; document: LegacyDocumentLineContext }):
   Promise<{ ok: true; id: number; replayed: boolean; caseCreated: boolean } | { ok: false; reason: LegacyTreatmentRefusal }> {
   const { patientId, request } = input;
-  const requestHash = request.idempotencyKey ? legacyTreatmentFingerprint(patientId, request) : null;
-  const client = await getPool().connect();
+  const requestHash = request.idempotencyKey ? request.repaymentTerms
+    ? debtRequestHash({intent:legacyTreatmentFingerprint(patientId,request),actor:input.actor,role:input.actorRole,userId:input.session?.userId})
+    : legacyTreatmentFingerprint(patientId, request) : null;
+  const client = composition?.client ?? await getPool().connect();
+  const document = composition?.document;
   try {
-    await client.query("BEGIN");
+    if (!composition) await client.query("BEGIN");
     // Same patient-first financial fence as invoice creation, signatures and plan edits.
     // The opening engine retains its own add-only fence when a new opening is actually inserted.
     const { rows: [patient] } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [patientId]);
     if (!patient) throw new Refusal("no_patient");
+    if(request.repaymentTerms){
+      if(!input.session||input.actor!==input.session.username||input.actorRole!==input.session.role)throw new DebtRepaymentError("unauthorized","جلسة الاتفاق غير صالحة.");
+      await assertDebtSession(client,input.session);
+      await lockDebtAccountForSchedule(client,patientId);
+      const access=openingBalanceAccess(input.session.role,(await getSettingsInTransaction(client))["finance.reception_adds_opening_balance"]==="true");
+      if(!access.add||input.canEditOpening&&!access.edit)throw new DebtRepaymentError("unauthorized","تغيّرت صلاحية تسجيل الرصيد السابق.");
+    }
 
     if (request.idempotencyKey) {
       const { rows: [prior] } = await client.query<{ id: number; idempotency_request_hash: string | null; patient_id: number }>(
@@ -392,16 +417,16 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
         if (prior.idempotency_request_hash !== requestHash || prior.patient_id !== patientId) {
           throw new Refusal("idempotency_conflict");
         }
-        await client.query("ROLLBACK");
+        if (!composition) await client.query("ROLLBACK");
         return { ok: true, id: prior.id, replayed: true, caseCreated: false };
       }
     }
 
-    const decision = await decideLegacyTreatment(client, input, true);
+    const decision = await decideLegacyTreatment(client, document ? { ...input, request: { ...request, remainingMinor: 0, previouslyPaidMinor: 0 } } : input, true);
     if (decision.casePlan.mode === "choose") throw new Refusal("ambiguous_case");
     const { service, specialty, site, masterId } = decision;
 
-    const amounts = `المتفق ${formatMoney(request.agreedMinor, request.currency)} · المدفوع قبل النظام `
+    const amounts = document ? `قيمة البند ${formatMoney(request.agreedMinor, request.currency)} — الحقائق المالية الإجمالية في المستند #${document.documentId}` : `المتفق ${formatMoney(request.agreedMinor, request.currency)} · المدفوع قبل النظام `
       + `${formatMoney(request.previouslyPaidMinor, request.currency)} · المتبقي ${formatMoney(request.remainingMinor, request.currency)}`;
 
     // ── الرصيد السابق: المتبقي وحده، بمحرّك الرصيد الافتتاحي نفسه ──
@@ -448,7 +473,7 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     }, masterId);
     if (!plan.ok) throw new Refusal("incompatible_plan");
     const itemId = plan.itemIds[0];
-    await client.query(`UPDATE plan_items SET billing_status = 'included_in_package' WHERE id = $1`, [itemId]);
+    await client.query(`UPDATE plan_items SET billing_status = 'included_in_package', doctor_id = $2::int WHERE id = $1`, [itemId, document?.doctorId ?? null]);
     await audit(client, {
       action: masterId === null ? "plan.create" : "plan.item_update", entity: "patient", entityId: patientId, entityLabel: planTitle,
       details: { الخطة: plan.planId, البنود: 1, المصدر: "علاج بدأ قبل النظام", الموافقة_السريرية: "لم تُسجّل بهذا الإدخال", التغطية: "مشمول بالاتفاق التاريخي" },
@@ -490,13 +515,13 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       `INSERT INTO legacy_treatment_agreements
          (patient_id, plan_item_id, case_id, service_id, service_name, specialty, tooth_code, currency, agreed_minor,
           previously_paid_minor, remaining_minor, historical_as_of, opening_effect, opening_history_id, note,
-          idempotency_key, idempotency_request_hash, created_by)
+          idempotency_key, idempotency_request_hash, created_by, document_id, document_line)
        VALUES ($1, $2, $3::int, $4, $5, $6, $7::smallint, $8, $9, $10, $11, $12::date, $13, $14::int, $15::text,
-               $16::text, $17::text, $18)
+               $16::text, $17::text, $18, $19::int, $20::int)
        RETURNING id`,
       [patientId, itemId, caseId, service.id, service.name, specialty, site.toothCode, request.currency,
-        request.agreedMinor, request.previouslyPaidMinor, request.remainingMinor, request.historicalAsOf, openingEffect,
-        openingHistoryId, request.note, request.idempotencyKey, requestHash, input.actor]);
+        request.agreedMinor, document ? null : request.previouslyPaidMinor, document ? null : request.remainingMinor, request.historicalAsOf, openingEffect,
+        openingHistoryId, request.note, request.idempotencyKey, requestHash, input.actor, document?.documentId ?? null, document?.line ?? null]);
 
     // Only this new-registration transaction captures coverage. No old-row backfill or evidence-guessing endpoint exists.
     await client.query(
@@ -522,16 +547,23 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
       action: "legacy_treatment.create", entity: "patient", entityId: patientId, entityLabel: service.name,
       details: {
         الاتفاق: agreement.id, التخصص: LINKAGE_SPECIALTY_LABEL[specialty], السن: siteText(site) ?? "—", التغطية_غير_القابلة_للتعديل: "لقطة موضع كاملة عند التسجيل",
-        العملة: request.currency, المتفق: request.agreedMinor, المدفوع_قبل_النظام: request.previouslyPaidMinor,
-        المتبقي: request.remainingMinor, حتى_تاريخ: request.historicalAsOf, البند: itemId, الحالة: caseId ?? "—",
-        الرصيد_السابق: openingEffect === "none" ? "لا رصيد (مسدَّد تاريخيًّا)" : openingEffect === "created" ? "أُنشئ بالمتبقي" : "أُضيف إليه المتبقي",
+        العملة: request.currency, المتفق: request.agreedMinor, المدفوع_قبل_النظام: document ? "حقيقة إجمالية في المستند" : request.previouslyPaidMinor,
+        المتبقي: document ? "رصيد المستند الإجمالي" : request.remainingMinor, حتى_تاريخ: request.historicalAsOf, البند: itemId, الحالة: caseId ?? "—",
+        الرصيد_السابق: document ? "أثر إجمالي واحد في المستند التاريخي" : openingEffect === "none" ? "لا رصيد (مسدَّد تاريخيًّا)" : openingEffect === "created" ? "أُنشئ بالمتبقي" : "أُضيف إليه المتبقي",
         سند: "لا سند للمدفوع سابقًا",
       },
       actor: input.actor, actorRole: input.actorRole,
     });
-    await client.query("COMMIT");
+    if(request.repaymentTerms && request.repaymentRemainingMinor!>0){
+      await writeDebtRepaymentInTransaction(client,{target:{patientId,currency:request.currency,invoiceId:null,openingCurrency:request.currency},
+        terms:request.repaymentTerms,expectedVersion:0,expectedRemainingMinor:request.repaymentRemainingMinor!,reason:"طريقة سداد الرصيد عند تسجيل العلاج السابق",
+        idempotencyKey:`legacy:${agreement.id}:repayment`,session:input.session!});
+    }
+    if(input.session)await assertDebtSession(client,input.session);
+    if (!composition) await client.query("COMMIT");
     return { ok: true, id: agreement.id, replayed: false, caseCreated };
   } catch (error) {
+    if (composition) throw error;
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyTreatmentRefusal };
     if (error instanceof OpeningBalanceExists) return { ok: false, reason: "opening_edit_forbidden" };
@@ -545,11 +577,12 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     }
     throw error;
   } finally {
-    client.release();
+    if (!composition) client.release();
   }
 }
 
 interface VoidAgreementRow {
+  document_id: number | null;
   status: "live" | "void"; currency: string; remaining_minor: string; opening_effect: "none" | "created" | "increased";
   service_name: string; plan_item_id: number;
 }
@@ -563,6 +596,7 @@ interface VoidAgreementRow {
 async function readLegacyVoidPreviewInTx(client: DbClient, input: {
   patientId: number; agreementId: number; actor: string; actorRole: string | null; mode: LegacyVoidMode;
 }, agreement: VoidAgreementRow, lock: boolean) {
+  if (agreement.document_id !== null) throw new Refusal("document_correction_required");
   if (!isCurrency(agreement.currency)) throw new Refusal("opening_changed");
   const currency = agreement.currency;
   const { rows: [work] } = await client.query<{ plan_id: number; patient_id: number }>(
@@ -643,7 +677,7 @@ export async function getLegacyVoidPreview(input: {
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const { rows: [agreement] } = await client.query<VoidAgreementRow>(
-      `SELECT status, currency, remaining_minor::text, opening_effect, service_name, plan_item_id
+      `SELECT document_id, status, currency, remaining_minor::text, opening_effect, service_name, plan_item_id
          FROM legacy_treatment_agreements WHERE id = $1 AND patient_id = $2`, [input.agreementId, input.patientId]);
     if (!agreement) throw new Refusal("not_found");
     const { preview } = await readLegacyVoidPreviewInTx(client, { ...input, mode }, agreement, false);
@@ -694,7 +728,7 @@ export async function voidLegacyTreatment(input: {
          FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
         WHERE i.id = $1 AND t.patient_id = $2 FOR UPDATE OF i`, [found.plan_item_id, input.patientId]);
     const { rows: [agreement] } = await client.query<VoidAgreementRow>(
-      `SELECT status, currency, remaining_minor::text, opening_effect, service_name, plan_item_id
+      `SELECT document_id, status, currency, remaining_minor::text, opening_effect, service_name, plan_item_id
          FROM legacy_treatment_agreements WHERE id = $1 AND patient_id = $2 FOR UPDATE`, [input.agreementId, input.patientId]);
     if (!agreement) throw new Refusal("not_found");
     if (!item || item.id !== agreement.plan_item_id) throw new Refusal("opening_changed");
@@ -777,3 +811,5 @@ export async function voidLegacyTreatment(input: {
   }
   return { ok: true, agreement: await readAgreement(input.agreementId) };
 }
+
+export { Refusal as LegacyTreatmentWriteError };

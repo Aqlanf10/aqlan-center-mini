@@ -217,7 +217,10 @@ export async function createLegacyBalanceArrangement(input: {
         WHERE patient_id = $1 AND currency = $2 AND cancelled_at IS NULL FOR UPDATE`,
       [input.patientId, input.currency],
     );
-    if (active.rowCount) {
+    const debtSchedule = await client.query(`SELECT a.id FROM debt_repayment_arrangements a
+      JOIN LATERAL (SELECT status FROM debt_repayment_revisions WHERE arrangement_id=a.id ORDER BY version DESC LIMIT 1) r ON TRUE
+      WHERE a.patient_id=$1 AND a.opening_currency=$2 AND r.status='active'`,[input.patientId,input.currency]);
+    if (active.rowCount || debtSchedule.rowCount) {
       await client.query("ROLLBACK");
       return { ok: false, reason: "already_active" };
     }

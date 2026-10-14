@@ -169,6 +169,19 @@ export interface DailyClinicLegacyAgreement {
   caseId: number | null;
 }
 
+export interface DailyClinicHistoricalDocumentLine {
+  agreementId: number; planItemId: number; caseId: number | null; serviceName: string;
+  coverageState: "verified" | "unknown" | "conflict"; coverageLabel: string | null;
+}
+export interface DailyClinicSourceHistoricalDocument {
+  id: number; patientId: number; currency: string; version: number;
+  totalMinor: number; discountMinor: number; previouslyPaidMinor: number; remainingMinor: number;
+  historicalAsOf: string; lines: DailyClinicHistoricalDocumentLine[];
+}
+export interface DailyClinicHistoricalDocument extends Omit<DailyClinicSourceHistoricalDocument, "currency" | "remainingMinor"> {
+  patientName: string; currency: Currency; agreedMinor: number; remainingAtStartMinor: number;
+}
+
 export interface DailyClinicReport {
   date: string;
   clinicTimeZone: string;
@@ -187,6 +200,8 @@ export interface DailyClinicReport {
   receipts: DailyClinicReceipt[];
   invoices: DailyClinicInvoice[];
   legacyAgreements: DailyClinicLegacyAgreement[];
+  /** Aggregate cash facts occur once per current immutable revision, never per treatment line. */
+  historicalDocuments?: DailyClinicHistoricalDocument[];
   expenses: DailyClinicExpenseReport;
   totals: {
     attendeesCount: number;
@@ -280,6 +295,7 @@ export interface DailyClinicSource {
   invoiceLines: DailyClinicSourceInvoiceLine[];
   invoiceCorrections: DailyClinicSourceInvoiceCorrection[];
   legacyAgreements: DailyClinicSourceLegacyAgreement[];
+  historicalDocuments?: DailyClinicSourceHistoricalDocument[];
   payments: DailyClinicSourcePayment[];
   openings: DailyClinicSourceOpening[];
   additionalPlanLinks: { planId: number; patientId: number; visitId: number }[];

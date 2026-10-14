@@ -46,7 +46,7 @@ describe("immutable agreement patient/service selection", () => {
   });
 
   it("decides registration and its read-only preview with the same locked/unlocked reader", () => {
-    expect(body(registration, "writeLegacyTreatment")).toContain("await decideLegacyTreatment(client, input, true)");
+    expect(body(registration, "writeLegacyTreatment")).toContain("await decideLegacyTreatment(client, document ? { ...input, request: { ...request, remainingMinor: 0, previouslyPaidMinor: 0 } } : input, true)");
     const preview = body(registration, "previewLegacyTreatment");
     expect(preview).toContain("await decideLegacyTreatment(client, input, false)");
     expect(preview).toContain("READ ONLY");

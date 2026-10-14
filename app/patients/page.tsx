@@ -165,7 +165,7 @@ export default function PatientsPage() {
               value={flag}
               onChange={(event) => { setFlag(event.target.value); setPage(0); }}
               aria-label="علَم"
-              className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
+              className="min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
             >
               <option value="">كل الأعلام</option>
               {flagList.map((item) => <option key={item} value={item}>🏷️ {item}</option>)}
@@ -210,7 +210,7 @@ export default function PatientsPage() {
                     </span>
                   ) : null}
                   {/* (PAT-1) ما يُسأل عنه قبل فتح الملف: العمر، التقويم، آخر زيارة، الموعد القادم، المستحق. */}
-                  <span className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] font-bold">
+                  <span className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] font-bold [overflow-wrap:anywhere]">
                     <PatientFlagChips flags={patient.flags} />
                     {patient.age != null ? <span className="text-slate-500">{ageText(patient.age)}</span> : null}
                     {patient.activeOrtho ? (
@@ -231,7 +231,7 @@ export default function PatientsPage() {
                     ))}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs font-mono font-bold text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                <span className="max-w-[45%] shrink-0 text-xs font-mono font-bold text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 [overflow-wrap:anywhere]">
                   {patient.patientNumber}
                 </span>
               </a>

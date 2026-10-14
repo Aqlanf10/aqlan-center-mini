@@ -9,11 +9,22 @@ import { previewTextLineHasOwnedHits, type PreviewTextLineEvidence } from "./fix
 
 // Actual components with the repository's existing bounded hook/key driver.
 // Leaf editors never execute. These tests do not open a browser or a database.
-const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, key: null as string | null,
-  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
-  memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(), pending: [] as Array<() => void>,
-  session: { username: "synthetic-admin-a", role: "admin" } as SessionInfo | null,
+const hooks = vi.hoisted(() => {
+  type Store = { values: unknown[]; cursor: number; changed: boolean; active: boolean;
+    effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>;
+    memos: Map<number, { deps?: readonly unknown[]; value: unknown }>;
+    layout: Array<() => void>; pending: Array<() => void> };
+  const make = (): Store => ({ values: [], cursor: 0, changed: false, active: true,
+    effects: new Map(), memos: new Map(), layout: [], pending: [] });
+  // The wrapper keeps its recovery owner; its keyed child owns independent reads.
+  return { make, current: make(), outer: make(), inner: make(), lateUpdates: 0,
+    key: null as string | null, session: null as SessionInfo | null };
+});
+// Browser-storage behaviour has separate real Chromium coverage. These hook
+// fixtures isolate ledger reads/feedback and provide an empty durable journal.
+vi.mock("../lib/financial-command-journal", async original => ({
+  ...await original<typeof import("../lib/financial-command-journal")>(),
+  readFinancialJournal: async () => ({ revision: 0, command: null }),
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/ServiceSelect", () => ({ ServiceSelect: () => null }));
@@ -23,29 +34,34 @@ vi.mock("../components/ReceiptCorrection", () => ({ ReceiptCorrection: () => nul
 vi.mock("../components/LegacyBalanceArrangementPanel", () => ({ LegacyBalanceArrangementPanel: () => null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
-  const slot = (initial: unknown) => { const i = hooks.cursor++; if (!(i in hooks.values)) hooks.values[i] = initial; return i; };
-  const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  const slot = (initial: unknown) => { const h = hooks.current, index = h.cursor++; if (!(index in h.values)) h.values[index] = initial; return index; };
+  const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   const memo = (factory: () => unknown, deps?: readonly unknown[]) => {
-    const i = slot(undefined); const old = hooks.memos.get(i);
-    if (old && same(old.deps, deps)) return old.value;
-    const value = factory(); hooks.memos.set(i, { deps, value }); return value;
+    const h = hooks.current, index = slot(undefined), previous = h.memos.get(index);
+    if (previous && same(previous.deps, deps)) return previous.value;
+    const value = factory(); h.memos.set(index, { deps, value }); return value;
+  };
+  const effect = (phase: "layout" | "pending", callback: () => void | (() => void), deps?: readonly unknown[]) => {
+    const h = hooks.current, index = slot(undefined), previous = h.effects.get(index);
+    if (previous && same(previous.deps, deps)) return;
+    h[phase].push(() => { previous?.cleanup?.(); const cleanup = callback(); h.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
   };
   return { ...react,
     useState: (initial: unknown) => {
-      const i = slot(typeof initial === "function" ? initial() : initial); const values = hooks.values;
-      return [values[i], (update: unknown) => {
-        const value = typeof update === "function" ? update(values[i]) : update;
-        if (values === hooks.values && !Object.is(value, values[i])) hooks.changed = true;
-        values[i] = value;
-      }];
+      const h = hooks.current, index = slot(typeof initial === "function" ? initial() : initial);
+      if (!h.memos.has(index)) h.memos.set(index, { value: (value: unknown) => {
+        if (!h.active) hooks.lateUpdates++;
+        const next = typeof value === "function" ? value(h.values[index]) : value;
+        if (h.active && !Object.is(next, h.values[index])) h.changed = true;
+        h.values[index] = next;
+      } });
+      return [h.values[index], h.memos.get(index)!.value];
     },
-    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
-    useMemo: memo, useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
-    useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => {
-      const i = slot(undefined); const old = hooks.effects.get(i);
-      if (old && same(old.deps, deps)) return;
-      hooks.pending.push(() => { old?.cleanup?.(); const cleanup = effect(); hooks.effects.set(i, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
-    },
+    useRef: (initial: unknown) => hooks.current.values[slot({ current: initial })],
+    useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
+    useMemo: memo,
+    useLayoutEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect("layout", callback, deps),
+    useEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect("pending", callback, deps),
   };
 });
 
@@ -61,29 +77,37 @@ const storage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
 let readLedger: () => Promise<Response>;
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-function retire() {
-  for (const effect of hooks.effects.values()) effect.cleanup?.();
-  hooks.values = []; hooks.effects.clear(); hooks.memos.clear(); hooks.pending = []; hooks.changed = false;
+function retire(h: typeof hooks.inner) {
+  h.active = false;
+  h.effects.forEach((effect) => effect.cleanup?.());
+  h.effects.clear(); h.layout = []; h.pending = [];
 }
-function keyed(scope: ReactElement | null, prefix: string): ReactNode {
-  const key = scope ? `${prefix}:${scope.key}` : null;
-  if (key !== hooks.key) { retire(); hooks.key = key; }
-  if (!scope) return null;
-  let tree: ReactNode = null; let count = 0;
-  do {
-    if (++count > 12) throw new Error("Synthetic render did not settle");
-    hooks.cursor = 0; hooks.changed = false;
-    tree = (scope.type as (properties: unknown) => ReactNode)(scope.props);
-    hooks.pending.splice(0).forEach((effect) => effect());
-  } while (hooks.changed);
-  return tree;
+function resetOwner() { retire(hooks.inner); hooks.inner = hooks.make(); }
+function resetHooks() {
+  retire(hooks.inner); retire(hooks.outer);
+  hooks.inner = hooks.make(); hooks.outer = hooks.make(); hooks.current = hooks.outer;
+  hooks.lateUpdates = 0;
 }
-const render = (value: Props = props()) => keyed(LegacyReconciliationPreview(value), "preview");
-function renderLedger(patientId = 11): ReactNode {
-  const scope = PatientLedger({ patientId });
-  if (typeof scope.type !== "function") { keyed(null, "ledger"); return scope; }
-  return keyed(scope, "ledger");
+function flushEffects() {
+  for (const phase of ["layout", "pending"] as const)
+    for (const h of [hooks.inner, hooks.outer]) h[phase].splice(0).forEach((run) => run());
 }
+function keyed(makeScope: () => ReactElement | null, prefix: string): ReactNode {
+  for (let round = 0; round < 20; round++) {
+    for (const h of [hooks.outer, hooks.inner]) { h.cursor = 0; h.changed = false; }
+    hooks.current = hooks.outer;
+    const scope = makeScope();
+    const key = scope && typeof scope.type === "function" ? `${prefix}:${scope.key}` : null;
+    if (key !== hooks.key) { resetOwner(); hooks.key = key; }
+    hooks.current = hooks.inner;
+    const tree = key === null ? scope : (scope!.type as (properties: unknown) => ReactNode)(scope!.props);
+    flushEffects();
+    if (!hooks.outer.changed && !hooks.inner.changed) return tree;
+  }
+  throw new Error("Synthetic render did not settle");
+}
+const render = (value: Props = props()) => keyed(() => LegacyReconciliationPreview(value), "preview");
+const renderLedger = (patientId = 11) => keyed(() => PatientLedger({ patientId }), "ledger");
 function nodes(node: ReactNode): Element[] {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!node || typeof node !== "object" || !("props" in node)) return [];
@@ -126,7 +150,7 @@ const previewNodes = (tree: ReactNode) => nodes(tree).filter((node) => node.type
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-05T09:00:00Z"));
-  retire(); hooks.key = null; hooks.cursor = 0;
+  resetHooks(); hooks.key = null;
   hooks.session = { username: "synthetic-admin-a", role: "admin" };
   fetchMock.mockReset(); Object.values(storage).forEach((spy) => spy.mockReset());
   readLedger = async () => response(ledger());
@@ -136,10 +160,11 @@ beforeEach(() => {
     if (/^\/api\/patients\/\d+\/ledger$/.test(url)) return readLedger();
     throw new Error(`Unexpected read: ${url}`);
   });
+  vi.stubGlobal("window", Object.assign(new EventTarget(), { confirm: vi.fn(() => true) }));
   vi.stubGlobal("fetch", fetchMock); vi.stubGlobal("localStorage", storage); vi.stubGlobal("sessionStorage", storage);
 });
 afterEach(() => {
-  retire();
+  retire(hooks.inner); retire(hooks.outer);
   expect(storage.getItem).not.toHaveBeenCalled(); expect(storage.setItem).not.toHaveBeenCalled(); expect(storage.removeItem).not.toHaveBeenCalled();
   expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   vi.unstubAllGlobals(); vi.useRealTimers();

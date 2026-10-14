@@ -9,6 +9,7 @@ import { canAccessPatient } from "@/lib/patient-access";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { effectiveTemplates } from "@/lib/specialty-templates";
+import { DebtRepaymentError } from "@/lib/debt-installments-db";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const settings = await getSettings().catch(() => null);
     const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
     return NextResponse.json(
-      { agreements: await listLegacyTreatments(patientId), access: { add: access.add, edit: access.edit, void: session.role === "admin" } },
+      { agreements: (await listLegacyTreatments(patientId)).filter(agreement=>agreement.documentId===null), access: { add: access.add, edit: access.edit, void: session.role === "admin" } },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
@@ -76,6 +77,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const result = await createLegacyTreatment({
       patientId, request: parsed.value, actor: session.username, actorRole: session.role, canEditOpening: access.edit,
+      session,
       templates: effectiveTemplates(settings?.["plans.specialty_templates"]).templates,
     });
     if (!result.ok) {
@@ -85,7 +87,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       { agreement: result.agreement, replayed: result.replayed, caseCreated: result.caseCreated },
       { status: result.replayed ? 200 : 201 },
     );
-  } catch {
+  } catch(error) {
+    if(error instanceof DebtRepaymentError)return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
     return NextResponse.json({ message: "تعذّر تسجيل العلاج السابق للنظام. أعد المحاولة." }, { status: 500 });
   }
 }

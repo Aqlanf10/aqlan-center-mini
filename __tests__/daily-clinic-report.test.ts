@@ -226,3 +226,23 @@ describe("daily clinic report: fail closed", () => {
     expect(report.totals.agreement).toEqual({ YER: 0, SAR: 0, USD: 0 });
   });
 });
+
+
+describe("unified historical header integrity in daily close",()=>{
+  const historical = {id:1,patientId:1,currency:"YER",version:2,totalMinor:320000,discountMinor:20000,previouslyPaidMinor:130000,remainingMinor:170000,historicalAsOf:"2026-10-01",lines:[{agreementId:7,planItemId:8,caseId:9,serviceName:"Synthetic historical work",coverageState:"verified" as const,coverageLabel:"سن 16"}]};
+  it("shows one aggregate and its clinical link without inventing a receipt or adding opening debt twice",()=>{
+    const report=buildDailyClinicReport(fixture({historicalDocuments:[historical],openings:[{patientId:1,currency:"YER",amountMinor:170000}]}));
+    expect(report.historicalDocuments).toEqual([expect.objectContaining({id:1,version:2,agreedMinor:300000,previouslyPaidMinor:130000,remainingAtStartMinor:170000,lines:historical.lines})]);
+    expect(report.legacyAgreements).toEqual([]);expect(report.receipts).toEqual([]);
+    expect(report.totals.currentReceivable.YER).toBe(170000);expect(report.totals.agreement.YER).toBe(0);expect(report.totals.nativeReceipts.YER).toBe(0);
+  });
+  it.each([
+    {currency:"UNKNOWN"},{previouslyPaidMinor:130001},{discountMinor:320000},{version:0},{version:1.5},
+    {lines:[historical.lines[0],historical.lines[0]]},
+  ])("rejects invalid aggregate evidence %j",overrides=>{
+    expect(()=>buildDailyClinicReport(fixture({historicalDocuments:[{...historical,...overrides}]}))).toThrow();
+  });
+  it("rejects a duplicate document rather than printing aggregate facts twice",()=>{
+    expect(()=>buildDailyClinicReport(fixture({historicalDocuments:[historical,historical]}))).toThrow(/Duplicate/);
+  });
+});

@@ -6,6 +6,8 @@ export interface LinePreview {
   item: { mode: "existing" | "new"; id: number | null } | null;
   case: { mode: "existing" | "new" | "bridge" | "choose" | "none"; id: number | null; title: string | null; options: { id: number; title: string }[] } | null;
   financialReviewRequired?: boolean;
+  /** Present for authoritative template visits, including non-specialty consultation work. */
+  scheduled?: boolean;
   refusal: string | null;
   refusalMessage: string | null;
 }
@@ -31,6 +33,7 @@ export function readPreviewLines(payload: unknown, rows: readonly { key: string;
     const row = rows[line.line];
     if (!row || byRow.has(row.key) || line.kind !== (row.clinical ? "clinical" : "financial")
       || (line.financialReviewRequired !== undefined && typeof line.financialReviewRequired !== "boolean")
+      || (line.scheduled !== undefined && typeof line.scheduled !== "boolean")
       || !textOrNull(line.specialtyLabel) || !textOrNull(line.refusal) || !textOrNull(line.refusalMessage)) return null;
     const item = line.item;
     if (item !== null && (!object(item) || !["existing", "new"].includes(String(item.mode)) || !idOrNull(item.id))) return null;

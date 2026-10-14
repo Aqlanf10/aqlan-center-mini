@@ -13,11 +13,22 @@ import type { LegacyBalanceArrangementView as DbArrangement, LegacyOpeningPositi
 
 // Actual component/read handlers with synthetic React/session/GET boundaries.
 // The markup tests render the very same invoice-status component used by Account.
-const hooks = vi.hoisted(() => ({
-  values: [] as unknown[], cursor: 0, changed: false, lateUpdates: 0,
-  effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
-  memos: new Map<number, { deps?: readonly unknown[]; value: unknown }>(),
-  pending: [] as Array<() => void>, session: null as SessionInfo | null,
+const hooks = vi.hoisted(() => {
+  type Store = { values: unknown[]; cursor: number; changed: boolean; active: boolean;
+    effects: Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>;
+    memos: Map<number, { deps?: readonly unknown[]; value: unknown }>;
+    layout: Array<() => void>; pending: Array<() => void> };
+  const make = (): Store => ({ values: [], cursor: 0, changed: false, active: true,
+    effects: new Map(), memos: new Map(), layout: [], pending: [] });
+  // The wrapper keeps its recovery owner; its keyed child owns independent reads.
+  return { make, current: make(), outer: make(), inner: make(), lateUpdates: 0,
+    key: null as string | null, session: null as SessionInfo | null };
+});
+// Browser-storage behaviour has separate real Chromium coverage. These hook
+// fixtures isolate ledger reads/feedback and provide an empty durable journal.
+vi.mock("../lib/financial-command-journal", async original => ({
+  ...await original<typeof import("../lib/financial-command-journal")>(),
+  readFinancialJournal: async () => ({ revision: 0, command: null }),
 }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/ServiceSelect", () => ({ ServiceSelect: () => null }));
@@ -28,31 +39,34 @@ vi.mock("../components/LegacyBalanceArrangementPanel", () => ({ LegacyBalanceArr
 vi.mock("../components/LegacyMoneyGuidance", () => ({ OpeningBalanceGuidance: () => null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
-  const slot = (initial: unknown) => { const index = hooks.cursor++; if (!(index in hooks.values)) hooks.values[index] = initial; return index; };
+  const slot = (initial: unknown) => { const h = hooks.current, index = h.cursor++; if (!(index in h.values)) h.values[index] = initial; return index; };
   const same = (a?: readonly unknown[], b?: readonly unknown[]) => !!a && !!b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   const memo = (factory: () => unknown, deps?: readonly unknown[]) => {
-    const index = slot(undefined); const previous = hooks.memos.get(index);
+    const h = hooks.current, index = slot(undefined), previous = h.memos.get(index);
     if (previous && same(previous.deps, deps)) return previous.value;
-    const value = factory(); hooks.memos.set(index, { deps, value }); return value;
+    const value = factory(); h.memos.set(index, { deps, value }); return value;
   };
-  const effect = (callback: () => void | (() => void), deps?: readonly unknown[]) => {
-    const index = slot(undefined); const previous = hooks.effects.get(index);
+  const effect = (phase: "layout" | "pending", callback: () => void | (() => void), deps?: readonly unknown[]) => {
+    const h = hooks.current, index = slot(undefined), previous = h.effects.get(index);
     if (previous && same(previous.deps, deps)) return;
-    hooks.pending.push(() => { previous?.cleanup?.(); const cleanup = callback(); hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
+    h[phase].push(() => { previous?.cleanup?.(); const cleanup = callback(); h.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined }); });
   };
   return { ...react,
     useState: (initial: unknown) => {
-      const index = slot(typeof initial === "function" ? initial() : initial); const values = hooks.values;
-      return [values[index], (value: unknown) => {
-        if (values !== hooks.values) hooks.lateUpdates++;
-        const next = typeof value === "function" ? value(values[index]) : value;
-        if (values === hooks.values && !Object.is(next, values[index])) hooks.changed = true;
-        values[index] = next;
-      }];
+      const h = hooks.current, index = slot(typeof initial === "function" ? initial() : initial);
+      if (!h.memos.has(index)) h.memos.set(index, { value: (value: unknown) => {
+        if (!h.active) hooks.lateUpdates++;
+        const next = typeof value === "function" ? value(h.values[index]) : value;
+        if (h.active && !Object.is(next, h.values[index])) h.changed = true;
+        h.values[index] = next;
+      } });
+      return [h.values[index], h.memos.get(index)!.value];
     },
-    useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
+    useRef: (initial: unknown) => hooks.current.values[slot({ current: initial })],
     useCallback: (callback: unknown, deps?: readonly unknown[]) => memo(() => callback, deps),
-    useMemo: memo, useEffect: effect,
+    useMemo: memo,
+    useLayoutEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect("layout", callback, deps),
+    useEffect: (callback: () => void | (() => void), deps?: readonly unknown[]) => effect("pending", callback, deps),
   };
 });
 
@@ -76,8 +90,7 @@ const unavailableLabel = "تعذّر التحقق من حالة السداد";
 const reviewLabel = "حالة السداد تحتاج مراجعة";
 
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0; hooks.changed = false; hooks.lateUpdates = 0;
-  hooks.effects.clear(); hooks.memos.clear(); hooks.pending = [];
+  resetHooks();
   hooks.session = { username: "synthetic-admin-a", role: "admin" };
   patientId = 201; key = null; fetchMock.mockReset();
   read = async () => response(payload());
@@ -88,10 +101,11 @@ beforeEach(() => {
     if (/^\/api\/patients\/\d+\/ledger$/.test(url)) return read();
     throw new Error(`Unexpected read ${url}`);
   });
+  vi.stubGlobal("window", Object.assign(new EventTarget(), { confirm: vi.fn(() => true) }));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
-  retire();
+  retire(hooks.inner); retire(hooks.outer);
   expect(fetchMock.mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
   vi.unstubAllGlobals();
 });
@@ -208,20 +222,34 @@ function text(node: ReactNode): string {
   if (Array.isArray(node)) return node.map(text).join("");
   return node && typeof node === "object" && "props" in node ? text((node as Element).props.children as ReactNode) : "";
 }
-function retire() { hooks.effects.forEach((effect) => effect.cleanup?.()); hooks.effects.clear(); }
-function resetOwner() { retire(); hooks.values = []; hooks.memos.clear(); hooks.pending = []; }
+function retire(h: typeof hooks.inner) {
+  h.active = false;
+  h.effects.forEach((effect) => effect.cleanup?.());
+  h.effects.clear(); h.layout = []; h.pending = [];
+}
+function resetOwner() { retire(hooks.inner); hooks.inner = hooks.make(); }
+function resetHooks() {
+  retire(hooks.inner); retire(hooks.outer);
+  hooks.inner = hooks.make(); hooks.outer = hooks.make(); hooks.current = hooks.outer;
+  hooks.lateUpdates = 0;
+}
+function flushEffects() {
+  for (const phase of ["layout", "pending"] as const)
+    for (const h of [hooks.inner, hooks.outer]) h[phase].splice(0).forEach((run) => run());
+}
 function render(): ReactNode {
-  let tree: ReactNode; let rounds = 0;
-  do {
-    if (++rounds > 20) throw new Error("Ledger lifecycle did not settle");
-    hooks.cursor = 0; hooks.changed = false;
+  for (let round = 0; round < 20; round++) {
+    for (const h of [hooks.outer, hooks.inner]) { h.cursor = 0; h.changed = false; }
+    hooks.current = hooks.outer;
     const wrapper = PatientLedger({ patientId }) as Element;
-    if (typeof wrapper.type !== "function") { if (key !== null) resetOwner(); key = null; return wrapper; }
-    if (wrapper.key !== key) { resetOwner(); key = wrapper.key; }
-    hooks.cursor = 0; tree = (wrapper.type as (props: Record<string, unknown>) => ReactNode)(wrapper.props);
-    hooks.pending.splice(0).forEach((effect) => effect());
-  } while (hooks.changed);
-  return tree;
+    const nextKey = typeof wrapper.type === "function" ? wrapper.key : null;
+    if (nextKey !== key) { resetOwner(); key = nextKey; }
+    hooks.current = hooks.inner;
+    const tree = nextKey === null ? wrapper : (wrapper.type as (props: Record<string, unknown>) => ReactNode)(wrapper.props);
+    flushEffects();
+    if (!hooks.outer.changed && !hooks.inner.changed) return tree;
+  }
+  throw new Error("Ledger lifecycle did not settle");
 }
 const find = (type: unknown) => elements(render()).find((node) => node.type === type);
 const statusRows = () => elements(render()).filter((node) => node.type === InvoiceSettlementStatus);
