@@ -49,9 +49,11 @@ describe("INV-LINK D — invoice-first journey", () => {
     await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
     await page.getByLabel("الخدمة", { exact: true }).selectOption(String(serviceId));
     await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
-    await page.getByTestId("invoice-row-0").getByTestId("scope-both").click();
+    await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
     const preview = page.getByTestId("invoice-clinical-preview-0");
-    await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor();
+    await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor({state:"attached"});
+    if(!await preview.isVisible())await preview.locator("..").locator("summary").click();
+    await preview.waitFor();
     expect(await preview.innerText()).toContain("بند خطة جديد");
     const save = page.getByRole("button", { name: "احفظ الفاتورة" });
     await save.dblclick();

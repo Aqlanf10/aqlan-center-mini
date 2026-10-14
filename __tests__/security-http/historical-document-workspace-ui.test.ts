@@ -25,7 +25,7 @@ async function open(scenario:typeof scenarios[number]){
   await page.getByTestId("invoice-row-0").getByLabel("الخدمة",{exact:true}).selectOption(String(endo));
   await page.getByTestId("invoice-tooth-button-0").click();const dialog=page.getByTestId("tooth-dialog");
   await dialog.getByTestId("odontogram-tooth-16").click();await dialog.getByTestId("odontogram-tooth-17").click();await page.getByTestId("tooth-dialog-confirm").click();await dialog.waitFor({state:"detached"});
-  await page.getByRole("button",{name:"+ بند آخر",exact:true}).click();await page.getByTestId("invoice-row-2").getByLabel("الخدمة",{exact:true}).selectOption(String(ortho));await page.getByTestId("invoice-row-2").getByTestId("scope-both").click();
+  await page.getByRole("button",{name:"+ بند آخر",exact:true}).click();await page.getByTestId("invoice-row-2").getByLabel("الخدمة",{exact:true}).selectOption(String(ortho));await page.getByTestId("invoice-row-2").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
   await page.getByLabel("الخصم",{exact:true}).fill("20000");await page.getByLabel("سبب الخصم",{exact:true}).fill("Synthetic documented discount");
   await page.getByLabel("المدفوع قبل النظام",{exact:true}).fill("120000");await page.getByLabel("تاريخ المعلومات التاريخية",{exact:true}).fill("2026-10-01");
   await expect.poll(()=>page.getByRole("button",{name:"احفظ الاتفاق التاريخي",exact:true}).isEnabled(),{timeout:15000}).toBe(true);

@@ -71,3 +71,17 @@ Three newly added PostgreSQL regressions first failed, demonstrating separate ja
 - Money guard passed after adding the existing payment currency explicitly to GROUP BY; no allowlist exception (`resume-20261014-money-guard-fixed`, source `626526c8d1e5ce9ee217187a16312e6a210aeaaa9cdfb0d98dd72ecac690bdce`, log `9c0a4f2e4de676364f5b67d8189c427b541fd54ddd77d41aa3bb286759a43f78`). Later changes do not modify that query.
 
 UI redesign and complete corrections/general collection recovery remain in progress. These bounded results are not a final integrated release claim.
+
+
+## Fourth checkpoint — unified approved entry, not full correction completion
+
+New/historical type selection now sits inside the same invoice form; historical date and previously-paid facts appear only for historical origin. Services, scope/teeth, provider, price, quantity and total use a desktop table and a narrow-screen layout. The financial summary is singular; existing-plan/clinical linkage details are expandable and installment fields appear when chosen. General patient layout/sidebar files were not changed. The existing ordinary issued-invoice trigger now says “تصحيح الفاتورة”; its underlying reduction-only behavior is **not** the complete newly requested correction workflow.
+
+Actual app evidence and acceptance matrix are in `INVOICE_UNIFIED_ACCEPTANCE_20261014.md`. Owner-visible Library IDs: `libfile_0945478048e081918997fcee554d07cc` (new), `libfile_7d6e9390af5c8191b8941fe884297910` (historical). These are real synthetic local app screenshots, not generated proposals, and do not yet show the unfinished correction workflow.
+
+- Build `Focxkb3mrpYNXj8qNzniQ`, source `0455776bff25f883492230497bb97c6882503d4d1ef916a454661feaee31aac8`: build/typecheck passed; focused lint zero errors / one existing warning; visual + tooth + first-invoice HTTP batch **16/16 passed**.
+- First premium HTTP run was **33 passed / 2 failed**: successful clinical details had moved into collapsed disclosures. Tests now open the actual disclosure before asserting its visible contents; the revised tooth/new-invoice batch passed.
+- Broad unit discovery: **9180 passed / 10 failed**; this discovery run spans a UI-only source change and is not pinned release evidence. Corrected old fixtures/source contracts/migration docs; reran without the local runner's preclassified DATABASE_ENVIRONMENT: **123/123 passed**. No CI rule or timeout changed. One exact read-only preview route remains unclassified in the audit coverage guard; see the acceptance document.
+- At checkpoint request time, `resume-20261014-unified-acceptance` was still running on the already built application. It had found one provider journey failure and two explicit-selection/lost-reply failures; diagnosis and reruns pending. It must not be reported as passed. Adding this checkpoint documentation while it runs does not change its built application.
+
+Latest owner requirement adds full post-issue corrections (ordinary + historical), including clinical identifiers/providers, increases/decreases, discount/terms, reason/audit/original retention, idempotency, period/shift locks, existing receipts/commissions, executed-work conflict handling and credit settlement without automatic refund. This scope is **not complete**. Receipt correction remains a separate requirement. The unreceived 5df continuation is still not claimed, and no final integration head or Staging publication has been accepted.

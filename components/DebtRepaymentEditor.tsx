@@ -16,9 +16,9 @@ export function readDebtRepaymentDraft(draft: DebtRepaymentDraft, currency: Curr
 
 /** Controlled editor only. The owning invoice/agreement command must persist its
  * validated terms atomically; this component never writes a receipt or debt. */
-export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor, today, disabled = false }: {
+export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor, today, disabled = false, compact = false }: {
   value: DebtRepaymentDraft; onChange: (value: DebtRepaymentDraft) => void;
-  currency: Currency; remainingMinor: number; today: string; disabled?: boolean;
+  currency: Currency; remainingMinor: number; today: string; disabled?: boolean; compact?: boolean;
 }) {
   const group = useId();
   const checked = readDebtRepaymentDraft(value,currency,remainingMinor);
@@ -30,7 +30,7 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
     if (!disabled) onChange({ ...value, rows: value.rows.map(row => row.key === key ? { ...row, ...patch } : row) });
   };
   const newRow = () => ({ key: crypto.randomUUID(), dueDate: value.rows.at(-1)?.dueDate || today, amount: "", kind: "installment" as const });
-  return <fieldset disabled={disabled} dir="rtl" data-testid="debt-repayment-editor" className="min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
+  return <fieldset disabled={disabled} dir="rtl" data-testid="debt-repayment-editor" data-compact={compact} className="min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3">
     <legend className="px-1 text-sm font-extrabold text-slate-900">طريقة سداد الاتفاق</legend>
     <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
       {([ ["full", "دفعة واحدة"], ["installments", "جدول أقساط"] ] as const).map(([mode,label]) =>
@@ -41,10 +41,10 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
           {label}
         </label>)}
     </div>
-    <p className="text-sm">الدين الذي سيُسدَّد: <strong>{formatMoney(remainingMinor,currency)}</strong></p>
+    {!compact?<p className="text-sm">الدين الذي سيُسدَّد: <strong>{formatMoney(remainingMinor,currency)}</strong></p>:null}
     <p className="text-xs leading-6 text-slate-600">اختيار طريقة السداد لا يسجّل مبلغًا محصّلًا. التحصيل الفعلي يُثبت بسند قبض مستقل.</p>
     {value.mode === "installments" ? <>
-      <p className="text-xs leading-6 text-slate-600">أدخل المواعيد من الأقدم إلى الأحدث؛ الدفعة المقدمة المقترحة تكون أول موعد. يمكن جمع دفعات اليوم نفسه دون تغيير ترتيبها.</p>
+      {!compact?<p className="text-xs leading-6 text-slate-600">أدخل المواعيد من الأقدم إلى الأحدث؛ الدفعة المقدمة المقترحة تكون أول موعد. يمكن جمع دفعات اليوم نفسه دون تغيير ترتيبها.</p>:null}
       <div className="space-y-2">
         {value.rows.map((row,index) => <div key={row.key} className="min-w-0 space-y-2 rounded-xl bg-slate-50 p-3">
           <div className="flex min-w-0 items-center justify-between gap-2">
@@ -64,7 +64,7 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
           </div>
           {index === 0 ? <label className="flex min-h-[44px] items-center gap-2 text-xs">
             <input type="checkbox" checked={row.kind === "down_payment"} onChange={event => changeRow(row.key,{ kind:event.target.checked ? "down_payment" : "installment" })} />
-            هذا الموعد دفعة مقدمة مقترحة، لم تُحصّل بعد
+            {compact?"دفعة مقدمة مقترحة (غير محصّلة)":"هذا الموعد دفعة مقدمة مقترحة، لم تُحصّل بعد"}
           </label> : null}
         </div>)}
       </div>

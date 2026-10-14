@@ -91,7 +91,12 @@ function success(route: Route, refusal: string | null = null) {
   })) };
 }
 const json = (route: Route, payload: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
-const ready = (page: Page, line = 0) => page.locator(`[data-testid="invoice-clinical-preview-${line}"][data-preview-state="ready"]`).waitFor();
+const ready = async (page: Page, line = 0) => {
+  const proof=page.locator(`[data-testid="invoice-clinical-preview-${line}"][data-preview-state="ready"]`);
+  await proof.waitFor({state:"attached"});
+  if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+  await proof.waitFor();
+};
 const save = (page: Page) => page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
 
 async function nativeClick(page: Page, target: Locator) {

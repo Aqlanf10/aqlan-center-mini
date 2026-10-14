@@ -113,6 +113,8 @@ interface ServiceSelectProps {
   /** Display only: use the server-projected catalogue price in this currency. */
   catalogCurrency?: Currency;
   disabled?: boolean;
+  /** The owning line already displays its unit and price. */
+  compact?: boolean;
 }
 
 /**
@@ -132,6 +134,7 @@ export function ServiceSelect({
   searchable = false,
   catalogCurrency,
   disabled = false,
+  compact = false,
 }: ServiceSelectProps) {
   const [activeCat, setActiveCat] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -242,7 +245,7 @@ export function ServiceSelect({
 
       {searchable && filteredServices.length === 0 ? <p role="status" className="text-xs text-slate-500">لا خدمة تطابق البحث.</p> : null}
 
-      {selectedService ? (
+      {selectedService && !compact ? (
         <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
           <span className="font-semibold text-navy-800">
             {categoryDisplayName(normalizeCategory(selectedService.category))}

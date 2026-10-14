@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {Calculator, FileText, Link2, Plus, Save, Trash2} from "lucide-react";
 import { CURRENCIES, CURRENCY_LABEL, CLINIC_BASE_CURRENCY, balanceText, formatAmount, formatMoney, invoiceNet, isCurrency, parseAmount, type Balance, type Currency } from "@/lib/money";
 import { useSession } from "./SessionProvider";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
@@ -632,16 +633,11 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
       {financialRecovery.error ? <p role="alert" className="my-3 text-sm text-rose-800">{financialRecovery.error}</p> : null}
 
       {mode === "entry" ? <TreatmentEntryChoice canAddLegacy={canAddLegacy}
-        disabled={!canStartTreatment || busy} onSelect={changeMode} /> : null}
-
-      {mode === "invoice" || mode === "legacy" ? <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-3">
-        <p className="text-sm font-bold">{mode === "invoice" ? "علاج جديد — الفاتورة تنشئ أو تربط الخطة والحالة" : "علاج بدأ قبل النظام — اتفاق تاريخي دون فاتورة أو سند جديد"}</p>
-        <button type="button" disabled={busy} onClick={() => changeMode("entry")}
-          className="min-h-11 rounded-lg border px-3 text-xs font-bold">تغيير نوع العلاج</button>
-      </div> : null}
+        disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode} /> : null}
 
       {mode === "invoice" ? (
         <InvoiceForm key={patientId}
+          originControl={<TreatmentEntryChoice canAddLegacy={canAddLegacy} activeMode="invoice" disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode}/>}
           patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
           financialRecovery={financialRecovery}
           canChangeDraft={() => financialRecovery.ready && !debtRecovery && readRef.current.active && readRef.current.authorized && !writePending.current}
@@ -673,6 +669,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
       ) : null}
 
       {mode === "legacy" && canAddLegacy ? <InvoiceForm key={`historical-${patientId}`}
+        originControl={<TreatmentEntryChoice canAddLegacy={canAddLegacy} activeMode="legacy" disabled={!canStartTreatment || busy || !!recovery} onSelect={changeMode}/>}
         historical patientId={patientId} base={base} services={services} busy={busy} selectionContextKey={selectionContextKey}
         financialRecovery={financialRecovery}
         canChangeDraft={() => financialRecovery.ready && !debtRecovery && readRef.current.active && readRef.current.authorized && !writePending.current}
@@ -692,12 +689,12 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
           positions={ledger.legacyOpeningPositions} payments={ledger.payments} />
       ) : null}
 
-      {session&&canHandleMoney(session.role)?<DebtRepaymentPanel patientId={patientId} refreshKey={ledger}
+      {mode==="none"&&session&&canHandleMoney(session.role)?<DebtRepaymentPanel patientId={patientId} refreshKey={ledger}
         financialRecovery={financialRecovery}
         recovery={debtRecovery} onRecoveryChange={onDebtRecoveryChange} onHold={holdDebt}
         enabled={financialRecovery.ready&&!recovery&&!!ledger&&!loading&&!error&&!busy&&mode==="none"} onChanged={()=>{void load();onClinicalChange?.();}}/>:null}
 
-      {ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} />:null}
+      {mode==="none"&&ledger&&!loading&&!error?<HistoricalDocuments patientId={patientId} refreshKey={ledger} />:null}
 
       {ledger ? (
         <LegacyBalanceArrangementPanel
@@ -927,7 +924,7 @@ function PatientLedgerContent({ patientId, selectionContextKey = "", onClinicalC
                     {admin && invoice.status !== "cancelled" && correcting !== invoice.id ? (
                       <button type="button" disabled={financialBlocked} onClick={() => { if (!financialBlocked) { setCorrecting(invoice.id); setNotice(null); } }}
                         className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
-                        تصحيح
+                        تصحيح الفاتورة
                       </button>
                     ) : null}
                     <a href={`/print/invoice/${invoice.id}`} target="_blank" rel="noopener"
@@ -1019,12 +1016,13 @@ const blankInvoiceRow = (key: string): InvoiceRow => ({
   key, doctorId: "", serviceId: "", description: "", price: "", quantity: "1", priceReason: "", caseId: "", ...emptyToothFields("none"),
 });
 
-function InvoiceForm({ patientId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery }: {
+function InvoiceForm({ patientId, base, services, busy, historical = false, selectionContextKey = "", canChangeDraft, onRecoveryHold, recovery, onRecoveryChange, onSubmit, financialRecovery, originControl }: {
   patientId: number;
   base: Currency;
   services: Service[];
   busy: boolean;
   historical?: boolean;
+  originControl?: ReactNode;
   selectionContextKey?: string;
   canChangeDraft: () => boolean;
   onRecoveryHold: (hold: boolean) => void;
@@ -1351,21 +1349,11 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
   const scopeButtons = (row: InvoiceRow, index: number, mode: ToothScopeMode) => {
     const scopes = allowedScopes(mode);
     if (scopes.length === 0) return null;
-    return (
-      <div role="group" aria-label="نطاق العلاج" className="flex flex-wrap rounded-xl border border-slate-200 bg-white p-0.5">
-        {scopes.map((scope) => {
-          const on = row.toothCode === null && row.scope === scope;
-          return (
-            <button key={scope} type="button" aria-pressed={on} data-testid={`scope-${scope}`}
-              onClick={() => setRows((current) => setRowScope(current, index, on && mode === "arch" ? null : scope))}
-              className={`min-h-[44px] rounded-lg px-3 text-xs font-bold transition-colors ${
-                on ? "bg-navy-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}>
-              {SITE_SCOPE_LABEL[scope]}
-            </button>
-          );
-        })}
-      </div>
-    );
+    return <select aria-label="نطاق العلاج" data-testid={`invoice-scope-${index}`} value={row.toothCode===null?row.scope??"":""}
+      onChange={event=>setRows(current=>setRowScope(current,index,event.target.value?event.target.value as typeof scopes[number]:null))}>
+      <option value="">اختر النطاق</option>
+      {scopes.map(scope=><option key={scope} value={scope}>{SITE_SCOPE_LABEL[scope]}</option>)}
+    </select>;
   };
 
   const toothControl = (row: InvoiceRow, index: number) => {
@@ -1404,21 +1392,14 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
   if (!canSubmit) return <p role="status" className="text-sm text-slate-500">لا توجد صلاحية لإصدار فاتورة في الجلسة الحالية.</p>;
   return (
     <section className={`mb-4 ${workspace.workspace} ${historical ? workspace.legacy : ""}`} aria-label={historical ? "اتفاق تاريخي متعدد البنود" : "فاتورة جديدة"} data-testid="invoice-workspace">
-      <header className={workspace.header}><div><span className={workspace.eyebrow}>اتفاق العلاج · ١ الخدمات · ٢ السداد</span><h3>{historical ? "اتفاق بدأ قبل النظام" : "فاتورة جديدة"}</h3>
-        <p className="mt-1 text-xs leading-6 text-slate-500">حدّد العلاج والسعر، ثم راجع ربط الخطة وطريقة السداد.</p></div>
-        <span className={workspace.badge}>{historical ? "علاج سابق للنظام" : "علاج جديد"}</span>
-        <details className={workspace.correction}><summary>تصحيح مستند محفوظ</summary>
-          <p className="mt-2">يُراجع المدير المستند الأصلي وسنداته قبل التصحيح، مع حفظ سجل التدقيق وهوية العلاج.</p>
-          <p><a href="#saved-invoices">الفواتير: فتح إجراء «تصحيح»</a></p>
-          <p><a href="#saved-historical-agreements">الاتفاقات التاريخية: مراجعة الإبطال والتسوية</a></p>
-          <p>تعرض الاتفاقات التاريخية النسخة الحالية والمبالغ القديمة، ويبقى التحصيل المثبت في سنداته.</p>
-        </details></header>
+      <header className={workspace.header}>
+        <FileText size={24} aria-hidden="true"/><div><h3>{historical ? "اتفاق علاج بدأ قبل النظام" : "فاتورة واتفاق علاج جديد"}</h3>
+        <p>الخدمات والأسنان والأسعار، ثم مراجعة الاتفاق وحفظه.</p></div>
+      </header>
+      {originControl}
       <div className={workspace.body}>
-      <button type="button" className={workspace.summaryJump} onClick={() => document.getElementById(summaryId)?.scrollIntoView({block:"start",behavior:"smooth"})}>
-        ملخص الاتفاق والسداد · {formatMoney(net,currency)} ↓
-      </button>
-      {historical ? <p role="status" className="mb-4 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm leading-7 text-violet-900">
-        المتفق عليه والمدفوع سابقًا حقائق تاريخية؛ يدخل المتبقي وحده رصيدًا سابقًا، وتُربط البنود بالخطة والحالات في الحفظ نفسه. جدول السداد يغطي كامل الرصيد السابق بهذه العملة، ويشمل أي اتفاقات تاريخية قائمة.
+      {historical ? <p role="status" className={workspace.historicalNotice}>
+        توثيق اتفاق سابق وربطه بالعلاج. يدخل المتبقي رصيدًا افتتاحيًا فقط، دون فاتورة أو سند للمدفوع قبل النظام.
       </p> : null}
       {!commandState && recovery ? <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs">
         <p>يوجد طلب سابق غير محسوم لهذا المريض والمستخدم. لا تبدأ فاتورة بديلة قبل التحقق من الطلب الأصلي.</p>
@@ -1453,7 +1434,16 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
       <fieldset disabled={busy || commandLocked} className="min-w-0">
       <div className={workspace.layout}>
       <div className={workspace.services}>
-      <h4 className={workspace.sectionTitle}>الخدمات وموضع العلاج</h4>
+      <div className={workspace.meta}>
+        <label><span>{historical ? "عملة الاتفاق" : "عملة الفاتورة"}</span>
+          <select value={currency} onChange={event=>changeCurrency(event.target.value as Currency)} aria-label={historical ? "عملة الاتفاق" : "عملة الفاتورة"}>
+            {CURRENCIES.map(option=><option key={option} value={option}>{CURRENCY_LABEL[option]}</option>)}
+          </select>
+        </label>
+        {historical?<label><span>تاريخ الاتفاق الأصلي</span><input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event=>setHistoricalDate(event.target.value)} type="date"/></label>
+          :<div><span>تاريخ الإصدار</span><time dir="ltr">{clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)}</time></div>}
+      </div>
+      <h4 className={workspace.sectionTitle}>الخدمات العلاجية</h4>
       {!historical ? <button type="button" disabled={busy} aria-expanded={templateOpen}
         onClick={() => { if (editorEnabled()) setTemplateOpen(open => !open); }}
         className="mb-3 min-h-11 rounded-xl border border-sky-300 px-3 text-sm font-bold">{templateOpen ? "إخفاء اختيار القالب" : "اختيار قالب علاج"}</button> : null}
@@ -1485,17 +1475,9 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
         </label>
         <p className="mt-1 text-xs text-slate-500">الجلسات مغطاة بهذه الفاتورة ولا تعني تحصيلًا أو موافقة سريرية. يمكن قبض دفعات جزئية لاحقًا؛ هذا ليس جدول أقساط جديدًا.</p>
       </section> : null}
-      <label className="mb-3 block w-48">
-        <span className="mb-1 block text-[11px] font-bold text-slate-500">{historical ? "عملة الاتفاق" : "عملة الفاتورة"}</span>
-        <select value={currency} onChange={(event) => changeCurrency(event.target.value as Currency)}
-          aria-label={historical ? "عملة الاتفاق" : "عملة الفاتورة"}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-          {CURRENCIES.map((option) => (
-            <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
-          ))}
-        </select>
-      </label>
-      {!historical && (rows.some((row) => isClinical(row.serviceId)) || templateDraft) ? <div className="mb-3 min-w-0 space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3">
+      {!historical && (rows.some((row) => isClinical(row.serviceId)) || templateDraft) ? <details className={workspace.planChoice}
+        open={(selectionEvidence?.planChoices.length ?? 0) > 1 || selected.existingPlanId !== null}>
+        <summary>ربط بخطة علاج قائمة</summary>
         <label className="block min-w-0">
           <span className="mb-1 block text-xs font-bold text-sky-900">الخطة المقصودة للأعمال الجديدة</span>
           <select aria-label="الخطة المقصودة للأعمال الجديدة" data-testid="invoice-existing-plan"
@@ -1505,7 +1487,7 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
               setSelection((current) => selectInvoicePlan(current, selectionOwner, planId, selectionEvidence?.planChoices ?? []) ?? current);
             }}
             className="min-h-[44px] w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs disabled:opacity-60">
-            <option value="">دون اختيار صريح — لا تُتجاوز الخطط الملتبسة تلقائيًا</option>
+            <option value="">حسب الربط الذي تؤكده المعاينة</option>
             {selected.existingPlanId !== null && !selectionEvidence?.planChoices.some((choice) => choice.id === selected.existingPlanId)
               ? <option value={selected.existingPlanId} disabled>خطة #{selected.existingPlanId} — بانتظار إعادة التحقق</option> : null}
             {selectionEvidence?.planChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.compatible}>
@@ -1513,18 +1495,18 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
             </option>)}
           </select>
         </label>
-        <p className="text-[11px] text-sky-900">بنود العلاج القائمة تُختار أدناه بهويتها. تغيير المريض أو سياق الحالة أو العملة أو الخدمة أو السن أو بيانات البند يلغي الاختيار الصريح ويعيد المعاينة، مع إبقاء مسودة الفاتورة.</p>
+        <p className={workspace.moneyNote}>اختر الخطة المقصودة إن كان للمريض أكثر من خطة. تُراجع مطابقة العمل والأسنان قبل الحفظ.</p>
         {selected.existingPlanId !== null || selected.itemIds.size > 0 ? <button type="button" disabled={busy}
           onClick={() => setSelection({ owner: selectionOwner, existingPlanId: null, itemIds: new Map() })}
           className="min-h-[44px] text-xs font-bold text-sky-800 underline">مسح اختيار الخطة والبنود</button> : null}
-      </div> : null}
+      </details> : null}
       {splitNotice ? (
         <p role="status" data-testid="invoice-split-notice"
           className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
           {splitNotice}
         </p>
       ) : null}
-      <div aria-hidden="true" className={workspace.tableHead}><span>الخدمة</span><span>سعر الوحدة · {currency}</span><span>الكمية</span><span>إجمالي البند</span></div>
+      <div aria-hidden="true" className={workspace.tableHead}><span>الخدمة</span><span>الأسنان / النطاق</span><span>الطبيب</span><span>سعر الوحدة<br/>{currency}</span><span>الكمية</span><span>الإجمالي<br/>{currency}</span><span/></div>
       {rows.map((row, index) => (
         <div key={row.key} data-testid={`invoice-row-${index}`} data-row-key={row.key} data-tooth={row.toothCode ?? ""}
           className={`${workspace.line} space-y-3 ${
@@ -1545,8 +1527,9 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
                 catalogCurrency={currency}
                 allowManual={true}
                 placeholder="— اختر الخدمة المصنفة أو بند يدوي —"
-                ariaLabel="الخدمة"
+                ariaLabel="الخدمة" compact
               />
+              {isClinical(row.serviceId)?<span className={workspace.unit}>{modeOf(row)==="per_tooth_episode"||modeOf(row)==="tooth_surfaces"?"لكل سن":"للمجموعة / الحالة"}</span>:null}
             </div>
             {!row.serviceId ? (
               <input
@@ -1605,11 +1588,11 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
               <button
                 type="button"
                 onClick={() => setRows((current) => removeRowAt(current, index))}
-                className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
+                className={workspace.removeLine}
                 title="حذف البند"
                 aria-label={`حذف البند ${index+1}`}
               >
-                ✕
+                <Trash2 size={16} aria-hidden="true"/>
               </button>
             ) : null}
             {isClinical(row.serviceId) ? (
@@ -1619,16 +1602,13 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
                   onChange={(event) => setRows((current) => current.map((item) => item.key === row.key
                     ? { ...item, doctorId: event.target.value } : item))}
                   className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs">
-                  <option value="">غير محدد — يحتاج مراجعة مالية</option>
+                  <option value="">غير محدد</option>
                   {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
                 </select>
                 {!doctorCatalog ? <span className="mt-1 block text-[10px] text-slate-500">قائمة الأطباء لم تُتحقق بعد؛ لا يُعيّن طبيب تلقائيًا.</span> : null}
               </label>
             ) : null}
-            {isClinical(row.serviceId)?<div className={workspace.toothGroup}>{toothControl(row, index)}
-              <p className="mt-2 text-xs font-bold text-slate-600">أساس التسعير: {modeOf(row) === "per_tooth_episode" || modeOf(row) === "tooth_surfaces"
-                ? "لكل سن — كل سن محدد له بند وسعر مستقل" : "للحالة / المجموعة — السعر مرة واحدة، لا يُضرب بعدد الأسنان"}</p>
-            </div>:null}
+            {isClinical(row.serviceId)?<div className={workspace.toothGroup}>{toothControl(row, index)}</div>:null}
           </div>
           {inputProblems[index] ? <p role="alert" data-testid={`invoice-input-problem-${index}`}
             className="text-[11px] font-bold text-rose-800">{inputProblems[index]}</p> : null}
@@ -1665,12 +1645,14 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
           {(() => {
             if(historical){const indexInRequest=rows.slice(0,index).filter(one=>one.serviceId||one.description.trim()).length;
               const proof=historicalEvidence?.lines[indexInRequest];
-              return <div role="status" data-testid={`historical-clinical-preview-${index}`} data-preview-state={proof?"ready":currentHistorical?.status??"pending"} className="rounded-lg border border-violet-200 bg-violet-50 p-2 text-xs leading-6">
+              return <details className={workspace.linkProof} open={!proof||proof.case.mode==="choose"}>
+                <summary><Link2 size={14} aria-hidden="true"/> {proof?"ربط الخطة والحالة جاهز للمراجعة":"مراجعة ربط العلاج"}</summary>
+                <div role="status" data-testid={`historical-clinical-preview-${index}`} data-preview-state={proof?"ready":currentHistorical?.status??"pending"} className="text-xs leading-6">
                 {proof?<><p>{proof.planId?`إضافة بند للخطة #${proof.planId}`:"بند ضمن خطة علاج جديدة"} · {proof.case.mode==="existing"?`الحالة القائمة #${proof.case.id}`:proof.case.mode==="new"?"حالة تخصصية للعلاج السابق":proof.case.mode==="choose"?"اختر الحالة المقصودة":"علاج مغطّى بالاتفاق"}</p>
                   {proof.case.mode==="choose"?<select aria-label="الحالة التاريخية" value={row.caseId} onChange={event=>setRows(current=>current.map((one,i)=>i===index?{...one,caseId:event.target.value}:one))}><option value="">اختر الحالة</option>{proof.case.options.map(option=><option key={option.id} value={option.id}>{option.title}</option>)}</select>:null}</>
                   :historicalParsed&&!historicalParsed.ok?historicalParsed.message:currentHistorical?.message??"أكمل الحقائق التاريخية لمعاينة الربط."}
                 {currentHistorical?.status==="unavailable"?<button type="button" className="mr-2 underline" onClick={()=>setPreviewRetry(value=>value+1)}>إعادة المعاينة</button>:null}
-              </div>;
+              </div></details>;
             }
             if (!isClinical(row.serviceId)) return null;
             if (inputProblems[index]) return <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state="invalid"
@@ -1694,8 +1676,9 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
               : preview.case.mode === "choose" ? "للمريض أكثر من حالة مفتوحة لهذا التخصص — اختر الحالة"
               : null;
             return (
-              <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status}
-                className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${evidence.status === "refused" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-sky-200 bg-sky-50 text-sky-900"}`}>
+              <details className={workspace.linkProof} open={evidence.status!=="ready"||preview.case?.mode==="choose"}>
+                <summary><Link2 size={14} aria-hidden="true"/> {evidence.status==="ready"?"ربط الخطة والحالة جاهز للمراجعة":"مراجعة ربط العلاج"}</summary>
+                <div role="status" data-testid={`invoice-clinical-preview-${index}`} data-preview-state={evidence.status} className="text-xs leading-6">
                 {evidence.status === "ready" ? <p>هذه الفاتورة ستنشئ/تربط علاجًا سريريًّا للمريض — {preview.specialtyLabel}: {preview.item?.mode === "existing" ? (preview.item.id !== null ? `بند الخطة القائم #${preview.item.id}` : "بند خطة قائم لا يطابق هذا السطر") : "بند خطة جديد"}
                   {` · ${formatMoney(previewAmount(index), currency)}`}</p> : <p>لا يمكن حفظ هذا البند قبل معالجة سبب الرفض.</p>}
                 {caseText && (evidence.status === "ready" || preview.case?.mode === "choose") ? <p>{caseText}</p> : null}
@@ -1710,7 +1693,7 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
                 {preview.refusalMessage ? <p>{preview.refusalMessage}</p> : null}
                 {evidence.status === "ready" && (preview.financialReviewRequired || !row.doctorId) ? <p data-testid={`invoice-provider-review-${index}`}
                   className="mt-1 text-amber-900">نسبة هذا الالتزام للطبيب غير محسومة؛ تُحفظ الفاتورة، وتبقى المراجعة المالية مطلوبة قبل التوقيع.</p> : null}
-              </div>
+              </div></details>
             );
           })()}
         </div>
@@ -1718,54 +1701,38 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
 
       <button type="button"
         onClick={() => setRows((current) => [...current, blankInvoiceRow(nextRowKey())])}
-        className="mb-3 rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
-        + بند آخر
+        className={workspace.addLine} aria-label="+ بند آخر">
+        <Plus size={17} aria-hidden="true"/> إضافة خدمة علاجية
       </button>
       </div>
       <aside id={summaryId} className={workspace.summary} aria-label="ملخص الاتفاق والسداد" data-testid="invoice-financial-summary">
-      <dl className={workspace.summaryCard}>
-        <dt>الإجمالي المتفق عليه</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate?"بانتظار اكتمال البنود":formatMoney(net,currency)}</dd>
-        <div className={workspace.facts}><div><dt>التحصيل في هذا الطلب</dt><dd>لا يوجد سند قبض</dd></div>
-          {historical ? <div><dt>المدفوع قبل النظام</dt><dd>{historicalPaidMinor === null ? "راجع المبلغ" : formatMoney(historicalPaidMinor,currency)}</dd></div> : null}
-          <div><dt>{historical ? "المتبقي · رصيد سابق فقط" : "الدين الجديد عند الحفظ"}</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate||historical&&historicalRemaining===null?"لم يُعتمد بعد":formatMoney(historical?historicalRemaining??0:debtRemaining,currency)}</dd></div>
-          {historicalEvidence?<><div><dt>كامل الرصيد السابق بعد الاتفاق</dt><dd>{formatMoney(historicalEvidence.remainingMinor,currency)}</dd></div><div><dt>المستحق الفعلي للحساب بعد الاتفاق</dt><dd>{formatMoney(historicalEvidence.accountDueMinor,currency)}</dd></div></>:null}
-          <div><dt>الدفعة المقدمة المقترحة</dt><dd>{repayment.ok&&repayment.value.mode==="installments"&&repayment.value.installments[0]?.kind==="down_payment"?formatMoney(repayment.value.installments[0].amountMinor,currency):"غير محددة"}</dd></div></div>
-      </dl>
-      <div className="mb-3 flex flex-wrap items-end gap-2">
-        <label className="w-32">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">خصم</span>
-          <input value={discount} onChange={(event) => setDiscount(event.target.value)}
-            inputMode="decimal" dir="ltr" placeholder="0" aria-label="الخصم"
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-        </label>
-        {discountMinor > 0 ? (
-          <label className="min-w-[10rem] flex-1">
-            <span className="mb-1 block text-[11px] font-bold text-slate-500">سبب الخصم</span>
-            <input value={discountReason} onChange={(event) => setDiscountReason(event.target.value)}
-              aria-label="سبب الخصم" maxLength={300} placeholder="مثل: مريض قديم"
-              className="w-full rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-sm" />
-          </label>
-        ) : null}
-        <p className="flex-1 text-left text-sm font-extrabold">
-          الإجمالي المتفق عليه: {totalInvalid ? "المجموع غير صالح" : inputProblems.some(Boolean) ? "راجع أسعار البنود وكمياتها" : templateDraft && !currentTemplate ? "بانتظار معاينة القالب" : formatMoney(net, currency)}
-          {!totalInvalid && discountMinor > 0 && (!templateDraft || currentTemplate) ? <span className="mr-2 text-[11px] font-normal text-slate-400">قبل الخصم {formatMoney(total, currency)}</span> : null}
-        </p>
-      </div>
-      {/* الرقم المعتمد يُحسب على الخادم من البنود مهما أرسلت الواجهة؛ وهذا العرض
-          يستعمل نفس دالة القراءة فيتطابق معه. */}
-      {historical ? <div className="space-y-3">
-        <label className="block text-xs font-bold">المدفوع قبل النظام
-          <input aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event => setHistoricalPaid(event.target.value)} inputMode="decimal" dir="ltr" className="mt-1 w-full rounded-xl border border-slate-200 px-3" />
-        </label>
-        <label className="block text-xs font-bold">تاريخ المعلومات التاريخية
-          <input aria-label="تاريخ المعلومات التاريخية" value={historicalDate} onChange={event => setHistoricalDate(event.target.value)} type="date" className="mt-1 w-full rounded-xl border border-slate-200 px-3" />
-        </label>
-        {historicalRemaining === null ? <p role="alert" className="text-xs text-rose-800">راجع المدفوع السابق؛ لا يتجاوز المتفق عليه بعد الخصم.</p> : null}
-        <p className="text-xs leading-6 text-slate-600">المتبقي وحده يدخل الرصيد السابق. المدفوع تاريخيًا لا يسجل تحصيلًا أو حركة صندوق.</p>
-      </div> : <p className="mb-3 text-xs text-slate-600">حفظ الاتفاق يثبت الفاتورة وربط العلاج. المبلغ المحصّل يُثبت بسند قبض مستقل؛ تحديد السعر لا يسجّل دفعة.</p>}
-      <DebtRepaymentEditor value={repaymentDraft} onChange={value=>{if(editorEnabled())setRepaymentDraft(value);}}
+      <section className={workspace.summaryCard}>
+        <h4><Calculator size={19} aria-hidden="true"/> ملخص الاتفاق المالي</h4>
+        <dl>
+          <div><dt>إجمالي الخدمات</dt><dd>{totalInvalid||inputProblems.some(Boolean)?"راجع البنود":formatMoney(total,currency)}</dd></div>
+          <div className={workspace.discountRow}><dt><label htmlFor={`${summaryId}-discount`}>خصم الاتفاق</label></dt><dd>
+            <input id={`${summaryId}-discount`} value={discount} onChange={event=>setDiscount(event.target.value)} inputMode="decimal" dir="ltr" placeholder="0" aria-label="الخصم"/>
+          </dd></div>
+          {discountMinor>0?<div className={workspace.discountReason}><dt>سبب الخصم</dt><dd><input value={discountReason} onChange={event=>setDiscountReason(event.target.value)} aria-label="سبب الخصم" maxLength={300} placeholder="سبب الخصم المعتمد"/></dd></div>:null}
+          <div className={workspace.net}><dt>صافي المبلغ المتفق عليه</dt><dd>{totalInvalid||inputProblems.some(Boolean)||templateDraft&&!currentTemplate?"بانتظار اكتمال البنود":formatMoney(net,currency)}</dd></div>
+          {historical?<div><dt><label htmlFor={`${summaryId}-paid`}>المدفوع قبل النظام</label></dt><dd><input id={`${summaryId}-paid`} aria-label="المدفوع قبل النظام" value={historicalPaid} onChange={event=>setHistoricalPaid(event.target.value)} inputMode="decimal" dir="ltr" placeholder="0"/></dd></div>
+            :<div><dt>المبلغ المحصّل بهذا الطلب</dt><dd>{formatMoney(0,currency)}</dd></div>}
+          <div className={workspace.remaining}><dt>{historical?"المتبقي التاريخي الافتتاحي":"المبلغ المتبقي"}</dt><dd>{totalInvalid||inputProblems.some(Boolean)||historical&&historicalRemaining===null?"راجع المبالغ":formatMoney(historical?historicalRemaining??0:debtRemaining,currency)}</dd></div>
+        </dl>
+        {historicalRemaining===null&&historical?<p role="alert">راجع المدفوع السابق؛ لا يتجاوز المتفق عليه بعد الخصم.</p>:null}
+        <p className={workspace.moneyNote}>{historical?"المدفوع قبل النظام للتوثيق فقط؛ دون سند قبض أو حركة صندوق.":"حفظ الفاتورة لا يثبت تحصيلًا. التحصيل الفعلي بسند قبض."}</p>
+      </section>
+      {historicalEvidence&&historicalEvidence.remainingMinor!==historicalRemaining?<section className={workspace.accountContext}>
+        <h4>الرصيد السابق القائم والاتفاق الجديد</h4>
+        <p>كامل الرصيد السابق بعد الاتفاق: <strong>{formatMoney(historicalEvidence.remainingMinor,currency)}</strong></p>
+        <p>المستحق الفعلي للحساب: <strong>{formatMoney(historicalEvidence.accountDueMinor,currency)}</strong></p>
+        <p>جدول السداد يغطي كامل الرصيد السابق بهذه العملة.</p>
+      </section>:null}
+      <DebtRepaymentEditor compact value={repaymentDraft} onChange={value=>{if(editorEnabled())setRepaymentDraft(value);}}
         currency={currency} remainingMinor={debtRemaining} today={clinicDateString(new Date(),CLINIC_ZONE_FALLBACK)} disabled={busy||commandLocked||!canSubmit} />
 
+      </aside>
+      <div className={workspace.saveActions}>
       {blockedLines.length > 0 ? (
         <p role="alert" data-testid="invoice-save-blocked"
           className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
@@ -1812,9 +1779,10 @@ function InvoiceForm({ patientId, base, services, busy, historical = false, sele
         disabled={!canSubmit || busy || !repayment.ok || commandLocked || (!templateDraft && Boolean((commandState || recovery) && invoiceCommandHasTemplate((commandState ?? recovery)!.original.lease))) || totalInvalid || discountInvalid || blockedLines.length > 0 || inputProblems.some(Boolean) || clinicalPreviewBlocked || templatePreviewBlocked || !templateReviewed || (!templateDraft && !rows.some((row) => row.serviceId || row.description.trim()))}
         className={workspace.save}
       >
-        {historical ? "احفظ الاتفاق التاريخي" : "احفظ الفاتورة"}
+        <Save size={19} aria-hidden="true"/>{historical ? "احفظ الاتفاق التاريخي" : "احفظ الفاتورة"}
       </button>
-      </aside>
+      <button type="button" className={workspace.review} onClick={()=>document.getElementById(summaryId)?.scrollIntoView({block:"start",behavior:"smooth"})}>مراجعة الاتفاق قبل الحفظ</button>
+      </div>
       </div>
       </fieldset>
       {discountInvalid ? <p role="alert" className="mt-2 text-xs text-red-700">اكتب خصمًا صحيحًا قبل الحفظ؛ لم يُرسل الطلب.</p> : null}

@@ -65,7 +65,7 @@ describe("(P2/P5) treatment creation uses the canonical invoice or historical wr
     const ledger = readFileSync("components/PatientLedger.tsx", "utf8");
     expect(ledger).toContain('<TreatmentEntryChoice');
     expect(ledger).toContain('fetch("/api/invoices"');
-    expect(ledger).toContain('fetch(`/api/patients/${patientId}/legacy-treatments`');
+    expect(ledger).toContain('fetch(`/api/patients/${patientId}/historical-documents`');
     expect(ledger).not.toMatch(/fetch\("\/api\/plans"|\/api\/quick-plan|quick_plans/);
   });
 

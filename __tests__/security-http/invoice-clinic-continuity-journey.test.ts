@@ -93,7 +93,7 @@ async function invoiceDraft(patientId: number, category: Category, tooth: number
   // Explicit reception choice from the authorized catalogue, never inferred from the signer.
   await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
   if (tooth === null) {
-    await page.getByTestId("invoice-row-0").getByTestId("scope-both").click();
+    await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
     expect(await page.getByTestId("invoice-tooth-button-0").count()).toBe(0);
   } else {
     await page.getByTestId("invoice-tooth-button-0").click();
@@ -110,7 +110,10 @@ async function invoiceDraft(patientId: number, category: Category, tooth: number
     await dialog.waitFor({ state: "detached" });
     expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(tooth));
   }
-  await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
+  const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+  await proof.waitFor({state:"attached"});
+  if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+  await proof.waitFor();
   expect(await page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).isEnabled()).toBe(true);
   return view;
 }

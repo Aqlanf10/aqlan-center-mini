@@ -261,7 +261,9 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     expect(await page.getByTestId("invoice-tooth-chip-1").innerText()).toContain("سن 46");
     for (const line of [0, 1]) {
       const preview = page.getByTestId(`invoice-clinical-preview-${line}`);
-      await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor();
+      await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor({state:"attached"});
+      if(!await preview.isVisible())await preview.locator("..").locator("summary").click();
+      await preview.waitFor();
       expect(await preview.innerText()).toContain("بند خطة جديد");
     }
 
@@ -319,10 +321,13 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     const { context, page } = await openInvoice(patientId);
     await chooseService(page, services.ortho);
     const row = page.getByTestId("invoice-row-0");
-    await row.getByTestId("scope-upper").click();
-    expect(await row.getByTestId("scope-upper").getAttribute("aria-pressed")).toBe("true");
+    await row.getByLabel("نطاق العلاج",{exact:true}).selectOption("upper");
+    expect(await row.getByLabel("نطاق العلاج",{exact:true}).inputValue()).toBe("upper");
     expect(await page.getByTestId("invoice-tooth-button-0").count()).toBe(0);
-    await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
+    const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+    await proof.waitFor({state:"attached"});
+    if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+    await proof.waitFor();
     expect(await page.getByRole("button", { name: "احفظ الفاتورة" }).isEnabled()).toBe(true);
     await save(page);
     expect(await cases(patientId)).toEqual([{ specialty: "orthodontics", site: "الفك العلوي" }]);

@@ -249,7 +249,10 @@ describe("required invoice visual evidence through retained CI stdout", () => {
 
         await page.getByTestId("tooth-dialog-confirm").click();
         await page.getByTestId("tooth-dialog").waitFor({ state: "detached" });
-        await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
+        const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+        await proof.waitFor({state:"attached"});
+        if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+        await proof.waitFor();
         expect(await page.getByTestId("invoice-provider-0").inputValue()).toBe(String(doctorId));
         expect(await page.getByTestId("invoice-provider-review-0").count()).toBe(0);
         expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("MO");

@@ -82,11 +82,17 @@ async function tooth(page: Page, code: number) {
   await dialog.waitFor({ state: "detached" });
   expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(code));
 }
-const ready = (page: Page) => page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
+const ready = async (page: Page) => {
+  const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+  await proof.waitFor({state:"attached"});
+  if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+  await proof.waitFor();
+};
 const refused = (page: Page) => page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="refused"]').waitFor();
 async function selectPlan(page: Page, planId: number, keyboard: boolean) {
   const select = page.getByTestId("invoice-existing-plan");
   await expect.poll(() => select.isEnabled()).toBe(true);
+  if(!await select.isVisible())await select.locator("../..").locator("summary").click();
   if (keyboard) { await select.focus(); await select.press("End"); await select.press("Enter"); }
   else await select.selectOption(String(planId));
   expect(await select.inputValue()).toBe(String(planId));
