@@ -31,7 +31,7 @@ function write(role: Role, path: string, method: string, body: unknown, key?: st
 async function accepted<T>(response: Response, status = 200): Promise<T> {
   const text = await response.text(); expect(response.status, text).toBe(status); return JSON.parse(text) as T;
 }
-async function fixture(currency: "YER" | "SAR" | "USD" = "YER", linked = true) {
+async function fixture(currency: "YER" | "SAR" | "USD" = "YER", linked = true, finish = true) {
   const label = `OC-${Date.now()}-${++serial}`;
   const patientId = (await db.query(`INSERT INTO patients (patient_number, full_name, primary_doctor_id)
     VALUES ($1, 'مريض اصطناعي للخروج والتحصيل', $2) RETURNING id`, [label, doctorId])).rows[0].id as number;
@@ -43,7 +43,7 @@ async function fixture(currency: "YER" | "SAR" | "USD" = "YER", linked = true) {
   }), 201);
   // Explicit synthetic fixture relationship, never a guessed latest invoice. The production invoice writer is unchanged.
   if (linked) await db.query(`UPDATE visits SET invoice_id = $2 WHERE id = $1`, [visit.id, invoice.id]);
-  await accepted(await write("admin", `/api/visits/${visit.id}`, "PATCH", { action: "finish" }));
+  if (finish) await accepted(await write("admin", `/api/visits/${visit.id}`, "PATCH", { action: "finish" }));
   return { patientId, visitId: visit.id, invoiceId: invoice.id, currency, label };
 }
 async function read(f: Awaited<ReturnType<typeof fixture>>) {
@@ -229,6 +229,118 @@ it("never guesses the invoice for an unsigned visit from unrelated paid account 
   await sign(f);
   expect((await db.query(`SELECT invoice_id FROM visits WHERE id=$1`, [f.visitId])).rows).toEqual([{ invoice_id: null }]);
   expect(await ledger(f)).toEqual(before);
+});
+
+it("closes a completed financial re-review in history without clearing the remaining debt", async () => {
+  const f = await fixture();
+  await accepted(await write("reception", `/api/visits/${f.visitId}/operational-checkout`, "POST", decisionBody(await read(f))));
+  const priorAudit = (await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1 ORDER BY id`, [String(f.visitId)])).rows;
+  await collect(f, "400");
+  expect((await read(f)).item.financialReviewRequired).toBe(true);
+  const receipts = await ledger(f);
+  const before = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
+  expect(before.balances).toEqual([{ currency: "YER", balanceMinor: 600 }]);
+  const context = await browser.newContext({ viewport: { width: 390, height: 900 }, locale: "ar-YE" });
+  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+  const page = await context.newPage();
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("tab", { name: /التحصيل والخروج/ }).click();
+    await page.getByRole("button", { name: /سجل المعالجة/ }).click();
+    const row = page.locator(`[data-handoff-visit="${f.visitId}"]`);
+    await row.getByRole("button", { name: `متابعة خروج الزيارة #${f.visitId}`, exact: true }).click();
+    const panel = row.getByRole("region", { name: `متابعة الخروج التشغيلي للزيارة ${f.visitId}` });
+    await expect.poll(() => panel.getAttribute("data-operational-state")).toBe("ready");
+    await panel.getByLabel("سبب المعالجة أو التأجيل").fill("مراجعة التحصيل الجزئي مع بقاء الدين");
+    const saved = page.waitForResponse(response => response.url().endsWith(`/api/visits/${f.visitId}/operational-checkout`) && response.request().method() === "POST");
+    await panel.getByRole("button", { name: "تمت مراجعة الخروج — لا يثبت السداد", exact: true }).click();
+    expect((await saved).status()).toBe(200);
+    await expect.poll(() => panel.count()).toBe(0);
+    expect(await row.count()).toBe(1);
+    expect((await read(f)).item).toMatchObject({ status: "handled", financialReviewRequired: false, visitInvoiceSettled: false });
+    expect(await ledger(f)).toEqual(receipts);
+    const after = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
+    expect(after.balances).toEqual(before.balances);
+    expect((await db.query(`SELECT id, details FROM audit_log WHERE action = 'visit.operational_handoff_decided' AND entity_id = $1 ORDER BY id`, [String(f.visitId)])).rows.slice(0, priorAudit.length)).toEqual(priorAudit);
+  } finally { await context.close(); }
+});
+
+it.each([390, 1280])("manager invoice → arrival → finish → partial collection → reasoned deferral keeps exact context at %spx", async width => {
+  // No SQL invoice association: this exercises the actual invoice-first contract.
+  const f = await fixture("YER", false, false);
+  const replay = await accepted<{ id: number }>(await write("admin", "/api/invoices", "POST", {
+    patientId: f.patientId, currency: "YER", idempotencyKey: `invoice:${f.label}`,
+    items: [{ description: "خدمة مالية اصطناعية", price: "1000", doctorId }],
+  }));
+  expect(replay.id).toBe(f.invoiceId);
+  const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "ar-YE", timezoneId: "Asia/Aden" });
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
+  await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+  const page = await context.newPage(), errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: `${ARTIFACTS}/reception-day-${width}.png`, fullPage: false });
+    const arrivalName = page.getByRole("textbox", { name: "اسم المريض", exact: true });
+    const arrivalPhone = page.getByRole("textbox", { name: "هاتف المريض", exact: true });
+    await arrivalName.fill("وصول اصطناعي للتجربة"); await arrivalPhone.fill("700000001");
+    if (width === 390) expect((await arrivalName.boundingBox())!.width).toBeGreaterThan(250);
+    await page.screenshot({ path: `${ARTIFACTS}/reception-arrival-${width}.png`, fullPage: false });
+    // A failed request must keep entered fields; this response simulates a bounded outage, without creating a visit.
+    const beforeArrival = (await db.query(`SELECT count(*)::int AS n FROM visits`)).rows[0].n;
+    await page.route("**/api/visits", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "تعذّر التسجيل الاصطناعي" }) })
+      : route.continue());
+    const failedArrival = page.waitForResponse(response => response.url().endsWith("/api/visits") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "وصل", exact: true }).click();
+    expect((await failedArrival).status()).toBe(503);
+    await expect.poll(() => page.getByRole("button", { name: "وصل", exact: true }).isEnabled()).toBe(true);
+    expect(await arrivalName.inputValue()).toBe("وصول اصطناعي للتجربة"); expect(await arrivalPhone.inputValue()).toBe("700000001");
+    expect((await db.query(`SELECT count(*)::int AS n FROM visits`)).rows[0].n).toBe(beforeArrival);
+    await page.unroute("**/api/visits");
+    await arrivalName.fill(""); await arrivalPhone.fill("");
+    const waiting = page.getByRole("region", { name: "قائمة الانتظار", exact: true });
+    expect(await waiting.innerText()).toContain("مريض اصطناعي للخروج والتحصيل");
+    await waiting.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${ARTIFACTS}/reception-waiting-${width}.png`, fullPage: false });
+    await accepted(await write("admin", `/api/visits/${f.visitId}`, "PATCH", { action: "clear" }));
+    await accepted(await write("admin", `/api/visits/${f.visitId}`, "PATCH", { action: "seat", chair: 2 }));
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("region", { name: "الكراسي", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${ARTIFACTS}/reception-chairs-${width}.png`, fullPage: false });
+    const invoicesBefore = (await db.query(`SELECT id, total_minor, discount_minor FROM invoices WHERE patient_id = $1 ORDER BY id`, [f.patientId])).rows;
+    await page.getByRole("region", { name: "الكراسي", exact: true }).getByRole("button", { name: "أنهِ الجلوس", exact: true }).click();
+    const checkout = page.getByRole("tab", { name: /التحصيل والخروج/ });
+    await expect.poll(() => checkout.getAttribute("aria-selected")).toBe("true");
+    const row = page.locator(`[data-handoff-visit="${f.visitId}"]`);
+    const panel = row.getByRole("region", { name: `متابعة الخروج التشغيلي للزيارة ${f.visitId}` });
+    await expect.poll(() => panel.getAttribute("data-operational-state")).toBe("ready");
+    expect(await panel.getByTestId("operational-visit-invoice").innerText()).toContain("لا توجد فاتورة مرتبطة");
+    expect((await db.query(`SELECT id, total_minor, discount_minor FROM invoices WHERE patient_id = $1 ORDER BY id`, [f.patientId])).rows).toEqual(invoicesBefore);
+    await collect(f, "400");
+    const receipts = await ledger(f);
+    await panel.getByRole("link", { name: /فتح حساب المريض/ }).click();
+    await page.waitForURL(`**/patients/${f.patientId}?tab=account`);
+    await page.goBack({ waitUntil: "networkidle" });
+    await expect.poll(() => checkout.getAttribute("aria-selected")).toBe("true");
+    await expect.poll(() => panel.getAttribute("data-operational-state")).toBe("ready");
+    await panel.getByLabel("سبب المعالجة أو التأجيل").fill("تأجيل المتبقي بعد تحصيل جزئي اصطناعي");
+    const saved = page.waitForResponse(response => response.url().endsWith(`/api/visits/${f.visitId}/operational-checkout`) && response.request().method() === "POST");
+    await panel.getByRole("button", { name: "تأجيل المتابعة مع بقاء الرصيد", exact: true }).click();
+    expect((await saved).status()).toBe(200);
+    await expect.poll(() => panel.count()).toBe(0);
+    expect((await read(f)).item).toMatchObject({ status: "deferred", signedAt: null, visitInvoiceSettled: false });
+    expect(await ledger(f)).toEqual(receipts);
+    const account = await accepted<{ balances: { currency: string; balanceMinor: number }[] }>(await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.reception));
+    expect(account.balances).toEqual([{ currency: "YER", balanceMinor: 600 }]);
+    await page.getByRole("button", { name: /سجل المعالجة/ }).click();
+    await expect.poll(() => row.count()).toBe(1);
+    expect(await row.innerText()).toContain("أُجّل الدفع — الرصيد باقٍ");
+    await page.screenshot({ path: `${ARTIFACTS}/reception-history-${width}.png`, fullPage: false });
+    expect(errors).toEqual([]);
+  } finally { await context.close(); }
 });
 
 it("real exact V1 survives current V2 and patient A→B→A/back/forward with a held retired read", async () => {

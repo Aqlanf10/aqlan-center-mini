@@ -1,0 +1,32 @@
+{
+  "starting_head": "d9690edf747d34da2195badb9c7b7863e7270abd",
+  "invoice_base": "03d325a8b6511098237458c38444620db59709e7",
+  "reference_head": "4538f57bb0171ee8d4b9428316633b331e024c0b",
+  "synthetic": true,
+  "capture": "native built app; 390x900 and 1280x900; no stitched images",
+  "test_log": "http-verified.log; 32/32 passed",
+  "source_sha256": {
+    "app/page.tsx": "0421644c430316680d29ca1da20d9331c6ca17017959972b3cab55c1e09fb1ec",
+    "components/today/ReceptionHandoffs.tsx": "bd7d5a3da50af90b7693507db8f3f3e5de07ae392e319f8f0eaee83637b859d9",
+    "components/today/OperationalCheckoutPanel.tsx": "e3da42567b721e21b8418b471fe45eb66af12dd1c9e22fdfa0bc7e311ba247a6",
+    "components/today/ReceptionFinancialVerification.tsx": "77fa58fcc02df73f62776a47e143af4ffc6e7026c69e07b4b34bbf0c31654278",
+    "components/today/reception.module.css": "674a970103e09ffdae795dc5c384fb5d2c16d9ef4ebb05e46475638a08b3d0be",
+    "__tests__/security-http/operational-checkout-acceptance.test.ts": "69533366a4a6deb3b46e61370da29010f9cc0cb2905a50396f5b7c2d4b3ad9a5"
+  },
+  "evidence_sha256": {
+    "reception-arrival-1280.png": "e9890c815751d688c7c2078df943251d83c319257f88b5c42e14ddb2b02a2c13",
+    "reception-arrival-390.png": "5ff1a3eb25ae100db7bc3fe1c13fe49ce48613881827a7fe43904de2afeb6df0",
+    "reception-chairs-1280.png": "73e359705f06dc6b797f5c628c25dba0d5a465cfd1e075935c68077a277a243c",
+    "reception-chairs-390.png": "40d690018037d9416e9c13f26fb1b86ec33d240326f17524825e93007f211b22",
+    "reception-day-1280.png": "1e224835e1658e862dee2386c673a712742f6e416bcb260448675bdd522a668f",
+    "reception-day-390.png": "102194db2abedebef888fb664bf77fba8c459cb8e031766aca8eefd5d10e499f",
+    "reception-history-1280.png": "a7377c5308b47a0840a7d9f8b41360e8ec31beae5c002d8b0625be638c726c62",
+    "reception-history-390.png": "2582629fe38f131f64325a4edf0834ebcace4a078639a67061cadf8f6a8737c8",
+    "reception-waiting-1280.png": "2b5cb47a06448987b41758bf98d6b07ac5f8f1377319f592bed13fea4edcb818",
+    "reception-waiting-390.png": "89d463aa5a9a56578046d2e2aeacbe6419d53e22e5dc5159261999cfc6b9d427",
+    "unsigned-paid-1280.json": "9ef3b368b07d7a48673d1a7c1dfc7f3f08c4f3b87413deff194c66fe5f337963",
+    "unsigned-paid-1280.png": "d6c557297049f9c0d0248e76a0eaf5ca307d860e5a20fc78f852c312419a8a34",
+    "unsigned-paid-390.json": "2d9e45c92d635e476853f4c247ec6f31900350d90b7a4d81e2105e097603b426",
+    "unsigned-paid-390.png": "c7a946de4cb199406e2a5356cb87dc31e4c985f7736ca3c62d8fab0c8de0588e"
+  }
+}
