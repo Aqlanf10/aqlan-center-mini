@@ -1,0 +1,71 @@
+{
+  "images": [
+    {
+      "bytes": 119444,
+      "sha256": "5b2016b24c2428b6ac5cd0d4b58bee0d291b0097bfb141469c26516413c96c2e",
+      "repoPath": "docs/inventory/evidence/Inventory-Valuation-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 87612,
+      "sha256": "80c74c0d21d934329c99349867fc2b42fe39ffec530639e7f3064547199b8fd4",
+      "repoPath": "docs/inventory/evidence/Inventory-Valuation-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 96892,
+      "sha256": "ee66cc01e1e0c640584b4ee4600a7091715ebcb85ef3250746d33dcc890120ed",
+      "repoPath": "docs/inventory/evidence/Procurement-Request-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 54310,
+      "sha256": "a40f5bdc9692567dc667072597f472720d5e56f9c79b9f8d85295467609f9a1a",
+      "repoPath": "docs/inventory/evidence/Procurement-Request-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 103450,
+      "sha256": "bba6e2c33d23f5805228f2f0584084286788765cb292defe945f05458d1aaba8",
+      "repoPath": "docs/inventory/evidence/Doctor-Custody-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 62783,
+      "sha256": "46cad326377912bb3d2396c859ed15e5c550c2bc37484464a3e7eff570025bc0",
+      "repoPath": "docs/inventory/evidence/Doctor-Custody-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 174122,
+      "sha256": "eb73bab5973029f0b362e2849e2a2e4087ac903940eaea362ec458ab6022b898",
+      "repoPath": "docs/inventory/evidence/Custody-Admin-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 132314,
+      "sha256": "0d5960c9de444928acc70445bb6ceb9c53063e28d2b2aeed67a63624410cbb45",
+      "repoPath": "docs/inventory/evidence/Custody-Admin-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    }
+  ],
+  "patientData": false,
+  "secrets": false,
+  "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+  "remainingScreens": [
+    "purchase order editor",
+    "inspection/receipt editor",
+    "supplier invoice match editor",
+    "actual treatment case consumption/returns UI",
+    "D-A financial settlement posting UI",
+    "unique package closure/disposal evidence UI"
+  ]
+}
