@@ -98,7 +98,7 @@ import {
   databaseUrlForProject,
 } from "./database-scope";
 import {
-  computeAll, isCephLandmarkCode, isCephMeasurementCode, MEASUREMENTS, REQUIRED_LANDMARKS,
+  computeAll, isCephLandmarkCode, MEASUREMENTS, projectCephStampedValues, REQUIRED_LANDMARKS,
   summarize, type LandmarkCode, type LandmarkMap,
 } from "./ceph";
 import { toWhatsAppNumber } from "./reminders";
@@ -2121,6 +2121,8 @@ export function ensureSchema(): Promise<void> {
        RETURNING id`,
     );
     if (seedSet.rows[0]) {
+      // Versioned methods without a verified norm must not receive fabricated references.
+      const referenced = MEASUREMENTS.filter(d => !d.referencePending && !d.retired && d.mean !== null && d.tol !== null);
       await getPool().query(
         `INSERT INTO ceph_reference_values (set_id, code, mean, sd)
          SELECT $1, x.code, x.mean, x.sd
@@ -2128,9 +2130,9 @@ export function ensureSchema(): Promise<void> {
          ON CONFLICT (set_id, code) DO UPDATE SET mean = EXCLUDED.mean, sd = EXCLUDED.sd`,
         [
           seedSet.rows[0].id,
-          MEASUREMENTS.map((d) => d.code),
-          MEASUREMENTS.map((d) => d.mean),
-          MEASUREMENTS.map((d) => d.tol),
+          referenced.map((d) => d.code),
+          referenced.map((d) => d.mean),
+          referenced.map((d) => d.tol),
         ],
       );
     }
@@ -22452,12 +22454,12 @@ export async function createCephAnalysis(input: {
           input.refSet?.trim() || "builtin_default",
         ],
       );
-      await client.query("COMMIT");
-      await recordAudit({
+      await insertAuditRow(client, {
         action: "ceph.create", entity: "ceph_analysis", entityId: String(rows[0].id),
         entityLabel: `على المستند #${input.documentId} — مرحلة ${input.phase ?? "pretreatment"}`,
         actor: input.createdBy,
       });
+      await client.query("COMMIT");
       return { ok: true, id: rows[0].id };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -22571,14 +22573,13 @@ export async function getCephAnalysisForCompare(id: number): Promise<CephAnalysi
     `SELECT code, value FROM ceph_measurements WHERE analysis_id = $1`,
     [id],
   );
-  const sealed = row.status === "completed" && ms.length > 0
-    ? new Map(ms.map((measurement) => [measurement.code, measurement.value]))
-    : null;
-  const live = computeAll(points, row.mm_per_pixel ?? NaN);
+  const projected = row.status === "completed"
+    ? projectCephStampedValues(ms)
+    : computeAll(points, row.mm_per_pixel ?? NaN);
 
   const measurements: CephAnalysisForCompare["measurements"] = [];
-  for (const result of live) {
-    const value = sealed ? (sealed.get(result.code) ?? null) : result.value;
+  for (const result of projected) {
+    const value = result.value;
     if (value == null || !Number.isFinite(value)) continue;
     measurements.push({
       code: result.code,
@@ -22895,12 +22896,12 @@ export async function updateCephCalibration(
        WHERE id=$1`,
       [id, cal.x1, cal.y1, cal.x2, cal.y2, cal.mm, scale],
     );
-    await client.query("COMMIT");
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `معايرة ${cal.mm} مم على ${px.toFixed(1)} بكسل`,
       actor: by,
     });
+    await client.query("COMMIT");
     return { ok: true, mmPerPixel: scale };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -22951,12 +22952,12 @@ export async function updateCephLandmarks(
         [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
       );
     }
-    await client.query("COMMIT");
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `كتابة ${clean.length} معلمًا (${clean.map((p) => p.code).join("، ")})`,
       actor: by,
     });
+    await client.query("COMMIT");
     return { ok: true, count: clean.length };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -23014,12 +23015,12 @@ export async function updateCephDiagnosis(
         clean(dx.note, 2000), finalDx.slice(0, 2000), by,
       ],
     );
-    await client.query("COMMIT");
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "ceph.update", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `تشخيص منظّم: ${finalDx.slice(0, 80)}`,
       actor: by,
     });
+    await client.query("COMMIT");
     return { ok: true };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -23131,14 +23132,14 @@ export async function completeCephAnalysis(
       `UPDATE ceph_analyses SET status='completed', completed_by=$2, completed_at=NOW() WHERE id=$1`,
       [id, by],
     );
-    await client.query("COMMIT");
 
     const summary = summarize(results);
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "ceph.complete", entity: "ceph_analysis", entityId: String(id),
       entityLabel: `ANB=${stamped.find((r) => r.code === "ANB")?.value ?? "—"} · FMA=${stamped.find((r) => r.code === "FMA")?.value ?? "—"} · ${summary.skeletal}`,
       actor: by,
     });
+    await client.query("COMMIT");
     return {
       ok: true,
       measurements: stamped.map((r) => ({ code: r.code, value: r.value })),
@@ -23172,13 +23173,16 @@ export async function discardCephAnalysis(
       `UPDATE ceph_analyses SET status='discarded', note=$2 WHERE id=$1`,
       [id, note?.trim() || null],
     );
-    await client.query("COMMIT");
-    await recordAudit({
+    await insertAuditRow(client, {
       action: "ceph.discard", entity: "ceph_analysis", entityId: String(id),
       entityLabel: note?.trim() ? note.trim().slice(0, 120) : null,
       actor: by,
     });
+    await client.query("COMMIT");
     return { ok: true };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }

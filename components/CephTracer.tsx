@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { formatClinicTimestamp } from "@/lib/clinic-clock";
 import {
-  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
+  CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, LANDMARK_ORDER, landmarkDef, projectCephStampedValues, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
   type CephSchool, type LandmarkCode, type LandmarkMap, type MeasurementResult, type Pt,
 } from "@/lib/ceph";
@@ -22,11 +23,11 @@ function CephDeviationGauge({
   unit,
 }: {
   value: number | null;
-  mean: number;
-  sd: number;
+  mean: number | null;
+  sd: number | null;
   unit: string;
 }) {
-  if (value == null || !Number.isFinite(value) || !Number.isFinite(sd) || sd <= 0) {
+  if (value == null || mean === null || sd === null || !Number.isFinite(value) || !Number.isFinite(mean) || !Number.isFinite(sd) || sd <= 0) {
     return <div className="h-2 w-20 rounded-full bg-slate-100" title="غير متوفر" />;
   }
 
@@ -102,6 +103,7 @@ const GUIDE_LINES: [LandmarkCode, LandmarkCode][] = [
   ["S", "N"], // الخط السهمي الأمامي
   ["Or", "Po"], // مستوى فرانكفورت
   ["Go", "Me"], // مستوى الفك السفلي
+  ["Go", "Gn"], // Steiner's distinct GoGn plane; Me never substitutes for Gn.
   ["N", "A"],
   ["N", "B"],
   ["N", "Pog"],
@@ -138,6 +140,7 @@ interface DxState {
 }
 
 export function CephTracer({
+  clinicTimeZone,
   patientName,
   patientBirthYear,
   analysis,
@@ -147,6 +150,7 @@ export function CephTracer({
   refSetName,
   diagnosis,
 }: {
+  clinicTimeZone: string;
   patientName: string;
   patientBirthYear: number | null;
   analysis: AnalysisProp;
@@ -533,16 +537,7 @@ export function CephTracer({
   // جدول المسودة يجري حيًّا؛ وجدول المعتمد يقرأ اللقطة: القيم من ceph_measurements
   // وحدها مع تفسيرها على سجل التعريفات نفسه — لا رقم معتمد يُعاد حسابه.
   const table = useMemo((): MeasurementResult[] => {
-    if (!(completed && stamped)) return results;
-    const snap = new Map(stamped.map((s) => [s.code, s.value]));
-    return results.map((r) => {
-      const v = snap.get(r.code);
-      if (v == null || !Number.isFinite(v)) {
-        return { ...r, value: null, display: "—", status: null };
-      }
-      const def = MEASUREMENTS.find((d) => d.code === r.code);
-      return { ...r, value: v, display: String(v), status: def ? interpret(v, def) : r.status };
-    });
+    return completed ? projectCephStampedValues(stamped ?? []) : results;
   }, [completed, stamped, results]);
 
   const enriched = useMemo(() => enrichWithRefs(table, refValues), [table, refValues]);
@@ -824,7 +819,7 @@ export function CephTracer({
               </div>
             </div>
             <span className="text-[11px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full">
-              49 قياساً
+              {enriched.length} قياساً
             </span>
           </button>
 
@@ -1543,7 +1538,7 @@ export function CephTracer({
                     مخطط
                   </button>
                 </div>
-                <span className="text-xs text-slate-400 font-mono">49 قياساً</span>
+                <span className="text-xs text-slate-400 font-mono">{enriched.length} قياساً</span>
               </div>
             </div>
 
@@ -1596,15 +1591,15 @@ export function CephTracer({
                         : r.value;
                       const mean = r.refMean ?? r.mean;
                       const sd = r.refSd ?? r.tol;
-                      const z = activeVal != null && sd > 0 ? (activeVal - mean) / sd : null;
+                      const z = activeVal != null && mean !== null && sd !== null && sd > 0 ? (activeVal - mean) / sd : null;
                       const barPercent = z != null ? Math.max(0, Math.min(100, 50 + z * 16.6)) : 50;
                       return (
                         <div key={r.code} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2 text-xs">
                           <div className="flex items-center justify-between mb-1">
-                            <span className="font-bold text-slate-800">{r.code} — {r.ar.split("—")[0]}</span>
+                            <span className="font-bold text-slate-800">{r.code} — {r.retired ? r.ar : r.ar.split("—")[0]}</span>
                             <div className="flex items-center gap-1 font-mono">
-                              <span className="font-black text-navy-900">{activeVal != null ? activeVal : "—"} {r.unit}</span>
-                              <span className="text-[10px] text-slate-400">({mean}±{sd})</span>
+                              <span className="font-black text-navy-900">{activeVal != null ? round1(activeVal) : "—"} {r.unit}</span>
+                              <span className="text-[10px] text-slate-400">{mean !== null && sd !== null ? `(${mean}±${sd})` : "المرجع غير محقق"}</span>
                               {r.severityStars && (
                                 <span className={`text-[10px] font-bold px-1 rounded ${
                                   r.severityStars === "***" ? "bg-rose-100 text-rose-700" :
@@ -1616,7 +1611,7 @@ export function CephTracer({
                             </div>
                           </div>
                           {/* شريط الانحراف المعياري WebCeph SD Bar */}
-                          <div className="relative h-3 w-full rounded-full bg-slate-200 overflow-hidden">
+                          {mean !== null && sd !== null ? <><div className="relative h-3 w-full rounded-full bg-slate-200 overflow-hidden">
                             <div className="absolute inset-y-0 left-1/2 w-0.5 bg-slate-400 z-10" title="المعدل الطبيعي (Mean)" />
                             <div className="absolute inset-y-0 left-[33.3%] w-[33.4%] bg-emerald-100/60 z-0" title="المجال الطبيعي ±1 SD" />
                             {z != null && (
@@ -1633,7 +1628,7 @@ export function CephTracer({
                             <span>-3 SD</span>
                             <span>طبيعي</span>
                             <span>+3 SD</span>
-                          </div>
+                          </div></> : null}
                           <div className="mt-1 text-[11px] text-slate-600 flex items-center justify-between">
                             <span>{r.interpretationAr}</span>
                             <span className="text-[9px] text-slate-400 font-mono">{r.interpretationEn}</span>
@@ -1676,7 +1671,7 @@ export function CephTracer({
                               : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
                             const refText = r.refMean != null && r.refSd != null
                               ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
-                              : `${r.mean}±${r.tol}`;
+                              : r.mean !== null && r.tol !== null ? `${r.mean}±${r.tol}` : "المرجع غير محقق";
                             const activeVal = completed && stamped
                               ? stamped.find((s) => s.code === r.code)?.value ?? null
                               : r.value;
@@ -1684,10 +1679,11 @@ export function CephTracer({
                               <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
                                 <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
                                   <span className="font-semibold">{r.code}</span>
-                                  <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
+                                  <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.retired ? r.ar : r.ar.split("—")[0].trim()}</span>
+                                  {r.retired && <span lang="en" dir="ltr" className="block text-[10px] text-amber-800">{r.en}</span>}
                                 </td>
                                 <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
-                                  {activeVal != null ? activeVal : "—"}
+                                  {activeVal != null ? round1(activeVal) : "—"}
                                   <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
                                 </td>
                                 <td className="px-1 py-1 text-center font-bold font-mono">
@@ -1702,7 +1698,7 @@ export function CephTracer({
                                   )}
                                 </td>
                                 <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
-                                  {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                                  {refText}{r.referencePending ? "" : r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
                                 </td>
                                 <td className="px-1 py-1 text-center">
                                   <CephDeviationGauge
@@ -1744,7 +1740,7 @@ export function CephTracer({
                         : r.status ? STATUS_COLOR[r.status] : "text-slate-400";
                       const refText = r.refMean != null && r.refSd != null
                         ? `${Math.round(r.refMean * 10) / 10}±${Math.round(r.refSd * 10) / 10}`
-                        : `${r.mean}±${r.tol}`;
+                        : r.mean !== null && r.tol !== null ? `${r.mean}±${r.tol}` : "المرجع غير محقق";
                       const activeVal = completed && stamped
                         ? stamped.find((s) => s.code === r.code)?.value ?? null
                         : r.value;
@@ -1752,10 +1748,11 @@ export function CephTracer({
                         <tr key={r.code} className="border-b border-slate-100 hover:bg-slate-50/60 last:border-0">
                           <td className="px-1.5 py-1 text-slate-700" title={r.ar}>
                             <span className="font-semibold">{r.code}</span>
-                            <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.ar.split("—")[0].trim()}</span>
+                            <span className="ms-1 text-[10px] text-slate-400 block sm:inline">{r.retired ? r.ar : r.ar.split("—")[0].trim()}</span>
+                                  {r.retired && <span lang="en" dir="ltr" className="block text-[10px] text-amber-800">{r.en}</span>}
                           </td>
                           <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
-                            {activeVal != null ? activeVal : "—"}
+                            {activeVal != null ? round1(activeVal) : "—"}
                             <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
                           </td>
                           <td className="px-1 py-1 text-center font-bold font-mono">
@@ -1770,7 +1767,7 @@ export function CephTracer({
                             )}
                           </td>
                           <td className="px-1.5 py-1 text-left text-[11px] text-slate-400" title={`مرجع ${r.source}${r.note ? ` — ${r.note}` : ""}`}>
-                            {refText}{r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
+                            {refText}{r.referencePending ? "" : r.unit === "%" ? "%" : r.unit === "mm" ? "" : "°"}
                           </td>
                           <td className="px-1 py-1 text-center">
                             <CephDeviationGauge
@@ -1826,7 +1823,7 @@ export function CephTracer({
                     {diagnosis.softTissue && <p><b className="text-slate-500">أنسجة رخوة: </b>{diagnosis.softTissue}</p>}
                     <p><b className="text-slate-500">الاستنتاج: </b>{diagnosis.finalDx}</p>
                     {diagnosis.note && <p><b className="text-slate-500">ملاحظات: </b>{diagnosis.note}</p>}
-                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {new Date(diagnosis.updatedAt).toLocaleDateString("ar")}</p>
+                    <p className="text-slate-400">حرّره {diagnosis.createdBy} — آخر تعديل {formatClinicTimestamp(diagnosis.updatedAt, clinicTimeZone)}</p>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400">لم يُكتب تشخيص منظم قبل الاعتماد.</p>
@@ -1894,7 +1891,7 @@ export function CephTracer({
             )}
             {completed && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-                اعتمدها {analysis.completedBy} في {new Date(analysis.completedAt ?? "").toLocaleDateString("ar")}
+                اعتمدها {analysis.completedBy} في {formatClinicTimestamp(analysis.completedAt ?? "", clinicTimeZone)}
                 {analysis.note ? ` — ${analysis.note}` : ""}
               </div>
             )}
