@@ -219,9 +219,6 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
   return (
     <div data-testid="patient-plans-content">
-      <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
-        planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
-        onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
       {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
@@ -467,6 +464,12 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
           })}
         </ul>
       )}
+
+      <div className="mt-3">
+        <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
+          planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
+          onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
+      </div>
 
       {/* الزيارات المخطَّطة — توزيع الخطة على الزيارات (المواصفة §١٠) */}
       {plannedVisits.length > 0 ? (

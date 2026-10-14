@@ -26,11 +26,21 @@ The browser suite asserts one document gallery, one item per uploaded record and
 
 ## Review evidence
 
-The [portable screenshot gallery](evidence/final/index.html), its [manifest](evidence/final/manifest.json), and the [inline comparison table](evidence/final/README.md) contain 15 supplied references, 45 actual application screenshots at **1448 / 1280 / 390**, 12 additional detail captures of long clinical sections, and 15 pixel-difference maps. The manifest includes SHA-256 hashes and raw comparison results. Download the HTML and adjacent files to use its width selector; GitHub also displays the PNGs directly.
+The [portable screenshot gallery](evidence/final/index.html), its [manifest](evidence/final/manifest.json), and the [inline comparison table](evidence/final/README.md) contain 15 supplied references, 45 actual viewport screenshots and 45 full-page captures at **1448 / 1280 / 390**, 12 additional detail captures of long clinical sections, and 15 pixel-difference maps. The manifest includes SHA-256 hashes and raw comparison results. Download the HTML and adjacent files to use its width selector; GitHub also displays the PNGs directly.
 
 [The first checkpoint](PATIENT_PREMIUM_PHASE1_REVIEW.md) retains before/after evidence for Summary and Account. These are actual built-app captures, not a replacement interface, injected CSS or mocked API data. The new visual suite uses isolated PostgreSQL 18 and synthetic accounts/records; uploads, history versions, referral and stock-consumption fixtures use the actual HTTP writers. Cephalometric signed geometry is an explicitly synthetic database fixture; this test does not claim a browser tracing/signing journey.
 
-## Executed verification
+## Repair after the failed 2d1c9cb2 head
+
+The [CI repair report](PATIENT_PREMIUM_CI_330_REPAIR.md) identifies the two pending-note failures, exact expected/actual results, local reproduction and scoped fix. The current refinement also deduplicates only an exact patient warning already visible through its independently authorized record; readiness denial and history-warning ownership remain unchanged.
+
+The visit-stage disclosure now shares the action row. In the severe-allergy synthetic fixture, the first patient tab moved upward by **33.5px at 1448/1280** and **15px at 390**, with complete warnings and larger mobile targets. The Summary full page shortened from 2751 to 2292px at 1448, and from 4922 to 4486px at 390. These are measured layout changes, not reference-match scores.
+
+Plan progress is linear and based on recorded procedures. One collection action remains in Summary's account region. Currency detail disclosures preserve every existing financial value. Account uses the original balance, actions, treatment details and historical preview; expanded forms receive full width. No duplicate writer was added. Patient orange buttons use dark text for readability.
+
+After correcting the warning composition, **79/79 tests across nine HTTP/browser files passed**: navigation/freshness, visit ownership, pending notes, workspace controls, More, invoice labels, cockpit/readiness and all 15 scenes. The final account/plan-layout rerun passed **58/58 cases across six files**, including historical preview and plan-payment authority. The exact-head CI result is recorded on PR #330. [Latest runner evidence](evidence/final/repair-verification-results.txt) includes the rejected intermediate warning composition, its repair and all final local checks. Historical checkpoints below are not substitutes for the final-head CI.
+
+## Earlier verification checkpoints
 
 [Actual runner excerpts](evidence/final/verification-results.txt) retain both the failed intermediate run and the successful reruns.
 
@@ -51,7 +61,7 @@ An earlier local HTTP run was invalidated after a build was started against its 
 
 The screenshots are not pixel-identical to the illustrative gallery. Raw pixel differences are diagnostic and **are not a percentage acceptance score**: blank backgrounds, different text and different fixture records affect that number.
 
-- The operational patient header is taller because it retains complete critical warnings, chair state, readiness and the current visit action. The synthetic severe-allergy case deliberately exercises those warnings on every screen.
+- The operational patient header is still taller than the reference, after reducing spacing and duplicate text, because it retains complete critical warnings, chair state, readiness and the current visit action. The synthetic severe-allergy case deliberately exercises those warnings on every screen.
 - Financial content comes from the native ledger. Currency tabs, canonical agreement disclosures, legacy/context notices and the available action cards differ from the gallery's static four-card account example. No second financial model was introduced to reproduce the drawing.
 - The original odontogram, endodontic editor, orthodontic wire controls and appointment/clinical state machines remain recognizable. Their geometry and available clinical facts differ from the illustrative tooth images and populated static examples.
 - Lab/referral/material forms reflow around their actual order/movement lists. Empty or unrecorded information is labelled instead of being filled with sample clinical facts.

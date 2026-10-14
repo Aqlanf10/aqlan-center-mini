@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import type { ClinicalProgressView } from "@/lib/historical-clinical-projection";
 import { HistoricalClinicalNote } from "../HistoricalClinicalNote";
 import type { AssessmentCase, LegacyCase } from "@/lib/patient-workflow-cases";
@@ -173,7 +173,7 @@ export function SummaryTab({
       ) : null}
 
       {summary.alerts.length > 0 ? (
-        <ul className="space-y-1.5">
+        <ul className={styles.alerts}>
           {summary.alerts.map((alert, index) => (
             <li key={index} className={`rounded-xl border px-3 py-2 text-xs font-bold ${SEVERITY_STYLE[alert.severity]}`}>
               {alert.text}
@@ -209,7 +209,7 @@ export function SummaryTab({
               <div><p>{primaryPlan?.title ?? "لا خطة جارية"}</p><small>{primaryPlan?.primaryDoctorName ?? "لم يحدد طبيب الخطة"}</small>
                 {primaryPlan ? <small>{primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات مسجلة</small> : <small>أنشئ خطة من تبويب العلاج</small>}
               </div>
-              {progress !== null ? <div className={styles.ring} style={{"--progress": `${progress}%`} as CSSProperties} role="progressbar" aria-label="تقدم الخطة المعروضة" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><span>{progress}%</span></div> : null}
+              {progress !== null ? <div className={styles.progressTrack} role="progressbar" aria-label="تقدم الخطة المعروضة" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><div className={styles.progressLabel}><span>نسبة الإجراءات المنفّذة</span><strong>{progress}%</strong></div><div className={styles.progressRail}><span style={{ width: `${progress}%` }} /></div></div> : null}
             </div>
             {primaryPlan?.clinicalProgress?.historicalItems ? <p className={styles.note}><HistoricalClinicalNote progress={primaryPlan.clinicalProgress} currency={primaryPlan.baseCurrency ?? base} /></p> : progress === null && primaryPlan ? <p className={styles.note}>لا تتوفر بنود كافية لحساب تقدم الخطة.</p> : null}
             {primaryPlan && !primaryPlan.consentAt ? <p className="my-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">موافقة العلاج لم تُسجّل</p> : null}
@@ -226,7 +226,6 @@ export function SummaryTab({
             <button type="button" className={`${styles.action} ${styles.orange}`} onClick={() => onGoToTab("today")}>{summary.openVisit ? "استكمال زيارة اليوم" : "فتح زيارة اليوم"}</button>
             <button type="button" className={styles.action} onClick={() => onGoToTab("ortho")} data-testid="summary-open-ortho">التقويم {summary.counts.orthoCase ? "· حالة قائمة" : ""}</button>
             <button type="button" className={styles.action} onClick={() => onGoToTab("files")}>الأشعة والمستندات</button>
-            {financial ? <button type="button" className={styles.action} onClick={() => setCollectOpen(true)}>تحصيل دفعة</button> : null}
           </div>
         </section>
       </div>
@@ -305,10 +304,11 @@ export function SummaryTab({
 
       {/* الحساب — للمخوّل ماليًا فقط؛ الخادم أرسل الرصيد لمن يملكه */}
       {financial ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label="الحساب">
+        <section className={styles.card} aria-label="الحساب">
+          <div className={styles.body}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-extrabold text-navy-900">الحساب</h3>
-            <div className="flex gap-1.5">
+            <div className={styles.accountActions}>
               <button type="button" onClick={() => setCollectOpen(true)}
                 className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white">
                 تحصيل دفعة
@@ -324,18 +324,20 @@ export function SummaryTab({
             </div>
           </div>
 
+          <div className={styles.accountCurrencies}>
           {CURRENCIES.filter((currency) => {
             const row = financial.byCurrency?.[currency] ?? (currency === base ? financial : null);
             return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || (row.clinicalProgress?.historicalItems ?? 0) > 0 || currency === base && !financial.byCurrency);
           }).map((currency) => {
             const row = financial.byCurrency?.[currency] ?? financial;
-            return <div key={currency} className="mt-3 min-w-0 rounded-xl border border-navy-100 bg-navy-50/30 p-3">
+            return <div key={currency} className={styles.currencyCard}>
               <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
               <p className="mt-1 text-lg font-black">
                 {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
                 {(row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
               </p>
-              <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
+              <details className={styles.amountDetails}><summary>تفاصيل الاتفاق والفوترة بهذه العملة</summary>
+              <dl className={styles.amountRows}>
                 {[
                   ["قيمة العلاج المتفق عليه", row.agreedMinor],
                   ["المسدّد من الاتفاق", row.agreementPaidMinor],
@@ -345,15 +347,17 @@ export function SummaryTab({
                   ["تم فوترة", row.invoicedMinor],
                   ["تم دفع", row.paidMinor],
                   ["المديونية الحالية", row.balanceMinor],
-                ].map(([label, value]) => <div key={label as string} className="min-w-0 rounded-xl border border-slate-100 bg-white px-2 py-2.5">
+                ].map(([label, value]) => <div key={label as string} className={styles.amountRow}>
                   <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
                   <dd className="mt-0.5 break-words font-extrabold text-navy-900 [overflow-wrap:anywhere]">{typeof value === "number" && Number.isFinite(value) ? formatMoney(value, currency) : "غير متاح"}</dd>
                 </div>)}
-              </dl>
+              </dl></details>
               {row.clinicalProgress?.historicalItems ? <p className="mt-2 text-xs text-slate-600"><HistoricalClinicalNote progress={row.clinicalProgress} currency={currency} /></p> : null}
             </div>;
           })}
+          </div>
           {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => typeof value === "number" && value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
+          </div>
         </section>
       ) : null}
 

@@ -33,7 +33,7 @@ const hhmm = (iso: string | null) => (iso
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
   compact = false, identity, primaryAction, secondaryActions, safety,
-  confirmedAlert,
+  confirmedAlert, displayedPatientAlert,
 }: {
   patientId: number;
   patientName: string;
@@ -41,6 +41,8 @@ export function PatientCockpit({
   /** التنبيه النصي في الملف — يُعرض إن لم يرجع الخادم تفاصيل الجاهزية. */
   fallbackAlert: string | null;
   confirmedAlert?: ConfirmedPatientAlert;
+  /** Already displayed by the independently authorized patient record. Never grants readiness access. */
+  displayedPatientAlert?: string | null;
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
@@ -56,6 +58,8 @@ export function PatientCockpit({
     busy, message, canEnterChair, setChair, reload, clear, enterChair } = usePatientCockpitReadiness({
     patientId, patientName, patientPhone, fallbackAlert, confirmedAlert, summary, chairCount, onChanged,
   });
+  const visibleAlerts = [...new Set(alerts)].filter(alert =>
+    !compact || !displayedPatientAlert || alert.trim() !== displayedPatientAlert.trim());
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
@@ -104,9 +108,9 @@ export function PatientCockpit({
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         {compact && identity ? <div className="w-full min-w-0">{identity}</div>
           : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
-        {alerts.length > 0 ? (
-          <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {alerts.join(" • ")}
+        {visibleAlerts.length > 0 ? (
+          <span data-testid="patient-readiness-alerts" className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={visibleAlerts.join(" • ")}>
+            ⚠️ {visibleAlerts.join(" • ")}
           </span>
         ) : null}
         {(visit?.balances ?? []).map((line) => (
@@ -149,6 +153,18 @@ export function PatientCockpit({
               </button>
             </span>
           ) : null}
+          {compact && (visitSteps || suggestion) ? (
+            <details className="ms-auto text-[11px]" data-testid="patient-visit-details">
+              <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {visitSteps}
+                {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
+                  مقترح: {suggestion.label}
+                </button> : null}
+              </div>
+            </details>
+          ) : null}
           {!compact && suggestion ? (
             <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900">
@@ -157,19 +173,6 @@ export function PatientCockpit({
           ) : null}
         </div>
       </div>
-
-      {compact && (visitSteps || suggestion) ? (
-        <details className="mt-1 text-[11px]" data-testid="patient-visit-details">
-          <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            {visitSteps}
-            {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
-              className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
-              مقترح: {suggestion.label}
-            </button> : null}
-          </div>
-        </details>
-      ) : null}
 
       {readiness !== "ready" || chairsState !== "ready" || !coherent ? (
         <p role="status" data-testid="patient-cockpit-read-state" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">

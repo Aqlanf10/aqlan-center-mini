@@ -1,80 +1,95 @@
 <!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AQLAN — مقارنة المراجع واللقطات الفعلية</title><style>body{font-family:Arial,sans-serif;margin:0;background:#eff8ff;color:#174777}header{padding:20px;background:white;position:sticky;top:0;z-index:1;border-bottom:1px solid #cce4fa}h1{font-size:20px}p{line-height:1.7}nav{display:flex;flex-wrap:wrap;gap:12px}a{color:#006bc4}section{margin:20px;padding:16px;background:white;border:1px solid #cce4fa;border-radius:10px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}figure{margin:0;min-width:0}figcaption{padding:10px;font-weight:bold}img{display:block;max-width:100%;height:auto;border:1px solid #d5e8fa}select{padding:7px}details{margin-top:12px}summary{cursor:pointer}@media(max-width:700px){.pair{grid-template-columns:1fr}section{margin:10px}}</style>
-<header><h1>مراجعة واجهات ملف المريض — صور من التطبيق الحقيقي</h1><p>45 لقطة من PostgreSQL معزول. المرجع الأصلي 1448px فقط؛ العروضان الآخران لإثبات التكيّف. الأرقام والتنبيهات الاصطناعية تختلف عن الرسم. راجع تقرير الفروقات قبل القبول.</p>
+<header><h1>مراجعة واجهات ملف المريض — صور من التطبيق الحقيقي</h1><p>45 لقطة للإطار و45 لقطة للصفحة كاملة من PostgreSQL معزول. المرجع الأصلي 1448px فقط؛ العروضان الآخران لإثبات التكيّف. الأرقام والتنبيهات الاصطناعية تختلف عن الرسم. راجع تقرير الفروقات قبل القبول.</p>
 <label>عرض التطبيق: <select id="width"><option>1448</option><option>1280</option><option>390</option></select></label>
 <nav><a href="#summary">الملخص</a><a href="#today">زيارة اليوم</a><a href="#account">الحساب</a><a href="#files">الأشعة والملفات</a><a href="#treatment">المخطط السني</a><a href="#plans">الخطط</a><a href="#cases">الحالات والمشاكل</a><a href="#endo">علاج الجذور</a><a href="#ortho">التقويم</a><a href="#lab">المعمل</a><a href="#referrals">الإحالات</a><a href="#materials">المستهلكات</a><a href="#personal-details">البيانات الشخصية</a><a href="#medical-history">التاريخ الطبي</a><a href="#cephalometric">السيفالومتري</a></nav></header><section id="summary"><h2>الملخص</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="summary-reference.png" alt="مرجع الملخص"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="summary" loading="lazy" src="summary-1448.png" alt="التطبيق الفعلي — الملخص"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="summary" data-suffix="-full" loading="lazy" src="summary-1448-full.png" alt="الصفحة الكاملة — الملخص"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">152349 pixels (ratio 0.11 of all image pixels) are different.</p><img loading="lazy" src="summary-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">150097 pixels (ratio 0.11 of all image pixels) are different.</p><img loading="lazy" src="summary-diff.png" alt="خريطة الفروق"></details></section>
 <section id="today"><h2>زيارة اليوم</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="today-reference.png" alt="مرجع زيارة اليوم"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="today" loading="lazy" src="today-1448.png" alt="التطبيق الفعلي — زيارة اليوم"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="today" data-suffix="-full" loading="lazy" src="today-1448-full.png" alt="الصفحة الكاملة — زيارة اليوم"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">142039 pixels (ratio 0.10 of all image pixels) are different.</p><img loading="lazy" src="today-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">141459 pixels (ratio 0.10 of all image pixels) are different.</p><img loading="lazy" src="today-diff.png" alt="خريطة الفروق"></details></section>
 <section id="account"><h2>الحساب</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="account-reference.png" alt="مرجع الحساب"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="account" loading="lazy" src="account-1448.png" alt="التطبيق الفعلي — الحساب"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="account" data-suffix="-full" loading="lazy" src="account-1448-full.png" alt="الصفحة الكاملة — الحساب"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">152109 pixels (ratio 0.11 of all image pixels) are different.</p><img loading="lazy" src="account-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">140751 pixels (ratio 0.10 of all image pixels) are different.</p><img loading="lazy" src="account-diff.png" alt="خريطة الفروق"></details></section>
 <section id="files"><h2>الأشعة والملفات</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="files-reference.png" alt="مرجع الأشعة والملفات"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="files" loading="lazy" src="files-1448.png" alt="التطبيق الفعلي — الأشعة والملفات"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="files" data-suffix="-full" loading="lazy" src="files-1448-full.png" alt="الصفحة الكاملة — الأشعة والملفات"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">356380 pixels (ratio 0.25 of all image pixels) are different.</p><img loading="lazy" src="files-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">352141 pixels (ratio 0.24 of all image pixels) are different.</p><img loading="lazy" src="files-diff.png" alt="خريطة الفروق"></details></section>
 <section id="treatment"><h2>المخطط السني</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="treatment-reference.png" alt="مرجع المخطط السني"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="treatment" loading="lazy" src="treatment-1448.png" alt="التطبيق الفعلي — المخطط السني"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="treatment" data-suffix="-full" loading="lazy" src="treatment-1448-full.png" alt="الصفحة الكاملة — المخطط السني"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">146046 pixels (ratio 0.10 of all image pixels) are different.</p><img loading="lazy" src="treatment-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">141546 pixels (ratio 0.10 of all image pixels) are different.</p><img loading="lazy" src="treatment-diff.png" alt="خريطة الفروق"></details></section>
 <section id="plans"><h2>الخطط</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="plans-reference.png" alt="مرجع الخطط"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="plans" loading="lazy" src="plans-1448.png" alt="التطبيق الفعلي — الخطط"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="plans" data-suffix="-full" loading="lazy" src="plans-1448-full.png" alt="الصفحة الكاملة — الخطط"></details>
 <details><summary>تفاصيل القسم الفعلي أسفل السياق المالي</summary><img class="actual" data-scene="plans" data-suffix="-detail" loading="lazy" src="plans-1448-detail.png" alt="تفاصيل الخطط"></details>
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">127417 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="plans-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">132369 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="plans-diff.png" alt="خريطة الفروق"></details></section>
 <section id="cases"><h2>الحالات والمشاكل</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="cases-reference.png" alt="مرجع الحالات والمشاكل"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="cases" loading="lazy" src="cases-1448.png" alt="التطبيق الفعلي — الحالات والمشاكل"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="cases" data-suffix="-full" loading="lazy" src="cases-1448-full.png" alt="الصفحة الكاملة — الحالات والمشاكل"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">131814 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="cases-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">127760 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="cases-diff.png" alt="خريطة الفروق"></details></section>
 <section id="endo"><h2>علاج الجذور</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="endo-reference.png" alt="مرجع علاج الجذور"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="endo" loading="lazy" src="endo-1448.png" alt="التطبيق الفعلي — علاج الجذور"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="endo" data-suffix="-full" loading="lazy" src="endo-1448-full.png" alt="الصفحة الكاملة — علاج الجذور"></details>
 <details><summary>تفاصيل القسم الفعلي أسفل السياق المالي</summary><img class="actual" data-scene="endo" data-suffix="-detail" loading="lazy" src="endo-1448-detail.png" alt="تفاصيل علاج الجذور"></details>
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">167172 pixels (ratio 0.12 of all image pixels) are different.</p><img loading="lazy" src="endo-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">163970 pixels (ratio 0.12 of all image pixels) are different.</p><img loading="lazy" src="endo-diff.png" alt="خريطة الفروق"></details></section>
 <section id="ortho"><h2>التقويم</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="ortho-reference.png" alt="مرجع التقويم"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="ortho" loading="lazy" src="ortho-1448.png" alt="التطبيق الفعلي — التقويم"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="ortho" data-suffix="-full" loading="lazy" src="ortho-1448-full.png" alt="الصفحة الكاملة — التقويم"></details>
 <details><summary>تفاصيل القسم الفعلي أسفل السياق المالي</summary><img class="actual" data-scene="ortho" data-suffix="-detail" loading="lazy" src="ortho-1448-detail.png" alt="تفاصيل التقويم"></details>
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">276535 pixels (ratio 0.19 of all image pixels) are different.</p><img loading="lazy" src="ortho-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">304917 pixels (ratio 0.21 of all image pixels) are different.</p><img loading="lazy" src="ortho-diff.png" alt="خريطة الفروق"></details></section>
 <section id="lab"><h2>المعمل</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="lab-reference.png" alt="مرجع المعمل"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="lab" loading="lazy" src="lab-1448.png" alt="التطبيق الفعلي — المعمل"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="lab" data-suffix="-full" loading="lazy" src="lab-1448-full.png" alt="الصفحة الكاملة — المعمل"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">129190 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="lab-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">125676 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="lab-diff.png" alt="خريطة الفروق"></details></section>
 <section id="referrals"><h2>الإحالات</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="referrals-reference.png" alt="مرجع الإحالات"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="referrals" loading="lazy" src="referrals-1448.png" alt="التطبيق الفعلي — الإحالات"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="referrals" data-suffix="-full" loading="lazy" src="referrals-1448-full.png" alt="الصفحة الكاملة — الإحالات"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">130798 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="referrals-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">128313 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="referrals-diff.png" alt="خريطة الفروق"></details></section>
 <section id="materials"><h2>المستهلكات</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="materials-reference.png" alt="مرجع المستهلكات"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="materials" loading="lazy" src="materials-1448.png" alt="التطبيق الفعلي — المستهلكات"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="materials" data-suffix="-full" loading="lazy" src="materials-1448-full.png" alt="الصفحة الكاملة — المستهلكات"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">125774 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="materials-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">121854 pixels (ratio 0.09 of all image pixels) are different.</p><img loading="lazy" src="materials-diff.png" alt="خريطة الفروق"></details></section>
 <section id="personal-details"><h2>البيانات الشخصية</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="personal-details-reference.png" alt="مرجع البيانات الشخصية"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="personal-details" loading="lazy" src="personal-details-1448.png" alt="التطبيق الفعلي — البيانات الشخصية"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="personal-details" data-suffix="-full" loading="lazy" src="personal-details-1448-full.png" alt="الصفحة الكاملة — البيانات الشخصية"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">116802 pixels (ratio 0.08 of all image pixels) are different.</p><img loading="lazy" src="personal-details-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">112668 pixels (ratio 0.08 of all image pixels) are different.</p><img loading="lazy" src="personal-details-diff.png" alt="خريطة الفروق"></details></section>
 <section id="medical-history"><h2>التاريخ الطبي</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="medical-history-reference.png" alt="مرجع التاريخ الطبي"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="medical-history" loading="lazy" src="medical-history-1448.png" alt="التطبيق الفعلي — التاريخ الطبي"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="medical-history" data-suffix="-full" loading="lazy" src="medical-history-1448-full.png" alt="الصفحة الكاملة — التاريخ الطبي"></details>
 
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">111098 pixels (ratio 0.08 of all image pixels) are different.</p><img loading="lazy" src="medical-history-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">107461 pixels (ratio 0.08 of all image pixels) are different.</p><img loading="lazy" src="medical-history-diff.png" alt="خريطة الفروق"></details></section>
 <section id="cephalometric"><h2>السيفالومتري</h2>
 <div class="pair"><figure><figcaption>المرجع المعتمد · 1448px</figcaption><img loading="lazy" src="cephalometric-reference.png" alt="مرجع السيفالومتري"></figure>
 <figure><figcaption>التطبيق المحلي الفعلي · بيانات اصطناعية</figcaption><img class="actual" data-scene="cephalometric" loading="lazy" src="cephalometric-1448.png" alt="التطبيق الفعلي — السيفالومتري"></figure></div>
+<details><summary>الصفحة كاملة — تشمل المحتوى أسفل الشاشة</summary><img class="actual" data-scene="cephalometric" data-suffix="-full" loading="lazy" src="cephalometric-1448-full.png" alt="الصفحة الكاملة — السيفالومتري"></details>
 <details><summary>تفاصيل القسم الفعلي أسفل السياق المالي</summary><img class="actual" data-scene="cephalometric" data-suffix="-detail" loading="lazy" src="cephalometric-1448-detail.png" alt="تفاصيل السيفالومتري"></details>
-<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">167740 pixels (ratio 0.12 of all image pixels) are different.</p><img loading="lazy" src="cephalometric-diff.png" alt="خريطة الفروق"></details></section>
+<details><summary>فرق البكسلات — تشخيص للفروقات، وليس شهادة مطابقة</summary><p dir="ltr">164647 pixels (ratio 0.12 of all image pixels) are different.</p><img loading="lazy" src="cephalometric-diff.png" alt="خريطة الفروق"></details></section>
 <script>document.getElementById('width').addEventListener('change',event=>{for(const image of document.querySelectorAll('.actual'))image.src=image.dataset.scene+'-'+event.target.value+(image.dataset.suffix||'')+'.png';});</script></html>

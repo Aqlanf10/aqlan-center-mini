@@ -652,6 +652,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         confirmedAlert={confirmedAlert?.owner === alertOwner ? confirmedAlert.alert : undefined}
         summary={summary}
         compact={compactWorkspace}
+        displayedPatientAlert={compactWorkspace ? patient.medicalAlert : null}
         identity={compactWorkspace ? (
           <div className={patientPremium.identity} data-testid="patient-compact-identity">
             <div className={patientPremium.identityName}>

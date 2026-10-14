@@ -68,6 +68,22 @@ describe("reference patient Summary presentation", () => {
     cockpit.unavailable = false;
   });
 
+  it("omits only an exact warning already displayed by the authorized patient record", () => {
+    const previous = cockpit.alerts;
+    cockpit.alerts = ["تحذير الملف", "تحذير التاريخ الطبي", "تحذير التاريخ الطبي"];
+    try {
+      const props = { patientId: 91, patientName: "مريض اصطناعي", patientPhone: null, fallbackAlert: null,
+        summary: null, compact: true, onOpenTab: noop, onChanged: noop };
+      const html = renderToStaticMarkup(createElement(PatientCockpit, { ...props, displayedPatientAlert: "تحذير الملف" }));
+      expect(html).not.toContain("تحذير الملف");
+      // One visible warning plus its title; distinct history remains complete.
+      expect(html.match(/تحذير التاريخ الطبي/g)).toHaveLength(2);
+      const withoutParent = renderToStaticMarkup(createElement(PatientCockpit, props));
+      expect(withoutParent).toContain("تحذير الملف");
+      expect(withoutParent).toContain("تحذير التاريخ الطبي");
+    } finally { cockpit.alerts = previous; }
+  });
+
   it("places operational work first while keeping safety visible and administrative utilities in a native disclosure", () => {
     const html = render();
     before(html, "تحذير يحتاج المراجعة", 'data-testid="summary-current-work"');

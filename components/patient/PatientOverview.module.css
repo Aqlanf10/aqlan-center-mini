@@ -21,9 +21,12 @@
 .orange { background: linear-gradient(110deg,#ffae32,#ed7b0b); color: #472300; border: 0; }
 .planSelect { margin-bottom: 12px; display: block; color: #567da2; font-size: 11px; }
 .planSelect select { display: block; width: 100%; min-height: 34px; margin-top: 5px; padding: 6px; background: #f8fbff; border: 1px solid #cce3fa; border-radius: 6px; color: #174c7d; font-size: 12px; font-weight: 600; }
-.progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; }
-.ring { --progress: 0%; display: grid; place-items: center; height: 88px; width: 88px; flex-shrink: 0; border-radius: 50%; background: conic-gradient(#118bdd var(--progress),#e4f1fb 0); }
-.ring > span { display: grid; place-items: center; width: 72px; height: 72px; background: white; border-radius: 50%; font-size: 22px; color: #0572c7; font-weight: 700; }
+.progress { display: flex; flex-direction: column; align-items: stretch; gap: 16px; padding: 4px 0 16px; }
+.progressTrack { width: 100%; }
+.progressLabel { display: flex; justify-content: space-between; gap: 12px; color: #527aa0; font-size: 11px; }
+.progressLabel strong { color: #1069af; font-variant-numeric: tabular-nums; }
+.progressRail { height: 10px; margin-top: 8px; overflow: hidden; border-radius: 6px; background: #e4f1fb; }
+.progressRail > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(100deg,#ffab32,#f58220); }
 .progress p { font-size: 13px; font-weight: 700; color: #145083; }
 .progress small { display: block; margin-top: 8px; color: #5b7892; font-size: 11px; font-weight: 400; }
 .followUp { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
@@ -43,3 +46,15 @@
 
 @media (max-width: 767px) { .action, .currencyChoices button, .planSelect select { min-height: 44px; } }
 .action:focus-visible, .currencyChoices button:focus-visible { outline: 2px solid #0878d2; outline-offset: 3px; }
+
+.alerts { display: flex; flex-wrap: wrap; gap: 6px; }
+.alerts > li { flex: 1 1 260px; }
+.accountActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.accountCurrencies { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+.currencyCard { min-width: 0; padding: 12px; border: 1px solid #d5e8fa; border-radius: 8px; background: #f7fbff; }
+.amountDetails { margin-top: 12px; font-size: 12px; }
+.amountDetails summary { cursor: pointer; color: #1069af; font-weight: 700; padding-block: 8px; }
+.amountRows { margin-top: 4px; }
+.amountRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 9px; border-bottom: 1px solid #e0eefc; }
+.amountRow:last-child { border-bottom: 0; }
+@media (max-width: 767px) { .accountCurrencies { grid-template-columns: minmax(0,1fr); } .accountActions > *, .amountDetails summary { min-height: 44px; } }

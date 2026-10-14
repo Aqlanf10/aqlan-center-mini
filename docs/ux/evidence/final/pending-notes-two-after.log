@@ -1,0 +1,20 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/clinical-visit-pending-notes-ui.test.ts -t retains notes and unlocks --reporter=verbose
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ↓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > locks all five notes, phrases and procedure controls through both POST and reload GET, then accepts fresh edits
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST rejection, allowing a corrected retry 1694ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST network failure, allowing a corrected retry 1412ms
+ ↓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > hides editing after a failed post-save reload and restores the exact draft only after an authorized retry
+ ↓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > keeps automatically generated treatment text stable while procedures and an already-open tooth picker are frozen
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 3 skipped (5)
+   Start at  02:41:37
+   Duration  8.28s (transform 22ms, setup 0ms, import 379ms, tests 4.37s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

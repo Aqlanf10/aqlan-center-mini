@@ -11,12 +11,12 @@
 .identityFacts > div { min-width: 0; padding: 4px 8px; border-inline-start: 1px solid #d0e5fa; }
 .identityFacts dt { font-size: 10px; color: #567fa4; margin-bottom: 6px; }
 .identityFacts dd { font-size: 12px; color: #134b80; font-weight: 700; overflow-wrap: anywhere; }
-.root :global([data-testid="patient-context-strip"]) { padding: 14px 18px 10px; border: 1px solid var(--patient-outline); border-radius: 10px; background: #fff; box-shadow: 0 2px 8px #256fa508; margin-bottom: 10px; }
+.root :global([data-testid="patient-context-strip"]) { padding: 10px 14px; border: 1px solid var(--patient-outline); border-radius: 10px; background: #fff; box-shadow: 0 2px 8px #256fa508; margin-bottom: 10px; }
 .root :global([data-testid="patient-context-strip"] > div:first-child) { gap: 5px; }
-.root :global([data-testid="patient-context-strip"] > div:first-child > div:first-child) { margin-bottom: 8px; }
-.root :global([data-testid="patient-context-strip"] > div:nth-child(2)) { margin-top: 8px; padding-top: 7px; border-top: 1px solid #e5f0fc; }
+.root :global([data-testid="patient-context-strip"] > div:first-child > div:first-child) { margin-bottom: 4px; }
+.root :global([data-testid="patient-context-strip"] > div:nth-child(2)) { margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5f0fc; }
 .root :global([data-testid="patient-details-panel"]) { border: 1px solid var(--patient-outline); background: white; border-radius: 10px; box-shadow: none; }
-.root :global([data-testid="patient-medical-alert-banner"]) { margin: 8px 0 10px; }
+.root :global([data-testid="patient-medical-alert-banner"]) { margin: 6px 0 8px; }
 .root :global([aria-label="أقسام ملف المريض"]) { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0; padding: 0; min-height: 45px; margin-bottom: 10px; overflow: hidden; border: 1px solid var(--patient-outline); border-radius: 9px; box-shadow: 0 2px 7px #125c9b0b; background: white; }
 .root :global([data-testid^="patient-tab-"]) { justify-content: center; min-width: 0; padding: 11px 6px; border-radius: 0; border-inline-end: 1px solid #e0edf9; color: #086ab6; font-size: 13px; }
 .root :global([data-testid^="patient-tab-"][aria-current="page"]) { background: linear-gradient(105deg,#209beb,#0870cd); color: white; border-bottom-color: var(--patient-orange); box-shadow: none; }
@@ -97,14 +97,14 @@
 .root [hidden] { display: none; }
 /* Compose the existing balance, actions and plan disclosure into one account row. */
 @media (min-width: 1100px) {
-  .ledger > div { grid-template-columns: repeat(6,minmax(0,1fr)); align-items: start; }
+  .ledger > div { grid-template-columns: repeat(12,minmax(0,1fr)); align-items: start; }
   .ledger > div > :global([data-testid="account-canonical-balance"]),
   .ledger > div > :global([data-testid="account-treatment-details"]),
-  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { grid-column: span 2; height: 100%; }
+  .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { grid-column: span 3; }
   .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { flex-direction: column; padding: 14px; border: 1px solid #d5e8fa; border-radius: 10px; background: #fff; }
   .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) > button { min-height: 36px; }
   .ledger > div > :global(section[aria-label="الفواتير"]),
-  .ledger > div > :global(section[aria-label="الدفعات"]) { grid-column: span 3; }
+  .ledger > div > :global(section[aria-label="الدفعات"]) { grid-column: span 6; }
 }
 
 /* Arabic glyph edges must remain within the inline settlement hit area in narrow invoice cards. */
@@ -122,3 +122,29 @@
   .summaryViews button, .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) > button { min-height: 44px; }
   .root :global([data-testid="patient-referral-form"] button) { min-height: 44px; }
 }
+
+/* Keep visit navigation beside its actions; clinical warnings stay fully readable. */
+.root :global([data-testid="patient-visit-details"] > summary) { min-height: 34px; display: list-item; align-content: center; padding-inline: 8px; }
+.root :global([data-testid="patient-visit-details"][open]) { flex-basis: 100%; }
+@media (max-width: 767px) {
+ .root :global([data-testid="patient-visit-details"] > summary),
+ .root :global([data-testid="patient-context-strip"] button) { min-height: 44px; }
+}
+
+@media (min-width: 1100px) {
+  .ledger > div > :global(section[aria-label="معاينة بيانات مالية سابقة"]:has(> button[aria-expanded="false"])) { grid-column: span 3; order: -1; margin: 0; background: white; border-color: var(--patient-outline); border-radius: 10px; }
+  .ledger > div > :global([data-testid="account-treatment-details"][open]) { grid-column: 1 / -1; order: 0; }
+}
+
+/* Orange task buttons retain readable text rather than low-contrast white. */
+.root :global(button[class~="bg-brand-orange"]) { color: #472300; }
+
+/* Existing read-only references follow the plans; no new financial projection. */
+.root :global([aria-label="المراجع المالية للعلاج"]) { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.root :global([aria-label="المراجع المالية للعلاج"] > *) { grid-column: 1 / -1; min-width: 0; margin-top: 0; }
+.root :global([aria-label="المراجع المالية للعلاج"] > article) { grid-column: auto; }
+@media (max-width: 767px) { .root :global([aria-label="المراجع المالية للعلاج"]) { grid-template-columns: minmax(0,1fr); } }
+
+/* Long specialty names and their badges must not compete for the same line. */
+.root :global([aria-label="أقسام العلاج"] > button) { flex-direction: column; gap: 3px; min-height: 44px; }
+.root :global([aria-label="أقسام العلاج"] > button > div) { min-width: 0; white-space: normal; overflow: visible; justify-content: center; text-align: center; }

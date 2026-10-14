@@ -1,0 +1,45 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/clinical-visit-pending-notes-ui.test.ts --reporter=verbose
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > locks all five notes, phrases and procedure controls through both POST and reload GET, then accepts fresh edits 5039ms
+ × __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST rejection, allowing a corrected retry 977ms
+   → expected +0 to be 1 // Object.is equality
+ × __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST network failure, allowing a corrected retry 878ms
+   → expected +0 to be 1 // Object.is equality
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > hides editing after a failed post-save reload and restores the exact draft only after an authorized retry 1573ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > keeps automatically generated treatment text stable while procedures and an already-open tooth picker are frozen 3692ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST rejection, allowing a corrected retry
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST network failure, allowing a corrected retry
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:292:38
+    290|       await expectLock(f, false);
+    291|       expect(await readNotes(f.page)).toEqual(submitted);
+    292|       expect(await f.alerts.count()).toBe(1);
+       |                                      ^
+    293|       expect(await f.alerts.textContent()).toContain(failure === "reje…
+    294|       expect(f.clinicalReads()).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 passed (5)
+   Start at  02:30:37
+   Duration  18.63s (transform 37ms, setup 0ms, import 617ms, tests 13.66s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة

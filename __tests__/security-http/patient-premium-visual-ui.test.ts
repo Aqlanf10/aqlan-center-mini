@@ -88,6 +88,11 @@ describe("patient premium real application evidence",()=>{
         await page.evaluate(async()=>{await document.fonts.ready;});
         expect(await page.getByTestId(`patient-tab-${tab}`).getAttribute("aria-current")).toBe("page");
         expect(await page.getByTestId("patient-medical-alert-banner").isVisible()).toBe(true);
+        expect(await page.getByTestId("patient-medical-alert-banner").count()).toBe(1);
+        const warnings=page.getByTestId("patient-medical-alert-banner");
+        expect(await warnings.innerText()).toContain("تنبيه اختبار اصطناعي");
+        expect(await page.getByTestId("patient-readiness-alerts").innerText()).toContain("شديدة");
+        expect(await page.getByTestId("patient-readiness-alerts").innerText()).not.toContain("تنبيه اختبار اصطناعي");
         expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
         if(sceneName === "personal-details") await page.getByRole("navigation",{name:"تفاصيل الملخص"}).getByRole("button",{name:"البيانات الشخصية",exact:true}).click();
         if(sceneName === "lab") await page.getByRole("button",{name:"+ طلب معمل جديد",exact:true}).click();
@@ -155,6 +160,18 @@ describe("premium UI authority and draft ownership",()=>{
       for(const label of ["ريال سعودي","ريال يمني"]) {
         await currencies.getByRole("button",{name:label,exact:true}).click();
         expect(await currencies.getByRole("button",{name:label,exact:true}).getAttribute("aria-pressed")).toBe("true");
+      }
+      const account=page.getByRole("region",{name:"الحساب",exact:true});
+      expect(await page.getByRole("button",{name:"تحصيل دفعة",exact:true}).count()).toBe(1);
+      const disclosures=account.locator("details");
+      expect(await disclosures.count()).toBe(2);
+      for(const disclosure of await disclosures.all()) {
+        expect(await disclosure.getAttribute("open")).toBeNull();
+        await disclosure.locator("summary").click();
+        expect(await disclosure.getByText("تم فوترة",{exact:true}).isVisible()).toBe(true);
+        expect(await disclosure.getByText("المديونية الحالية",{exact:true}).isVisible()).toBe(true);
+        await disclosure.locator("summary").click();
+        expect(await disclosure.getAttribute("open")).toBeNull();
       }
       const select=page.getByLabel("الخطة المعروضة في الملخص",{exact:true});
       const choices=await select.locator("option").evaluateAll(options=>options.map(option=>({value:(option as HTMLOptionElement).value,title:option.textContent})));

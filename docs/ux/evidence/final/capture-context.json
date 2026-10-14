@@ -1,0 +1,25 @@
+{
+  "startingHead": "2d1c9cb28bcc45987f51412b071817b9b4cdc238",
+  "integrationBase": "175957f4e074d28b819d00a51f3f1e6d53b3d78b",
+  "environment": "isolated PostgreSQL 18, synthetic records, local optimized application",
+  "widths": [
+    1448,
+    1280,
+    390
+  ],
+  "changedSourceSha256": {
+    "__tests__/patient-summary-layout.test.tsx": "2ed3a24ca635342ed5e270b04df53fdac4258214d2175f0a6c1f2a7c90273a1b",
+    "__tests__/security-http/clinical-visit-pending-notes-ui.test.ts": "e2bd3866e11fe685d9cb046b114a8f4350352fdcb1015db2e6b10521e72ad024",
+    "__tests__/security-http/patient-navigation-ui-journey.test.ts": "0fa2dc661f355aa553ad313fc8d458018f7889b81a4ca237aefde6bbcf102845",
+    "__tests__/security-http/patient-premium-visual-ui.test.ts": "1d8f2ff7c22d1139844feb3531cf1aaf34e843f760baab69271e12c4cc9c7893",
+    "app/patients/[id]/page.tsx": "abff70a99881553f354bdb48b0984c1228f6f0100a60fe3688de4740c5b36165",
+    "app/patients/[id]/patient-premium.module.css": "a19af0b0413f97158afc413eafe5c87d195e4be79dd0d4a1d80d3ff322275cde",
+    "components/ClinicalVisit.tsx": "1468ea30222a795334b53837d832b0a51c77b1b3cff99455436afb80f0af1f95",
+    "components/PatientPlans.tsx": "2b27e25143cbf75bc977875dedcf2baec770c4d380aaa08418a14f64445b5395",
+    "components/patient/PatientCockpit.tsx": "4dfdfb4afa0312cd166c0f23edc45c3e0f01e828701c8521337df437086c3f17",
+    "components/patient/PatientOverview.module.css": "70797be6b5b135aa79d070d01a1452d32fcbf4a1ee690a787f79e21501b7fedd",
+    "components/patient/SummaryTab.tsx": "3a53b64c30c087d46f576a233548933e3d63269b6241f8618eae1a793647df8e",
+    "scripts/visual/patient-reference-report.mjs": "bd3b1b2dbc5111d46fef243f2344d4a20f5a5bbc4d55edb6e769534c44bf2d38"
+  },
+  "ciResult": "Reported by exact head on PR #330, not inferred from these local captures."
+}

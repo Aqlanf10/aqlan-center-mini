@@ -22,6 +22,24 @@
 | التاريخ الطبي | ![مرجع](./medical-history-reference.png) | ![1448](./medical-history-1448.png) | ![1280](./medical-history-1280.png) | ![390](./medical-history-390.png) |
 | السيفالومتري | ![مرجع](./cephalometric-reference.png) | ![1448](./cephalometric-1448.png) | ![1280](./cephalometric-1280.png) | ![390](./cephalometric-390.png) |
 
+## الصفحات الكاملة
+
+- الملخص: [1448](summary-1448-full.png) · [1280](summary-1280-full.png) · [390](summary-390-full.png)
+- زيارة اليوم: [1448](today-1448-full.png) · [1280](today-1280-full.png) · [390](today-390-full.png)
+- الحساب: [1448](account-1448-full.png) · [1280](account-1280-full.png) · [390](account-390-full.png)
+- الأشعة والملفات: [1448](files-1448-full.png) · [1280](files-1280-full.png) · [390](files-390-full.png)
+- المخطط السني: [1448](treatment-1448-full.png) · [1280](treatment-1280-full.png) · [390](treatment-390-full.png)
+- الخطط: [1448](plans-1448-full.png) · [1280](plans-1280-full.png) · [390](plans-390-full.png)
+- الحالات والمشاكل: [1448](cases-1448-full.png) · [1280](cases-1280-full.png) · [390](cases-390-full.png)
+- علاج الجذور: [1448](endo-1448-full.png) · [1280](endo-1280-full.png) · [390](endo-390-full.png)
+- التقويم: [1448](ortho-1448-full.png) · [1280](ortho-1280-full.png) · [390](ortho-390-full.png)
+- المعمل: [1448](lab-1448-full.png) · [1280](lab-1280-full.png) · [390](lab-390-full.png)
+- الإحالات: [1448](referrals-1448-full.png) · [1280](referrals-1280-full.png) · [390](referrals-390-full.png)
+- المستهلكات: [1448](materials-1448-full.png) · [1280](materials-1280-full.png) · [390](materials-390-full.png)
+- البيانات الشخصية: [1448](personal-details-1448-full.png) · [1280](personal-details-1280-full.png) · [390](personal-details-390-full.png)
+- التاريخ الطبي: [1448](medical-history-1448-full.png) · [1280](medical-history-1280-full.png) · [390](medical-history-390-full.png)
+- السيفالومتري: [1448](cephalometric-1448-full.png) · [1280](cephalometric-1280-full.png) · [390](cephalometric-390-full.png)
+
 ## تفاصيل الأقسام الطويلة
 
 - الخطط: [1448](plans-1448-detail.png) · [1280](plans-1280-detail.png) · [390](plans-390-detail.png)

@@ -1214,7 +1214,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   );
 
   return (
-    <div key={owner.generation}>
+    <div key={owner.generation} data-testid="clinical-visit-workspace">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
       ) : null}
