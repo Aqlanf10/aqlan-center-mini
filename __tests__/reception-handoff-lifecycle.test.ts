@@ -1,13 +1,16 @@
+vi.mock("../lib/operational-checkout-db", () => ({ operationalDecisionForSigned: vi.fn().mockResolvedValue(null),
+  lockReceptionReceivable: state.proof,
+  signedReceptionFinancialState: vi.fn().mockResolvedValue({ reviewRequired: false, invoiceSettled: false }) }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VisitWalkout } from "../lib/db";
 
-const state = vi.hoisted(() => ({ poolQuery: vi.fn(), query: vi.fn(), connect: vi.fn(), release: vi.fn(), audit: vi.fn(), walkout: vi.fn(), schema: vi.fn() }));
+const state = vi.hoisted(() => ({ poolQuery: vi.fn(), query: vi.fn(), connect: vi.fn(), release: vi.fn(), audit: vi.fn(), walkout: vi.fn(), schema: vi.fn(), proof: vi.fn() }));
 vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", ensureSchema: state.schema,
   getPool: () => ({ query: state.poolQuery, connect: state.connect }), insertAuditRow: state.audit, visitWalkout: state.walkout }));
 const { completeReceptionHandoff, listReceptionHandoffs, readReceptionHandoff, isHandoffSignature } = await import("../lib/reception-handoff-db");
 const signedAt = "2026-10-10T09:00:00.123Z";
 const signatureVersion = "2026-10-10T09:00:00.123456Z";
-const input = { visitId: 41, patientId: 7, signedAt, reason: "اتُّفق على المتابعة لاحقًا" };
+const input = { visitId: 41, patientId: 7, signedAt, signatureVersion, receivable: null, reason: "اتُّفق على المتابعة لاحقًا" };
 const actor = { actor: "desk", actorRole: "reception" };
 const row = (override: Record<string, unknown> = {}) => ({ id: 41, patient_id: 7,
   full_name: "مريض اصطناعي", patient_number: "H-7", signed_at: new Date(signedAt),
@@ -21,6 +24,7 @@ const walkout = (override: Partial<VisitWalkout> = {}): VisitWalkout => ({ visit
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.proof.mockReset().mockResolvedValue({ ok: true, patientId: 7, signedAt, signatureVersion, receivable: null });
   state.audit.mockReset().mockResolvedValue(undefined);
   state.connect.mockResolvedValue({ query: state.query, release: state.release });
   state.query.mockReset().mockImplementation(async (sql: string) => {
@@ -87,12 +91,12 @@ describe("reception handoff status uses canonical financial facts", () => {
 describe("transactional exact-signature handoff completion", () => {
   it("locks, inserts a first-class audit, commits, and releases without writing financial rows", async () => {
     expect(await completeReceptionHandoff({ ...input, reason: ` ${input.reason} ` }, actor)).toEqual({ ok: true,
-      visitId: 41, patientId: 7, signedAt, status: "handled", handledReason: input.reason });
+      visitId: 41, patientId: 7, signedAt, status: "handled", handledReason: input.reason, already: false, invoiceId: null });
     expect(state.query.mock.calls[0][0]).toBe("BEGIN");
-    expect(state.query.mock.calls[1][0]).toContain("FOR UPDATE OF v");
+    expect(state.proof).toHaveBeenCalledWith(expect.objectContaining({ query: state.query }), 41);
     expect(state.audit).toHaveBeenCalledWith(expect.objectContaining({ query: state.query }), expect.objectContaining({
       action: "visit.reception_handoff_completed", entity: "visit", entityId: 41, actor: "desk", actorRole: "reception",
-      details: { patientId: 7, signedAt, signatureVersion, reason: input.reason },
+      details: { patientId: 7, signedAt, signatureVersion, reason: input.reason, receivable: null },
     }));
     expect(state.query).toHaveBeenLastCalledWith("COMMIT");
     expect(state.release).toHaveBeenCalledOnce();
@@ -100,7 +104,7 @@ describe("transactional exact-signature handoff completion", () => {
   it("returns the persisted first reason on retry without replacing the decision", async () => {
     state.query.mockImplementation(async (sql: string) => ({ rows: sql.includes("FOR UPDATE OF v")
       ? [{ patient_id: 7, signed_at: new Date(signedAt), signature_version: signatureVersion }]
-      : sql.includes("SELECT id,") ? [{ id: "9", handled_reason: "السبب الأول" }] : [] }));
+      : sql.includes("SELECT action,") ? [{ action: "visit.reception_handoff_completed", details: { ...input, reason: "السبب الأول" } }] : [] }));
     expect(await completeReceptionHandoff(input, actor)).toMatchObject({ ok: true, handledReason: "السبب الأول" });
     expect(state.audit).not.toHaveBeenCalled();
   });
@@ -115,7 +119,7 @@ describe("transactional exact-signature handoff completion", () => {
     expect(await completeReceptionHandoff(input, { actor: "spoof", actorRole })).toEqual({ ok: false, reason: "forbidden" });
     expect(state.connect).not.toHaveBeenCalled();
   });
-  it.each([{ patientId: 8 }, { signedAt: "2026-10-10T09:00:00.124Z" }])("rejects a stale exact target (%j)", async change => {
+  it.each([{ patientId: 8 }, { signedAt: "2026-10-10T09:00:00.124Z", signatureVersion: "2026-10-10T09:00:00.124456Z" }])("rejects a stale exact target (%j)", async change => {
     expect(await completeReceptionHandoff({ ...input, ...change }, actor)).toEqual({ ok: false, reason: "stale" });
     expect(state.audit).not.toHaveBeenCalled();
     expect(state.query).toHaveBeenLastCalledWith("ROLLBACK");
@@ -125,8 +129,10 @@ describe("transactional exact-signature handoff completion", () => {
     expect(state.connect).not.toHaveBeenCalled();
   });
   it("rejects unsigned and missing visits with no audit", async () => {
+    state.proof.mockResolvedValue({ ok: true, patientId: 7, signedAt: null, receivable: null });
     state.query.mockResolvedValue({ rows: [{ patient_id: 7, signed_at: null, signature_version: null }] });
     expect(await completeReceptionHandoff(input, actor)).toEqual({ ok: false, reason: "not_signed" });
+    state.proof.mockResolvedValue({ ok: false, reason: "not_found" });
     state.query.mockResolvedValue({ rows: [] });
     expect(await completeReceptionHandoff(input, actor)).toEqual({ ok: false, reason: "not_found" });
     expect(state.audit).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { readSignedReceptionProof } from "@/lib/operational-checkout";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { authorizeVisit } from "@/lib/operational-access";
@@ -26,15 +27,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const body = await readJsonBody<unknown>(request, JSON_BODY_LIMIT_BYTES);
     if (!body || typeof body !== "object" || Array.isArray(body)) return reply({ message: "طلب غير صالح." }, 400);
     const source = body as Record<string, unknown>;
-    if (Object.keys(source).some(key => !["patientId", "signedAt", "reason"].includes(key))
+    const proof = readSignedReceptionProof(source);
+    if (!proof || Object.keys(source).some(key => !["patientId", "signedAt", "signatureVersion", "receivable", "reason"].includes(key))
       || typeof source.patientId !== "number" || !Number.isSafeInteger(source.patientId) || source.patientId <= 0
       || !isHandoffSignature(source.signedAt) || typeof source.reason !== "string"
       || source.reason.trim().length < 3 || source.reason.trim().length > 300) {
       return reply({ message: "حدّد المريض والتوقيع وسبب إنهاء المتابعة (من ٣ إلى ٣٠٠ حرف)." }, 400);
     }
     if (source.patientId !== allowed.patientId) return reply({ message: "تغيّر المريض المرتبط بالزيارة. حدّث الصفحة." }, 409);
-    const result = await completeReceptionHandoff({ visitId, patientId: source.patientId,
-      signedAt: source.signedAt, reason: source.reason.trim() }, { actor: session.username, actorRole: session.role });
+    const result = await completeReceptionHandoff({ ...proof, visitId, reason: source.reason.trim() }, { actor: session.username, actorRole: session.role });
     if (!result.ok) {
       const status = result.reason === "forbidden" ? 403 : result.reason === "not_found" ? 404 : result.reason === "invalid" ? 400 : 409;
       return reply({ message: status === 409 ? "تغيّرت الزيارة أو توقيعها. حدّث الصفحة قبل إنهاء المتابعة." : "تعذّر إنهاء متابعة الزيارة." }, status);

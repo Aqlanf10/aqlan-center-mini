@@ -1,3 +1,5 @@
+import { readSignedReceptionProof, sameVisitReceivable, type SignedReceptionProof } from "./operational-checkout";
+import { operationalDecisionForSigned, lockReceptionReceivable, signedReceptionFinancialState } from "./operational-checkout-db";
 import { CLINIC_TIME_ZONE, ensureSchema, getPool, insertAuditRow, visitWalkout, type VisitActor, type VisitWalkout } from "./db";
 import { onClinicDaysSql } from "./clinic-day-sql";
 import { clinicDateString } from "./schedule";
@@ -15,13 +17,18 @@ interface HandoffRow {
   full_name: string;
   patient_number: string;
   signed_at: Date;
+  signature_version: string;
   eligible_invoice_id: number | null;
   handled_reason: string | null;
+  completed_details?: Record<string, unknown> | null;
+  deferred_details?: Record<string, unknown> | null;
   deferred: boolean;
 }
 
-const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number, v.signed_at,
-            i.id AS eligible_invoice_id, completed.handled_reason,
+const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version,
+            i.id AS eligible_invoice_id, completed.handled_reason, completed.details AS completed_details,
+            (SELECT a.details FROM audit_log a WHERE a.entity = 'visit' AND a.entity_id = v.id::text
+              AND a.action = 'visit.payment_deferred' AND a.created_at >= v.signed_at ORDER BY a.id DESC LIMIT 1) AS deferred_details,
             EXISTS (SELECT 1 FROM audit_log a
                      WHERE a.entity = 'visit' AND a.entity_id = v.id::text
                        AND a.action = 'visit.payment_deferred'
@@ -30,7 +37,7 @@ const HANDOFF_SELECT = `SELECT v.id, v.patient_id, p.full_name, p.patient_number
        LEFT JOIN invoices i ON i.id = v.invoice_id AND i.patient_id = v.patient_id
          AND i.status <> 'cancelled' AND i.total_minor - i.discount_minor > 0
        LEFT JOIN LATERAL (
-         SELECT a.details->>'reason' AS handled_reason FROM audit_log a
+         SELECT a.details->>'reason' AS handled_reason, a.details FROM audit_log a
           WHERE a.entity = 'visit' AND a.entity_id = v.id::text
             AND a.action = '${COMPLETED_ACTION}'
             AND a.details->>'patientId' = v.patient_id::text
@@ -58,9 +65,18 @@ async function toHandoff(row: HandoffRow, walkout?: VisitWalkout | null): Promis
   let status: ReceptionHandoff["status"] = row.handled_reason !== null ? "handled" : row.deferred ? "deferred" : "pending";
   if (status === "pending" && row.eligible_invoice_id !== null
     && isCollected(row, walkout === undefined ? await visitWalkout(row.id) : walkout)) status = "collected";
+  const carried = !row.handled_reason && !row.deferred ? await operationalDecisionForSigned(row.id, row.patient_id, row.signed_at.toISOString()) : null;
+  if (carried) status = carried.status;
+  const decisionDetails = row.handled_reason !== null ? row.completed_details : row.deferred_details;
+  const originalProof = decisionDetails?.patientId === row.patient_id && decisionDetails?.signatureVersion === row.signature_version
+    ? decisionDetails.receivable : undefined;
+  const financial = row.handled_reason !== null || row.deferred
+    ? await signedReceptionFinancialState(row.id, row.patient_id, row.signed_at.toISOString(), originalProof)
+    : { reviewRequired: carried?.reviewRequired ?? false, invoiceSettled: carried?.invoiceSettled ?? status === "collected" };
   return { visitId: row.id, patientId: row.patient_id, patientName: row.full_name,
-    patientNumber: row.patient_number, signedAt: row.signed_at.toISOString(),
-    status, handledReason: row.handled_reason };
+    patientNumber: row.patient_number, signedAt: row.signed_at.toISOString(), signatureVersion: row.signature_version,
+    status, handledReason: carried?.reason ?? row.handled_reason ?? (typeof row.deferred_details?.reason === "string" ? row.deferred_details.reason : typeof row.deferred_details?.السبب === "string" ? row.deferred_details.السبب : null),
+    financialReviewRequired: financial.reviewRequired, visitInvoiceSettled: financial.invoiceSettled };
 }
 
 /** Also serves the exact-visit checkout, including signatures outside today's window. */
@@ -97,15 +113,9 @@ export async function listReceptionHandoffs(throughDate?: string) {
   return { fromDate, toDate, clinicTimeZone: CLINIC_TIME_ZONE, items };
 }
 
-export interface CompleteReceptionHandoffInput {
-  visitId: number;
-  patientId: number;
-  signedAt: string;
-  reason: string;
-}
-
+export type CompleteReceptionHandoffInput = SignedReceptionProof & { visitId: number; reason: string };
 export type CompleteReceptionHandoffResult =
-  | { ok: true; visitId: number; patientId: number; signedAt: string; status: "handled"; handledReason: string }
+  | { ok: true; visitId: number; patientId: number; signedAt: string; status: "handled" | "deferred"; handledReason: string; already: boolean; invoiceId: number | null }
   | { ok: false; reason: "forbidden" | "invalid" | "not_found" | "stale" | "not_signed" };
 
 export function isHandoffSignature(value: unknown): value is string {
@@ -113,52 +123,46 @@ export function isHandoffSignature(value: unknown): value is string {
     && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 }
 
-/** The audit IS the durable completion. It is never best-effort recordAudit.
- * The visit lock serializes retries and signature/owner changes. A retry returns
- * the first decision without replacing its reason or inserting another row.
- */
+/** Patient → visit → invoice locks serialize first decisions and retries with finance writers. */
 export async function completeReceptionHandoff(input: CompleteReceptionHandoffInput, actor: VisitActor): Promise<CompleteReceptionHandoffResult> {
+  return decideSignedReceptionHandoff(input, actor, "handled");
+}
+export async function decideSignedReceptionHandoff(input: CompleteReceptionHandoffInput, actor: VisitActor, status: "handled" | "deferred"): Promise<CompleteReceptionHandoffResult> {
   if (!canReadReceptionHandoff(actor.actorRole) || !actor.actor.trim()) return { ok: false, reason: "forbidden" };
-  if (!Number.isSafeInteger(input.visitId) || input.visitId <= 0
-    || !Number.isSafeInteger(input.patientId) || input.patientId <= 0
+  if (!Number.isSafeInteger(input.visitId) || input.visitId <= 0 || !readSignedReceptionProof(input)
     || !isHandoffSignature(input.signedAt) || typeof input.reason !== "string"
     || input.reason.trim().length < 3 || input.reason.trim().length > 300) return { ok: false, reason: "invalid" };
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const { rows: [visit] } = await client.query<{
-      patient_id: number | null; signed_at: Date | null; signature_version: string | null;
-    }>(`SELECT v.patient_id, v.signed_at, ${SIGNATURE_VERSION_SQL} AS signature_version
-          FROM visits v WHERE v.id = $1 FOR UPDATE OF v`, [input.visitId]);
-    let failure: CompleteReceptionHandoffResult | null = null;
-    if (!visit) failure = { ok: false, reason: "not_found" };
-    else if (visit.patient_id !== input.patientId) failure = { ok: false, reason: "stale" };
-    else if (!visit.signed_at) failure = { ok: false, reason: "not_signed" };
-    else if (visit.signed_at.toISOString() !== input.signedAt) failure = { ok: false, reason: "stale" };
-    if (failure) {
-      await client.query("ROLLBACK");
-      return failure;
+    const financial = await lockReceptionReceivable(client, input.visitId);
+    if (!financial.ok) { await client.query("ROLLBACK"); return { ok: false, reason: financial.reason }; }
+    if (financial.patientId !== input.patientId || financial.signedAt !== input.signedAt || financial.signatureVersion !== input.signatureVersion
+      || !sameVisitReceivable(financial.receivable, input.receivable)) {
+      await client.query("ROLLBACK"); return { ok: false, reason: financial.signedAt === null ? "not_signed" : "stale" };
     }
-    const { rows: completed } = await client.query<{ id: string; handled_reason: string }>(
-      `SELECT id, details->>'reason' AS handled_reason FROM audit_log WHERE entity = 'visit' AND entity_id = $1
-         AND action = $2 AND details->>'patientId' = $3
-         AND details->>'signatureVersion' = $4 AND length(btrim(details->>'reason')) > 0 ORDER BY id LIMIT 1`,
-      [String(input.visitId), COMPLETED_ACTION, String(input.patientId), visit.signature_version],
-    );
-    if (!completed.length) {
-      await insertAuditRow(client, { action: COMPLETED_ACTION, entity: "visit", entityId: input.visitId,
-        details: { patientId: input.patientId, signedAt: input.signedAt,
-          signatureVersion: visit.signature_version, reason: input.reason.trim() },
-        actor: actor.actor, actorRole: actor.actorRole });
+    const { rows: [prior] } = await client.query<{ action: string; details: Record<string, unknown> }>(
+      `SELECT action, details FROM audit_log WHERE entity = 'visit' AND entity_id = $1
+        AND action IN ('visit.reception_handoff_completed', 'visit.payment_deferred')
+        AND details->>'patientId' = $2 AND details->>'signatureVersion' = $3
+        ORDER BY id LIMIT 1`, [String(input.visitId), String(input.patientId), financial.signatureVersion]);
+    // History is immutable. Changed financial circumstances use the separate review route.
+    if (prior && (!readSignedReceptionProof(prior.details) || !sameVisitReceivable(readSignedReceptionProof(prior.details)!.receivable, financial.receivable))) {
+      await client.query("ROLLBACK"); return { ok: false, reason: "stale" };
     }
+    const savedStatus = prior ? (prior.action === COMPLETED_ACTION ? "handled" : "deferred") : status;
+    const savedReason = prior ? String(prior.details.reason ?? prior.details.السبب ?? "") : input.reason.trim();
+    if (!prior) await insertAuditRow(client, {
+      action: status === "handled" ? COMPLETED_ACTION : "visit.payment_deferred", entity: "visit", entityId: input.visitId,
+      details: { patientId: input.patientId, signedAt: input.signedAt, signatureVersion: financial.signatureVersion,
+        reason: savedReason, receivable: financial.receivable,
+        ...(status === "deferred" ? { السبب: savedReason, الفاتورة: financial.receivable?.invoiceId ?? null,
+          "صافي الفاتورة": financial.receivable?.netMinor ?? null, العملة: financial.receivable?.currency ?? null } : {}) },
+      actor: actor.actor, actorRole: actor.actorRole });
     await client.query("COMMIT");
     return { ok: true, visitId: input.visitId, patientId: input.patientId, signedAt: input.signedAt,
-      status: "handled", handledReason: completed[0]?.handled_reason ?? input.reason.trim() };
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+      status: savedStatus, handledReason: savedReason, already: !!prior, invoiceId: financial.receivable?.invoiceId ?? null };
+  } catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+  finally { client.release(); }
 }

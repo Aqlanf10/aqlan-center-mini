@@ -1,3 +1,4 @@
+import { readSignedReceptionProof } from "@/lib/operational-checkout";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -118,15 +119,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!canHandleMoney(session.role)) {
         return NextResponse.json({ message: "تأجيل الدفع للاستقبال أو المدير." }, { status: 403 });
       }
-      const deferReason = typeof source.reason === "string" && source.reason.trim() ? source.reason.trim().slice(0, 300) : null;
-      const deferred = await deferVisitPayment(id, actor, deferReason);
+      const proof = readSignedReceptionProof(source);
+      if (!proof || typeof source.reason !== "string" || source.reason.trim().length < 3 || source.reason.trim().length > 300) {
+        return NextResponse.json({ message: "حدّث بيانات الزيارة واكتب سبب التأجيل من 3 إلى 300 حرف." }, { status: 400 });
+      }
+      const deferred = await deferVisitPayment(id, actor, source.reason.trim(), proof);
       if (!deferred.ok) {
         return NextResponse.json(
-          { message: deferred.reason === "not_signed" ? "وقّع الزيارة أولًا — التأجيل يكون عند الشبّاك بعد التوقيع." : "الزيارة غير موجودة." },
-          { status: deferred.reason === "not_signed" ? 409 : 404 },
+          { message: deferred.reason === "not_found" ? "الزيارة غير موجودة." : "تغيّرت الزيارة أو صلاحية الوصول أو حالتها المالية. أعد القراءة قبل القرار." },
+          { status: deferred.reason === "forbidden" ? 403 : deferred.reason === "invalid" ? 400 : deferred.reason === "not_found" ? 404 : 409 },
         );
       }
-      return NextResponse.json({ ok: true, already: deferred.already, message: "أُجِّل الدفع — الرصيد باقٍ على المريض." });
+      return NextResponse.json({ ...deferred, message: deferred.status === "deferred" ? "أُجِّل الدفع — الرصيد باقٍ على المريض." : "المتابعة معالجة بالفعل — القرار الأصلي محفوظ ولا يثبت السداد." });
     }
 
     if (action === "return") {

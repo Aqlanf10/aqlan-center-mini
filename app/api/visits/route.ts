@@ -1,3 +1,4 @@
+import { listOperationalHandoffs } from "@/lib/operational-checkout-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -20,16 +21,21 @@ export async function GET(request: Request) {
   }
   const params = new URL(request.url).searchParams;
   if (params.has("view")) {
-    if (params.getAll("view").length !== 1 || params.get("view") !== "reception-handoff") {
+    if (params.getAll("view").length !== 1 || !["reception-handoff", "operational-checkout"].includes(params.get("view") ?? "")) {
       return failed("عرض الزيارات غير صالح.", 400);
     }
     if (!canReadReceptionHandoff(session.role)) return failed("تسليم الزيارات للاستقبال والمدير فقط.", 403);
     const date = params.get("date");
-    if (params.getAll("date").length > 1 || (date !== null && !isHandoffDate(date))) return failed("تاريخ التوقيع غير صالح.", 400);
+    if (params.getAll("date").length > 1 || (date !== null && !isHandoffDate(date))) return failed("تاريخ المتابعة غير صالح.", 400);
     try {
-      return NextResponse.json({ ...await listReceptionHandoffs(date ?? undefined),
+      // Read unsigned first, then signed; a late signature wins any overlap by visit ID.
+      const operational = params.get("view") === "operational-checkout" ? await listOperationalHandoffs(date ?? undefined) : null;
+      const signed = await listReceptionHandoffs(date ?? operational?.toDate);
+      const signedIds = new Set(signed.items.map(row => row.visitId));
+      return NextResponse.json({ ...signed,
+        ...(operational ? { version: 1, operationalItems: operational.items.filter(row => !signedIds.has(row.visitId)) } : {}),
         owner: { username: session.username, role: session.role } }, { headers: { "Cache-Control": "private, no-store" } });
-    } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
+    } catch { return failed("تعذّر تحديث زيارات الخروج. أعد المحاولة."); }
   }
   try {
     return NextResponse.json(await listTodayVisits());

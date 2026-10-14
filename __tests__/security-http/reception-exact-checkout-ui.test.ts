@@ -20,10 +20,11 @@ const workflow = () => ({ patient,
 function walkout(id: number, collected = false, yer = 180000) {
   const sar = collected ? 0 : 5000;
   return { visitId: id, patientId, patientName: patient.fullName, patientNumber: patient.patientNumber,
-    arrivedAt: "2026-09-01T08:00:00Z", signedAt: "2026-09-01T09:00:00Z", signedToday: false, deferred: false,
+    arrivedAt: "2026-09-01T08:00:00Z", signedAt: "2026-09-01T09:00:00.000Z", signedToday: false, deferred: false,
     lines: [], orthoAdjustment: { id: id + 20, billingClass: "LEGACY_INCLUDED", pendingDecision: false, decision: null },
     invoice: { id: invoiceId + (id - firstId), number: `SYN-${id}`, netMinor: 5000, currency: "SAR" },
     payments: [], nextAppointment: null,
+    receptionProof: { patientId, signedAt: "2026-09-01T09:00:00.000Z", signatureVersion: "2026-09-01T09:00:00.000000Z", receivable: null },
     balances: [{ currency: "YER", balanceMinor: yer }, ...(sar ? [{ currency: "SAR", balanceMinor: sar }] : []), { currency: "USD", balanceMinor: 2300 }],
     checkout: { previous: { YER: 180000, SAR: collected ? -5000 : 0, USD: 2300 }, current: { YER: yer, SAR: sar, USD: 2300 },
       invoicePaidMinor: collected ? 5000 : 0, paymentsToday: [], openingPaidToday: [] }, summary: [] };
@@ -55,11 +56,11 @@ describe("exact reception checkout on the built patient workspace", () => {
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${path}`); await route.abort(); return; }
       if (method === "POST" && path === `/api/visits/${firstId}/reception-handoff` && permitHandoff) {
         permitHandoff = false; handoffWrites++;
-        expect(request.postDataJSON()).toEqual({ patientId, signedAt: "2026-09-01T09:00:00Z", reason: "معالجة موثقة مع بقاء الدين" });
+        expect(request.postDataJSON()).toEqual({ patientId, signatureVersion: "2026-09-01T09:00:00.000000Z", receivable: null, signedAt: "2026-09-01T09:00:00.000Z", reason: "معالجة موثقة مع بقاء الدين" });
         if (handoffMode === "lost") { mode = "failed"; await route.abort(); return; }
         if (handoffMode === "held") { await new Promise<void>(resolve => { handoffReleases.push(resolve); }); }
         else handled = true;
-        await json(route, { ok: true, visitId: firstId, patientId, signedAt: "2026-09-01T09:00:00Z", status: "handled", handledReason: "معالجة موثقة مع بقاء الدين" }); return;
+        await json(route, { ok: true, visitId: firstId, patientId, signedAt: "2026-09-01T09:00:00.000Z", status: "handled", handledReason: "معالجة موثقة مع بقاء الدين" }); return;
       }
       if (method === "POST" && path === "/api/payments" && permitPayment) {
         permitPayment = false;

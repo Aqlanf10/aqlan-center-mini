@@ -6,8 +6,11 @@ export interface ReceptionHandoff {
   patientName: string;
   patientNumber: string;
   signedAt: string;
+  signatureVersion?: string;
   status: ReceptionHandoffStatus;
   handledReason: string | null;
+  financialReviewRequired?: boolean;
+  visitInvoiceSettled?: boolean;
 }
 
 export interface ReceptionHandoffSnapshot {
@@ -54,6 +57,8 @@ export function readReceptionHandoffs(value: unknown, owner: { username: string;
       || typeof row.signedAt !== "string" || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(row.signedAt)
       || !Number.isFinite(Date.parse(row.signedAt))
       || typeof row.status !== "string" || !["pending", "collected", "deferred", "handled"].includes(row.status)
+      || (row.financialReviewRequired !== undefined && typeof row.financialReviewRequired !== "boolean")
+      || (row.visitInvoiceSettled !== undefined && typeof row.visitInvoiceSettled !== "boolean")
       || !(row.handledReason === null || typeof row.handledReason === "string")) return null;
     const parts = day.formatToParts(new Date(row.signedAt));
     const date = ["year", "month", "day"].map(type => parts.find(part => part.type === type)?.value).join("-");
@@ -61,7 +66,10 @@ export function readReceptionHandoffs(value: unknown, owner: { username: string;
     ids.add(row.visitId);
     items.push({ visitId: row.visitId, patientId: row.patientId, patientName: row.patientName,
       patientNumber: row.patientNumber, signedAt: row.signedAt,
-      status: row.status as ReceptionHandoffStatus, handledReason: row.handledReason as string | null });
+      ...(typeof row.signatureVersion === "string" ? { signatureVersion: row.signatureVersion } : {}),
+      status: row.status as ReceptionHandoffStatus, handledReason: row.handledReason as string | null,
+      ...(typeof row.financialReviewRequired === "boolean" ? { financialReviewRequired: row.financialReviewRequired } : {}),
+      ...(typeof row.visitInvoiceSettled === "boolean" ? { visitInvoiceSettled: row.visitInvoiceSettled } : {}) });
   }
   return { owner, fromDate: value.fromDate, toDate: value.toDate, clinicTimeZone: value.clinicTimeZone, items };
 }

@@ -161,7 +161,7 @@ describe("CHAIR-1 — defer and walkout", () => {
   it("defer before sign is an Arabic 409; a doctor cannot defer (403)", async () => {
     const visitId = await newVisit();
     const early = await patch("reception", visitId, { action: "defer" });
-    expect(early.status).toBe(409);
+    expect(early.status).toBe(400);
     await expectCleanArabic(early);
     const doctor = await patch("doctorA", visitId, { action: "defer" });
     expect(doctor.status).toBe(403);

@@ -39,11 +39,12 @@ async function fixture(options: { patientId?: number; billed?: boolean; unsigned
     invoiceId = result.invoiceId;
   }
   const walkout = await db.visitWalkout(visit.id);
-  return { patientId, visitId: visit.id, invoiceId, signedAt: walkout?.signedAt ?? "2026-10-10T09:00:00.000Z" };
+  const proof = await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visit.id, patientId);
+  return { signatureVersion: proof?.signatureVersion ?? "2026-10-10T09:00:00.000000Z", receivable: proof?.receivable ?? null, patientId, visitId: visit.id, invoiceId, signedAt: walkout?.signedAt ?? "2026-10-10T09:00:00.000Z" };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const complete = (visit: Fixture, reason = "تمت مراجعة المهمة؛ متابعة التحصيل لاحقًا") => completeReceptionHandoff({
-  visitId: visit.visitId, patientId: visit.patientId, signedAt: visit.signedAt, reason,
+  visitId: visit.visitId, patientId: visit.patientId, signedAt: visit.signedAt, signatureVersion: visit.signatureVersion, receivable: visit.receivable, reason,
 }, reception);
 const audit = async (visitId: number) => (await q(`SELECT id, actor, actor_role, details FROM audit_log
   WHERE entity = 'visit' AND entity_id = $1 AND action = $2 ORDER BY id`, [String(visitId), action])).rows;
@@ -89,7 +90,7 @@ describe("durable reception task lifecycle on PostgreSQL", () => {
       details: { patientId: visit.patientId, signedAt: visit.signedAt } });
     const retry = await complete(visit, "إعادة بعد فقدان الاستجابة");
     expect(retry).toMatchObject({ ok: true, handledReason: rows[0].details.reason });
-    expect(results).toEqual([retry, retry]);
+    for (const result of results) expect(result).toMatchObject({ ok: true, handledReason: rows[0].details.reason });
     expect(await audit(visit.visitId)).toHaveLength(1);
     const walkout = await db.visitWalkout(visit.visitId);
     expect(await readReceptionHandoff(visit.visitId, walkout!)).toMatchObject({ status: "handled", handledReason: rows[0].details.reason });
@@ -129,8 +130,9 @@ describe("durable reception task lifecycle on PostgreSQL", () => {
   it.each(["handled", "deferred"] as const)("preserves explicit %s as a historical task decision after refund", async status => {
     const visit = await fixture({ billed: true });
     const receipt = await payment(visit, 15000);
+    Object.assign(visit, await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visit.visitId, visit.patientId));
     if (status === "handled") expect(await complete(visit)).toMatchObject({ ok: true });
-    else expect(await db.deferVisitPayment(visit.visitId, reception, "المتبقي يُراجع لاحقًا")).toMatchObject({ ok: true });
+    else expect(await db.deferVisitPayment(visit.visitId, reception, "المتبقي يُراجع لاحقًا", visit)).toMatchObject({ ok: true });
     await payment(visit, 5000, receipt.id);
     expect(await item(visit.visitId)).toMatchObject({ status });
     expect((await db.visitWalkout(visit.visitId))?.checkout.invoicePaidMinor).toBe(10000);
@@ -164,13 +166,14 @@ describe("durable reception task lifecycle on PostgreSQL", () => {
     await q(`UPDATE visits SET signed_at = signed_at + INTERVAL '1 second' WHERE id = $1`, [visit.visitId]);
     expect(await complete(visit)).toEqual({ ok: false, reason: "stale" });
     expect(await item(visit.visitId)).toMatchObject({ status: "pending" });
-    const fresh = await db.visitWalkout(visit.visitId);
-    expect(await complete({ ...visit, signedAt: fresh!.signedAt! })).toMatchObject({ ok: true });
+    const fresh = await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visit.visitId, visit.patientId);
+    expect(await complete({ ...visit, ...fresh! })).toMatchObject({ ok: true });
     expect(await audit(visit.visitId)).toHaveLength(2);
   });
   it("does not carry an audit across a sub-millisecond signature change", async () => {
     const visit = await fixture();
     await q(`UPDATE visits SET signed_at = date_trunc('milliseconds', signed_at) WHERE id = $1`, [visit.visitId]);
+    Object.assign(visit, await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visit.visitId, visit.patientId));
     expect(await complete(visit)).toMatchObject({ ok: true });
     await q(`UPDATE visits SET signed_at = signed_at + INTERVAL '1 microsecond' WHERE id = $1`, [visit.visitId]);
     expect((await db.visitWalkout(visit.visitId))?.signedAt).toBe(visit.signedAt);

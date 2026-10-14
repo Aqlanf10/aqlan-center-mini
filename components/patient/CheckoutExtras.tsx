@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
+import { readSignedReceptionProof, type SignedReceptionProof } from "@/lib/operational-checkout";
 import type { ReceptionHandoffStatus } from "@/lib/reception-handoff";
 import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
 import type { BillingClassification } from "@/lib/billing-classification";
@@ -14,7 +15,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { VisitWalkout, WalkoutLine } from "@/lib/db";
 
 /** (P0-G) ملخّص المغادرة كما يعيده الخادم مع ملخّصه المالي بكل عملة. */
-type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { summary?: CheckoutCurrencyLine[]; signedAt?: string | null; receptionHandoff?: { status: ReceptionHandoffStatus; handledReason: string | null } };
+type CheckoutWalkout = Pick<VisitWalkout, "visitId" | "patientId" | "patientName" | "lines" | "orthoAdjustment" | "deferred" | "nextAppointment"> & { receptionProof?: SignedReceptionProof | null; summary?: CheckoutCurrencyLine[]; signedAt?: string | null; receptionHandoff?: { status: ReceptionHandoffStatus; handledReason: string | null; financialReviewRequired?: boolean; visitInvoiceSettled?: boolean } };
 
 /** تسميات التصنيف القانوني — المصدر في الخادم، والواجهة تعرضه فقط. */
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -37,8 +38,12 @@ export function isCheckoutWalkout(value: unknown, visitId: number): value is Che
   if (value.receptionHandoff !== undefined && (!record(value.receptionHandoff)
     || typeof value.receptionHandoff.status !== "string"
     || !["pending", "collected", "deferred", "handled"].includes(value.receptionHandoff.status)
+    || (value.receptionHandoff.financialReviewRequired !== undefined && typeof value.receptionHandoff.financialReviewRequired !== "boolean")
+    || (value.receptionHandoff.visitInvoiceSettled !== undefined && typeof value.receptionHandoff.visitInvoiceSettled !== "boolean")
     || !(value.receptionHandoff.handledReason === null || typeof value.receptionHandoff.handledReason === "string")
     || typeof value.signedAt !== "string" || !Number.isFinite(Date.parse(value.signedAt)))) return false;
+  const proof = readSignedReceptionProof(value.receptionProof);
+  if (value.receptionProof !== undefined && value.receptionProof !== null && (!proof || proof.patientId !== value.patientId || proof.signedAt !== value.signedAt)) return false;
   const fields = ["previousBalanceMinor", "newBillableMinor", "paymentsTodayMinor", "currentBalanceMinor", "todayRemainingMinor",
     "legacySuggestedMinor", "legacyRemainingMinor", "dueNowMinor"];
   return value.summary === undefined || (Array.isArray(value.summary)
@@ -136,18 +141,18 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   }, [load, collected, financialRevision]);
 
   const defer = async () => {
-    if (busy || command.current || !mounted.current || !walkout) return;
+    if (busy || command.current || !mounted.current || !walkout?.receptionProof) return;
     /* (P0-G) التأجيل بسببٍ مكتوب — يُحفظ في التدقيق مع اسم من قرّره. */
     const reason = window.prompt("سبب تأجيل الدفع (يُسجَّل في التدقيق):", "")?.trim() ?? "";
-    if (reason.length < 3) {
-      setMessage({ tone: "error", text: "اكتب سبب التأجيل (ثلاثة أحرف على الأقل)." });
+    if (reason.length < 3 || reason.length > 300) {
+      setMessage({ tone: "error", text: "اكتب سبب التأجيل من 3 إلى 300 حرف." });
       return;
     }
     command.current = true;
     setBusy(true);
     try {
       const response = await fetch(`/api/visits/${visitId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "defer", reason }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "defer", ...walkout.receptionProof, reason }),
       });
       const payload = await response.json().catch(() => null);
       if (!mounted.current) return;
@@ -189,7 +194,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   };
 
   const completeHandoff = async () => {
-    if (busy || command.current || !mounted.current || !walkout?.patientId || !walkout.signedAt
+    if (busy || command.current || !mounted.current || !walkout?.patientId || !walkout.signedAt || !walkout.receptionProof
       || !financialVerified || walkout.receptionHandoff?.status !== "pending") return;
     const reason = window.prompt("سبب إتمام معالجة الاستقبال (لا يسقط دين المريض):", "")?.trim() ?? "";
     if (reason.length < 3 || reason.length > 300) {
@@ -202,7 +207,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
     try {
       const response = await fetch(`/api/visits/${visitId}/reception-handoff`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId: expected.patientId, signedAt: expected.signedAt, reason }),
+        body: JSON.stringify({ ...walkout.receptionProof, reason }),
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!mounted.current) return;
@@ -223,7 +228,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
     }
   };
 
-  const deferred = walkout?.deferred === true;
+  const deferred = walkout?.deferred === true || walkout?.receptionHandoff?.status === "deferred";
   const summary = financialVerified ? walkout?.summary ?? [] : [];
 
   return (
@@ -281,10 +286,16 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
           ) : null}
         </section>
       ))}
+      {walkout?.receptionHandoff?.financialReviewRequired && <section aria-label="إعادة تحقق متابعة الاستقبال" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs">
+        <p className="font-bold">الحالة المالية تحتاج إعادة تحقق. القرار السابق محفوظ ولا يثبت السداد الحالي.</p>
+        <a href={`/patients/${walkout.patientId}?tab=account`} className="inline-flex min-h-11 items-center rounded-xl border px-3">عرض الحساب الحالي</a>
+        <button type="button" onClick={() => void load()} disabled={busy} className="min-h-11 rounded-xl border px-3">تحديث حالة الزيارة</button>
+        <p>لتسجيل مراجعة جديدة، افتح قائمة التحصيل والخروج ثم «تحتاج إعادة تحقق مالية».</p>
+      </section>}
       <div className="flex flex-wrap gap-2">
         {walkout?.receptionHandoff?.status === "pending" && typeof walkout.signedAt === "string"
           && Number.isFinite(Date.parse(walkout.signedAt)) ? (
-          <button type="button" onClick={() => void completeHandoff()} disabled={busy || !financialVerified}
+          <button type="button" onClick={() => void completeHandoff()} disabled={busy || !financialVerified || !walkout.receptionProof}
             title="إنهاء مهمة الاستقبال بسبب موثّق؛ لا يُسقط أي دين أو مراجعة مالية"
             className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-800 disabled:opacity-40">
             تمت المعالجة
@@ -296,7 +307,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
           deferred ? (
             <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">أُجِّل الدفع — الرصيد باقٍ على المريض</span>
           ) : (
-            <button type="button" onClick={() => void defer()} disabled={busy || !walkout}
+            <button type="button" onClick={() => void defer()} disabled={busy || !walkout?.receptionProof || !financialVerified}
               title="لا سند ولا فاتورة — يبقى الرصيد على المريض ويُسجَّل القرار"
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-40">
               تأجيل الدفع

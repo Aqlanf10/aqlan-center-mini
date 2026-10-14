@@ -244,8 +244,9 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     };
     expect(before.due).toBe(15000);
 
-    expect(await deferVisitPayment(v, reception)).toEqual({ ok: true, already: false, invoiceId: signed.invoiceId });
-    expect(await deferVisitPayment(v, reception)).toEqual({ ok: true, already: true, invoiceId: signed.invoiceId });
+    const proof = (await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(v, p))!;
+    expect(await deferVisitPayment(v, reception, "متابعة اصطناعية للتحصيل", proof)).toMatchObject({ ok: true, already: false, invoiceId: signed.invoiceId });
+    expect(await deferVisitPayment(v, reception, "سبب آخر لا يغيّر الأول", proof)).toMatchObject({ ok: true, already: true, invoiceId: signed.invoiceId });
 
     expect(await yerDue(p)).toBe(before.due);
     expect((await q(`SELECT id FROM payments WHERE patient_id = $1`, [p])).length).toBe(before.payments);
@@ -253,14 +254,14 @@ describe("(CHAIR-1 Slice 5) defer and walkout at checkout", () => {
     const deferRows = (await trail(v)).filter((row) => row.action === "visit.payment_deferred");
     expect(deferRows).toEqual([{
       action: "visit.payment_deferred", actor: "reception1",
-      details: { الفاتورة: signed.invoiceId, "صافي الفاتورة": 15000, العملة: "YER" },
+      details: { الفاتورة: signed.invoiceId, "صافي الفاتورة": 15000, العملة: "YER", patientId: p, signedAt: proof.signedAt, signatureVersion: proof.signatureVersion, receivable: proof.receivable, reason: "متابعة اصطناعية للتحصيل", السبب: "متابعة اصطناعية للتحصيل" },
     }]);
     expect((await patientVisitReadinessFacts(p))?.deferred).toBe(true);
   });
 
   it("defer before sign is refused without a trace", async () => {
     const v = await arrive(await patient());
-    expect(await deferVisitPayment(v, reception)).toEqual({ ok: false, reason: "not_signed" });
+    expect(await deferVisitPayment(v, reception)).toEqual({ ok: false, reason: "invalid" });
     expect(await trail(v)).toEqual([]);
   });
 

@@ -77,7 +77,7 @@ describe("(P0-G) reception checkout after the doctor signs", () => {
     expect((await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).length).toBe(1);
 
     /* تأجيل الدفع بسببٍ مكتوب — قرارٌ في التدقيق لا حركة مالية. */
-    expect(await deferVisitPayment(visit.id, { actor: "reception1", actorRole: "reception" }, "سيدفع الأسبوع القادم")).toMatchObject({ ok: true });
+    expect(await deferVisitPayment(visit.id, { actor: "reception1", actorRole: "reception" }, "سيدفع الأسبوع القادم", (await (await import("../../lib/operational-checkout-db")).readSignedReceptionVerification(visit.id, patientId))!)).toMatchObject({ ok: true });
     const [audit] = await q<{ details: Record<string, unknown> }>(
       `SELECT details FROM audit_log WHERE action = 'visit.payment_deferred' AND entity_id = $1`, [String(visit.id)]);
     expect(audit.details).toMatchObject({ السبب: "سيدفع الأسبوع القادم" });

@@ -1,15 +1,17 @@
-import { CLINIC_TIME_ZONE, type VisitWalkout } from "./db";
+import { type VisitWalkout } from "./db";
 import { buildCheckoutSummary, legacyCheckoutSuggestion, type CheckoutCurrencyLine } from "./checkout-summary";
 import { listLegacyBalanceArrangements } from "./legacy-balance-arrangements-db";
-import { clinicDateString } from "./schedule";
+import { isHandoffDate } from "./reception-handoff";
 
 /**
  * (P0-G) الملخص المالي للشبّاك بكل عملة — من ملخّص المغادرة الكانوني + ترتيب الرصيد السابق (P0-C).
  * ما دُفع اليوم على الرصيد السابق يُطرح من اقتراح اليوم فلا يُقترح قسطان في زيارةٍ واحدة.
  */
 export async function visitCheckoutSummary(walkout: VisitWalkout): Promise<CheckoutCurrencyLine[]> {
+  const financialDate = walkout.checkout.financialAsOfDate;
+  if (!financialDate || !isHandoffDate(financialDate)) throw new Error("Missing server financial date");
   const arrangements = walkout.patientId === null ? []
-    : await listLegacyBalanceArrangements(walkout.patientId, clinicDateString(new Date(), CLINIC_TIME_ZONE));
+    : await listLegacyBalanceArrangements(walkout.patientId, financialDate);
   return buildCheckoutSummary({
     previous: walkout.checkout.previous,
     current: walkout.checkout.current,

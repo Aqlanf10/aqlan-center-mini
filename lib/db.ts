@@ -17333,9 +17333,10 @@ export async function signClinicalVisit(input: {
       id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
       planned_visit_id: number | null; doctor_id: number | null; appointment_id: number | null;
       diagnosis: string | null; treatment_done: string | null; billing_currency: string | null; case_id: number | null;
+      invoice_id: number | null;
     }>(
       `SELECT id, patient_name, patient_phone, patient_id, planned_visit_id, doctor_id, appointment_id, diagnosis, treatment_done,
-              billing_currency, case_id
+              billing_currency, case_id, invoice_id
          FROM visits WHERE id = $1 AND signed_at IS NULL FOR UPDATE`,
       [input.visitId],
     );
@@ -17359,6 +17360,17 @@ export async function signClinicalVisit(input: {
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [patientId]);
     await client.query(`SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id = i.plan_id
       WHERE t.patient_id = $1 ORDER BY i.id FOR UPDATE OF i`, [patientId]);
+    // Keep only the exact current owned reference. Signing never repairs an
+    // invalid link by selecting another invoice or silently unlinking it.
+    let retainedInvoice: { id: number; currency: Currency } | null = null;
+    if (locked[0].invoice_id !== null) {
+      const { rows: [invoice] } = await client.query<{ id: number; patient_id: number; base_currency: string }>(
+        `SELECT id, patient_id, base_currency FROM invoices WHERE id = $1 FOR UPDATE`, [locked[0].invoice_id]);
+      if (!invoice || invoice.patient_id !== patientId) {
+        throw new ClinicalPlanConflict("فاتورة الزيارة المرتبطة لا تخص ملف هذا المريض أو تغيّر رابطها؛ راجع الرابط قبل التوقيع.");
+      }
+      retainedInvoice = { id: invoice.id, currency: requireCurrency(invoice.base_currency, "فاتورة الزيارة", `زيارة #${input.visitId}`) };
+    }
 
     // Re-read procedures under the visit lock; another save may have completed since the preview.
     const { rows: currentProcedures } = await client.query<ProcedureRow>(
@@ -17643,29 +17655,31 @@ export async function signClinicalVisit(input: {
         await client.query("ROLLBACK");
         return emptyResult("mixed_plan_currencies", { visit: existing });
       }
-      const { rows: invoiceRows } = await client.query<{ id: number }>(
-        `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
-         VALUES (${documentNumberSql("invoice")},
-                 $1, $2, $3, 0, $4::text, $5)
-         RETURNING id`,
-        [patientId, invoiceCurrency, duesMinor,
-         `من الزيارة رقم ${existing.id}`, input.signedBy],
-      );
-      invoiceId = invoiceRows[0].id;
-
-      for (const line of billable) {
-        const session = sessionOutcome.byProcedure.get(line.id);
-        const description = session
-          ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`
-          : line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName;
-        await client.query(
-          `INSERT INTO invoice_items
-             (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
-              source_type, source_id)
-           VALUES ($1, $2, $3::int, $4, $5, $6, $7, 'visit_procedure', $8)`,
-          [invoiceId, line.serviceId, line.doctorId, description,
-           line.quantity, line.unitPriceMinor, line.totalMinor, line.id],
+      if (duesMinor > 0) {
+        const { rows: invoiceRows } = await client.query<{ id: number }>(
+          `INSERT INTO invoices (invoice_number, patient_id, base_currency, total_minor, discount_minor, note, created_by)
+           VALUES (${documentNumberSql("invoice")},
+                   $1, $2, $3, 0, $4::text, $5)
+           RETURNING id`,
+          [patientId, invoiceCurrency, duesMinor,
+           `من الزيارة رقم ${existing.id}`, input.signedBy],
         );
+        invoiceId = invoiceRows[0].id;
+
+        for (const line of billable) {
+          const session = sessionOutcome.byProcedure.get(line.id);
+          const description = session
+            ? `${line.serviceName}${line.toothCode ? ` — سن ${line.toothCode}` : ""} (جلسة ${session.sessionIndex} من ${session.sessionCount})`
+            : line.toothCode ? `${line.serviceName} — سن ${line.toothCode}` : line.serviceName;
+          await client.query(
+            `INSERT INTO invoice_items
+               (invoice_id, service_id, doctor_id, description, quantity, unit_price_minor, total_minor,
+                source_type, source_id)
+             VALUES ($1, $2, $3::int, $4, $5, $6, $7, 'visit_procedure', $8)`,
+            [invoiceId, line.serviceId, line.doctorId, description,
+             line.quantity, line.unitPriceMinor, line.totalMinor, line.id],
+          );
+        }
       }
     }
 
@@ -17757,11 +17771,16 @@ export async function signClinicalVisit(input: {
       );
     }
 
+    // invoiceId denotes a document generated by this signature. A no-charge
+    // signature retains its already-owned visit link, including a cancelled
+    // historical reference; cancellation/correction belongs to its audited path.
+    const linkedInvoiceId = invoiceId ?? retainedInvoice?.id ?? null;
+    if (invoiceId === null && retainedInvoice) invoiceCurrency = retainedInvoice.currency;
     await client.query(
       `UPDATE visits SET signed_at = NOW(), signed_by = $2, invoice_id = $3::int,
               status = 'done', finished_at = COALESCE(finished_at, NOW())
         WHERE id = $1`,
-      [input.visitId, input.signedBy, invoiceId],
+      [input.visitId, input.signedBy, linkedInvoiceId],
     );
 
     await client.query("COMMIT");
@@ -28121,39 +28140,13 @@ export function seatVisitGated(
   return gatedVisitMove("seat", id, chair, actor, emergency);
 }
 
-export type DeferPaymentResult =
-  | { ok: true; already: boolean; invoiceId: number | null }
-  | { ok: false; reason: "not_found" | "not_signed" };
+export type DeferPaymentResult = import("./reception-handoff-db").CompleteReceptionHandoffResult;
 
-/**
- * (CHAIR-1 Slice 5) «تأجيل الدفع» عند الشبّاك — قرارٌ يُسجَّل لا حركةٌ مالية.
- *
- * لا سند ولا فاتورة ولا قيد: الرصيد يبقى كما هو على المريض، والزيارة (المُنهاة بالتوقيع) تبقى
- * مُنهاة. الأثر الوحيد سطر تدقيق «من أجّل، ومتى، وكم كان المستحق» — مرّةً واحدة لكل زيارة.
- */
-export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null): Promise<DeferPaymentResult> {
-  return inVisitTransaction(async (client) => {
-    const { rows } = await client.query<ReadinessFactsRow>(
-      `${READINESS_FACTS_SELECT} WHERE v.id = $2 FOR UPDATE OF v`,
-      [CLINIC_TIME_ZONE, id],
-    );
-    const row = rows[0];
-    if (!row) return { ok: false, reason: "not_found" };
-    if (!row.signed_at) return { ok: false, reason: "not_signed" };
-    if (row.deferred) return { ok: true, already: true, invoiceId: row.invoice_id };
-    await insertAuditRow(client, {
-      action: "visit.payment_deferred", entity: "visit", entityId: id, entityLabel: row.patient_name,
-      details: {
-        الفاتورة: row.invoice_id,
-        "صافي الفاتورة": row.invoice_net === null ? null : toMinor(row.invoice_net),
-        العملة: row.invoice_currency,
-        /* (P0-G) سبب التأجيل كما كتبه الاستقبال — يظهر في التدقيق وتقرير جريان الكرسي. */
-        ...(reason ? { السبب: reason } : {}),
-      },
-      actor: actor.actor, actorRole: actor.actorRole ?? null,
-    });
-    return { ok: true, already: false, invoiceId: row.invoice_id };
-  });
+/** Reasoned operational decision only: no invoice, receipt or ledger mutation. */
+export async function deferVisitPayment(id: number, actor: VisitActor, reason: string | null = null,
+  proof?: import("./operational-checkout").SignedReceptionProof): Promise<DeferPaymentResult> {
+  const { decideSignedReceptionHandoff } = await import("./reception-handoff-db");
+  return decideSignedReceptionHandoff({ ...proof, visitId: id, reason } as import("./reception-handoff-db").CompleteReceptionHandoffInput, actor, "deferred");
 }
 
 /** سطر عملٍ في ملخّص المغادرة. */
@@ -28193,6 +28186,7 @@ export interface VisitWalkout {
   deferred: boolean;
   /** (P0-G) الملخص المالي بكل عملة — قبل اليوم (المحرك الكانوني على الدفتر بلا حركات اليوم) وبعده. */
   checkout: {
+    financialAsOfDate?: string;
     previous: Partial<Record<Currency, number>>;
     current: Partial<Record<Currency, number>>;
     invoicePaidMinor: number;
@@ -28286,7 +28280,7 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
   let payments: VisitWalkout["payments"] = [];
   let balances: VisitWalkout["balances"] = [];
   let nextAppointment: VisitWalkout["nextAppointment"] = null;
-  const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
+  const checkout: VisitWalkout["checkout"] = { financialAsOfDate: visit.today, previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
     const [ledger, planCurrencies, appointments] = await Promise.all([
       patientLedger(visit.patient_id),
@@ -28306,25 +28300,28 @@ export async function visitWalkout(visitId: number): Promise<VisitWalkout | null
 
     /* (P0-G) «الرصيد السابق» بالمحرك نفسه على الدفتر بلا فاتورة الزيارة وبلا سندات يومها — لا حسابٌ
        في الواجهة ولا طرحٌ عابرٌ للعملات. */
-    const todayPayment = (payment: Payment) =>
+    const visitDayPayment = (payment: Payment) =>
       clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.visit_day;
     const before = ledgerBalancesByCurrency(visit.patient_id, {
       invoices: ledger.invoices.filter((invoice) => invoice.id !== visit.invoice_id),
-      payments: ledger.payments.filter((payment) => !todayPayment(payment)),
+      payments: ledger.payments.filter((payment) => !visitDayPayment(payment)),
       openings: ledger.openings,
     }, planCurrencies);
     for (const currency of CURRENCIES) {
       checkout.previous[currency] = before[currency].dueMinor;
       checkout.current[currency] = byCurrency[currency].dueMinor;
     }
+    // Actionable collection totals use the server financial day, independently of the arrival-day reference.
+    const financialDayPayment = (payment: Payment) =>
+      clinicDateString(new Date(payment.createdAt), CLINIC_TIME_ZONE) === visit.today;
     const paidByCurrency = new Map<Currency, number>();
-    for (const payment of ledger.payments.filter(todayPayment)) {
+    for (const payment of ledger.payments.filter(financialDayPayment)) {
       const signed = payment.kind === "refund" ? -payment.amountMinor : payment.amountMinor;
       paidByCurrency.set(payment.currency, (paidByCurrency.get(payment.currency) ?? 0) + signed);
     }
     checkout.paymentsToday = [...paidByCurrency.entries()].map(([currency, netMinor]) => ({ currency, netMinor }));
     const openingByCurrency = new Map<Currency, number>();
-    for (const payment of ledger.payments.filter(todayPayment)) {
+    for (const payment of ledger.payments.filter(financialDayPayment)) {
       if (payment.openingCurrency === null) continue;
       const target = payment.openingCurrency;
       const settled = payment.currency === target ? payment.amountMinor

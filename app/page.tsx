@@ -33,6 +33,8 @@ import {
 import { ReadinessChip } from "@/components/today/ReadinessChip";
 import { sendGatedMove, useChairReadiness } from "@/components/today/useChairReadiness";
 import { ReceptionHandoffs } from "@/components/today/ReceptionHandoffs";
+import receptionStyles from "@/components/today/reception.module.css";
+import { CalendarDays } from "lucide-react";
 
 /** ملفٌّ مرشَّح لِما تكتبه الاستقبال في حقل الوصول. */
 interface PatientMatch {
@@ -119,6 +121,7 @@ export default function FlowBoard() {
   const [chosen, setChosen] = useState<PatientMatch | null>(null);
   // الزيارة التي انتهت للتو، معروضة لحجز جلستها القادمة والمريض ما زال واقفًا.
   const [justFinished, setJustFinished] = useState<Visit | null>(null);
+  const [checkoutVisitId, setCheckoutVisitId] = useState<number | null>(null);
   const [nextDate, setNextDate] = useState("");
   const [nextTime, setNextTime] = useState("10:00");
   const [nextDuration, setNextDuration] = useState(30);
@@ -383,10 +386,9 @@ export default function FlowBoard() {
     }));
     /* (P0-D) المراجع العائد بلا موعد يصل من هنا أيضًا — تُفتح له لوحة الوصول كما للموعد. */
     if (ok && existingPatientId) setArrivalPatient(existingPatientId);
-    setName("");
-    setPhone("");
-    setChosen(null);
-    setMatches([]);
+    if (ok) {
+      setName(""); setPhone(""); setChosen(null); setMatches([]);
+    }
   }, [act, name, phone, chosen]);
 
   /* (CHAIR-1) النداء والإدخال عبر بوابة الجاهزية — تحذيرٌ فقط ما لم يفعّل المالك المنع. */
@@ -473,6 +475,7 @@ export default function FlowBoard() {
     if (!ok) return;
     setNextBooked(null);
     setJustFinished(visit);
+    setCheckoutVisitId(visit.id);
     setNextPhone(visit.patientPhone ?? "");
     // أربعة أسابيع هي دورة متابعة التقويم المعتادة، وهي الاختيار الأكثر تكرارًا.
     setNextDate(sessionAfterWeeks(localToday(), 4));
@@ -518,18 +521,19 @@ export default function FlowBoard() {
   }, [justFinished, nextDate, nextTime, nextDuration, nextPhone, CLINIC_NAME, clinicPhone]);
 
   return (
-    <main className="mx-auto max-w-5xl p-4 pb-24">
+    <main className={receptionStyles.page}>
       {/*
         العنوان سطرًا والروابط سطرًا تحته.
         كانت الروابط بجانب العنوان، فلمّا صارت أربعة انكسر اسم المركز إلى أربعة أسطر
         على شاشة الهاتف — والاستقبال تعمل على الهاتف. كل رابط يُضاف لاحقًا يقع في
         السطر السفلي ولا يزاحم العنوان.
       */}
-      <header className="mb-4">
+      <header className={receptionStyles.heading}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
+            <p className={receptionStyles.eyebrow}><CalendarDays size={15} aria-hidden="true" />الاستقبال · {localToday()}</p>
             <h1 className="text-xl font-extrabold leading-tight">اليوم</h1>
-            <p className="text-xs text-slate-500">من ينتظر، ومنذ متى، وهل الكرسي فارغ</p>
+            <p className={receptionStyles.subtitle}>الوصول، الانتظار، والتحصيل — خطوة واضحة لكل زيارة</p>
           </div>
           <button
             type="button"
@@ -550,12 +554,12 @@ export default function FlowBoard() {
           * بالتلفزيون، وشريط الاعتذار يُشغّل بضغطة حين يتأخر اليوم — لا شاشة
           * إعدادات ولا استأذان.
           */}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className={receptionStyles.tools}>
           <a
             href="/display"
             target="_blank"
             rel="noopener"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-navy-800"
+            className={receptionStyles.button}
           >
             شاشة الصالة ↗
           </a>
@@ -573,7 +577,10 @@ export default function FlowBoard() {
         </div>
       </header>
 
-      <ReceptionHandoffs>
+      <ReceptionHandoffs checkoutVisitId={checkoutVisitId} onHandled={visitId => {
+        setCheckoutVisitId(current => current === visitId ? null : current);
+        setJustFinished(current => current?.id === visitId ? null : current);
+      }}>
 
       <section className="mb-4 grid grid-cols-3 gap-2" aria-label="ملخص اليوم">
         <Stat label="ينتظرون الآن" value={summary.waiting} tone={summary.waiting > 0 ? "warn" : "calm"} />
@@ -584,6 +591,75 @@ export default function FlowBoard() {
         />
         <Stat label="كراسٍ فارغة" value={summary.freeChairs} tone={summary.freeChairs > 0 && summary.waiting > 0 ? "bad" : "calm"} />
       </section>
+
+      <form onSubmit={addPatient} className={`mb-5 border bg-white p-4 ${receptionStyles.arrival}`}>
+        <h2 className="mb-3 text-sm font-bold">وصل مريض</h2>
+        <div className={`flex flex-wrap gap-2 ${receptionStyles.arrivalFields}`}>
+          <input
+            value={name}
+            onChange={(event) => { setName(event.target.value); setChosen(null); }}
+            placeholder="اسم المريض"
+            aria-label="اسم المريض"
+            autoComplete="off"
+            className="min-w-[180px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+          />
+          <input
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
+            placeholder="الهاتف (اختياري)"
+            aria-label="هاتف المريض"
+            inputMode="tel"
+            className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
+          />
+          <button
+            type="submit"
+            disabled={busy || !name.trim()}
+            className="rounded-xl bg-brand-orange px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
+          >
+            وصل
+          </button>
+        </div>
+
+        {chosen ? (
+          <p className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <span>مربوط بملف {chosen.patientNumber}</span>
+            {chosen.medicalAlert ? (
+              <span className="rounded-lg bg-red-100 px-2 py-0.5 text-red-800">
+                تنبيه طبي: {chosen.medicalAlert}
+              </span>
+            ) : null}
+            <button type="button" onClick={() => setChosen(null)}
+              className="mr-auto rounded-lg border border-emerald-300 bg-white px-2 py-0.5 font-bold text-emerald-700">
+              فكّ الربط
+            </button>
+          </p>
+        ) : matches.length > 0 ? (
+          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+            <p className="mb-1 text-[11px] font-bold text-slate-500">
+              ملفّات مطابقة — اختر ملفّه إن كان مسجّلًا، فلا يُنشأ له ملفٌ ثانٍ:
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {matches.map((match) => (
+                <li key={match.id}>
+                  <button type="button"
+                    onClick={() => {
+                      setChosen(match);
+                      setName(match.fullName);
+                      if (match.phone) setPhone(match.phone);
+                      setMatches([]);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-navy-800">
+                    {match.fullName}
+                    <span className="mr-1.5 font-normal text-slate-500">
+                      {match.patientNumber}{match.phone ? ` · ${match.phone}` : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </form>
 
       {/* (LIVE-2) مرشّحات الاستقبال وعدّادات اليوم — حالة الزيارة وحالة الموعد كلٌّ من مصدره. */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="مرشّحات اليوم">
@@ -666,7 +742,6 @@ export default function FlowBoard() {
         * تُعرض الفقرة حتى وهي فارغة: اختفاؤها عند الفراغ يجعل «لا مواعيد اليوم»
         * و«تعذّر التحميل» شيئًا واحدًا على الشاشة، وهما نقيضان في العمل.
         */}
-      <TomorrowCard />
 
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4" aria-label="مُنتظَرو اليوم" hidden={filter.status !== "all"}>
         <div className="mb-3 flex items-center justify-between gap-2">
@@ -753,74 +828,6 @@ export default function FlowBoard() {
         )}
       </section>
 
-      <form onSubmit={addPatient} className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 className="mb-3 text-sm font-bold">وصل مريض</h2>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={name}
-            onChange={(event) => { setName(event.target.value); setChosen(null); }}
-            placeholder="اسم المريض"
-            aria-label="اسم المريض"
-            autoComplete="off"
-            className="min-w-[180px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
-          />
-          <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            placeholder="الهاتف (اختياري)"
-            aria-label="هاتف المريض"
-            inputMode="tel"
-            className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-blue"
-          />
-          <button
-            type="submit"
-            disabled={busy || !name.trim()}
-            className="rounded-xl bg-brand-orange px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
-          >
-            وصل
-          </button>
-        </div>
-
-        {chosen ? (
-          <p className="mt-2 flex flex-wrap items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
-            <span>مربوط بملف {chosen.patientNumber}</span>
-            {chosen.medicalAlert ? (
-              <span className="rounded-lg bg-red-100 px-2 py-0.5 text-red-800">
-                تنبيه طبي: {chosen.medicalAlert}
-              </span>
-            ) : null}
-            <button type="button" onClick={() => setChosen(null)}
-              className="mr-auto rounded-lg border border-emerald-300 bg-white px-2 py-0.5 font-bold text-emerald-700">
-              فكّ الربط
-            </button>
-          </p>
-        ) : matches.length > 0 ? (
-          <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-            <p className="mb-1 text-[11px] font-bold text-slate-500">
-              ملفّات مطابقة — اختر ملفّه إن كان مسجّلًا، فلا يُنشأ له ملفٌ ثانٍ:
-            </p>
-            <ul className="flex flex-wrap gap-1.5">
-              {matches.map((match) => (
-                <li key={match.id}>
-                  <button type="button"
-                    onClick={() => {
-                      setChosen(match);
-                      setName(match.fullName);
-                      if (match.phone) setPhone(match.phone);
-                      setMatches([]);
-                    }}
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-navy-800">
-                    {match.fullName}
-                    <span className="mr-1.5 font-normal text-slate-500">
-                      {match.patientNumber}{match.phone ? ` · ${match.phone}` : ""}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </form>
 
       {notice ? (
         <p role="status" className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900">{notice}</p>
@@ -985,7 +992,7 @@ export default function FlowBoard() {
                     <button
                       onClick={() => finish(chair.occupant!)}
                       disabled={busy}
-                      title="يُنهي الجلوس ويحرّر الكرسي فقط — التوثيق والتوقيع والفاتورة من «وثّق وأغلق»"
+                      title="يحرّر الكرسي ويفتح متابعة الخروج؛ التوقيع السريري والفاتورة إجراءان مستقلان"
                       className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold disabled:opacity-50"
                     >
                       أنهِ الجلوس
@@ -1149,6 +1156,8 @@ export default function FlowBoard() {
           )}
         </section>
       ) : null}
+
+      <details className={receptionStyles.period}><summary>مواعيد الغد وطلبات الحجز</summary><TomorrowCard /></details>
 
       <p className="mt-6 text-center text-[11px] text-slate-400">
         {freeChair ? `الكرسي ${freeChair} جاهز` : "الكرسيان مشغولان"} · أُنجز اليوم: {summary.done}
