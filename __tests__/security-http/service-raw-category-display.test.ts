@@ -78,7 +78,11 @@ async function facts() {
     'items', (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM invoice_items i JOIN invoices v ON v.id=i.invoice_id WHERE v.patient_id=$2),
     'visits', (SELECT jsonb_agg(to_jsonb(v) ORDER BY id) FROM visits v WHERE patient_id=$2),
     'procedures', (SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM visit_procedures p JOIN visits v ON v.id=p.visit_id WHERE v.patient_id=$2),
-    'payments', (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM payments p WHERE patient_id=$2)
+    'payments', (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM payments p WHERE patient_id=$2),
+    'plans', (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM treatment_plans p WHERE patient_id=$2),
+    'planItems', (SELECT jsonb_agg(to_jsonb(i) ORDER BY i.id) FROM plan_items i JOIN treatment_plans p ON p.id=i.plan_id WHERE p.patient_id=$2),
+    'cases', (SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM clinical_cases c WHERE patient_id=$2),
+    'audit', (SELECT count(*) FROM audit_log)
   ) AS facts`, [doctorId, patientId])).rows;
 }
 
@@ -92,6 +96,16 @@ describe("reachable raw category labels on the actual built app", () => {
     expect(matching).toHaveLength(1);
     expect(matching[0]).toMatchObject({ category, categoryLabel: label, percent: 17, accruedMinor: 1700, earnedMinor: 1700 });
     expect(typeof matching[0].categoryLabel).toBe("string");
+    expect(await facts()).toEqual(before);
+  });
+
+  it.each(["constructor", "__proto__", "toString"])("invoice preview for %s is a read-only POST with no financial or clinical changes", async category => {
+    const before = await facts();
+    const response = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({
+      patientId, currency: "YER", items: [{ serviceId: serviceIds.get(category), quantity: 1, price: "10000" }],
+    }));
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect((await response.json()).lines).toEqual([expect.objectContaining({ line: 0, kind: "financial" })]);
     expect(await facts()).toEqual(before);
   });
 
@@ -136,7 +150,14 @@ describe("reachable raw category labels on the actual built app", () => {
       const request = route.request();
       if (!["GET", "HEAD"].includes(request.method())) {
         // Abort first. Diagnostics cannot accidentally let a request reach the server.
-        writes.push(request.method()); await route.abort();
+        await route.abort();
+        // The invoice now validates financial rows by a read-only POST. It stays
+        // aborted here, exactly like every mutation; it is never sent by this
+        // display-only journey. Only this exact same-origin endpoint is a read.
+        const target = new URL(request.url());
+        const previewRead = request.method() === "POST" && target.origin === baseUrl
+          && target.pathname === "/api/invoices/clinical-preview";
+        if (!previewRead) writes.push(request.method());
         if (blockedRequests.length < 8) {
           const raw = request.postData() ?? "";
           let shape: Record<string, unknown> = { json: false };
@@ -256,6 +277,15 @@ describe("reachable raw category labels on the actual built app", () => {
       await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); });
       await mkdir(".settings-ui-artifacts", { recursive: true });
       await page.screenshot({ path: `.settings-ui-artifacts/service-raw-category-${width}.png` });
+      // Every non-GET/HEAD was still aborted. Unknown writes fail the unchanged
+      // zero-write guard; blocked reads must belong to this exact synthetic row.
+      for (const blocked of blockedRequests) {
+        expect(blocked).toMatchObject({ method: "POST", sameOrigin: true, path: "/api/invoices/clinical-preview",
+          shape: { json: true, ownsSyntheticPatient: true } });
+        const shape = blocked.shape as { items: { syntheticServiceCategory: string }[] };
+        expect(shape.items.length).toBeGreaterThan(0);
+        for (const item of shape.items) expect(["constructor", "__proto__", "toString"]).toContain(item.syntheticServiceCategory);
+      }
       expect(errors).toEqual([]); expect(writes).toEqual([]); expect(await facts()).toEqual(before);
     } finally {
       console.log("AQLAN_RAW_CATEGORY_REQUESTS_V1 " + JSON.stringify(requestWitness()));

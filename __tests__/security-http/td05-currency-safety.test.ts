@@ -171,14 +171,26 @@ describe("مسار HTTP المباشر: فاتورة أجنبية بلا سعر 
     });
     expect(rejected.status).toBe(400);
 
-    const accepted = await authedJson("/api/invoices", {
+    const unreasoned = await authedJson("/api/invoices", {
       patientId: invoicePatientId, currency: "SAR",
       items: [{ serviceId: invoiceServiceId, quantity: 1, price: "80" }],
+    });
+    expect(unreasoned.status).toBe(400);
+    expect((await unreasoned.json()).message).toContain("سبب التسعير اليدوي");
+    for (const table of ["invoices", "payments", "treatment_plans", "clinical_cases"]) {
+      expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [invoicePatientId])).rows).toEqual([]);
+    }
+    const reason = "اتفاق سعودي صريح لخدمة بلا سعر سعودي مقرر";
+    const accepted = await authedJson("/api/invoices", {
+      patientId: invoicePatientId, currency: "SAR",
+      items: [{ serviceId: invoiceServiceId, quantity: 1, price: "80", priceReason: reason }],
     });
     expect(accepted.status).toBe(201);
     const invoice = await accepted.json();
     expect(invoice.baseCurrency).toBe("SAR");
     expect(invoice.totalMinor).toBe(8000);
+    const { rows: [audit] } = await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND entity_id=$1", [String(invoice.id)]);
+    expect(audit.details.invoicePriceSnapshots[0]).toMatchObject({ agreedPriceSource: "manual", requestedMinor: 8000, reason });
   });
 
   it("فاتورة YER بلا سعر تسقط لسعر الدليل — السلوك القائم لا يمس", async () => {

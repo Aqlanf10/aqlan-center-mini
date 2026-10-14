@@ -4,6 +4,8 @@ import { invoiceCatalogRequestFingerprint, invoiceCommandFingerprint, parseInvoi
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
 import type { SessionPayload } from "../../lib/auth";
 import type { DebtRepaymentTerms } from "../../lib/debt-installments";
+import { invoicePriceQuote } from "../../lib/invoice-price-quote";
+import { invoicePricingSettings } from "../../lib/invoice-price-settings-db";
 
 assertRealPostgresUrl(); stubPostgresEnv();
 const db = await import("../../lib/db");
@@ -43,6 +45,35 @@ const counts = (id: number) => q(`SELECT (SELECT count(*)::int FROM invoices WHE
   (SELECT count(*)::int FROM treatment_plans WHERE patient_id=$1) AS plans`, [id]);
 
 describe("ordinary invoice transaction catalogue authority", () => {
+  it("locks and snapshots configured FX, refuses same-rounded-price drift, and replays the successful original without repricing", async () => {
+    const prior = await q("SELECT value FROM settings WHERE key='finance.rate.SAR'");
+    const fxId = (await q("INSERT INTO services(name,category,price_minor,price_configured,is_active) VALUES('Synthetic converted consultation','consultation',2200,TRUE,TRUE) RETURNING id"))[0].id;
+    try {
+      await q("INSERT INTO settings(key,value) VALUES('finance.rate.SAR','440') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+      const make = async (name: string) => {
+        const patientId = (await q("INSERT INTO patients(patient_number,full_name) VALUES($1,$1) RETURNING id", [name]))[0].id;
+        const catalog = new Map((await db.listServices()).map(row => [row.id, row]));
+        const source = { patientId, currency: "SAR", items: [{ serviceId: fxId, price: "5", catalogPriceMinor: null, priceQuote: invoicePriceQuote(catalog.get(fxId)!, "SAR", { SAR: 440 }) }], idempotencyKey: name };
+        const parsed = parseInvoiceCommand(source, catalog, new Set(), { ...(await invoicePricingSettings()), "finance.rate.SAR": "440" }, true);
+        if (!parsed.ok) throw new Error(parsed.message);
+        return { patientId, source, input: { patientId, baseCurrency: parsed.baseCurrency, discountMinor: 0, note: null, items: parsed.items,
+          createdBy: session.username, actorRole: session.role, templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: name,
+          requestHash: invoiceCatalogRequestFingerprint(source, session), catalogueAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session }, auditDetails: {} } };
+      };
+      const successful = await make("CAT-CONVERTED-SUCCESS");
+      const first = await createLinkedInvoice(successful.input); if (!first.ok) throw new Error(first.reason);
+      expect((await q("SELECT details FROM audit_log WHERE action='invoice.create' AND entity_id=$1", [String(first.invoice.id)]))[0].details.invoicePriceSnapshots[0]).toMatchObject({ serviceId: fxId, quote: { source: "converted", rate: 440, rateSource: "finance.rate.SAR", rounding: "nearest-major-unit", minor: 500 } });
+      const stale = await make("CAT-CONVERTED-SAME-ROUNDING-STALE");
+      await q("UPDATE settings SET value='441' WHERE key='finance.rate.SAR'");
+      await expect(createLinkedInvoice(stale.input)).rejects.toBeInstanceOf(InvoiceTemplateAuthorityError);
+      expect(await counts(stale.patientId)).toEqual([{ invoices: 0, payments: 0, plans: 0 }]);
+      expect(await createLinkedInvoice(successful.input)).toMatchObject({ ok: true, replayed: true, invoice: { id: first.invoice.id, totalMinor: 500 } });
+      expect(await counts(successful.patientId)).toEqual([{ invoices: 1, payments: 0, plans: 0 }]);
+    } finally {
+      if (prior.length) await q("UPDATE settings SET value=$1 WHERE key='finance.rate.SAR'", [prior[0].value]);
+      else await q("DELETE FROM settings WHERE key='finance.rate.SAR'");
+    }
+  });
   it("persists exact installment terms atomically with an ordinary invoice and replays once",async()=>{
     const terms:DebtRepaymentTerms={mode:"installments",installments:[{dueDate:"2026-10-12",amountMinor:2345,kind:"down_payment"},{dueDate:"2026-11-12",amountMinor:10000,kind:"installment"}]};
     const {input}=await command("CAT-REPAYMENT-EXACT",terms);

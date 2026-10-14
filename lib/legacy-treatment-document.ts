@@ -1,3 +1,5 @@
+import type { ForeignRates } from "./service-pricing";
+import type { ParsedInvoiceInput } from "./invoice-input";
 import type { Service } from "./db";
 import { parseInvoiceInput } from "./invoice-input";
 import { checkInvoiceAuthority } from "./invoice-pricing";
@@ -33,16 +35,17 @@ export interface HistoricalDocumentLine {
 }
 export interface HistoricalDocumentInput {
   patientId:number;currency:Currency;idempotencyKey:string;lines:HistoricalDocumentLine[];
+  pricingSnapshots?:ParsedInvoiceInput["pricingSnapshots"];
   totalMinor:number;discountMinor:number;discountReason:string|null;agreedMinor:number;
   previouslyPaidMinor:number;remainingMinor:number;historicalAsOf:string;note:string|null;
   repaymentTerms:DebtRepaymentTerms;repaymentRemainingMinor:number;repaymentVersion:number;repaymentSourceHash:string|null;
 }
 export function parseHistoricalDocument(source:Record<string,unknown>, services:ReadonlyMap<number,Service>, doctors:ReadonlySet<number>,
-  context:{today:string;role:string;maxDiscountPercent:number}):{ok:true;value:HistoricalDocumentInput}|{ok:false;message:string} {
+  context:{today:string;role:string;maxDiscountPercent:number;rates?:ForeignRates}):{ok:true;value:HistoricalDocumentInput}|{ok:false;message:string} {
   if(Object.keys(source).some(key=>!["patientId","currency","items","discount","discountReason","previouslyPaidAmount","historicalAsOf","note","idempotencyKey","repaymentTerms","repaymentRemainingMinor","repaymentVersion","repaymentSourceHash"].includes(key)))
     return {ok:false,message:"بيانات الاتفاق التاريخي غير صالحة؛ لا يُقبل قالب أو هوية مالية بديلة ضمن هذا الطلب."};
   if(!isCurrency(source.currency))return {ok:false,message:"اختر عملة الاتفاق."};
-  const parsed=parseInvoiceInput(source,services,doctors);
+  const parsed=parseInvoiceInput(source,services,doctors,context.rates);
   if(!parsed.ok)return parsed;
   if(!parsed.idempotencyKey)return {ok:false,message:"مفتاح الاتفاق إلزامي لاستعادة الطلب نفسه."};
   const lines:HistoricalDocumentLine[]=[];
@@ -57,7 +60,7 @@ export function parseHistoricalDocument(source:Record<string,unknown>, services:
   const totalMinor=lines.reduce((sum,line)=>sum+line.unitPriceMinor,0);
   if(!Number.isSafeInteger(totalMinor)||totalMinor<=0||parsed.discountMinor>=totalMinor)return {ok:false,message:"راجع مجموع الاتفاق والخصم؛ المتفق عليه يجب أن يكون موجبًا."};
   const discountReason=typeof source.discountReason==="string"?source.discountReason.trim()||null:null;
-  const authority=checkInvoiceAuthority({lines:parsed.authorityLines,currency:parsed.baseCurrency,rates:{},role:context.role,
+  const authority=checkInvoiceAuthority({ requireInvoiceManualReason:true,lines:parsed.authorityLines,currency:parsed.baseCurrency,rates:context.rates??{},role:context.role,
     maxDiscountPercent:context.maxDiscountPercent,totalMinor,discountMinor:parsed.discountMinor,discountReason});
   if(!authority.ok)return authority;
   const agreedMinor=totalMinor-parsed.discountMinor;
@@ -69,7 +72,7 @@ export function parseHistoricalDocument(source:Record<string,unknown>, services:
     ||source.repaymentSourceHash!==null&&(typeof source.repaymentSourceHash!=="string"||!/^[a-f0-9]{64}$/.test(source.repaymentSourceHash)))
     return {ok:false,message:"راجع نسخة الرصيد السابق والمبلغ المطلوب جدولته."};
   const repayment=validateDebtRepaymentTerms(source.repaymentTerms,source.repaymentRemainingMinor);if(!repayment.ok)return repayment;
-  return {ok:true,value:{patientId:parsed.patientId,idempotencyKey:parsed.idempotencyKey,lines,totalMinor,
+  return {ok:true,value:{patientId:parsed.patientId,idempotencyKey:parsed.idempotencyKey,lines,totalMinor,pricingSnapshots:parsed.pricingSnapshots,
     discountMinor:parsed.discountMinor,discountReason,...preview.historical,note:parsed.note,
     repaymentTerms:repayment.value,repaymentRemainingMinor:source.repaymentRemainingMinor,repaymentVersion:source.repaymentVersion,repaymentSourceHash:source.repaymentSourceHash as string|null}};
 }

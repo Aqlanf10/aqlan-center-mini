@@ -170,6 +170,9 @@ async function renderedAccount(page: Page, proof: AccountReadProof, expectedWrit
 }
 /** Observe the application's own post-write reads; never substitute a test fetch or a sleep. */
 async function nativeSaveAndReadAccount(page: Page, patientId: number, control: Locator, expectedCount: number): Promise<AccountReadProof> {
+  // Native coordinate clicks do not wait for enabled state like Locator.click.
+  // Every invoice row now requires the real server preview, including consultation.
+  await expect.poll(() => control.isEnabled(), { timeout: 15_000 }).toBe(true);
   const ledgerPath = `/api/patients/${patientId}/ledger`, workflowPath = `/api/patients/${patientId}/workflow`;
   const reads = new Set<Request>(); let writeSeen = false;
   const isWrite = (response: Response) => new URL(response.url()).pathname === "/api/invoices"
@@ -235,6 +238,7 @@ describe("final native template command recovery", () => {
       await nativeClick(page, page.getByTestId("treatment-entry-open"));
       await nativeClick(page, page.getByRole("button", { name: "علاج جديد", exact: true }));
       await nativeSelect(page, page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }), String(consultation));
+      await expect.poll(() => save(page).isEnabled(), { timeout: 15_000 }).toBe(true);
       const refused = page.waitForResponse(response => new URL(response.url()).pathname === "/api/invoices" && response.request().method() === "POST");
       await nativeClick(page, save(page)); expect((await refused).status()).toBe(400);
       const error = page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب", exact: true });
@@ -617,15 +621,26 @@ describe("invoice form preview safety and shared chart interruption journeys", (
 
   it("ignores an older delayed response after changing to a financial-only service", async () => {
     const { page, context } = await openInvoice();
-    let held: Route | null = null;
-    await page.route("**/api/invoices/clinical-preview", async (route) => { held = route; });
+    let heldClinical: Route | null = null, heldFinancial: Route | null = null;
+    await page.route("**/api/invoices/clinical-preview", async (route) => {
+      const body = route.request().postDataJSON() as { items: { serviceId: number }[] };
+      if (body.items[0]?.serviceId === consultation) heldFinancial = route;
+      else heldClinical = route;
+    });
     try {
       await selectFilling(page);
-      await expect.poll(() => held !== null).toBe(true);
+      await expect.poll(() => heldClinical !== null).toBe(true);
       await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(consultation));
       expect(await page.getByTestId("invoice-clinical-preview-0").count()).toBe(0);
-      expect(await save(page).isEnabled()).toBe(true);
-      await json(held!, success(held!)).catch(() => undefined); // The old request may already be aborted.
+      expect(await save(page).isDisabled()).toBe(true);
+      await expect.poll(() => heldFinancial !== null).toBe(true);
+      await json(heldClinical!, success(heldClinical!)).catch(() => undefined); // The old request may already be aborted.
+      // Even a successful late clinical response cannot authorize the pending financial row.
+      expect(await save(page).isDisabled()).toBe(true);
+      expect(await page.getByTestId("invoice-clinical-preview-0").count()).toBe(0);
+      expect(await page.getByTestId("invoice-tooth-chip-0").count()).toBe(0);
+      await json(heldFinancial!, success(heldFinancial!));
+      await expect.poll(() => save(page).isEnabled(), { timeout: 15_000 }).toBe(true);
       expect(await page.getByTestId("invoice-clinical-preview-0").count()).toBe(0);
       expect(await page.getByTestId("invoice-tooth-chip-0").count()).toBe(0);
     } finally { await context.close(); }

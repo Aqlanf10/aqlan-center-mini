@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { invoicePriceQuote } from "../lib/invoice-price-quote";
 import type { InvoiceTemplatePreview, InvoiceTemplateSelection } from "../lib/invoice-template";
 import type { SpecialtyTemplate } from "../lib/specialty-templates";
 import type { LinePreview, PreviewState } from "../components/dental/invoice-preview-state";
@@ -65,6 +66,22 @@ function fixture(withManual = true) {
 }
 
 describe("canonical invoice template catalog", () => {
+  it("requires exact displayed source/rate evidence for quoted template services", () => {
+    const value=fixture(); value.context.currency="SAR";
+    for(const service of value.context.catalogServices){
+      const amount=value.payload.template.lines.find(line=>line.serviceId===service.id)!.unitPriceMinor;
+      const quote=invoicePriceQuote({priceMinor:amount*440/100,priceSarMinor:null,priceUsdMinor:null,priceConfigured:true},"SAR",{SAR:440});
+      service.invoiceQuotes={SAR:quote};
+      for(const line of value.payload.template.lines.filter(line=>line.serviceId===service.id))line.priceQuote=quote;
+    }
+    expect(value.read()?.template.lines[0].priceQuote).toMatchObject({source:"converted",rate:440});
+    const original=value.payload.template.lines[0].priceQuote!;
+    value.payload.template.lines[0].priceQuote={...original,rate:441};expect(value.read()).toBeNull();
+    delete value.payload.template.lines[0].priceQuote;expect(value.read()).toBeNull();
+    value.payload.template.lines[0].priceQuote=original;
+    for(const line of value.payload.template.lines.filter(line=>line.serviceId===11))line.unitPriceMinor++;
+    expect(value.read()).toBeNull();
+  });
   it("reads exact template and named-session settings without prices or fallback defaults", () => {
     const { template } = fixture();
     expect(readInvoiceTemplateCatalog({ templates: [template], services: [{ priceMinor: "untrusted" }] })).toEqual([template]);

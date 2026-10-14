@@ -3,6 +3,9 @@ import { LINKAGE_SPECIALTY_LABEL, lineLinkage, toothScope, validateLineSite } fr
 import type { InvoiceTemplatePreview, InvoiceTemplatePreviewLine, InvoiceTemplateSelection } from "@/lib/invoice-template";
 import { MAX_TEMPLATES, type SpecialtyTemplate, type TemplateStep } from "@/lib/specialty-templates";
 import { MAX_SESSION_COUNT } from "@/lib/workflow";
+import { readInvoicePriceQuote, sameInvoicePriceQuote } from "@/lib/invoice-price-quote";
+import type { InvoiceCatalogService } from "@/lib/invoice-catalog-price";
+import type { Currency } from "@/lib/money";
 import {
   INVOICE_TEMPLATE_SCHEDULED_ROW, readInvoiceSelectionPreview, type InvoicePreviewRequestRow,
 } from "./invoice-selection-state";
@@ -60,9 +63,10 @@ export function readInvoiceTemplateCatalog(payload: unknown): SpecialtyTemplate[
   return result;
 }
 
-export interface InvoiceTemplateCatalogService { id: number; name: string; category: string | null }
+export interface InvoiceTemplateCatalogService { id: number; name: string; category: string | null; invoiceQuotes?: InvoiceCatalogService["invoiceQuotes"] }
 export type InvoiceTemplatePreviewRow = InvoicePreviewRequestRow;
 export interface InvoiceTemplatePreviewContext {
+  currency?: Currency;
   selection: InvoiceTemplateSelection;
   template: SpecialtyTemplate;
   catalogServices: readonly InvoiceTemplateCatalogService[];
@@ -101,7 +105,17 @@ export function readInvoiceTemplatePreview(
   for (const service of context.catalogServices) {
     if (!object(service) || !id(service.id) || typeof service.name !== "string" || !service.name.trim()
       || !(service.category === null || typeof service.category === "string") || services.has(service.id)) return null;
-    services.set(service.id, { id: service.id, name: service.name, category: service.category });
+    const invoiceQuotes: InvoiceTemplateCatalogService["invoiceQuotes"] = {};
+    if (service.invoiceQuotes !== undefined) {
+      if (!object(service.invoiceQuotes)) return null;
+      for (const currency of ["YER","SAR","USD"] as const) {
+        if (service.invoiceQuotes[currency] === undefined) continue;
+        const quote = readInvoicePriceQuote(service.invoiceQuotes[currency],currency);
+        if (!quote) return null;
+        invoiceQuotes[currency] = quote;
+      }
+    }
+    services.set(service.id, { id: service.id, name: service.name, category: service.category, invoiceQuotes });
   }
   const choices = new Map<string, InvoiceTemplateSelection["steps"][number]>();
   for (const choice of selection.steps) {
@@ -157,7 +171,7 @@ export function readInvoiceTemplatePreview(
       if (!expectedSite.ok || (caseId !== null && (linkage.kind === "financial" || !linkage.needsCase)) || rowKeys.has(key)) return null;
       const raw = response.lines[lines.length];
       const lineIndex = manualRows.length + lines.length;
-      if (!object(raw) || !exactKeys(raw, ["line", "stepKey", "serviceId", "description", "quantity", "unitPriceMinor",
+      if (!object(raw) || !exactKeys(raw, [...(Object.hasOwn(raw,"priceQuote")?["priceQuote"]:[]), "line", "stepKey", "serviceId", "description", "quantity", "unitPriceMinor",
         "toothCode", "scope", "episodeTeeth", "surfaces", "caseId", "doctorId", "sessions", "sessionPlan"])
         || raw.line !== lineIndex || raw.stepKey !== step.key || raw.serviceId !== service.id || raw.description !== service.name
         || raw.quantity !== 1 || !integer(raw.unitPriceMinor, 1, Number.MAX_SAFE_INTEGER)
@@ -168,6 +182,8 @@ export function readInvoiceTemplatePreview(
       if (priceByService.has(service.id) && priceByService.get(service.id) !== raw.unitPriceMinor) return null;
       priceByService.set(service.id, raw.unitPriceMinor);
       totalMinor += raw.unitPriceMinor;
+      const quote = service.invoiceQuotes?.[context.currency??"YER"];
+      if ((quote || raw.priceQuote !== undefined) && (!quote || !sameInvoicePriceQuote(raw.priceQuote, quote) || quote.minor !== raw.unitPriceMinor)) return null;
       if (!Number.isSafeInteger(totalMinor)) return null;
       const sessionPlan: InvoiceTemplatePreviewLine["sessionPlan"] = [];
       for (const [index, scheduled] of raw.sessionPlan.entries()) {
@@ -202,6 +218,7 @@ export function readInvoiceTemplatePreview(
       rowKeys.add(key);
       rows.push({ key, clinical: linkage.kind === "clinical", expectedScheduled: INVOICE_TEMPLATE_SCHEDULED_ROW });
       lines.push({ line: lineIndex, stepKey: step.key, serviceId: service.id, description: service.name, quantity: 1,
+        ...(quote ? {priceQuote:quote} : {}),
         unitPriceMinor: raw.unitPriceMinor, toothCode: expectedSite.site.toothCode, scope: expectedSite.site.scope,
         episodeTeeth: expectedSite.site.episodeTeeth === null ? null : [...expectedSite.site.episodeTeeth],
         surfaces: expectedSite.site.surfaces, caseId, doctorId: selection.doctorId, sessions: step.sessions.length, sessionPlan });

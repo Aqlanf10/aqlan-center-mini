@@ -1,3 +1,5 @@
+import { invoicePriceQuote } from "@/lib/invoice-price-quote";
+import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -32,12 +34,13 @@ export async function GET(request: Request) {
   }
   const includeInactive = new URL(request.url).searchParams.get("all") === "1";
   try {
-    const [services, settings] = await Promise.all([listServices(includeInactive), getSettings()]);
+    const [services, settings, invoiceSettings] = await Promise.all([listServices(includeInactive), getSettings(), canHandleMoney(session.role) ? invoicePricingSettings() : Promise.resolve(null)]);
     // (DAY1) سعر كل خدمة بكل عملة كما ستُسعَّر في الزيارة — الخاص أو المحوَّل بسعر الصرف.
     const rates = foreignRatesFromSettings(settings);
     return NextResponse.json(services.map((service) => ({
       ...service,
       priceIn: catalogPricesByCurrency(service, rates),
+      ...(invoiceSettings ? { invoiceQuotes: Object.fromEntries((["YER", "SAR", "USD"] as const).map(currency => [currency, invoicePriceQuote(service, currency, foreignRatesFromSettings(invoiceSettings))])) } : {}),
     })));
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل قائمة الأسعار." }, { status: 500 });

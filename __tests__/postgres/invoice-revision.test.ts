@@ -8,6 +8,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv, createIsolate
 import type { DebtRepaymentTerms } from "../../lib/debt-installments";
 import type { SessionPayload } from "../../lib/auth";
 import { toInputAmount, type Currency } from "../../lib/money";
+import { readSavedRepaymentAgreement } from "../../lib/debt-repayment-agreement-db";
 assertRealPostgresUrl(); stubPostgresEnv();
 const db = await import("../../lib/db"), auth = await import("../../lib/auth");
 const revision = await import("../../lib/invoice-revision-db");
@@ -46,9 +47,13 @@ async function command(invoiceId: number, after: number) {
 }
 
 describe("immutable invoice replacement and original receipt settlement", () => {
-  it.each([0,4000,10000])("increases and decreases an invoice with %i already paid without moving receipts or duplicating debt",async paid => {
+  it.each((["YER","SAR","USD"] as const).flatMap(currency=>[0,4000,10000].map(paid=>({currency,paid}))))("$currency increases and decreases an invoice with $paid already paid without moving receipts or duplicating debt",async ({currency,paid}) => {
     for (const after of [6000,14000]) {
-      const invoice = await fixture(paid);
+      const invoice = await fixture(paid,currency);
+      const originalSchedule = paid < 10000 ? await debt.saveDebtRepayment({target:{patientId:invoice.patientId,currency,invoiceId:invoice.id,openingCurrency:null},
+        terms:terms(10000-paid),expectedVersion:0,expectedRemainingMinor:10000-paid,reason:"Synthetic original dated agreement",idempotencyKey:`initial-revision-schedule-${++serial}`,session}) : null;
+      if(originalSchedule)expect(await readSavedRepaymentAgreement(originalSchedule.arrangementId,1,"2026-10-14")).not.toBeNull();
+      const cashBefore=(await db.getOpenShift())!.expected;
       const receipts = await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId]);
       const input = await command(invoice.id,after);
       const view=readInvoiceRevisionView(await revision.readInvoiceRevision(invoice.id,session),invoice.patientId,invoice.id)!;
@@ -65,7 +70,7 @@ describe("immutable invoice replacement and original receipt settlement", () => 
         remainingMinor:Math.max(0,after-paid),creditMinor:Math.max(0,paid-after),accountDueMinor:after-paid});
       const corrected = (await q("SELECT corrected_invoice_id FROM invoice_corrections WHERE original_invoice_id=$1",[invoice.id]))[0].corrected_invoice_id;
       const client = await db.getPool().connect();
-      try { expect(await debt.readDebtPosition(client,{patientId:invoice.patientId,currency:"YER",invoiceId:corrected,openingCurrency:null}))
+      try { expect(await debt.readDebtPosition(client,{patientId:invoice.patientId,currency,invoiceId:corrected,openingCurrency:null}))
         .toMatchObject({principalMinor:after,settledMinor:paid,remainingMinor:Math.max(0,after-paid)}); } finally { client.release(); }
       expect(await q("SELECT to_jsonb(p) AS receipt FROM payments p WHERE patient_id=$1 ORDER BY id",[invoice.patientId])).toEqual(receipts);
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1 AND status<>'cancelled'",[invoice.patientId])).toHaveLength(1);
@@ -75,6 +80,31 @@ describe("immutable invoice replacement and original receipt settlement", () => 
       expect(readInvoiceRevisionReceipt(replay,retained)).not.toBeNull();
       const workspace = await debt.debtRepaymentWorkspace(invoice.patientId,"2026-10-14");
       expect(workspace.targets.reduce((sum,target)=>sum+target.remainingMinor,0)).toBe(Math.max(0,after-paid));
+      if(originalSchedule)expect(await readSavedRepaymentAgreement(originalSchedule.arrangementId,1,"2026-10-14")).toBeNull();
+      const active=workspace.arrangements.filter(row=>row.status==="active"&&row.terms.mode==="installments");
+      expect(active).toHaveLength(after>paid?1:0);
+      if(active[0]){
+        const printable=await readSavedRepaymentAgreement(active[0].id,active[0].version,"2026-10-14");
+        expect(printable?.schedule).toMatchObject({target:{currency,invoiceId:corrected},principalMinor:after,collectedMinor:paid,remainingMinor:after-paid});
+        expect(printable?.source.invoice_number).toBe((await db.getInvoice(corrected))!.invoiceNumber);
+      }
+      const ledger=await db.patientLedger(invoice.patientId);
+      const balances=db.ledgerBalancesByCurrency(invoice.patientId,ledger,new Map());
+      expect(balances[currency]).toMatchObject({billedMinor:after,collectedMinor:paid,dueMinor:after-paid});
+      for(const other of (["YER","SAR","USD"] as const).filter(code=>code!==currency))expect(balances[other]).toMatchObject({billedMinor:0,collectedMinor:0,dueMinor:0});
+      expect((await db.getOpenShift())!.expected).toEqual(cashBefore);
+      if(paid>0&&active[0]){
+        const originalPayment=ledger.payments.find(row=>row.kind==="payment")!;
+        const refund=await db.recordPayment({patientId:invoice.patientId,invoiceId:invoice.id,kind:"refund",amountMinor:1000,currency,baseCurrency:currency,
+          exchangeRate:1,method:"cash",note:"Synthetic explicit ancestor refund",createdBy:session.username,reversalOfId:originalPayment.id,idempotencyKey:`revision-explicit-refund-${++serial}`});
+        expect(refund.reason).toBeNull();
+        expect(await readSavedRepaymentAgreement(active[0].id,active[0].version,"2026-10-14")).toBeNull();
+        const refundedLedger=await db.patientLedger(invoice.patientId);
+        expect(db.ledgerBalancesByCurrency(invoice.patientId,refundedLedger,new Map())[currency]).toMatchObject({billedMinor:after,collectedMinor:paid-1000,dueMinor:after-paid+1000});
+        const cashAfter=(await db.getOpenShift())!.expected;
+        for(const code of ["YER","SAR","USD"] as const)expect(cashAfter[code]).toBe(cashBefore[code]-(code===currency?1000:0));
+        expect(refundedLedger.payments.find(row=>row.id===originalPayment.id)?.invoiceId).toBe(invoice.id);
+      }
     }
   });
   it("replays one concurrent command, rejects changed intent and a stale second command",async () => {

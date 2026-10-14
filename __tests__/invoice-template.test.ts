@@ -14,6 +14,12 @@ const services = new Map([service(1, "rct", 60000), service(2, "crown", 40000), 
   service(4, "ortho", 240000), service(5, "cleaning", 12000), service(6, "filling", 15000)].map((one) => [one.id, one]));
 const doctors = new Set([7]);
 const defaults = withDefaults({});
+it("a rounded-zero template directs users to positive reasoned manual invoice pricing without changing rounding",()=>{
+  const tinyServices=new Map([...services].map(([id,entry])=>[id,{...entry,priceMinor:1,priceSarMinor:null}]));
+  const result=parseInvoiceCommand({patientId:1,currency:"SAR",templateSelection:selection()},tinyServices,doctors,withDefaults({"finance.rate.SAR":"440"}),false);
+  expect(result.ok).toBe(false);if(result.ok)throw new Error("Rounded-zero template must refuse");
+  expect(result.message).toContain("نتج عنه صفر");expect(result.message).toContain("بسعر يدوي موجب وسبب");
+});
 const selection = (): InvoiceTemplateSelection => ({ templateId: "endo", teeth: [36, 11, 36], doctorId: 7,
   steps: [{ key: "rct", include: true, serviceId: 1 }, { key: "crown", include: true, serviceId: 2 }],
   sites: [11, 36].map((toothCode) => ({ stepKey: "crown", toothCode, episodeTeeth: [11, 36] })),

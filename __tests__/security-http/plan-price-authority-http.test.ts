@@ -140,10 +140,20 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
   });
 
   it("an unpriced catalog service keeps its typed price on the linked clinical item", async () => {
-    const unpriced = await createTreatment("reception", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000 }]);
+    const unreasoned = await createTreatment("reception", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000 }]);
+    expect(unreasoned.status).toBe(400);
+    expect((await unreasoned.json() as { message: string }).message).toContain("سبب التسعير اليدوي");
+    const { rows: [patient] } = await db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number=$1", [`FIN5-${stamp}-${sequence}`]);
+    for (const table of ["invoices", "treatment_plans", "clinical_cases", "payments"]) {
+      expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [patient.id])).rows).toEqual([]);
+    }
+    const reason = "اتفاق صريح لسعر خدمة غير مسعرة بالفاتورة";
+    const unpriced = await createTreatment("reception", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000, priceReason: reason }]);
     expect(unpriced.status).toBe(201);
-    const { clinical: { planId } } = await unpriced.json() as { clinical: { planId: number } };
+    const { id: invoiceId, clinical: { planId } } = await unpriced.json() as { id: number; clinical: { planId: number } };
     expect(await storedItems(planId)).toEqual([{ name: `خدمة بلا سعر للخطة ${stamp}`, price: 7000 }]);
+    const { rows: [audit] } = await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND entity_id=$1", [String(invoiceId)]);
+    expect(audit.details.invoicePriceSnapshots[0]).toMatchObject({ agreedPriceSource: "manual", requestedMinor: 7000, reason });
   });
 
   it("adding an item to a foreign-currency plan follows the same rule on its typed price", async () => {
