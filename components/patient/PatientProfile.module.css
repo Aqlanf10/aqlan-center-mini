@@ -14,3 +14,5 @@
 .editor fieldset { min-width: 0; padding: 15px; border: 1px solid #d5e8fa; border-radius: 9px; }
 .editor legend { padding: 0 8px; color: #0073c8; font-size: 13px; font-weight: 700; }
 @media (max-width: 767px) { .columns, .editor { grid-template-columns: minmax(0,1fr); } }
+
+@media (max-width: 767px) { .toolbar button, .editor button, .workspace form button { min-height: 44px; } }

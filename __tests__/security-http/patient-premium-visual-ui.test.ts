@@ -95,6 +95,14 @@ describe("patient premium real application evidence",()=>{
         if(sceneName === "materials") await page.getByRole("button",{name:"+ صرف مادة من المخزن",exact:true}).first().click();
         if(sceneName === "medical-history") await page.getByRole("navigation",{name:"تفاصيل الملخص"}).getByRole("button",{name:"التاريخ الطبي",exact:true}).click();
         if(sceneName === "files") {
+          expect(await page.getByTestId("patient-document-gallery").count()).toBe(1);
+          expect(await page.getByTestId("patient-document-card").count()).toBe(2);
+          if(width === 390) {
+            const sizes=await page.getByRole("region",{name:"تصنيفات المستندات"}).getByRole("button").evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().height));
+            expect(sizes.every(height=>height >= 44)).toBe(true);
+            const actionSizes=await page.getByRole("group",{name:"إجراءات المستند المحدد"}).getByRole("button").evaluateAll(buttons=>buttons.map(button=>button.getBoundingClientRect().height));
+            expect(actionSizes.every(height=>height >= 44)).toBe(true);
+          }
           const preview=page.getByRole("region",{name:"معاينة المستند المحدد"});
           await expect.poll(()=>preview.locator("img").evaluate(img=>(img as HTMLImageElement).naturalWidth)).toBe(900);
           await preview.getByRole("button",{name:"عرض بالحجم الكامل",exact:true}).click();
@@ -223,9 +231,27 @@ describe("premium UI authority and draft ownership",()=>{
       expect(await camera.evaluate(el=>(el as HTMLInputElement).files?.length)).toBe(0);
       const saved=page.waitForResponse(r=>r.url().endsWith(`/api/patients/${patientId}/documents`) && r.request().method()==="POST");
       await page.locator("form").filter({has:page.getByLabel("وصف المستند",{exact:true})}).locator('button[type="submit"]').click();
-      const response=await saved; expect(response.status()).toBe(201); expect((await response.json()).title).toBe(title);
+      const response=await saved; expect(response.status()).toBe(201);
+      const uploaded=await response.json(); expect(uploaded.title).toBe(title);
+      expect(await page.getByTestId("patient-document-gallery").count()).toBe(1);
+      await expect.poll(()=>page.getByRole("button").filter({hasText:title}).count()).toBe(1);
       const item=page.getByRole("region",{name:"اختيار ملف للمعاينة"}).getByRole("button").filter({hasText:title}); await item.click();
       await expect.poll(()=>page.getByRole("region",{name:"معاينة المستند المحدد"}).locator("img").evaluate(img=>(img as HTMLImageElement).naturalWidth)).toBe(900);
+      const actions=page.getByRole("group",{name:"إجراءات المستند المحدد"});
+      expect(await actions.getByRole("button",{name:"اجعلها صورة المريض",exact:true}).count()).toBe(1);
+      expect(await actions.getByRole("button",{name:"مقارنة",exact:true}).count()).toBe(1);
+      const removal=page.waitForResponse(r=>r.url().endsWith(`/api/documents/${uploaded.id}`) && r.request().method()==="DELETE");
+      const note=page.waitForEvent("dialog").then(dialog=>dialog.accept("إخفاء اصطناعي للتحقق من القائمة الموحدة"));
+      await actions.getByRole("button",{name:"أخفِ",exact:true}).click(); await note;
+      expect((await removal).status()).toBe(200);
+      await expect.poll(()=>page.getByTestId("patient-document-gallery").getByRole("button").filter({hasText:title}).count()).toBe(0);
+      await page.getByRole("region",{name:"تصنيفات المستندات"}).getByRole("button",{name:/المستندات المخفية/}).click();
+      const hidden=page.getByTestId("patient-document-gallery").getByRole("button").filter({hasText:title});
+      expect(await hidden.count()).toBe(1); await hidden.click();
+      expect(await actions.innerText()).toContain("إخفاء اصطناعي للتحقق من القائمة الموحدة");
+      expect(await actions.getByRole("button",{name:"أخفِ",exact:true}).count()).toBe(0);
+      const persisted=await db.query("SELECT removed_at, removed_note FROM patient_documents WHERE id=$1 AND patient_id=$2",[uploaded.id,patientId]);
+      expect(persisted.rows).toHaveLength(1); expect(persisted.rows[0].removed_at).not.toBeNull();
       await page.getByTestId("patient-tab-summary").click();
       await page.getByTestId("summary-current-work").waitFor();
     } finally {await context.close();}

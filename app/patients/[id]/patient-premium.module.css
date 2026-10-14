@@ -116,3 +116,9 @@
   .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) { order: -1; }
   .ledger > div > :global([role="alert"]), .ledger > div > :global([role="status"]) { order: -2; }
 }
+
+/* Touch sizing is scoped to patient actions, never the clinical tooth geometry. */
+@media (max-width: 767px) {
+  .summaryViews button, .ledger > div > div:has(> :global([data-testid="treatment-entry-open"])) > button { min-height: 44px; }
+  .root :global([data-testid="patient-referral-form"] button) { min-height: 44px; }
+}

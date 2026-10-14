@@ -22,3 +22,12 @@
 .upload > summary { color: #0071c7; font-size: 13px; font-weight: 700; cursor: pointer; }
 .upload form { margin-top: 10px; box-shadow: none; border: 0; padding: 0; }
 @media (max-width: 767px) { .browser { grid-template-columns: minmax(0,1fr); } .categories { display: flex; flex-wrap: wrap; gap: 4px; } .categories button { width: auto; min-height: 40px; border: 1px solid #dfedfb; border-radius: 6px; } .preview { height: 270px; } .list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); max-height: 200px; } }
+
+/* Actions belong to the selected document; the destructive action is distinct. */
+.tools button[data-destructive] { color: #b42318; border-color: #f3b5ae; margin-inline-start: auto; }
+.tools button:disabled { opacity: .45; cursor: wait; }
+.workspace button:focus-visible, .workspace a:focus-visible, .upload summary:focus-visible { outline: 2px solid #0878d2; outline-offset: 3px; }
+@media (max-width: 767px) {
+  .tools button, .tools a, .categories button, .upload button, .upload select, .upload label[for] { min-height: 44px; }
+  .upload label[for] { display: inline-flex; align-items: center; }
+}

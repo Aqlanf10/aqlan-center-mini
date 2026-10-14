@@ -7,23 +7,23 @@
       {
         "width": 1448,
         "filename": "summary-1448.png",
-        "sha256": "635c6f53a84959ca129ff4f3d9342ac08484cff0a6a99e158a003aaa4c1f037e",
+        "sha256": "0dfaf84e40949fd3d507020fd2e94139d9c8fac8117fd2952d46978f44427aa5",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "summary-1280.png",
-        "sha256": "1238edc998f99a466eb48f4f01e19455840b71f0f53b8421e1e155a4ca18873c",
+        "sha256": "cf41c63a019b17cf7f034bb14b0f591a0ef54ef489aa42ccd091125f09c4783f",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "summary-390.png",
-        "sha256": "49a6fc55b46ea3f82f72a9d9a194d18ce37fe5465d632e80a282fdd5686c8893",
+        "sha256": "e3ec5580ed2730dba4d294624cb560f9681cf0b5fd2b6548d12922a91c2f2f03",
         "detailFile": null
       }
     ],
-    "pixelComparison": "152337 pixels (ratio 0.11 of all image pixels) are different."
+    "pixelComparison": "152349 pixels (ratio 0.11 of all image pixels) are different."
   },
   {
     "scene": "today",
@@ -33,23 +33,23 @@
       {
         "width": 1448,
         "filename": "today-1448.png",
-        "sha256": "fe2eb79c7863fac226f9f71d0ed89ebf0a1af5ff018c4aa1176221417a1f5293",
+        "sha256": "c541ced14ace45f5fdd57fec1637c685139fe17bba467a857d7437869ff34840",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "today-1280.png",
-        "sha256": "77e83ae2c67c05644000371e08f5ef332ca0ae13d490af94182ba18c209b0589",
+        "sha256": "2d73d1c53c673fca50ccee994659d07a67187ee4788312269f6b23b1423fcab0",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "today-390.png",
-        "sha256": "a47a51c327826274c4be50e627aefe99969964fdcc4ca6c96abcc5035f4bd535",
+        "sha256": "3749d8c8bf67eff587fb58a1cf3cb56a2dfc47b1596b713a5df874638ee52f0e",
         "detailFile": null
       }
     ],
-    "pixelComparison": "142027 pixels (ratio 0.10 of all image pixels) are different."
+    "pixelComparison": "142039 pixels (ratio 0.10 of all image pixels) are different."
   },
   {
     "scene": "account",
@@ -59,23 +59,23 @@
       {
         "width": 1448,
         "filename": "account-1448.png",
-        "sha256": "57df62482a7bd341f22131a57a6ad6a89a56526b2b59f4e577569e963be0265a",
+        "sha256": "e0305ae102ab96a507247d16770564aa6665eaffa1da57a4b1f9d8fb53f669d8",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "account-1280.png",
-        "sha256": "8dcc8c5126aedfd9fe60bdf46b5000aa6d5d36514d40c300c8be75fbf38fc9db",
+        "sha256": "dbfaffdae5e99b9e8a0264e32f61112dd0bdebf6da6634b2ad62f93c32e7a17f",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "account-390.png",
-        "sha256": "06900aa6a42ededc3898566659185bfacad1c6fd3002c9ffed3c797100604562",
+        "sha256": "36021e15aa03b79ff9639e440ace092b370ecf3c32a6c6d42053ea7b2656f96c",
         "detailFile": null
       }
     ],
-    "pixelComparison": "152069 pixels (ratio 0.11 of all image pixels) are different."
+    "pixelComparison": "152109 pixels (ratio 0.11 of all image pixels) are different."
   },
   {
     "scene": "files",
@@ -85,23 +85,23 @@
       {
         "width": 1448,
         "filename": "files-1448.png",
-        "sha256": "2a20b70c1b6750a00cca523d0500e39f68e9e2aabb78f3def4a856f19f66eade",
+        "sha256": "db4e4e7fe7eea08c595bf411f8736a2620f25f6e007e1de61e509fc88d71a602",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "files-1280.png",
-        "sha256": "d55d9fe7991f0fc277f549a9178e601248a457f737d12b5db24176c0674b240c",
+        "sha256": "caab5629c4f62e510128e6794840af560c2ac4cbec1f679ca07b0cb30beac606",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "files-390.png",
-        "sha256": "9b753903658fd1b485c24ec5f32352a3cdb244a3f39359267a95b5ddf1b4550f",
+        "sha256": "4bcf1b52b9de3fb28d69e5f1a1395a4cac83905ea3bc5a2de409241c569c3de4",
         "detailFile": null
       }
     ],
-    "pixelComparison": "356063 pixels (ratio 0.25 of all image pixels) are different."
+    "pixelComparison": "356380 pixels (ratio 0.25 of all image pixels) are different."
   },
   {
     "scene": "treatment",
@@ -111,23 +111,23 @@
       {
         "width": 1448,
         "filename": "treatment-1448.png",
-        "sha256": "e9880fb343770dfbc2555be6a2ada439ce68050e72ec605c16ac3626a10dfee3",
+        "sha256": "e3920d684b0ee96b781159bc0e4edb616f3202094fbbc572802b37fd8af27cfd",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "treatment-1280.png",
-        "sha256": "8aab5deffd0de57b481f647006a984051409ca3e3994ed48e88d3554031ee992",
+        "sha256": "074d6b22348e5e9cfd49581e6a4c6144028ac98370cfab4d9a8dc4ac7805302f",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "treatment-390.png",
-        "sha256": "959a30410aa03b61307c670f8761af344e3205063b702a4d41f6af80fc28630f",
+        "sha256": "068723f6c86087129c6c54532d08e2e5181cc3f6cb9d6c6d6cd3928cc2c7fa00",
         "detailFile": null
       }
     ],
-    "pixelComparison": "146034 pixels (ratio 0.10 of all image pixels) are different."
+    "pixelComparison": "146046 pixels (ratio 0.10 of all image pixels) are different."
   },
   {
     "scene": "plans",
@@ -137,23 +137,23 @@
       {
         "width": 1448,
         "filename": "plans-1448.png",
-        "sha256": "0acc17b7e7fad56c6eaaab8b20ea8dca48d5e05ff9371669154ed0bbacba8f43",
+        "sha256": "de894fdbe5ba6ece939a6e5b3a1ad4144f86882d5126d75ab16ba0004998c3c7",
         "detailFile": "plans-1448-detail.png"
       },
       {
         "width": 1280,
         "filename": "plans-1280.png",
-        "sha256": "2b9019b9a3737d8901b7ce267588007ad9e027c8568a023a25f0e3cc4915f8f6",
+        "sha256": "ad813c5f0f4d07bf02e551fcd2eba7b5719c2b63cad11b9b2d9879c1ff3319f9",
         "detailFile": "plans-1280-detail.png"
       },
       {
         "width": 390,
         "filename": "plans-390.png",
-        "sha256": "25c4ee4be0a2ff05c6a1f1b4094b980f8bcf67073c4536f49d129340965e91f6",
+        "sha256": "6856f696c1b0b4b840ea3174774398ad8fced6c85d83133a5822a4c424aa196e",
         "detailFile": "plans-390-detail.png"
       }
     ],
-    "pixelComparison": "127405 pixels (ratio 0.09 of all image pixels) are different."
+    "pixelComparison": "127417 pixels (ratio 0.09 of all image pixels) are different."
   },
   {
     "scene": "cases",
@@ -163,23 +163,23 @@
       {
         "width": 1448,
         "filename": "cases-1448.png",
-        "sha256": "cdc94beea1244a262104c0f52e4445cde9c8a6989be73c9442b9ffb2cda62732",
+        "sha256": "59b90ea69e182ce06f0ab69e7737f9544bdd2526633ccc92fffcfb0b07b770f3",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "cases-1280.png",
-        "sha256": "a0ae508340348a15e1d5eefb7e810cf18872dc3b7316857c4e2f1531b4ee9075",
+        "sha256": "abb5f0a6a5601a85e004edbc611a117c643e373945aff0bedf1e77776c43a05b",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "cases-390.png",
-        "sha256": "ec5fd66dce44639536d5ff2ac4dd1902994bbdb13a23d5b2158c4af760111fdc",
+        "sha256": "359758787fca33262077000f7fc7d2e9c52299acce4bf0110e5b830791d8c766",
         "detailFile": null
       }
     ],
-    "pixelComparison": "131802 pixels (ratio 0.09 of all image pixels) are different."
+    "pixelComparison": "131814 pixels (ratio 0.09 of all image pixels) are different."
   },
   {
     "scene": "endo",
@@ -189,23 +189,23 @@
       {
         "width": 1448,
         "filename": "endo-1448.png",
-        "sha256": "efe8c77dd7d8467d03016a3419acfdd3b83977913a896e8a04fafd480c88ad57",
+        "sha256": "e90844a70ade01758e0837db73e84c368478814800d53b1d1ab116ef60957c3c",
         "detailFile": "endo-1448-detail.png"
       },
       {
         "width": 1280,
         "filename": "endo-1280.png",
-        "sha256": "be695d838fe355da69c156d824785de941f97ee8b6481ec9e145385f553ddc9a",
+        "sha256": "73a2ab4e242bfdef4d4fcaae3fa6e27cad7ef96113f2dad7df8f4af853cc5e0a",
         "detailFile": "endo-1280-detail.png"
       },
       {
         "width": 390,
         "filename": "endo-390.png",
-        "sha256": "41ff1874d17a19b656bf25d6e09998a0966edc38f852bd32fa001fc545ffcd8e",
+        "sha256": "80511010032508bf3957eba7667c91d1f63a4926b4415eb65130a159bb2440c2",
         "detailFile": "endo-390-detail.png"
       }
     ],
-    "pixelComparison": "167160 pixels (ratio 0.12 of all image pixels) are different."
+    "pixelComparison": "167172 pixels (ratio 0.12 of all image pixels) are different."
   },
   {
     "scene": "ortho",
@@ -215,23 +215,23 @@
       {
         "width": 1448,
         "filename": "ortho-1448.png",
-        "sha256": "f95e5258c85e9af3136ade912462613a2f63537f3c9d8cc75219a3607daeee03",
+        "sha256": "ea9f0899a74f765e863787087b94371fe185e6934ccb746bf0eec639510a333c",
         "detailFile": "ortho-1448-detail.png"
       },
       {
         "width": 1280,
         "filename": "ortho-1280.png",
-        "sha256": "e2ba2b87c2a0bd6c843e824c8e22a63d098b971a513017c5f80524ffb7e9370d",
+        "sha256": "c224c0188abf0bbfdb390ca0754ec3d2f46014e0c5e8fe0e7ce49c8f595f6c92",
         "detailFile": "ortho-1280-detail.png"
       },
       {
         "width": 390,
         "filename": "ortho-390.png",
-        "sha256": "8f5e91c4c2a29b4fe8704ebc51e8f044f01e3ea393b7466bca3b0a4401473184",
+        "sha256": "0be0d939725384fc5f8253c76e7b07fb242426e1f8952a2d684323f825b4a971",
         "detailFile": "ortho-390-detail.png"
       }
     ],
-    "pixelComparison": "276523 pixels (ratio 0.19 of all image pixels) are different."
+    "pixelComparison": "276535 pixels (ratio 0.19 of all image pixels) are different."
   },
   {
     "scene": "lab",
@@ -241,23 +241,23 @@
       {
         "width": 1448,
         "filename": "lab-1448.png",
-        "sha256": "1300ead147db46d7c24264fd36cbbb97b2f7ac680d15ae5ae41defb6ebc22a61",
+        "sha256": "91d937a9657f5979822bbb99ac976458792f9001898a8abb0572aa3515b1871f",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "lab-1280.png",
-        "sha256": "5ef713aa579584e005f894639263bff9b9be0f2adb696fea6839d5c6450e4f97",
+        "sha256": "9de42ce8c0b033e0032a598db6c2b72bcc75c3622fc4c0a4219e97faad33210d",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "lab-390.png",
-        "sha256": "d3ba48ac2e9cce5bf00a1eedf6565d968d903bdac2bcb48acbc8df018aefa3a1",
+        "sha256": "fbb9bb018d2951396726c7c617bf51612ddc7e149ca5b776d94ddfa646493db8",
         "detailFile": null
       }
     ],
-    "pixelComparison": "129178 pixels (ratio 0.09 of all image pixels) are different."
+    "pixelComparison": "129190 pixels (ratio 0.09 of all image pixels) are different."
   },
   {
     "scene": "referrals",
@@ -267,23 +267,23 @@
       {
         "width": 1448,
         "filename": "referrals-1448.png",
-        "sha256": "25dcbfe46fce1cd5d723d5636142b091dbfafbd262d886d06b767b182108873d",
+        "sha256": "318a0edf6db5b175b05abcd8419dbaa612983902efe171efc79f218647ab8a61",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "referrals-1280.png",
-        "sha256": "6ddaa45cca47deab605e32fe76b8bf1526db6c76f278c4a5f722c142eefc0184",
+        "sha256": "ebb1c94ba56cb2255be13cd24a9476b7a3302108ba70bd00befdd7d0ba9d2f41",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "referrals-390.png",
-        "sha256": "3c2118f60edc7f324c7c59cf1215a631aeb65fc256796708c86d4193c2c5a8d3",
+        "sha256": "ca4179140c1038faaed23675b8b488797088369a50c89edcc7b5c5bbb5117a67",
         "detailFile": null
       }
     ],
-    "pixelComparison": "130786 pixels (ratio 0.09 of all image pixels) are different."
+    "pixelComparison": "130798 pixels (ratio 0.09 of all image pixels) are different."
   },
   {
     "scene": "materials",
@@ -293,23 +293,23 @@
       {
         "width": 1448,
         "filename": "materials-1448.png",
-        "sha256": "bbde23a13781869f03ddeeda37a1369a5b9529199806de15bae72b445458b51f",
+        "sha256": "da166cb6caf008beb8cbaae8a6c51f0156b580b76b1c1fcd31e084e78a9903f7",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "materials-1280.png",
-        "sha256": "b44edd7cc4ea2503cdb263110a4ecddbd049442e1f4170d66b606331599a541b",
+        "sha256": "ff6f144ea057db46977aa57f374071ab2753361ab8a1d45bef1cdb6d16a72837",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "materials-390.png",
-        "sha256": "f12da428bbeb7c0103de110393f97bea912a678d5d73fe47250e66fb6b73b141",
+        "sha256": "f5773c76b27f78ba70723056d0887a72ded9dda53b4c922458154634b7732e3d",
         "detailFile": null
       }
     ],
-    "pixelComparison": "125762 pixels (ratio 0.09 of all image pixels) are different."
+    "pixelComparison": "125774 pixels (ratio 0.09 of all image pixels) are different."
   },
   {
     "scene": "personal-details",
@@ -319,23 +319,23 @@
       {
         "width": 1448,
         "filename": "personal-details-1448.png",
-        "sha256": "9dba4ad4c58e2a1f91d1240cd1a4e1e8c1956a90030c1a07fca8732d0e354d2a",
+        "sha256": "789aae539f1896ac51968d3dc45c2474390a53f7ebf25a1230d733e84d62eb40",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "personal-details-1280.png",
-        "sha256": "706b5badfc1559304b7bd62a400de89039888ebd52de6ab6ab701ae5982995f9",
+        "sha256": "5cf00f582e76ca30815dd654a2085db83ba047999105485053ca5c21189787ed",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "personal-details-390.png",
-        "sha256": "da50dc1e82c582625fc418e2c58f3c2329bb0bd77159dca57d223abacdc9abc6",
+        "sha256": "1e4962ed626879c6b1bd05499686350c1f32ffe388662f17fcf4975b81643e28",
         "detailFile": null
       }
     ],
-    "pixelComparison": "116794 pixels (ratio 0.08 of all image pixels) are different."
+    "pixelComparison": "116802 pixels (ratio 0.08 of all image pixels) are different."
   },
   {
     "scene": "medical-history",
@@ -345,23 +345,23 @@
       {
         "width": 1448,
         "filename": "medical-history-1448.png",
-        "sha256": "990eb5b42cca63f54fd6c844eb6e579dcca4812ebd6f65fd657b62ec8f588fc1",
+        "sha256": "1e21a5b64e267af9bddd9f33cc708834c4299957913560b297324664c44910b5",
         "detailFile": null
       },
       {
         "width": 1280,
         "filename": "medical-history-1280.png",
-        "sha256": "a3a5bd90bfd27167ba8d6c997af629ea436e5fc32ecd7331caf54c2c6f88ed14",
+        "sha256": "bf504fe28bca11b857bd0290924fee9bff784b89afb66819f0ef09753f515ee0",
         "detailFile": null
       },
       {
         "width": 390,
         "filename": "medical-history-390.png",
-        "sha256": "9658e6bb2f40cd4bd7d7de5ee1761d46f579c7ca80e4d8c361d80630ed0d25b2",
+        "sha256": "99d79df184110facda1e705b300c59fec3752ec03070aa415191a42905509160",
         "detailFile": null
       }
     ],
-    "pixelComparison": "111086 pixels (ratio 0.08 of all image pixels) are different."
+    "pixelComparison": "111098 pixels (ratio 0.08 of all image pixels) are different."
   },
   {
     "scene": "cephalometric",
@@ -371,22 +371,22 @@
       {
         "width": 1448,
         "filename": "cephalometric-1448.png",
-        "sha256": "1d369caf1357520d0ffe6156451cae6b238044a6e553364c212f32e8e6cf46a8",
+        "sha256": "52a3f544903ff18ba586963a5ddba3bec8ca6361911eb7526a695651a3723083",
         "detailFile": "cephalometric-1448-detail.png"
       },
       {
         "width": 1280,
         "filename": "cephalometric-1280.png",
-        "sha256": "11420512d808e1bb12795713f229b7dcdff524d7d81656a3ce618a62477865e1",
+        "sha256": "0e8e7bc0d5fbd7301bdba079844a1fcfb8e8a0feef30616743860648c490743a",
         "detailFile": "cephalometric-1280-detail.png"
       },
       {
         "width": 390,
         "filename": "cephalometric-390.png",
-        "sha256": "c4f000d7d7c5f9e236b21648180bae585687c151bf94e8df53eb0e06d7093722",
+        "sha256": "fd4596884193b213a783aa5031c2e67c3314c78ba19e702639d7940f44100093",
         "detailFile": "cephalometric-390-detail.png"
       }
     ],
-    "pixelComparison": "167728 pixels (ratio 0.12 of all image pixels) are different."
+    "pixelComparison": "167740 pixels (ratio 0.12 of all image pixels) are different."
   }
 ]
