@@ -1,0 +1,66 @@
+# PR #330 — pending-note regression and visual refinement
+
+Failed head: `2d1c9cb28bcc45987f51412b071817b9b4cdc238`.
+Failed [CI run 38497563800](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38497563800), job `115636732267`, step **HTTP security integration tests**.
+
+## Failure evidence and cause
+
+Both GitHub annotations identify `__tests__/security-http/clinical-visit-pending-notes-ui.test.ts:292:38`:
+
+- `retains notes and unlocks after a POST rejection, allowing a corrected retry`
+- `retains notes and unlocks after a POST network failure, allowing a corrected retry`
+
+Expected `f.alerts.count()` = **1**; actual = **0**. The same unmodified head reproduced both failures locally, with the other three cases passing. This was not diagnosed from an assumed timeout: the assertion was immediate, and the preceding draft-content and lock-state checks had passed.
+
+The fixture scoped alerts to `#visit-notes`' immediate parent. Compared with integration base `175957f4e074d28b819d00a51f3f1e6d53b3d78b`, the design added `visitColumns` and `visitNotes` wrappers. The error still renders at the `ClinicalVisit` root, outside that notes column. The base-to-failed-head diff in this component consists of the CSS import and those wrappers; it did not change the clinical reader, writer, ownership or permission checks.
+
+The repair marks the existing owner-keyed root with `data-testid="clinical-visit-workspace"` and scopes the existing alert assertion to that root. It retains count, exact error text, all five notes, POST/GET locking, corrected retry and safe-request assertions, and adds an explicit visibility assertion. No test was deleted or disabled and no timeout or CI rule was changed. The two failing cases and then the complete five-case file passed locally against the optimized application build.
+
+The full GitHub log archive could not be downloaded: `gh run view --log-failed` received HTTP 403 from the environment's download proxy. The job metadata and complete annotations were retrieved through the GitHub API. The local reproduction log is complete; it is not represented as the unavailable remote archive.
+
+## Warning ownership found during visual verification
+
+An intermediate attempt to show all warnings through the readiness area failed the existing navigation tests. A successfully authorized patient-record warning must remain visible even when readiness has not granted a clinical read or its GET fails. That attempted composition was discarded before commit.
+
+The final composition retains the independently authorized patient banner and the existing readiness hook unchanged. The cockpit omits only text exactly matching the patient warning already displayed beside it. Distinct history warnings remain visible; no fuzzy matching merges diagnoses. Add/replace/remove tests check the current patient warning and the separate history warning, including the original viewport hit tests for **both** sources, failed canonical GETs, and unchanged ENDO drafts. Denied readiness never gains access from a local warning.
+
+## Visual changes in this repair
+
+- Visit-stage disclosure shares the action row, and patient header padding is reduced without fixed heights or clipped warnings.
+- The original plan cards now precede their read-only financial-reference region in DOM/tab order. References remain complete in a responsive two-column region, with the same reader and permissions.
+- Selected-plan progress uses a linear indicator of actual recorded procedures. Historical/unknown progress remains explicitly unknown.
+- Summary has one collection action in its account section. Native currencies remain separate; detailed agreement/invoice values expand independently without introducing another writer.
+- The four existing account regions share the desktop row; expanded treatment/history forms use full width. Closed disclosures and short balance cards no longer stretch into empty full-height panels.
+- Mobile action targets remain at least 44px; clinical tooth geometry is not resized.
+
+The 15-reference comparison gallery and runner evidence are updated in `evidence/final`. Remaining deviations are recorded in `PATIENT_PREMIUM_REFERENCE_REVIEW.md`; illustrative clinical data and financial relationships are never manufactured for visual similarity. No migration, financial engine, API authorization, staging service or production deployment was changed.
+
+
+## Final local checks
+
+- 58/58 cases across six HTTP/browser files passed after the final account/plan layout: all 15 scenes at three widths, pending-note failures, patient navigation/freshness, invoice settlement labels, read-only historical preview, and plan-payment permission/lifetime checks.
+- The broader nine-file run passed 79/79 before the final presentation-only account/plan adjustments, including visit ownership, readiness denial, native review and More.
+- Focused unit runs passed 101/101 for warnings/ownership and 69/69 for plan visibility/lifetimes. Typecheck, lint (0 errors, 185 existing warnings), optimized build, environment contract and money aggregation guard passed.
+- The portable gallery verified 90 viewport/full-page image hashes and loaded all three width selections in Chromium without JavaScript errors. It includes 12 additional clinical detail captures and the 15 original references/difference maps.
+
+See [runner results](evidence/final/repair-verification-results.txt), [the failed-head reproduction](evidence/final/pending-notes-before.log), [remote failure annotations](evidence/final/failed-ci-annotations.json), and [source/capture provenance](evidence/final/capture-context.json). Final GitHub CI is tracked by exact SHA on PR #330; local results do not replace it.
+
+## Full-suite follow-up: native CSS in the Ceph StrictMode fixture
+
+The full local HTTP run on checkpoint `99a3f142` uncovered another setup regression inherited from `2d1c9cb2`: `patient-ceph-post-real-react.test.ts` bundled the real `PatientCeph` component without an output path. The new `PatientProfile.module.css` import therefore stopped esbuild before any of that file's 27 cases could execute. Those cases were reported skipped because setup failed; they were not deliberately disabled. The file and component were unchanged between those two heads.
+
+The fixture now supplies a virtual output directory with `write:false`, verifies that both the JavaScript and CSS outputs exist, verifies the actual CSS module is among the bundle inputs, and injects the generated stylesheet into its isolated HTML page under the existing CSP. It preserves the class-name mapping and all original StrictMode, patient/case/principal/permission lifetime and navigation assertions. No product component or screenshot changed in this follow-up.
+
+The preceding full local run recorded 1308 passed, two native-PDF test failures, and this one suite setup failure (27 cases not run). The two PDF failures concern Arabic glyph extraction/geometry in unchanged lab and receipt print tests under local Chromium 151 / Poppler 25.03. CI installs locked Chromium 153. The official matching-browser download was blocked with HTTP 403; the PDF oracles were not weakened. The observed receipt gap is 1.832742pt against the existing 0–0.5pt CI calibration; the lab label colon is attached to a word locally rather than extracted separately. Their final CI outcome is reported on the exact-head run, not inferred from local results.
+
+The full local unit run had 9179 passes and one unchanged runtime-tracing 5000ms timeout (8257ms). Its isolated recheck passed 5/5, with that assertion taking 4387ms. The checkpoint's GitHub unit stage also passed. See the retained full-HTTP failure summary and subsequent Ceph/pending-note runner log in `evidence/final`.
+
+After the fixture repair, all 27 Ceph cases and all five pending-note cases passed together (32/32), with typecheck and lint also passing. The application source and visual capture hashes remain unchanged from checkpoint `99a3f142`.
+
+## Full-suite follow-up: independent report witness day
+
+A complete rerun on `b3424f85` executed all 27 repaired Ceph cases, then exposed a separate order-dependent test fixture collision. `collections-native-currency-ui.test.ts:78` expected no pre-existing rows on its witness day, but found four. That file used `2000-03-03`; `receipt-provenance-ui.test.ts` also creates receipts on that clinic date (`2000-03-02T22:00:00Z`, Asia/Aden). When cached test ordering placed receipt provenance first, the report witness was contaminated.
+
+The collections fixture now uses the unused day `2000-03-05`. The empty-day assertion, real database writers, exact currency amounts, negative controls, downloads and native PDF assertions are unchanged. Running receipt provenance first and collections second in the same isolated database now passes the complete collections case. The receipt PDF case still reports its documented local glyph-geometry difference; that pair is not described as entirely green. The temporary sequencer extends the unchanged HTTP config solely to reproduce the observed ordering; it does not alter CI or deadlines. See `collections-order-after.txt`.
+
+That full rerun recorded 1331 passes, five failed cases and one collection case not run due to fixture setup. Beyond the two PDF cases, three cases timed out waiting for the first read immediately after DOMContentLoaded: lab at `patient-lab-read-state-ui.test.ts:130` (two cases) and finance at `finance-shift-read-state-ui.test.ts:85` (one). Both unchanged files then passed together, 16/16, without raising their deadlines. These are retained as intermittent local failures, not silently counted as full-run passes. The application sources and all visual captures remain unchanged by this fixture-only follow-up.

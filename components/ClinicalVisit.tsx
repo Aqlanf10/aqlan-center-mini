@@ -1,5 +1,8 @@
 "use client";
 
+import { DentalChart } from "./DentalChart";
+import patientClinical from "./patient/PatientClinical.module.css";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { CLINIC_BASE_CURRENCY, formatAmount, formatMoney, isCurrency, parseAmount, type Currency } from "@/lib/money";
@@ -225,9 +228,11 @@ interface BillingPreview {
   zeroReason: string | null;
 }
 
-export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange, onPreviousVisitReferenceChange }: {
+export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedPatientId, onNavigationGuardChange, onPreviousVisitReferenceChange, showPatientChart = false }: {
   visitId: number;
   expectedPatientId?: number;
+  /** Patient-file presentation variant; standalone visit keeps its existing readers. */
+  showPatientChart?: boolean;
   onNavigationGuardChange?: (guard: (() => boolean) | null) => void;
   /** Presentation-only: lets the enclosing workspace omit the same visible reference. */
   onPreviousVisitReferenceChange?: (previousVisitId: number | null) => void;
@@ -1144,8 +1149,37 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
     </>
   );
+  const examinationFields = (<>
+    {!orthoFollowUp ? <>
+        {([
+          ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
+          ["examination", "② الفحص", phrases.examination],
+        ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
+          <Field key={key} label={label} maxLength={key === "chiefComplaint" ? 500 : 2000} value={notes[key]} disabled={signed || busy || !canWrite}
+            auto={autoFilled.has(key)} phrases={signed ? [] : list}
+            onPhrase={signed ? undefined : (phrase) => setNote(key, appendPhrase(notes[key], phrase))}
+            onChange={(value) => setNote(key, value)} />
+        ))}
+    </> : null}
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-bold text-slate-500">
+            الطبيب المعالج
+            {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
+          </span>
+          <select value={doctorId ?? ""} disabled={signed || busy || !canEditWork}
+            onChange={(event) => {
+              if (busy || !currentOwner()) return;
+              draftForLeave.current = { owner, dirty: true }; setDirty(true); setDoctorId(Number(event.target.value) || null);
+              setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
+            }}
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
+            <option value="">—</option>
+            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+          </select>
+        </label>
+  </>);
   const visitNotes = (
-      <div id="visit-notes" className="mb-4 grid scroll-mt-4 gap-2 sm:grid-cols-2">
+      <div className={patientClinical.noteFields}>
         {orthoFollowUp ? (
           <>
             <Field label="شكوى جديدة أو تغيّر اليوم (إن وجد)" maxLength={500} value={notes.chiefComplaint} disabled={busy || !canWrite}
@@ -1173,16 +1207,11 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             </details>
           </>
         ) : <>
-        {([
-          ["chiefComplaint", "① الشكوى الرئيسية", phrases.chiefComplaint],
-          ["examination", "② الفحص", phrases.examination],
-          ["diagnosis", "② التشخيص", phrases.diagnosis],
-        ] as [NoteKey, string, string[]][]).map(([key, label, list]) => (
-          <Field key={key} label={label} maxLength={key === "chiefComplaint" ? 500 : 2000} value={notes[key]} disabled={signed || busy || !canWrite}
-            auto={autoFilled.has(key)} phrases={signed ? [] : list}
-            onPhrase={signed ? undefined : (phrase) => setNote(key, appendPhrase(notes[key], phrase))}
-            onChange={(value) => setNote(key, value)} />
-        ))}
+        <Field label="② التشخيص" maxLength={2000} value={notes.diagnosis} disabled={signed || busy || !canWrite}
+          auto={autoFilled.has("diagnosis")} phrases={signed ? [] : phrases.diagnosis}
+          onPhrase={signed ? undefined : (phrase) => setNote("diagnosis", appendPhrase(notes.diagnosis, phrase))}
+          onChange={(value) => setNote("diagnosis", value)} />
+
         <Field label="③ ما نُفّذ" value={notes.treatmentDone} disabled={signed || busy || !canWrite}
           hint={!signed && notes.treatmentDone && notes.treatmentDone === lastAutoTreatment.current ? "نص مشتق من قائمة الإجراءات؛ يمكنك تعديله. لا يثبت التوقيع أو اكتمال شروط الخطة." : undefined}
           onChange={(value) => setNote("treatmentDone", value)} />
@@ -1191,28 +1220,13 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
           onPhrase={signed ? undefined : (phrase) => setNote("nextPlan", appendPhrase(notes.nextPlan, phrase))}
           onChange={(value) => setNote("nextPlan", value)} />
         </>}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">
-            الطبيب المعالج
-            {autoFilled.has("doctor") ? <span className="mr-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">✨ تلقائي</span> : null}
-          </span>
-          <select value={doctorId ?? ""} disabled={signed || busy || !canEditWork}
-            onChange={(event) => {
-              if (busy || !currentOwner()) return;
-              draftForLeave.current = { owner, dirty: true }; setDirty(true); setDoctorId(Number(event.target.value) || null);
-              setAutoFilled((current) => { const next = new Set(current); next.delete("doctor"); return next; });
-            }}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm disabled:bg-slate-50">
-            <option value="">—</option>
-            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
-          </select>
-        </label>
+
       </div>
 
   );
 
   return (
-    <div key={owner.generation}>
+    <div key={owner.generation} data-testid="clinical-visit-workspace">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-danger-300 bg-danger-50 px-4 py-2 text-sm font-semibold text-danger-700">{error}</p>
       ) : null}
@@ -1234,7 +1248,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         </div>
       ) : null}
 
-      <div className={`mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
+      <div className={`${patientClinical.visitToolbar} mb-4 flex flex-wrap items-center gap-2 rounded-2xl border-2 p-3 ${
         signed ? "border-success-300 bg-success-50" : "border-navy-800 bg-white"
       }`}>
         <Icon name={signed ? "check" : "clock"} className={`h-5 w-5 ${signed ? "text-success-700" : "text-navy-800"}`} />
@@ -1282,19 +1296,16 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
         ) : null}
       </div>
 
-      <VisitSteps steps={orthoFollowUp ? [
-        { id: "visit-ortho-session", label: "جلسة اليوم", done: Boolean(visit.ortho?.visitAdjustmentId || orthoSession?.done.trim()) },
-        { id: "visit-notes", label: "تغيّرات اليوم", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
-        { id: "visit-procedures", label: "إجراءات إضافية", done: drafts.length > 0 },
-        { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
-      ] : [
-        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
-        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
-        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
-        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
-      ]} />
 
-      {orthodonticEntry}
+
+      <div id="visit-notes" className={patientClinical.visitColumns} data-testid="visit-reference-columns">
+        <section className={patientClinical.visitExamination} aria-label="الفحص والسياق السريري للزيارة">
+          <h3>المعلومات السريرية لهذه الزيارة</h3>
+          {orthodonticEntry}
+          {!orthoFollowUp ? visitReference : null}
+          {examinationFields}
+        </section>
+      <div className={patientClinical.visitNotes}><h3>التشخيص والملاحظات</h3>
       {orthoFollowUp ? (
         <>
           {visitNotes}
@@ -1349,10 +1360,14 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             {visitReference}
           </details>
         </>
-      ) : <>{visitReference}{visitNotes}</>}
+      ) : visitNotes}
+      </div>
 
-      <section id="visit-procedures" className="mb-4 min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3" aria-label="قائمة عمل الزيارة">
+      <section id="visit-procedures" className={`${patientClinical.visitProcedures} mb-4 min-w-0 scroll-mt-4 rounded-2xl border border-slate-200 bg-white p-3`} aria-label="قائمة عمل الزيارة">
+        <h3 className={patientClinical.regionHeading}>مخطط الأسنان والإجراءات</h3>
+
         <fieldset disabled={busy || !canEditWork} className="m-0 min-w-0 border-0 p-0">
+        {showPatientChart ? (contextPatientId ? <DentalChart patientId={contextPatientId} readOnly /> : <p role="status" className="text-xs text-slate-600">يظهر المخطط بعد ربط الزيارة بملف المريض الصحيح.</p>) : null}
         {!signed && canWrite ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" role="radiogroup" aria-label="عملة الزيارة">
             <span className="text-xs font-extrabold text-navy-900">عملة الزيارة:</span>
@@ -1572,6 +1587,19 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
         </fieldset>
       </section>
+      </div>
+
+      <VisitSteps steps={orthoFollowUp ? [
+        { id: "visit-ortho-session", label: "جلسة اليوم", done: Boolean(visit.ortho?.visitAdjustmentId || orthoSession?.done.trim()) },
+        { id: "visit-notes", label: "تغيّرات اليوم", done: Boolean(notes.chiefComplaint.trim() || notes.nextPlan.trim()) },
+        { id: "visit-procedures", label: "إجراءات إضافية", done: drafts.length > 0 },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: false },
+      ] : [
+        { id: "visit-notes", label: "الشكوى", done: Boolean(notes.chiefComplaint.trim()) || signed },
+        { id: "visit-notes", label: "الفحص والتشخيص", done: Boolean(notes.examination.trim() || notes.diagnosis.trim()) || signed },
+        { id: "visit-procedures", label: "الإجراءات", done: drafts.length > 0 || signed },
+        { id: "visit-sign", label: "المراجعة والتوقيع", done: signed },
+      ]} />
 
       {labVisitIsCurrent ? <section aria-label="طلبات المختبر المرتبطة بالزيارة" data-testid="clinical-visit-lab-orders" className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs">
         <h3 className="font-bold text-sky-900">طلبات المختبر المرتبطة بالزيارة</h3>

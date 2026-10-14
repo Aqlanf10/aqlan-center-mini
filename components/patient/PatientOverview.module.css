@@ -1,0 +1,64 @@
+.summary { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.metrics { margin-bottom: 0; }
+.currency { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 11px; font-weight: 700; color: #39749f; }
+.metricGrid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.metric { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 15px; min-height: 76px; background: white; border: 1px solid #d5e8fa; border-radius: 9px; box-shadow: 0 2px 6px #19609508; }
+.metric dt { font-size: 11px; color: #50779e; font-weight: 600; }
+.metric dd { margin-top: 5px; color: #075da7; font-size: 20px; line-height: 1.3; font-weight: 700; overflow-wrap: anywhere; }
+.metric[data-tone="paid"] dd { color: #008b66; } .metric[data-tone="due"] dd { color: #bd5c00; }
+.metricIcon { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; background: #edf7ff; color: #248cd8; border-radius: 9px; }
+.metric[data-tone="paid"] .metricIcon { color: #00866b; background: #e8faf5; } .metric[data-tone="due"] .metricIcon { color: #c06400; background: #fff2e5; }
+.note { color: #607e9a; font-size: 11px; margin: 6px 0 0; line-height: 1.8; }
+.workGrid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr); gap: 10px; }
+.card { min-width: 0; border: 1px solid #d5e8fa; border-radius: 10px; background: white; box-shadow: 0 2px 8px #1a669108; overflow: hidden; }
+.heading { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 10px 13px; border-bottom: 1px solid #e0eefc; font-size: 14px; font-weight: 700; color: #0572c7; }
+.body { padding: 13px; font-size: 12px; }
+.facts > div { display: flex; gap: 12px; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #e2effa; }
+.facts dt { color: #527aa0; } .facts dd { color: #155083; font-weight: 600; text-align: end; }
+.action { display: flex; justify-content: center; align-items: center; gap: 7px; min-height: 35px; width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #c1e1ff; color: #0071c7; background: white; font-size: 12px; font-weight: 700; }
+.action + .action { margin-top: 8px; }
+.primary { background: linear-gradient(110deg,#1499ec,#006bcb); color: white; border: 0; }
+.orange { background: linear-gradient(110deg,#ffae32,#ed7b0b); color: #472300; border: 0; }
+.planSelect { margin-bottom: 12px; display: block; color: #567da2; font-size: 11px; }
+.planSelect select { display: block; width: 100%; min-height: 34px; margin-top: 5px; padding: 6px; background: #f8fbff; border: 1px solid #cce3fa; border-radius: 6px; color: #174c7d; font-size: 12px; font-weight: 600; }
+.progress { display: flex; flex-direction: column; align-items: stretch; gap: 16px; padding: 4px 0 16px; }
+.progressTrack { width: 100%; }
+.progressLabel { display: flex; justify-content: space-between; gap: 12px; color: #527aa0; font-size: 11px; }
+.progressLabel strong { color: #1069af; font-variant-numeric: tabular-nums; }
+.progressRail { height: 10px; margin-top: 8px; overflow: hidden; border-radius: 6px; background: #e4f1fb; }
+.progressRail > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(100deg,#ffab32,#f58220); }
+.progress p { font-size: 13px; font-weight: 700; color: #145083; }
+.progress small { display: block; margin-top: 8px; color: #5b7892; font-size: 11px; font-weight: 400; }
+.followUp { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.disclosure { border: 1px solid #d5e8fa; border-radius: 10px; background: white; padding: 12px; }
+.disclosure > summary { cursor: pointer; color: #1069af; font-size: 13px; font-weight: 700; }
+.disclosure > div { margin-top: 12px; }
+@media (max-width: 767px) {
+  .metricGrid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .metric { padding: 12px 10px; min-height: 85px; } .metric dd { font-size: 17px; }
+  .metricIcon { width: 26px; height: 30px; } .metricIcon svg { width: 17px; }
+  .workGrid, .followUp { grid-template-columns: minmax(0,1fr); }
+}
+
+.currencyChoices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 11px; color: #5c7e9d; }
+.currencyChoices button { padding: 6px 12px; border: 1px solid #cde5fa; border-radius: 6px; color: #076dbc; background: white; font-weight: 700; }
+.currencyChoices button[aria-pressed="true"] { background: #0b80d3; border-color: #0b80d3; color: white; }
+
+@media (max-width: 767px) { .action, .currencyChoices button, .planSelect select { min-height: 44px; } }
+.action:focus-visible, .currencyChoices button:focus-visible { outline: 2px solid #0878d2; outline-offset: 3px; }
+
+.alerts { display: flex; flex-wrap: wrap; gap: 6px; }
+.alerts > li { flex: 1 1 260px; }
+.accountActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.accountCurrencies { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+.currencyCard { min-width: 0; padding: 12px; border: 1px solid #d5e8fa; border-radius: 8px; background: #f7fbff; }
+.amountDetails { margin-top: 12px; font-size: 12px; }
+.amountDetails summary { cursor: pointer; color: #1069af; font-weight: 700; padding-block: 8px; }
+.amountRows { margin-top: 4px; }
+.amountRow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 9px; border-bottom: 1px solid #e0eefc; }
+.amountRow:last-child { border-bottom: 0; }
+@media (max-width: 767px) { .accountCurrencies { grid-template-columns: minmax(0,1fr); } .accountActions > *, .amountDetails summary { min-height: 44px; } }
+
+.metrics { display: flex; flex-direction: column; gap: 6px; }.currencyChoices { margin: 0; }
+.nativeDues { display: flex; flex-direction: column; gap: 4px; }.metric .nativeDues { font-size: 14px; }.nativeDues > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }.nativeDues small { color: #52779e; font-size: 10px; font-weight: 400; }
+.metric:has(.nativeDues) { align-items: flex-start; }.metricGrid { align-items: stretch; }

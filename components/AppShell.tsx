@@ -1,5 +1,6 @@
 "use client";
 
+import patientShell from "./patient/PatientShell.module.css";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
@@ -59,6 +60,7 @@ const BARE_PATHS = ["/login", "/setup", "/display", "/book", "/print", "/portal"
 export function AppShell({ children, clinicTimeZone }: { children: React.ReactNode; clinicTimeZone: string }) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
+  const patientWorkspace = /^\/patients\/[^/]+$/.test(pathname);
   const clinicName = useClinicName();
   const { session, logout } = useSessionActions();
 
@@ -98,15 +100,17 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
 
   const bare = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
+  const badgeRole = session?.role;
   const loadBadges = useCallback(async () => {
     try {
       const [requests, lab, messages] = await Promise.all([
-        fetch("/api/booking-requests?status=new", { cache: "no-store" }),
+        badgeRole === "admin" || badgeRole === "reception"
+          ? fetch("/api/booking-requests?status=new", { cache: "no-store" }) : Promise.resolve(null),
         fetch("/api/lab?summary=1", { cache: "no-store"}),
         fetch("/api/messages?unread=1", { cache: "no-store" }),
       ]);
       const next = { requests: 0, lab: 0, messages: 0, urgentMessages: 0 };
-      if (requests.ok) next.requests = ((await requests.json()) as unknown[]).length;
+      if (requests?.ok) next.requests = ((await requests.json()) as unknown[]).length;
       if (lab.ok) next.lab = Number(((await lab.json()) as { late?: number }).late ?? 0);
       if (messages.ok) {
         const payload = (await messages.json()) as { unread?: number; urgent?: number };
@@ -130,7 +134,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
     } catch {
       // العدّادات تبقى على آخر قيمة
     }
-  }, []);
+  }, [badgeRole]);
 
   // تاريخ المركز وساعته من توقيت الخادم المحسوم، لا من توقيت جهاز المشاهد.
   useEffect(() => {
@@ -225,21 +229,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 
   const restActive = nav.slice(4).some((item) => isActive(item.href));
-
-  return (
-    <div className="min-h-full lg:flex print:block">
-      {/* القائمة الجانبية للشاشات الكبيرة — تختفي في الطباعة: ورقة التقرير
-          تحمل ترويسة المركز، لا قائمة تنقّل البرنامج. */}
-      <aside className="hidden w-60 shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col print:hidden">
-        <div className="flex items-start gap-2.5 border-b border-slate-100 p-4">
-          <Logo className="mt-0.5 h-9 w-9 shrink-0" />
-          <div className="min-w-0">
-            <p className="text-[13px] font-bold leading-tight text-navy-900">{clinicName}</p>
-            <p className="mt-0.5 text-[10px] font-semibold text-slate-600">نظام إدارة المركز الطبي</p>
-          </div>
-        </div>
-        <nav className="flex-1 space-y-0.5 p-3">
-          {nav.map((item) => (
+  const sidebarLinks = (items: NavItem[]) => <>          {items.map((item) => (
             <a
               key={item.href}
               href={item.href}
@@ -254,9 +244,37 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
               <span className="flex-1">{item.label}</span>
               <Badge item={item} badges={badges} />
             </a>
-          ))}
+          ))}</>;
+  const patientPrimaryRoutes = ["/", "/patients", "/appointments", "/ortho", "/finance", "/lab", "/reports", "/settings"];
+  const primaryNav = patientPrimaryRoutes.flatMap(href => nav.filter(item => item.href === href));
+  const secondaryNav = nav.filter(item => !patientPrimaryRoutes.includes(item.href));
+
+
+  return (
+    <div className={`${patientWorkspace ? patientShell.shell : ""} min-h-full lg:flex print:block`} data-patient-shell={patientWorkspace || undefined}>
+      {/* القائمة الجانبية للشاشات الكبيرة — تختفي في الطباعة: ورقة التقرير
+          تحمل ترويسة المركز، لا قائمة تنقّل البرنامج. */}
+      <aside className={`${patientWorkspace ? patientShell.sidebar : ""} hidden w-60 shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col print:hidden`} aria-label="التنقل الرئيسي">
+        {patientWorkspace ? <div className={patientShell.sidebarBrand}>AQLAN CENTER MINI</div> : <div className="flex items-start gap-2.5 border-b border-slate-100 p-4">
+          <Logo className="mt-0.5 h-9 w-9 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-[13px] font-bold leading-tight text-navy-900">{clinicName}</p>
+            <p className="mt-0.5 text-[10px] font-semibold text-slate-600">نظام إدارة المركز الطبي</p>
+          </div>
+        </div>
+        }
+        <nav className={`${patientWorkspace ? patientShell.sideNav : ""} flex-1 space-y-0.5 p-3`}>
+          {patientWorkspace ? <>
+            {sidebarLinks(primaryNav)}
+            <details className={patientShell.secondaryNav}>
+              <summary><Icon name="menu" className="h-4 w-4" /> بقية أقسام المركز</summary>
+              {sidebarLinks(secondaryNav)}
+              <a href="/display" target="_blank" rel="noopener"><Icon name="screen" className="h-4 w-4" /> شاشة الصالة</a>
+              <a href="/book" target="_blank" rel="noopener"><Icon name="link" className="h-4 w-4" /> صفحة حجز المرضى</a>
+            </details>
+          </> : sidebarLinks(nav)}
         </nav>
-        <div className="space-y-0.5 border-t border-slate-100 p-3">
+        {!patientWorkspace && <div className="space-y-0.5 border-t border-slate-100 p-3">
           <a href="/display" target="_blank" rel="noopener"
             className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
             <Icon name="screen" className="h-4 w-4 shrink-0" /> شاشة الصالة
@@ -267,7 +285,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
           </a>
         </div>
 
-        {session ? (
+        }
+        {patientWorkspace ? <div className={patientShell.sidebarFooter} aria-hidden="true"><span>♡</span>A HEALTHIER SMILE<br />A BRIGHTER TOMORROW</div> : session ? (
           <div className="border-t border-slate-100 p-3 space-y-2">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-navy-100 text-[11px] font-bold text-navy-800">
@@ -323,13 +342,14 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
           </div>
         )}
         {/* شريط علوي موحد للشاشات الكبيرة (Desktop & Tablet Header Bar) */}
-        <header className="hidden print:hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30">
+        <header className={`${patientWorkspace ? patientShell.desktopHeader : ""} hidden print:hidden lg:flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-6 py-2.5 backdrop-blur-md sticky top-0 z-30`}>
+          {patientWorkspace ? <div className={patientShell.headerBrand}><Logo className="h-14 w-16" /><div><p>{clinicName}</p><small>AQLAN ALKAMEL DENTAL CENTER</small></div><span className={patientShell.headerSlogan} dir="ltr">A HEALTHIER SMILE<br />A BRIGHTER TOMORROW</span></div> : null}
           {/* زر البحث الفوري الشامل */}
           {restricted ? <span /> : (
           <button
             type="button"
             onClick={() => setSearchModalOpen(true)}
-            className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-1.5 text-xs text-slate-500 hover:border-navy-300 hover:bg-white hover:text-navy-900 transition-all w-80 max-w-sm"
+            className={`${patientWorkspace ? patientShell.search : ""} flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3.5 py-1.5 text-xs text-slate-500 hover:border-navy-300 hover:bg-white hover:text-navy-900 transition-all w-80 max-w-sm`}
           >
             <Icon name="search" className="h-4 w-4 text-slate-600" />
             <span className="flex-1 text-right font-medium">بحث عن مريض أو شاشة...</span>
@@ -340,7 +360,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
           )}
 
           {/* الوقت والإجراء السريع وحالة الحساب */}
-          <div className="flex items-center gap-3">
+          <div className={`${patientWorkspace ? patientShell.shellTools : ""} flex items-center gap-3`}>
+            {patientWorkspace ? <div className={patientShell.headerUser}><span className={patientShell.headerAvatar} aria-hidden="true">{(session.displayName || session.username).slice(0, 1)}</span><a href="/account">{session.displayName || session.username}<small>{ROLE_LABEL[session.role as Role] ?? session.role}</small></a></div> : null}
             <button
               type="button"
               onClick={() => setShortcutsOpen(true)}
@@ -350,7 +371,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
             >
               <kbd className="font-mono text-[10px] font-black">?</kbd>
             </button>
-            {clock.date && (
+            {!patientWorkspace && clock.date && (
               <div className="flex items-center gap-1.5 rounded-xl bg-slate-50 border border-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
                 <Icon name="clock" className="h-3.5 w-3.5 text-slate-600" />
                 <span>{clock.date}</span>
@@ -360,7 +381,7 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
             )}
 
             {/* زر المساعد الذكي للعيادة (للمصرح لهم) */}
-            {hasAiChat && (
+            {hasAiChat && !patientWorkspace && (
               <button
                 type="button"
                 onClick={() => setAiChatOpen(true)}

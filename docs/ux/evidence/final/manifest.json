@@ -1,0 +1,482 @@
+[
+  {
+    "scene": "summary",
+    "title": "الملخص",
+    "referenceSha256": "e52da5b9050e4c761b88d40e993864bb493280401028ca013697696e0736aea2",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "summary-1448.png",
+        "sha256": "8792eaa3248f424b6a218b119c580de0182c9a4912b21ab397a6f3ad5a2a2d3d",
+        "fullFile": "summary-1448-full.png",
+        "fullSha256": "2cecd9ebceb0d643aed4cb30abd8a7402f3d852b7eed5d6e6b23aeda07fcff39",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "summary-1280.png",
+        "sha256": "a02b3f9f3b92d6967df83420398ddcac463f27588bd2dc54a8f18bff20d38366",
+        "fullFile": "summary-1280-full.png",
+        "fullSha256": "ea738f7f83297d288e938735b8083642edbab563a83bce8984f785d7fba19ca3",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "summary-390.png",
+        "sha256": "138fd66f5e63c92092ee6773f7988aa0c1f7aa5f5bcf6d265f463b27b7165c25",
+        "fullFile": "summary-390-full.png",
+        "fullSha256": "802b66e333a4bbb68c426219d026d904a50955b8dda80664a11c54c50af518d7",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "150097 pixels (ratio 0.11 of all image pixels) are different."
+  },
+  {
+    "scene": "today",
+    "title": "زيارة اليوم",
+    "referenceSha256": "ff62547331840b5e0fd1337f5e3d2180207e9a17021f8b2ec14b4b2c4d120088",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "today-1448.png",
+        "sha256": "3ecb39584c1bb3cd6de5b6bbdc5d7d5fe7a24582779e9e2fe120a31897cc6117",
+        "fullFile": "today-1448-full.png",
+        "fullSha256": "946cf5bcbf6880d07486719c8511fdb9e07d07a492651e33348d1b69a184be6a",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "today-1280.png",
+        "sha256": "92c1213d1b215050dde2e05226339a7a30e6fdf819ca10cdf3e6203bbad955cd",
+        "fullFile": "today-1280-full.png",
+        "fullSha256": "7dc89a46c7191bcbd81322ea9a547e19d5c0fe8fbae10df950234e726f9d7e7d",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "today-390.png",
+        "sha256": "011d2ebed0550b4512818fefd78670af1adc6d207f63770155210fb9d6959a40",
+        "fullFile": "today-390-full.png",
+        "fullSha256": "b26e52a83cc97a17bcbef3c59c0b881dac5003e7bc642d7e2b306ff34dd70f73",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "141459 pixels (ratio 0.10 of all image pixels) are different."
+  },
+  {
+    "scene": "account",
+    "title": "الحساب",
+    "referenceSha256": "bb8641db129783e010cb65263fdb82ff415253b33f29602b790c6baad3837e30",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "account-1448.png",
+        "sha256": "71c40e0b7d261d023c327df7d49a0b889e12ddde9d9730224bae253fce7887c9",
+        "fullFile": "account-1448-full.png",
+        "fullSha256": "f7c1bee203f3d6f80f9fcaf2898d1d5b6417703c5b537e2568793d20d21c3a92",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "account-1280.png",
+        "sha256": "e8ce5ee938e5928147a76fdfe1bbc9ad8c0f03aad7e91f9d8b20ce4da5c67fc7",
+        "fullFile": "account-1280-full.png",
+        "fullSha256": "403485b3d33a0d9a4fb66bf5e9a14a568d51918034ca7ecfb60f30d7a4b7ed86",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "account-390.png",
+        "sha256": "ec536ec94cb45fc3bc5d1a7f555549f53ec84527334a715361da0af3efc25994",
+        "fullFile": "account-390-full.png",
+        "fullSha256": "c6cdb63a40a24118af4ed07930143367017605c7a1fc391cf6ad56cd2e0ca904",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "140751 pixels (ratio 0.10 of all image pixels) are different."
+  },
+  {
+    "scene": "files",
+    "title": "الأشعة والملفات",
+    "referenceSha256": "aad8e92f7aa3559856ed2d710c9b93918b21ac1b09f81f78fd447ea168756482",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "files-1448.png",
+        "sha256": "f947b3f92b509cb4508c12b3728cd671dd97a29785a55997664de61b4d800c62",
+        "fullFile": "files-1448-full.png",
+        "fullSha256": "14aaedf621d37910dc02f11c50d9e30489d99fedf12c2f6ee2ce543314930825",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "files-1280.png",
+        "sha256": "7221e548690f79ee2574bfcde0a81d6d6531807ca17061e40f2acb7dbad14d9d",
+        "fullFile": "files-1280-full.png",
+        "fullSha256": "f488a8447f8328ec809a9840e895b8b2da6f9451b09020e67841d433b0f9f38d",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "files-390.png",
+        "sha256": "67519351a16811fb2daf594082445c858a498d28ffa4f97e85342e8736318407",
+        "fullFile": "files-390-full.png",
+        "fullSha256": "e3fe39125141467294bf3aa56a5bc1c81037ca923cf86d568cd0b5c28b8abffe",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "352141 pixels (ratio 0.24 of all image pixels) are different."
+  },
+  {
+    "scene": "treatment",
+    "title": "المخطط السني",
+    "referenceSha256": "aa4b541903a8c60e52f2feffb4fc1cb4328ee464b491708593d65dc0a0600bad",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "treatment-1448.png",
+        "sha256": "c0cd48b3f8e250719b22df92b3751403e00ec9d84fddcbb70ce28c866964c1e8",
+        "fullFile": "treatment-1448-full.png",
+        "fullSha256": "35a07bcfc520e69b0b06987324a415b43082cab8caa3fd35667d734c52793059",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "treatment-1280.png",
+        "sha256": "f16c1e2791e42428658e57f536f65b57472b63ffe92ef0d17a9c45af85b7bdff",
+        "fullFile": "treatment-1280-full.png",
+        "fullSha256": "3d9de2ea8ae851a68c68f7319573b66eb3e8628921b8c165cc5c591b216c26eb",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "treatment-390.png",
+        "sha256": "b151dade8c9ec4bbd2ffacc74e0eaae33790c7d7715fa5f37faa8d806a114c82",
+        "fullFile": "treatment-390-full.png",
+        "fullSha256": "9c7acaf4af3f444216aee9ca8b4cecb0a06c01059f99dc7ddc58b28481af62b1",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "141546 pixels (ratio 0.10 of all image pixels) are different."
+  },
+  {
+    "scene": "plans",
+    "title": "الخطط",
+    "referenceSha256": "e5d200a535f4943daf28815a94785d482a2db0c919c06d46bc2681f4ff570ade",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "plans-1448.png",
+        "sha256": "7915489f761907997f5359366b804d7b68a6df01e84883a2814d276e162b3624",
+        "fullFile": "plans-1448-full.png",
+        "fullSha256": "bc1f61d4759a6652ab05e6e584525930fc5f70aa689b338b53358a53a1e28b72",
+        "detailFile": "plans-1448-detail.png"
+      },
+      {
+        "width": 1280,
+        "filename": "plans-1280.png",
+        "sha256": "aee8e3f23184dad8287a4b5f521dd6063935324944baccc52d92c9e1e41ab809",
+        "fullFile": "plans-1280-full.png",
+        "fullSha256": "7ef533042d408362e7193fa691af83d3cc09ab2895e8b6609c8261b99559b1e7",
+        "detailFile": "plans-1280-detail.png"
+      },
+      {
+        "width": 390,
+        "filename": "plans-390.png",
+        "sha256": "7826e29336ad2757423a0e9440e58909153fcc97d9a41d836dc4ccdb151bedf9",
+        "fullFile": "plans-390-full.png",
+        "fullSha256": "943924ca357c6e56538d7307daf2ffac98b14011a6165ec9f4c859bbfa8cab64",
+        "detailFile": "plans-390-detail.png"
+      }
+    ],
+    "pixelComparison": "132369 pixels (ratio 0.09 of all image pixels) are different."
+  },
+  {
+    "scene": "cases",
+    "title": "الحالات والمشاكل",
+    "referenceSha256": "c64a6c66185edf2379c71cb7f8793f36c8bfd0d8af9ffd7cf8fd134b7d00f105",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "cases-1448.png",
+        "sha256": "d3e7bced420ac6db5fa78b98454a64620acd10805294301530d9172a7804d775",
+        "fullFile": "cases-1448-full.png",
+        "fullSha256": "3653dea0e74df82c7a022c961910cfc27671bbdf779622aab24f6bdd25fa81cc",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "cases-1280.png",
+        "sha256": "dade307565b7452d781fa4e1ce3bfc26c7c1ee0e3448a4901ba0c80b1de39c1f",
+        "fullFile": "cases-1280-full.png",
+        "fullSha256": "341d1e4fce379382a5066b2bbcae90dd761a15634043c5454f527a02db1f8702",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "cases-390.png",
+        "sha256": "f50a10dda5f4077928451310338d50d893f6b952f88a285819f4784d035b899c",
+        "fullFile": "cases-390-full.png",
+        "fullSha256": "0c4d158ad24bac74a68989c6d30e96742a0fc2b8d3e2e10999b7a42dfb47d723",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "127760 pixels (ratio 0.09 of all image pixels) are different."
+  },
+  {
+    "scene": "endo",
+    "title": "علاج الجذور",
+    "referenceSha256": "1c7f273d86510860ad7a1c310bd220a44411e9252209455d7a7b1a6bebfbd1d4",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "endo-1448.png",
+        "sha256": "6d26619edb4b15172d545d17917592cf75e367f019a13e0acc78982ebea8bb35",
+        "fullFile": "endo-1448-full.png",
+        "fullSha256": "08b23f905767aae0e9cbe733fac16d9e0dfb18d98c2ed29ffc58e406734ca0cf",
+        "detailFile": "endo-1448-detail.png"
+      },
+      {
+        "width": 1280,
+        "filename": "endo-1280.png",
+        "sha256": "ae6e6e0ad671b922eaf165a47dd4f2e97df6e746cc4ce7a9c4bb7bae33910f22",
+        "fullFile": "endo-1280-full.png",
+        "fullSha256": "884a67fe9755545a75aa173a7243b3fa1bbf1183b2e95e4aefea861f065a3470",
+        "detailFile": "endo-1280-detail.png"
+      },
+      {
+        "width": 390,
+        "filename": "endo-390.png",
+        "sha256": "72dee2179e3f884f45cb8f5f9573d9701b4b78517fb2b5f50063732079409538",
+        "fullFile": "endo-390-full.png",
+        "fullSha256": "35903bd2fbf1216053fdc9d22b220133dcaf0bedafc4342b8f5bf7938732d407",
+        "detailFile": "endo-390-detail.png"
+      }
+    ],
+    "pixelComparison": "163970 pixels (ratio 0.12 of all image pixels) are different."
+  },
+  {
+    "scene": "ortho",
+    "title": "التقويم",
+    "referenceSha256": "32683cda21834ca14ee04104421fb4c6969c96957f7bb9d0904de5cd4e3b6e77",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "ortho-1448.png",
+        "sha256": "0251618eb284b5dd94002b558d69e5c750e4f43506869c98a1e53a868675bc8a",
+        "fullFile": "ortho-1448-full.png",
+        "fullSha256": "b541f0cb7e3d338a0434a98e63d4fb06ea00ece2bf9c46eafb12a5017a3fe24b",
+        "detailFile": "ortho-1448-detail.png"
+      },
+      {
+        "width": 1280,
+        "filename": "ortho-1280.png",
+        "sha256": "066ba7d4cffccea55a957f9e9da1cb9aa0b9b6e3d47b449518d72d93d9f384d9",
+        "fullFile": "ortho-1280-full.png",
+        "fullSha256": "a9fbde4516bc89164bd0114f238bce9865dbac651327571d7a6e4e3e8f5c6ba0",
+        "detailFile": "ortho-1280-detail.png"
+      },
+      {
+        "width": 390,
+        "filename": "ortho-390.png",
+        "sha256": "0090e6cb8a7e024f8000ec5bb26306c2ccdee733b3391b7bc2b24763bd43507f",
+        "fullFile": "ortho-390-full.png",
+        "fullSha256": "d77141f9311bd41437012b13f3ebd36aab69556a54a6e5d455e1d886f613e3cc",
+        "detailFile": "ortho-390-detail.png"
+      }
+    ],
+    "pixelComparison": "304917 pixels (ratio 0.21 of all image pixels) are different."
+  },
+  {
+    "scene": "lab",
+    "title": "المعمل",
+    "referenceSha256": "8c15dacc0eaa07832c24761e91bd02ba24bec8ef9b0d8201e79b0eb4fe5958c9",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "lab-1448.png",
+        "sha256": "d9358e5bc35d7fd49b57192188ade876b6e10bc9c37e4cc5309f1974442461fe",
+        "fullFile": "lab-1448-full.png",
+        "fullSha256": "b87b0a76882eb0c1d679187ba623dea2750b88d4bdd81893acfc237e887ed7ea",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "lab-1280.png",
+        "sha256": "d696c03bf5092a679be2ff6fefc3298f21cfcb0e45259db7dbcacdbc320593b5",
+        "fullFile": "lab-1280-full.png",
+        "fullSha256": "b716c5901e65332feb1c6d5a1ca52826d9285daf88521834683022a0cc8cb85c",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "lab-390.png",
+        "sha256": "134b837ce47350d0ba4166e2fe01fd569fba7dada8b4cf7fc14fdd8dd492ceb4",
+        "fullFile": "lab-390-full.png",
+        "fullSha256": "fe81fa459535a25365a2f7fe69f0825243cbbc3c4424b2c979893d4652925439",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "125676 pixels (ratio 0.09 of all image pixels) are different."
+  },
+  {
+    "scene": "referrals",
+    "title": "الإحالات",
+    "referenceSha256": "b1f7e5f72fe69e54f6a709e6652225346c82945c500c59898059747a80bb8197",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "referrals-1448.png",
+        "sha256": "0aac51cc532563a2bcc4ba5b5914de0c64e6cb172f76f613c916a7f76a15edfd",
+        "fullFile": "referrals-1448-full.png",
+        "fullSha256": "f765857e1321f2f305a44ad256b444c1b3465244280df6e568621802eb74703e",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "referrals-1280.png",
+        "sha256": "f9ffe78156bb29aa59457c001c4486bc229bdc30a39473a0723331ad9be79069",
+        "fullFile": "referrals-1280-full.png",
+        "fullSha256": "37041e707071af23bebfdb30c2177b7b165f9d5b9fe4738d5292d2eb74ea7ad1",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "referrals-390.png",
+        "sha256": "608a967ceb386e78702bc7928499014e8022aa6859729828f156dd6257d11e85",
+        "fullFile": "referrals-390-full.png",
+        "fullSha256": "87d43902303cf5ea8c89d8db59691de2732ce6132adb127988d1612b457bdd9a",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "128313 pixels (ratio 0.09 of all image pixels) are different."
+  },
+  {
+    "scene": "materials",
+    "title": "المستهلكات",
+    "referenceSha256": "d695a80bbcdcc7974823c175802085be146f428cf047c5bd3c0672dfab7f2038",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "materials-1448.png",
+        "sha256": "289ec6ed359d590706147f7dfe91f2b44086e29329167291b49d5b7adba73333",
+        "fullFile": "materials-1448-full.png",
+        "fullSha256": "e67109b0d90080901aef18b4d950f4538e6594d6f72ac3946b3ef4dca893e7d2",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "materials-1280.png",
+        "sha256": "5272164e978f491ad97330900027f8436b4182ef58344713631bf37f2f2fadad",
+        "fullFile": "materials-1280-full.png",
+        "fullSha256": "aff6ed9d5b0c79b994d4845a91343d2ab24d2956b3505e8c33427974ab395b3b",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "materials-390.png",
+        "sha256": "0fc4b5c9447bae0651f36ea09bd1e93fea519bc08d60f20a3a0e6025492242c8",
+        "fullFile": "materials-390-full.png",
+        "fullSha256": "4fc3816e5770b4855eb5397f8e48c0b9194aa703ba5f1e9e0c26798d01a93f62",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "121854 pixels (ratio 0.09 of all image pixels) are different."
+  },
+  {
+    "scene": "personal-details",
+    "title": "البيانات الشخصية",
+    "referenceSha256": "70e9127b7d83028760d8a4125a1119e7aaca64a8d8596ed9d1c458aec829639b",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "personal-details-1448.png",
+        "sha256": "fc1eff644b07b9daef8dfa8fb74c4d669f2f20cb6fd6f9f6c80dc380fc3c2ac6",
+        "fullFile": "personal-details-1448-full.png",
+        "fullSha256": "5c4fdada593f655341dacfad714bce6086ef9cfedebbe467a47a4f5d60e258cf",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "personal-details-1280.png",
+        "sha256": "a0e2a97111c2757d448e87987d360c818a6fbe3e13a2634d655d31fd247f0aea",
+        "fullFile": "personal-details-1280-full.png",
+        "fullSha256": "e1fe62f4017973b0ed9ba380b5ef75431acc8c0f63d8d7e2b005fb497dcf460e",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "personal-details-390.png",
+        "sha256": "ca8fa48f4e3289c2d72d02097a9d27ccb831005bea3b123f899c952b36d2dd43",
+        "fullFile": "personal-details-390-full.png",
+        "fullSha256": "a2d05ae9cdcafcf7545f79f7dba56c4b094e357ab90a4287a8b2fcd544b0e59a",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "112668 pixels (ratio 0.08 of all image pixels) are different."
+  },
+  {
+    "scene": "medical-history",
+    "title": "التاريخ الطبي",
+    "referenceSha256": "cc73cf842bad431334b05264354f1d0b93c23eda4ff2678df5ce7570b02a2249",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "medical-history-1448.png",
+        "sha256": "f17cba9587f4b253546191b402ac354fbb65dee965aaead70ae270f642c3673f",
+        "fullFile": "medical-history-1448-full.png",
+        "fullSha256": "7082c873dee3662c771093d57fb250ac941af9f5b5247f95f641d2b5c870ed97",
+        "detailFile": null
+      },
+      {
+        "width": 1280,
+        "filename": "medical-history-1280.png",
+        "sha256": "7e32785313e668733e3cdf1d0f45020698a2ae1c4110a80810ff63731da58456",
+        "fullFile": "medical-history-1280-full.png",
+        "fullSha256": "0c6c3523dfe13fddd31f8e3c9c083403146e7f16523e302327744032afb6cabe",
+        "detailFile": null
+      },
+      {
+        "width": 390,
+        "filename": "medical-history-390.png",
+        "sha256": "6e900dc1c5a4dfa9d19fe4a54fa0d5f7c71b7c05cdd70730a8b181fafde69cc2",
+        "fullFile": "medical-history-390-full.png",
+        "fullSha256": "57672b937b3480be93ba23cf9c309df6823c5e6444f055a47f433206e83a7a09",
+        "detailFile": null
+      }
+    ],
+    "pixelComparison": "107461 pixels (ratio 0.08 of all image pixels) are different."
+  },
+  {
+    "scene": "cephalometric",
+    "title": "السيفالومتري",
+    "referenceSha256": "517163c6784d41524e47aae73b7e5bfc33493f8a3a5d243353dcc6267ceb4b76",
+    "captures": [
+      {
+        "width": 1448,
+        "filename": "cephalometric-1448.png",
+        "sha256": "aa904691f128b77f5f65bcb7b6a9f4b65b9febf0585edccb476ceacf04ee8d31",
+        "fullFile": "cephalometric-1448-full.png",
+        "fullSha256": "2ba266a7bac1fcf64b0a49f00c57f5aea922c42b8f53ed169ed52be25bc5446c",
+        "detailFile": "cephalometric-1448-detail.png"
+      },
+      {
+        "width": 1280,
+        "filename": "cephalometric-1280.png",
+        "sha256": "c197357146d4b33ce2b6285522eb5e34cd9410a791e0ab67575ea42b48b74914",
+        "fullFile": "cephalometric-1280-full.png",
+        "fullSha256": "bec55b2327392e1a814f4d6f1efe696aa8658e92ba680d8ec490cfa2ed0e3d8b",
+        "detailFile": "cephalometric-1280-detail.png"
+      },
+      {
+        "width": 390,
+        "filename": "cephalometric-390.png",
+        "sha256": "1bbea91d5b706f3392c2b9726530cdffd35edafddf1459717957f458bddabe69",
+        "fullFile": "cephalometric-390-full.png",
+        "fullSha256": "3b854886af1068d5cbe7b9c5be568338d4f5a565f77dceb5d33669e700a1d138",
+        "detailFile": "cephalometric-390-detail.png"
+      }
+    ],
+    "pixelComparison": "164647 pixels (ratio 0.12 of all image pixels) are different."
+  }
+]

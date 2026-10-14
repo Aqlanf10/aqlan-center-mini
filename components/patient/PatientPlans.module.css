@@ -1,0 +1,16 @@
+/* One canonical plan at a time, rendered as summary / stages / agreement. */
+.regions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.55fr) minmax(0,1fr); gap: 10px; align-items: stretch; }
+.regions > section { min-width: 0; padding: 12px; background: white; border: 1px solid #d5e8fa; border-radius: 9px; }
+.regions h3 { margin: -12px -12px 12px; padding: 11px 12px; border-bottom: 1px solid #dfedfb; color: #0572c7; font-size: 14px; font-weight: 700; }
+.summary { grid-column: 1; }.stages { grid-column: 2; }.financial { grid-column: 3; }
+.facts > div { display: flex; justify-content: space-between; gap: 12px; padding-block: 11px; border-bottom: 1px solid #e0eefc; font-size: 11px; }
+.facts dt { color: #527aa0; }.facts dd { font-weight: 700; text-align: end; overflow-wrap: anywhere; }
+.note { margin-top: 10px; border-radius: 7px; background: #edf7ff; padding: 10px; font-size: 11px; line-height: 1.8; }
+.financial :global([data-testid="plan-amount-summary"]) { display: flex; flex-direction: column; text-align: start; gap: 0; }
+.financial :global([data-testid="plan-amount-summary"] > div) { display: flex; flex-direction: row-reverse; justify-content: space-between; gap: 10px; border: 0; border-bottom: 1px solid #e0eefc; border-radius: 0; background: white; padding: 12px 0; }
+.stages > div { margin: 0; padding: 0; border: 0; background: white; }
+.stages :global(li[data-testid^="plan-item-"]) { display: grid; grid-template-columns: minmax(0,1fr) auto; font-size: 11px; }
+.entry { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #d5e8fa; border-radius: 9px; background: white; }
+.entry > p:first-child { color: #076fbf; font-size: 12px; }.entry > p:nth-child(2) { flex: 1; margin: 0; font-size: 11px; }.entry > button { margin: 0; font-size: 12px; padding: 7px 12px; }
+@media (max-width: 1023px) { .regions { grid-template-columns: minmax(0,1fr) minmax(0,1.5fr); }.financial { grid-column: 1 / -1; }.financial :global([data-testid="plan-amount-summary"]) { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; } }
+@media (max-width: 767px) { .regions { grid-template-columns: minmax(0,1fr); }.regions > section { grid-column: 1; }.entry > p:nth-child(2) { flex-basis: 100%; }.regions button,.entry button,.regions select { min-height: 44px; }.financial :global([data-testid="plan-amount-summary"]) { display: flex; }.stages :global(li[data-testid^="plan-item-"]) { grid-template-columns: minmax(0,1fr); } }

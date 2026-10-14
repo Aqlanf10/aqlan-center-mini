@@ -48,8 +48,10 @@ describe("patient treatment executive overview", () => {
     expect(html).toContain('data-testid="patient-active-plans"');
     expect(html).toContain("خطة التقويم");
     expect(html).toContain("خطة علاج الجذور");
-    expect(html).toContain("الخطة المعروضة (1 من 2)");
-    expect(html).toContain("هذه نسبة الخطة الأولى فقط");
+    expect(html).toContain('aria-label="الخطة المعروضة بجانب مخطط الأسنان"');
+    expect(html).toContain('<option value="31" selected="">خطة التقويم</option>');
+    expect(html).toContain('<option value="44">خطة علاج الجذور</option>');
+    expect(html).toContain("هذه نسبة الخطة المختارة فقط");
     // First plan = 1 / 4, not the combined (1+2) / (4+3) value.
     expect(html).toContain('aria-valuenow="25"');
     expect(html).not.toContain('aria-valuenow="43"');

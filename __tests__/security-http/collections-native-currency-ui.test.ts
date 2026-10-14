@@ -18,7 +18,9 @@ let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
 const stamp = Date.now();
-const fixtureDay = "2000-03-03";
+// Reserved for this report witness. Receipt provenance uses 2000-03-03 in
+// clinic time; sharing that day makes this fixture depend on suite order.
+const fixtureDay = "2000-03-05";
 const fixtureAt = `${fixtureDay}T10:00:00.000Z`;
 const artifacts = ".collections-native-artifacts";
 const receiverA = `SYN-A-${stamp.toString(36)}`;

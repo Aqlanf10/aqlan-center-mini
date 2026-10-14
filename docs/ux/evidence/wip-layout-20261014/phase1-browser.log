@@ -1,0 +1,110 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/patient-premium-visual-ui.test.ts __tests__/security-http/clinical-visit-pending-notes-ui.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts (5 tests | 5 failed) 11077ms
+     × locks all five notes, phrases and procedure controls through both POST and reload GET, then accepts fresh edits 2825ms
+     × retains notes and unlocks after a POST rejection, allowing a corrected retry 1515ms
+     × retains notes and unlocks after a POST network failure, allowing a corrected retry 1693ms
+     × hides editing after a failed post-save reload and restores the exact draft only after an authorized retry 2215ms
+     × keeps automatically generated treatment text stable while procedures and an already-open tooth picker are frozen 1397ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > locks all five notes, phrases and procedure controls through both POST and reload GET, then accepts fresh edits
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ expectLock __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:187:130
+    185|   expect(await controls.count()).toBeGreaterThan(8);
+    186|   // :disabled detects native fieldset inheritance, including nested p…
+    187|   expect(await controls.evaluateAll((nodes, disabled) => nodes.every((…
+       |                                                                                                                                  ^
+    188|   expect(await f.save.isDisabled()).toBe(locked);
+    189| }
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:237:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST rejection, allowing a corrected retry
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST network failure, allowing a corrected retry
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ expectLock __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:187:130
+    185|   expect(await controls.count()).toBeGreaterThan(8);
+    186|   // :disabled detects native fieldset inheritance, including nested p…
+    187|   expect(await controls.evaluateAll((nodes, disabled) => nodes.every((…
+       |                                                                                                                                  ^
+    188|   expect(await f.save.isDisabled()).toBe(locked);
+    189| }
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:286:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > hides editing after a failed post-save reload and restores the exact draft only after an authorized retry
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ expectLock __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:187:130
+    185|   expect(await controls.count()).toBeGreaterThan(8);
+    186|   // :disabled detects native fieldset inheritance, including nested p…
+    187|   expect(await controls.evaluateAll((nodes, disabled) => nodes.every((…
+       |                                                                                                                                  ^
+    188|   expect(await f.save.isDisabled()).toBe(locked);
+    189| }
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:328:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > keeps automatically generated treatment text stable while procedures and an already-open tooth picker are frozen
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ expectLock __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:187:130
+    185|   expect(await controls.count()).toBeGreaterThan(8);
+    186|   // :disabled detects native fieldset inheritance, including nested p…
+    187|   expect(await controls.evaluateAll((nodes, disabled) => nodes.every((…
+       |                                                                                                                                  ^
+    188|   expect(await f.save.isDisabled()).toBe(locked);
+    189| }
+ ❯ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts:386:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  5 failed | 15 passed (20)
+   Start at  05:30:56
+   Duration  143.80s (transform 211ms, setup 0ms, import 734ms, tests 138.14s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

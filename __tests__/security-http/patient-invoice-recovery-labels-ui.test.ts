@@ -191,6 +191,9 @@ async function openAccount(width = 1280) {
   };
   try {
     await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
+    // DOMContentLoaded precedes client hydration and the authorized patient reads.
+    // Keep the one-pending-read assertion, but start it once the real tab is mounted.
+    await page.getByTestId("patient-tab-account").waitFor({ state: "visible" });
     await expect.poll(() => pending.length).toBe(1);
     const invoices = page.getByRole("region", { name: "الفواتير", exact: true });
     return {

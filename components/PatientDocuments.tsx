@@ -12,6 +12,10 @@ import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 import { ConsentModal } from "./ConsentModal";
 import { BeforeAfterSlider } from "./BeforeAfterSlider";
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "./patient/usePatientDraftGuard";
+import styles from "./patient/PatientDocuments.module.css";
+import { Modal } from "./Modal";
+import { Icon } from "./Icon";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
@@ -46,6 +50,7 @@ interface PatientDocument {
 const KINDS = Object.keys(KIND_LABEL) as DocumentKind[];
 
 interface PatientDocumentsProps {
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   patientId: number;
   patientName?: string;
   patientPhone?: string | null;
@@ -55,7 +60,7 @@ interface PatientDocumentsProps {
 }
 
 export function PatientDocuments({
-  patientId,
+  patientId, onNavigationGuardChange,
   patientName = "المريض",
   patientPhone,
   photoDocumentId = null,
@@ -63,6 +68,10 @@ export function PatientDocuments({
 }: PatientDocumentsProps) {
   const session = useSession();
   const admin = isAdmin(session?.role);
+  const canUpload = admin || session?.role === "reception" || (session?.role === "doctor" && session.permissions?.canUploadXrays === true);
+  const [category, setCategory] = useState<DocumentKind | "all" | "hidden">("all");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const [documents, setDocuments] = useState<PatientDocument[]>([]);
@@ -98,6 +107,7 @@ export function PatientDocuments({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [photoStage, setPhotoStage] = useState<PhotoStage>("progress");
   const [photoView, setPhotoView] = useState<PhotoView | "">("");
+  usePatientDraftGuard(Boolean(title.trim() || picked), busy, onNavigationGuardChange);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +120,8 @@ export function PatientDocuments({
       setStorageMessage(payload.storageMessage ?? null);
       setError(null);
     } catch (loadError) {
+      setDocuments([]);
+      setReady(false);
       setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
     } finally {
       setLoading(false);
@@ -122,7 +134,7 @@ export function PatientDocuments({
     event.preventDefault();
     // الكاميرا والملفّ مدخلان لكن مسار الرفع واحد: أيّهما مملوءٌ يُرفع.
     const file = fileInput.current?.files?.[0] ?? cameraInput.current?.files?.[0];
-    if (!file || busy) return;
+    if (!file || busy || !canUpload || loading || !ready) return;
     setBusy(true);
     setError(null);
     try {
@@ -138,6 +150,7 @@ export function PatientDocuments({
       const response = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: form });
       const payload = await response.json().catch(() => null);
       if (!response.ok) { setError(payload?.message ?? "تعذّر الرفع."); return; }
+      setUploadOpen(false);
       setTitle("");
       setPicked(null);
       setPhotoView("");
@@ -170,6 +183,10 @@ export function PatientDocuments({
   };
 
   const imageDocs = documents.filter((d) => d.isImage && !d.removedAt);
+  const visibleDocs = documents.filter(document => category === "hidden"
+    ? admin && Boolean(document.removedAt)
+    : !document.removedAt && (category === "all" || document.kind === category));
+  const selected = visibleDocs.find(document => document.id === selectedId) ?? visibleDocs[0] ?? null;
 
   const openComparisonSlider = (beforeDoc?: PatientDocument, afterDoc?: PatientDocument) => {
     if (beforeDoc && afterDoc) {
@@ -198,7 +215,7 @@ export function PatientDocuments({
   };
 
   return (
-    <div className="min-w-0 space-y-3" data-testid="patient-documents-workspace">
+    <div className={styles.workspace} data-testid="patient-documents-workspace">
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
       ) : null}
@@ -249,6 +266,59 @@ export function PatientDocuments({
         </div>
       </div>
 
+      <div className={styles.browser}>
+        <section className={styles.panel} aria-label="تصنيفات المستندات">
+          <h3 className={styles.heading}>ملفات المريض</h3>
+          <div className={styles.categories}>
+            {(["all", ...KINDS] as const).map(value => <button key={value} type="button" aria-pressed={category === value} onClick={() => setCategory(value)}>
+              <Icon name="file" className="h-4 w-4" />{value === "all" ? "كل الملفات" : KIND_LABEL[value]}<span>{documents.filter(document => !document.removedAt && (value === "all" || document.kind === value)).length}</span>
+            </button>)}
+            {admin ? <button type="button" aria-pressed={category === "hidden"} onClick={() => setCategory("hidden")}>
+              <Icon name="file" className="h-4 w-4" />المستندات المخفية<span>{documents.filter(document => document.removedAt).length}</span>
+            </button> : null}
+          </div>
+          {canUpload ? <div className={styles.tools}><button type="button" onClick={() => setUploadOpen(true)}><Icon name="plus" className="h-4 w-4" />رفع ملف جديد</button></div> : <p className={styles.empty}>لا تتوفر صلاحية رفع المستندات.</p>}
+        </section>
+        <section className={styles.panel} aria-label="معاينة المستند المحدد">
+          <h3 className={styles.heading}>{selected?.title ?? "معاينة الأشعة والملفات"}</h3>
+          <div className={styles.preview}>
+            {loading ? <p role="status" className={styles.empty}>جارٍ تحميل المستندات…</p> : error ? <div className={styles.empty}><p>تعذّر عرض المستندات.</p><button type="button" onClick={() => void load()} className="mt-2 underline">إعادة المحاولة</button></div> : selected ? selected.isImage ? <DocumentImage key={selected.id} document={selected} /> : <iframe src={`/api/documents/${selected.id}`} title={selected.title} /> : <p className={styles.empty}>لا توجد مستندات في هذا التصنيف.</p>}
+          </div>
+          {selected ? <>
+            <div className={styles.tools}>
+              <button type="button" onClick={() => setViewing(selected)}>عرض بالحجم الكامل</button>
+              <a href={`/api/documents/${selected.id}?download=1`}>تنزيل الملف</a>
+              <span className="self-center text-xs text-slate-500">{formatBytes(selected.sizeBytes)} · {KIND_LABEL[selected.kind]}</span>
+            </div>
+            <div className={styles.tools} role="group" aria-label="إجراءات المستند المحدد">
+              {onPhotoChange && selected.isImage && !selected.removedAt ? (
+                photoDocumentId === selected.id ? <span className="self-center text-xs font-bold text-emerald-700">✓ صورة المريض</span> :
+                  <button type="button" onClick={() => void setAsPhoto(selected.id)}>اجعلها صورة المريض</button>
+              ) : null}
+              {selected.kind === "consent" ? <a href={`/print/consent/${patientId}?docId=${selected.id}`} target="_blank" rel="noreferrer">طباعة الإقرار (A4)</a> : null}
+              {selected.isImage && !selected.removedAt && imageDocs.length >= 2 ? <button type="button" onClick={() => {
+                const other = imageDocs.find(document => document.id !== selected.id);
+                if (other) openComparisonSlider(other, selected);
+              }}>مقارنة</button> : null}
+              {selected.removedAt ? <p className="text-xs text-slate-500">مخفيّ — {selected.removedBy}{selected.removedNote ? `: ${selected.removedNote}` : ""}</p> : admin ?
+                <button type="button" data-destructive disabled={busy} onClick={() => void hide(selected)}>أخفِ</button> : null}
+            </div>
+          </> : null}
+        </section>
+        <section className={styles.panel} aria-label="اختيار ملف للمعاينة">
+          <h3 className={styles.heading}>الملفات المسجلة</h3>
+          <ul className={styles.list} aria-label="معرض مستندات المريض" data-testid="patient-document-gallery">
+            {visibleDocs.map(document => <li key={document.id} data-testid="patient-document-card">
+              <button type="button" aria-pressed={selected?.id === document.id} onClick={() => setSelectedId(document.id)}>
+                {document.isImage ? <img src={`/api/documents/${document.id}`} alt="" loading="lazy" /> : <Icon name="file" className="h-8 w-8 shrink-0" />}
+                <span className="min-w-0 break-words">{document.title}<small>{document.takenOn ? friendlyDateLong(document.takenOn) : KIND_LABEL[document.kind]}</small></span>
+              </button>
+            </li>)}
+          </ul>
+        </section>
+      </div>
+      {canUpload ? <details className={styles.upload} open={uploadOpen} onToggle={event => setUploadOpen(event.currentTarget.open)}>
+      <summary>رفع مستند أو التقاط صورة</summary>
       <form onSubmit={upload} className="min-w-0 rounded-2xl border border-sky-100 bg-white p-3 shadow-card sm:p-4">
         <div className="mb-2 flex flex-wrap items-end gap-2">
           <label className="min-w-[7rem]">
@@ -311,7 +381,7 @@ export function PatientDocuments({
         <div className="flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" id="document-file" aria-label="ملف الأشعة"
             accept="image/jpeg,image/png,image/webp,application/pdf"
-            onChange={(event) => setPicked(event.target.files?.[0]?.name ?? null)}
+            onChange={(event) => { if (cameraInput.current) cameraInput.current.value = ""; setPicked(event.target.files?.[0]?.name ?? null); }}
             className="sr-only" />
           <label htmlFor="document-file"
             className="cursor-pointer rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-bold text-navy-800">
@@ -322,6 +392,7 @@ export function PatientDocuments({
           <input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
             accept="image/*" capture="environment"
             onChange={(event) => {
+              if (fileInput.current) fileInput.current.value = "";
               const cameraFile = event.target.files?.[0];
               setPicked(cameraFile?.name ?? null);
               if (cameraFile) setKind("photo");
@@ -334,104 +405,17 @@ export function PatientDocuments({
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {picked ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
-          <button type="submit" disabled={busy || !ready || !picked}
+          <button type="submit" disabled={busy || loading || !ready || !picked}
             className="rounded-lg bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
             {busy ? "جارٍ الرفع…" : "ارفع"}
           </button>
         </div>
       </form>
+      </details> : null}
 
-      {loading && documents.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
-      ) : documents.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-          لا أشعة ولا مستندات في هذا الملف.
-        </p>
-      ) : (
-        <ul className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="معرض مستندات المريض" data-testid="patient-document-gallery">
-          {documents.map((document) => (
-            <li key={document.id} data-testid="patient-document-card"
-              className={`group flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-white shadow-card transition-[border-color,box-shadow] ${
-                document.removedAt ? "border-slate-200 opacity-60" : "border-sky-100 hover:border-sky-200 hover:shadow-lg focus-within:border-brand-blue"
-              }`}>
-              <button type="button" onClick={() => setViewing(document)}
-                aria-label={`عرض المستند: ${document.title}`}
-                className="block min-w-0 w-full flex-1 text-right focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-blue">
-                {document.isImage ? (
-                  <img src={`/api/documents/${document.id}`} alt={document.title}
-                    loading="lazy"
-                    className="h-44 w-full bg-slate-900 object-contain" />
-                ) : (
-                  <div className="flex h-44 w-full items-center justify-center bg-gradient-to-b from-sky-50 to-slate-100 text-4xl">📄</div>
-                )}
-                <div className="min-w-0 p-3">
-                  <p className="line-clamp-2 min-h-[2.4rem] break-words text-sm font-extrabold leading-5 text-navy-900 [overflow-wrap:anywhere]">{document.title}</p>
-                  <p className="mt-1 break-words text-[11px] leading-5 text-slate-500">
-                    {KIND_LABEL[document.kind]} · {formatBytes(document.sizeBytes)}
-                    {document.takenOn ? ` · ${friendlyDateLong(document.takenOn)}` : ""}
-                  </p>
-                </div>
-              </button>
-              <div className="mt-auto flex min-w-0 flex-wrap items-center gap-2 border-t border-sky-100 bg-sky-50/30 px-3 py-2.5">
-                <a href={`/api/documents/${document.id}?download=1`}
-                  className="text-[11px] font-bold text-navy-800 underline decoration-slate-300 underline-offset-4">
-                  نزّل
-                </a>
-                {onPhotoChange && document.isImage && !document.removedAt ? (
-                  photoDocumentId === document.id ? (
-                    <span className="text-[11px] font-bold text-emerald-700">✓ صورة المريض</span>
-                  ) : (
-                    <button type="button" onClick={() => void setAsPhoto(document.id)}
-                      className="text-[11px] font-bold text-violet-700 hover:text-violet-900">
-                      👤 اجعلها صورة المريض
-                    </button>
-                  )
-                ) : null}
-                {document.kind === "consent" && (
-                  <a
-                    href={`/print/consent/${patientId}?docId=${document.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] font-bold text-sky-700 hover:text-sky-900 flex items-center gap-1"
-                  >
-                    <span>🖨️</span>
-                    <span>طباعة الإقرار (A4)</span>
-                  </a>
-                )}
-                {document.isImage && imageDocs.length >= 2 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const other = imageDocs.find((d) => d.id !== document.id) || document;
-                      openComparisonSlider(other, document);
-                    }}
-                    className="text-[11px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-0.5"
-                  >
-                    <span>✨</span>
-                    <span>مقارنة</span>
-                  </button>
-                )}
-                {document.removedAt ? (
-                  <span className="text-[11px] text-slate-500">
-                    مخفيّ — {document.removedBy}
-                    {document.removedNote ? `: ${document.removedNote}` : ""}
-                  </span>
-                ) : admin ? (
-                  <button type="button" onClick={() => void hide(document)} disabled={busy}
-                    className="mr-auto text-[11px] font-bold text-slate-400 hover:text-red-600 disabled:opacity-40">
-                    أخفِ
-                  </button>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
 
       {viewing ? (
-        <div role="dialog" aria-label={viewing.title}
-          onClick={() => setViewing(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+        <Modal label={viewing.title} onClose={() => setViewing(null)}>
           <div className="max-h-full w-full max-w-4xl overflow-auto rounded-2xl bg-white p-3"
             onClick={(event) => event.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -448,14 +432,13 @@ export function PatientDocuments({
               </button>
             </div>
             {viewing.isImage ? (
-              <img src={`/api/documents/${viewing.id}`} alt={viewing.title}
-                className="max-h-[70vh] w-full bg-slate-900 object-contain" />
+              <div className="h-[70vh] bg-slate-900"><DocumentImage key={viewing.id} document={viewing} /></div>
             ) : (
               <iframe src={`/api/documents/${viewing.id}`} title={viewing.title}
                 className="h-[70vh] w-full rounded-lg border border-slate-200" />
             )}
           </div>
-        </div>
+        </Modal>
       ) : null}
 
       <ConsentModal
@@ -479,4 +462,15 @@ export function PatientDocuments({
       )}
     </div>
   );
+}
+
+/** A missing or denied image is explicit; it is never replaced by a sample radiograph. */
+function DocumentImage({ document }: { document: PatientDocument }) {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [attempt, setAttempt] = useState(0);
+  return <div className="relative flex h-full w-full items-center justify-center">
+    {state === "loading" ? <span role="status" className="absolute text-xs text-slate-600">جارٍ تحميل الصورة…</span> : null}
+    {state === "error" ? <div role="alert" className="p-4 text-center text-xs text-red-800">تعذّر تحميل الصورة أو لم تعد متاحة.<button type="button" className="mx-2 underline" onClick={() => { setState("loading"); setAttempt(value => value + 1); }}>إعادة المحاولة</button></div> :
+      <img key={attempt} src={`/api/documents/${document.id}`} alt={document.title} className={`h-full w-full object-contain ${state === "loading" ? "opacity-0" : ""}`} onLoad={() => setState("ready")} onError={() => setState("error")} />}
+  </div>;
 }

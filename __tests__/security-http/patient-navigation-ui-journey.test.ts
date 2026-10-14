@@ -66,7 +66,7 @@ async function draft(page: Page) {
 }
 
 describe("patient context navigation on the built application", () => {
-  it.each([1280, 390])("restores the full Summary header and visible editors while keeping safety, drafts and More dismissal at %ipx", async width => {
+  it.each([1280, 390])("keeps compact Summary identity, operational order, editable details, safety, drafts and More dismissal at %ipx", async width => {
     const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
     try {
       const [name, ...value] = h.sessions.doctorA.cookie.split("=");
@@ -97,12 +97,14 @@ describe("patient context navigation on the built application", () => {
       await routes.run(async () => {
         await page.goto(`${baseUrl}/patients/${patientId}?tab=summary`, { waitUntil: "domcontentloaded" });
         const tasks = page.getByTestId("summary-current-work"); await tasks.waitFor();
-        expect(await page.getByTestId("patient-workspace").getAttribute("data-compact")).toBe("false");
+        expect(await page.getByTestId("patient-workspace").getAttribute("data-compact")).toBe("true");
         const header = page.getByTestId("patient-details-panel");
+        expect(await header.isVisible()).toBe(false);
+        expect(await page.getByTestId("patient-medical-alert-banner").isVisible()).toBe(true);
+        await page.getByTestId("patient-details-toggle").click();
         expect(await header.isVisible()).toBe(true);
-        expect(await page.getByTestId("patient-details-toggle").count()).toBe(0);
         expect(await page.locator("h1:visible").count()).toBe(1);
-        expect(await header.getByRole("button", { name: /^🪑/ }).count()).toBe(1);
+        expect(await page.getByTestId("patient-primary-action").isVisible()).toBe(true);
         expect(await page.getByTestId("patient-medical-alert-banner").innerText()).toContain(warning);
         for (const alert of clinicalWarnings) {
           await expect.poll(() => page.getByTestId("patient-context-strip").innerText()).toContain(alert);
@@ -110,14 +112,15 @@ describe("patient context navigation on the built application", () => {
         expect(await header.getByRole("button", { name: "🩺 + تسجيل العلامات الحيوية وفصيلة الدم", exact: true }).isVisible()).toBe(true);
         expect(await page.getByRole("button", { name: "🩺 العلامات الحيوية", exact: true }).isVisible()).toBe(true);
         await page.getByRole("region", { name: "التاريخ الطبي", exact: true }).waitFor();
+        await page.getByTestId("summary-history-details").locator(":scope > summary").click();
         expect(await page.getByRole("region", { name: "ما قاله المريض عن صحته", exact: true }).isVisible()).toBe(true);
         const contact = page.getByRole("region", { name: "الهوية والتواصل", exact: true });
         expect(await contact.isVisible()).toBe(true);
-        expect(await page.getByTestId("summary-administrative-details").count()).toBe(0);
+        expect(await page.getByTestId("summary-administrative-details").count()).toBe(1);
         const order = await page.evaluate(() => {
           const contact = document.querySelector('[aria-label="الهوية والتواصل"]')!;
           const tasks = document.querySelector('[data-testid="summary-current-work"]')!;
-          return Boolean(contact.compareDocumentPosition(tasks) & Node.DOCUMENT_POSITION_FOLLOWING);
+          return Boolean(tasks.compareDocumentPosition(contact) & Node.DOCUMENT_POSITION_FOLLOWING);
         });
         expect(order).toBe(true);
         const email = contact.locator('input[type="email"]');
@@ -235,8 +238,16 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
         await page.getByTestId("patient-details-toggle").click();
         await expect.poll(() => failedGets).toBeGreaterThan(0);
         await expect.poll(() => cockpit.textContent()).toContain(history);
-        if (alert) await expect.poll(() => cockpit.textContent()).toContain(alert);
-        if (index > 0) expect(await cockpit.textContent()).not.toContain("تحذير جديد مؤكد");
+        const patientWarning = page.getByTestId("patient-medical-alert-banner");
+        if (alert) {
+          await expect.poll(() => patientWarning.innerText()).toContain(alert);
+          expect(await patientWarning.isVisible()).toBe(true);
+          expect(await cockpit.innerText()).not.toContain(alert);
+        } else expect(await patientWarning.count()).toBe(0);
+        if (index > 0) {
+          expect(await cockpit.textContent()).not.toContain("تحذير جديد مؤكد");
+          expect(await patientWarning.allTextContents()).not.toEqual(expect.arrayContaining([expect.stringContaining("تحذير جديد مؤكد")]));
+        }
         if (index === 2) expect(await cockpit.textContent()).not.toContain("تحذير بديل مؤكد");
         expect(await page.getByTestId("endo-note").inputValue()).toBe("مسودة اختبار محمية");
         expect(page.url()).toBe(url); expect(await page.getByTestId("patient-details-panel").isVisible()).toBe(false);
@@ -248,23 +259,25 @@ describe("confirmed patient alert freshness beside an unchanged ENDO draft", () 
           // Capture the settled native viewport and prove both sources are unobscured.
           await page.evaluate(() => window.scrollTo(0, 0));
           await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-          const combined = cockpit.locator("span[title]").filter({ hasText: history });
-          expect(await combined.count()).toBe(1);
-          expect(await combined.innerText()).toContain(alert);
-          const geometry = await combined.evaluate(element => {
-            const rect = element.getBoundingClientRect();
-            const points = [[rect.x + rect.width / 2, rect.y + 3], [rect.x + rect.width / 2, rect.bottom - 3],
-              [rect.x + 5, rect.y + rect.height / 2], [rect.right - 5, rect.y + rect.height / 2],
-              [rect.x + rect.width / 2, rect.y + rect.height / 2]];
-            return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
-              viewportWidth: innerWidth, viewportHeight: innerHeight,
-              unobscured: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
-          });
-          expect(geometry.width).toBeGreaterThan(0); expect(geometry.height).toBeGreaterThan(0);
-          expect(geometry.x).toBeGreaterThanOrEqual(0); expect(geometry.y).toBeGreaterThanOrEqual(0);
-          expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
-          expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
-          expect(geometry.unobscured).toEqual([true, true, true, true, true]);
+          const historyWarning = cockpit.getByTestId("patient-readiness-alerts");
+          expect(await historyWarning.count()).toBe(1);
+          expect(await historyWarning.innerText()).toContain(history);
+          for (const warning of [historyWarning, patientWarning]) {
+            const geometry = await warning.evaluate(element => {
+              const rect = element.getBoundingClientRect();
+              const points = [[rect.x + rect.width / 2, rect.y + 3], [rect.x + rect.width / 2, rect.bottom - 3],
+                [rect.x + 5, rect.y + rect.height / 2], [rect.right - 5, rect.y + rect.height / 2],
+                [rect.x + rect.width / 2, rect.y + rect.height / 2]];
+              return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height,
+                viewportWidth: innerWidth, viewportHeight: innerHeight,
+                unobscured: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit !== null && (hit === element || element.contains(hit)); }) };
+            });
+            expect(geometry.width).toBeGreaterThan(0); expect(geometry.height).toBeGreaterThan(0);
+            expect(geometry.x).toBeGreaterThanOrEqual(0); expect(geometry.y).toBeGreaterThanOrEqual(0);
+            expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+            expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
+            expect(geometry.unobscured).toEqual([true, true, true, true, true]);
+          }
           await page.screenshot({ path: `.settings-ui-artifacts/patient-alert-freshness-${width}.png`, fullPage: false });
         }
       }

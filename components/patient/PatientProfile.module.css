@@ -1,0 +1,18 @@
+.workspace { min-width: 0; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: #076fbf; font-size: 14px; font-weight: 700; }
+.columns { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.card { min-width: 0; border: 1px solid #d5e8fa; border-radius: 10px; background: #fff; overflow: hidden; }
+.card h3 { min-height: 43px; padding: 12px; border-bottom: 1px solid #dfedfb; color: #0070c8; font-size: 14px; font-weight: 700; }
+.body { padding: 13px; font-size: 12px; line-height: 1.9; }
+.facts > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #dfedfb; }
+.facts dt { color: #52799e; } .facts dd { font-weight: 600; color: #174b7d; text-align: end; }
+.warning { margin: 10px 0; padding: 10px; border-radius: 6px; color: #995100; background: #fff0df; font-size: 11px; }
+.history { margin-top: 10px; }
+.history li { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 10px 13px; border-bottom: 1px solid #e6f0fa; font-size: 12px; }
+.editor { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.editor > :first-child, .editor > :last-child { grid-column: 1 / -1; }
+.editor fieldset { min-width: 0; padding: 15px; border: 1px solid #d5e8fa; border-radius: 9px; }
+.editor legend { padding: 0 8px; color: #0073c8; font-size: 13px; font-weight: 700; }
+@media (max-width: 767px) { .columns, .editor { grid-template-columns: minmax(0,1fr); } }
+
+@media (max-width: 767px) { .toolbar button, .editor button, .workspace form button { min-height: 44px; } }

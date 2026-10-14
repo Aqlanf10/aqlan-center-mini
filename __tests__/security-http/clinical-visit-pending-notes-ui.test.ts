@@ -141,7 +141,7 @@ async function fixture(automaticTreatment = false) {
       context, page, save, writes, refreshes, unexpected, errors,
       // Next.js also renders a global role=alert route announcer. Assertions
       // here concern only errors inside this ClinicalVisit workspace.
-      alerts: page.locator("#visit-notes").locator("..").getByRole("alert"),
+      alerts: page.getByTestId("clinical-visit-workspace").getByRole("alert"),
       clinicalReads: () => clinicalReads,
       holdReadWithNotes: (notes: Notes) => {
         stored = { ...stored, ...notes, procedures: [procedure] };
@@ -290,6 +290,7 @@ describe("pending clinical note containment in the built visit page", () => {
       await expectLock(f, false);
       expect(await readNotes(f.page)).toEqual(submitted);
       expect(await f.alerts.count()).toBe(1);
+      expect(await f.alerts.isVisible()).toBe(true);
       expect(await f.alerts.textContent()).toContain(failure === "rejection" ? "Synthetic save rejection" : "تعذّر الاتصال بالخادم.");
       expect(f.clinicalReads()).toBe(1);
       expect(f.refreshes).toHaveLength(0);

@@ -1,5 +1,6 @@
 "use client";
 
+import planStyles from "./patient/PatientPlans.module.css";
 import TreatmentFinancialContext from "./TreatmentFinancialContext";
 import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
@@ -219,9 +220,6 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
   return (
     <div data-testid="patient-plans-content">
-      <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
-        planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
-        onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
       {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
@@ -248,7 +246,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
 
       {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} /> : null}
 
-      <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
+      <div className={planStyles.entry}>
         <p className="text-sm font-bold">إنشاء العلاج من الفاتورة / الاتفاق</p>
         <p className="mt-1 text-xs text-slate-600">اختر علاجًا جديدًا أو علاجًا بدأ قبل النظام من حساب المريض. السجلات والخطط القائمة محفوظة هنا؛ إضافة مسودة سريرية لا تسجّل فاتورة أو دفعة.</p>
         {onOpenTreatmentEntry ? <button type="button" disabled={loading || readUnavailable || readDenied}
@@ -279,6 +277,9 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
             <li key={plan.id} className={`rounded-2xl border p-4 ${
               plan.status === "active" ? "border-slate-200 bg-white" : "border-slate-200 bg-slate-50 opacity-70"
             }`}>
+              <div className={planStyles.regions} data-testid="plan-reference-columns">
+                <section className={planStyles.summary} aria-label={`ملخص الخطة — ${plan.title}`}>
+                  <h3>ملخص الخطة النشطة</h3>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-base font-extrabold">{plan.title}</span>
                 <span className="flex items-center gap-1.5">
@@ -291,6 +292,45 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </span>
               </div>
 
+              <dl className={planStyles.facts}>
+                <div><dt>تاريخ بداية الخطة</dt><dd>{friendlyDateLong(plan.startDate)}</dd></div>
+                <div><dt>عملة الخطة</dt><dd>{CURRENCY_LABEL[plan.baseCurrency]}</dd></div>
+                <div><dt>البنود المسجلة</dt><dd>{plan.items.length}</dd></div>
+              </dl>
+              {plan.note ? <p className={planStyles.note}>{plan.note}</p> : null}
+              {plan.status === "active" && !plan.consentAt && coverageVerified && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
+                consentFor === plan.id ? (
+                  <ConsentForm plan={plan}
+                    scheduleExists={loading || readUnavailable ? null : canSeeFinancial ? plan.installments.length > 0
+                      : typeof plan.hasInstallments === "boolean" ? plan.hasInstallments : null}
+                    onDone={() => { setConsentFor(null); void load(); }} onError={setError} />
+                ) : (
+                  <button onClick={() => setConsentFor(plan.id)}
+                    className="mt-2 w-full rounded-xl border border-emerald-500 bg-emerald-50 py-2 text-xs font-extrabold text-emerald-800">
+                    سجّل موافقة المريض — ويُقفل الاتفاق
+                  </button>
+                )
+              ) : null}
+
+              {plan.consentAt ? (
+                <p className="mt-2 text-[10px] font-semibold text-slate-400">
+                  {currentConsent ? "وافق المريض في " : "تاريخ موافقة محفوظ غير متحقق للموافقة الحالية: "}{friendlyDateLong(plan.consentAt.slice(0, 10))}
+                  {plan.consentBy ? ` · سجّلها ${plan.consentBy}` : ""}
+                  {plan.consentNote ? ` · ${plan.consentNote}` : ""}
+                </p>
+              ) : null}
+
+                </section>
+                <section className={planStyles.stages} aria-label={`المراحل والجلسات — ${plan.title}`}>
+                  <h3>المراحل وجلسات العلاج</h3>
+              {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
+                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
+                  onChanged={() => void load()} onError={setError} />
+              ) : null}
+
+                </section>
+                <section className={planStyles.financial} aria-label={`اتفاق الخطة — ${plan.title}`}>
+                  <h3>{canSeeFinancial ? "الاتفاق والتحصيل" : "قيمة العلاج وتقدّمه"}</h3>
               <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{formatMoney(plan.totalMinor, plan.baseCurrency)}</p>
@@ -419,33 +459,6 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 )
               ) : null}
 
-              {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
-                  onChanged={() => void load()} onError={setError} />
-              ) : null}
-
-              {plan.status === "active" && !plan.consentAt && coverageVerified && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
-                consentFor === plan.id ? (
-                  <ConsentForm plan={plan}
-                    scheduleExists={loading || readUnavailable ? null : canSeeFinancial ? plan.installments.length > 0
-                      : typeof plan.hasInstallments === "boolean" ? plan.hasInstallments : null}
-                    onDone={() => { setConsentFor(null); void load(); }} onError={setError} />
-                ) : (
-                  <button onClick={() => setConsentFor(plan.id)}
-                    className="mt-2 w-full rounded-xl border border-emerald-500 bg-emerald-50 py-2 text-xs font-extrabold text-emerald-800">
-                    سجّل موافقة المريض — ويُقفل الاتفاق
-                  </button>
-                )
-              ) : null}
-
-              {plan.consentAt ? (
-                <p className="mt-2 text-[10px] font-semibold text-slate-400">
-                  {currentConsent ? "وافق المريض في " : "تاريخ موافقة محفوظ غير متحقق للموافقة الحالية: "}{friendlyDateLong(plan.consentAt.slice(0, 10))}
-                  {plan.consentBy ? ` · سجّلها ${plan.consentBy}` : ""}
-                  {plan.consentNote ? ` · ${plan.consentNote}` : ""}
-                </p>
-              ) : null}
-
               {canSeeFinancial && plan.progress && plan.installments.length > 0 ? (
               <details className="mt-2">
                 <summary className="cursor-pointer text-[11px] font-bold text-slate-500">جدول الأقساط</summary>
@@ -461,12 +474,19 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                   ))}
                 </ul>
               </details>
-              ) : null}
+              ) : null}                </section>
+              </div>
             </li>
             );
           })}
         </ul>
       )}
+
+      <div className="mt-3">
+        <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
+          planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
+          onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
+      </div>
 
       {/* الزيارات المخطَّطة — توزيع الخطة على الزيارات (المواصفة §١٠) */}
       {plannedVisits.length > 0 ? (

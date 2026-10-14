@@ -13,6 +13,9 @@ import { CollectPaymentModal } from "../CollectPaymentModal";
 import { PortalInviteRow } from "../PortalInviteRow";
 import { PatientTimeline } from "./PatientTimeline";
 import { PatientIntakeHistory } from "./PatientIntakeHistory";
+import { PatientPremiumAccountOverview } from "./PatientPremiumAccountOverview";
+import styles from "./PatientOverview.module.css";
+import { Icon } from "../Icon";
 
 /**
  * تبويب الملخص — «ما وضع هذا المريض، وما المطلوب مني الآن؟» (المواصفة §٥).
@@ -106,8 +109,10 @@ export function SummaryTab({
   const [lastReceipt, setLastReceipt] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const financial = summary.financial;
-  const primaryPlan = summary.activePlans[0] ?? null;
+  const financial = summary.canSeeFinancial ? summary.financial : null;
+  const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
+  const primaryPlan = summary.activePlans.find(plan => plan.id === selectedPlanId) ?? summary.activePlans[0] ?? null;
+  const progress = primaryPlan && primaryPlan.itemsCount > 0 && !primaryPlan.clinicalProgress?.historicalItems ? Math.min(100, Math.round(primaryPlan.doneItems / primaryPlan.itemsCount * 100)) : null;
   const nextPlanned = summary.plannedVisits.find((visit) => !visit.appointmentDate) ?? null;
   const scheduledNext = summary.plannedVisits.find((visit) => visit.appointmentDate) ?? null;
 
@@ -160,15 +165,16 @@ export function SummaryTab({
   };
 
   return (
-    <div className="space-y-4 pb-2" data-testid="patient-executive-summary">
+    <div className={styles.summary} data-testid="patient-executive-summary">
       {message ? (
         <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
           {message}
         </p>
       ) : null}
 
+      <PatientPremiumAccountOverview summary={summary} base={base} />
       {summary.alerts.length > 0 ? (
-        <ul className="space-y-1.5">
+        <ul className={styles.alerts}>
           {summary.alerts.map((alert, index) => (
             <li key={index} className={`rounded-xl border px-3 py-2 text-xs font-bold ${SEVERITY_STYLE[alert.severity]}`}>
               {alert.text}
@@ -177,127 +183,53 @@ export function SummaryTab({
         </ul>
       ) : null}
 
-      <PatientIntakeHistory patientId={patientId} />
-
-      {/*
-        * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ
-        * رحلة الاستقبال مع المريض: البطاقة في جيبه تختصر البحث إلى رقم،
-        * والرابط على جوّاله يعطيه مواعيده بنفسه.
-        */}
-      <div className="flex flex-col gap-2 rounded-2xl border border-navy-100 bg-white px-3 py-2.5 shadow-card sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="flex flex-wrap items-center gap-2">
-          <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener"
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
-            🪪 بطاقة الملف
-          </a>
-        </div>
-        <PortalInviteRow patientNumber={patientNumber} phone={patientPhone} />
-      </div>
-
-      {/*
-        * وصولٌ سريع للتقويم والأشعة من أول شاشة (طلب المالك): العين تجدهما هنا
-        * قبل فتح أي تبويب — والتقويم يظهر حتى بلا حالة قائمة لأن فتحها يبدأ منه.
-        */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => onGoToTab("ortho")} data-testid="summary-open-ortho"
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
-          📐 التقويم
-          {summary.counts.orthoCase ? (
-            <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">حالة قائمة</span>
-          ) : null}
-        </button>
-        <button type="button" onClick={() => onGoToTab("files")}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
-          🗂️ الأشعة والمستندات
-          {summary.counts.documents > 0 ? (
-            <span className="mr-1.5 rounded-full bg-sky-100 px-1.5 text-[10px] font-extrabold text-sky-700">
-              {summary.counts.documents}
-            </span>
-          ) : null}
-        </button>
-      </div>
-
-      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="summary-current-work">
-        {/* الموعد القادم */}
-        <div className={`min-w-0 rounded-2xl border border-t-[3px] p-4 shadow-card ${summary.nextAppointment ? "border-navy-200 border-t-brand-orange bg-white" : "border-slate-200 border-t-navy-300 bg-white"}`}>
-          <span className="text-xs font-bold text-slate-500">الموعد القادم</span>
-          <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {summary.nextAppointment
-              ? `${friendlyDate(summary.nextAppointment.date)} · ${friendlyTime(summary.nextAppointment.time)}`
-              : "لا يوجد موعد قادم"}
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            {summary.nextAppointment
-              ? `${getAppointmentTypeLabel(summary.nextAppointment.appointmentType) ?? "زيارة"}${summary.nextAppointment.note ? ` · ${summary.nextAppointment.note}` : ""}`
-              : `الجلسات المتبقّية: ${summary.plannedVisits.length} — جدولها من هنا`}
-          </p>
-        </div>
-
-        {/* آخر زيارة */}
-        <div className="min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-navy-300 bg-white p-4 shadow-card">
-          <span className="text-xs font-bold text-slate-500">آخر زيارة</span>
-          <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {summary.lastVisit ? friendlyDateLong(summary.lastVisit.date) : "لا زيارات سابقة"}
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            {summary.lastVisit
-              ? summary.lastVisit.proceduresSummary ?? summary.lastVisit.treatmentDone ?? "زيارة كشف"
-              : `إجمالي الزيارات: ${summary.counts.visits}`}
-          </p>
-        </div>
-
-        {/* الخطة النشطة */}
-        <div className="min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-white p-4 shadow-card">
-          <div className="flex flex-wrap items-center justify-between gap-1.5">
-            <span className="text-xs font-bold text-slate-500">خطة العلاج النشطة</span>
-            {primaryPlan && !primaryPlan.consentAt ? (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                موافقة العلاج لم تُسجّل
-              </span>
-            ) : null}
+      <div className={styles.workGrid} data-testid="summary-current-work">
+        <section className={styles.card} aria-label="ملخص الحالة السريرية">
+          <h2 className={styles.heading}><Icon name="clipboard" className="h-4 w-4" />ملخص الحالة السريرية</h2>
+          <div className={styles.body}>
+            <dl className={styles.facts}>
+              <div><dt>الزيارات المسجلة</dt><dd>{summary.counts.visits}</dd></div>
+              <div><dt>الخطط النشطة</dt><dd>{summary.activePlans.length}</dd></div>
+              <div><dt>طلبات المعمل المفتوحة</dt><dd>{summary.counts.openLabOrders}</dd></div>
+              <div><dt>الأشعة والمستندات</dt><dd>{summary.counts.documents}</dd></div>
+              <div><dt>آخر زيارة</dt><dd>{summary.lastVisit ? friendlyDate(summary.lastVisit.date) : "لا زيارات سابقة"}</dd></div>
+            </dl>
+            <button type="button" className={`${styles.action} mt-3`} onClick={() => onGoToTab("chart")}>عرض مخطط الأسنان</button>
           </div>
-          <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {primaryPlan ? primaryPlan.title : "لا خطة جارية"}
-          </p>
-          {primaryPlan ? (
-            <>
-              {primaryPlan.clinicalProgress?.historicalItems ? (
-                <p className="mt-2 text-[11px] text-slate-600"><HistoricalClinicalNote progress={primaryPlan.clinicalProgress} currency={primaryPlan.baseCurrency ?? base} /></p>
-              ) : <>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-brand-orange transition-[width] duration-300"
-                  style={{ width: `${Math.min(100, Math.round((primaryPlan.doneItems / Math.max(1, primaryPlan.itemsCount)) * 100))}%` }}
-                />
+        </section>
+        <section className={styles.card} aria-label="تقدم الخطة المختارة">
+          <h2 className={styles.heading}><Icon name="tooth" className="h-4 w-4" />خطة العلاج النشطة</h2>
+          <div className={styles.body}>
+            {summary.activePlans.length > 1 ? <label className={styles.planSelect}>الخطة المعروضة
+              <select aria-label="الخطة المعروضة في الملخص" value={primaryPlan?.id ?? ""} onChange={event => setSelectedPlanId(Number(event.target.value))}>
+                {summary.activePlans.map(plan => <option key={plan.id} value={plan.id}>{plan.title}</option>)}
+              </select>
+            </label> : null}
+            <div className={styles.progress}>
+              <div><p>{primaryPlan?.title ?? "لا خطة جارية"}</p><small>{primaryPlan?.primaryDoctorName ?? "لم يحدد طبيب الخطة"}</small>
+                {primaryPlan ? <small>{primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات مسجلة</small> : <small>أنشئ خطة من تبويب العلاج</small>}
               </div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                {primaryPlan.doneItems} من {primaryPlan.itemsCount} إجراءات ·
-                باقي علاج {formatMoney(primaryPlan.remainingMinor, primaryPlan.baseCurrency ?? base)}
-                {primaryPlan.specialty ? ` · ${primaryPlan.specialty}` : ""}
-              </p>
-              </>}
-            </>
-          ) : (
-            <p className="mt-0.5 text-[11px] text-slate-500">أنشئ خطة من تبويب العلاج</p>
-          )}
-        </div>
-
-        {/* الجلسة التالية المخططة */}
-        <div className={`min-w-0 rounded-2xl border border-t-[3px] p-4 shadow-card ${nextPlanned ? "border-navy-200 border-t-brand-orange bg-white" : "border-slate-200 border-t-navy-300 bg-white"}`}>
-          <span className="text-xs font-bold text-slate-500">الجلسة التالية المخططة</span>
-          <p className="mt-1.5 text-sm font-extrabold text-navy-900">
-            {nextPlanned ?? scheduledNext
-              ? (nextPlanned ?? scheduledNext)!.title
-              : "لا جلسة مخطَّطة"}
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-500">
-            {nextPlanned ?? scheduledNext
-              ? `${PLANNED_VISIT_STATUS_LABEL[(nextPlanned ?? scheduledNext)!.status]} · ${(nextPlanned ?? scheduledNext)!.durationMinutes} دقيقة`
-              : "تُقترح تلقائيًا بعد إنهاء كل زيارة"}
-          </p>
-        </div>
+              {progress !== null ? <div className={styles.progressTrack} role="progressbar" aria-label="تقدم الخطة المعروضة" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><div className={styles.progressLabel}><span>نسبة الإجراءات المنفّذة</span><strong>{progress}%</strong></div><div className={styles.progressRail}><span style={{ width: `${progress}%` }} /></div></div> : null}
+            </div>
+            {primaryPlan?.clinicalProgress?.historicalItems ? <p className={styles.note}><HistoricalClinicalNote progress={primaryPlan.clinicalProgress} currency={primaryPlan.baseCurrency ?? base} /></p> : progress === null && primaryPlan ? <p className={styles.note}>لا تتوفر بنود كافية لحساب تقدم الخطة.</p> : null}
+            {primaryPlan && !primaryPlan.consentAt ? <p className="my-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">موافقة العلاج لم تُسجّل</p> : null}
+            <dl className={styles.facts}><div><dt>الجلسة التالية المخططة</dt><dd>{(nextPlanned ?? scheduledNext)?.title ?? "لا جلسة مخطَّطة"}</dd></div></dl>
+            <button type="button" className={`${styles.action} ${styles.primary} mt-3`} onClick={() => onGoToTab("plans")}>عرض تفاصيل خطة العلاج</button>
+          </div>
+        </section>
+        <section className={styles.card} aria-label="الإجراء القادم">
+          <h2 className={styles.heading}><Icon name="calendar" className="h-4 w-4" />الإجراء القادم</h2>
+          <div className={styles.body}>
+            <p className="mb-1 text-xs font-bold text-slate-500">الموعد القادم</p>
+            <p className="mb-3 text-sm font-bold">{summary.nextAppointment ? `${friendlyDate(summary.nextAppointment.date)} · ${friendlyTime(summary.nextAppointment.time)}` : "لا يوجد موعد قادم"}</p>
+            {summary.nextAppointment ? <p className="mb-3 text-xs text-slate-500">{getAppointmentTypeLabel(summary.nextAppointment.appointmentType) ?? "زيارة"}</p> : null}
+            <button type="button" className={`${styles.action} ${styles.orange}`} onClick={() => onGoToTab("today")}>{summary.openVisit ? "استكمال زيارة اليوم" : "فتح زيارة اليوم"}</button>
+            <button type="button" className={styles.action} onClick={() => onGoToTab("ortho")} data-testid="summary-open-ortho">التقويم {summary.counts.orthoCase ? "· حالة قائمة" : ""}</button>
+            <button type="button" className={styles.action} onClick={() => onGoToTab("files")}>الأشعة والمستندات</button>
+          </div>
+        </section>
       </div>
-
+      {summary.lastVisit ? <section className={styles.card} aria-label="ملخص آخر زيارة"><h2 className={styles.heading}>آخر زيارة — {friendlyDateLong(summary.lastVisit.date)}</h2><p className={styles.body}>{summary.lastVisit.proceduresSummary ?? summary.lastVisit.treatmentDone ?? "زيارة كشف"}</p></section> : null}
       {/* جدولة الجلسة / بدؤها — تاريخ ووقت فقط، والعلاج من الخطة */}
       {summary.plannedVisits.length > 0 && !summary.openVisit ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label="الجلسات المخطَّطة">
@@ -372,10 +304,11 @@ export function SummaryTab({
 
       {/* الحساب — للمخوّل ماليًا فقط؛ الخادم أرسل الرصيد لمن يملكه */}
       {financial ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label="الحساب">
+        <section className={styles.card} aria-label="الحساب">
+          <div className={styles.body}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-extrabold text-navy-900">الحساب</h3>
-            <div className="flex gap-1.5">
+            <div className={styles.accountActions}>
               <button type="button" onClick={() => setCollectOpen(true)}
                 className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-extrabold text-white">
                 تحصيل دفعة
@@ -391,36 +324,40 @@ export function SummaryTab({
             </div>
           </div>
 
+          <div className={styles.accountCurrencies}>
           {CURRENCIES.filter((currency) => {
             const row = financial.byCurrency?.[currency] ?? (currency === base ? financial : null);
             return row && (Object.values(row).some((value) => typeof value === "number" && value !== 0) || (row.clinicalProgress?.historicalItems ?? 0) > 0 || currency === base && !financial.byCurrency);
           }).map((currency) => {
             const row = financial.byCurrency?.[currency] ?? financial;
-            return <div key={currency} className="mt-3 min-w-0 rounded-xl border border-navy-100 bg-navy-50/30 p-3">
+            return <div key={currency} className={styles.currencyCard}>
               <p className="text-xs font-bold">{CURRENCY_LABEL[currency]}</p>
               <p className="mt-1 text-lg font-black">
                 {row.balanceMinor > 0 ? `المستحق الحالي: ${formatMoney(row.balanceMinor, currency)}` : row.balanceMinor < 0 ? `رصيد لصالح المريض: ${formatMoney(-row.balanceMinor, currency)}` : "المستحق الحالي مسدّد"}
                 {(row.agreementRemainingMinor ?? 0) > 0 ? <span className="block text-sm text-amber-700">متبقّي من اتفاق العلاج: {formatMoney(row.agreementRemainingMinor!, currency)}</span> : null}
               </p>
-              <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center text-xs sm:grid-cols-3">
+              <details className={styles.amountDetails}><summary>تفاصيل الاتفاق والفوترة بهذه العملة</summary>
+              <dl className={styles.amountRows}>
                 {[
                   ["قيمة العلاج المتفق عليه", row.agreedMinor],
-                  ["المسدّد من الاتفاق", row.agreementPaidMinor ?? 0],
-                  ["المتبقي من الاتفاق", row.agreementRemainingMinor ?? 0],
+                  ["المسدّد من الاتفاق", row.agreementPaidMinor],
+                  ["المتبقي من الاتفاق", row.agreementRemainingMinor],
                   [row.clinicalProgress?.historicalItems ? "تم تنفيذ علاج معروف خارج التاريخي" : "تم تنفيذ علاج", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownDoneMinor : row.treatmentDoneMinor],
                   [row.clinicalProgress?.historicalItems ? "باقي علاج معروف خارج التاريخي" : "علاج غير منفّذ", row.clinicalProgress?.historicalItems ? row.clinicalProgress.knownRemainingMinor : row.remainingTreatmentMinor],
                   ["تم فوترة", row.invoicedMinor],
                   ["تم دفع", row.paidMinor],
                   ["المديونية الحالية", row.balanceMinor],
-                ].map(([label, value]) => <div key={label as string} className="min-w-0 rounded-xl border border-slate-100 bg-white px-2 py-2.5">
+                ].map(([label, value]) => <div key={label as string} className={styles.amountRow}>
                   <dt className="text-[10px] font-bold text-slate-500">{label}</dt>
-                  <dd className="mt-0.5 break-words font-extrabold text-navy-900 [overflow-wrap:anywhere]">{formatMoney(value as number, currency)}</dd>
+                  <dd className="mt-0.5 break-words font-extrabold text-navy-900 [overflow-wrap:anywhere]">{typeof value === "number" && Number.isFinite(value) ? formatMoney(value, currency) : "غير متاح"}</dd>
                 </div>)}
-              </dl>
+              </dl></details>
               {row.clinicalProgress?.historicalItems ? <p className="mt-2 text-xs text-slate-600"><HistoricalClinicalNote progress={row.clinicalProgress} currency={currency} /></p> : null}
             </div>;
           })}
+          </div>
           {!CURRENCIES.some((currency) => financial.byCurrency?.[currency] && Object.values(financial.byCurrency[currency]).some((value) => typeof value === "number" && value !== 0)) && financial.byCurrency ? <p className="mt-2 font-bold">لا مبالغ مستحقة ولا اتفاق متبقٍّ</p> : null}
+          </div>
         </section>
       ) : null}
 
@@ -440,6 +377,14 @@ export function SummaryTab({
         </div>
       ) : null}
 
+      <details className={styles.disclosure} data-testid="summary-history-details">
+        <summary>التاريخ الطبي المصرّح به وبطاقة الملف والتواصل</summary>
+        <div className="space-y-3">
+          <PatientIntakeHistory patientId={patientId} />
+          <a href={`/print/patient-card/${patientId}`} target="_blank" rel="noopener" className={styles.action}>بطاقة الملف</a>
+          <PortalInviteRow patientNumber={patientNumber} phone={patientPhone} />
+        </div>
+      </details>
       {/* الخط الزمني الموحَّد (§٢٩-٣٠) — يُحمَّل عند فتحه، والفلترة تُجيب تاريخ
           العلاج وتاريخ المال من مكان واحد. */}
       <PatientTimeline patientId={patientId} base={base} />

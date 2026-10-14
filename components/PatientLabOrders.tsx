@@ -1,5 +1,7 @@
 "use client";
 
+import patientClinical from "./patient/PatientClinical.module.css";
+
 import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -365,7 +367,7 @@ export function PatientLabOrders({
   };
 
   return (
-    <div className="space-y-4">
+    <div className={patientClinical.serviceWorkspace} data-testid="patient-lab-workspace">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-navy-900">أعمال وتركيبات المعمل{currentRead?.status === "success" ? ` (${orders.length})` : ""}</h3>

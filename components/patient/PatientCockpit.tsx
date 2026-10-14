@@ -32,8 +32,8 @@ const hhmm = (iso: string | null) => (iso
  */
 export function PatientCockpit({
   patientId, patientName, patientPhone, fallbackAlert, summary, onOpenTab, onChanged,
-  compact = false, identity, primaryAction, secondaryActions, safety,
-  confirmedAlert,
+  compact = false, identity, primaryAction, secondaryActions, safety, showFinancialBalances = true,
+  confirmedAlert, displayedPatientAlert,
 }: {
   patientId: number;
   patientName: string;
@@ -41,11 +41,14 @@ export function PatientCockpit({
   /** التنبيه النصي في الملف — يُعرض إن لم يرجع الخادم تفاصيل الجاهزية. */
   fallbackAlert: string | null;
   confirmedAlert?: ConfirmedPatientAlert;
+  /** Already displayed by the independently authorized patient record. Never grants readiness access. */
+  displayedPatientAlert?: string | null;
   summary: WorkflowSummary | null;
   onOpenTab: (tab: SpecialtyTab) => void;
   onChanged: () => void;
   /** Presentation slots reuse the patient page's existing identity and actions. */
   compact?: boolean;
+  showFinancialBalances?: boolean;
   identity?: ReactNode;
   primaryAction?: ReactNode;
   secondaryActions?: ReactNode;
@@ -56,6 +59,8 @@ export function PatientCockpit({
     busy, message, canEnterChair, setChair, reload, clear, enterChair } = usePatientCockpitReadiness({
     patientId, patientName, patientPhone, fallbackAlert, confirmedAlert, summary, chairCount, onChanged,
   });
+  const visibleAlerts = [...new Set(alerts)].filter(alert =>
+    !compact || !displayedPatientAlert || alert.trim() !== displayedPatientAlert.trim());
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
@@ -101,15 +106,16 @@ export function PatientCockpit({
       ? "mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2"
       : "-mx-3 sm:-mx-4 mb-3 border-b border-slate-200 bg-white/95 px-4 py-2 shadow-xs backdrop-blur"}
       aria-label="قمرة المريض" data-testid="patient-context-strip" data-compact={compact ? "true" : "false"}>
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {compact && identity ? <div className="w-full min-w-0">{identity}</div>
-          : <span className="truncate text-sm font-black text-navy-900">{patientName}</span>}
-        {alerts.length > 0 ? (
-          <span className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={alerts.join(" • ")}>
-            ⚠️ {alerts.join(" • ")}
+      {compact && identity ? <div className="w-full min-w-0" data-testid="patient-context-identity">{identity}</div> : null}
+      <div data-testid="patient-context-body">
+      <div data-testid="patient-context-information" className="flex flex-wrap items-center gap-1.5 text-xs">
+        {!compact || !identity ? <span className="truncate text-sm font-black text-navy-900">{patientName}</span> : null}
+        {visibleAlerts.length > 0 ? (
+          <span data-testid="patient-readiness-alerts" className="max-w-full break-words [overflow-wrap:anywhere] rounded-lg bg-red-600 px-2 py-0.5 text-[11px] font-black text-white" title={visibleAlerts.join(" • ")}>
+            ⚠️ {visibleAlerts.join(" • ")}
           </span>
         ) : null}
-        {(visit?.balances ?? []).map((line) => (
+        {(showFinancialBalances ? visit?.balances ?? [] : []).map((line) => (
           <span key={line.currency}
             className={`rounded-lg px-2 py-0.5 text-[11px] font-black ${line.warn ? "bg-amber-200 text-amber-950" : "bg-amber-50 text-amber-900"}`}>
             عليه {formatMoney(line.dueMinor, line.currency)}
@@ -122,7 +128,7 @@ export function PatientCockpit({
         ) : null}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <div data-testid="patient-context-actions" className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {!compact ? visitSteps : null}
 
         <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
@@ -149,6 +155,18 @@ export function PatientCockpit({
               </button>
             </span>
           ) : null}
+          {compact && (visitSteps || suggestion) ? (
+            <details className="ms-auto text-[11px]" data-testid="patient-visit-details">
+              <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {visitSteps}
+                {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
+                  مقترح: {suggestion.label}
+                </button> : null}
+              </div>
+            </details>
+          ) : null}
           {!compact && suggestion ? (
             <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900">
@@ -158,18 +176,7 @@ export function PatientCockpit({
         </div>
       </div>
 
-      {compact && (visitSteps || suggestion) ? (
-        <details className="mt-1 text-[11px]" data-testid="patient-visit-details">
-          <summary className="cursor-pointer font-bold text-slate-600">مراحل الزيارة</summary>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            {visitSteps}
-            {suggestion ? <button type="button" onClick={() => onOpenTab(suggestion.tab)} title={suggestion.reason}
-              className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 font-bold text-indigo-900">
-              مقترح: {suggestion.label}
-            </button> : null}
-          </div>
-        </details>
-      ) : null}
+      </div>
 
       {readiness !== "ready" || chairsState !== "ready" || !coherent ? (
         <p role="status" data-testid="patient-cockpit-read-state" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">

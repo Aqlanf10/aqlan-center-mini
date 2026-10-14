@@ -1,5 +1,7 @@
 "use client";
 
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "./patient/usePatientDraftGuard";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   MISSED_APPOINTMENT_LABEL, REFERRAL_SPECIALTIES, REFERRAL_SPECIALTY_LABEL, REFERRAL_STATUS_LABEL, REFERRAL_URGENCIES,
@@ -33,7 +35,8 @@ interface Step {
   procedurePerformed: string; followupRequired: boolean; mayReturn: boolean;
 }
 
-export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
+export function PatientReferrals({ patientId, canIssue, appointments = [], onNavigationGuardChange }: {
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   patientId: number; canIssue: boolean;
   /** (REF-1) مواعيد المريض القادمة — «حجز الإحالة» يربط أحدها بالإحالة. */
   appointments?: Pick<Appointment, "id" | "scheduledDate" | "scheduledTime" | "status" | "doctorId" | "doctorName">[];
@@ -107,6 +110,8 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
     }
   };
 
+  usePatientDraftGuard(Boolean(form.toName.trim() || form.reason.trim() || form.teeth.trim() || toPartyId || closing?.note.trim() || step?.note.trim() || step?.procedurePerformed.trim()), busy, onNavigationGuardChange);
+
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/patients/${patientId}/referrals`, { cache: "no-store" });
@@ -177,7 +182,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
   const ordered = [...items].sort((a, b) => Number(b.status === "sent") - Number(a.status === "sent"));
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" data-testid="patient-referrals-workspace">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-extrabold text-navy-900">📨 الإحالات إلى الأخصائيين</h3>
         {canIssue && !creating ? (
@@ -193,7 +198,7 @@ export function PatientReferrals({ patientId, canIssue, appointments = [] }: {
       ) : null}
 
       {creating ? (
-        <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+        <div data-testid="patient-referral-form" className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
           <div className="flex gap-2 sm:col-span-2" role="radiogroup" aria-label="نوع الإحالة">
             {[{ value: true, label: "داخل المركز" }, { value: false, label: "خارج المركز (خطاب)" }].map((option) => (
               <button key={String(option.value)} type="button" role="radio" aria-checked={internal === option.value}

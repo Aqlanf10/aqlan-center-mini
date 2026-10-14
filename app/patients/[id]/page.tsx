@@ -48,6 +48,9 @@ import { CaseProfitabilityModal } from "@/components/CaseProfitabilityModal";
 import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
+import { PatientIdentityOverview } from "@/components/patient/PatientIdentityOverview";
+import profileStyles from "@/components/patient/PatientProfile.module.css";
+import { usePatientDraftGuard, type RegisterPatientDraftGuard } from "@/components/patient/usePatientDraftGuard";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
@@ -219,13 +222,19 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const contextRequest = useRef(0);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
-  const compactWorkspace = tab === "today" || tab === "treatment" || tab === "account";
+  const compactWorkspace = true; // Consistent compact identity on all five patient tabs.
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
   const clinicalLeaveGuard = useRef<(() => boolean) | null>(null);
   const casesLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const plansLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
   const accountLeaveGuard = useRef<{ guard: () => boolean; owner: typeof alertOwner } | null>(null);
+  const uiLeaveGuards = useRef(new Map<symbol, { guard: () => boolean; owner: typeof alertOwner }>());
+  const trackUiGuard = useCallback((guard: () => boolean) => {
+    const token = Symbol("patient-ui-draft");
+    if (alertOwner.active) uiLeaveGuards.current.set(token, { guard, owner: alertOwner });
+    return () => { uiLeaveGuards.current.delete(token); };
+  }, [alertOwner]);
   const treatmentEntrySequence = useRef(0);
   const [treatmentEntryRequest, setTreatmentEntryRequest] = useState<{ owner: typeof alertOwner; key: number } | null>(null);
   const trackAccountGuard = useCallback((guard: () => boolean) => {
@@ -256,6 +265,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   useEffect(() => {
     const controller = createPatientNavigation(window, {
       canLeave: () => {
+        for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return false;
         if (clinicalLeaveGuard.current && !clinicalLeaveGuard.current()) return false;
         const account = accountLeaveGuard.current;
         if (account?.owner.active && !account.guard()) return false;
@@ -314,6 +324,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     onOpenAccount: summary?.canSeeFinancial ? (context: ClinicalNavigationContext) => openClinicalContext(context, "account") : undefined,
   };
   const [editing, setEditing] = useState(false);
+  const [summaryView, setSummaryView] = useState<"overview" | "identity" | "medical">("overview");
+  const showSummaryView = (view: typeof summaryView) => {
+    for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return;
+    setSummaryView(view);
+  };
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async (workflowOnly = false) => {
@@ -622,8 +637,31 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           </div>
         ) : null;
 
+  const summaryNavigation = (!isRestrictedRole(session?.role) ? <nav aria-label="تفاصيل الملخص" className={patientPremium.summaryViews}>
+            {([ ["overview","ملخص الرحلة"], ["identity","البيانات الشخصية"], ["medical","التاريخ الطبي"] ] as const).map(([value,label]) => <button type="button" key={value} aria-pressed={summaryView === value} onClick={() => showSummaryView(value)}>{label}</button>)}
+          </nav> : null);
+
   return (
     <main className={`${patientPremium.root} mx-auto max-w-7xl min-w-0 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-5 sm:pt-5 lg:pb-24 [&_input]:scroll-mb-28 [&_textarea]:scroll-mb-28 [&_button]:scroll-mb-28`} data-testid="patient-workspace" data-compact={compactWorkspace ? "true" : "false"}>
+      <div className={patientPremium.pageHeading}>
+        <p>ملف المريض — {TABS.find(([key]) => key === tab)?.[1]}</p>
+        {tab === "summary" ? summaryNavigation : null}
+        <div className={patientPremium.headingActions}>
+          {compactWorkspace && primaryAction ? <button type="button" onClick={primaryAction.run} disabled={busyAction}
+            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
+            {primaryAction.label}
+          </button> : null}
+          {compactWorkspace ? <button type="button" onClick={() => {
+            setMoreOpen(false);
+            setPatientDetailsOpen((open) => !open);
+          }}
+            aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
+            className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
+            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
+          </button> : null}
+        <a href="/patients"><Icon name="arrow" className="h-3.5 w-3.5" /> عودة للمرضى</a>
+        </div>
+      </div>
       {/* (CHAIR-1) قمرة المريض: سياق الملف بالحالة والمراحل و«إدخال إلى الكرسي» — تركيبٌ لا محرّك. */}
       <PatientCockpit
         patientId={patient.id}
@@ -633,8 +671,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         confirmedAlert={confirmedAlert?.owner === alertOwner ? confirmedAlert.alert : undefined}
         summary={summary}
         compact={compactWorkspace}
+        showFinancialBalances={!(summary?.canSeeFinancial && summary.financial && (tab === "summary" || tab === "account"))}
+        displayedPatientAlert={compactWorkspace ? patient.medicalAlert : null}
         identity={compactWorkspace ? (
-          <div className="flex min-w-0 items-center gap-2" data-testid="patient-compact-identity">
+          <div className={patientPremium.identity} data-testid="patient-compact-identity">
+            <div className={patientPremium.identityName}>
             {patient.photoDocumentId ? <img src={`/api/documents/${patient.photoDocumentId}`} alt={`صورة ${patient.fullName}`}
               className="h-8 w-8 shrink-0 rounded-lg object-cover" />
               : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-xs font-black text-white">{initials || "م"}</span>}
@@ -647,27 +688,20 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 {copiedLabel === "patientNumber" ? <span role="status" className="text-emerald-700">نُسخ الرقم</span> : null}
               </div>
             </div>
+            </div>
+            <dl className={patientPremium.identityFacts}>
+              <div><dt>الطبيب المسؤول عن الخطة</dt><dd>{primaryPlan?.primaryDoctorName ?? "غير محدد"}</dd></div>
+              <div><dt>رقم الجوال</dt><dd dir="ltr">{patient.phone ? <a href={`tel:${patient.phone}`}>{patient.phone}</a> : "غير مسجل"}</dd></div>
+              <div><dt>العمر</dt><dd>{ageText(age)}</dd></div>
+              <div><dt>الموعد القادم</dt><dd>{summary?.nextAppointment ? `${summary.nextAppointment.date} · ${summary.nextAppointment.time.slice(0, 5)}` : summary ? "لا يوجد موعد" : "غير متاح"}</dd></div>
+              <div><dt>رقم الملف</dt><dd>{patient.patientNumber}</dd></div>
+            </dl>
           </div>
         ) : undefined}
-        primaryAction={compactWorkspace && primaryAction ? (
-          <button type="button" onClick={primaryAction.run} disabled={busyAction}
-            className="rounded-lg bg-brand-orange px-3 py-2 text-xs font-extrabold text-white disabled:opacity-50" data-testid="patient-primary-action">
-            {primaryAction.label}
-          </button>
-        ) : undefined}
-        secondaryActions={compactWorkspace ? (
-          <button type="button" onClick={() => {
-            setMoreOpen(false);
-            setPatientDetailsOpen((open) => !open);
-          }}
-            aria-expanded={patientDetailsOpen} aria-controls="patient-details-panel" data-testid="patient-details-toggle"
-            className="rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-bold text-navy-800">
-            {patientDetailsOpen ? "إخفاء البيانات والإجراءات" : "بيانات المريض والإجراءات"}
-          </button>
-        ) : undefined}
         safety={compactWorkspace ? <>
+          {medicalAlertBanner}
           <PatientFlagChips flags={patient.flags} />
-          {!vitals ? <span className="text-[11px] text-slate-500">العلامات الحيوية في تنبيه الملف: غير مسجلة</span> : null}
+          {!vitals ? <span className="text-[11px] text-slate-500">علامات حيوية: غير مسجلة</span> : null}
           {vitals?.bpSystolic && vitals.bpDiastolic && bpRisk.category !== "normal" && bpRisk.category !== "unknown" ? (
             <button type="button" onClick={() => setShowVitalsModal(true)} data-testid="patient-compact-pressure-alert"
               className={`rounded-lg border px-2 py-1 font-bold ${bpRisk.category === "elevated"
@@ -684,7 +718,6 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         }}
         onChanged={() => void load()}
       />
-      {compactWorkspace ? medicalAlertBanner : null}
       {/* رأس الملف السريري الاحترافي: هوية المريض، المؤشرات الحيوية، والأمان السريري */}
       <header id="patient-details-panel" hidden={compactWorkspace && !patientDetailsOpen}
         className="mb-4 min-w-0 rounded-2xl border border-slate-200 border-t-[3px] border-t-brand-orange bg-gradient-to-b from-white to-sky-50/30 p-3 shadow-card sm:p-5" data-testid="patient-details-panel">
@@ -884,7 +917,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-emerald-800 hover:bg-emerald-50">
                   📋 إرشادات العناية بعد العلاج
                 </button>
-                <button type="button" onClick={() => setEditing((open) => !open)}
+                <button type="button" onClick={() => { if (editing) for (const entry of uiLeaveGuards.current.values()) if (entry.owner.active && !entry.guard()) return; setEditing((open) => !open); }}
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
                   ✏️ تعديل بيانات الملف
                 </button>
@@ -1031,7 +1064,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : null}
 
       {editing ? (
-        <PatientEditor
+        <PatientEditor onNavigationGuardChange={trackUiGuard}
           patient={patient}
           onSaved={(medicalAlert) => {
             if (!confirmPatientAlert(medicalAlert)) return;
@@ -1118,21 +1151,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "summary" ? (
         retainedSummary ? (
           <div className="space-y-4" hidden={!summary} inert={!summary}>
-          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
-          {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
-          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientContactPanel
-              patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
-            />
-          ) : null}
-          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
-          {!isRestrictedRole(session?.role) ? (
-            <PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} />
-          ) : null}
+
+          <div hidden={summaryView !== "overview"}>
           <SummaryTab
+
             summary={summary ?? retainedSummary}
             workflowIsCurrent={workflowIsCurrent}
             patientId={patient.id}
@@ -1148,6 +1170,28 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             onChanged={() => void load()}
             onGoToTab={goTo}
           />
+          </div>
+
+          <div hidden={summaryView !== "identity"}>
+            {!isRestrictedRole(session?.role) ? <PatientIdentityOverview patient={patient} onEdit={() => setEditing(true)} /> : null}
+          </div>
+          <div className={patientPremium.detailsGrid} data-testid="summary-administrative-details">
+          {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
+          {!isRestrictedRole(session?.role) ? <div hidden={summaryView === "identity"} className={patientPremium.medicalSection}><MedicalHistoryPanel patientId={patient.id} onNavigationGuardChange={trackUiGuard} /></div> : null}
+          {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
+          {!isRestrictedRole(session?.role) ? (
+            <div hidden={summaryView === "medical"}><PatientContactPanel onNavigationGuardChange={trackUiGuard}
+              patient={patient}
+              canEdit
+              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+            /></div>
+          ) : null}
+          {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
+          {!isRestrictedRole(session?.role) ? (
+            <div hidden={summaryView === "medical"}><PatientFamilyPanel patientId={patient.id} patientName={patient.fullName} patientPhone={patient.phone} /></div>
+          ) : null}
+
+          </div>
 
           </div>
         ) : (
@@ -1279,7 +1323,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           {treatmentSubTab === "referrals" && (
             <section aria-label="الإحالات إلى الأخصائيين">
-              <PatientReferrals patientId={patient.id} canIssue={session?.role === "doctor" || admin}
+              <PatientReferrals onNavigationGuardChange={trackUiGuard} patientId={patient.id} canIssue={session?.role === "doctor" || admin}
                 appointments={file?.appointments ?? []} />
             </section>
           )}
@@ -1288,7 +1332,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <section aria-label="المستهلكات والمواد المنصرفة">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
                 <h3 className="mb-3 text-sm font-extrabold text-navy-900">📦 المستهلكات والمواد المنصرفة للمريض</h3>
-                <PatientMaterials
+                <PatientMaterials onNavigationGuardChange={trackUiGuard}
                   patientId={patient.id}
                   visits={file.visits.map((v) => ({ id: v.id, arrivedAt: v.arrivedAt }))}
                 />
@@ -1329,6 +1373,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       ) : tab === "account" ? (
         <>
           <PatientPremiumAccountOverview summary={summary} base={base} />
+          <div className={patientPremium.ledger} data-testid="patient-canonical-ledger">
           <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
             setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
           }} accountDetails={<>
@@ -1370,6 +1415,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             planId={clinicalContext.context?.planId} planItemId={clinicalContext.context?.planItemId} clinicalCaseId={clinicalContext.context?.clinicalCaseId} orthoCaseId={clinicalContext.context?.orthoCaseId}
             onOpenClinicalContext={openClinicalContext} /> : null}
           </>} />
+          </div>
 
           <LegacyHistory patientId={patient.id} />
         </>
@@ -1384,7 +1430,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 </span>
               ) : null}
             </div>
-            <PatientDocuments
+            <PatientDocuments onNavigationGuardChange={trackUiGuard}
               patientId={patient.id}
               patientName={patient.fullName}
               patientPhone={patient.phone}
@@ -1660,11 +1706,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 }
 
 function PatientEditor({
+  onNavigationGuardChange,
   patient,
   onSaved,
   onError,
 }: {
   patient: Patient;
+  onNavigationGuardChange?: RegisterPatientDraftGuard;
   onSaved: (medicalAlert: string | null) => void;
   onError: (message: string | null) => void;
 }) {
@@ -1685,6 +1733,8 @@ function PatientEditor({
     referredBy: patient.referredBy ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const [original] = useState(() => JSON.stringify(form));
+  usePatientDraftGuard(JSON.stringify(form) !== original, saving, onNavigationGuardChange);
   /* (P3-8ب) خيارات «من أين جاء» من الإعداد — والقيمة المحفوظة تبقى خيارًا وإن حُذفت
      من القائمة لاحقًا، فلا يُمحى مصدرٌ قديم بمجرد فتح المحرّر. */
   const sourceList = useSetting("patients.referral_sources");
@@ -1734,9 +1784,10 @@ function PatientEditor({
   };
 
   return (
-    <section className="mb-4 rounded-2xl border border-navy-800 bg-white p-4 shadow-sm" aria-label="تعديل البيانات">
+    <section className={`mb-4 rounded-xl border border-sky-200 bg-white p-4 ${profileStyles.editor}`} aria-label="تعديل البيانات">
       <h2 className="mb-3 text-sm font-extrabold text-navy-900">تعديل بيانات المريض</h2>
 
+      <fieldset><legend>الهوية والبيانات الأساسية</legend>
       <Field label="الاسم الكامل">
         <input value={form.fullName} onChange={(e) => set("fullName", e.target.value)} className={inputClass} />
       </Field>
@@ -1780,6 +1831,7 @@ function PatientEditor({
         </Field>
       </div>
 
+      </fieldset><fieldset><legend>التواصل ووليّ الأمر</legend>
       <div className="flex flex-wrap gap-2">
         <Field label="وليّ الأمر (للأطفال)" className="min-w-[9rem] flex-1">
           <input value={form.guardianName} onChange={(e) => set("guardianName", e.target.value)} className={inputClass} />
@@ -1835,6 +1887,7 @@ function PatientEditor({
         <input value={form.address} onChange={(e) => set("address", e.target.value)} className={inputClass} />
       </Field>
 
+      </fieldset><fieldset><legend>التنبيهات الطبية</legend>
       <Field label="تنبيه طبي (حساسية بنج، أمراض مزمنة، أدوية سيولة)">
         <input
           value={form.medicalAlert}
@@ -1869,6 +1922,7 @@ function PatientEditor({
         </div>
       </Field>
 
+      </fieldset><fieldset><legend>ملاحظات الملف</legend>
       <Field label="ملاحظات عامة">
         <textarea
           value={form.note}
@@ -1878,6 +1932,7 @@ function PatientEditor({
         />
       </Field>
 
+      </fieldset>
       <div className="mt-3 flex justify-end gap-2">
         <button
           type="button"

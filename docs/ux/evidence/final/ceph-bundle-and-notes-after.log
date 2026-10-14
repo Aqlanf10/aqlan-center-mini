@@ -1,0 +1,47 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/patient-ceph-post-real-react.test.ts __tests__/security-http/clinical-visit-pending-notes-ui.test.ts --reporter=verbose
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after cancel while awaiting response 784ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after header while awaiting response 1275ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after toggle-probe while awaiting response 1068ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after patient-aba while awaiting response 1563ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after case-aba while awaiting response 1167ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after principal-aba while awaiting response 1522ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after permission-aba while awaiting response 1548ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after cancel while awaiting body 1338ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after header while awaiting body 1113ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after toggle-probe while awaiting body 1024ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after patient-aba while awaiting body 1841ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after case-aba while awaiting body 2613ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after principal-aba while awaiting body 1507ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > keeps newer navigation after permission-aba while awaiting body 2097ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > does not let old JSON failure/finally release the reopened form's live lock 2387ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > uses its synchronous latch for repeated committed handlers in one browser task 1432ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph creation lifetime in real React development StrictMode > rechecks after the real creation callback synchronously unmounts the view 1633ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > rejects a captured A image change while B's read is pending and preserves A's explicit choice 2149ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > recovers to patient B's only image and submits that image without an artificial change event 1597ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > clears old image options and stays disabled for an empty new image list 867ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > keeps an explicit valid patient-wide choice through case A→B→A without extra GETs 1788ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired patient A→B→A document response 1415ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired principal A→B→A document response 1321ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired permission A→B→A document response 1163ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired patient A→B→A document body 1351ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired principal A→B→A document body 1933ms
+ ✓ __tests__/security-http/patient-ceph-post-real-react.test.ts > PatientCeph document selection in a reused real React component > does not republish retired permission A→B→A document body 1162ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > locks all five notes, phrases and procedure controls through both POST and reload GET, then accepts fresh edits 6696ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST rejection, allowing a corrected retry 2601ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > retains notes and unlocks after a POST network failure, allowing a corrected retry 2175ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > hides editing after a failed post-save reload and restores the exact draft only after an authorized retry 2212ms
+ ✓ __tests__/security-http/clinical-visit-pending-notes-ui.test.ts > pending clinical note containment in the built visit page > keeps automatically generated treatment text stable while procedures and an already-open tooth picker are frozen 5305ms
+
+ Test Files  2 passed (2)
+      Tests  32 passed (32)
+   Start at  03:38:11
+   Duration  68.80s (transform 99ms, setup 0ms, import 685ms, tests 62.11s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
