@@ -127,6 +127,9 @@ describe("real invoice signing, correction lineage and browser checkout", () => 
   }, 90000);
   it("keeps existing role/privacy and foreign target boundaries without financial writes", async () => {
     const f = await invoice("SAR", 400), other = await owner();
+    // Real concurrent HTTP readers must also fit the default application pool.
+    const concurrent = await Promise.all(Array.from({ length: 3 }, () => read(f.visitId)));
+    for (const result of concurrent) expect(result).toMatchObject({ invoice: { id: f.original.id, currency: "SAR" }, checkout: { invoicePaidMinor: 400, current: { SAR: 600 } } });
     const before = (await db.query("SELECT to_jsonb(p) AS value FROM payments p WHERE patient_id=$1 ORDER BY id", [f.patientId])).rows;
     for (const actor of [h.sessions.reception, h.sessions.accountant, h.sessions.cashier]) expect((await post(`/api/visits/${other.visitId}/clinical`, { action: "sign" }, actor)).status).toBe(403);
     expect((await authedGet(`/api/visits/${f.visitId}/walkout`, h.sessions.portalA)).status).toBe(401);

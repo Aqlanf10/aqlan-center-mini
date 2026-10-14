@@ -22785,9 +22785,10 @@ export async function prescribedBefore(patientId: number): Promise<SuggestionIte
 export async function patientAppointmentsFrom(
   patientId: number,
   fromDate: string,
+  client?: DbClient,
 ): Promise<Appointment[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<AppointmentRow>(
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<AppointmentRow>(
     `${APPOINTMENT_SELECT} WHERE a.patient_id = $1 AND a.scheduled_date >= $2::date
       ORDER BY a.scheduled_date, a.scheduled_time`,
     [patientId, fromDate],
@@ -28398,11 +28399,9 @@ async function visitWalkoutInSnapshot(pool: DbClient, visitId: number): Promise<
   let nextAppointment: VisitWalkout["nextAppointment"] = null;
   const checkout: VisitWalkout["checkout"] = { previous: {}, current: {}, invoicePaidMinor: 0, paymentsToday: [], openingPaidToday: [] };
   if (visit.patient_id !== null) {
-    const [ledger, planCurrencies, appointments] = await Promise.all([
-      patientLedgerInSnapshot(visit.patient_id, pool),
-      patientPlanCurrencies(visit.patient_id, pool),
-      patientAppointmentsFrom(visit.patient_id, visit.today),
-    ]);
+    const ledger = await patientLedgerInSnapshot(visit.patient_id, pool);
+    const planCurrencies = await patientPlanCurrencies(visit.patient_id, pool);
+    const appointments = await patientAppointmentsFrom(visit.patient_id, visit.today, pool);
     const settlement = visit.invoice_id === null ? null : await readInvoiceSettlementPosition(pool, {
       patientId: visit.patient_id, invoiceId: visit.invoice_id,
       currency: requireCurrency(visit.invoice_currency, "فاتورة الزيارة", visit.invoice_id),
