@@ -1,6 +1,8 @@
 # Invoice execution requirements and evidence
 
-Branch: `feat/invoice-resume-20261014`. Execution resumed from independently verified remote `d8822f30660bd3f5cd19b99c2c4f3f1714bbf263`. Only the invoice writer is active. No main merge, Production access or patient-data access is authorized. No deployment has occurred; only eventual verified Staging is authorized.
+Branch: `feat/invoice-resume-20261014`. Execution resumed from independently verified remote `d8822f30660bd3f5cd19b99c2c4f3f1714bbf263`. Only the invoice writer is active. No main merge, Production access or patient-data access is authorized. No deployment has occurred. The latest scope permits invoice-only currency defect verification; no further merge or deployment is currently authorized.
+
+Invoice delivery **961f498b** passed [required CI 38548186976](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38548186976), all 83 steps / zero skipped. The selected-service currency defect reported on deployed add3b2b5 is already repaired in that invoice source: [source/test/evidence checklist](INVOICE_CURRENCY_SWITCH_VERIFICATION_20261014.md). Fresh actual-app verification passed **19/19 browser/API** and **9/9 units**, with 35 before/after PNGs. The enclosing test/documentation follow-up retains identical application bytes and requires its own exact-head CI. The paused local design integration and its unresolved cross-owner refresh defect are excluded.
 
 ## Exact failed gate
 
