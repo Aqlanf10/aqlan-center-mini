@@ -1,5 +1,7 @@
 # Invoice completion — resumed, not release-ready
 
+Current continuation: see [invoice execution checklist](INVOICE_EXECUTION_CHECKLIST_20261014.md) and [implementation handoff](INVOICE_IMPLEMENTATION_HANDOFF_20261014.md) for the sole-writer repairs, completed follow-up scope and current unwaived release blockers. The dated checkpoints below remain historical evidence.
+
 ## Source truth
 
 Resumed original saved worktree `/workspace/compat-invoice-03d325a8`, clean at `1a19d65f7621e7ebf30c30699d938cd4dbdc9e42` / tree `08e9b9091340865f8d0e59851cbfd62f78aa10cd`. New branch: `feat/invoice-resume-20261014`. No prior local work was discarded.

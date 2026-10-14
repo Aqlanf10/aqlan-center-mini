@@ -53,3 +53,7 @@ Candidate failures 40/42 and 40/42 remain preserved under `candidate-http-gate-r
 - Remaining planned work and posted account debt are distinct projections. No conclusion about the live report is drawn from that distinction without its expected/actual example.
 
 Next: complete full exact-head gates for the ledger repair, retain actual invoice screenshots and the unwaived local audit/PDF differences, then push and review exact-head CI. Reproduce the user's specific expected/actual case synthetically when supplied. Staging still requires a reviewed combined head preserving patient-design and paused reception work; do not deploy this branch directly over it.
+
+## Completed local verification of the committed financial repair
+
+Source c27f685b11cf15f6f1184828c49b54de8c960c71 (tree167fecaf2389c4f21404c38fdfb27af36c6a5a48) passed complete9203/9203 units, complete1827/1827 PG, relevant150/150 HTTP/browser and20/20 operational journeys, zero skips. Fresh build/environment/typecheck/lint/money/body/schema/ownership/baseline/preflight/runtime passed with stable app hash204edb2b84038118007fb4b5b89fb8c45dc0ff80adc314dbba4987ffe5c94d92 and source+tests48e4c45d9e6eaea63bf51c2e71b770e4414d5ab5863f0513b0bbb765a431de30. Records are in `snapshot-verification-index.json`; final-source actual64 images in `snapshot-actual-ui-manifest.json`. This supersedes the earlier record's pending local-gate step. Required exact delivery-head CI/review and safe combined Staging target remain outstanding; the user's specific live discrepancy is still not identified.

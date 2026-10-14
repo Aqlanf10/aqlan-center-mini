@@ -1,5 +1,7 @@
 # Unified invoice / historical agreement acceptance
 
+Current continuation: see [invoice execution checklist](INVOICE_EXECUTION_CHECKLIST_20261014.md) and [implementation handoff](INVOICE_IMPLEMENTATION_HANDOFF_20261014.md) for the sole-writer repairs, completed follow-up scope and current unwaived release blockers. The dated checkpoints below remain historical evidence.
+
 Preservation checkpoint: remote `7f423cb5c41206c72f1cf079f61ed4bfb8afebf7`, tree `9c6e84cde645046596a2203153ccb936ae82ef36`, branch `feat/invoice-resume-20261014`. The accompanying follow-up includes the narrow pre-visit clinical-evidence protection and its verification below. This is a review checkpoint, not the combined reception/clinical release. The coordinator confirmed reception is paused with a clean tree at `a91fec440709cc9e46fa7bc015da51eab42f8170`; that checkpoint was fetched and inspected, not integrated here.
 
 ## Verified source and isolation

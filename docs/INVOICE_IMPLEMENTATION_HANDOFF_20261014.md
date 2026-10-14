@@ -1,11 +1,79 @@
-# Invoice implementation handoff — verification in progress
+# Invoice implementation handoff — local verification complete, release blocked
 
-Branch: `feat/invoice-resume-20261014`. Verified starting remote d8822f30660bd3f5cd19b99c2c4f3f1714bbf263. First repaired and pushed source: 31b7219acd3fe50773313505d39cbbd541021db6 (tree 580080c30ecba41fe44f152fb655e3c6d03633fb). This document accompanies the next implementation checkpoint; resolve its enclosing commit with `git rev-parse HEAD HEAD^{tree}`. Final verified SHA and gate results will be appended in a documentation-only follow-up.
+Branch: `feat/invoice-resume-20261014`. Starting remote head independently verified as d8822f30660bd3f5cd19b99c2c4f3f1714bbf263. Current product checkpoint: **c27f685b11cf15f6f1184828c49b54de8c960c71**, tree **167fecaf2389c4f21404c38fdfb27af36c6a5a48**, pushed and remote-verified. The enclosing handoff follow-up changes documentation only; resolve its delivery SHA with `git rev-parse HEAD`. Exact delivery-head CI is still required. No Staging deployment or final CI success is claimed in this document.
 
-The exact CI failure is repaired, with untouched-head failure and five-file 22/22 success evidence. Subsequent work adds explicit-visit recovery across corrections, correct historical opening dates, visit-before-invoice repayment locks, guarded ordinary clinical identity amendments, immutable original clinical display facts, grouped pricing-unit guards and actual native-currency/recovery/two-tab evidence. See `INVOICE_EXECUTION_CHECKLIST_20261014.md` for requirement mapping, commands, before/after failures and source boundaries, and `INVOICE_SETTLEMENT_ADAPTER.md` for the reception contract.
+Application SHA256: `204edb2b84038118007fb4b5b89fb8c45dc0ff80adc314dbba4987ffe5c94d92`; source plus tests SHA256: `48e4c45d9e6eaea63bf51c2e71b770e4414d5ab5863f0513b0bbb765a431de30`. The retained runner hashes tracked/untracked source/config/schema/scripts, excludes documentation and generated assets, and records both before/after values. All final local runs below have matching before/after hashes and c27f685b HEAD.
 
-Historical original clinical identity and unsupported pre-system credit assertions are deliberately refused with concrete reasons. In-system correction credits remain supported with immutable receipts and separate authorized refunds. Original historical totals/paid facts are never transformed into invented receipts or cash. All new execution uses a new disposable PostgreSQL 18.6 container on loopback 55439, synthetic `aqlan_p1_test` and recreated `aqlan_sec_http`, and app loopback 3322. Do not run two HTTP harnesses together.
+## Confirmed financial repair and limits
 
-No main merge, Production access, real patient/credential access, CI/security setting change, migration-number change or external notification. Existing design is preserved; patient layout/sidebar and reception-owned screens are not edited. Reception's paused a91fec440709cc9e46fa7bc015da51eab42f8170 fix must remain intact in its later integration. Its walkout/operational proof consumers still require adapter wiring and a combined no-additional-fee signature → one collection-task journey. This invoice checkpoint does not claim that combined release.
+The latest user steering prioritizes incorrect account calculations. The reported live expected/actual example remains unspecified and **is not claimed reproduced or fixed**. No real patient data was read or modified.
 
-Next step: freeze the implementation, run the full required local and exact-head CI gates, inspect actual screenshot evidence, and record any untouched-base failures precisely. No Staging deployment has occurred. Only verified Staging is authorized; Production remains prohibited.
+An independent real-PostgreSQL race was reproduced in YER/SAR/USD: canonical opening 1000 minor followed by actual collection 400 minor leaves 600 owed, but separate parallel ledger reads combined old opening 0 with new receipt 400 and returned an impossible **−400 credit**. Three before-tests failed with that exact result. `patientLedger` now reads invoices/items, opening principal and receipts on one `REPEATABLE READ READ ONLY` client. The same three interleavings now return coherent earlier zero snapshots; fresh reads return 600. No formula, receipt, opening fact, period, permission or writer lock changed. Focused financial regression batch passed 79/79, then the complete PostgreSQL suite passed 1827/1827.
+
+[Financial reconciliation record](INVOICE_FINANCIAL_RECONCILIATION_20261014.md) contains the exact commands, before/after witnesses, canonical server contracts and captured real synthetic API responses. It also proves that an unresolved collection resumes its original body/key, creates one original receipt, and then releases the user to create a separate new-key payment. Those browser fixture changes are not asserted to fix the unspecified live discrepancy.
+
+## Invoice outcome
+
+- Approved unified new/historical form retained, with native YER/SAR/USD prices, correct service units, multiple services including orthodontics, provider/site selection, discounts and installment terms. Historical prosthetic group value is retained once; arch/region quantities cannot multiply a scope price. Patient layout/sidebar were not redesigned.
+- Historical original agreed/previously-paid facts produce opening principal only, without invented invoices/cash receipts. Current positive revisions determine the owned opening date. Each work line retains its canonical item/case and immutable coverage.
+- Ordinary/historical financial corrections retain original facts, reasons, audit, existing receipts, idempotency, permissions and period locks. Safe ordinary service/provider/site amendments affect one unstarted unshared canonical item/case; executed/shared/paid/commission-linked or otherwise unsafe amendments reject explicitly. Historical clinical identities and unsupported pre-system credit assertions require review. Actual in-system overcollection credit is supported without automatic refund.
+- Durable recovery and competing tabs are verified for creation/correction/collection/receipt correction, with current server authority. Explicit visits bind normal/catalogue/template commands, fingerprints, recovery and acknowledgement; no latest-visit inference. Creation recovery remains valid after owned correction descendants relink the visit.
+- The [settlement adapter contract](INVOICE_SETTLEMENT_ADAPTER.md) covers the complete explicit same-patient/currency correction lineage, ancestor receipts/refunds and stale-proof invalidation. Original receipt invoice IDs stay unchanged. Original1000/paid400/replacement900 yields remaining500; paid1000/replacement900 yields credit100. Old unstructured replacement ancestry refuses instead of silently dropping original receipts. Schedule locks fence patient → visit → invoice.
+
+## Verification
+
+Evidence root: `/workspace/reviews/invoice-resume-20261014/`.
+
+| Final local check on c27f685b | Result / evidence |
+|---|---|
+| Complete units, 518 files | **9203/9203**, zero skipped; `snapshot-full-unit.{log,metadata.json}`, results JSON |
+| Complete real PostgreSQL18.6, 182 files | **1827/1827**, zero skipped; `snapshot-full-postgres.*` |
+| Invoice/recovery/native-currency browser + HTTP, 25 files | **150/150**, zero skipped; `snapshot-http.*` |
+| All operational journeys | **20/20**; `snapshot-operational.*` |
+| Fresh build / environment / typecheck / full lint / money scan / raw-body guard / preflight / runtime dependency proof | Passed; `snapshot-build-static.*`; build **4h-_Kt7PgtwFDtmSGqMYR**; lint zero errors / existing185 warnings |
+| Fresh schema drift + ownership | Passed; `snapshot-schema.*`, fresh95 tables/1224 columns/1206 constraints/296 indexes/40 triggers; ownership zero unexpected differences and existing16 convergence findings |
+| Baseline manifest generation/verification | Passed; `snapshot-baseline-manifest.*` |
+| Actual UI evidence | **64 PNGs**, 77 files including geometry/manifests; `snapshot-actual-ui/`, `snapshot-actual-ui-manifest.json` |
+
+`snapshot-verification-index.json` retains every exact command array, source hash, elapsed time, exit code and raw log SHA256. `snapshot-deliverable-sha256.json` hashes the results and actual UI manifest. These are source-bound checks, not tests of main.
+
+Commands use `/tmp/invoice-test-env.sh`: Node22.23.3/npm11.9.0, Asia/Aden, systemChromium151 and the newly created disposable PG18.6 container on loopback55439. Unit runner has no DATABASE_ENVIRONMENT override. Full PG uses `CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE=1 MANUAL_CASH_CI_DISPOSABLE_FIXTURE=1`. HTTP owns recreated `aqlan_sec_http` and port3322, with CI flags and synthetic runID0 (not a GitHub run). Operational/schema commands use the same synthetic server's maintenance database. No two harnesses share a database/port. A separate disposable container55440/app3323 was used for unchanged-base/candidate checks only.
+
+```sh
+npm test -- --reporter=json --outputFile=/workspace/reviews/invoice-resume-20261014/snapshot-full-unit-results.json
+CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE=1 MANUAL_CASH_CI_DISPOSABLE_FIXTURE=1 npm run test:postgres -- --reporter=default --reporter=json --outputFile=/workspace/reviews/invoice-resume-20261014/snapshot-full-postgres-results.json
+npm run build
+npm run verify:environment
+npm run typecheck
+npm run lint
+npm run scan:money
+npm run ci:scan:body
+npm run build:preflight
+node scripts/verify-braces-runtime.mjs
+npm run verify:ci
+bash /tmp/invoice-final-schema.sh
+npm run db:baseline:manifest -- --output /workspace/reviews/invoice-resume-20261014/snapshot-baseline-schema-manifest.json
+npm run db:baseline:manifest:verify -- --fresh /workspace/reviews/invoice-resume-20261014/snapshot-baseline-schema-manifest.json
+```
+
+The precise 25-file HTTP command and synthetic CI environment are in `snapshot-http.metadata.json`; all tests within selected files ran. The schema wrapper compares a freshly generated contract against `git show HEAD:schema/current-schema-contract.pg18.json`, restores only its generated working-file bytes in a trap, and runs unmodified ownership characterization with source SHA c27f685b. Generated c27 artifacts are also copied to `snapshot-current-schema-contract.pg18.json` and `snapshot-schema-ownership-characterization.json`. No migration or schema baseline changed.
+
+## Exact HTTP CI diagnosis and unwaived differences
+
+Original run38518088911/job115701627479 on d8822f30 failed HTTP and raw-category PNG upload. Signed log download returned403; check-run annotations succeeded. Untouched-head five-file reproduction was **13 failed/9 passed**. It exposed retired historical/correction selectors and DTO assumptions, missing exact sibling GET fixtures, a mobile provider/proof/Save span exceeding the viewport, a hidden compact category label, and incorrect historical bridge splitting. Repair31b7219a passed those five files **22/22**, with all six bounded stdout PNG scenes and both raw-category images preserved. No tracing timeout was changed.
+
+Full frozen c9 local HTTP later finished **1380 passed/9 failed**, not green. Remote [38537739747](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38537739747) failed six invoice/shared receipt assertions, but audit/build/etc and raw-category artifact upload passed. Canonical real-writer contract evidence justified fixture updates; native status geometry was repaired in product markup while retaining all display/nine-point assertions. Candidate intermediate failures40/42 and40/42 are preserved; final candidate **42/42**, followed by branch-source **150/150** and now snapshot-source **150/150**, are distinct runs.
+
+Two additional local PDF failures reproduce on pristine detached d8822f30: lab-dispatch privacy “PDF service label must occur in exactly one field block”, and receipt provenance “PDF signature receipt fragments violate exact glyph geometry”. Five relevant lab/privacy files hash identically to starting source. Diagnostic-only failed PDF and verified stdout codec are retained under `baseline-lab-diagnostic/` (SHA83ec9e4c61653a6672b09bbc830a8c94f2731e066d610411cd5148ce2106fd2d, acceptancefalse). The local bundled PlaywrightChromium153 download was blocked403 “Domain forbidden”; no browser difference is claimed proven cause, no privacy assertion was changed, and no local whole196-file HTTP green is claimed. Exact delivery-head GitHub HTTP remains mandatory.
+
+Local dependency audit also rejects empty advisory ranges (`BRACES_EXCEPTION_REJECTED: invalid node range @next/eslint-plugin-next`). This reproduced byte-for-byte on pristine d8822f30 and with official registry selected. Manifests, lockfile, audit/exception code and CI workflow are identical to starting head; exact raw reports/provenance are in `final-c9-audit-rejected-raw/` and `audit-base-comparison.json`. Remote c9 audit passed. Neither local failure is waived or transformed into success.
+
+## Release boundaries and next step
+
+Required CI for c27 source: [38546235538](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/38546235538), job115792877394, still in progress at the last check. A documentation delivery follow-up triggers its own exact-head run; use its immutable head and final check status. Final CI receipt/status is recorded separately after the delivery commit, avoiding a recursive documentation commit that invalidates its own head. Do not claim release completion while required CI is pending/red.
+
+Read-only Railway metadata proves staging-web serves patient-design **add3b2b5076964dcf39c106075970018b0dac096**, branch `staging/patient-codex-reviewed-add3b2b-20261014`, deployment4a78152d-8230-4863-b83e-4c3c6da14816. It is not an ancestor of the invoice branch. Project7f3b5a7b-4508-4b7f-be3d-ad268fc5675a / Staging72f23813-8b82-4a53-a470-3c5eb7ef583b / staging-web60eaf891-e7ae-4de9-88a9-0d4cefd11e75. Directly deploying this branch would replace preserved work. No Railway mutation, variable value or database read occurred; `staging-readonly.json` retains provenance.
+
+Reception's paused checkpoint **a91fec440709cc9e46fa7bc015da51eab42f8170** retains its targeted no-additional-fee signing fix. It was not overwritten or copied here. Reception production readers/screens remain unchanged; their correction-lineage adapter wiring and combined no-fee signature → one collection-task journey require coordinated integration afterward. Only their exact synthetic receipt DTO/read fixtures were aligned with the existing invoice-owned durable contract.
+
+Next: verify the exact delivery-head full CI, reproduce the user's specific expected/actual example synthetically when available, then review a combined Staging head preserving patient-design and reception work. Staging release requires exact-head tests and review. No merge to main, Production deployment, real-data/credential operation, CI/security weakening, migration-number change or external notification is authorized.
