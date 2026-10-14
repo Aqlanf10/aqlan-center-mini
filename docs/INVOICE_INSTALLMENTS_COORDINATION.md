@@ -19,3 +19,9 @@ Root formally allocated `0060_historical_treatment_documents.sql` exclusively to
 0060adds immutable document headers and financial revisions, and document identity columns on legacy treatment agreements. Existing standalone rows retain mandatory paid/remaining arithmetic. Document-backed lines have NULL paid/remaining fields; the aggregate is stored once on the document revision. The same byte-identical SQL is loaded by the numbered runner and development bootstrap. Corrections append versions and use canonical opening and repayment writers.
 
 Backup discovers FK order and additionally exports historical revisions after agreements/coverage snapshots, ordered by document/version, because the insertion guard validates complete immutable clinical evidence. Both new tables belong to the reset wipe classification. An actual synthetic migration/backup/restore test is required before integration.
+
+## Correction lineage —0061
+
+The coordinator explicitly extended this worker's scope to complete ordinary/historical corrections and uncertainty recovery on 2026-10-14. A fresh read-only inventory of all 13 open PRs at 01:55 UTC found no 0061 migration; main and the current local chain also lack it. This branch now uses `0061_invoice_correction_lineage.sql` for immutable original→replacement invoice references and approved line snapshots. Integration must preserve existing reservations 0052–0058 and this 0061 namespace. Inventory evidence is `/workspace/reviews/invoice-workspace/migration-inventory-20261014.json`.
+
+These references do not create payments or move existing receipts. They permit the canonical debt reader to count original receipts against the current replacement without counting them twice, and preserve the exact correction acknowledgement for retries. Migration/bootstrap/schema/backup/reset acceptance remains pending while this slice is implemented.

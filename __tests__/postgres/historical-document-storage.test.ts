@@ -200,7 +200,7 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
   });
   it("0060 matches bootstrap and canonical backup restores complete lines before ordered immutable revisions",async()=>{
     expect(readFileSync("migrations/0060_historical_treatment_documents.sql","utf8")).toBe(LEGACY_TREATMENT_DOCUMENT_SQL);
-    const files=await loadMigrationFiles();expect(files.slice(-2).map(file=>file.filename)).toEqual(["0059_invoice_debt_installments.sql","0060_historical_treatment_documents.sql"]);
+    const files=await loadMigrationFiles();expect(files.map(file=>file.filename)).toEqual(expect.arrayContaining(["0059_invoice_debt_installments.sql","0060_historical_treatment_documents.sql"]));
     const tables=["legacy_treatment_documents","legacy_treatment_agreements","legacy_treatment_coverage_snapshots","legacy_treatment_document_revisions","debt_repayment_revisions","payments"];
     const before=await Promise.all(tables.map(table=>q(`SELECT to_jsonb(t) AS facts FROM ${table} t ORDER BY ${table==="legacy_treatment_coverage_snapshots"?"agreement_id":"id"}`)));
     const chunks:string[]=[];for await(const chunk of db.backupSnapshotSqlLines(db.getPool()))chunks.push(chunk);const sql=chunks.join("");

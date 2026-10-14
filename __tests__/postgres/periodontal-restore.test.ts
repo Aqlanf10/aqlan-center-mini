@@ -132,9 +132,9 @@ beforeAll(async () => {
   const shipped = await readMigrationFiles();
   shippedFiles = shipped;
   const candidateVersion = periodontalCandidateMigrationVersion(shipped);
-  // Only exact reviewed 40/41/42/43 baselines are accepted; coverage0043 selects test-only0044.
+  // The shared validator checks exact filenames and the reviewed branch gaps.
   shippedCount = shipped.length;
-  expect(shipped.map((file) => file.version)).toEqual(Array.from({ length: shippedCount }, (_, index) => String(index + 1).padStart(4, "0")));
+  expect(Number(candidateVersion)).toBe(Number(shipped[shippedCount-1].version)+1);
   for (const file of shipped) await copyFile(path.join(defaultMigrationsDir(), file.filename), path.join(selection.directory, file.filename));
   const candidatePath = path.resolve("__tests__/postgres/fixtures/0041_periodontal_candidate.sql");
   expect(await readFile(candidatePath, "utf8")).toBe(PERIODONTAL_SQL);

@@ -55,6 +55,8 @@ import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
 import { DEBT_INSTALLMENTS_SQL } from "./debt-installments-schema";
 import { LEGACY_TREATMENT_DOCUMENT_SQL } from "./legacy-treatment-document-schema";
+import { INVOICE_CORRECTION_SQL } from "./invoice-correction-schema";
+import { INVOICE_CORRECTION_COVERAGE_SQL } from "./invoice-correction-coverage";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
 import { ENDO_STAGE_LABEL } from "./endodontics";
@@ -2058,6 +2060,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
     await getPool().query(DEBT_INSTALLMENTS_SQL);
     await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
+    await getPool().query(INVOICE_CORRECTION_SQL);
 
     // بذر البيانات الافتراضية (مجموعة مرجعية مدمجة، حسابات، خدمات، مخزون) يبدأ من هنا.
     //
@@ -8247,7 +8250,7 @@ export async function reorderDisplayAnnouncements(ids: number[]): Promise<boolea
 
 // ─── المالية ─────────────────────────────────────────────────────────────────
 
-import { planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
+import { planInvoiceRevision, planInvoiceCorrection, type CorrectionLineInput } from "./invoice-correction";
 import { CURRENCIES, CLINIC_BASE_CURRENCY, FinancialCurrencyIntegrityError, MINOR_UNITS, formatMoney, isCurrency, toInputAmount, patientBalancesByCurrency, requireCurrency, settlementTargetCurrency, settlePaymentMinor, toBaseAmount, toCurrencyPaymentLikes, type Currency, type DocumentCurrencyRef, type OpeningByCurrency, type PaymentLike } from "./money";
 
 export interface Service {
@@ -8971,7 +8974,7 @@ async function itemsFor(invoiceIds: number[], client?: DbClient): Promise<Map<nu
  * (INV-LINK) بنود الخطة التي قبلتها الفاتورة تُقفل **قبل** الفاتورة — ترتيب التوقيع نفسه (البند ثم فاتورته)،
  * فلا يتقاطع الإلغاء أو التصحيح مع توقيع جلسة البند (لا جمود ولا قراءة فاتورةٍ تُلغى في اللحظة نفسها).
  */
-async function lockPlanItemsBilledBy(client: DbClient, invoiceId: number): Promise<void> {
+export async function lockPlanItemsBilledBy(client: DbClient, invoiceId: number): Promise<void> {
   // Global order: patient → visits/plans → sorted items → invoices.
   const { rows: [owner] } = await client.query<{ patient_id: number }>(
     `SELECT patient_id FROM invoices WHERE id = $1`, [invoiceId]);
@@ -9174,15 +9177,17 @@ export type InvoiceCorrectionResult =
  * - سطر التدقيق في المعاملة نفسها: لا تصحيح بلا أثرٍ مكتوب.
  * الفترة المقفلة يرفضها المسار قبل الوصول هنا.
  */
-export async function correctInvoice(input: {
+export interface InvoiceCorrectionWrite {
   invoiceId: number;
   lines: CorrectionLineInput[];
   reason: string;
   actor: string;
   actorRole: string | null;
-}): Promise<InvoiceCorrectionResult> {
-  await ensureSchema();
-  const outcome = await withTransaction(getPool(), async (client) => {
+}
+
+/** Transaction-owned existing reversal/replacement writer. The revision option
+ * is internal; callers must validate current authority, locks and intent first. */
+export async function correctInvoiceInTransaction(client: DbClient, input: InvoiceCorrectionWrite, revision?: { discountMinor: number }) {
     await lockPlanItemsBilledBy(client, input.invoiceId);
     const { rows: [original] } = await client.query<{
       id: number; invoice_number: string; patient_id: number; status: string; total_minor: string;
@@ -9204,10 +9209,10 @@ export async function correctInvoice(input: {
          FROM invoice_items WHERE invoice_id = $1 ORDER BY id`,
       [input.invoiceId],
     );
-    const plan = planInvoiceCorrection(
+    const plan = (revision ? planInvoiceRevision : planInvoiceCorrection)(
       items.map((item) => ({ id: item.id, quantity: item.quantity, unitPriceMinor: toMinor(item.unit_price_minor) })),
       input.lines,
-      toMinor(original.discount_minor),
+      revision?.discountMinor ?? toMinor(original.discount_minor),
     );
     if (!plan.ok) return { ok: false as const, reason: "invalid" as const, message: plan.message };
 
@@ -9266,7 +9271,7 @@ export async function correctInvoice(input: {
     const changed = plan.lines
       .map((line) => ({ line, item: itemById.get(line.itemId)! }))
       .filter(({ line, item }) => line.quantity !== item.quantity || line.unitPriceMinor !== toMinor(item.unit_price_minor));
-    await insertAuditRow(client, {
+    if (!revision) await insertAuditRow(client, {
       action: "invoice.correct", entity: "invoice", entityId: original.id, entityLabel: original.invoice_number,
       details: {
         الفاتورة_المصححة: created.invoice_number,
@@ -9285,7 +9290,11 @@ export async function correctInvoice(input: {
       actor: input.actor, actorRole: input.actorRole,
     });
     return { ok: true as const, originalId: original.id, correctedId: created.id };
-  });
+}
+
+export async function correctInvoice(input: InvoiceCorrectionWrite): Promise<InvoiceCorrectionResult> {
+  await ensureSchema();
+  const outcome = await withTransaction(getPool(), client => correctInvoiceInTransaction(client, input));
   if (!outcome.ok) return outcome;
   const [original, corrected] = await Promise.all([getInvoice(outcome.originalId), getInvoice(outcome.correctedId)]);
   return { ok: true, original: original!, corrected: corrected! };
@@ -16943,13 +16952,14 @@ export const PLAN_ITEM_PREBILLED_SQL =
   `(i.billing_status = 'billed' AND EXISTS (SELECT 1 FROM parties provider WHERE provider.id = i.doctor_id AND provider.kind = 'doctor') AND EXISTS (
     SELECT 1 FROM invoices bv WHERE bv.id = i.billed_invoice_id AND bv.status <> 'cancelled'
       AND bv.patient_id = t.patient_id AND bv.base_currency = t.base_currency
-      AND EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id
+      AND (EXISTS (SELECT 1 FROM invoice_items original_source JOIN invoices original_invoice ON original_invoice.id = original_source.invoice_id
         WHERE original_source.source_type = 'plan_item' AND original_source.source_id = i.id AND original_source.plan_item_id = i.id
           AND original_source.service_id IS NOT DISTINCT FROM i.service_id
           AND original_source.quantity = i.quantity AND original_source.unit_price_minor = i.unit_price_minor
           AND original_source.doctor_id IS NOT DISTINCT FROM i.doctor_id
           AND (i.origin_invoice_id IS NULL OR i.origin_invoice_id = original_source.invoice_id)
           AND original_invoice.patient_id = t.patient_id AND original_invoice.base_currency = t.base_currency)
+        OR ${INVOICE_CORRECTION_COVERAGE_SQL})
       AND (SELECT COUNT(*) FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id) = 1
       AND EXISTS (SELECT 1 FROM invoice_items bi WHERE bi.invoice_id = bv.id AND bi.plan_item_id = i.id
         AND bi.service_id IS NOT DISTINCT FROM i.service_id AND bi.quantity = i.quantity
@@ -19329,7 +19339,7 @@ async function lockPlan(client: DbClient, planId: number): Promise<{
  * يُستدعى بعد كل تغيّر في البنود — وهو ما يجعل «الإجمالي» و«مجموع البنود» رقمًا
  * واحدًا لا رقمين يفترقان بعد أول تعديل يُنسى.
  */
-async function recomputePlanTotal(client: DbClient, planId: number): Promise<number> {
+export async function recomputePlanTotal(client: DbClient, planId: number): Promise<number> {
   const { rows } = await client.query<{ id: number; quantity: number; unit_price_minor: string; status: string }>(
     `SELECT id, quantity, unit_price_minor, status FROM plan_items WHERE plan_id = $1`, [planId],
   );

@@ -34,6 +34,29 @@ export type CorrectionPlan =
 export const CORRECTION_REASON_MIN = 3;
 export const CORRECTION_REASON_MAX = 300;
 
+/** Authorized revision arithmetic. Issued values remain in the original invoice;
+ * increases and decreases both produce one replacement, using safe minor units. */
+export function planInvoiceRevision(
+  original: readonly CorrectionOriginalItem[],
+  requested: readonly CorrectionLineInput[],
+  discountMinor: number,
+): CorrectionPlan {
+  if (!requested.length || requested.length > 200) return { ok: false, message: "أبقِ بندًا واحدًا على الأقل في الفاتورة المصححة." };
+  const ids = new Set(original.map(item => item.id));
+  const seen = new Set<number>();
+  const lines: { itemId: number; quantity: number; unitPriceMinor: number; totalMinor: number }[] = [];
+  let totalMinor = 0;
+  for (const line of requested) {
+    if (!Number.isSafeInteger(line.itemId) || !ids.has(line.itemId) || seen.has(line.itemId)) return { ok: false, message: "بند التصحيح مكرر أو لا يخص هذه الفاتورة." };
+    if (!Number.isSafeInteger(line.quantity) || line.quantity < 1 || !Number.isSafeInteger(line.unitPriceMinor) || line.unitPriceMinor < 0) return { ok: false, message: "راجع الكمية والسعر؛ المبالغ بوحدات العملة الصحيحة." };
+    const amount = line.quantity * line.unitPriceMinor;
+    if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(totalMinor + amount)) return { ok: false, message: "مجموع الفاتورة خارج النطاق الآمن." };
+    seen.add(line.itemId); totalMinor += amount; lines.push({ ...line, totalMinor: amount });
+  }
+  if (!Number.isSafeInteger(discountMinor) || discountMinor < 0 || discountMinor > totalMinor) return { ok: false, message: "الخصم لا يتجاوز مجموع البنود." };
+  return { ok: true, lines, totalMinor, discountMinor };
+}
+
 /** البنود الباقية بعد التصحيح وإجماليها — أو سبب الرفض بالعربية. */
 export function planInvoiceCorrection(
   original: readonly CorrectionOriginalItem[],

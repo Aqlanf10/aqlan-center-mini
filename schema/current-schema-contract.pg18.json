@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6",
   "counts": {
-    "tables": 92,
-    "columns": 1206,
-    "constraints": 1165,
-    "indexes": 288,
-    "triggers": 36
+    "tables": 95,
+    "columns": 1224,
+    "constraints": 1206,
+    "indexes": 296,
+    "triggers": 40
   },
   "tables": {
     "ai_confirmation_claims": {
@@ -3389,6 +3389,303 @@
           "timing": "BEFORE",
           "events": [
             "DELETE"
+          ]
+        }
+      }
+    },
+    "invoice_correction_lines": {
+      "columns": {
+        "approved_work": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "corrected_item_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "correction_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "original_item_id": {
+          "type": "int4",
+          "nullable": true
+        },
+        "plan_item_id": {
+          "type": "int4",
+          "nullable": true
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "corrected_item_id"
+        ],
+        [
+          "correction_id",
+          "original_item_id"
+        ]
+      ],
+      "checks": [
+        "invoice_correction_lines_approved_work_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "correction_id"
+          ],
+          "refTable": "invoice_corrections",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "corrected_item_id"
+          ],
+          "refTable": "invoice_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "original_item_id"
+          ],
+          "refTable": "invoice_items",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "plan_item_id"
+          ],
+          "refTable": "plan_items",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_correction_lines_corrected_item_id_key": {
+          "columns": [
+            "corrected_item_id"
+          ],
+          "unique": true
+        },
+        "invoice_correction_lines_correction_id_original_item_id_key": {
+          "columns": [
+            "correction_id",
+            "original_item_id"
+          ],
+          "unique": true
+        },
+        "invoice_correction_lines_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_correction_lines_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "invoice_correction_receipts": {
+      "columns": {
+        "correction_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "receipt": {
+          "type": "jsonb",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "correction_id"
+      ],
+      "unique": [],
+      "checks": [
+        "invoice_correction_receipts_receipt_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "correction_id"
+          ],
+          "refTable": "invoice_corrections",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_correction_receipts_pkey": {
+          "columns": [
+            "correction_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_correction_receipts_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "invoice_corrections": {
+      "columns": {
+        "corrected_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "created_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "created_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "currency": {
+          "type": "text",
+          "nullable": false
+        },
+        "id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "idempotency_key": {
+          "type": "text",
+          "nullable": false
+        },
+        "original_invoice_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "patient_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "reason": {
+          "type": "text",
+          "nullable": false
+        },
+        "request_hash": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "id"
+      ],
+      "unique": [
+        [
+          "corrected_invoice_id"
+        ],
+        [
+          "idempotency_key"
+        ],
+        [
+          "original_invoice_id"
+        ]
+      ],
+      "checks": [
+        "invoice_corrections_check",
+        "invoice_corrections_created_by_check",
+        "invoice_corrections_currency_check",
+        "invoice_corrections_idempotency_key_check",
+        "invoice_corrections_reason_check",
+        "invoice_corrections_request_hash_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "corrected_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "original_invoice_id"
+          ],
+          "refTable": "invoices",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "patient_id"
+          ],
+          "refTable": "patients",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "invoice_corrections_corrected_invoice_id_key": {
+          "columns": [
+            "corrected_invoice_id"
+          ],
+          "unique": true
+        },
+        "invoice_corrections_idempotency_key_key": {
+          "columns": [
+            "idempotency_key"
+          ],
+          "unique": true
+        },
+        "invoice_corrections_original_invoice_id_key": {
+          "columns": [
+            "original_invoice_id"
+          ],
+          "unique": true
+        },
+        "invoice_corrections_pkey": {
+          "columns": [
+            "id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "invoice_corrections_complete": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "invoice_corrections_guard": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
           ]
         }
       }

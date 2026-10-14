@@ -5,6 +5,7 @@ import { revalidateSessionInTransaction } from "./session";
 import { requireCurrency, settlePaymentMinor, type Currency } from "./money";
 import { debtInstallmentProgress, validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-position";
+import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 
 export type DebtTarget = { patientId: number; currency: Currency; invoiceId: number | null; openingCurrency: Currency | null };
 export class DebtRepaymentError extends Error {
@@ -44,10 +45,11 @@ export async function readDebtPosition(client: DbClient, target: DebtTarget, loc
     available = Boolean(row); principal = row ? safe(row.amount_minor) : 0;
     snapshot = { patientId:target.patientId,currency:target.currency,opening:row ?? null };
   }
+  const settlementInvoiceIds = target.invoiceId === null ? null : await invoiceSettlementLineage(client,target.invoiceId,target.patientId,target.currency);
   const { rows: payments } = await client.query<{ id: number; patient_id: number; amount_minor: string; base_amount_minor: string; currency: string; kind: string }>(
     `SELECT id,patient_id,amount_minor::text,base_amount_minor::text,currency,kind FROM payments
-     WHERE ${target.invoiceId !== null ? "invoice_id=$1" : "patient_id=$1 AND opening_currency=$2"} ORDER BY id`,
-    target.invoiceId !== null ? [target.invoiceId] : [target.patientId,target.currency]);
+     WHERE ${target.invoiceId !== null ? "invoice_id=ANY($1::int[])" : "patient_id=$1 AND opening_currency=$2"} ORDER BY id`,
+    target.invoiceId !== null ? [settlementInvoiceIds] : [target.patientId,target.currency]);
   let settledMinor = 0;
   for (const payment of payments) {
     if (payment.patient_id !== target.patientId || !["payment","refund"].includes(payment.kind)) throw new DebtRepaymentError("invalid","ربط السند يحتاج مراجعة مالية.");
