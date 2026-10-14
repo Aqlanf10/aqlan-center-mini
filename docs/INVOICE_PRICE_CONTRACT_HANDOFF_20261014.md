@@ -1,5 +1,7 @@
 # Invoice pricing and printable installment contract handoff
 
+Latest CI repair: see `INVOICE_CI_HTTP_REPAIR_20261014.md` and its exact JSON receipts. Head62168 failed HTTP because two invoice browser fixtures assumed immediate financial Save and absent stored FX. The test-only repair preserves all guards and timeouts; unchanged-head reproduction12failed/28passed, repaired focused suite50passed/3files, typecheck and changed-file lint pass. Required CI must pass on the final repair head; final status is recorded in PR333/external receipt. Application code and22 committed screen/PDF artifacts remain unchanged.
+
 PR: https://github.com/Aqlanf10/aqlan-center-mini/pull/333 (draft, owner review required).
 Branch: `feat/invoice-monthly-schedule-20261014`.
 Base main: `9b1ddc0e7d0d2bcf5a5159089e3dc55be6da8216`.

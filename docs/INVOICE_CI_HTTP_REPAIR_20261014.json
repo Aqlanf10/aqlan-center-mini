@@ -1,0 +1,261 @@
+{
+  "branch": "feat/invoice-monthly-schedule-20261014",
+  "pr": "https://github.com/Aqlanf10/aqlan-center-mini/pull/333",
+  "failedHead": "62168f21265640bf71fe2c98678b0f19136cac34",
+  "failedPRRun": 38638155465,
+  "failedPRJob": 116107120168,
+  "failedPushRun": 38638152750,
+  "failedPushJob": 116106709594,
+  "syntheticOnly": true,
+  "reproductionFixture": {
+    "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+    "database": "owned isolated loopback aqlan_sec_http on55439",
+    "storedRates": {
+      "USD": "530",
+      "SAR": "140"
+    },
+    "fixture": "Explicitly inserted during pre-edit reproduction before currency suite, matching opening-balance-currency-http.test.ts existing full-suite setup. No app/test source edits during the before run.",
+    "ciAnnotations": "invoice-ci-62168f21-annotations.json",
+    "observedCIFailures": 10
+  },
+  "ciFailureAnnotations": [
+    {
+      "path": "__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "start_line": 184,
+      "start_column": null,
+      "end_line": 184,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > explicit BUSY allows confirmed edit but refuses manual removal, restores the parent command and clears it only on exact success at 390×844",
+      "message": "TimeoutError: page.waitForResponse: Timeout 15000ms exceeded while waiting for event \"response\"\n ❯ nativeSaveAndReadAccount __tests__/security-http/invoice-preview-state-journey.test.ts:184:12\n ❯ __tests__/security-http/invoice-preview-state-journey.test.ts:434:13\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { log: [] }\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "start_line": 184,
+      "start_column": null,
+      "end_line": 184,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > lost acknowledgement plus catalogue drift retries exactly, clears parent recovery and permits one independent next invoice at 1280×844",
+      "message": "TimeoutError: page.waitForResponse: Timeout 15000ms exceeded while waiting for event \"response\"\n ❯ nativeSaveAndReadAccount __tests__/security-http/invoice-preview-state-journey.test.ts:184:12\n ❯ __tests__/security-http/invoice-preview-state-journey.test.ts:373:29\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { log: [] }\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "start_line": 184,
+      "start_column": null,
+      "end_line": 184,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > lost acknowledgement plus catalogue drift retries exactly, clears parent recovery and permits one independent next invoice at 390×844",
+      "message": "TimeoutError: page.waitForResponse: Timeout 15000ms exceeded while waiting for event \"response\"\n ❯ nativeSaveAndReadAccount __tests__/security-http/invoice-preview-state-journey.test.ts:184:12\n ❯ __tests__/security-http/invoice-preview-state-journey.test.ts:373:29\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { log: [] }\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "start_line": 238,
+      "start_column": null,
+      "end_line": 238,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > a new refused command retires prior success while preserving the authoritative balance at 1280×844",
+      "message": "TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event \"response\"\n ❯ __tests__/security-http/invoice-preview-state-journey.test.ts:238:28\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { log: [] }\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-preview-state-journey.test.ts",
+      "start_line": 238,
+      "start_column": null,
+      "end_line": 238,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-preview-state-journey.test.ts > final native template command recovery > a new refused command retires prior success while preserving the authoritative balance at 390×844",
+      "message": "TimeoutError: page.waitForResponse: Timeout 30000ms exceeded while waiting for event \"response\"\n ❯ __tests__/security-http/invoice-preview-state-journey.test.ts:238:28\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\nSerialized Error: { log: [] }\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "start_line": 153,
+      "start_column": null,
+      "end_line": 153,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-currency-transition-ui.test.ts > invoice selected-service currency transitions > keeps missing USD blocked through rapid changes and a late real SAR preview",
+      "message": "AssertionError: expected '472.00' to be '' // Object.is equality\n\n- Expected\n+ Received\n\n+ 472.00\n\n ❯ __tests__/security-http/invoice-currency-transition-ui.test.ts:153:46\n\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "start_line": 113,
+      "start_column": null,
+      "end_line": 113,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-currency-transition-ui.test.ts > invoice selected-service currency transitions > clears and blocks a missing 'USD' quote after YER selection, historical=true",
+      "message": "AssertionError: expected '472.00' to be '' // Object.is equality\n\n- Expected\n+ Received\n\n+ 472.00\n\n ❯ __tests__/security-http/invoice-currency-transition-ui.test.ts:113:46\n\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "start_line": 113,
+      "start_column": null,
+      "end_line": 113,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-currency-transition-ui.test.ts > invoice selected-service currency transitions > clears and blocks a missing 'SAR' quote after YER selection, historical=true",
+      "message": "AssertionError: expected '1,786.00' to be '' // Object.is equality\n\n- Expected\n+ Received\n\n+ 1,786.00\n\n ❯ __tests__/security-http/invoice-currency-transition-ui.test.ts:113:46\n\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "start_line": 113,
+      "start_column": null,
+      "end_line": 113,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-currency-transition-ui.test.ts > invoice selected-service currency transitions > clears and blocks a missing 'USD' quote after YER selection, historical=false",
+      "message": "AssertionError: expected '472.00' to be '' // Object.is equality\n\n- Expected\n+ Received\n\n+ 472.00\n\n ❯ __tests__/security-http/invoice-currency-transition-ui.test.ts:113:46\n\n",
+      "raw_details": ""
+    },
+    {
+      "path": "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "blob_href": "https://github.com/Aqlanf10/aqlan-center-mini/blob/62168f21265640bf71fe2c98678b0f19136cac34/__tests__/security-http/invoice-currency-transition-ui.test.ts",
+      "start_line": 113,
+      "start_column": null,
+      "end_line": 113,
+      "end_column": null,
+      "annotation_level": "failure",
+      "title": "__tests__/security-http/invoice-currency-transition-ui.test.ts > invoice selected-service currency transitions > clears and blocks a missing 'SAR' quote after YER selection, historical=false",
+      "message": "AssertionError: expected '1,786.00' to be '' // Object.is equality\n\n- Expected\n+ Received\n\n+ 1,786.00\n\n ❯ __tests__/security-http/invoice-currency-transition-ui.test.ts:113:46\n\n",
+      "raw_details": ""
+    }
+  ],
+  "checks": [
+    {
+      "label": "invoice-ci-62168-reproduce",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/invoice-preview-state-journey.test.ts",
+        "__tests__/security-http/invoice-currency-transition-ui.test.ts"
+      ],
+      "startedUtc": "2026-10-14T21:52:21.529158+00:00",
+      "seconds": 302.461,
+      "exitCode": 1,
+      "before": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "after": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "logSha256": "3e403c03fc89cc0c373b2a0285a2ce767950adea2a7f9cea85e478fbb4f0b156"
+    },
+    {
+      "label": "invoice-ci-http-repaired-focused",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/invoice-preview-state-journey.test.ts",
+        "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+        "__tests__/security-http/invoice-quote-contract-ui.test.ts"
+      ],
+      "startedUtc": "2026-10-14T21:57:59.373498+00:00",
+      "seconds": 210.858,
+      "exitCode": 0,
+      "before": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "after": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "logSha256": "9ff7858c57f2e1dbbc98363483154fee0dada98f98e2621e70589610dd2311ba"
+    },
+    {
+      "label": "invoice-ci-http-repair-typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "startedUtc": "2026-10-14T21:58:11.694731+00:00",
+      "seconds": 13.096,
+      "exitCode": 0,
+      "before": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "after": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "logSha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060"
+    },
+    {
+      "label": "invoice-ci-http-repair-lint",
+      "command": [
+        "npx",
+        "eslint",
+        "__tests__/security-http/invoice-preview-state-journey.test.ts",
+        "__tests__/security-http/invoice-currency-transition-ui.test.ts"
+      ],
+      "startedUtc": "2026-10-14T21:58:11.700428+00:00",
+      "seconds": 2.084,
+      "exitCode": 0,
+      "before": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "after": {
+        "head": "62168f21265640bf71fe2c98678b0f19136cac34",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "29c0c15524c3f220af29bfb1f588fb6db88c0c026fdc1e27091a0936c8bf69c1",
+        "files": 1937
+      },
+      "logSha256": "76162e465989f3f070a9de8db711fbf358e53b74d09ce1bbdb57c727e4c4a16d"
+    }
+  ],
+  "beforeCounts": {
+    "failed": 12,
+    "passed": 28,
+    "files": 2
+  },
+  "afterCounts": {
+    "failed": 0,
+    "passed": 50,
+    "files": 3
+  },
+  "applicationUnchanged": true,
+  "requiredFinalCI": "Must succeed on exact repair head; final run IDs/result kept in external receipt and PR body. No merge/deployment."
+}

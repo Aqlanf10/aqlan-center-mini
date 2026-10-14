@@ -12,10 +12,16 @@ const ids = { native: 0, missing: 0, partial: 0 };
 const evidence = process.env.INVOICE_CURRENCY_OUTPUT ?? ".settings-ui-artifacts/invoice-currency-transitions";
 const witnesses: unknown[] = [];
 let serial = 0;
+const rateKeys = ["finance.rate.SAR", "finance.rate.USD"];
+let priorRates: { key: string; value: string; updated_at: string }[] = [];
 const native = { YER: { text: "250000", minor: 250000 }, SAR: { text: "1800.00", minor: 180000 }, USD: { text: "625.00", minor: 62500 } };
 beforeAll(async () => {
   expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
   h = await harness(); db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
+  // This file exercises absent offers. Other HTTP suites legitimately store FX;
+  // own and restore this precondition instead of depending on file order.
+  priorRates = (await db.query("SELECT key,value,updated_at::text AS updated_at FROM settings WHERE key=ANY($1::text[])", [rateKeys])).rows;
+  await db.query("DELETE FROM settings WHERE key=ANY($1::text[])", [rateKeys]);
   doctorId = (await db.query("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0].party_id as number;
   for (const [key, sar, usd] of [["native", 180000, 62500], ["missing", null, null], ["partial", 180000, null]] as const) {
     ids[key] = (await db.query(`INSERT INTO services(name,category,price_minor,price_sar_minor,price_usd_minor,price_configured,is_active)
@@ -26,7 +32,12 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await writeFile(`${evidence}/currency-witnesses.json`, JSON.stringify(witnesses, null, 2) + "\n");
-  await browser?.close(); await db?.end();
+  await browser?.close();
+  if (db) {
+    await db.query("DELETE FROM settings WHERE key=ANY($1::text[])", [rateKeys]);
+    for (const row of priorRates) await db.query("INSERT INTO settings(key,value,updated_at) VALUES($1,$2,$3)", [row.key, row.value, row.updated_at]);
+    await db.end();
+  }
 });
 async function patient() {
   return (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'اختبار عملة الفاتورة — اصطناعي',$2) RETURNING id", [`CURR-${Date.now()}-${++serial}`, doctorId])).rows[0].id as number;
@@ -104,8 +115,9 @@ describe("invoice selected-service currency transitions", () => {
       const catalogue = await authedGet("/api/services", h.sessions.reception); expect(catalogue.status).toBe(200);
       const quoted = (await catalogue.json()).find((one: { id: number }) => one.id === ids.missing);
       expect(quoted[currency === "SAR" ? "priceSarMinor" : "priceUsdMinor"]).toBeNull();
-      // The shared service DTO may offer an FX suggestion for other workflows;
-      // this agreement must never adopt that converted amount as its native price.
+      // Display defaults may suggest FX, but no stored centre FX means no invoice
+      // offer. Configured conversion is covered by invoice-quote-contract-ui.
+      expect(quoted.invoiceQuotes[currency]).toMatchObject({ source: "none", minor: null, rate: null });
       expect(quoted.priceIn[currency].source).not.toBe("catalog");
       await service(page, ids.missing);
       expect((await price(page).inputValue()).replaceAll(",", "")).toBe("250000");
