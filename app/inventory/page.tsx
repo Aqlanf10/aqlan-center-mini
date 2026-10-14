@@ -320,7 +320,7 @@ export default function InventoryPage() {
       <PageHeader
         title="إدارة المخزون والمستهلكات السنية"
         subtitle="تتبع دقيق للمواد، حركة الوارد والصرف، وتنبيهات الصلاحية وحد الطلب التلقائية"
-        links={[{ href: "/inventory", label: "المخزون", current: true }, { href: "/inventory/procurement", label: "طلبات شراء المواد" }, ...(isAdmin ? [{ href: "/inventory/review", label: "التقييم والطباعة · English" }] : [])]}
+        links={[{ href: "/inventory", label: "المخزون", current: true }, { href: "/inventory/procurement", label: "طلبات شراء المواد" }, ...(["admin", "doctor"].includes(session?.role ?? "") ? [{ href: "/inventory/custody", label: "عهد المواد للأطباء" }] : []), ...(isAdmin ? [{ href: "/inventory/review", label: "التقييم والطباعة · English" }] : [])]}
       >
         <button
           onClick={() => setShowAdd((v) => !v)}

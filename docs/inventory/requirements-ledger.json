@@ -2732,7 +2732,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "No stock/debt/cash; request API and UI persist once.",
+      "remainingBlocker": "Coordinated migration activation; full approved deployment remains unrun.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P02",
@@ -2758,7 +2761,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Original requested quantity and reasoned partial approval persist.",
+      "remainingBlocker": "Administration decision UI and rejection journey.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P03",
@@ -2780,7 +2786,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Changed version/content cannot reuse approval.",
+      "remainingBlocker": "Revision-edit UI and persisted revised lifecycle.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P04",
@@ -2806,7 +2815,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Fresh active actor/admin checks, exact API gate and frozen currency ceiling.",
+      "remainingBlocker": "Delegation UI/policy configuration and branch model: base has one clinic scope.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P05",
@@ -2828,7 +2840,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Exact 3×50=150 and 150−2=148 arithmetic; frozen conversion; receipt PG.",
+      "remainingBlocker": "Old manual/automatic issue writer and historical unit lock integration.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P06",
@@ -2850,7 +2865,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Cumulative source allocation and concurrent order requests cannot overspend approval.",
+      "remainingBlocker": "Multi-request order creation UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P07",
@@ -2876,7 +2894,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Partial inspected receipt creates 100 pieces once with 50 remaining.",
+      "remainingBlocker": "Receipt administration UI and coordinated migration.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P08",
@@ -2898,7 +2919,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Rejected has no stock; quarantine not available; replacement fulfillment stays open.",
+      "remainingBlocker": "Replacement document workflow and quarantine release approval.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P09",
@@ -2920,7 +2944,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Planner and locked receipt reject excessive arrival.",
+      "remainingBlocker": "Explicit excess-arrival decision UI/policy.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P10",
@@ -2942,7 +2969,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Transactional audit failure rolls back receipt and stock.",
+      "remainingBlocker": "Actual multi-item browser receipt failure scenario.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P11",
@@ -2953,7 +2983,8 @@
       "sources": [
         "lib/inventory-domain/procurement.ts",
         "lib/inventory-domain/procurement-store.ts",
-        "lib/inventory-domain/schema-proposal.ts"
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/useInventoryCommand.ts"
       ],
       "tests": [
         "__tests__/inventory-procurement-domain.test.ts",
@@ -2965,10 +2996,15 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log",
         "http-browser-checkpoint.log",
-        "http-browser-authorized.log"
+        "http-browser-authorized.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
       ],
-      "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "PG concurrent replay plus real request response-loss retry with identical payload/key.",
+      "remainingBlocker": "Lost-response receipt/invoice browser journeys; only request uncertainty witnessed.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P12",
@@ -2990,7 +3026,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Two simultaneous different receipts cannot exceed locked remaining quantity.",
+      "remainingBlocker": "Coordinated production schema; UI concurrent receipt journey.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P13",
@@ -3007,7 +3046,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; legacy-issue-integration-blocked"
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure FEFO allocates exact valid lots and reservations.",
+      "remainingBlocker": "Connect allocations to existing manual/automatic issue writers.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P14",
@@ -3024,7 +3066,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; legacy-issue-integration-blocked"
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure FEFO rejects unsafe lots; new custody dispatch/accept also rejects unsafe lots.",
+      "remainingBlocker": "Existing manual/automatic issue paths still permit expired-only stock: release blocker.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P15",
@@ -3051,7 +3096,10 @@
         "browser/valuation-ar-390.png",
         "browser/valuation-ar-1280.png"
       ],
-      "status": "partial-real-HTTP-browser; complete-scenario-unrun"
+      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "verifiedSubset": "Real HTTP/browser WAC completeness separates missing price and known free stock.",
+      "remainingBlocker": "Finalize procurement invoice valuation adapter; historical valuation policy.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P16",
@@ -3077,7 +3125,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-domain-or-PG-fixture",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Three-way match reserves received quantity without additional movement or debt.",
+      "remainingBlocker": "Shared finance owner must atomically create one existing payable and immutable links; no posting implemented.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P17",
@@ -3099,7 +3150,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Supplier/calendar-year duplicate identity and missing-number review; PG invoice duplication gate.",
+      "remainingBlocker": "Finance posting transaction and supplier invoice review UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P18",
@@ -3121,7 +3175,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Invoice before arrival held for match; never fabricates stock.",
+      "remainingBlocker": "Authorized advance/exception path through existing supplier payment engine.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P19",
@@ -3143,7 +3200,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Price/quantity variances detected; no financial posting.",
+      "remainingBlocker": "Variance approval policy and actual posting UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P20",
@@ -3165,7 +3225,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Immutable FX arithmetic only; old supplier-payment regressions separately passed.",
+      "remainingBlocker": "Procurement payable integration plus full cross-currency payment E2E has not run.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P21",
@@ -3178,16 +3241,12 @@
         "lib/inventory-domain/procurement-store.ts",
         "lib/inventory-domain/schema-proposal.ts"
       ],
-      "tests": [
-        "__tests__/inventory-procurement-domain.test.ts",
-        "__tests__/postgres/inventory-procurement-store.test.ts"
-      ],
-      "evidence": [
-        "procurement-domain.log",
-        "procurement-store-pg.log",
-        "pg-checkpoint.log"
-      ],
-      "status": "partial-domain-or-PG-fixture"
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No procurement advance allocation implemented.",
+      "remainingBlocker": "Shared supplier advance allocation writer, permission/FX and cash-conservation E2E.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P22",
@@ -3200,16 +3259,12 @@
         "lib/inventory-domain/procurement-store.ts",
         "lib/inventory-domain/schema-proposal.ts"
       ],
-      "tests": [
-        "__tests__/inventory-procurement-domain.test.ts",
-        "__tests__/postgres/inventory-procurement-store.test.ts"
-      ],
-      "evidence": [
-        "procurement-domain.log",
-        "procurement-store-pg.log",
-        "pg-checkpoint.log"
-      ],
-      "status": "partial-domain-or-PG-fixture"
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No procurement supplier return/reversal writer implemented.",
+      "remainingBlocker": "Independent stock/debt/cash return documents using existing finance writers.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P23",
@@ -3231,7 +3286,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Exact minor-unit apportionment, shipping/discount and stable rounding unit tests.",
+      "remainingBlocker": "Persist cumulative allocation approval and verify final payable charges.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P24",
@@ -3244,16 +3302,12 @@
         "lib/inventory-domain/procurement-store.ts",
         "lib/inventory-domain/schema-proposal.ts"
       ],
-      "tests": [
-        "__tests__/inventory-procurement-domain.test.ts",
-        "__tests__/postgres/inventory-procurement-store.test.ts"
-      ],
-      "evidence": [
-        "procurement-domain.log",
-        "procurement-store-pg.log",
-        "pg-checkpoint.log"
-      ],
-      "status": "partial-domain-or-PG-fixture"
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Historical valuation is not silently repriced by new modules.",
+      "remainingBlocker": "Invoice-after-consumption adjustment adapter/audit and commission-owner review.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P25",
@@ -3264,7 +3318,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Existing inventory concurrency regression passed; new FEFO planner only.",
+      "remainingBlocker": "Shared manual/automatic usage identity and locked allocation writer.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P26",
@@ -3275,7 +3332,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Single-clinic store/transit/doctor transfer tested.",
+      "remainingBlocker": "Base has no branch identity: cross-branch authority and partial differences not implemented.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P27",
@@ -3286,7 +3346,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No stocktake posting implemented.",
+      "remainingBlocker": "Count-cutoff/freeze/reconcile policy and shared writer concurrency.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P28",
@@ -3297,7 +3360,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No exact-lot disposal posting implemented.",
+      "remainingBlocker": "Approved lot-specific disposal and existing movement allocation writer.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P29",
@@ -3314,7 +3380,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; legacy-issue-integration-blocked"
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure planner rejects recalled lot.",
+      "remainingBlocker": "Persist recall events, trace known patient/custody use and old-history limits.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P30",
@@ -3341,7 +3410,10 @@
         "browser/valuation-ar-390.png",
         "browser/valuation-ar-1280.png"
       ],
-      "status": "partial-real-HTTP-browser; complete-scenario-unrun"
+      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "verifiedSubset": "Non-admin JSON omits prices/payable/supplier refs; valuation endpoint denied; existing tool read failures truthful.",
+      "remainingBlocker": "Full export/attachment/print coverage beyond owned review surface.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P31",
@@ -3368,7 +3440,10 @@
         "browser/valuation-ar-390.png",
         "browser/valuation-ar-1280.png"
       ],
-      "status": "partial-real-HTTP-browser; complete-scenario-unrun"
+      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "verifiedSubset": "Equal reorder boundary low; read failure cannot yield false safe stock.",
+      "remainingBlocker": "Full operator journey and root integration verification.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P32",
@@ -3379,7 +3454,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Custody refuses unallocated historical stock; no invented ownership or new stock/debt.",
+      "remainingBlocker": "Historical balance import preview/reconciliation, opening migration and preservation rehearsal.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P33",
@@ -3390,7 +3468,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No import workflow implemented.",
+      "remainingBlocker": "Idempotent import mapping/reject report and unknown-price review.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P34",
@@ -3412,7 +3493,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Server rejects supplier role/activity/scope mismatch.",
+      "remainingBlocker": "All related receipt/financial attachment access and authenticated spoofing matrix.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P35",
@@ -3434,7 +3518,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Existing audit writer in same transaction; mandatory audit failure rollback tested.",
+      "remainingBlocker": "Finance approvals/posting/reversal audit and shared audit action vocabulary.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P36",
@@ -3456,7 +3543,10 @@
         "procurement-store-pg.log",
         "pg-checkpoint.log"
       ],
-      "status": "partial-domain-or-PG-fixture"
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Partial example 100 received/50 remaining, invoice200SAR matched and no debt/cash.",
+      "remainingBlocker": "Complete150/148, payable300SAR, payment100SAR, remaining200SAR requires shared finance/issue adapters.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P37",
@@ -3487,7 +3577,10 @@
         "http-browser-authorized.log"
       ],
       "status": "partial-real-HTTP-browser; complete-scenario-unrun",
-      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial"
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Real valuation and custody Arabic/English at390/1280, Arabic request UI; generated branded valuation/custody prints checked for text and price redaction.",
+      "remainingBlocker": "Monetary/admin procurement interfaces, request/order/receipt/match printable documents and English request copy.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P38",
@@ -3498,7 +3591,10 @@
       "sources": [],
       "tests": [],
       "evidence": [],
-      "status": "unrun-complete-scenario"
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Synthetic local PG/build and prior exact-head CI passed; no orders/messages sent.",
+      "remainingBlocker": "Coordinated migration upgrade/restore rehearsal and authorized later release: unrun.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P39",
@@ -3517,7 +3613,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Exact3/1/8SAR and sub-minor cost arithmetic.",
+      "remainingBlocker": "Package settings/admin UI and applied movement valuation.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P40",
@@ -3536,7 +3635,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Custody transfer changes allocation only; empty evidence changes no stock.",
+      "remainingBlocker": "Kit decomposition/component value persistence and UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P41",
@@ -3555,7 +3657,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure treatment costs isolate patient case/visit/procedure and linked return.",
+      "remainingBlocker": "Shared clinical source adapter and actual movement allocations.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P42",
@@ -3574,7 +3679,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure usage duplicate/overallocation rejected.",
+      "remainingBlocker": "Durable unique usage identity, locked issue and visit-sign transaction.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P43",
@@ -3593,7 +3701,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure shared-visit supplies are not repeated; estimated quantities remain estimated.",
+      "remainingBlocker": "Versioned service_materials source and confirmation UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P44",
@@ -3612,7 +3723,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure cost/category/registration completeness never gives trustworthy zero.",
+      "remainingBlocker": "Replace existing patient-wide profitability read via coordinated adapter and UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P45",
@@ -3631,7 +3745,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure staged performed revenue separated from collection and agreement cap.",
+      "remainingBlocker": "Ortho/agreement owner source adapter and completion estimates.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P46",
@@ -3650,7 +3767,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure exact overhead allocations, idle capacity and duplicate/direct/capital rejection.",
+      "remainingBlocker": "Approved expense/capacity policy and persisted period source allocations.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P47",
@@ -3669,7 +3789,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure180/200=10%,25% target240 and valid commission denominator.",
+      "remainingBlocker": "Authorized pricing simulation UI and agreement basis adapter.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P48",
@@ -3688,7 +3811,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure snapshots/quotes immutable and currency mixing rejected.",
+      "remainingBlocker": "Persist historical applied valuations and show replacement quote source/date.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P49",
@@ -3699,15 +3825,23 @@
       "sources": [
         "lib/inventory-domain/treatment-cost.ts",
         "lib/inventory-domain/custody.ts",
-        "docs/inventory/treatment-custody-contract.md"
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
       ],
       "tests": [
-        "__tests__/inventory-treatment-custody.test.ts"
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
       ],
       "evidence": [
-        "unit-checkpoint.log"
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual PG/HTTP/browser store100→70store+30doctor over two15 transfers; no stock/debt/cash write.",
+      "remainingBlocker": "Coordinated transfer migration; period reporting and full valuation adapter.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P50",
@@ -3726,7 +3860,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure30−8−2=20; clinic92.",
+      "remainingBlocker": "Clinical consumption/return existing-writer integration not implemented; transfer UI does not record consumption.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P51",
@@ -3737,15 +3874,21 @@
       "sources": [
         "lib/inventory-domain/treatment-cost.ts",
         "lib/inventory-domain/custody.ts",
-        "docs/inventory/treatment-custody-contract.md"
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
       ],
       "tests": [
-        "__tests__/inventory-treatment-custody.test.ts"
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
       ],
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "partial-PG-and-domain",
+      "verifiedSubset": "Actual doctor-to-doctor transfer conserves quantity/value; pure count difference held.",
+      "remainingBlocker": "Stocktake approval/source cutoff and consumption correction transaction.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P52",
@@ -3764,7 +3907,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure collections10000→1000 versus commission3000→300.",
+      "remainingBlocker": "Existing effective doctor contract/materialRate source history.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P53",
@@ -3783,7 +3929,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure actual-applied600 less reversal100 =D500.",
+      "remainingBlocker": "Commission-owner actual deduction and linked reversal adapter.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P54",
@@ -3802,7 +3951,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure D−A positive/negative/zero and supplemental directions.",
+      "remainingBlocker": "Authorized supplemental posting into existing doctor account; no automatic posting.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P55",
@@ -3813,15 +3965,21 @@
       "sources": [
         "lib/inventory-domain/treatment-cost.ts",
         "lib/inventory-domain/custody.ts",
-        "docs/inventory/treatment-custody-contract.md"
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
       ],
       "tests": [
-        "__tests__/inventory-treatment-custody.test.ts"
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
       ],
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "partial-PG-and-domain",
+      "verifiedSubset": "Pure closing custody excluded from A; actual transfers create no purchase/debt.",
+      "remainingBlocker": "Opening import/period close/rollforward transaction and incomplete reconciliation policy.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P56",
@@ -3840,7 +3998,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure contract exclusions and held waste exception.",
+      "remainingBlocker": "Effective item coverage and independent approved exception source.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P57",
@@ -3859,7 +4020,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure supplemental proposal excludes previous adjustments.",
+      "remainingBlocker": "Concurrent settlement approval/idempotency/source membership PG constraints not implemented.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P58",
@@ -3878,7 +4042,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure wrong doctor/period rejected.",
+      "remainingBlocker": "Stable frozen cross-period source sets, late collections and doctor transfer reconciliation.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P59",
@@ -3897,7 +4064,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure explicit immutable settlement FX; mixed currencies rejected.",
+      "remainingBlocker": "Approved valuation source and original/converted/FX difference statement.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P60",
@@ -3916,7 +4086,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure materials100+grossfee300−recovery40 =360.",
+      "remainingBlocker": "Actual finance recovery source and profitability read adapter.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P61",
@@ -3927,15 +4100,23 @@
       "sources": [
         "lib/inventory-domain/treatment-cost.ts",
         "lib/inventory-domain/custody.ts",
-        "docs/inventory/treatment-custody-contract.md"
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
       ],
       "tests": [
-        "__tests__/inventory-treatment-custody.test.ts"
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
       ],
       "evidence": [
-        "unit-checkpoint.log"
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual doctor own custody read/receiver only; anotherdoctor/reception denied; no automatic finances.",
+      "remainingBlocker": "Immutable objection, separate settlement approval/posting and own financial statement not implemented.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P62",
@@ -3954,7 +4135,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Missing valuation/count keeps pure settlement provisional; legacy allocation discrepancies block transfer.",
+      "remainingBlocker": "Historical importer and reviewed closing quantity/cost completeness.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P63",
@@ -3973,7 +4157,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure arithmetic composition plus actual purchase→custody transfer subset.",
+      "remainingBlocker": "Actual case consumption/return/count/settlement/payment complete PG/browser journey unrun.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P64",
@@ -3992,7 +4179,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure empty package closes evidence without stock/cost reversal.",
+      "remainingBlocker": "Persist unique package closure actor/lot/custody linkage and UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P65",
@@ -4011,7 +4201,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure120−80=40 unexplained for review without debt/usage.",
+      "remainingBlocker": "Persist investigation and independently approved cause.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P66",
@@ -4030,7 +4223,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure supplied-history rejects repeated package/evidence IDs.",
+      "remainingBlocker": "Concurrent unique package/evidence PG closure not implemented.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P67",
@@ -4049,7 +4245,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure remaining-stock early replenishment and emergency self-approval rejection.",
+      "remainingBlocker": "Trusted capabilities, emergency request approval transitions and audit UI.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P68",
@@ -4060,15 +4259,22 @@
       "sources": [
         "lib/inventory-domain/treatment-cost.ts",
         "lib/inventory-domain/custody.ts",
-        "docs/inventory/treatment-custody-contract.md"
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
       ],
       "tests": [
         "__tests__/inventory-treatment-custody.test.ts"
       ],
       "evidence": [
-        "unit-checkpoint.log"
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "partial-domain-and-Arabic-UI",
+      "verifiedSubset": "Pure hazard disposal and actual Arabic/English custody UI/printed instructions forbid sharps/waste returns.",
+      "remainingBlocker": "Package-specific safe disposal evidence/closure workflow and its complete browser journey.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "P69",
@@ -4087,7 +4293,10 @@
       "evidence": [
         "unit-checkpoint.log"
       ],
-      "status": "domain-only; persistence-HTTP-E2E-unrun"
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure unknown loss creates no doctor/assistant debt.",
+      "remainingBlocker": "Any authorized loss posting must share one unique decision across accounts and reverse independently.",
+      "fullAcceptanceExecuted": false
     },
     {
       "id": "R177",
@@ -4431,5 +4640,12 @@
     "fullCIReleaseRestore": "unrun/blocked",
     "httpPermissionContract": "16 passed /2 files after exact literal registration; dynamic routes and unknown/method refusal verified"
   },
-  "sharedSurfaceException": "Root explicitly delegated only exact /api/inventory/procurement GET/POST CLINIC registration; all other shared surfaces unchanged"
+  "sharedSurfaceException": "Root explicitly delegated only exact /api/inventory/procurement GET/POST CLINIC registration; all other shared surfaces unchanged",
+  "acceptanceAudit": {
+    "count": 69,
+    "completeAcceptanceExecuted": 0,
+    "note": "Scenario numbering is requirements inventory, not number of executed tests. Fixture tables applied explicitly in synthetic PG; migration not registered. Prior CI green applies only to 659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
+    "sourceCheckpoint": "659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
+    "continuation": "Custody continuation verified locally; exact commit/postimage hashes are in the delivered source manifest. 13 built HTTP/browser,33 PG and132 focused unit tests passed; no full acceptance scenario claim."
+  }
 }

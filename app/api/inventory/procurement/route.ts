@@ -5,6 +5,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
 import { submitPurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
   recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
+import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement } from "@/lib/inventory-domain/custody-store";
 import type { RequestRevision, PurchaseOrder, ReceiptRevision, SupplierInvoiceRevision } from "@/lib/inventory-domain/procurement";
 export const dynamic = "force-dynamic";
 function failure(error:unknown) {
@@ -22,13 +23,15 @@ function shape(document:unknown,command:string){const source=record(document);in
   if(command==="receipt.post"){list(line.portions);}
   if(command==="invoice.match"){record(line.price);list(line.receiptAllocations);}
 }return source;}
-export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
+export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
 export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{
   const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=source.command;
   invariant(typeof source.operationKey==="string","invalid_operation_key","Operation key is required");
-  invariant(command==="request.submit" || session.role==="admin","operation_forbidden","This management transition requires administrator authority");
+  invariant(command==="request.submit" || command==="custody.acknowledge" || session.role==="admin","operation_forbidden","This management transition requires administrator authority");
   const actor:InventoryActor={userId:session.userId,username:session.username,role:session.role};
   switch(command){
+    case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return NextResponse.json(await dispatchCustodyTransfer(actor,source.operationKey,transfer as unknown as CustodyDispatch),{status:201});}
+    case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return NextResponse.json(await acknowledgeCustodyTransfer(actor,source.operationKey,acknowledgement as unknown as CustodyAcknowledgement),{status:201});}
     case "request.submit":shape(source.document,command);return NextResponse.json(await submitPurchaseRequest(actor,source.operationKey,{...source.document as RequestRevision,requestedBy:actor.userId}),{status:201});
     case "request.approve":{const approval=record(source.approval);list(approval.decisions);invariant(typeof approval.requestId==="string"&&Number.isSafeInteger(approval.version),"invalid_approval","Approval targets an exact request/version");return NextResponse.json(await approvePurchaseRequest(actor,source.operationKey,approval as Parameters<typeof approvePurchaseRequest>[2]));}
     case "order.issue":shape(source.document,command);return NextResponse.json(await issuePurchaseOrder(actor,source.operationKey,source.document as PurchaseOrder),{status:201});

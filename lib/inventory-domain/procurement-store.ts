@@ -21,24 +21,25 @@ async function ready() {
   const { rows } = await getPool().query<{ present: boolean }>("SELECT to_regclass('purchase_requests') IS NOT NULL AND to_regclass('inventory_operations') IS NOT NULL AS present");
   if (!rows[0]?.present) throw new InventoryDomainError("schema_not_ready", "Inventory procurement schema awaits coordinated migration");
 }
-async function actorIn(client: DbClient, actor: InventoryActor, management: boolean) {
-  const { rows } = await client.query<{ username: string; role: string; is_active: boolean }>("SELECT username,role,is_active FROM users WHERE id=$1 FOR SHARE", [actor.userId]);
+export async function requireInventoryActor(client: DbClient, actor: InventoryActor, management: boolean) {
+  const { rows } = await client.query<{ username: string; role: string; is_active: boolean; party_id: number | null }>("SELECT username,role,is_active,party_id FROM users WHERE id=$1 FOR SHARE", [actor.userId]);
   const row = rows[0];
   invariant(row?.is_active && row.username === actor.username && row.role === actor.role, "actor_forbidden", "Authenticated actor is no longer active");
   invariant(management ? row.role === "admin" : ["admin", "reception", "doctor"].includes(row.role), "operation_forbidden", "Actor is not authorized for this operation");
+  return row;
 }
-async function audit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>) {
+export async function writeInventoryAudit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>) {
   // Reuses the existing throwing transactional audit writer. Specific new action
   // labels are a narrow root-owned audit enum proposal, not a second audit ledger.
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
     actor: actor.username, actorRole: actor.role, details: { operation, ...details } });
 }
-async function operation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
+export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");
   const hash = createHash("sha256").update(payloadIdentity(payload)).digest("hex");
   await ready();
   return withTransaction(getPool(), async client => {
-    await actorIn(client, actor, management);
+    await requireInventoryActor(client, actor, management);
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify([name, actor.userId, key])]);
     const previous = await client.query<{ payload_hash: string; result: T }>("SELECT payload_hash,result FROM inventory_operations WHERE scope=$1 AND actor_id=$2 AND operation_key=$3", [name,actor.userId,key]);
     if (previous.rows[0]) {
@@ -69,7 +70,7 @@ async function verifyUnits(client: DbClient, lines: readonly { itemId: number; c
 export async function submitPurchaseRequest(actor: InventoryActor, key: string, request: RequestRevision) {
   docId(request.id); scope(request.branchId); validateRequest(request);
   invariant(request.requestedBy === actor.userId && request.version === 1, "request_owner_mismatch", "A new request belongs to its authenticated creator at version one");
-  return operation(actor,key,"request.submit",request,false, async client => {
+  return inventoryOperation(actor,key,"request.submit",request,false, async client => {
     await verifyUnits(client,request.lines);
     await client.query("INSERT INTO purchase_requests(id,branch_key,current_version,status,requested_by) VALUES($1,$2,1,'submitted',$3)",[request.id,request.branchId,actor.userId]);
     await client.query("INSERT INTO purchase_request_revisions(request_id,version,document) VALUES($1,1,$2::jsonb)",[request.id,JSON.stringify(request)]);
@@ -77,7 +78,7 @@ export async function submitPurchaseRequest(actor: InventoryActor, key: string, 
       const quantity=convertQuantity(line.quantity,line.conversion);
       await client.query("INSERT INTO purchase_request_lines(request_id,request_version,id,item_id,entered_qty,base_qty,conversion) VALUES($1,1,$2,$3,$4::numeric,$5::numeric,$6::jsonb)",[request.id,line.id,line.itemId,quantity.enteredQuantity,quantity.baseQuantity,JSON.stringify(quantity.conversion)]);
     }
-    await audit(client,actor,"purchase_request",request.id,"submit",{version:1,lines:request.lines.length});
+    await writeInventoryAudit(client,actor,"purchase_request",request.id,"submit",{version:1,lines:request.lines.length});
     return { id:request.id,status:"submitted" as const,version:1 };
   });
 }
@@ -89,7 +90,7 @@ async function lockedRequest(client: DbClient,id:string) {
   return { ...row.rows[0],request:revision.rows[0].document };
 }
 export async function approvePurchaseRequest(actor:InventoryActor,key:string,input:{ requestId:string; version:number; decisions: Parameters<typeof approveRequest>[0]["decisions"]; valuation:ValuationSnapshot|null; selfApprovalReason?:string|null }) {
-  return operation(actor,key,"request.approve",input,true,async client=>{
+  return inventoryOperation(actor,key,"request.approve",input,true,async client=>{
     const current=await lockedRequest(client,input.requestId);
     invariant(current.current_version === input.version,"stale_version","The request was revised; reload before approving");
     const policies=await client.query<{version:number;currency:"YER";limit_minor:string;allow_self_approval:boolean}>("SELECT version,currency,limit_minor::text,allow_self_approval FROM inventory_approval_policies WHERE branch_key=$1 ORDER BY version DESC LIMIT 1 FOR SHARE",[INVENTORY_CLINIC_SCOPE]);
@@ -100,13 +101,13 @@ export async function approvePurchaseRequest(actor:InventoryActor,key:string,inp
       selfApprovalReason:input.selfApprovalReason ?? null,valuation:input.valuation,decisions:input.decisions});
     await client.query("INSERT INTO purchase_approval_events(id,request_id,request_version,actor_id,decision) VALUES($1,$2,$3,$4,$5::jsonb)",[randomUUID(),input.requestId,input.version,actor.userId,JSON.stringify(decision)]);
     await client.query("UPDATE purchase_requests SET status=$2 WHERE id=$1",[input.requestId,decision.status]);
-    await audit(client,actor,"purchase_request",input.requestId,"approve",{version:input.version,status:decision.status,decision});
+    await writeInventoryAudit(client,actor,"purchase_request",input.requestId,"approve",{version:input.version,status:decision.status,decision});
     return {id:input.requestId,version:input.version,status:decision.status};
   });
 }
 export async function issuePurchaseOrder(actor:InventoryActor,key:string,order:PurchaseOrder) {
   docId(order.id); scope(order.branchId);
-  return operation(actor,key,"order.issue",order,true,async client=>{
+  return inventoryOperation(actor,key,"order.issue",order,true,async client=>{
     const sources=[...new Set(order.lines.flatMap(line=>line.sources.map(source=>source.requestId)))].sort();
     const requests:{request:RequestRevision;approval:RequestApproval}[]=[];
     for(const id of sources){
@@ -130,7 +131,7 @@ export async function issuePurchaseOrder(actor:InventoryActor,key:string,order:P
         await client.query("INSERT INTO purchase_order_source_allocations(id,order_id,order_line_id,request_id,request_version,request_line_id,base_qty,amount_minor,currency,base_amount_minor) VALUES($1,$2,$3,$4,$5,$6,$7::numeric,$8,$9,$10)",[source.id,order.id,line.id,source.requestId,revision,source.requestLineId,source.baseQuantity,amount.amountMinor,amount.currency,amount.baseAmountMinor]);
       }
     }
-    await audit(client,actor,"purchase_order",order.id,"issue",{version:order.version,total:plan.totalMinor,currency:order.currency});
+    await writeInventoryAudit(client,actor,"purchase_order",order.id,"issue",{version:order.version,total:plan.totalMinor,currency:order.currency});
     return {id:order.id,status:"issued" as const,totalMinor:plan.totalMinor,currency:order.currency};
   });
 }
@@ -140,7 +141,7 @@ async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrde
 }
 export async function postInspectedReceipt(actor:InventoryActor,key:string,receipt:ReceiptRevision){
   docId(receipt.id);scope(receipt.branchId);
-  return operation(actor,key,"receipt.post",receipt,true,async client=>{
+  return inventoryOperation(actor,key,"receipt.post",receipt,true,async client=>{
     const order=await lockedOrder(client,receipt.orderId);
     const old=await client.query<{order_line_id:string;accepted:string;quarantined:string;rejected:string}>(`SELECT order_line_id,
       COALESCE(SUM(base_qty) FILTER(WHERE disposition='accepted'),0)::text AS accepted,
@@ -166,16 +167,16 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
       // snapshot rather than silently rounding a cheap piece to zero.
       const movement=await client.query<{id:number}>("INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'in',$2::numeric,$3::date,$4,$5,NULL,FALSE) RETURNING id",[entry.itemId,entry.baseQuantity,line.expiryDate,`Inspected receipt ${receipt.id}`,actor.username]);
       const source=order.lines.find(row=>row.id===line.orderLineId)!;const lotId=randomUUID();
-      await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::date,$8,'estimated',$9::jsonb)",[lotId,line.id,line.itemId,line.locationId,movement.rows[0].id,line.lotCode,line.expiryDate,line.disposition,JSON.stringify({source:"approved_order_quote",currency:order.currency,price:source.price,conversion:line.conversion,financialValuation:"pending_invoice_adapter"})]);
+      await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::date,$8,'estimated',$9::jsonb)",[lotId,line.id,line.itemId,line.locationId,movement.rows[0].id,line.lotCode,line.expiryDate,line.disposition,JSON.stringify({source:"approved_order_quote",currency:order.currency,price:source.price,conversion:line.conversion,requiresExpiry:source.requiresExpiry,financialValuation:"pending_invoice_adapter"})]);
       await client.query("INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",[randomUUID(),movement.rows[0].id,lotId,line.locationId,entry.baseQuantity]);
     }
-    await audit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines});
+    await writeInventoryAudit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines});
     return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,financialEffects:plan.financialEffects};
   });
 }
 export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string,invoice:SupplierInvoiceRevision){
   docId(invoice.id);scope(invoice.branchId);
-  return operation(actor,key,"invoice.match",invoice,true,async client=>{
+  return inventoryOperation(actor,key,"invoice.match",invoice,true,async client=>{
     const order=await lockedOrder(client,invoice.orderId);
     const receipts=await client.query<{document:InspectedReceiptLine}>("SELECT document FROM goods_receipt_lines WHERE order_id=$1 ORDER BY id",[order.id]);
     const priorRows=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>("SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=$1",[order.id]);
@@ -183,13 +184,13 @@ export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string
     const match=matchSupplierInvoice(order,invoice,receipts.rows.map(row=>row.document),prior);
     await client.query("INSERT INTO supplier_invoices(id,order_id,supplier_party_id,duplicate_key,document,match_plan,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",[invoice.id,order.id,invoice.supplierPartyId,match.duplicateKey,JSON.stringify(invoice),JSON.stringify(match),actor.userId]);
     if(match.status === "matched")for(const line of invoice.lines)for(const allocation of line.receiptAllocations){await client.query("INSERT INTO supplier_invoice_receipt_allocations(id,invoice_id,invoice_line_id,receipt_line_id,base_qty) VALUES($1,$2,$3,$4,$5::numeric)",[allocation.id,invoice.id,line.id,allocation.receiptLineId,allocation.baseQuantity]);}
-    await audit(client,actor,"supplier_invoice",invoice.id,"match",{version:invoice.version,status:match.status,issues:match.issues});
+    await writeInventoryAudit(client,actor,"supplier_invoice",invoice.id,"match",{version:invoice.version,status:match.status,issues:match.issues});
     return {id:invoice.id,status:match.status,match,financialPosting:"pending_shared_finance_review" as const};
   });
 }
 export async function readProcurementRequests(actor:InventoryActor,offset=0){
   await ready();return withTransaction(getPool(),async client=>{
-    await actorIn(client,actor,false);
+    await requireInventoryActor(client,actor,false);
     const rows=await client.query<{id:string;current_version:number;status:string;document:RequestRevision;decision:RequestApproval|null}>(`SELECT p.id,p.current_version,p.status,r.document,a.decision FROM purchase_requests p
       JOIN purchase_request_revisions r ON r.request_id=p.id AND r.version=p.current_version
       LEFT JOIN purchase_approval_events a ON a.request_id=p.id AND a.request_version=p.current_version
@@ -199,7 +200,7 @@ export async function readProcurementRequests(actor:InventoryActor,offset=0){
 }
 export async function readProcurementCatalog(actor:InventoryActor){
   await ready();return withTransaction(getPool(),async client=>{
-    await actorIn(client,actor,false);
+    await requireInventoryActor(client,actor,false);
     const rows=await client.query<{item_id:number;name:string;version:number;entered_unit:string;base_unit:string;factor:string;entered_precision:number;base_precision:number}>(`SELECT p.item_id,i.name,p.version,p.entered_unit,p.base_unit,p.factor::text,p.entered_precision,p.base_precision
       FROM inventory_item_unit_versions p JOIN inventory_items i ON i.id=p.item_id
       WHERE i.is_active AND i.unit=p.base_unit ORDER BY i.name,p.version DESC LIMIT 200`);

@@ -46,3 +46,11 @@
 @media(max-width:640px) { .root { padding:14px 12px 32px; } .title { font-size:19px; } .metrics,.items { grid-template-columns:minmax(0,1fr); } .items { padding:12px; } .metric dd { font-size:21px; } .toolbar { align-items:flex-start; } }
 @media(prefers-reduced-motion:reduce) { .button { transition:none; } }
 @media print { .root { background:#fff; padding:0; border-radius:0; } .toolbar,.actions,.screenControls { display:none; } .printHeader { display:block; margin-bottom:18px; } .screenItems { display:none; } .printItems { display:grid; } .metrics { grid-template-columns:repeat(3,minmax(0,1fr)); } .items { grid-template-columns:repeat(2,minmax(0,1fr)); } .metric,.panel,.item { box-shadow:none; } }
+/* Only inventory reports opt out of the shell's viewport-height print minimum.
+   Otherwise a short, single-page statement emits an empty trailing page. */
+@media print {
+  :global(html):has(.root), :global(body):has(.root), :global(.min-h-full):has(.root) {
+    height:auto !important;
+    min-height:0 !important;
+  }
+}
