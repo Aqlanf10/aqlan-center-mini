@@ -1,4 +1,14 @@
-# Invoice converted quote proposal — review required
+# Invoice currency offer policy — approved and implemented
+
+The owner subsequently approved implementation for **both admin and reception**. This is now implemented in PR333 on `feat/invoice-monthly-schedule-20261014`; no merge/deployment is authorized. The proposal below is retained as historical rationale and is superseded by this approved implementation summary.
+
+Native prices, including explicit zero, always win. Otherwise a converted offer uses actually stored centre FX and the existing nearest-whole-major-unit rounding. Missing/invalid stored rates produce no automatic quote; defaults are not financial snapshots. Converted offers are suggestions, not a new native comparison baseline. Manual changes to converted/unpriced catalogue invoice services need an invoice-only reason and retain existing unpriced agreement authority. Native increases and discounts retain their role/reason/limit checks; free-text lines, plan pricing and visit pricing keep their prior policy. `requireInvoiceManualReason` is enabled only at invoice/historical-document boundaries. New invoice quote/rate DTOs are returned only to admin/reception.
+
+Preview and save compare the full versioned source/rate/base amount/currency/rounding quote, and the writer repeats validation under existing settings/catalogue locks. The immutable audit stores service/line identity, actual agreed source (including manual), requested minor units, reason, quote and server SHA256 hash. Template versions contain the same evidence; their strict browser decoder checks source and amount. A changed source/rate rejects even if its rounded price stays unchanged. Successful quoted-command replay precedes current catalogue parsing and preserves the original receipt without repricing. No catalogue edits, migration, invented rate, payment movement or receipt creation occurs.
+
+The UI shows source/rate, manual-reason and server-refusal messages and a refresh-prices/preview action. `invoice-price-quote`, strict template preview, locked PostgreSQL catalogue authority and actual admin/reception HTTP/browser tests cover this policy. See the latest committed handoff/evidence manifest for exact results and remaining CI status.
+
+## Archived proposal (superseded by the implementation above)
 
 Status: proposal only. No pricing, permission, API, schema, catalogue or FX changes are included in the monthly-schedule follow-up.
 

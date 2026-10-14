@@ -77,9 +77,12 @@ describe("invoice converted source, manual reasons and saved contract", () => {
     try {
       const currency = page.getByLabel("عملة الفاتورة", { exact: true }); const price = row.getByLabel("السعر", { exact: true });
       expect((await price.inputValue()).replaceAll(",", "")).toBe("2200");
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-YER-${role}-${width}.png`,fullPage:true});
       await currency.selectOption("USD"); expect(await price.inputValue()).toBe("1.00");
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-USD-${role}-${width}.png`,fullPage:true});
       await currency.selectOption("SAR"); expect(await price.inputValue()).toBe("5.00");
       expect(await page.getByTestId("invoice-price-source-0").innerText()).toContain("440");
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-SAR-${role}-${width}.png`,fullPage:true});
       await row.getByLabel("الخدمة", { exact: true }).selectOption(String(native)); expect((await price.inputValue()).replaceAll(",", "")).toBe("1500.00");
       await row.getByLabel("الخدمة", { exact: true }).selectOption(String(converted));
       await row.getByLabel("نطاق العلاج", { exact: true }).selectOption("both"); await page.getByTestId("invoice-provider-0").selectOption(String(doctor));
@@ -97,6 +100,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await editor.getByLabel("تاريخ السداد 3", { exact: true }).inputValue()).toBe("2028-02-29");
       expect(await editor.getByLabel("تاريخ السداد 4", { exact: true }).inputValue()).toBe("2028-03-31");
       expect(await editor.getByRole("checkbox").count()).toBe(0);
+      expect(await editor.getByText("القسط 1",{exact:true}).count()).toBe(1);
       expect(await page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).count()).toBe(1);
       expect(await page.getByTestId("invoice-financial-summary").getByText("المبلغ المتبقي", { exact: true }).count()).toBe(0);
       await expect.poll(() => save.isEnabled()).toBe(true);
@@ -106,6 +110,15 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       await page.getByRole("region", { name: "فاتورة جديدة", exact: true }).waitFor({ state: "detached" });
       expect(bodies).toHaveLength(1); expect(await facts(patientId)).toEqual({ invoices: 1, payments: 0, plans: 1, cases: 1, schedules: 1, items: 1 });
       const repeated = await authedMutation("/api/invoices", h.sessions[role], "POST", bodies[0]); expect(repeated.status).toBe(200); expect((await repeated.json()).replayed).toBe(true);
+      const ledgerResponse=await context.request.get(`${baseUrl}/api/patients/${patientId}/ledger`);expect(ledgerResponse.status()).toBe(200);
+      const ledger=await ledgerResponse.json();expect(ledger.balances.SAR).toMatchObject({billedMinor:150000,collectedMinor:0,dueMinor:150000});
+      expect(ledger.balances.YER.dueMinor).toBe(0);expect(ledger.balances.USD.dueMinor).toBe(0);
+      const statement=await context.newPage();await statement.goto(`${baseUrl}/print/statement/${patientId}`,{waitUntil:"domcontentloaded"});
+      const statementInvoice=statement.locator("tbody tr").filter({hasText:ledger.invoices[0].invoiceNumber});await statementInvoice.waitFor();expect(await statementInvoice.count()).toBe(1);
+      expect(await statementInvoice.innerText()).toContain("1,500.00");
+      expect(await statement.locator(".line").filter({hasText:"إجمالي المفوتر"}).innerText()).toContain("1,500.00");
+      expect(await statement.locator(".line").filter({hasText:"إجمالي المحصّل"}).innerText()).toContain("0.00");
+      await statement.emulateMedia({media:"print"});await statement.screenshot({path:`.settings-ui-artifacts/invoice-statement-${role}-${width}.png`,fullPage:true});await statement.close();
       const audit = (await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND details->>'المريض'=$1", [String(patientId)])).rows[0].details;
       expect(audit.invoicePriceSnapshots[0]).toMatchObject({ quote: { source: "converted", rate: 440, rounding: "nearest-major-unit", minor: 500 }, agreedPriceSource:"manual", requestedMinor: 150000, reason: "Synthetic explicit manual agreement" });
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -116,6 +129,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       const text = await contract.getByTestId("saved-installment-contract").innerText();
       expect(text).toContain("Synthetic invoice contract patient"); expect(text).toContain("SAR"); expect(text).toContain("فاتورة"); expect(text).toContain("التوقيع والاسم الثلاثي");
       expect(await contract.locator("tbody tr").count()).toBe(4); expect(text).toContain("490.00"); expect(text).toContain("1,010.00");
+      expect(await contract.getByText("قسط 1",{exact:true}).count()).toBe(1);
       await contract.emulateMedia({ media: "print" });
       await contract.screenshot({ path: `.settings-ui-artifacts/invoice-contract-${role}-${width}.png`, fullPage: true });
       await contract.pdf({ path: `.settings-ui-artifacts/invoice-contract-${role}.pdf`, format: "A4", printBackground: true });

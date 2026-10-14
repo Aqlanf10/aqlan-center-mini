@@ -29,7 +29,7 @@ export async function DebtRepaymentAgreementPrint({ id, version, today }: { id: 
     <p className="footer-note">المقدمة المقترحة موعد سداد وليست سند قبض. المسدد الفعلي أعلاه من السندات والتسويات المسجلة فقط.</p>
     <h3>جدول الأقساط والمواعيد الاستحقاقية</h3>
     <table className="items"><thead><tr><th>الدفعة</th><th>تاريخ الاستحقاق</th><th>المبلغ</th><th>محصّل فعليًا</th><th>المتبقي</th></tr></thead>
-      <tbody>{schedule.progress!.rows.map((row, index) => <tr key={index}><td>{row.kind === "down_payment" ? "مقدمة مقترحة" : `قسط ${index + 1}`}</td>
+      <tbody>{schedule.progress!.rows.map((row, index) => <tr key={index}><td>{row.kind === "down_payment" ? "مقدمة مقترحة" : `قسط ${index + 1-(schedule.terms.installments[0]?.kind==="down_payment"?1:0)}`}</td>
         <td>{friendlyDateLong(row.dueDate)}</td><td>{formatMoney(row.amountMinor, currency)}</td><td>{formatMoney(row.settledMinor, currency)}</td><td>{formatMoney(row.remainingMinor, currency)}</td></tr>)}</tbody></table>
     <div className="rule" /><h3>الشروط والالتزامات السريرية:</h3>
     <ol>{STANDARD_PLAN_TERMS.map((term, index) => <li key={index}>{term}</li>)}</ol>

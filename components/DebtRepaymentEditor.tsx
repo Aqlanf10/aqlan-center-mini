@@ -119,7 +119,7 @@ export function DebtRepaymentEditor({ value, onChange, currency, remainingMinor,
       <div className="space-y-2">
         {value.rows.map((row,index) => <div key={row.key} className="min-w-0 space-y-2 rounded-xl bg-slate-50 p-3">
           <div className="flex min-w-0 items-center justify-between gap-2">
-            <strong className="text-xs">{row.kind === "down_payment" ? "دفعة مقدمة مقترحة" : `القسط ${index+1}`}</strong>
+            <strong className="text-xs">{row.kind === "down_payment" ? "دفعة مقدمة مقترحة" : `القسط ${index+1-(firstDownPayment?1:0)}`}</strong>
             <button type="button" disabled={disabled} onClick={() => { if (!disabled) onChange({ ...value, rows: value.rows.filter(item => item.key !== row.key) }); }}
               aria-label={`حذف موعد السداد ${index+1}`} className="min-h-[44px] shrink-0 rounded-lg px-3 text-xs font-bold text-rose-800">حذف</button>
           </div>
