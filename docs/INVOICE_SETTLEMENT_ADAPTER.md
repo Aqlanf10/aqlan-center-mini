@@ -6,6 +6,8 @@ The caller supplies an explicit invoice and its authorized patient/native curren
 
 The adapter validates the entire explicit correction lineage: one linear same-patient/currency chain, cancelled ancestors, valid invoice amounts, and valid same-owner receipt/refund references. Missing, foreign, malformed, cyclic/branched or live-ancestor history fails closed with `InvoiceSettlementError` (`missing` / `invalid`). Do not turn that refusal into a zero balance or accept an earlier proof.
 
+The retired correction writer left a replacement marker in the invoice note without a structured correction edge. Such a marked invoice anywhere in the ancestry is explicitly refused when its incoming edge is absent. The display note is used only to detect an unsafe legacy record, never to infer an ancestor or attach receipts. It requires reviewed reconciliation before checkout can use this adapter. The regression first demonstrated an incorrect unpaid 900 balance despite an original 400 receipt, then passed with an explicit `invalid` refusal and unchanged receipts.
+
 Returned fields:
 
 - `principalMinor`: current invoice total minus discount, only when current invoice is available.

@@ -22,14 +22,18 @@ export async function readInvoiceSettlementPosition(client:DbClient,target:{pati
   let lineageInvoiceIds:number[];
   try{lineageInvoiceIds=await invoiceSettlementLineage(client,target.invoiceId,target.patientId,target.currency);}
   catch(error){if(error instanceof InvoiceSettlementLineageError)throw new InvoiceSettlementError();throw error;}
-  const {rows:invoices}=await client.query<{id:number;patient_id:number;base_currency:string;total_minor:string;discount_minor:string;status:string}>(
-    `SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status FROM invoices WHERE id=ANY($1::int[]) ORDER BY id ${lock?"FOR NO KEY UPDATE":""}`,[lineageInvoiceIds]);
+  const {rows:invoices}=await client.query<{id:number;patient_id:number;base_currency:string;total_minor:string;discount_minor:string;status:string;note:string|null}>(
+    `SELECT id,patient_id,base_currency,total_minor::text,discount_minor::text,status,note FROM invoices WHERE id=ANY($1::int[]) ORDER BY id ${lock?"FOR NO KEY UPDATE":""}`,[lineageInvoiceIds]);
   if(invoices.length!==lineageInvoiceIds.length||invoices.some(row=>row.patient_id!==target.patientId||row.base_currency!==target.currency||!["open","paid","cancelled"].includes(row.status)
     ||safe(row.total_minor)<0||safe(row.discount_minor)<0||safe(row.discount_minor)>safe(row.total_minor)))throw new InvoiceSettlementError();
   const current=invoices.find(row=>row.id===target.invoiceId);if(!current)throw new InvoiceSettlementError();
   const {rows:edges}=await client.query<{id:number;patient_id:number;currency:string;original_invoice_id:number;corrected_invoice_id:number;request_hash:string}>(
     "SELECT id,patient_id,currency,original_invoice_id,corrected_invoice_id,request_hash FROM invoice_corrections WHERE corrected_invoice_id=ANY($1::int[]) ORDER BY id",[lineageInvoiceIds]);
   if(edges.some(row=>row.patient_id!==target.patientId||row.currency!==target.currency||!lineageInvoiceIds.includes(row.original_invoice_id)||!lineageInvoiceIds.includes(row.corrected_invoice_id)))throw new InvoiceSettlementError();
+  // The retired writer identified replacements only in their display note.
+  // That is not an authoritative receipt link: refuse an unstructured past
+  // rather than treating its replacement as an unpaid root or guessing IDs.
+  if(invoices.some(row=>row.note?.startsWith("تصحيح للفاتورة ")&&!edges.some(edge=>edge.corrected_invoice_id===row.id)))throw new InvoiceSettlementError();
   // Imported corruption must not turn a cycle/branch or a live ancestor into
   // another source of settlement. A replacement has one linear cancelled past.
   if(edges.length!==lineageInvoiceIds.length-1

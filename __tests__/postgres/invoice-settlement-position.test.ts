@@ -49,6 +49,15 @@ describe("one scoped settlement/proof across immutable invoice corrections",()=>
     const unrelated=await invoice(original.patientId);await payment(original.patientId,unrelated.id,200);
     expect(await read(original.patientId,changed.corrected!.id)).toEqual(after);
   });
+  it("refuses an old unstructured replacement instead of silently dropping its original receipt",async()=>{
+    const original=await invoice();await payment(original.patientId,original.id,400);
+    const changed=await db.correctInvoice({invoiceId:original.id,lines:[{itemId:original.items[0].id,quantity:1,unitPriceMinor:900}],reason:"Synthetic legacy correction without structured lineage",actor:session.username,actorRole:"admin"});
+    if(!changed.ok)throw new Error("Fixture legacy correction");
+    const before=await footprint(original.patientId);
+    await expect(read(original.patientId,changed.corrected.id)).rejects.toMatchObject({code:"invalid"});
+    expect(await footprint(original.patientId)).toEqual(before);
+    expect((await q("SELECT invoice_id FROM payments WHERE patient_id=$1",[original.patientId]))).toEqual([{invoice_id:original.id}]);
+  });
   it("includes a later imported original-reference receipt in the proof without moving or creating money during reads",async()=>{
     const original=await invoice();await payment(original.patientId,original.id,400);const changed=await correct(original.id,900),before=await read(original.patientId,changed.corrected!.id);
     // A synthetic bank/import receipt retains its historical document reference.
