@@ -204,9 +204,10 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
     }
   }
 
+  const unlinked = data?.state === "bridge_missing";
   return <section aria-label={lifetime ? "خطة الحالة: المشكلة والهدف والاستراتيجية" : "خطة الحالة للمرجع فقط"} data-testid={lifetime ? "ortho-strategy-editor" : "ortho-strategy-reference"}
-    className="min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="text-sm font-black text-navy-900">المشكلة ← الهدف ← الاستراتيجية</h4>
+    className={`min-w-0 rounded-2xl border border-slate-200 bg-white ${unlinked ? "space-y-2 p-2 sm:space-y-3 sm:p-4" : "space-y-3 p-4"}`}>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between"><h4 className={`${unlinked ? "text-xs sm:text-sm" : "text-sm"} font-black text-navy-900`}>المشكلة ← الهدف ← الاستراتيجية</h4>
       <button type="button" className={buttonClass} disabled={!!lifetime?.busy} onClick={() => setReload(value => value + 1)}>تحديث سجل الخطة</button></div>
     {!lifetime ? <p className="text-xs text-slate-500">مرجع للقراءة فقط. لا ينسخ النص إلى الزيارة ولا يضيف إجراءً أو توقيعًا أو مبلغًا.</p> : null}
     {loading ? <p role="status" className="text-sm text-slate-500">جارٍ التحقق من خطة الحالة…</p> : null}
@@ -215,7 +216,7 @@ function StrategyWorkspace({ patientId, orthoCaseId, lifetime, referenceVisitId 
     {lifetime?.uncertain ? <p role="alert" className="text-xs font-bold text-amber-900">نتيجة الطلب السابق غير مؤكدة. احتُفظ بالمسودة وتوقف الحفظ. تحقّق بإعادة نفس الطلب قبل فتح مسودة أخرى.</p> : null}
     {lifetime?.uncertain && lifetime.beginRetry ? <button type="button" className={buttonClass} disabled={lifetime.busy || !lifetime.active()} onClick={() => void send(true)}>التحقق بإعادة نفس طلب الخطة</button> : null}
     {malformedDraft ? <p role="alert">تعذّر قراءة المسودة المحفوظة لهذه الجلسة؛ لم تُستبدل بنموذج فارغ.</p> : null}
-    {data?.state === "bridge_missing" ? <div className="space-y-2 text-sm"><p>هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.</p>
+    {unlinked ? <div className="space-y-1 text-xs sm:space-y-2 sm:text-sm"><p>هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.</p>
       <p className="text-xs text-amber-900">يلزم ربط سريري موجود ومتحقق قبل تدوين الاستراتيجية؛ الربط غير متاح من هذه الشاشة.</p></div> : null}
     {data?.state === "ready" ? <>
       {data.history.length ? <label className="block text-xs font-bold text-slate-600">النسخة المعروضة

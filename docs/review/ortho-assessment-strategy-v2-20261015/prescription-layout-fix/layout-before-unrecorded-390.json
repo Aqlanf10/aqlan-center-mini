@@ -1,0 +1,425 @@
+{
+  "frame": {
+    "top": 80,
+    "bottom": 980.5,
+    "viewportHeight": 844,
+    "caseLabel": "#1",
+    "identityExposed": true
+  },
+  "elements": [
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "#1ثابت معدني · الفكّانجاريةالتسوية والمحاذاةلا اتفاق مالي مربوط بالحالةالشدّة تحتاج قرار فوترة حتى ت",
+      "class": "border-b border-slate-100 bg-slate-50/70 p-4",
+      "top": 0,
+      "height": 290.5,
+      "width": 364
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "#1ثابت معدني · الفكّانجاريةالتسوية والمحاذاة",
+      "class": "flex flex-wrap items-center justify-between gap-2",
+      "top": 16,
+      "height": 28,
+      "width": 332
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "#1ثابت معدني · الفكّان",
+      "class": "flex items-center gap-2",
+      "top": 16,
+      "height": 28,
+      "width": 159.65625
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "جاريةالتسوية والمحاذاة",
+      "class": "flex items-center gap-2",
+      "top": 18.75,
+      "height": 22.5,
+      "width": 152.0625
+    },
+    {
+      "tag": "SECTION",
+      "testId": null,
+      "text": "لا اتفاق مالي مربوط بالحالةالشدّة تحتاج قرار فوترة حتى تُربط الحالة باتفاق أقساط.أنشئ اتفاق تقويم من",
+      "class": "mt-2 rounded-xl border px-3 py-2 text-[11px] border-slate-200 bg-slate-50",
+      "top": 52,
+      "height": 83.5,
+      "width": 332
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "لا اتفاق مالي مربوط بالحالةالشدّة تحتاج قرار فوترة حتى تُربط الحالة باتفاق أقساط.أنشئ اتفاق تقويم من",
+      "class": "flex flex-wrap items-center gap-2",
+      "top": 61,
+      "height": 65.5,
+      "width": 306
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "أقل من شهرانقضى من العلاج18 شهرًاالمتبقي المتوقع0جلسات وشدّات منفذة—لا شدّات بعد",
+      "class": "mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs",
+      "top": 147.5,
+      "height": 108,
+      "width": 332
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "أقل من شهرانقضى من العلاج",
+      "class": "rounded-xl bg-white p-2 border border-slate-200/80",
+      "top": 147.5,
+      "height": 50,
+      "width": 162
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "أقل من شهر",
+      "class": "font-extrabold text-navy-900",
+      "top": 156.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "انقضى من العلاج",
+      "class": "text-[10px] text-slate-500",
+      "top": 172.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "18 شهرًاالمتبقي المتوقع",
+      "class": "rounded-xl p-2 border bg-white border-slate-200/80 text-slate-700",
+      "top": 147.5,
+      "height": 50,
+      "width": 162
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "18 شهرًا",
+      "class": "font-extrabold",
+      "top": 156.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "المتبقي المتوقع",
+      "class": "text-[10px] text-slate-500",
+      "top": 172.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "0جلسات وشدّات منفذة",
+      "class": "rounded-xl bg-white p-2 border border-slate-200/80",
+      "top": 205.5,
+      "height": 50,
+      "width": 162
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "0",
+      "class": "font-extrabold text-navy-900",
+      "top": 214.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "جلسات وشدّات منفذة",
+      "class": "text-[10px] text-slate-500",
+      "top": 230.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "—لا شدّات بعد",
+      "class": "rounded-xl bg-white p-2 border border-slate-200/80",
+      "top": 205.5,
+      "height": 50,
+      "width": 162
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "—",
+      "class": "font-extrabold text-navy-900",
+      "top": 214.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "لا شدّات بعد",
+      "class": "text-[10px] text-slate-500",
+      "top": 230.5,
+      "height": 16,
+      "width": 144
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "",
+      "class": "mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200",
+      "top": 265.5,
+      "height": 8,
+      "width": 332
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "",
+      "class": "h-full transition-all bg-navy-800",
+      "top": 265.5,
+      "height": 8,
+      "width": 0
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "⚡مسار الأسلاك والشدّاتمسار📐السجلات والسيفالومتري (WebCeph)السجلات⚙️خطة العلاج والميكانيكاخطة🛡️التث",
+      "class": "flex border-b border-slate-200 bg-white",
+      "top": 290.5,
+      "height": 39,
+      "width": 364
+    },
+    {
+      "tag": "BUTTON",
+      "testId": null,
+      "text": "⚡مسار الأسلاك والشدّاتمسار",
+      "class": "flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50",
+      "top": 290.5,
+      "height": 38,
+      "width": 91
+    },
+    {
+      "tag": "BUTTON",
+      "testId": null,
+      "text": "📐السجلات والسيفالومتري (WebCeph)السجلات",
+      "class": "flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50",
+      "top": 290.5,
+      "height": 38,
+      "width": 91
+    },
+    {
+      "tag": "BUTTON",
+      "testId": null,
+      "text": "⚙️خطة العلاج والميكانيكاخطة",
+      "class": "flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 border-navy-800 text-navy-900 bg-navy-50/40",
+      "top": 290.5,
+      "height": 38,
+      "width": 91
+    },
+    {
+      "tag": "BUTTON",
+      "testId": null,
+      "text": "🛡️التثبيت والاستبقاءالتثبيت",
+      "class": "flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50",
+      "top": 290.5,
+      "height": 38,
+      "width": 91
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "المشكلة ← الهدف ← الاستراتيجيةتحديث سجل الخطةهذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم ي",
+      "class": "p-4",
+      "top": 329.5,
+      "height": 569,
+      "width": 364
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "المشكلة ← الهدف ← الاستراتيجيةتحديث سجل الخطةهذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم ي",
+      "class": "space-y-4",
+      "top": 345.5,
+      "height": 537,
+      "width": 332
+    },
+    {
+      "tag": "SECTION",
+      "testId": "ortho-strategy-editor",
+      "text": "المشكلة ← الهدف ← الاستراتيجيةتحديث سجل الخطةهذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم ي",
+      "class": "min-w-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-4",
+      "top": 345.5,
+      "height": 198,
+      "width": 332
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "المشكلة ← الهدف ← الاستراتيجيةتحديث سجل الخطة",
+      "class": "flex flex-wrap items-center justify-between gap-2",
+      "top": 362.5,
+      "height": 72,
+      "width": 298
+    },
+    {
+      "tag": "H4",
+      "testId": null,
+      "text": "المشكلة ← الهدف ← الاستراتيجية",
+      "class": "text-sm font-black text-navy-900",
+      "top": 362.5,
+      "height": 20,
+      "width": 187.78125
+    },
+    {
+      "tag": "BUTTON",
+      "testId": null,
+      "text": "تحديث سجل الخطة",
+      "class": "min-h-11 rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold disabled:opacity-40",
+      "top": 390.5,
+      "height": 44,
+      "width": 120.890625
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.يلزم ربط سريري موجود ومتحقق ",
+      "class": "space-y-2 text-sm",
+      "top": 446.5,
+      "height": 80,
+      "width": 298
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.",
+      "class": "",
+      "top": 446.5,
+      "height": 40,
+      "width": 298
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "يلزم ربط سريري موجود ومتحقق قبل تدوين الاستراتيجية؛ الربط غير متاح من هذه الشاشة.",
+      "class": "text-xs text-amber-900",
+      "top": 494.5,
+      "height": 32,
+      "width": 298
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "وصفة الجهاز والمواصفات الميكانيكيةنوع الجهازثابت معدنيالفكّان المعالجانالفكّانمقاس الشق (Slot)شقّ 0.",
+      "class": "rounded-2xl border border-slate-200 bg-white p-4",
+      "top": 559.5,
+      "height": 323,
+      "width": 332
+    },
+    {
+      "tag": "H4",
+      "testId": null,
+      "text": "وصفة الجهاز والمواصفات الميكانيكية",
+      "class": "mb-3 text-xs font-black text-navy-900",
+      "top": 576.5,
+      "height": 16,
+      "width": 298
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "نوع الجهازثابت معدنيالفكّان المعالجانالفكّانمقاس الشق (Slot)شقّ 0.022فلسفة البراكيتغير مسجّلةتاريخ ا",
+      "class": "grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs",
+      "top": 604.5,
+      "height": 187,
+      "width": 298
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "نوع الجهازثابت معدني",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 604.5,
+      "height": 54,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "الفكّان المعالجانالفكّان",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 604.5,
+      "height": 54,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "مقاس الشق (Slot)شقّ 0.022",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 670.5,
+      "height": 55,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "فلسفة البراكيتغير مسجّلة",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 670.5,
+      "height": 55,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "تاريخ البدءالخميس 15/10/2026",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 737.5,
+      "height": 54,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "المدة المخططة18 شهرًا",
+      "class": "rounded-xl bg-slate-50 p-2.5 border border-slate-100",
+      "top": 737.5,
+      "height": 54,
+      "width": 143
+    },
+    {
+      "tag": "DIV",
+      "testId": null,
+      "text": "ملاحظات خطة العلاج والميكانيكا:ملاحظات خطة اصطناعية محفوظة دون تعديل",
+      "class": "mt-3 rounded-xl bg-slate-50 p-3 border border-slate-100 text-xs",
+      "top": 803.5,
+      "height": 62,
+      "width": 298
+    },
+    {
+      "tag": "P",
+      "testId": null,
+      "text": "ملاحظات خطة اصطناعية محفوظة دون تعديل",
+      "class": "text-slate-800",
+      "top": 836.5,
+      "height": 16,
+      "width": 272
+    }
+  ]
+}

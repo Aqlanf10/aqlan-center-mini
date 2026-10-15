@@ -702,7 +702,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 }`}
               >
                 {/* رأس الحالة التقويمية */}
-                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "p-3 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs font-bold text-white">
@@ -752,7 +752,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
-                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                  <div className={`mt-3 grid ${currentPillar === "prescription" ? "grid-cols-4 [&>div]:py-1 sm:[&>div]:py-2" : "grid-cols-2 sm:grid-cols-4"} gap-2 text-center text-xs`}>
                     <div className="rounded-xl bg-white p-2 border border-slate-200/80">
                       <p className="font-extrabold text-navy-900">{monthsText(row.progress.monthsElapsed)}</p>
                       <p className="text-[10px] text-slate-500">انقضى من العلاج</p>
@@ -822,7 +822,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                 </div>
 
                 {/* محتوى الركن المختار */}
-                <div className="p-4">
+                <div className={currentPillar === "prescription" ? "p-2 sm:p-4" : "p-4"}>
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
@@ -1026,43 +1026,43 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
 
                   {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
                   {currentPillar === "prescription" && (
-                    <div className="space-y-4">
+                    <div className="space-y-2 sm:space-y-4">
                       <OrthoStrategyPanel patientId={patientId} caseRow={row} />
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <h4 className="mb-3 text-xs font-black text-navy-900">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-2 sm:p-4">
+                        <h4 className="mb-2 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
                         </h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">نوع الجهاز</span>
-                            <span className="font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
+                        <div className="grid grid-cols-1 gap-0.5 text-xs sm:grid-cols-3 sm:gap-3">
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">نوع الجهاز</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">الفكّان المعالجان</span>
-                            <span className="font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">الفكّان المعالجان</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">مقاس الشق (Slot)</span>
-                            <span className="font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">مقاس الشق (Slot)</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">فلسفة البراكيت</span>
-                            <span className="font-black text-navy-900 font-mono" dir="ltr">
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">فلسفة البراكيت</span>
+                            <span className="min-w-0 break-words font-black text-navy-900 font-mono" dir="ltr">
                               {row.bracketSystem?.trim() ? row.bracketSystem : "غير مسجّلة"}
                             </span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">تاريخ البدء</span>
-                            <span className="font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">تاريخ البدء</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">المدة المخططة</span>
-                            <span className="font-black text-navy-900">{row.plannedMonths} شهرًا</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">المدة المخططة</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.plannedMonths} شهرًا</span>
                           </div>
                         </div>
 
                         {row.note && (
-                          <div className="mt-3 rounded-xl bg-slate-50 p-3 border border-slate-100 text-xs">
+                          <div className="mt-2 rounded-xl bg-slate-50 p-2 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
                             <span className="block font-bold text-slate-500 mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
                             <p className="text-slate-800">{row.note}</p>
                           </div>
