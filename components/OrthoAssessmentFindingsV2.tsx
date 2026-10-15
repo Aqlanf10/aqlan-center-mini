@@ -15,7 +15,7 @@ export function OrthoAssessmentFindingsV2({ draft, owner, sources, onChange, foc
 }) {
   const instance = useId(), [metadataId, setMetadataId] = useState<string | null>(null), [targets, setTargets] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const editable = !!owner?.active() && owner.editable();
+  const editable = owner?.renderEditable === true;
   const publish = (next: MeasurementEditorDraftV2) => { if (owner?.active() && owner.editable()) onChange(next); };
   const patch = (id: string, value: Partial<MeasurementValueDraftV2>) => {
     if (draft.values[id]) publish({ ...draft, values: { ...draft.values, [id]: { ...draft.values[id], ...value } } });

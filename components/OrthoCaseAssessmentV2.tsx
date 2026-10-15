@@ -153,11 +153,11 @@ function Workspace({ patientId, orthoCaseId, clinicalCaseId, lifetime, sectionVi
       <div hidden={sectionView === "measurements"}>
       <OrthoAssessmentFindingsV2 draft={draft.measurements} sources={data?.sources.items ?? []}
         focusGroup={sectionView === "interview" ? "history" : sectionView === "extraoral" ? "facial" : sectionView === "intraoral" ? "intraoral" : undefined}
-        owner={{ active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
+        owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
         onChange={measurements => change({ ...draft, measurements })} />
       </div><div hidden={sectionView !== undefined && sectionView !== "measurements"}>
       <OrthoAssessmentMeasurementsV2 draft={draft.measurements} sources={data?.sources.items ?? []}
-        owner={{ active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
+        owner={{ renderEditable: editable, active: currentDraft, editable: () => currentDraft() && editable && !!latest.current?.editable() }}
         onChange={measurements => change({ ...draft, measurements })} />
       </div>
       <label className="block">سبب إنشاء هذه المراجعة<input className={`${control} w-full`} maxLength={500} disabled={!editable} value={draft.reason}

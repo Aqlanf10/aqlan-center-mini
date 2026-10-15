@@ -5,7 +5,13 @@ import { UPPER_MEASUREMENT_TEETH, LOWER_MEASUREMENT_TEETH, measurementReadinessV
   type MeasurementEditorDraftV2, type MeasurementValueDraftV2, type MissingEditorInputV2 } from "@/lib/ortho-assessment-measurement-editor-v2";
 import type { AssessmentSourceV2 } from "@/lib/ortho-assessment-v2";
 import type { DraftAnalysisSelectionV2 } from "@/lib/ortho-assessment-measurement-set-v2";
-export interface MeasurementEditorOwnerV2 { active(): boolean; editable(): boolean }
+export interface MeasurementEditorOwnerV2 {
+  /** Presentation follows this render's grant. Event callbacks still recheck the
+   * committed owner/draft; a layout-effect ref from the prior render cannot
+   * decide whether the new render's inputs are disabled. */
+  readonly renderEditable: boolean;
+  active(): boolean; editable(): boolean;
+}
 export interface MeasurementSourceChoiceV2 extends AssessmentSourceV2 { label: string }
 const control = "min-h-11 min-w-11 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm disabled:opacity-40";
 const keyOf = (s: AssessmentSourceV2) => `${s.kind}:${s.id}:${s.version}`;
@@ -17,7 +23,7 @@ export function OrthoAssessmentMeasurementsV2({ draft, onChange, owner, sources 
   const [selected, setSelected] = useState(draft.payload.measurementSets[0]?.id ?? "");
   const [metadataId, setMetadataId] = useState<string | null>(null), [targets, setTargets] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const editable = !!owner?.active() && owner.editable(), rows = draft.payload.observations.observations;
+  const editable = owner?.renderEditable === true, rows = draft.payload.observations.observations;
   const set = draft.payload.measurementSets.find(s => s.id === selected), metadata = metadataId ? draft.values[metadataId] : null;
   const publish = (next: MeasurementEditorDraftV2) => { if (owner?.active() && owner.editable()) onChange(next); };
   const patch = (id: string, change: Partial<MeasurementValueDraftV2>) => {

@@ -126,6 +126,15 @@ beforeEach(() => {
 });
 afterEach(() => { retireView(); vi.unstubAllGlobals(); });
 describe("actual assessment view handler admission", () => {
+  it("renders new draft inputs editable while retained callbacks still require committed document bytes", async () => {
+    await startDraft();
+    const editors = () => nodes(render()).filter(n => ["findings-editor", "measurement-editor"].includes(String(n.type)));
+    const oldOwners = editors().map(node => node.props.owner as { renderEditable: boolean; active(): boolean });
+    expect(oldOwners.every(owner => owner.renderEditable)).toBe(true);
+    reasonHandler()({ target: { value: "new document bytes" } }); render();
+    expect(editors().every(node => (node.props.owner as { renderEditable: boolean }).renderEditable)).toBe(true);
+    expect(oldOwners.every(owner => !owner.active())).toBe(true);
+  });
   it("retired reason/source/discard/save/refresh callbacks cannot act after the same parent owner remounts", async () => {
     await startDraft();
     const oldReason = reasonHandler(), oldSource = sourceHandler(), oldDiscard = action(discardLabel), oldSave = action(saveLabel), oldRefresh = action(refreshLabel);

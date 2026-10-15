@@ -51,6 +51,17 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       for (const p of [page, stale]) await p.getByRole("button", { name: "فتح مراجعة تصحيحية من النسخة الحالية", exact: true }).click();
       await page.getByLabel("سبب إنشاء هذه المراجعة").fill("تصحيح اصطناعي محفوظ من الواجهة");
       await stale.getByLabel("سبب إنشاء هذه المراجعة").fill("مسودة تبويب قديم تبقى دون نقل صامت");
+      // Enter one clinical value once, choose two teeth for explicitly confirmed
+      // session provenance, and reuse the same input across multiple analyses.
+      await page.getByLabel("قيمة السن 11 (mm)", { exact: true }).fill("7.5");
+      await page.getByRole("checkbox", { name: "اختيار السن 11 لجلسة القياس", exact: true }).check();
+      await page.getByRole("checkbox", { name: "اختيار السن 12 لجلسة القياس", exact: true }).check();
+      await page.getByRole("button", { name: "المصدر والتاريخ: السن 11", exact: true }).click();
+      await page.getByLabel("إسناد منفذ الفحص", { exact: true }).fill("Synthetic shared measurement session");
+      page.once("dialog", dialog => void dialog.accept());
+      await page.getByRole("button", { name: "تطبيق مصدر الجلسة على 2 مدخلات مختارة", exact: true }).click();
+      await page.getByRole("checkbox", { name: "Bolton أمامي", exact: true }).uncheck();
+      await page.getByRole("checkbox", { name: "Bolton أمامي", exact: true }).check();
       const path = `${baseUrl}/api/ortho/${scope.ortho}/assessment`;
       await page.route(path, async route => {
         if (route.request().method() !== "POST") return route.continue();
@@ -60,6 +71,19 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       await page.getByRole("button", { name: "حفظ مراجعة تقييم جديدة", exact: true }).click();
       await page.getByRole("button", { name: "التحقق بإعادة نفس طلب الحفظ", exact: true }).waitFor();
       const committed = await records(scope.ortho); expect(committed).toHaveLength(2);
+      const content = committed[1].content;
+      const observation = (id: string) => content.draft.observations.observations.filter((row: { id: string }) => row.id === id);
+      expect(observation("width_11")).toHaveLength(1);
+      expect(observation("width_11")[0].value).toEqual({ state: "measured", value: 7.5 });
+      for (const id of ["width_11", "width_12"]) expect(observation(id)[0].provenance.performer.attribution).toBe("Synthetic shared measurement session");
+      expect(observation("width_13")[0].provenance.performer.attribution).toBe("Synthetic examiner");
+      expect(content.results).toHaveLength(4);
+      const dependentResults = content.results.filter((entry: { result: { dependencyObservationIds: string[] } }) => entry.result.dependencyObservationIds.includes("width_11"));
+      expect(dependentResults).toHaveLength(3); // upper space + both Bolton methods
+      for (const entry of content.results) {
+        expect(entry.result.state).toBe("ready"); expect(entry.result.witness.clinicalApproval).toBe("unapproved");
+        expect(entry.result.witness.formula.engineVersion).toBe("ortho-model-2.1.0");
+      }
       await page.unroute(path);
       await page.getByRole("button", { name: "التحقق بإعادة نفس طلب الحفظ", exact: true }).click();
       await expect.poll(async () => page.getByTestId("assessment-v2-saved").innerText()).toContain("نسخة 2");
