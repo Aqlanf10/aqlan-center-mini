@@ -55,7 +55,7 @@ export default async function HrStaffPrintPage({
     <div className="print-sheet hr-staff-sheet" dir="rtl">
       <PrintHeader settings={settings} title="كشف الطاقم وشروط الأجر" />
       <p className="report-meta">
-        صادر بتاريخ {friendlyDateLong(new Date().toISOString())} — عدد الملفات: {staff.length}
+        صادر بتاريخ {friendlyDateLong(reportAsOf)} — عدد الملفات: {staff.length}
         {departmentParam ? ` — القسم: ${HR_DEPARTMENT_LABEL[departmentParam as never]}` : ""}
         {statusParam ? ` — الحالة: ${HR_WORK_STATUS_LABEL[statusParam as never]}` : ""}
       </p>

@@ -105,6 +105,7 @@ for (const width of [390, 1280]) it(`native employee links, wage source, metadat
     await page.screenshot({ path: join(evidence, `hr-profile-attendance-${width}.png`), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.goto(`${isolated.baseUrl}/print/hr/staff`);
+    expect(await page.locator('.report-meta').textContent()).not.toMatch(/\d{2}T\d{2}:/);
     for (const person of employees) {
       const row = page.getByRole('row').filter({ hasText: person.name });
       await expect.poll(() => row.textContent()).toContain(({ YER: '150,000', SAR: '1,500.55', USD: '1,500.99' } as Record<string, string>)[person.currency]);
