@@ -11,6 +11,7 @@ import {
 import { aiChat, getAiSettings } from "@/lib/ai";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { cephAgeAtXray } from "@/lib/ceph-patient-context";
 
 export const dynamic = "force-dynamic";
 
@@ -76,13 +77,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const height = Number(body.imageHeight) > 0 ? Number(body.imageHeight) : 1600;
 
     const patient = await getPatient(study.analysis.patientId);
-    let age: number | undefined;
-    if (patient?.birthYear) {
-      const refYear = study.analysis.xrayDate
-        ? new Date(study.analysis.xrayDate).getUTCFullYear()
-        : new Date().getUTCFullYear();
-      age = Math.max(1, refYear - patient.birthYear);
-    }
+    const age = cephAgeAtXray(patient?.birthYear, study.analysis.xrayDate);
 
     const suggestedMap = suggestLandmarks(width, height, currentPoints, { age, gender: patient?.gender });
 
@@ -112,13 +107,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (body.action === "generate-diagnosis") {
     const patient = await getPatient(study.analysis.patientId);
 
-    let age: number | undefined;
-    if (patient?.birthYear) {
-      const refYear = study.analysis.xrayDate
-        ? new Date(study.analysis.xrayDate).getUTCFullYear()
-        : new Date().getUTCFullYear();
-      age = Math.max(0, refYear - patient.birthYear);
-    }
+    const age = cephAgeAtXray(patient?.birthYear, study.analysis.xrayDate);
     const gender = patient?.gender ?? undefined;
 
     const currentPoints: Partial<Record<LandmarkCode, Pt>> = {};
@@ -195,6 +184,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       action: "generate-diagnosis",
       expertDiagnosis: expert,
       aiEnhancedText,
+      suggestionSource: aiEnhancedText ? "external_ai" : "local_engine",
       suggestion,
     });
   }

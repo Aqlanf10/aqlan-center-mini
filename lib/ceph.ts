@@ -1000,7 +1000,10 @@ export interface DiagnosisSuggestion {
  * تكتمل معالمه يقول عنه الصدق: غير متاح.
  */
 export function suggestDiagnosis(results: MeasurementResult[]): DiagnosisSuggestion {
-  const get = (code: string): number | null => results.find((r) => r.code === code && !r.referencePending)?.value ?? null;
+  const get = (code: string): number | null => {
+    const value = results.find((r) => r.code === code && !r.referencePending)?.value;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
   const summary = summarize(results);
 
   const parts: string[] = [];
@@ -1111,7 +1114,10 @@ export function generateCephExpertDiagnosis(
   results: MeasurementResult[],
   patientInfo?: { age?: number; gender?: string },
 ): CephExpertDiagnosis {
-  const get = (code: string): number | null => results.find((r) => r.code === code && !r.referencePending)?.value ?? null;
+  const get = (code: string): number | null => {
+    const value = results.find((r) => r.code === code && !r.referencePending)?.value;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
 
   // 1. التحليل الهيكلي السهمي
   const anb = get("ANB");
@@ -1348,8 +1354,9 @@ export function generateCephExpertDiagnosis(
   const softTissueSummary = `${profileTypeAr} · ${nasolabialAr} · ${eLineAr}`;
 
   // 5. توصيات خطة العلاج الموجهة
-  const age = patientInfo?.age;
-  const isGrowing = age != null ? age < 15 : true;
+  const recordedAge = patientInfo?.age;
+  const age = typeof recordedAge === "number" && Number.isFinite(recordedAge) && recordedAge >= 0 ? recordedAge : undefined;
+  const isGrowing = age != null && age < 15;
   const isAdult = age != null ? age >= 18 : false;
 
   let growthModification = false;
@@ -1402,7 +1409,8 @@ export function generateCephExpertDiagnosis(
     extractionRationaleAr = "خطة غير قالعة مع رصف وتسوية وتنسيق الإطباق.";
   }
 
-  const recommendationsParts: string[] = [];
+  const recommendationsParts: string[] = ["مسودة اقتراح من المحرك الحسابي المحلي؛ تتطلب مراجعة الطبيب، والعمر وحده لا يثبت النمو المتبقي."];
+  if (age == null) recommendationsParts.push("العمر وقت الأشعة غير متاح؛ لم تُقترح معالجة مرتبطة بالعمر أو بالنمو.");
   recommendationsParts.push(`• قرار القلع: ${extractionRationaleAr}`);
   if (growthModificationAr) recommendationsParts.push(`• تعديل النمو: ${growthModificationAr}`);
   if (expansionAr) recommendationsParts.push(`• التوسيع: ${expansionAr}`);

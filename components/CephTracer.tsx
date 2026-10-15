@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { formatClinicTimestamp } from "@/lib/clinic-clock";
+import { cephAgeAtXray } from "@/lib/ceph-patient-context";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, LANDMARK_ORDER, landmarkDef, projectCephStampedValues, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -650,9 +651,15 @@ export function CephTracer({
           note: data.suggestion.recommendationsText,
         });
         setDxDirty(true);
-        setMessage("🧠 تم توليد التشخيص التقويمي الذكي وخطة العلاج السردية — يرجى مراجعة الحقول والضغط على 'حفظ التشخيص'.");
+        setMessage(data.suggestionSource === "external_ai"
+          ? "مسودة اقتراح بمساعدة خدمة AI الخارجية؛ راجع الحقول قبل حفظ التشخيص."
+          : "مسودة اقتراح من المحرك الحسابي المحلي؛ راجع الحقول قبل حفظ التشخيص.");
       } else {
-        const expert = generateCephExpertDiagnosis(table ?? results);
+        if (res.status !== 503) {
+          setMessage("تعذر توليد الاقتراح؛ تحقق من الجلسة والصلاحية وبيانات الدراسة ثم أعد المحاولة.");
+          return;
+        }
+        const expert = generateCephExpertDiagnosis(table ?? results, { age: cephAgeAtXray(patientBirthYear, analysis.xrayDate) });
         setDx({
           skeletal: expert.formatted.skeletal,
           dental: expert.formatted.dental,
@@ -661,10 +668,10 @@ export function CephTracer({
           note: expert.formatted.recommendationsText,
         });
         setDxDirty(true);
-        setMessage("🧠 تم استنتاج التشخيص وخطة العلاج من محرك الخبير السيفالومتري المدمج.");
+        setMessage("تعذرت خدمة الاقتراح؛ عُرضت مسودة من المحرك الحسابي المحلي للمراجعة قبل الحفظ.");
       }
     } catch {
-      const expert = generateCephExpertDiagnosis(table ?? results);
+      const expert = generateCephExpertDiagnosis(table ?? results, { age: cephAgeAtXray(patientBirthYear, analysis.xrayDate) });
       setDx({
         skeletal: expert.formatted.skeletal,
         dental: expert.formatted.dental,
@@ -673,16 +680,14 @@ export function CephTracer({
         note: expert.formatted.recommendationsText,
       });
       setDxDirty(true);
-      setMessage("🧠 تم توليد التشخيص من محرك التحليل المدمج.");
+      setMessage("تعذر الاتصال بخدمة الاقتراح؛ عُرضت مسودة من المحرك الحسابي المحلي للمراجعة قبل الحفظ.");
     } finally {
       setAiDxLoading(false);
     }
   };
 
   const nextToPlace = completed ? null : (active ?? missing[0] ?? null);
-  const ageAtXray = analysis.xrayDate && patientBirthYear
-    ? new Date(analysis.xrayDate).getUTCFullYear() - patientBirthYear
-    : null;
+  const ageAtXray = cephAgeAtXray(patientBirthYear, analysis.xrayDate);
 
   return (
     <div className="space-y-3">

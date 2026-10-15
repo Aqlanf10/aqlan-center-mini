@@ -40,12 +40,16 @@ async function captureVisibleRow(page: Page, row: Locator, path: string) {
 describe("versioned ceph planes in the built browser and print consumer", () => {
   it.each([390, 1280])("keeps new and historic stamps distinct at %ipx", async width => {
     const patientId = (await db.query("INSERT INTO patients(patient_number,full_name,birth_year) VALUES($1,$2,2000) RETURNING id",
-      [`SYN-PLANES-${randomUUID()}`, `قياسات اصطناعية ${width}`])).rows[0].id;
+      // Keep the synthetic file number inside the existing numeric sequence
+      // contract. Full UUID digit stripping can overflow bootstrap's BIGINT;
+      // that separate shared-schema defect is recorded for root coordination.
+      [`SYN-PLANES-${width}-${randomUUID().slice(0, 8)}`, `قياسات اصطناعية ${width}`])).rows[0].id;
     const context = await browser.newContext({ viewport: { width, height: 900 }, locale: "ar-YE", timezoneId: "Asia/Aden" });
     const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
-    const page = await context.newPage(), errors: string[] = [];
+    const page = await context.newPage(), errors: string[] = [], requests: { path: string; status: number }[] = [];
     page.setDefaultTimeout(15_000); page.on("pageerror", error => errors.push(error.message));
+    page.on("response", response => requests.push({ path: new URL(response.url()).pathname, status: response.status() }));
     try {
       // A new explicitly synthetic 500px test image, made in native canvas and
       // uploaded through real multipart/storage. No source radiograph is claimed.
@@ -80,6 +84,40 @@ describe("versioned ceph planes in the built browser and print consumer", () => 
       expect(await row("STEINER_SN_GOGN_V1").innerText()).toContain("45");
       expect(await row("DOWNS_FH_GOME_V1").innerText()).toContain("60");
       expect(await row("STEINER_SN_GOGN_V1").innerText()).toContain("المرجع غير محقق");
+      // The same undated study must have no inferred age on either server or
+      // local fallback. Suggestion requests alone never save a diagnosis.
+      const diagnosesBefore = (await db.query("SELECT * FROM ceph_diagnoses WHERE analysis_id=$1", [id])).rows;
+      const suggested = await authedMutation(`/api/ceph/${id}/ai-analyze`, h.sessions.admin, "POST",
+        JSON.stringify({ action: "generate-diagnosis", useAiChat: false }));
+      expect(suggested.status).toBe(200);
+      const suggestion = await suggested.json();
+      expect(suggestion.suggestionSource).toBe("local_engine");
+      expect(suggestion.expertDiagnosis.treatmentRecommendations.growthModification).toBe(false);
+      expect(suggestion.expertDiagnosis.treatmentRecommendations.orthognathicSurgery).toBe(false);
+      expect(suggestion.suggestion.recommendationsText).toContain("العمر وقت الأشعة غير متاح");
+      const note = page.getByPlaceholder("ملاحظات الطبيب (اختياري)…");
+      const generate = page.getByRole("button", { name: "توليد التشخيص الذكي" });
+      const path = `${baseUrl}/api/ceph/${id}/ai-analyze`;
+      await page.route(path, route => route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ message: "Synthetic denial" }) }));
+      await generate.click();
+      await page.getByText("تعذر توليد الاقتراح؛ تحقق من الجلسة والصلاحية وبيانات الدراسة ثم أعد المحاولة.", { exact: true }).waitFor();
+      expect(await note.inputValue()).toBe("");
+      await page.unroute(path);
+      await page.route(path, route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Synthetic unavailable service" }) }));
+      await generate.click();
+      await expect.poll(() => note.inputValue()).toContain("العمر وقت الأشعة غير متاح");
+      expect(await note.inputValue()).toContain("مسودة");
+      expect(await note.inputValue()).not.toMatch(/Twin Block|Herbst|Facemask|Le Fort|BSSO/);
+      await captureVisibleRow(page, note, `.settings-ui-artifacts/ceph-context-local-${width}.png`);
+      expect((await db.query("SELECT * FROM ceph_diagnoses WHERE analysis_id=$1", [id])).rows).toEqual(diagnosesBefore);
+      expect((await db.query("SELECT status FROM ceph_analyses WHERE id=$1", [id])).rows[0].status).toBe("draft");
+      await page.unroute(path);
+      await generate.click();
+      await page.getByText("مسودة اقتراح من المحرك الحسابي المحلي؛ راجع الحقول قبل حفظ التشخيص.", { exact: true }).waitFor();
+      expect(await note.inputValue()).toContain("العمر وقت الأشعة غير متاح");
+      expect((await db.query("SELECT * FROM ceph_diagnoses WHERE analysis_id=$1", [id])).rows).toEqual(diagnosesBefore);
+      await page.reload();
+      await row("STEINER_SN_GOGN_V1").waitFor();
       page.once("dialog", dialog => dialog.accept());
       const completed = page.waitForResponse(response => response.url().endsWith(`/api/ceph/${id}/complete`));
       await page.getByRole("button", { name: "اعتماد التحليل", exact: true }).click();
@@ -114,6 +152,7 @@ describe("versioned ceph planes in the built browser and print consumer", () => 
       expect((await db.query("SELECT code,value FROM ceph_measurements WHERE analysis_id=$1 ORDER BY code", [id])).rows).toEqual(current);
       expect(errors).toEqual([]);
     } catch (error) {
+      await writeFile(`.settings-ui-artifacts/ceph-versioned-failure-${width}.json`, JSON.stringify({ requests, errors }, null, 2));
       await page.screenshot({ path: `.settings-ui-artifacts/ceph-versioned-failure-${width}.png`, fullPage: true });
       await writeFile(`.settings-ui-artifacts/ceph-versioned-failure-${width}.txt`, await page.locator("body").innerText());
       throw error;
