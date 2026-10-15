@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useHrStaffSelection } from "./HrNavigation";
 import { Modal } from "@/components/Modal";
 import { HrHistoryLauncher } from "./HistoryEditor";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -33,7 +34,9 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
 
   // Filters
   const [selectedDate, setSelectedDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-  const [selectedStaff, setSelectedStaff] = useState("");
+  const [selectedStaff, setSelectedStaff] = useHrStaffSelection();
+  const alive = useRef(false), readSequence = useRef(0);
+  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; readSequence.current++; }; }, []);
   const [statusFilter, setStatusFilter] = useState("");
 
   // Punch modal / quick punch
@@ -65,6 +68,9 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [schedDays, setSchedDays] = useState<number[]>([0, 1, 2, 3, 4, 6]);
 
   const loadAttendance = useCallback(async () => {
+    if (!alive.current) return;
+    const sequence = ++readSequence.current;
+    setLoading(true); setRecords([]);
     try {
       const params = new URLSearchParams();
       if (selectedDate) {
@@ -77,14 +83,17 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
       const res = await fetch(`/api/hr/attendance?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error("تعذّر تحميل سجلات الدوام.");
       const data = await res.json();
+      if (!alive.current || sequence !== readSequence.current) return;
+      if (!Array.isArray(data) || (selectedStaff && data.some(row => String(row.staffId) !== selectedStaff))) throw new Error("تعذّر التحقق من سجلات الموظف المختار.");
       setRecords(data);
       setError(null);
     } catch (err: any) {
-      setError(err?.message || "حدث خطأ أثناء تحميل الحضور.");
+      if (alive.current && sequence === readSequence.current) setError(err?.message || "حدث خطأ أثناء تحميل الحضور.");
     } finally {
-      setLoading(false);
+      if (alive.current && sequence === readSequence.current) setLoading(false);
     }
   }, [selectedDate, selectedStaff, statusFilter]);
+  useLayoutEffect(() => { setRecords([]); setLoading(true); return () => { readSequence.current++; }; }, [loadAttendance]);
 
   const loadCorrections = useCallback(async () => {
     if (!isAdmin) return;

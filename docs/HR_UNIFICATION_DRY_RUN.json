@@ -1,0 +1,35 @@
+{
+  "mode": "dry-run-plan-only",
+  "source": "owner_report_not_live_database_read",
+  "reported_counts": {
+    "hr_staff": 0,
+    "active_users": 6,
+    "doctor_parties": 5
+  },
+  "preserve_existing_user_party_links": [
+    {
+      "user_id": null,
+      "party_id": 2,
+      "review": "exact_user_id_required"
+    },
+    {
+      "user_id": null,
+      "party_id": 3,
+      "review": "exact_user_id_required"
+    }
+  ],
+  "other_active_user_candidates": 4,
+  "other_doctor_parties_to_review": 3,
+  "operations": [],
+  "name_matching": false,
+  "copy_draft_percent": false,
+  "proposed_contracts": [],
+  "proposed_payroll": [],
+  "migration_number": null,
+  "production_accessed": false,
+  "blockers": [
+    "Exact account identities and approved person mapping absent",
+    "Current HR creation requires a contract kind; unresolved employment state needs reviewed design",
+    "Explicit financial linking uniqueness and effective-history policy require approval"
+  ]
+}

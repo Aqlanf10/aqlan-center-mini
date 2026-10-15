@@ -119,7 +119,8 @@ describe("(HR) browser journey — staff files and tasks", () => {
       // انتظار ظهور صفوف الطاقم فعلًا — التحميل الأول للشاشة قد يتأخر.
       await page.waitForSelector("table", { timeout: 60_000 });
       await page.waitForTimeout(400);
-      await page.getByRole("button", { name: "حارس الورديات", exact: true }).click();
+      await page.getByRole("link", { name: "حارس الورديات", exact: true }).click();
+      await page.getByRole("button", { name: "تعديل بيانات الموظف وربط الحساب" }).click();
       await page.waitForTimeout(400);
       await page.getByLabel("حالة العمل").selectOption({ label: "موقوف مؤقتًا" });
       await page.getByLabel(/سبب هذا التعديل/).fill("إيقاف مؤقت ريثما تكتمل أوراقه");

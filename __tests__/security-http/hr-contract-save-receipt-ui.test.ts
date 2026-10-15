@@ -317,7 +317,7 @@ for (const width of [390, 1280]) for (const variant of ["lost", "truncated", "fo
       // The real kind-filter native select previously overflowed to x=-38,
       // creating a428px RTL document and a38px native screenshot origin shift.
       await boundedCaptureObservation(page.evaluate(() => document.fonts.ready.then(() => undefined)));
-      const filters = panel.locator("select"); expect(await filters.count()).toBe(2);
+      const filters = panel.locator("select"); expect(await filters.count()).toBe(3);
       for (const filter of await filters.all()) {
         expect(await filter.isVisible()).toBe(true);
         await nativeReachable(page, filter);

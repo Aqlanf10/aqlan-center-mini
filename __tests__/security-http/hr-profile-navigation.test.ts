@@ -1,0 +1,132 @@
+import { afterAll, beforeAll, expect, it } from 'vitest';
+import { chromium, type Browser } from 'playwright';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { harness, type Harness } from './_server';
+import { openHrJourneyServer } from './_hr-isolated-server';
+let h: Harness, isolated: Awaited<ReturnType<typeof openHrJourneyServer>>, browser: Browser;
+const evidence = process.env.HR_EVIDENCE_DIR ?? '/tmp/hr-profile-evidence';
+const employees: Array<{ id: number; contractId: number; currency: string; amount: number; name: string }> = [];
+async function api(method: string, path: string, body?: unknown, cookie = h.sessions.admin.cookie) {
+  const response = await fetch(`${isolated.baseUrl}${path}`, { method, headers: { cookie, origin: isolated.baseUrl, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: response.status, body: await response.json() };
+}
+beforeAll(async () => {
+  h = await harness(); isolated = await openHrJourneyServer(h);
+  browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
+  mkdirSync(evidence, { recursive: true });
+  for (const [currency, amount] of [['YER', 150000], ['SAR', 150055], ['USD', 150099]] as const) {
+    const name = `ملف اصطناعي ${currency}`;
+    const created = await api('POST', '/api/hr/staff', { fullName: name, department: 'secretariat', jobTitle: 'موظف اصطناعي', hireDate: '2026-01-01', endDate: null, phone: null, note: null, workStatus: 'active', contractKind: 'salary', salaryAmountMinor: 10000, salaryCurrency: currency, salaryPeriod: 'monthly', salaryEffectiveOn: '2026-01-01' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.staff?.id ?? created.body.id;
+    const contract = await api('POST', '/api/hr/contracts', { staffId: id, title: `عقد اصطناعي ${currency}`, templateKind: 'support_staff', startDate: '2026-01-02', compensationKind: 'salary', baseSalaryMinor: amount, salaryCurrency: currency, salaryPeriod: 'monthly' });
+    expect(contract.status, JSON.stringify(contract.body)).toBe(201);
+    expect((await api('PATCH', `/api/hr/contracts/${contract.body.id}`, { action: 'transition', status: 'approved', reason: 'اعتماد اصطناعي' })).status).toBe(200);
+    employees.push({ id, contractId: contract.body.id, currency, amount, name });
+  }
+});
+afterAll(async () => { await browser?.close(); await isolated?.close(); });
+it('HTTP private current-pay projection is precise in all currencies and denied to other roles', async () => {
+  for (const employee of employees) {
+    const read = await api('GET', `/api/hr/staff/${employee.id}`);
+    expect(read.body.staff.currentPay).toMatchObject({ source: 'contract', terms: { currency: employee.currency, salaryMinor: employee.amount }, contract: { id: employee.contractId }, profilePayLocked: true });
+    for (const cookie of [h.sessions.reception.cookie, h.sessions.doctorA.cookie, h.sessions.accountant.cookie, h.sessions.cashier.cookie]) {
+      expect((await api('GET', `/api/hr/staff/${employee.id}`, undefined, cookie)).status).toBe(403);
+    }
+  }
+  const directory = await api('GET', '/api/hr/directory', undefined, h.sessions.reception.cookie);
+  expect(directory.status).toBe(200); expect(JSON.stringify(directory.body)).not.toContain('currentPay');
+});
+for (const width of [390, 1280]) it(`native employee links, wage source, metadata edit and preserved navigation at ${width}`, async () => {
+  const context = await browser.newContext({ viewport: { width, height: 900 } });
+  const pair = h.sessions.admin.cookie.split(';')[0], separator = pair.indexOf('=');
+  await context.addCookies([{ name: pair.slice(0, separator), value: pair.slice(separator + 1), url: isolated.baseUrl }]);
+  const page = await context.newPage(), employee = employees[0], errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const forbiddenWrites: string[] = [];
+  page.on('request', request => { if (request.method() !== 'GET' && /payroll|commission|parties/.test(request.url())) forbiddenWrites.push(request.url()); });
+  try {
+    await page.goto(`${isolated.baseUrl}/hr?tab=staff`, { waitUntil: 'domcontentloaded' });
+    for (const person of employees) {
+      const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: person.name, exact: true }) });
+      await expect.poll(() => row.textContent()).toContain('المصدر: العقد');
+    }
+    await page.getByRole('link', { name: employee.name, exact: true }).click();
+    const profile = page.getByRole('dialog', { name: 'ملف الموظف الشامل' });
+    await expect.poll(() => profile.textContent()).toContain('150,000');
+    await page.screenshot({ path: join(evidence, `hr-profile-${width}.png`), fullPage: true });
+    await profile.getByRole('button', { name: 'تعديل بيانات الموظف وربط الحساب' }).click();
+    const editor = page.getByRole('dialog');
+    expect(await editor.locator('fieldset').getAttribute('disabled')).not.toBeNull();
+    expect(await editor.getByRole('radio').first().isDisabled()).toBe(true);
+    await editor.getByLabel('الهاتف', { exact: true }).fill(`synthetic-${width}`);
+    await editor.getByLabel(/سبب هذا التعديل/).fill('تصحيح اصطناعي لبيانات الملف فقط');
+    const request = page.waitForRequest(req => req.method() === 'PATCH' && req.url().endsWith(`/api/hr/staff/${employee.id}`));
+    await editor.getByRole('button', { name: 'حفظ', exact: true }).click();
+    const sent = (await request).postDataJSON();
+    for (const key of ['contractKind', 'salaryAmountMinor', 'salaryCurrency', 'salaryPeriod', 'salaryEffectiveOn']) expect(sent).not.toHaveProperty(key);
+    await expect.poll(() => profile.textContent()).toContain(`synthetic-${width}`);
+    await profile.getByRole('link', { name: 'مراجعة العقد وإضافة ملحق' }).click();
+    await expect.poll(() => page.url()).toContain(`staffId=${employee.id}`);
+    const details = page.getByRole('dialog');
+    await expect.poll(() => details.textContent()).toContain('عقد اصطناعي YER');
+    expect(await details.getByRole('button', { name: '+ إضافة ملحق', exact: true }).isVisible()).toBe(true);
+    await details.getByRole('button', { name: 'إغلاق', exact: true }).click();
+    expect(await page.getByLabel('عقود الموظف', { exact: true }).inputValue()).toBe(String(employee.id));
+    await page.getByRole('tab', { name: /الطاقم/ }).click();
+    await profile.getByRole('link', { name: 'أرصدة الإجازة', exact: true }).click();
+    await expect.poll(() => profile.textContent()).toContain('لا أرصدة إجازة مسجلة');
+    await page.reload();
+    await expect.poll(() => profile.textContent()).toContain('لا أرصدة إجازة مسجلة');
+    await profile.getByRole('link', { name: 'طلبات الإجازة واعتماداتها' }).click();
+    await expect.poll(() => page.getByLabel('عرض رصيد الموظف', { exact: true }).inputValue()).toBe(String(employee.id));
+    await page.getByRole('tab', { name: /الطاقم/ }).click();
+    await expect.poll(() => profile.getByRole('link', { name: 'أرصدة الإجازة', exact: true }).getAttribute('aria-current')).toBe('page');
+    await profile.getByRole('link', { name: 'الحضور', exact: true }).click();
+    await profile.getByRole('link', { name: 'إدارة الحضور والتصحيحات' }).click();
+    await expect.poll(() => page.url()).toContain(`tab=attendance&staffId=${employee.id}`);
+    await page.screenshot({ path: join(evidence, `hr-profile-attendance-${width}.png`), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    expect(errors).toEqual([]); expect(forbiddenWrites).toEqual([]);
+    writeFileSync(join(evidence, `hr-profile-result-${width}.json`), JSON.stringify({ syntheticOnly: true, width, employeeId: employee.id, contractId: employee.contractId, metadataRequestKeys: Object.keys(sent), errors, forbiddenWrites }, null, 2));
+  } catch (error) {
+    await page.screenshot({ path: join(evidence, `hr-profile-failure-${width}.png`), fullPage: true }).catch(() => undefined);
+    writeFileSync(join(evidence, `hr-profile-failure-${width}.json`), JSON.stringify({ url: page.url(), text: await page.textContent('body').catch(() => ''), errors }, null, 2));
+    throw error;
+  } finally { await context.close(); }
+});
+
+it('editor refuses save while its current-pay read is pending, then preserves the entered data after verification', async () => {
+  const created = await api('POST', '/api/hr/staff', { fullName: 'موظف تحقق اصطناعي', department: 'secretariat', jobTitle: 'اصطناعي', hireDate: '2026-01-01', endDate: null, phone: null, note: null, workStatus: 'active', contractKind: 'salary', salaryAmountMinor: 10000, salaryCurrency: 'YER', salaryPeriod: 'monthly', salaryEffectiveOn: '2026-01-01' });
+  expect(created.status).toBe(201);
+  const id = created.body.staff?.id ?? created.body.id;
+  const context = await browser.newContext(), page = await context.newPage();
+  const pair = h.sessions.admin.cookie.split(';')[0], separator = pair.indexOf('=');
+  await context.addCookies([{ name: pair.slice(0, separator), value: pair.slice(separator + 1), url: isolated.baseUrl }]);
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { started = resolve; });
+  const patches: unknown[] = [];
+  page.on('request', request => { if (request.method() === 'PATCH' && request.url().endsWith(`/api/hr/staff/${id}`)) patches.push(request.postDataJSON()); });
+  try {
+    await page.goto(`${isolated.baseUrl}/hr?tab=staff&staffId=${id}`);
+    const profile = page.getByRole('dialog', { name: 'ملف الموظف الشامل' });
+    await expect.poll(() => profile.textContent()).toContain('شروط الملف الابتدائية');
+    await page.route(`${isolated.baseUrl}/api/hr/staff/${id}`, async route => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch(); started(); await gate; await route.fulfill({ response });
+    });
+    await profile.getByRole('button', { name: 'تعديل بيانات الموظف وربط الحساب' }).click(); await entered;
+    const editor = page.getByRole('dialog');
+    await editor.getByLabel('الهاتف', { exact: true }).fill('synthetic-pending-read');
+    await editor.getByRole('button', { name: 'حفظ', exact: true }).click();
+    await expect.poll(() => editor.getByRole('alert').textContent()).toContain('لم تُرسل تغييرات');
+    expect(patches).toEqual([]);
+    release();
+    await expect.poll(() => editor.getByRole('radio').first().isEnabled()).toBe(true);
+    await editor.getByRole('button', { name: 'حفظ', exact: true }).click();
+    await expect.poll(() => profile.textContent()).toContain('synthetic-pending-read');
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ salaryAmountMinor: 10000, salaryCurrency: 'YER', phone: 'synthetic-pending-read' });
+  } finally { release(); await context.close(); }
+});

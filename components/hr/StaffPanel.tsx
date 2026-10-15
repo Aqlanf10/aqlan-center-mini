@@ -1,15 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { StaffProfileModal } from "./StaffProfileModal";
+import { CurrentPaySummary } from "./CurrentPaySummary";
+import { useHrNavigation } from "./HrNavigation";
+import { hrHref } from "@/lib/hr-navigation";
 import { useHrReadEpoch } from "./useHrReadEpoch";
-import { operationalStatus, operationalStatusLabel, type HrOperationalEmployment } from "@/lib/hr-operational-employment-shared";
+import { operationalStatus, operationalStatusLabel } from "@/lib/hr-operational-employment-shared";
 import { Modal } from "@/components/Modal";
 import { HrHistoryLauncher } from "./HistoryEditor";
 import {
   HR_CONTRACT_KIND_LABEL, HR_DEPARTMENT_LABEL, HR_SALARY_PERIOD_LABEL, HR_WORK_STATUS_LABEL,
   type HrContractKind, type HrDepartment, type HrSalaryPeriod, type HrWorkStatus,
 } from "@/lib/hr-shared";
-import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, type Currency } from "@/lib/money";
+import { CURRENCIES, CURRENCY_SHORT, parseAmount, toInputAmount, type Currency } from "@/lib/money";
 
 /**
  * لوحة الطاقم — المدير وحده (الخادم يحرسها والشاشة تعكس ذلك).
@@ -19,37 +24,15 @@ import { CURRENCIES, CURRENCY_SHORT, formatAmount, parseAmount, toInputAmount, t
  * لا تخرج من هنا إلى أي دليل إسناد.
  */
 
-interface StaffView {
-  id: number;
-  fullName: string;
-  jobTitle: string;
-  department: HrDepartment;
-  workStatus: HrWorkStatus;
-  operationalEmployment?: HrOperationalEmployment;
-  hireDate: string | null;
-  endDate: string | null;
-  contractKind: HrContractKind;
-  payTerms: { amountMinor: number; currency: string; period: HrSalaryPeriod; effectiveOn: string } | null;
-  userId: number | null;
-  phone: string | null;
-  note: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+type StaffView = import("@/lib/hr-shared").HrStaffView;
 
-interface StaffDetail {
+export interface StaffDetail {
   staff: StaffView;
   changes: { id: number; actor: string; actorRole: string | null; action: string; field: string | null; oldValue: string | null; newValue: string | null; reason: string | null; createdAt: string }[];
   linkedUser: { id: number; username: string; displayName: string; role: string; isActive: boolean } | null;
 }
 
 interface AdminUserOption { id: number; username: string; displayName: string; role: string; linked: boolean }
-
-// المبالغ بأدوات المال المعتمدة (lib/money.ts): العرض بعملة الصف نفسها
-// (اليمني بوحدةٍ واحدة، والسعودي والدولار بالهللة/السنت) — لا قسمة ثابتة.
-function fmtMoney(minor: number, currency: string): string {
-  return isApprovedCurrency(currency) ? formatAmount(minor, currency) : minor.toLocaleString("en");
-}
 
 function isApprovedCurrency(value: string): value is Currency {
   return (CURRENCIES as string[]).includes(value);
@@ -65,6 +48,9 @@ const CONTRACT_ACTION_LABEL: Record<string, string> = {
 };
 
 export function HrStaffPanel() {
+  const navigation = useHrNavigation();
+  const [localStaffId, setLocalStaffId] = useState<string>("");
+  const profileId = navigation?.staffId ?? localStaffId;
   const readEpoch = useHrReadEpoch(), readSequence = useRef(0);
   const [staff, setStaff] = useState<StaffView[]>([]);
   const [search, setSearch] = useState("");
@@ -75,6 +61,7 @@ export function HrStaffPanel() {
 
   const load = useCallback(async () => {
     const sequence = ++readSequence.current;
+    setLoading(true); setStaff([]);
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("q", search.trim());
@@ -97,13 +84,9 @@ export function HrStaffPanel() {
   }, [search, departmentFilter]);
 
   const invalidateRead = useCallback(() => { readSequence.current++; }, []);
+  useLayoutEffect(() => { invalidateRead(); setStaff([]); setLoading(true); return invalidateRead; }, [load, invalidateRead]);
   useEffect(() => { void load(); return invalidateRead; }, [load, readEpoch, invalidateRead]);
 
-  const openEditor = async (id: number) => {
-    const response = await fetch(`/api/hr/staff/${id}`, { cache: "no-store" });
-    if (!response.ok) { setError("تعذّر فتح الملف."); return; }
-    setEditor({ mode: "edit", detail: (await response.json()) as StaffDetail });
-  };
 
   return (
     <section aria-label="ملفات الطاقم">
@@ -151,9 +134,9 @@ export function HrStaffPanel() {
               {staff.map((member) => (
                 <tr key={member.id} className="border-b border-navy-50 last:border-0 hover:bg-navy-50/50">
                   <td className="p-3">
-                    <button onClick={() => void openEditor(member.id)} className="font-semibold text-brand-blue hover:underline">
+                    <Link prefetch={false} scroll={false} href={navigation?.href({ staffId: String(member.id), profileTab: "overview", contractId: null }) ?? hrHref("", { tab: "staff", staffId: String(member.id) })} className="font-semibold text-brand-blue hover:underline">
                       {member.fullName}
-                    </button>
+                    </Link>
                     <div className="mt-2"><HrHistoryLauncher staffId={member.id} label={member.fullName} kind="employment" /></div>
                   </td>
                   <td className="p-3">{member.jobTitle || "—"}</td>
@@ -169,9 +152,7 @@ export function HrStaffPanel() {
                   <td className="p-3 text-xs">{fmtDate(member.hireDate)}</td>
                   <td className="p-3 text-xs">{HR_CONTRACT_KIND_LABEL[member.contractKind]}</td>
                   <td className="p-3 text-xs">
-                    {member.payTerms
-                      ? <span className="ltr-nums">{fmtMoney(member.payTerms.amountMinor, member.payTerms.currency)} {CURRENCY_SHORT[member.payTerms.currency as Currency] ?? member.payTerms.currency} — {HR_SALARY_PERIOD_LABEL[member.payTerms.period]}</span>
-                      : "—"}
+                    <CurrentPaySummary pay={member.currentPay} staffId={member.id} compact />
                   </td>
                   <td className="p-3 text-xs">{member.userId !== null ? "مرتبط" : "بلا حساب"}</td>
                 </tr>
@@ -180,6 +161,8 @@ export function HrStaffPanel() {
           </table>
         </div>
       )}
+
+      {profileId && !editor && <StaffProfileModal staffId={profileId} open onClose={() => navigation ? navigation.closeProfile() : setLocalStaffId("")} onEdit={detail => setEditor({ mode: "edit", detail })} />}
 
       {editor?.mode === "create" && (
         <StaffEditorModal onClose={() => setEditor(null)} onSaved={() => { setEditor(null); void load(); }} />
@@ -198,6 +181,26 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
   onSaved: () => void;
 }) {
   const existing = detail?.staff;
+  const payEpoch = useHrReadEpoch();
+  const [currentPay, setCurrentPay] = useState(existing?.currentPay);
+  const [payReadPending, setPayReadPending] = useState(false);
+  const payLocked = Boolean(existing && (payReadPending || !currentPay || currentPay.profilePayLocked));
+  useEffect(() => {
+    if (!existing) return;
+    const abort = new AbortController();
+    setPayReadPending(true);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/hr/staff/${existing.id}`, { cache: 'no-store', signal: abort.signal });
+        if (!response.ok) throw new Error('pay read failed');
+        const fresh = await response.json() as StaffDetail;
+        if (fresh.staff.id !== existing.id) throw new Error('pay identity mismatch');
+        if (!abort.signal.aborted) setCurrentPay(fresh.staff.currentPay);
+      } catch { if (!abort.signal.aborted) setCurrentPay(undefined); }
+      finally { if (!abort.signal.aborted) setPayReadPending(false); }
+    })();
+    return () => abort.abort();
+  }, [existing, payEpoch]);
   const [fullName, setFullName] = useState(existing?.fullName ?? "");
   const [jobTitle, setJobTitle] = useState(existing?.jobTitle ?? "");
   const [department, setDepartment] = useState<HrDepartment>(existing?.department ?? "other");
@@ -235,16 +238,19 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
   }, [linkMode]);
 
   const buildBody = (): Record<string, unknown> | { error: string } => {
+    if (existing && (payReadPending || !currentPay)) return { error: "انتظر اكتمال التحقق من مصدر الأجر قبل حفظ الملف؛ لم تُرسل تغييرات." };
     const body: Record<string, unknown> = {
       fullName: fullName.trim(), jobTitle: jobTitle.trim(), department,
       hireDate: hireDate || null,
       endDate: endDate || null,
-      contractKind,
+      ...(payLocked ? {} : { contractKind }),
       phone: phone.trim() || null, note: note.trim() || null,
     };
     // حالة العمل تُرسل دائمًا: ما اختاره المستخدم هو ما يُحفظ (وفي الإنشاء والتعديل).
     body.workStatus = workStatus;
-    if (contractKind === "commission") {
+    if (payLocked) {
+      // Metadata edits must not resubmit the obsolete secondary wage snapshot.
+    } else if (contractKind === "commission") {
       // لا مفاتيح راتب: الخادم يمسح شروط الراتب في نفس التحديث عند التحويل إلى نسبة.
     } else {
       // راتب/راتب ونسبة: الشروط الأربعة إلزامية — بالوحدات البشرية هنا وتتحول
@@ -366,7 +372,9 @@ function StaffEditorModal({ detail, onClose, onSaved }: {
             </label>
           </div>
 
-          <fieldset className="rounded-xl border border-navy-100 p-3">
+          {existing && <CurrentPaySummary pay={currentPay} staffId={existing.id} />}
+          {payLocked && <p className="rounded-xl bg-info-50 p-3 text-sm text-info-900">{currentPay?.profilePayLocked ? "شروط أجر الملف مقفلة لوجود عقد حاكم. لتغيير الأجر افتح «مراجعة العقد وإضافة ملحق» أعلاه؛ باقي بيانات الملف قابلة للتحرير." : "شروط الأجر مقفلة حتى يكتمل التحقق من مصدرها الحالي."}</p>}
+          <fieldset disabled={payLocked} className="rounded-xl border border-navy-100 p-3 disabled:opacity-60">
             <legend className="px-1 text-sm font-bold text-navy-900">نوع التعاقد وشروط الأجر</legend>
             <div className="grid gap-3">
               <div className="flex flex-wrap gap-3 text-sm">

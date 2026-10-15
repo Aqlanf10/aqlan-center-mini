@@ -262,6 +262,12 @@ jobs:
           name: hr-workflow-ui
           path: |
             /tmp/hr-evidence/hr-workforce-390.png
+            /tmp/hr-evidence/hr-profile-390.png
+            /tmp/hr-evidence/hr-profile-1280.png
+            /tmp/hr-evidence/hr-profile-attendance-390.png
+            /tmp/hr-evidence/hr-profile-attendance-1280.png
+            /tmp/hr-evidence/hr-profile-result-390.json
+            /tmp/hr-evidence/hr-profile-result-1280.json
             /tmp/hr-evidence/hr-workforce-1280.png
             /tmp/hr-evidence/hr-phone-390.png
             /tmp/hr-evidence/hr-tasks-desktop-1280.png
