@@ -1,0 +1,257 @@
+{
+  "code_head": "4d6ba3f8c8f3c0e2fd327a85a251545ffc5373e3",
+  "node": "22.23.3",
+  "postgres": "18.6",
+  "database": "new Docker container ortho-resume-pg-20261015, loopback port 55432; synthetic fixtures only",
+  "environment": {
+    "PATH_prefix": "/workspace/.cloud-tools/node_modules/.bin",
+    "DATABASE_ENVIRONMENT": "test",
+    "PLAYWRIGHT_CHROMIUM_EXECUTABLE": "/usr/bin/chromium",
+    "CLINIC_TIME_ZONE": "Asia/Aden"
+  },
+  "commands": [
+    {
+      "command": "npm test -- __tests__/ceph-wits-zero.test.ts",
+      "stage": "before fix",
+      "result": "1 failed, 6 passed",
+      "log": "evidence/wits-red.txt"
+    },
+    {
+      "command": "npm test -- __tests__/ceph-wits-zero.test.ts __tests__/ceph.test.ts __tests__/ceph-versioned-planes.test.ts __tests__/ceph-ai.test.ts __tests__/ceph-compare.test.ts __tests__/ceph-calendar-date.test.ts __tests__/ceph-superimpose.test.ts",
+      "result": "98 passed",
+      "log": "evidence/unit.txt"
+    },
+    {
+      "command": "npm run test:postgres -- __tests__/postgres/ceph-versioned-planes.test.ts __tests__/postgres/ceph-calendar-date.test.ts",
+      "result": "26 passed",
+      "log": "evidence/postgres.txt"
+    },
+    {
+      "command": "npm run test:security-http -- __tests__/security-http/ceph-versioned-planes-browser.test.ts",
+      "result": "2 passed; HTTP, Chromium, PDFs",
+      "log": "evidence/browser.txt"
+    },
+    {
+      "command": "npm run build",
+      "result": "passed",
+      "log": "evidence/build.txt"
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "passed",
+      "log": "evidence/typecheck.txt"
+    },
+    {
+      "command": "npx eslint lib/ceph.ts __tests__/ceph-wits-zero.test.ts __tests__/postgres/ceph-versioned-planes.test.ts __tests__/security-http/ceph-versioned-planes-browser.test.ts",
+      "result": "0 errors, 3 existing warnings",
+      "log": "evidence/lint.txt"
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6418,
+      "sha256": "0e370f3b2512b6127ebeece3fb7593a5edd46ee710aee826a92553c64aa2d51e"
+    },
+    {
+      "path": "coordination/0051_ortho_treatment_strategy.sql.reference.txt",
+      "bytes": 5478,
+      "sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e"
+    },
+    {
+      "path": "coordination/0052_ortho_assessment.sql.reference.txt",
+      "bytes": 7155,
+      "sha256": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2"
+    },
+    {
+      "path": "coordination/0053_ortho_case_journey.sql.reference.txt",
+      "bytes": 29004,
+      "sha256": "6f5b8590368c0a78e11f559bdfdbaf2647c80744000b1cd29ac50103155cf9c5"
+    },
+    {
+      "path": "coordination/0054_ortho_assessment_lifecycle.sql.reference.txt",
+      "bytes": 12489,
+      "sha256": "e8307b5f7330ad6c534eef23f8ba89809dbd3402b611900c6e9e4a4be5aa9745"
+    },
+    {
+      "path": "coordination/AQLAN-0055-__tests____ortho-clinical-grant.test.ts.txt",
+      "bytes": 5438,
+      "sha256": "cf37bee33a2294e0dd87990a0555b54636d414d828b5497476ff2877c18c64bf"
+    },
+    {
+      "path": "coordination/AQLAN-0055-__tests____postgres__ortho-clinical-grant-schema.test.ts.txt",
+      "bytes": 6323,
+      "sha256": "2c3b009cecf6db2c8fc36b62eff67dc53d415466d6a06663b0e1c03dd7f02315"
+    },
+    {
+      "path": "coordination/AQLAN-0055-lib__ortho-clinical-grant-schema.ts.txt",
+      "bytes": 7499,
+      "sha256": "a75a2d9f95cb71a99cf090d91027a7c2828cf16dd7037a79ee52a85ae0577b48"
+    },
+    {
+      "path": "coordination/AQLAN-0055-lib__ortho-clinical-grant.ts.txt",
+      "bytes": 7259,
+      "sha256": "aff35c9d1887dd7e4bae46860ba8802b0b1324dd535600fab1bd52565244f79c"
+    },
+    {
+      "path": "coordination/AQLAN-0055-migrations__0055_ortho_clinical_approval_governance.sql.txt",
+      "bytes": 7375,
+      "sha256": "f274d742868744fc6a7fccbd640f72e074b46255bb2c78b7b54cc4eeac48d67c"
+    },
+    {
+      "path": "coordination/REVIEW.md",
+      "bytes": 4329,
+      "sha256": "31726d2b8c51753f1bc35b373d9bc5289fb6b089605cd8b66f3bf5fda66032bc"
+    },
+    {
+      "path": "coordination/components__PatientOrtho.tsx.comparison.diff.txt",
+      "bytes": 96568,
+      "sha256": "20fd223181f44f66dd3dc63657ae3a40796cc55723267f6cd0856e685ff0291c"
+    },
+    {
+      "path": "coordination/lib__audit.ts.comparison.diff.txt",
+      "bytes": 10564,
+      "sha256": "0ddf4484aa14da11b8dba4917ca0db2d2a932069e3a1c298b52e0429c7ebd6c8"
+    },
+    {
+      "path": "coordination/lib__backup.ts.comparison.diff.txt",
+      "bytes": 684,
+      "sha256": "5787d60c734e3153e8112d0f3926a700ba7722369cfa4bdca5b8e180e7ecc64c"
+    },
+    {
+      "path": "coordination/lib__clinic-reset.ts.comparison.diff.txt",
+      "bytes": 1495,
+      "sha256": "ffcee4ec70546978617c1e4447d76339a934106e0ddd540e50c41846f013da69"
+    },
+    {
+      "path": "coordination/lib__db.ts.comparison.diff.txt",
+      "bytes": 122839,
+      "sha256": "c57dcd901cbeeaa23e51d8b526bc275ea4f1cff9e20e1ea5412490d51ee1aff8"
+    },
+    {
+      "path": "coordination/lib__http-permissions.ts.comparison.diff.txt",
+      "bytes": 10853,
+      "sha256": "87f09deb87bf0b816dfe4fe94c764c7b9f846280ea3d0da566fa2d07d4bb6f63"
+    },
+    {
+      "path": "coordination/lib__migrations.ts.comparison.diff.txt",
+      "bytes": 3046,
+      "sha256": "180374421dcf5baf3a3d4de3d60eaff7c4acd68024611119ae402ecb34d9b319"
+    },
+    {
+      "path": "coordination/lib__patient-access.ts.comparison.diff.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "coordination/lib__session.ts.comparison.diff.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "coordination/library-source-recovery.json",
+      "bytes": 1776,
+      "sha256": "dfd11982a6c3239d79818897bfc4284c99d2232a0f292bf6a85e670cfea6a3ea"
+    },
+    {
+      "path": "coordination/shared-contracts.json",
+      "bytes": 8491,
+      "sha256": "e56b92bc6bf0b8ffde00f30d2877821c79bcdcc535de70f5c70cba7f454367c0"
+    },
+    {
+      "path": "evidence/browser.txt",
+      "bytes": 772,
+      "sha256": "0dc2b3e93378923f44408f3f2fdc4f051168ee67018c1cabab1360f6857d8e34"
+    },
+    {
+      "path": "evidence/build.txt",
+      "bytes": 11425,
+      "sha256": "bda2e74360a917afd2c79d62512feb03e3656429f7ab9ba00272da0a2943f998"
+    },
+    {
+      "path": "evidence/ceph-versioned-current-1280.json",
+      "bytes": 100,
+      "sha256": "4e839b5ba325e9aaa84d0940812614963f782eb94ec5678c7529806131097687"
+    },
+    {
+      "path": "evidence/ceph-versioned-current-1280.png",
+      "bytes": 204604,
+      "sha256": "85a27e188aa3851fb0e487ef4380a16c2985fd69cc8e610eb4b418348e9da721"
+    },
+    {
+      "path": "evidence/ceph-versioned-current-390.json",
+      "bytes": 97,
+      "sha256": "a31df029efaeb8e84d748f7285ef7d3e703b79b566ac6adb5184849e70bf4fcb"
+    },
+    {
+      "path": "evidence/ceph-versioned-current-390.png",
+      "bytes": 75939,
+      "sha256": "daf7763446131009a06ea51dee210180f727702f27bd24868fa5993cd8d1b688"
+    },
+    {
+      "path": "evidence/ceph-versioned-historical-1280.json",
+      "bytes": 96,
+      "sha256": "f43b0e03055e49062d086047c64613fb493021e3aecf49a0bd47977cf2c692b6"
+    },
+    {
+      "path": "evidence/ceph-versioned-historical-1280.png",
+      "bytes": 151473,
+      "sha256": "3aca9e23e5a5e175780c9f90c8d5c4fa4f661393a189c1aa9767371c0ebd7e07"
+    },
+    {
+      "path": "evidence/ceph-versioned-historical-390.json",
+      "bytes": 95,
+      "sha256": "1a0ac2af889a20fb4467ef4504ebf8f15bd43cc97d7ef2731cd45a5adf877564"
+    },
+    {
+      "path": "evidence/ceph-versioned-historical-390.png",
+      "bytes": 80255,
+      "sha256": "a396b4c542e70a538b5388f3fdfa62d023018ce004a1b5f58d44df0e50df57c1"
+    },
+    {
+      "path": "evidence/ceph-wits-zero-1280.pdf",
+      "bytes": 323709,
+      "sha256": "1a3b9cfc88dca089c2034bdb6323e2aaf120ad05c5735ea532ef26aa4804c7bf"
+    },
+    {
+      "path": "evidence/ceph-wits-zero-390.pdf",
+      "bytes": 323764,
+      "sha256": "1d3e581aded64b2f57f64a40ca4e79183440dae716d0e1af03a872235fa7a65a"
+    },
+    {
+      "path": "evidence/lint.txt",
+      "bytes": 708,
+      "sha256": "656dae192df09944a2c50e2cb28f7f21d2f5da039301b250f8bc5977de14bd23"
+    },
+    {
+      "path": "evidence/postgres.txt",
+      "bytes": 715,
+      "sha256": "edb464042dd43ada9910787a2c76bf99c109795c8fb7c17c7b7f61d500034b36"
+    },
+    {
+      "path": "evidence/typecheck.txt",
+      "bytes": 257,
+      "sha256": "8762478f1c274e9c95b63dc4d5267ac409995b8191f21a501f9ffe28ca18e441"
+    },
+    {
+      "path": "evidence/unit.txt",
+      "bytes": 690,
+      "sha256": "517b755037bbb0e58e2b4161208ecd1cb4b4f59fe53c2f8be1b5d4b712e140a1"
+    },
+    {
+      "path": "evidence/wits-print-page1.png",
+      "bytes": 227053,
+      "sha256": "17d0b382a386c181757a17b18fe4cde4e07de6c13be7032ba2af6afe211343ce"
+    },
+    {
+      "path": "evidence/wits-red.txt",
+      "bytes": 1392,
+      "sha256": "3b2271630acf347b40ae79700334a09689e54e1e7166332840a4cbbb9766d4a1"
+    },
+    {
+      "path": "requirements-matrix.json",
+      "bytes": 177537,
+      "sha256": "ac6e15fb50d1fe05f8e18d212fbb913f06deca2127a79dc775b8cdb53e732809"
+    }
+  ]
+}

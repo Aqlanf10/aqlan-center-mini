@@ -1,0 +1,44 @@
+diff --git a/lib/clinic-reset.ts b/lib/clinic-reset.ts
+index 8a464b7e..5804d7b3 100644
+--- a/lib/clinic-reset.ts
++++ b/lib/clinic-reset.ts
+@@ -36,6 +36,15 @@ export const RESET_WIPE_TABLES = [
+   "endo_canal_records",
+   "endo_visits",
+   "endo_treatments",
++  // Clinical append-only history; removed only by the existing explicit reset TRUNCATE.
++  "ortho_case_study_artifact_events",
++  "ortho_case_study_export_manifests",
++  "ortho_case_study_revisions",
++  "ortho_retention_entries",
++  "ortho_decision_revisions",
++  "ortho_assessment_revisions",
++  "ortho_case_lifecycle_events",
++  "ortho_strategy_revisions",
+   "ortho_adjustments",
+   "ortho_cases",
+   "tooth_conditions",
+@@ -91,13 +100,6 @@ export const RESET_WIPE_TABLES = [
+   "party_opening_advances",
+   "payables",
+   "payments",
+-  "invoice_correction_lines",
+-  "invoice_correction_receipts",
+-  "invoice_corrections",
+-  "legacy_treatment_document_revisions",
+-  "legacy_treatment_documents",
+-  "debt_repayment_revisions",
+-  "debt_repayment_arrangements",
+   "invoice_items",
+   "invoices",
+   "plan_installments",
+@@ -125,9 +127,6 @@ export const RESET_KEEP_TABLES = [
+   // (HR-1) ملفات الطاقم وسجل تغييراته: بيانات فريقٍ حقيقية كالمستخدمين — لا بيانات تجريبية
+   "hr_staff",
+   "hr_staff_changes",
+-  "hr_effective_streams",
+-  "hr_effective_revisions",
+-  "hr_temporal_write_receipts",
+   "hr_contracts",
+   "hr_work_schedules",
+   "hr_leave_types",

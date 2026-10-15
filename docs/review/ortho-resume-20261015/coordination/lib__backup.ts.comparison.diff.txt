@@ -1,0 +1,18 @@
+diff --git a/lib/backup.ts b/lib/backup.ts
+index 33fff067..ff41369f 100644
+--- a/lib/backup.ts
++++ b/lib/backup.ts
+@@ -166,12 +166,11 @@ export function insertStatement(
+   columns: string[],
+   row: Record<string, unknown>,
+   columnTypes?: Map<string, string>,
+-  identityInsert = false,
+ ): string {
+   const values = columns.map((column) =>
+     sqlValueForColumn(row[column], columnTypes?.get(column)),
+   ).join(", ");
+-  return `INSERT INTO ${table} (${columns.map((c) => `"${c}"`).join(", ")}) ${identityInsert ? "OVERRIDING SYSTEM VALUE " : ""}VALUES (${values});`;
++  return `INSERT INTO ${table} (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${values});`;
+ }
+ 
+ /**

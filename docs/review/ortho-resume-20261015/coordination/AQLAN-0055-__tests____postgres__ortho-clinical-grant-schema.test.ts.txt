@@ -1,0 +1,66 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { DbClient } from "../../lib/db";
+import { ORTHO_CLINICAL_GRANT_SQL } from "../../lib/ortho-clinical-grant-schema";
+import { openPeriodontalFixture } from "./_periodontal-fixture";
+// Owned synthetic PG fixture only. This file proves schema invariants, not route authority or writer lock order.
+let f: Awaited<ReturnType<typeof openPeriodontalFixture>>;
+beforeAll(async () => { f = await openPeriodontalFixture(process.env); await f.pool.query(ORTHO_CLINICAL_GRANT_SQL); }, 180000);
+afterAll(async () => { await f?.close(); }, 30000);
+async function seed() {
+  const user = (await f.pool.query<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic grant','unused','admin') RETURNING id", [`grant_${randomUUID()}`])).rows[0].id;
+  const party = (await f.pool.query<{ id: number }>("INSERT INTO parties(kind,name) VALUES('doctor','Synthetic grant doctor') RETURNING id")).rows[0].id;
+  const anchor = (await f.pool.query<{ id: number }>("INSERT INTO ortho_clinical_grant_anchors(user_id,doctor_party_id) VALUES($1,$2) RETURNING id", [user,party])).rows[0].id;
+  return { user,party,anchor };
+}
+async function event(c: DbClient, anchor: number, user: number | null, version = 1, prior: number | null = null, action = "grant", kind = "user") {
+  return (await c.query<{ id: number }>(`INSERT INTO ortho_clinical_grant_events(anchor_id,version,predecessor_id,action,enabled,actor_kind,actor_user_id,actor_label,reason,command_id,request_fingerprint)
+    VALUES($1,$2,$3,$4,$5,$6,$7,'Synthetic actor','Synthetic explicit policy',$8,$9) RETURNING id`,
+  [anchor,version,prior,action,action==="grant",kind,user,`grant_${randomUUID().replaceAll("-", "")}`,"a".repeat(64)])).rows[0].id;
+}
+async function state(c: DbClient, anchor: number, id: number, version: number, enabled: boolean) {
+  await c.query(`INSERT INTO ortho_clinical_grant_states(anchor_id,last_event_id,version,enabled) VALUES($1,$2,$3,$4)
+    ON CONFLICT(anchor_id) DO UPDATE SET last_event_id=excluded.last_event_id,version=excluded.version,enabled=excluded.enabled`, [anchor,id,version,enabled]);
+}
+async function transaction<T>(fn: (c: DbClient) => Promise<T>) {
+  const c = await f.pool.connect();
+  try { await c.query("BEGIN"); const value = await fn(c); await c.query("COMMIT"); return value; }
+  catch(error) { await c.query("ROLLBACK").catch(() => {}); throw error; } finally { c.release(); }
+}
+describe("0055 immutable grant identity and append-only exact state", () => {
+  it("creates no implicit grant, and installs identical bootstrap SQL idempotently", async () => {
+    const s = await seed();
+    expect((await f.pool.query("SELECT * FROM ortho_clinical_grant_states WHERE anchor_id=$1",[s.anchor])).rows).toEqual([]);
+    await f.pool.query(ORTHO_CLINICAL_GRANT_SQL);
+    expect((await f.pool.query("SELECT * FROM ortho_clinical_grant_events WHERE anchor_id=$1",[s.anchor])).rows).toEqual([]);
+  });
+  it("requires a complete exact event/state commit and retains immutable identity/history", async () => {
+    const s = await seed();
+    await expect(transaction(c => event(c,s.anchor,s.user))).rejects.toThrow();
+    expect((await f.pool.query("SELECT * FROM ortho_clinical_grant_events WHERE anchor_id=$1",[s.anchor])).rows).toEqual([]);
+    const first = await transaction(async c => { const id = await event(c,s.anchor,s.user); await state(c,s.anchor,id,1,true); return id; });
+    await expect(f.pool.query("UPDATE ortho_clinical_grant_anchors SET user_id=user_id WHERE id=$1",[s.anchor])).rejects.toThrow();
+    await expect(f.pool.query("DELETE FROM ortho_clinical_grant_events WHERE id=$1",[first])).rejects.toThrow();
+    await expect(transaction(async c => { const id = await event(c,s.anchor,null,3,first,"party_disabled","system_policy"); await state(c,s.anchor,id,3,false); })).rejects.toThrow();
+    const second = await transaction(async c => { const id = await event(c,s.anchor,null,2,first,"party_disabled","system_policy"); await state(c,s.anchor,id,2,false); return id; });
+    expect((await f.pool.query("SELECT enabled,version,last_event_id FROM ortho_clinical_grant_states WHERE anchor_id=$1",[s.anchor])).rows)
+      .toEqual([{ enabled:false,version:2,last_event_id:second }]);
+    await expect(transaction(async c => { const id = await event(c,s.anchor,s.user); await state(c,s.anchor,id,3,true); })).rejects.toThrow();
+  });
+  it("refuses user-FK system actors, system enabling, foreign predecessors and stale projection", async () => {
+    const s = await seed(), other = await seed();
+    const first = await transaction(async c => { const id = await event(c,s.anchor,s.user); await state(c,s.anchor,id,1,true); return id; });
+    await expect(transaction(c => event(c,s.anchor,s.user,2,first,"party_disabled","system_policy"))).rejects.toThrow();
+    await expect(transaction(c => event(c,s.anchor,null,2,first,"grant","system_policy"))).rejects.toThrow();
+    await expect(transaction(async c => { const id = await event(c,other.anchor,other.user,2,first); await state(c,other.anchor,id,2,true); })).rejects.toThrow();
+    await expect(transaction(async c => { await event(c,s.anchor,null,2,first,"party_disabled","system_policy"); })).rejects.toThrow();
+    expect((await f.pool.query("SELECT version,enabled FROM ortho_clinical_grant_states WHERE anchor_id=$1",[s.anchor])).rows).toEqual([{ version:1,enabled:true }]);
+  });
+  it("has no direct target-user/party FK in events or current state; only optional actor FK reaches users", async () => {
+    const rows = (await f.pool.query<{ table_name: string; parent: string; definition: string }>(`SELECT c.conrelid::regclass::text AS table_name,c.confrelid::regclass::text AS parent,pg_get_constraintdef(c.oid) AS definition
+      FROM pg_constraint c WHERE c.contype='f' AND c.conrelid IN ('ortho_clinical_grant_events'::regclass,'ortho_clinical_grant_states'::regclass)
+      ORDER BY table_name,parent,definition`)).rows;
+    expect(rows.filter(r => r.parent === "users")).toEqual([{ table_name:"ortho_clinical_grant_events",parent:"users",definition:"FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE RESTRICT" }]);
+    expect(rows.some(r => r.parent === "parties")).toBe(false);
+  });
+});
