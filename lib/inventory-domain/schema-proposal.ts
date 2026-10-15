@@ -96,14 +96,29 @@ CREATE TABLE IF NOT EXISTS goods_receipt_lines (
   FOREIGN KEY(order_id,order_line_id) REFERENCES purchase_order_lines(order_id,id) ON DELETE RESTRICT
 );
 CREATE TABLE IF NOT EXISTS stock_lots (
-  id UUID PRIMARY KEY, receipt_line_id TEXT NOT NULL UNIQUE REFERENCES goods_receipt_lines(id) ON DELETE RESTRICT,
+  id UUID PRIMARY KEY, receipt_line_id TEXT UNIQUE REFERENCES goods_receipt_lines(id) ON DELETE RESTRICT,
   item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
   location_id TEXT NOT NULL REFERENCES inventory_locations(id) ON DELETE RESTRICT,
   movement_id INTEGER NOT NULL UNIQUE REFERENCES inventory_movements(id) ON DELETE RESTRICT,
   lot_code TEXT, expiry_date DATE,
   status TEXT NOT NULL CHECK(status IN ('accepted','quarantined','recalled')),
   cost_status TEXT NOT NULL CHECK(cost_status IN ('known','estimated','missing')),
-  cost_snapshot JSONB NOT NULL CHECK(jsonb_typeof(cost_snapshot)='object')
+  cost_snapshot JSONB NOT NULL CHECK(jsonb_typeof(cost_snapshot)='object'),
+  CHECK (receipt_line_id IS NOT NULL OR cost_snapshot->>'source' = 'legacy_reconciliation')
+);
+CREATE TABLE IF NOT EXISTS quarantine_dispositions (
+  id UUID PRIMARY KEY,
+  receipt_line_id TEXT NOT NULL REFERENCES goods_receipt_lines(id) ON DELETE RESTRICT,
+  order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE RESTRICT,
+  order_line_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK(action IN ('release','reject_return')),
+  base_qty NUMERIC(12,3) NOT NULL CHECK(base_qty > 0),
+  movement_id INTEGER UNIQUE REFERENCES inventory_movements(id) ON DELETE RESTRICT,
+  reason TEXT NOT NULL,
+  document JSONB NOT NULL CHECK(jsonb_typeof(document)='object'),
+  created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  FOREIGN KEY(order_id,order_line_id) REFERENCES purchase_order_lines(order_id,id) ON DELETE RESTRICT
 );
 CREATE TABLE IF NOT EXISTS inventory_movement_allocations (
   id UUID PRIMARY KEY, movement_id INTEGER NOT NULL REFERENCES inventory_movements(id) ON DELETE RESTRICT,
@@ -142,6 +157,7 @@ CREATE TABLE IF NOT EXISTS inventory_operations (
 );
 CREATE INDEX IF NOT EXISTS purchase_requests_actor_idx ON purchase_requests(requested_by,created_at DESC,id);
 CREATE INDEX IF NOT EXISTS goods_receipt_lines_order_idx ON goods_receipt_lines(order_id,order_line_id);
+CREATE INDEX IF NOT EXISTS quarantine_dispositions_receipt_idx ON quarantine_dispositions(receipt_line_id,action);
 CREATE INDEX IF NOT EXISTS stock_lots_location_idx ON stock_lots(item_id,location_id,status,expiry_date);
 CREATE OR REPLACE FUNCTION inventory_procurement_append_only() RETURNS TRIGGER AS $inv_append$
 BEGIN RAISE EXCEPTION 'Posted procurement evidence is append-only'; END;
@@ -151,7 +167,7 @@ DECLARE rel TEXT;
 BEGIN
  FOREACH rel IN ARRAY ARRAY['inventory_approval_policies','inventory_item_unit_versions','purchase_request_revisions','purchase_request_lines',
  'purchase_approval_events','purchase_orders','purchase_order_lines','purchase_order_source_allocations',
- 'goods_receipts','goods_receipt_lines','stock_lots','inventory_movement_allocations',
+ 'goods_receipts','goods_receipt_lines','stock_lots','quarantine_dispositions','inventory_movement_allocations',
  'supplier_invoices','supplier_invoice_payable_links','supplier_invoice_receipt_allocations','inventory_operations'] LOOP
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname=rel || '_immutable' AND tgrelid=to_regclass(rel)) THEN
    EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION inventory_procurement_append_only()',rel || '_immutable',rel);

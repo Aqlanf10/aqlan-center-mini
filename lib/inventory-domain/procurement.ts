@@ -718,3 +718,380 @@ export function matchSupplierInvoice(order: IssuedPurchaseOrder, invoice: Suppli
   return freeze({ invoiceId: invoice.id, invoiceVersion: invoice.version, identity: payloadIdentity(invoice), duplicateKey,
     status: issues.size === 0 ? "matched" : "needs_review", issues: [...issues], lines, total, charges, effects: NO_FINANCIAL_EFFECT });
 }
+
+export type QuarantineResolutionAction = "release" | "reject_return";
+export interface PriorQuarantineResolution {
+  readonly id: string;
+  readonly receiptLineId: string;
+  readonly action: QuarantineResolutionAction;
+  readonly baseQuantity: string;
+}
+export interface QuarantineResolutionInput {
+  readonly id: string;
+  readonly order: IssuedPurchaseOrder;
+  readonly receiptLine: InspectedReceiptLine & { readonly damaged?: boolean };
+  readonly priorResolutions: readonly PriorQuarantineResolution[];
+  readonly action: QuarantineResolutionAction;
+  readonly quantity: string;
+  readonly reason: string;
+  readonly resolutionDate: string;
+}
+export interface QuarantineResolutionPlan {
+  readonly id: string;
+  readonly receiptLineId: string;
+  readonly orderId: string;
+  readonly orderLineId: string;
+  readonly itemId: number;
+  readonly action: QuarantineResolutionAction;
+  readonly enteredQuantity: string;
+  readonly baseQuantity: string;
+  readonly reason: string;
+  readonly resolutionDate: string;
+  readonly effectiveReceiptLine: {
+    readonly receiptLineId: string;
+    readonly releasedBaseQuantity: string;
+    readonly returnedBaseQuantity: string;
+    readonly remainingQuarantinedBaseQuantity: string;
+    readonly effectiveLotStatus: "accepted" | "quarantined" | "recalled";
+  };
+  readonly stockCompensation: null | {
+    readonly itemId: number;
+    readonly locationId: string;
+    readonly baseQuantity: string;
+    readonly movementType: "out";
+    readonly isReturn: true;
+    readonly reason: string;
+  };
+  readonly effects: { readonly inventoryMovements: 0 | 1; readonly payables: 0; readonly expenses: 0 };
+}
+
+/** Resolves quarantined receipt quantities via append-only evidence.
+ * - "release" transitions quarantined stock to accepted usable stock after
+ *   verifying non-damaged state, LOT, expiry, and minimum shelf-life policy at
+ *   resolutionDate, without creating a duplicate 'in' movement.
+ * - "reject_return" rejects and returns quarantined stock to the supplier,
+ *   restoring order delivery capacity for a replacement shipment and planning a
+ *   single compensating 'out' return movement for stock items.
+ */
+export function planQuarantineResolution(input: QuarantineResolutionInput): QuarantineResolutionPlan {
+  validateOrder(input.order);
+  invariant(input.order.status === "issued", "order_not_issued", "Quarantine resolution requires an issued order");
+  identifier(input.id, "quarantine resolution id");
+  reason(input.reason);
+  dateOnly(input.resolutionDate);
+  invariant(
+    input.action === "release" || input.action === "reject_return",
+    "invalid_quarantine_action",
+    "Quarantine resolution action must be release or reject_return",
+  );
+  const { receiptLine } = input;
+  identifier(receiptLine.id, "quarantine receipt line");
+  invariant(
+    receiptLine.orderId === input.order.id && receiptLine.supplierPartyId === input.order.supplierPartyId
+      && receiptLine.branchId === input.order.branchId,
+    "receipt_owner_mismatch",
+    "Quarantine receipt line belongs to another order, supplier, or branch",
+  );
+  invariant(receiptLine.disposition === "quarantined", "not_quarantined", "Only a quarantined receipt line can be resolved");
+  const orderLine = input.order.lines.find((line) => line.id === receiptLine.orderLineId);
+  invariant(orderLine && orderLine.itemId === receiptLine.itemId, "item_mismatch", "Quarantine receipt line item does not match the order line");
+  const conversion = unitConversionSnapshot(receiptLine.conversion);
+  invariant(
+    conversion.itemId === orderLine.itemId && conversion.baseUnit === orderLine.conversion.baseUnit
+      && conversion.basePrecision === orderLine.conversion.basePrecision,
+    "unit_mismatch",
+    "Quarantine receipt line base unit differs from the order line",
+  );
+  const prior = unique(input.priorResolutions, (row) => row.id, "prior quarantine resolution");
+  invariant(!prior.has(input.id), "duplicate_source", "Quarantine resolution id already exists");
+  let releasedAtoms = 0n;
+  let returnedAtoms = 0n;
+  for (const row of prior.values()) {
+    invariant(row.receiptLineId === receiptLine.id, "receipt_line_mismatch", "Prior resolution belongs to a different receipt line");
+    invariant(row.action === "release" || row.action === "reject_return", "invalid_quarantine_action", "Invalid prior quarantine action");
+    const qty = quantityAtoms(row.baseQuantity, conversion.basePrecision);
+    if (row.action === "release") releasedAtoms += qty;
+    else returnedAtoms += qty;
+  }
+  const originalQuarantined = quantityAtoms(receiptLine.baseQuantity, conversion.basePrecision);
+  const converted = convertQuantity(input.quantity, conversion);
+  const currentAtoms = quantityAtoms(converted.baseQuantity, conversion.basePrecision);
+  invariant(
+    releasedAtoms + returnedAtoms + currentAtoms <= originalQuarantined,
+    "quarantine_overresolved",
+    "Quarantine resolution exceeds the remaining quarantined quantity",
+  );
+  if (input.action === "release") {
+    invariant(receiptLine.damaged !== true, "damaged_stock", "Damaged material cannot be released from quarantine to available stock");
+    invariant(!orderLine.trackLot || receiptLine.lotCode !== null, "missing_lot", "This item requires a manufacturer lot before quarantine release");
+    invariant(!orderLine.requiresExpiry || receiptLine.expiryDate !== null, "missing_expiry", "This item requires a known expiry date before quarantine release");
+    if (receiptLine.expiryDate !== null) {
+      dateOnly(receiptLine.expiryDate);
+      const days = (Date.parse(`${receiptLine.expiryDate}T00:00:00.000Z`) - Date.parse(`${input.resolutionDate}T00:00:00.000Z`)) / 86_400_000;
+      invariant(days > 0 && days >= orderLine.minimumShelfLifeDays, "expired_receipt", "Quarantined material fails the resolution-date shelf-life policy");
+    }
+    releasedAtoms += currentAtoms;
+  } else {
+    returnedAtoms += currentAtoms;
+  }
+  const remainingAtoms = originalQuarantined - releasedAtoms - returnedAtoms;
+  const effectiveLotStatus: "accepted" | "quarantined" | "recalled" =
+    remainingAtoms > 0n ? "quarantined" : releasedAtoms > 0n ? "accepted" : "recalled";
+  const stockCompensation = input.action === "reject_return" && orderLine.kind === "stock"
+    ? {
+        itemId: orderLine.itemId,
+        locationId: receiptLine.locationId,
+        baseQuantity: converted.baseQuantity,
+        movementType: "out" as const,
+        isReturn: true as const,
+        reason: `Quarantine rejection return ${input.id}: ${input.reason}`,
+      }
+    : null;
+  return freeze({
+    id: input.id,
+    receiptLineId: receiptLine.id,
+    orderId: input.order.id,
+    orderLineId: orderLine.id,
+    itemId: orderLine.itemId,
+    action: input.action,
+    enteredQuantity: converted.enteredQuantity,
+    baseQuantity: converted.baseQuantity,
+    reason: input.reason,
+    resolutionDate: input.resolutionDate,
+    effectiveReceiptLine: {
+      receiptLineId: receiptLine.id,
+      releasedBaseQuantity: quantityText(releasedAtoms),
+      returnedBaseQuantity: quantityText(returnedAtoms),
+      remainingQuarantinedBaseQuantity: quantityText(remainingAtoms),
+      effectiveLotStatus,
+    },
+    stockCompensation,
+    effects: {
+      inventoryMovements: stockCompensation ? (1 as const) : (0 as const),
+      payables: 0 as const,
+      expenses: 0 as const,
+    },
+  });
+}
+
+export type ExcessArrivalAction = "return_excess_to_supplier" | "hold_for_order_amendment";
+export interface ExcessArrivalDecisionPlan {
+  readonly orderId: string;
+  readonly orderLineId: string;
+  readonly itemId: number;
+  readonly decision: ExcessArrivalAction;
+  readonly reason: string;
+  readonly orderedBaseQuantity: string;
+  readonly withinOrderBaseQuantity: string;
+  readonly excessBaseQuantity: string;
+  readonly requiresOrderAmendment: boolean;
+  readonly effects: typeof NO_FINANCIAL_EFFECT;
+}
+
+/** Explicit decision plan when an arrived shipment exceeds remaining order delivery capacity.
+ * Never silently accepts overdelivery into usable stock or inflates payables.
+ */
+export function planExcessArrivalDecision(input: {
+  readonly order: IssuedPurchaseOrder;
+  readonly orderLineId: string;
+  readonly prior: readonly PriorInspectedQuantity[];
+  readonly arrivedQuantity: string;
+  readonly decision: ExcessArrivalAction;
+  readonly reason: string;
+}): ExcessArrivalDecisionPlan {
+  validateOrder(input.order);
+  invariant(input.order.status === "issued", "order_not_issued", "Excess arrival decision requires an issued order");
+  reason(input.reason);
+  invariant(
+    input.decision === "return_excess_to_supplier" || input.decision === "hold_for_order_amendment",
+    "invalid_excess_decision",
+    "Excess arrival decision must be return_excess_to_supplier or hold_for_order_amendment",
+  );
+  const orderLine = input.order.lines.find((line) => line.id === input.orderLineId);
+  invariant(orderLine, "unknown_order_line", "Excess arrival references a line outside this order");
+  const previous = unique(input.prior, (row) => row.orderLineId, "prior receipt total").get(orderLine.id);
+  const ordered = quantityAtoms(convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity);
+  const accepted = quantityAtoms(previous?.acceptedBaseQuantity ?? "0", 3, true);
+  const quarantined = quantityAtoms(previous?.quarantinedBaseQuantity ?? "0", 3, true);
+  invariant(accepted + quarantined <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted/held capacity");
+  const remainingDelivery = ordered - accepted - quarantined;
+  const arrived = quantityAtoms(convertQuantity(input.arrivedQuantity, orderLine.conversion).baseQuantity);
+  invariant(arrived > remainingDelivery, "no_excess_arrival", "Arrived quantity does not exceed remaining order delivery capacity");
+  return freeze({
+    orderId: input.order.id,
+    orderLineId: orderLine.id,
+    itemId: orderLine.itemId,
+    decision: input.decision,
+    reason: input.reason,
+    orderedBaseQuantity: quantityText(ordered),
+    withinOrderBaseQuantity: quantityText(remainingDelivery),
+    excessBaseQuantity: quantityText(arrived - remainingDelivery),
+    requiresOrderAmendment: input.decision === "hold_for_order_amendment",
+    effects: NO_FINANCIAL_EFFECT,
+  });
+}
+
+export interface LegacyMovementRecord {
+  readonly movementId: number;
+  readonly kind: "in" | "out" | "adjust";
+  readonly signedBaseQuantity: string;
+  readonly alreadyAllocatedBaseQuantity: string;
+  readonly expiryDate: string | null;
+  readonly unitCostMinor: number | null;
+  readonly payableId: number | null;
+}
+export interface HistoricalReconciliationPlan {
+  readonly itemId: number;
+  readonly locationId: string;
+  readonly reason: string;
+  readonly netReconciledBaseQuantity: string;
+  readonly lotsToCreate: ReadonlyArray<{
+    readonly movementId: number;
+    readonly itemId: number;
+    readonly locationId: string;
+    readonly baseQuantity: string;
+    readonly expiryDate: string | null;
+    readonly costStatus: "known" | "missing";
+    readonly costSnapshot: {
+      readonly source: "legacy_reconciliation";
+      readonly traceability: "legacy_unknown";
+      readonly conversion: UnitConversionSnapshot;
+      readonly requiresExpiry: boolean;
+      readonly unitCostMinor: number | null;
+      readonly payableId: number | null;
+      readonly reason: string;
+    };
+  }>;
+  readonly allocationsToCreate: ReadonlyArray<{
+    readonly movementId: number;
+    readonly sourceLotMovementId: number;
+    readonly locationId: string;
+    readonly baseQuantity: string;
+  }>;
+  readonly effects: typeof NO_FINANCIAL_EFFECT;
+}
+
+/** Plans allocation of historical unallocated inventory_movements to an active
+ * clinic store location without creating duplicate movements, payables, or
+ * fabricated costs/LOT codes.
+ */
+export function planHistoricalReconciliation(input: {
+  readonly itemId: number;
+  readonly baseUnit: string;
+  readonly basePrecision: 0 | 1 | 2 | 3;
+  readonly conversionVersion: number;
+  readonly requiresExpiry: boolean;
+  readonly locationId: string;
+  readonly reason: string;
+  readonly movements: readonly LegacyMovementRecord[];
+}): HistoricalReconciliationPlan {
+  positiveId(input.itemId, "item id");
+  identifier(input.locationId, "reconciliation location");
+  reason(input.reason);
+  const conversion = unitConversionSnapshot({
+    itemId: input.itemId,
+    version: input.conversionVersion,
+    baseUnit: input.baseUnit,
+    enteredUnit: input.baseUnit,
+    baseUnitsPerEnteredUnit: "1",
+    enteredPrecision: input.basePrecision,
+    basePrecision: input.basePrecision,
+  });
+  invariant(input.movements.length > 0, "empty_reconciliation", "At least one historical movement is required");
+  const seen = new Set<number>();
+  const positiveBuckets: Array<{
+    movementId: number;
+    remainingAtoms: bigint;
+    initialAtoms: bigint;
+    expiryDate: string | null;
+    unitCostMinor: number | null;
+    payableId: number | null;
+  }> = [];
+  const negativeMovements: Array<{ movementId: number; neededAtoms: bigint }> = [];
+  for (const row of input.movements) {
+    positiveId(row.movementId, "historical movement id");
+    invariant(!seen.has(row.movementId), "duplicate_source", `Duplicate historical movement: ${row.movementId}`);
+    seen.add(row.movementId);
+    invariant(["in", "out", "adjust"].includes(row.kind), "invalid_movement_kind", "Invalid historical movement kind");
+    if (row.expiryDate !== null) dateOnly(row.expiryDate);
+    if (row.unitCostMinor !== null) minorAmount(row.unitCostMinor);
+    if (row.payableId !== null) positiveId(row.payableId, "historical payable id");
+    const isNegative = row.kind === "out" || (row.kind === "adjust" && row.signedBaseQuantity.startsWith("-"));
+    const magnitudeText = row.signedBaseQuantity.startsWith("-") ? row.signedBaseQuantity.slice(1) : row.signedBaseQuantity;
+    const magnitudeAtoms = quantityAtoms(magnitudeText, input.basePrecision, true);
+    const allocatedAtoms = quantityAtoms(row.alreadyAllocatedBaseQuantity, input.basePrecision, true);
+    invariant(allocatedAtoms <= magnitudeAtoms, "overallocated_movement", "Historical movement allocation exceeds its quantity");
+    const unallocatedAtoms = magnitudeAtoms - allocatedAtoms;
+    if (unallocatedAtoms === 0n) continue;
+    if (isNegative) {
+      negativeMovements.push({ movementId: row.movementId, neededAtoms: unallocatedAtoms });
+    } else {
+      positiveBuckets.push({
+        movementId: row.movementId,
+        remainingAtoms: unallocatedAtoms,
+        initialAtoms: unallocatedAtoms,
+        expiryDate: row.expiryDate,
+        unitCostMinor: row.unitCostMinor,
+        payableId: row.payableId,
+      });
+    }
+  }
+  const totalPositive = positiveBuckets.reduce((sum, row) => sum + row.initialAtoms, 0n);
+  const totalNegative = negativeMovements.reduce((sum, row) => sum + row.neededAtoms, 0n);
+  invariant(totalPositive > 0n || totalNegative > 0n, "already_reconciled", "All historical movements for this item are already allocated");
+  invariant(totalPositive >= totalNegative, "negative_legacy_balance", "Historical negative movements exceed positive inflows");
+  const lotsToCreate: HistoricalReconciliationPlan["lotsToCreate"][number][] = [];
+  const allocationsToCreate: HistoricalReconciliationPlan["allocationsToCreate"][number][] = [];
+  for (const bucket of positiveBuckets) {
+    lotsToCreate.push({
+      movementId: bucket.movementId,
+      itemId: input.itemId,
+      locationId: input.locationId,
+      baseQuantity: quantityText(bucket.initialAtoms),
+      expiryDate: bucket.expiryDate,
+      costStatus: bucket.unitCostMinor !== null ? "known" : "missing",
+      costSnapshot: {
+        source: "legacy_reconciliation",
+        traceability: "legacy_unknown",
+        conversion,
+        requiresExpiry: input.requiresExpiry && bucket.expiryDate !== null,
+        unitCostMinor: bucket.unitCostMinor,
+        payableId: bucket.payableId,
+        reason: input.reason,
+      },
+    });
+    allocationsToCreate.push({
+      movementId: bucket.movementId,
+      sourceLotMovementId: bucket.movementId,
+      locationId: input.locationId,
+      baseQuantity: quantityText(bucket.initialAtoms),
+    });
+  }
+  for (const neg of negativeMovements) {
+    let needed = neg.neededAtoms;
+    for (const bucket of positiveBuckets) {
+      if (needed === 0n) break;
+      if (bucket.remainingAtoms === 0n) continue;
+      const take = bucket.remainingAtoms <= needed ? bucket.remainingAtoms : needed;
+      bucket.remainingAtoms -= take;
+      needed -= take;
+      allocationsToCreate.push({
+        movementId: neg.movementId,
+        sourceLotMovementId: bucket.movementId,
+        locationId: input.locationId,
+        baseQuantity: quantityText(take),
+      });
+    }
+    invariant(needed === 0n, "negative_legacy_balance", "Unable to allocate historical outflow across positive legacy movements");
+  }
+  return freeze({
+    itemId: input.itemId,
+    locationId: input.locationId,
+    reason: input.reason,
+    netReconciledBaseQuantity: quantityText(totalPositive - totalNegative),
+    lotsToCreate,
+    allocationsToCreate,
+    effects: NO_FINANCIAL_EFFECT,
+  });
+}
+

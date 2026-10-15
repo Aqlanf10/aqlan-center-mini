@@ -5,10 +5,10 @@ import { clinicDateString } from "../schedule";
 import { CLINIC_ZONE_FALLBACK } from "../clinicZone";
 import { invariant, InventoryDomainError, decimalRatio, convertQuantity, unitConversionSnapshot } from "./quantities";
 import { sanitizeInventoryAuditDetails } from "./presentation";
-import { approveRequest, matchSupplierInvoice, payloadIdentity, planInspectedReceipt, planOrderIssue, validateRequest,
+import { approveRequest, matchSupplierInvoice, payloadIdentity, planInspectedReceipt, planOrderIssue, planQuarantineResolution, validateRequest,
   type CommittedSourceAllocation, type RequestRevision, type RequestApproval, type PurchaseOrder,
   type IssuedPurchaseOrder, type ReceiptRevision, type InspectedReceiptLine, type PriorInspectedQuantity,
-  type SupplierInvoiceRevision, type InvoiceReceiptAllocation, type ValuationSnapshot } from "./procurement";
+  type SupplierInvoiceRevision, type InvoiceReceiptAllocation, type ValuationSnapshot, type QuarantineResolutionAction } from "./procurement";
 
 /** Temporary single-clinic boundary. The project has no branch identity on this
  * pinned base. Never accept a client invented branch or broaden branch reads. */
@@ -168,11 +168,14 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
   docId(receipt.id);scope(receipt.branchId);
   return inventoryOperation(actor,key,"receipt.post",receipt,true,async client=>{
     const order=await lockedOrder(client,receipt.orderId);
-    const old=await client.query<{order_line_id:string;accepted:string;quarantined:string;rejected:string}>(`SELECT order_line_id,
-      COALESCE(SUM(base_qty) FILTER(WHERE disposition='accepted'),0)::text AS accepted,
-      COALESCE(SUM(base_qty) FILTER(WHERE disposition='quarantined'),0)::text AS quarantined,
-      COALESCE(SUM(base_qty) FILTER(WHERE disposition='rejected'),0)::text AS rejected
-      FROM goods_receipt_lines WHERE order_id=$1 GROUP BY order_line_id`,[order.id]);
+    const old=await client.query<{order_line_id:string;accepted:string;quarantined:string;rejected:string}>(`SELECT grl.order_line_id,
+      (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='accepted'),0)
+       + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='release'),0))::text AS accepted,
+      (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='quarantined'),0)
+       - COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id),0))::text AS quarantined,
+      (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='rejected'),0)
+       + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='reject_return'),0))::text AS rejected
+      FROM goods_receipt_lines grl WHERE grl.order_id=$1 GROUP BY grl.order_line_id`,[order.id]);
     const prior:PriorInspectedQuantity[]=old.rows.map(row=>({orderLineId:row.order_line_id,acceptedBaseQuantity:row.accepted,quarantinedBaseQuantity:row.quarantined,rejectedBaseQuantity:row.rejected}));
     const postingDate=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
     const plan=planInspectedReceipt(order,receipt,prior,postingDate);
@@ -199,14 +202,111 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
     return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,financialEffects:plan.financialEffects};
   });
 }
+export async function resolveQuarantineReceipt(
+  actor: InventoryActor,
+  key: string,
+  input: {
+    id: string;
+    orderId: string;
+    receiptLineId: string;
+    action: QuarantineResolutionAction;
+    quantity: string;
+    reason: string;
+    resolutionDate?: string;
+  },
+) {
+  docId(input.id);
+  docId(input.orderId);
+  return inventoryOperation(actor, key, "quarantine.resolve", input, true, async (client) => {
+    const order = await lockedOrder(client, input.orderId);
+    const receiptLineRows = await client.query<{ document: InspectedReceiptLine; receipt_doc: ReceiptRevision }>(
+      "SELECT grl.document, gr.document AS receipt_doc FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.receipt_id WHERE grl.id=$1 AND grl.order_id=$2 FOR SHARE",
+      [input.receiptLineId, order.id],
+    );
+    const row = receiptLineRows.rows[0];
+    invariant(row, "not_found", "Quarantine receipt line was not found");
+    const portionDamaged = row.receipt_doc.lines
+      .flatMap((line) => line.portions)
+      .find((portion) => portion.id === input.receiptLineId)?.damaged;
+    const priorRows = await client.query<{ id: string; receipt_line_id: string; action: QuarantineResolutionAction; base_qty: string }>(
+      "SELECT id::text, receipt_line_id, action, base_qty::text FROM quarantine_dispositions WHERE receipt_line_id=$1 ORDER BY created_at, id",
+      [input.receiptLineId],
+    );
+    const resolutionDate = input.resolutionDate ?? clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+    const plan = planQuarantineResolution({
+      id: input.id,
+      order,
+      receiptLine: {
+        ...row.document,
+        ...(typeof portionDamaged === "boolean" ? { damaged: portionDamaged } : {}),
+      },
+      priorResolutions: priorRows.rows.map((prior) => ({
+        id: prior.id,
+        receiptLineId: prior.receipt_line_id,
+        action: prior.action,
+        baseQuantity: prior.base_qty,
+      })),
+      action: input.action,
+      quantity: input.quantity,
+      reason: input.reason,
+      resolutionDate,
+    });
+    let movementId: number | null = null;
+    if (plan.stockCompensation) {
+      const lotRows = await client.query<{ id: string }>(
+        "SELECT id FROM stock_lots WHERE receipt_line_id=$1 FOR SHARE",
+        [plan.receiptLineId],
+      );
+      const lot = lotRows.rows[0];
+      invariant(lot, "not_found", "Quarantined stock lot was not found");
+      await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [plan.stockCompensation.itemId]);
+      const movement = await client.query<{ id: number }>(
+        "INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'out',$2::numeric,NULL,$3,$4,NULL,TRUE) RETURNING id",
+        [plan.stockCompensation.itemId, plan.stockCompensation.baseQuantity, plan.stockCompensation.reason, actor.username],
+      );
+      movementId = movement.rows[0].id;
+      await client.query(
+        "INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",
+        [randomUUID(), movementId, lot.id, plan.stockCompensation.locationId, plan.stockCompensation.baseQuantity],
+      );
+    }
+    await client.query(
+      "INSERT INTO quarantine_dispositions(id,receipt_line_id,order_id,order_line_id,action,base_qty,movement_id,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6::numeric,$7,$8,$9::jsonb,$10)",
+      [plan.id, plan.receiptLineId, plan.orderId, plan.orderLineId, plan.action, plan.baseQuantity, movementId, plan.reason, JSON.stringify(plan), actor.userId],
+    );
+    await writeInventoryAudit(client, actor, "quarantine_disposition", plan.id, "resolve", {
+      orderId: plan.orderId,
+      receiptLineId: plan.receiptLineId,
+      action: plan.action,
+      baseQuantity: plan.baseQuantity,
+      effectiveReceiptLine: plan.effectiveReceiptLine,
+    });
+    return {
+      id: plan.id,
+      status: "resolved" as const,
+      action: plan.action,
+      baseQuantity: plan.baseQuantity,
+      effectiveReceiptLine: plan.effectiveReceiptLine,
+      effects: plan.effects,
+    };
+  });
+}
 export async function recordSupplierInvoiceMatch(actor:InventoryActor,key:string,invoice:SupplierInvoiceRevision){
   docId(invoice.id);scope(invoice.branchId);
   return inventoryOperation(actor,key,"invoice.match",invoice,true,async client=>{
     const order=await lockedOrder(client,invoice.orderId);
-    const receipts=await client.query<{document:InspectedReceiptLine}>("SELECT document FROM goods_receipt_lines WHERE order_id=$1 ORDER BY id",[order.id]);
+    const receipts=await client.query<{document:InspectedReceiptLine;released_qty:string}>(`SELECT grl.document,
+      COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.receipt_line_id=grl.id AND qd.action='release'),0)::text AS released_qty
+      FROM goods_receipt_lines grl WHERE grl.order_id=$1 ORDER BY grl.id`,[order.id]);
+    const effectiveReceiptLines:InspectedReceiptLine[]=receipts.rows.map(row=>{
+      if(row.document.disposition==="quarantined" && decimalRatio(row.released_qty).numerator>0n){
+        return {...row.document,disposition:"accepted",baseQuantity:row.released_qty};
+      }
+      return row.document;
+    });
     const priorRows=await client.query<{id:string;invoice_line_id:string;receipt_line_id:string;base_qty:string}>("SELECT a.id,a.invoice_line_id,a.receipt_line_id,a.base_qty::text FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=$1",[order.id]);
     const prior:InvoiceReceiptAllocation[]=priorRows.rows.map(row=>({id:row.id,invoiceLineId:row.invoice_line_id,receiptLineId:row.receipt_line_id,baseQuantity:row.base_qty}));
-    const match=matchSupplierInvoice(order,invoice,receipts.rows.map(row=>row.document),prior);
+    const match=matchSupplierInvoice(order,invoice,effectiveReceiptLines,prior);
     await client.query("INSERT INTO supplier_invoices(id,order_id,supplier_party_id,duplicate_key,document,match_plan,created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",[invoice.id,order.id,invoice.supplierPartyId,match.duplicateKey,JSON.stringify(invoice),JSON.stringify(match),actor.userId]);
     if(match.status === "matched")for(const line of invoice.lines)for(const allocation of line.receiptAllocations){await client.query("INSERT INTO supplier_invoice_receipt_allocations(id,invoice_id,invoice_line_id,receipt_line_id,base_qty) VALUES($1,$2,$3,$4,$5::numeric)",[allocation.id,invoice.id,line.id,allocation.receiptLineId,allocation.baseQuantity]);}
     await writeInventoryAudit(client,actor,"supplier_invoice",invoice.id,"match",{version:invoice.version,status:match.status,issues:match.issues});
@@ -228,7 +328,7 @@ export async function readProcurementRequests(actor:InventoryActor,offset=0){
 export async function readProcurementCatalog(actor:InventoryActor){
   await ready();return withTransaction(getPool(),async client=>{
     await requireInventoryActor(client,actor,false);
-    const rows=await client.query<{item_id:number;name:string;version:number;entered_unit:string;base_unit:string;factor:string;entered_precision:number;base_precision:number}>(`SELECT p.item_id,i.name,p.version,p.entered_unit,p.base_unit,p.factor::text,p.entered_precision,p.base_precision
+    const rows=await client.query<{item_id:number;name:string;version:number;entered_unit:string;base_unit:string;factor:string;entered_precision:number;base_precision:number}>(`SELECT p.item_id,i.name,p.version,p.entered_unit,p.base_unit,p.factor::text,entered_precision,base_precision
       FROM inventory_item_unit_versions p JOIN inventory_items i ON i.id=p.item_id
       WHERE i.is_active AND i.unit=p.base_unit ORDER BY i.name,p.version DESC LIMIT 200`);
     return {items:rows.rows.map(row=>({itemId:row.item_id,name:row.name,conversion:unitConversionSnapshot({itemId:row.item_id,version:row.version,baseUnit:row.base_unit,enteredUnit:row.entered_unit,baseUnitsPerEnteredUnit:row.factor,enteredPrecision:row.entered_precision,basePrecision:row.base_precision})})),scope:INVENTORY_CLINIC_SCOPE};
@@ -253,10 +353,14 @@ export async function readProcurementWorkbench(actor:InventoryActor,requestOffse
     const orderResults=await client.query<{result:{id:string;totalMinor:number;currency:PurchaseOrder["currency"]}}>("SELECT result FROM inventory_operations WHERE scope='order.issue' AND result->>'id'=ANY($1::text[])",[orderIds]);
     const receiptHeaders=await client.query<{id:string;document:ReceiptRevision}>("SELECT id,document FROM goods_receipts WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
     const receipts=await client.query<{id:string;order_id:string;document:InspectedReceiptLine}>("SELECT id,order_id,document FROM goods_receipt_lines WHERE order_id=ANY($1::uuid[]) ORDER BY receipt_id,id",[orderIds]);
+    const hasQuarantineTable=await client.query<{present:boolean}>("SELECT to_regclass('quarantine_dispositions') IS NOT NULL AS present");
+    const quarantineDispositions=hasQuarantineTable.rows[0]?.present
+      ? (await client.query<{id:string;receipt_line_id:string;order_id:string;order_line_id:string;action:QuarantineResolutionAction;base_qty:string;reason:string}>("SELECT id::text,receipt_line_id,order_id::text,order_line_id,action,base_qty::text,reason FROM quarantine_dispositions WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds])).rows
+      : [];
     const allocations=await client.query<{receipt_line_id:string;qty:string}>("SELECT a.receipt_line_id,SUM(a.base_qty)::text AS qty FROM supplier_invoice_receipt_allocations a JOIN supplier_invoices i ON i.id=a.invoice_id WHERE i.order_id=ANY($1::uuid[]) GROUP BY a.receipt_line_id",[orderIds]);
     const invoices=await client.query<{id:string;order_id:string;document:SupplierInvoiceRevision;match_plan:ReturnType<typeof matchSupplierInvoice>}>("SELECT id,order_id,document,match_plan FROM supplier_invoices WHERE order_id=ANY($1::uuid[]) ORDER BY created_at,id",[orderIds]);
     const itemIds=[...new Set([...requests.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId)),...orders.rows.slice(0,20).flatMap(row=>row.document.lines.map(line=>line.itemId))])];
     const names=await client.query<{id:number;name:string}>("SELECT id,name FROM inventory_items WHERE id=ANY($1::int[])",[itemIds]);
-    return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:orders.rows.slice(0,20),orderResults:orderResults.rows.map(row=>row.result),receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
+    return {scope:INVENTORY_CLINIC_SCOPE,requests:requests.rows.slice(0,20),sourceAllocations:sources.rows,suppliers:suppliers.rows,locations:locations.rows,orders:orders.rows.slice(0,20),orderResults:orderResults.rows.map(row=>row.result),receiptHeaders:receiptHeaders.rows,receipts:receipts.rows,quarantineDispositions,invoiceAllocations:allocations.rows,invoices:invoices.rows,itemNames:Object.fromEntries(names.rows.map(row=>[row.id,row.name])),hasMoreRequests:requests.rows.length>20,hasMoreOrders:orders.rows.length>20,requestOffset,orderOffset,financialPosting:"pending_shared_finance_review" as const};
   });
 }

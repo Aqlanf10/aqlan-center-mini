@@ -5,13 +5,13 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
 import { safeInventoryErrorMessage } from "@/lib/inventory-domain/presentation";
 import { submitPurchaseRequest, revisePurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
-  recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog,readProcurementWorkbench, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
-import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement } from "@/lib/inventory-domain/custody-store";
+  resolveQuarantineReceipt, recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog,readProcurementWorkbench, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
+import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,reconcileHistoricalMovements,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement,type LegacyReconciliationInput } from "@/lib/inventory-domain/custody-store";
 import type { RequestRevision, PurchaseOrder, ReceiptRevision, SupplierInvoiceRevision } from "@/lib/inventory-domain/procurement";
 export const dynamic = "force-dynamic";
 function failure(error:unknown) {
   const bounded=bodyErrorResponse(error);if(bounded)return bounded;
-  if(error instanceof InventoryDomainError){const status=error.code==="schema_not_ready"?503:error.code.includes("forbidden")?403:error.code==="not_found"?404:["stale_version","idempotency_conflict","invalid_transition","source_overallocated","overdelivery","receipt_already_invoiced"].includes(error.code)?409:400;
+  if(error instanceof InventoryDomainError){const status=error.code==="schema_not_ready"?503:error.code.includes("forbidden")?403:error.code==="not_found"?404:["stale_version","idempotency_conflict","invalid_transition","source_overallocated","overdelivery","receipt_already_invoiced","quarantine_overresolved","already_reconciled"].includes(error.code)?409:400;
     return NextResponse.json({code:error.code,message:status===503?"دورة المشتريات بانتظار اعتماد ترحيل المخطط. لم تُسجّل العملية.":safeInventoryErrorMessage(error,error.message)},{status});}
   if(error && typeof error==="object" && "code" in error && error.code==="23505")return NextResponse.json({code:"duplicate_document",message:"هذا المستند أو مصدره مسجّل بالفعل. راجع العملية الأصلية."},{status:409});
   return NextResponse.json({code:"inventory_unavailable",message:"تعذّر تأكيد العملية. استعلم عن النتيجة واستخدم مفتاح العملية نفسه عند إعادة المحاولة."},{status:500});
@@ -34,10 +34,12 @@ export async function POST(request:Request){const session=await requireSession()
     case "request.revise":{const revision=record(source.revision);record(revision.value);return NextResponse.json(await revisePurchaseRequest(actor,source.operationKey,revision as unknown as Parameters<typeof revisePurchaseRequest>[2]),{status:201});}
     case "custody.dispatch":{const transfer=record(source.transfer);list(transfer.lines);return NextResponse.json(await dispatchCustodyTransfer(actor,source.operationKey,transfer as unknown as CustodyDispatch),{status:201});}
     case "custody.acknowledge":{const acknowledgement=record(source.acknowledgement);list(acknowledgement.lines);return NextResponse.json(await acknowledgeCustodyTransfer(actor,source.operationKey,acknowledgement as unknown as CustodyAcknowledgement),{status:201});}
+    case "legacy.reconcile":{const reconciliation=record(source.reconciliation ?? source.document);return NextResponse.json(await reconcileHistoricalMovements(actor,source.operationKey,reconciliation as unknown as LegacyReconciliationInput),{status:201});}
     case "request.submit":shape(source.document,command);return NextResponse.json(await submitPurchaseRequest(actor,source.operationKey,{...source.document as RequestRevision,requestedBy:actor.userId}),{status:201});
     case "request.approve":{const approval=record(source.approval);list(approval.decisions);invariant(typeof approval.requestId==="string"&&Number.isSafeInteger(approval.version),"invalid_approval","Approval targets an exact request/version");return NextResponse.json(await approvePurchaseRequest(actor,source.operationKey,approval as Parameters<typeof approvePurchaseRequest>[2]));}
     case "order.issue":shape(source.document,command);return NextResponse.json(await issuePurchaseOrder(actor,source.operationKey,source.document as PurchaseOrder),{status:201});
     case "receipt.post":shape(source.document,command);return NextResponse.json(await postInspectedReceipt(actor,source.operationKey,source.document as ReceiptRevision),{status:201});
+    case "quarantine.resolve":{const resolution=record(source.resolution ?? source.document);return NextResponse.json(await resolveQuarantineReceipt(actor,source.operationKey,resolution as unknown as Parameters<typeof resolveQuarantineReceipt>[2]),{status:201});}
     case "invoice.match":shape(source.document,command);return NextResponse.json(await recordSupplierInvoiceMatch(actor,source.operationKey,source.document as SupplierInvoiceRevision),{status:201});
     default:throw new InventoryDomainError("invalid_command","Use a supported procurement transition");
   }

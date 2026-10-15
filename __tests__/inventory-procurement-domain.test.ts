@@ -5,7 +5,8 @@ import {
 } from "../lib/inventory-domain/quantities";
 import {
   allocateMinor, approveRequest, inspectIdempotency, matchSupplierInvoice, payloadIdentity,
-  planInspectedReceipt, planOrderIssue, requireCurrentApproval, supplierInvoiceDuplicateKey, valuationSnapshot,
+  planExcessArrivalDecision, planHistoricalReconciliation, planInspectedReceipt, planOrderIssue,
+  planQuarantineResolution, requireCurrentApproval, supplierInvoiceDuplicateKey, valuationSnapshot,
   type CommittedSourceAllocation, type InvoiceReceiptAllocation, type IssuedPurchaseOrder, type PurchaseOrder,
   type ReceiptRevision, type RequestApproval, type RequestRevision, type SupplierInvoiceRevision,
 } from "../lib/inventory-domain/procurement";
@@ -465,3 +466,260 @@ describe("exact money, valuation and idempotent payload boundaries", () => {
     rejects("invalid_payload", () => payloadIdentity(cycle));
   });
 });
+
+describe("quarantine disposition, excess arrival decision and historical reconciliation", () => {
+  const quarantinedLine = () => {
+    const source = receipt();
+    return planInspectedReceipt(issuedOrder(), {
+      ...source,
+      lines: [{
+        ...source.lines[0],
+        portions: [{
+          ...source.lines[0].portions[0],
+          disposition: "quarantined",
+          reason: "Awaiting specification confirmation",
+        }],
+      }],
+    }, [], "2026-10-11").lines[0];
+  };
+
+  it("releases quarantined stock to available without creating a duplicate receipt movement or payable", () => {
+    const line = quarantinedLine();
+    const order = issuedOrder();
+    const resolved = planQuarantineResolution({
+      id: "qres-1",
+      order,
+      receiptLine: line,
+      priorResolutions: [],
+      action: "release",
+      quantity: "2",
+      reason: "Certificate of analysis verified",
+      resolutionDate: "2026-10-12",
+    });
+    expect(resolved).toMatchObject({
+      action: "release",
+      baseQuantity: "100",
+      effectiveReceiptLine: {
+        receiptLineId: line.id,
+        releasedBaseQuantity: "100",
+        returnedBaseQuantity: "0",
+        remainingQuarantinedBaseQuantity: "0",
+        effectiveLotStatus: "accepted",
+      },
+      stockCompensation: null,
+    });
+    expect(resolved.effects).toEqual({ inventoryMovements: 0, payables: 0, expenses: 0 });
+  });
+
+  it("reject_return records a compensating return movement and reopens supplier replacement delivery capacity", () => {
+    const line = quarantinedLine();
+    const order = issuedOrder();
+    const resolved = planQuarantineResolution({
+      id: "qres-2",
+      order,
+      receiptLine: line,
+      priorResolutions: [],
+      action: "reject_return",
+      quantity: "2",
+      reason: "Failed lab sterility test; returned to supplier",
+      resolutionDate: "2026-10-12",
+    });
+    expect(resolved).toMatchObject({
+      action: "reject_return",
+      baseQuantity: "100",
+      effectiveReceiptLine: {
+        receiptLineId: line.id,
+        releasedBaseQuantity: "0",
+        returnedBaseQuantity: "100",
+        remainingQuarantinedBaseQuantity: "0",
+        effectiveLotStatus: "recalled",
+      },
+      stockCompensation: {
+        itemId: 1,
+        locationId: "main-store",
+        baseQuantity: "100",
+        movementType: "out",
+        isReturn: true,
+      },
+    });
+    expect(resolved.effects).toEqual({ inventoryMovements: 1, payables: 0, expenses: 0 });
+
+    // After returning 100 quarantined units, a replacement shipment of 2 boxes (100 units) is accepted without overdelivery
+    const projectedHistory = [{
+      orderLineId: line.orderLineId,
+      acceptedBaseQuantity: resolved.effectiveReceiptLine.releasedBaseQuantity,
+      quarantinedBaseQuantity: resolved.effectiveReceiptLine.remainingQuarantinedBaseQuantity,
+      rejectedBaseQuantity: resolved.effectiveReceiptLine.returnedBaseQuantity,
+    }];
+    const replacement = planInspectedReceipt(order, {
+      ...receipt(),
+      id: "receipt-replacement-1",
+      lines: [{
+        ...receipt().lines[0],
+        arrivedQuantity: "2",
+        portions: [{
+          ...receipt().lines[0].portions[0],
+          id: "receipt-line-replacement-1",
+          quantity: "2",
+          lotCode: "SYNTH-LOT-REPL",
+        }],
+      }],
+    }, projectedHistory, "2026-10-13");
+    expect(replacement.remaining[0]).toMatchObject({
+      acceptedBaseQuantity: "100",
+      rejectedBaseQuantity: "100",
+      remainingFulfillmentBaseQuantity: "50",
+      remainingDeliveryBaseQuantity: "50",
+    });
+  });
+
+  it("blocks releasing damaged, missing-lot or expired/short-shelf-life quarantined stock and prevents over-resolution", () => {
+    const line = quarantinedLine();
+    const order = issuedOrder();
+    rejects("damaged_stock", () => planQuarantineResolution({
+      id: "qres-bad-1",
+      order,
+      receiptLine: { ...line, damaged: true },
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Try release damaged",
+      resolutionDate: "2026-10-12",
+    }));
+    rejects("missing_lot", () => planQuarantineResolution({
+      id: "qres-bad-2",
+      order,
+      receiptLine: { ...line, lotCode: null },
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Try release unknown lot",
+      resolutionDate: "2026-10-12",
+    }));
+    rejects("expired_receipt", () => planQuarantineResolution({
+      id: "qres-bad-3",
+      order,
+      receiptLine: { ...line, expiryDate: "2026-10-25" },
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Try release short shelf life",
+      resolutionDate: "2026-10-12",
+    }));
+    const partial = planQuarantineResolution({
+      id: "qres-partial",
+      order,
+      receiptLine: line,
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Partial release 1 box",
+      resolutionDate: "2026-10-12",
+    });
+    expect(partial.effectiveReceiptLine.releasedBaseQuantity).toBe("50");
+    expect(partial.effectiveReceiptLine.remainingQuarantinedBaseQuantity).toBe("50");
+    rejects("quarantine_overresolved", () => planQuarantineResolution({
+      id: "qres-over",
+      order,
+      receiptLine: line,
+      action: "reject_return",
+      quantity: "2",
+      reason: "Exceeds remaining quarantine",
+      resolutionDate: "2026-10-12",
+      priorResolutions: [{
+        id: partial.id,
+        receiptLineId: line.id,
+        action: partial.action,
+        baseQuantity: partial.baseQuantity,
+      }],
+    }));
+  });
+
+  it("plans explicit excess arrival decisions without silently expanding purchase order capacity", () => {
+    const order = issuedOrder();
+    const returned = planExcessArrivalDecision({
+      order,
+      orderLineId: "order-line-1",
+      prior: [],
+      arrivedQuantity: "4",
+      decision: "return_excess_to_supplier",
+      reason: "Supplier shipped 4 boxes instead of 3; 1 box returned on truck",
+    });
+    expect(returned).toMatchObject({
+      orderedBaseQuantity: "150",
+      withinOrderBaseQuantity: "150",
+      excessBaseQuantity: "50",
+      decision: "return_excess_to_supplier",
+      requiresOrderAmendment: false,
+    });
+    expect(returned.effects).toEqual({ inventoryMovements: 0, payables: 0, expenses: 0 });
+
+    const held = planExcessArrivalDecision({
+      order,
+      orderLineId: "order-line-1",
+      prior: [],
+      arrivedQuantity: "4",
+      decision: "hold_for_order_amendment",
+      reason: "Hold excess 1 box pending formal request/order amendment",
+    });
+    expect(held.requiresOrderAmendment).toBe(true);
+    rejects("no_excess_arrival", () => planExcessArrivalDecision({
+      order,
+      orderLineId: "order-line-1",
+      prior: [],
+      arrivedQuantity: "3",
+      decision: "return_excess_to_supplier",
+      reason: "Within order",
+    }));
+  });
+
+  it("reconciles unallocated historical movements into explicit lot/location allocations without duplicating stock or debt", () => {
+    const reconciled = planHistoricalReconciliation({
+      itemId: 1,
+      baseUnit: "cartridge",
+      basePrecision: 0,
+      conversionVersion: 1,
+      requiresExpiry: false,
+      locationId: "main-store",
+      reason: "Opening legacy inventory reconciliation before LOT tracking",
+      movements: [
+        { movementId: 101, kind: "in", signedBaseQuantity: "80", alreadyAllocatedBaseQuantity: "0", expiryDate: null, unitCostMinor: null, payableId: 501 },
+        { movementId: 102, kind: "out", signedBaseQuantity: "20", alreadyAllocatedBaseQuantity: "0", expiryDate: null, unitCostMinor: null, payableId: null },
+      ],
+    });
+    expect(reconciled).toMatchObject({
+      itemId: 1,
+      locationId: "main-store",
+      netReconciledBaseQuantity: "60",
+    });
+    expect(reconciled.lotsToCreate).toHaveLength(1);
+    expect(reconciled.lotsToCreate[0]).toMatchObject({
+      movementId: 101,
+      baseQuantity: "80",
+      costStatus: "missing",
+      costSnapshot: {
+        source: "legacy_reconciliation",
+        traceability: "legacy_unknown",
+        unitCostMinor: null,
+        payableId: 501,
+      },
+    });
+    expect(reconciled.allocationsToCreate).toEqual([
+      { movementId: 101, sourceLotMovementId: 101, locationId: "main-store", baseQuantity: "80" },
+      { movementId: 102, sourceLotMovementId: 101, locationId: "main-store", baseQuantity: "20" },
+    ]);
+    expect(reconciled.effects).toEqual({ inventoryMovements: 0, payables: 0, expenses: 0 });
+
+    rejects("already_reconciled", () => planHistoricalReconciliation({
+      itemId: 1,
+      baseUnit: "cartridge",
+      basePrecision: 0,
+      conversionVersion: 1,
+      requiresExpiry: false,
+      locationId: "main-store",
+      reason: "Attempt duplicate reconciliation",
+      movements: [{ movementId: 101, kind: "in", signedBaseQuantity: "80", alreadyAllocatedBaseQuantity: "80", expiryDate: null, unitCostMinor: null, payableId: null }],
+    }));
+  });
+});
+
