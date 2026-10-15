@@ -12,13 +12,13 @@ import { CLINIC_ZONE_FALLBACK } from '@/lib/clinicZone';
 const field = 'w-full min-w-0 max-w-full rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm';
 const button = 'shrink-0 rounded-xl border border-navy-200 px-3 py-2 text-sm font-semibold disabled:opacity-50';
 const weekdays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-export function HrHistoryLauncher({ staffId, label, kind }: { staffId: number; label: string; kind: HrHistoryKind }) {
+export function HrHistoryLauncher({ staffId, label, kind, onOpen }: { staffId: number; label: string; kind: HrHistoryKind; onOpen?: () => void }) {
   const [open, setOpen] = useState(false), { owner } = useHrHistoryDrafts();
   const title = kind === 'employment' ? 'تاريخ العمل' : 'نسخ جدول الموظف';
-  return <><button type="button" className={button} onClick={() => setOpen(true)} aria-label={`${title}: ${label}`}>{title}</button>
+  return <><button type="button" className={button} onClick={onOpen ?? (() => setOpen(true))} aria-label={`${title}: ${label}`}>{title}</button>
     {open && <HistoryEditor key={`${owner}:${staffId}:${kind}`} staffId={staffId} kind={kind} label={label} onClose={() => setOpen(false)} />}</>;
 }
-function HistoryEditor({ staffId, kind, label, onClose }: { staffId: number; kind: HrHistoryKind; label: string; onClose(): void }) {
+export function HistoryEditor({ staffId, kind, label, onClose }: { staffId: number; kind: HrHistoryKind; label: string; onClose(): void }) {
   const { owner, username, store } = useHrHistoryDrafts(), scope = `${kind}:${staffId}`, pending = store.get(owner, scope);
   const initial = pending?.append.at(-1), initialValue = initial?.value;
   const [data, setData] = useState<HrRecordedHistory | null>(null), [loading, setLoading] = useState(true);

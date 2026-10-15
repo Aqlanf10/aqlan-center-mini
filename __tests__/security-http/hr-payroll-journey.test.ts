@@ -45,7 +45,7 @@ async function hrReadinessSnapshot(page:Page){
  return page.evaluate(()=>({
   readyState:document.readyState,pathname:location.pathname,fonts:document.fonts.status,
   tablists:Array.from(document.querySelectorAll('[role="tablist"][aria-label="أقسام الموارد البشرية"]')).map(list=>({
-   busy:list.getAttribute("aria-busy"),tabs:Array.from(list.querySelectorAll<HTMLButtonElement>('[role="tab"]')).map((tab,index)=>({index,disabled:tab.disabled,selected:tab.getAttribute("aria-selected")})),
+   busy:list.getAttribute("aria-busy"),tabs:Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]')).map((tab,index)=>({index,disabled:tab.matches(":disabled")||tab.getAttribute("aria-disabled")==="true",selected:tab.getAttribute("aria-selected")})),
   })),
   payrollSections:document.querySelectorAll('section[aria-label="إدارة المسير والصرف"]').length,
   payrollSelects:document.querySelectorAll('section[aria-label="إدارة المسير والصرف"] select').length,
@@ -208,6 +208,7 @@ it("a doctor sees personal tasks and leave without an unusable team attendance t
  const pair=h.sessions.doctorA.cookie.split(";")[0],split=pair.indexOf("=");await doctor.addCookies([{name:pair.slice(0,split),value:pair.slice(split+1),url:baseUrl}]);
  const page=await doctor.newPage();try{
   await page.goto(`${baseUrl}/hr`,{waitUntil:"domcontentloaded"});
+  await expect.poll(()=>page.getByRole("tablist",{name:"أقسام الموارد البشرية",exact:true}).getAttribute("aria-busy")).toBe("false");
   expect(await page.getByRole("tab",{name:"المهام",exact:false}).count()).toBe(1);
   expect(await page.getByRole("tab",{name:"الدوام والحضور",exact:false}).count()).toBe(0);
   expect(await page.getByRole("tab",{name:"المسير والصرف",exact:false}).count()).toBe(0);
@@ -681,7 +682,10 @@ for(const [index,template] of contractTemplateCases.entries()){
     expect(await editor.getByLabel("الراتب الأساسي",{exact:true}).inputValue()).toBe("");expect(await editor.getByLabel("نوع العقد",{exact:true}).isDisabled()).toBe(true);
     await editor.getByLabel("عملة الأجر",{exact:true}).selectOption("SAR");await editor.getByLabel("دورية الراتب",{exact:true}).selectOption("monthly");await editor.getByLabel("الراتب الأساسي",{exact:true}).fill("123.45");
     await diagnostic.witness("beforeDraftSaveGeometry");diagnostic.phase("save-draft-update");const updated=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await editor.getByRole("button",{name:"حفظ العقد",exact:true}).click();expect((await updated).status()).toBe(200);
-    diagnostic.phase("reload-contract-list");await page.reload({waitUntil:"domcontentloaded"});await openContractsPanel(page);await page.locator("tbody tr").filter({hasText:name}).getByRole("button",{name:"عرض وتعديل",exact:true}).click();
+    diagnostic.phase("reload-selected-contract");expect(new URL(page.url()).searchParams.get("contractId")).toBe(String(contract.id));
+    await page.reload({waitUntil:"domcontentloaded"});
+    await expect.poll(()=>page.getByRole("dialog").getByRole("heading",{name,exact:true}).count()).toBe(1);
+    expect(new URL(page.url()).searchParams.get("contractId")).toBe(String(contract.id));
     await expect.poll(()=>page.getByRole("dialog").innerText()).toContain(formatAmount(12345,"SAR"));
     await page.getByRole("button",{name:"تغيير الحالة",exact:true}).click();const statusDialog=page.getByRole("dialog").filter({has:page.getByRole("heading",{name:"تغيير حالة العقد",exact:true})});await statusDialog.getByRole("combobox").selectOption("approved");
     diagnostic.phase("approve-completed-draft");const approved=page.waitForResponse(r=>r.url().endsWith(`/api/hr/contracts/${contract.id}`)&&r.request().method()==="PATCH");await statusDialog.getByRole("button",{name:"تأكيد التغيير",exact:true}).click();expect((await approved).status()).toBe(200);
@@ -756,8 +760,9 @@ it("HR tabs are honestly disabled before hydration and one native click opens pa
   const periods=page.waitForResponse(response=>response.url().endsWith("/api/hr/payroll/periods")&&response.request().method()==="GET");
   phase="release-own-js";release();released=true;
   // Playwright waits on the real disabled affordance, then performs one click.
-  phase="single-hydrated-native-click";await payroll.click();expect(await payroll.getAttribute("aria-selected")).toBe("true");expect(await tabs.getAttribute("aria-busy")).toBe("false");
-  phase="verify-real-periods-response";const response=await periods;periodsStatus=response.status();expect(periodsStatus).toBe(200);const body=await response.json();expect(Array.isArray(body)).toBe(true);
+  phase="single-hydrated-native-click";const [response]=await Promise.all([periods,payroll.click()]);
+  await expect.poll(()=>payroll.getAttribute("aria-selected")).toBe("true");expect(await tabs.getAttribute("aria-busy")).toBe("false");
+  phase="verify-real-periods-response";periodsStatus=response.status();expect(periodsStatus).toBe(200);const body=await response.json();expect(Array.isArray(body)).toBe(true);
   expect(body.some((period:{id:number})=>period.id===run.periodId)).toBe(true);
   phase="select-owned-period";await page.locator('section[aria-label="إدارة المسير والصرف"] select').first().selectOption(String(run.periodId));
   phase="assert-owned-payroll-row";await expect.poll(async()=>await page.locator("tbody").textContent()).toContain("HR-JOURNEY-HYBRID");

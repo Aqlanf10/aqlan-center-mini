@@ -9,7 +9,7 @@ import { hrHref } from "@/lib/hr-navigation";
 import { useHrReadEpoch } from "./useHrReadEpoch";
 import { operationalStatus, operationalStatusLabel } from "@/lib/hr-operational-employment-shared";
 import { Modal } from "@/components/Modal";
-import { HrHistoryLauncher } from "./HistoryEditor";
+import { HistoryEditor, HrHistoryLauncher } from "./HistoryEditor";
 import {
   HR_CONTRACT_KIND_LABEL, HR_DEPARTMENT_LABEL, HR_SALARY_PERIOD_LABEL, HR_WORK_STATUS_LABEL,
   type HrContractKind, type HrDepartment, type HrSalaryPeriod, type HrWorkStatus,
@@ -58,6 +58,9 @@ export function HrStaffPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ mode: "create" } | { mode: "edit"; detail: StaffDetail } | null>(null);
+  // Refreshing the list must not detach an open history editor or its write lease.
+  // The owner-scoped panel still detaches both on navigation/account changes.
+  const [history, setHistory] = useState<{ id: number; label: string } | null>(null);
 
   const load = useCallback(async () => {
     const sequence = ++readSequence.current;
@@ -137,7 +140,7 @@ export function HrStaffPanel() {
                     <Link prefetch={false} scroll={false} href={navigation?.href({ staffId: String(member.id), profileTab: "overview", contractId: null }) ?? hrHref("", { tab: "staff", staffId: String(member.id) })} className="font-semibold text-brand-blue hover:underline">
                       {member.fullName}
                     </Link>
-                    <div className="mt-2"><HrHistoryLauncher staffId={member.id} label={member.fullName} kind="employment" /></div>
+                    <div className="mt-2"><HrHistoryLauncher staffId={member.id} label={member.fullName} kind="employment" onOpen={() => setHistory({ id: member.id, label: member.fullName })} /></div>
                   </td>
                   <td className="p-3">{member.jobTitle || "—"}</td>
                   <td className="p-3">{HR_DEPARTMENT_LABEL[member.department]}</td>
@@ -162,6 +165,7 @@ export function HrStaffPanel() {
         </div>
       )}
 
+      {history && <HistoryEditor key={history.id} staffId={history.id} kind="employment" label={history.label} onClose={() => setHistory(null)} />}
       {profileId && !editor && <StaffProfileModal staffId={profileId} open onClose={() => navigation ? navigation.closeProfile() : setLocalStaffId("")} onEdit={detail => setEditor({ mode: "edit", detail })} />}
 
       {editor?.mode === "create" && (

@@ -86,6 +86,12 @@ for (const width of [390, 1280]) {
       const page = await context.newPage(); await page.goto(owned.baseUrl + '/hr'); await page.getByRole('tab', { name: 'الطاقم' }).click(); const dialog = await openHistory(page, name);
       await dialog.getByLabel('بداية السريان', { exact: true }).fill('2026-10-10'); await dialog.getByLabel('نهاية السريان (غير مشمولة)', { exact: true }).fill('2026-10-01');
       await dialog.getByLabel('سبب التوثيق أو التصحيح').fill('إثبات تاريخ من مستند تجريبي');
+      // A focus refresh replaces the private list, but must preserve this editor,
+      // its unsaved fields and its admitted history write until explicit close.
+      const refreshed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/hr/staff' && r.request().method() === 'GET');
+      await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await refreshed;
+      expect(await dialog.getByLabel('نهاية السريان (غير مشمولة)', { exact: true }).inputValue()).toBe('2026-10-01');
+      expect(await dialog.getByLabel('سبب التوثيق أو التصحيح').inputValue()).toBe('إثبات تاريخ من مستند تجريبي');
       await dialog.getByRole('button', { name: 'توثيق الفترة', exact: true }).click(); await dialog.getByRole('alert').waitFor();
       expect((await api('GET', endpoint)).body.headRevision).toBe(0); await layout(page, dialog, `employment-invalid-${width}`);
       await dialog.getByLabel('بداية السريان', { exact: true }).fill('2026-10-01'); await dialog.getByLabel('نهاية السريان (غير مشمولة)', { exact: true }).fill(''); const first = await save(page, dialog, endpoint);

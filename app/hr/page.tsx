@@ -117,25 +117,28 @@ function HrPageView() {
         >
           {TABS.filter((t) => t.visible).map((t) => {
             const isActive = tab === t.id;
-            return (
+            const className = `flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+              isActive ? "bg-navy-900 text-white shadow-md shadow-navy-950/20" : "text-navy-600 hover:bg-navy-50 hover:text-navy-900"
+            }`;
+            const content = <><span>{t.icon}</span><span>{t.label}</span></>;
+            // An aria-disabled anchor still navigates before React attaches.
+            // Native disabled buttons make the initial server affordance honest.
+            return hydrated ? (
               <Link
                 key={t.id}
                 role="tab"
                 aria-selected={isActive}
-                aria-disabled={!hydrated}
                 href={href({ tab: t.id })}
                 prefetch={false}
                 scroll={false}
-                onClick={event => { if (!hydrated) event.preventDefault(); }}
-                className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-                  isActive
-                    ? "bg-navy-900 text-white shadow-md shadow-navy-950/20"
-                    : "text-navy-600 hover:bg-navy-50 hover:text-navy-900"
-                }`}
+                className={className}
               >
-                <span>{t.icon}</span>
-                <span>{t.label}</span>
+                {content}
               </Link>
+            ) : (
+              <button key={t.id} type="button" role="tab" aria-selected={isActive} disabled className={className}>
+                {content}
+              </button>
             );
           })}
         </div>
