@@ -7,6 +7,7 @@ export const HrNavigationContext = createContext<{
   contractId: string;
   href: (patch: Record<string, string | null>) => string;
   selectStaff: (id: string) => void;
+  selectContract: (id: string) => void;
   closeProfile: () => void;
 } | null>(null);
 export const useHrNavigation = () => useContext(HrNavigationContext);

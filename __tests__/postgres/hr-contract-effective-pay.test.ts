@@ -252,6 +252,21 @@ it.each([['YER', 150000], ['SAR', 150055], ['USD', 150099]] as const)('read-only
   expect(await state()).toEqual(before);
   expect((await hr.getStaffDetail(s.id))!.staff.payTerms!.amountMinor).toBe(100000);
 });
+it('read-only effective-day rollover changes compensation kind without rewriting the old profile or history', async () => {
+  const s = await staff('commission'), c = await salaryContract(s.id, '2099-02-01');
+  const { readCurrentStaffPay } = await import('../../lib/hr-current-pay');
+  const detail = (await hr.getStaffDetail(s.id))!;
+  const state = async () => ({ financial: await financialState(), staff: (await fixture.source.query('SELECT to_jsonb(s)::text AS value FROM hr_staff s ORDER BY id')).rows, contracts: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_contracts c ORDER BY id')).rows, changes: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_staff_changes c ORDER BY id')).rows });
+  const before = await state(), client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    expect((await readCurrentStaffPay(client, [detail.staff], '2099-01-31')).get(s.id)).toMatchObject({ source: 'staff_profile', terms: { kind: 'commission' } });
+    expect((await readCurrentStaffPay(client, [detail.staff], '2099-02-01')).get(s.id)).toMatchObject({ source: 'contract', terms: { kind: 'salary', salaryMinor: 120000 }, contract: { id: c.id } });
+    await client.query('COMMIT');
+  } finally { client.release(); }
+  expect(await state()).toEqual(before);
+  expect((await hr.getStaffDetail(s.id))!.staff.contractKind).toBe('commission');
+});
 it('detail and list agree on clinic today while the assignment directory and minimal read omit current pay', async () => {
   const s = await staff(); await salaryContract(s.id);
   const detail = (await hr.getStaffDetail(s.id))!, list = await hr.listStaff({ includePayTerms: true });

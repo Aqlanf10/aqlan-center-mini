@@ -99,6 +99,7 @@ function HrPageView() {
   return (
     <HrNavigationContext.Provider value={{ staffId, profileTab, contractId, href,
       selectStaff: id => router.push(href({ staffId: id || null, contractId: null }), { scroll: false }),
+      selectContract: id => router.push(href({ contractId: id || null }), { scroll: false }),
       closeProfile: () => router.push(href({ staffId: null, contractId: null }), { scroll: false }) }}>
     <div className="mx-auto w-full max-w-7xl px-3 pb-20 pt-4 sm:px-6">
       <PageHeader

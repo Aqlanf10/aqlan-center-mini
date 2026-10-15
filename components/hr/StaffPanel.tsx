@@ -150,7 +150,7 @@ export function HrStaffPanel() {
                     </span>
                   </td>
                   <td className="p-3 text-xs">{fmtDate(member.hireDate)}</td>
-                  <td className="p-3 text-xs">{HR_CONTRACT_KIND_LABEL[member.contractKind]}</td>
+                  <td className="p-3 text-xs">{member.currentPay?.terms ? HR_CONTRACT_KIND_LABEL[member.currentPay.terms.kind] : "نوع التعاقد يحتاج مراجعة"}</td>
                   <td className="p-3 text-xs">
                     <CurrentPaySummary pay={member.currentPay} staffId={member.id} compact />
                   </td>

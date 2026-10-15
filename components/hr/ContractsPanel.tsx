@@ -199,9 +199,20 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
       if (alive.current && sequence === detailSequence.current) setError(err instanceof Error ? err.message : "تعذّر تحميل العقد.");
     }
   }, [selectedStaff]);
-  const openDetails = (contract: ContractItem) => readDetails(String(contract.id));
-  const closeDetails = () => { detailSequence.current++; setSelectedContract(null); setContractDetails(null); };
-  useEffect(() => { if (navigation?.contractId) void readDetails(navigation.contractId); }, [navigation?.contractId, readDetails]);
+  const openDetails = (contract: ContractItem) => {
+    const id = String(contract.id);
+    if (navigation && navigation.contractId !== id) navigation.selectContract(id);
+    else void readDetails(id);
+  };
+  const closeDetails = () => {
+    detailSequence.current++; setSelectedContract(null); setContractDetails(null);
+    if (navigation) navigation.selectContract("");
+  };
+  useEffect(() => {
+    // A saved detail link must not cover the owner's unresolved save review
+    // when this panel remounts. Explicit detail clicks remain available.
+    if (navigation?.contractId && !activeSave.current) void readDetails(navigation.contractId);
+  }, [navigation?.contractId, readDetails]);
 
   const applyTemplate = (template: "fixed" | "doctor_pct" | "doctor_salary" | "hybrid" | "probation") => {
     const presets = {

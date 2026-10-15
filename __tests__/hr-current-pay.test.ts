@@ -21,6 +21,12 @@ it('does not call an arbitrary independent overlap the governing source', () => 
 it('retains a dated addendum as the governing source', () => {
   expect(currentStaffPay(staff, [contract, { ...contract, id: 8, parentContractId: 7, versionNumber: 2, salaryMinor: 175000 }], '2099-02-01')).toMatchObject({ source: 'contract', contract: { id: 8 }, terms: { salaryMinor: 175000 } });
 });
+it('changes the displayed compensation kind with its governing contract, without rewriting the profile', () => {
+  const old = { ...staff, contractKind: 'commission' as const, payTerms: null };
+  expect(currentStaffPay(old, [contract], '2099-01-31').terms?.kind).toBe('commission');
+  expect(currentStaffPay(old, [contract], '2099-02-01').terms?.kind).toBe('salary');
+  expect(old.contractKind).toBe('commission'); expect(old.payTerms).toBeNull();
+});
 it('shows unresolved coverage and terminal history instead of silently showing an old wage', () => {
   for (const c of [{ ...contract, endDate: '2099-02-01' }, { ...contract, status: 'terminated', approvedBy: 'synthetic' }]) {
     const pay = currentStaffPay(staff, [c], '2099-02-02'); expect(pay.source).toBeNull(); expect(pay.terms).toBeNull(); expect(pay.blockers.length).toBeGreaterThan(0);
