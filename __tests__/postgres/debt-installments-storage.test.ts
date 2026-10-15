@@ -18,7 +18,7 @@ const input=(key:string,version=0)=>({target:target(),terms,expectedVersion:vers
 beforeAll(async()=>{
   await dropPublicSchema(process.env.DATABASE_URL!);
   const files=(await loadMigrationFiles()).filter(file=>file.version<="0059");expect(files.at(-1)?.filename).toBe("0059_invoice_debt_installments.sql");
-  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0045","0046","0048","0049","0050","0056","0057","0058","0059"]);
+  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0045","0046","0048","0049","0050","0051","0052","0056","0057","0058","0059"]);
   await migrate(db.getPool(),{apply:true,files:files.filter(f=>Number(f.version)<=43)});
   patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES('DEBT-SYN','Synthetic schedule') RETURNING id"))[0].id;
   invoiceId=(await q("INSERT INTO invoices(invoice_number,patient_id,base_currency,total_minor,discount_minor,created_by) VALUES('DEBT-OLD', $1,'SAR',60000,0,'synthetic') RETURNING id",[patientId]))[0].id;

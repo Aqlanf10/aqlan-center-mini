@@ -27,6 +27,10 @@ vi.mock("../components/OrthoPackageLink", () => ({ OrthoPackageLink: ({ onChange
 } }));
 vi.mock("../components/PatientCeph", () => ({ PatientCeph: () => null }));
 vi.mock("../components/PatientDiagnosis", () => ({ PatientDiagnosis: () => null }));
+// This suite isolates parent reads/prescription truth, like the other specialist
+// leaves above. The new editors have separate actual HTTP/React acceptance.
+vi.mock("../components/OrthoTreatmentStrategy", () => ({ OrthoTreatmentStrategy: () => null }));
+vi.mock("../components/OrthoCaseAssessmentV2", () => ({ OrthoCaseAssessmentV2: () => null }));
 vi.mock("../components/WebCephRecordsGrid", () => ({ WebCephRecordsGrid: () => null }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();

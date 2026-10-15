@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { guardOrthoRevisionMigration, validateOrthoRevisionRegistry } from "./ortho-revision-migration-guard";
 import { BASELINE_VERSION, loadMigrationFiles, type MigrationFile } from "./migration-files";
 import type { DbClient, DbPool } from "./db";
 import { runBaselineSchemaProbe, describeBaselineDiff, type BaselineSchemaDiff } from "./baseline-probe";
@@ -333,6 +334,10 @@ async function migrateHoldingLock(
   apply: boolean,
 ): Promise<MigrationRunResult> {
   let applied = await listAppliedMigrations(client);
+  // Validate only the two pinned Ortho contracts before skipping applied files.
+  for (const file of files) {
+    if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));
+  }
   const appliedVersions = new Set(applied.map((row) => row.version));
   const appliedNow: string[] = [];
   let adoptedBaseline = false;
@@ -424,6 +429,10 @@ async function applyMigrationInTransaction(
 ): Promise<void> {
   await client.query("BEGIN");
   try {
+    if (file.version === "0051" || file.version === "0052") {
+      validateOrthoRevisionRegistry(file, (await listAppliedMigrations(client)).find(row => row.version === file.version));
+      await guardOrthoRevisionMigration(client, file);
+    }
     await client.query(file.sql);
     await client.query(
       `INSERT INTO schema_migrations (version, name, checksum, adopted)

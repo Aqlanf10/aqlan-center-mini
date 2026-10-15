@@ -3,6 +3,7 @@ import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { HR_STAFF_SQL } from "./hr-schema";
 import HR_TEMPORAL_RUNTIME_MIGRATIONS from './hr-temporal-schema.generated.json';
 import { applyRuntimeMigrationFiles } from './migrations';
+import { applyOrthoAssessmentRuntime } from './ortho-assessment-runtime';
 import { HR_TASKS_SQL } from "./hr-tasks-schema";
 import { HR_CONTRACTS_ATTENDANCE_LEAVES_SQL } from "./hr-contracts-attendance-schema";
 import { HR_PAYROLL_SQL } from "./hr-payroll-schema";
@@ -2076,6 +2077,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_PAYROLL_SQL);
     await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
+    await applyOrthoAssessmentRuntime(getPool());
 
 
 

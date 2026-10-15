@@ -7,6 +7,15 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length === 56) {
+    const ortho = files.filter(file => file.version === "0051" || file.version === "0052");
+    if (ortho.length !== 2 || ortho[0].filename !== "0051_ortho_treatment_strategy.sql" || ortho[1].filename !== "0052_ortho_assessment.sql") {
+      throw new Error("Unreviewed Ortho strategy/assessment union for periodontal test fixture.");
+    }
+    // Strip only the exact two root-authorized additions, then preserve every
+    // existing HR/finance chain guard. No number is allocated by this fixture.
+    return periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0051" && file.version !== "0052"));
+  }
   if (files.length === 54) {
     const hr = [
       "0045_hr_staff.sql", "0046_hr_tasks.sql", "0048_hr_contracts_attendance_leaves.sql",
