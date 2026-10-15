@@ -4,6 +4,7 @@ import { withTransaction } from "../transactions";
 import { clinicDateString } from "../schedule";
 import { CLINIC_ZONE_FALLBACK } from "../clinicZone";
 import { invariant, InventoryDomainError, decimalRatio, convertQuantity, unitConversionSnapshot } from "./quantities";
+import { sanitizeInventoryAuditDetails } from "./presentation";
 import { approveRequest, matchSupplierInvoice, payloadIdentity, planInspectedReceipt, planOrderIssue, validateRequest,
   type CommittedSourceAllocation, type RequestRevision, type RequestApproval, type PurchaseOrder,
   type IssuedPurchaseOrder, type ReceiptRevision, type InspectedReceiptLine, type PriorInspectedQuantity,
@@ -31,8 +32,12 @@ export async function requireInventoryActor(client: DbClient, actor: InventoryAc
 export async function writeInventoryAudit(client: DbClient, actor: InventoryActor, entity: string, id: string, operation: string, details: Record<string, unknown>) {
   // Reuses the existing throwing transactional audit writer. Specific new action
   // labels are a narrow root-owned audit enum proposal, not a second audit ledger.
+  const sanitized = sanitizeInventoryAuditDetails(
+    { operation, ...details },
+    { includeFinancials: actor.role === "admin" },
+  );
   await insertAuditRow(client, { action: "inventory.item", entity, entityId: id, entityLabel: id,
-    actor: actor.username, actorRole: actor.role, details: { operation, ...details } });
+    actor: actor.username, actorRole: actor.role, details: sanitized });
 }
 export async function inventoryOperation<T extends object>(actor: InventoryActor, key: string, name: string, payload: unknown, management: boolean, work: (client: DbClient) => Promise<T>): Promise<T & { replayed: boolean }> {
   invariant(typeof key === "string" && /^[A-Za-z0-9_.:-]{8,120}$/.test(key), "invalid_operation_key", "A bounded idempotency key is required");

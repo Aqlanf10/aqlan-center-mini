@@ -84,15 +84,27 @@ export default function InventoryPage() {
   const isAdmin = session?.role === "admin";
   const canBill = session?.role === "admin" || session?.role === "reception";
 
+  const [suppliersError, setSuppliersError] = useState(false);
   useEffect(() => {
     if (!canBill) return;
     let alive = true;
     fetch("/api/parties?kind=supplier", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : []))
-      .then((rows: { id: number; name: string; isActive: boolean }[]) => {
-        if (alive && Array.isArray(rows)) setSuppliers(rows);
+      .then(async (response) => {
+        if (!response.ok) throw new Error("supplier_read_failed");
+        return response.json();
       })
-      .catch(() => {});
+      .then((rows: { id: number; name: string; isActive: boolean }[]) => {
+        if (alive && Array.isArray(rows)) {
+          setSuppliers(rows);
+          setSuppliersError(false);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setSuppliers([]);
+          setSuppliersError(true);
+        }
+      });
     return () => { alive = false; };
   }, [canBill]);
   const [items, setItems] = useState<InventoryItemView[]>([]);
@@ -145,15 +157,21 @@ export default function InventoryPage() {
   }, []);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const response = await fetch("/api/inventory", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload?.message ?? "تعذّر التحميل.");
-      setItems((payload as { items: InventoryItemView[] }).items ?? []);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload || !Array.isArray(payload.items)) {
+        throw new Error(typeof payload?.message === "string" ? payload.message : "تعذّر تحميل المخزون.");
+      }
+      setItems((payload as { items: InventoryItemView[] }).items);
       setAlerts((payload as { alerts: Alerts }).alerts ?? { lowItems: [], expired: [], soon: [] });
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "تعذّر التحميل.");
+      setItems([]);
+      setAlerts({ lowItems: [], expired: [], soon: [] });
+      setDetail(null);
+      setError(loadError instanceof Error ? loadError.message : "تعذّر تحميل المخزون.");
     } finally {
       setLoading(false);
     }
@@ -166,11 +184,13 @@ export default function InventoryPage() {
       const response = await fetch("/api/inventory/value", { cache: "no-store" });
       if (!response.ok) {
         const payload = await response.json().catch(() => null);
+        setValuePanel(null);
         setMessage(payload?.message ?? "تعذّر حساب قيمة المخزون.");
         return;
       }
       setValuePanel(await response.json());
     } catch {
+      setValuePanel(null);
       setMessage("تعذّر الاتصال بالخادم.");
     }
   }, []);
@@ -412,30 +432,40 @@ export default function InventoryPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-slate-600">معدل السلامة:</span>
-            <span className={`rounded-full px-3 py-1 text-xs font-extrabold ${
-              healthSummary.healthScore >= 80 ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                : healthSummary.healthScore >= 50 ? "bg-amber-100 text-amber-800 border border-amber-300"
-                : "bg-red-100 text-red-800 border border-red-300"
-            }`}>
-              {healthSummary.healthScore}% {healthSummary.healthScore >= 80 ? "آمن ومكتمل" : healthSummary.healthScore >= 50 ? "تحذير: نقص مواد" : "خطر نفاد مواد أساسية"}
-            </span>
+            {loading ? (
+              <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-600">
+                جارٍ التحقق…
+              </span>
+            ) : error ? (
+              <span className="rounded-full border border-red-300 bg-red-100 px-3 py-1 text-xs font-extrabold text-red-800">
+                تعذّر التحقق من الحالة
+              </span>
+            ) : (
+              <span className={`rounded-full px-3 py-1 text-xs font-extrabold ${
+                healthSummary.healthScore >= 80 ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  : healthSummary.healthScore >= 50 ? "bg-amber-100 text-amber-800 border border-amber-300"
+                  : "bg-red-100 text-red-800 border border-red-300"
+              }`}>
+                {healthSummary.healthScore}% {healthSummary.healthScore >= 80 ? "آمن ومكتمل" : healthSummary.healthScore >= 50 ? "تحذير: نقص مواد" : "خطر نفاد مواد أساسية"}
+              </span>
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 pt-3 sm:grid-cols-4">
           <div className="rounded-xl bg-slate-50 p-2.5 text-center">
-            <p className="text-lg font-extrabold text-navy-900">{healthSummary.totalItems}</p>
+            <p className="text-lg font-extrabold text-navy-900">{loading || error ? "—" : healthSummary.totalItems}</p>
             <p className="text-[10px] font-bold text-slate-500">إجمالي المواد</p>
           </div>
-          <div className={`rounded-xl p-2.5 text-center ${healthSummary.outOfStockCount > 0 ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-800"}`}>
-            <p className="text-lg font-extrabold">{healthSummary.outOfStockCount}</p>
+          <div className={`rounded-xl p-2.5 text-center ${!loading && !error && healthSummary.outOfStockCount > 0 ? "bg-red-50 text-red-800" : loading || error ? "bg-slate-50 text-slate-500" : "bg-emerald-50 text-emerald-800"}`}>
+            <p className="text-lg font-extrabold">{loading || error ? "—" : healthSummary.outOfStockCount}</p>
             <p className="text-[10px] font-bold">مواد نافدة (صفر)</p>
           </div>
-          <div className={`rounded-xl p-2.5 text-center ${healthSummary.lowStockCount > 0 ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-600"}`}>
-            <p className="text-lg font-extrabold">{healthSummary.lowStockCount}</p>
+          <div className={`rounded-xl p-2.5 text-center ${!loading && !error && healthSummary.lowStockCount > 0 ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-600"}`}>
+            <p className="text-lg font-extrabold">{loading || error ? "—" : healthSummary.lowStockCount}</p>
             <p className="text-[10px] font-bold">تحت حد الطلب</p>
           </div>
-          <div className={`rounded-xl p-2.5 text-center ${healthSummary.expiredCount > 0 ? "bg-red-50 text-red-800 font-bold" : "bg-slate-50 text-slate-600"}`}>
-            <p className="text-lg font-extrabold">{healthSummary.expiredCount}</p>
+          <div className={`rounded-xl p-2.5 text-center ${!loading && !error && healthSummary.expiredCount > 0 ? "bg-red-50 text-red-800 font-bold" : "bg-slate-50 text-slate-600"}`}>
+            <p className="text-lg font-extrabold">{loading || error ? "—" : healthSummary.expiredCount}</p>
             <p className="text-[10px] font-bold">دفعات منتهية الصلاحية</p>
           </div>
         </div>
@@ -654,6 +684,17 @@ export default function InventoryPage() {
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
         {loading ? (
           <p className="p-8 text-center text-xs text-slate-400">جارٍ التحميل…</p>
+        ) : error ? (
+          <div role="alert" className="p-8 text-center text-xs text-red-700 space-y-3">
+            <p className="font-bold">تعذّر تحميل بيانات المخزون من قاعدة البيانات — لا يُعتبر الرصيد صفرًا أو المخزن فارغًا.</p>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="rounded-xl border border-red-200 bg-red-50 px-4 py-1.5 text-xs font-bold text-red-800 hover:bg-red-100"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
         ) : items.length === 0 ? (
           <p className="p-8 text-center text-xs text-slate-400">
             لا توجد مواد مسجلة بالمخزن بعد.
@@ -840,6 +881,11 @@ export default function InventoryPage() {
                             <option key={s.id} value={s.id}>{s.name}</option>
                           ))}
                         </select>
+                        {suppliersError ? (
+                          <span role="alert" className="mt-1 block text-[10px] font-bold text-red-600">
+                            تعذّر تحميل قائمة الموردين؛ أعد المحاولة قبل ربط فاتورة مورد.
+                          </span>
+                        ) : null}
                         <span className="mt-1 block text-[10px] text-slate-400">
                           اختياره يسجّل فاتورته في المستحقات (الثمن × الكمية) — فلا تُدخل مرتين.
                         </span>

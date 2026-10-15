@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { InventoryDomainError, invariant } from "@/lib/inventory-domain/quantities";
+import { safeInventoryErrorMessage } from "@/lib/inventory-domain/presentation";
 import { submitPurchaseRequest, revisePurchaseRequest, approvePurchaseRequest, issuePurchaseOrder, postInspectedReceipt,
   recordSupplierInvoiceMatch, readProcurementRequests, readProcurementCatalog,readProcurementWorkbench, type InventoryActor } from "@/lib/inventory-domain/procurement-store";
 import { dispatchCustodyTransfer,acknowledgeCustodyTransfer,readDoctorCustody,type CustodyDispatch,type CustodyAcknowledgement } from "@/lib/inventory-domain/custody-store";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 function failure(error:unknown) {
   const bounded=bodyErrorResponse(error);if(bounded)return bounded;
   if(error instanceof InventoryDomainError){const status=error.code==="schema_not_ready"?503:error.code.includes("forbidden")?403:error.code==="not_found"?404:["stale_version","idempotency_conflict","invalid_transition","source_overallocated","overdelivery","receipt_already_invoiced"].includes(error.code)?409:400;
-    return NextResponse.json({code:error.code,message:status===503?"دورة المشتريات بانتظار اعتماد ترحيل المخطط. لم تُسجّل العملية.":error.message},{status});}
+    return NextResponse.json({code:error.code,message:status===503?"دورة المشتريات بانتظار اعتماد ترحيل المخطط. لم تُسجّل العملية.":safeInventoryErrorMessage(error,error.message)},{status});}
   if(error && typeof error==="object" && "code" in error && error.code==="23505")return NextResponse.json({code:"duplicate_document",message:"هذا المستند أو مصدره مسجّل بالفعل. راجع العملية الأصلية."},{status:409});
   return NextResponse.json({code:"inventory_unavailable",message:"تعذّر تأكيد العملية. استعلم عن النتيجة واستخدم مفتاح العملية نفسه عند إعادة المحاولة."},{status:500});
 }

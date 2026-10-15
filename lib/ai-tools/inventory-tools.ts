@@ -15,15 +15,18 @@ export async function getInventorySummary(
 ): Promise<ToolExecutionResult> {
   if (!context.isDbConnected) {
     return {
-      success: true,
-      textSummary: `📦 **تقرير المخزون:**\n⚠️ خدمة قاعدة البيانات غير متصلة في هذا الوضع التجريبي. عند التشغيل الحي، سيعرض النظام رصيد المواد ونواقص حد الطلب.`,
-      cards: [{ title: "المخزون", value: "وضع تجريبي", tone: "calm" }],
+      success: false,
+      textSummary: "تعذّر الاتصال بقاعدة البيانات؛ لا يمكن تأكيد أرصدة المخزون أو سلامة المواد الآن.",
+      warnings: ["inventory_unavailable"],
       actions: [{ label: "فتح شاشة المخزون", href: "/inventory", actionType: "navigate" }],
     };
   }
 
   try {
     const items: InventoryItem[] = await listInventoryItems();
+    if (!Array.isArray(items)) {
+      throw new Error("invalid_inventory_response");
+    }
     const activeItems = items.filter((it) => it.isActive);
     const lowStock = activeItems.filter((it) => stockStatus(it.balance, it.minLevel) !== "ok");
     const outOfStock = activeItems.filter((it) => it.balance <= 0);
