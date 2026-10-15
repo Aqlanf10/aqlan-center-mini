@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS inventory_transfer_ack_lines (
   PRIMARY KEY(acknowledgement_id,transfer_line_id)
 );
 CREATE INDEX IF NOT EXISTS inventory_transfers_destination_idx ON inventory_transfers(to_location_id,created_at DESC,id);
+CREATE TABLE IF NOT EXISTS custody_waste_approvals (
+  id UUID PRIMARY KEY,
+  location_id TEXT NOT NULL REFERENCES inventory_locations(id) ON DELETE RESTRICT,
+  lot_id UUID NOT NULL REFERENCES stock_lots(id) ON DELETE RESTRICT,
+  doctor_party_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE RESTRICT,
+  max_qty NUMERIC(12,3) NOT NULL CHECK(max_qty>0),
+  reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 1 AND 2000),
+  document JSONB NOT NULL CHECK(jsonb_typeof(document)='object'),
+  approved_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 CREATE TABLE IF NOT EXISTS custody_usage_events (
   id UUID PRIMARY KEY,
   usage_key TEXT NOT NULL UNIQUE CHECK(length(trim(usage_key)) BETWEEN 1 AND 240),
@@ -114,7 +125,7 @@ DECLARE rel TEXT;
 BEGIN
  FOREACH rel IN ARRAY ARRAY[
    'inventory_transfers','inventory_transfer_lines','inventory_transfer_acknowledgements','inventory_transfer_ack_lines',
-   'custody_usage_events','custody_stocktakes','custody_package_closures','custody_annual_settlements','custody_settlement_objections'
+   'custody_waste_approvals','custody_usage_events','custody_stocktakes','custody_package_closures','custody_annual_settlements','custody_settlement_objections'
  ] LOOP
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname=rel || '_immutable' AND tgrelid=to_regclass(rel)) THEN
    EXECUTE format('CREATE TRIGGER %I BEFORE UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION inventory_procurement_append_only()',rel || '_immutable',rel);

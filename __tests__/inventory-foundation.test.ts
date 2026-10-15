@@ -38,10 +38,13 @@ describe("Inventory foundation desired invariants", () => {
     expect(result.success).toBe(false);
     expect(JSON.stringify(result)).not.toContain("private database detail");
   });
-  it("INV-12b: disconnected database never reports zero stock or healthy status in AI summary", async () => {
+  it("INV-12b: disconnected database returns offline notice without claiming zero stock or healthy status in AI summary", async () => {
     const result = await getInventorySummary({}, { isDbConnected: false } as AiToolContext);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.textSummary).toContain("غير متصلة");
     expect(result.warnings).toContain("inventory_unavailable");
+    expect(JSON.stringify(result)).not.toContain("آمنة");
+    expect(JSON.stringify(result)).not.toContain('"0"');
     expect(mocks.items).not.toHaveBeenCalled();
   });
   it("INV-12c: database failure during visit lookup returns 500 instead of false 404 visit-not-found", async () => {
@@ -57,27 +60,59 @@ describe("Inventory foundation desired invariants", () => {
     expect(body.message).not.toContain("الزيارة غير موجودة");
     expect(JSON.stringify(body)).not.toContain("secret");
   });
-  it("INV-08b & INV-12d: sanitizes audit details and error messages against credential, SQL, and unauthorized cost leaks", () => {
+  it("INV-08b & INV-12d (R10): sanitizes audit details and error messages against credential, token, DB auth, permission, constraint, SQL, and unauthorized cost leaks even when caller passes error.message as fallback", () => {
     const rawAudit = {
       status: "submitted",
       databaseUrl: "postgresql://user:supersecret@localhost:5432/aqlan",
+      api_key: "sk_live_999888777",
+      access_token: "tok_secret_abc123",
+      privateKey: "-----BEGIN PRIVATE KEY-----MIIEvgIBADANBg",
       unitCostMinor: 45000,
       supplierInvoiceNumber: "INV-99",
-      nested: { note: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig", safeCount: 3 },
+      costSnapshot: { unitPriceMinor: 45000 },
+      nested: {
+        note: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig api_key=sk_inline_123 access_token=tok_inline_456",
+        dbDiag: 'password authentication failed for user "postgres" on table "stock_lots"',
+        safeCount: 3,
+      },
     };
     const scrubbedNonAdmin = sanitizeInventoryAuditDetails(rawAudit, { includeFinancials: false });
-    expect(JSON.stringify(scrubbedNonAdmin)).not.toContain("supersecret");
-    expect(JSON.stringify(scrubbedNonAdmin)).not.toContain("45000");
-    expect(JSON.stringify(scrubbedNonAdmin)).not.toContain("INV-99");
-    expect(JSON.stringify(scrubbedNonAdmin)).not.toContain("eyJhbGci");
+    const serializedNonAdmin = JSON.stringify(scrubbedNonAdmin);
+    expect(serializedNonAdmin).not.toContain("supersecret");
+    expect(serializedNonAdmin).not.toContain("sk_live_999888777");
+    expect(serializedNonAdmin).not.toContain("tok_secret_abc123");
+    expect(serializedNonAdmin).not.toContain("PRIVATE KEY");
+    expect(serializedNonAdmin).not.toContain("sk_inline_123");
+    expect(serializedNonAdmin).not.toContain("tok_inline_456");
+    expect(serializedNonAdmin).not.toContain("password authentication failed");
+    expect(serializedNonAdmin).not.toContain("stock_lots");
+    expect(serializedNonAdmin).not.toContain("45000");
+    expect(serializedNonAdmin).not.toContain("INV-99");
+    expect(serializedNonAdmin).not.toContain("eyJhbGci");
     expect(scrubbedNonAdmin).toMatchObject({ status: "submitted", nested: { safeCount: 3 } });
 
     const scrubbedAdmin = sanitizeInventoryAuditDetails(rawAudit, { includeFinancials: true });
     expect(JSON.stringify(scrubbedAdmin)).not.toContain("supersecret");
+    expect(JSON.stringify(scrubbedAdmin)).not.toContain("sk_live_999888777");
     expect(scrubbedAdmin.unitCostMinor).toBe(45000);
 
-    expect(safeInventoryErrorMessage(new Error("SELECT * FROM inventory_items WHERE id = 1"), "خطأ آمن")).toBe("خطأ آمن");
-    expect(safeInventoryErrorMessage(new Error("postgres://root:pw@host:5432/db"), "خطأ آمن")).toBe("خطأ آمن");
+    const sensitiveErrors = [
+      "SELECT * FROM inventory_items WHERE id = 1",
+      "postgres://root:pw@host:5432/db",
+      'password authentication failed for user "clinic_admin"',
+      'permission denied for table "purchase_requests"',
+      'duplicate key value violates unique constraint "ux_purchase_orders_idempotency"',
+      "Bearer eyJhbGciOiJIUzI1NiJ9.secret",
+      "upstream failure api_key=sk_test_555 access_token=at_999",
+    ];
+    for (const msg of sensitiveErrors) {
+      const err = new Error(msg);
+      expect(safeInventoryErrorMessage(err, "خطأ آمن")).toBe("خطأ آمن");
+      // Even if a caller mistakenly passes err.message as fallbackMessage, it must never leak!
+      const fallbackLeakTest = safeInventoryErrorMessage(err, err.message);
+      expect(fallbackLeakTest).not.toContain(msg);
+      expect(fallbackLeakTest).toBe("تعذّر تنفيذ العملية. راجع المدخلات والصلاحية.");
+    }
     expect(safeInventoryErrorMessage(new Error("كمية الصرف أكبر من المتاح"), "خطأ آمن")).toBe("كمية الصرف أكبر من المتاح");
   });
 });

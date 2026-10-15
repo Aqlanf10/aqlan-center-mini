@@ -10,6 +10,11 @@ import {
   type CommittedSourceAllocation, type InvoiceReceiptAllocation, type IssuedPurchaseOrder, type PurchaseOrder,
   type ReceiptRevision, type RequestApproval, type RequestRevision, type SupplierInvoiceRevision,
 } from "../lib/inventory-domain/procurement";
+import {
+  DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE,
+  safeInventoryErrorMessage,
+  sanitizeInventoryAuditDetails,
+} from "../lib/inventory-domain/presentation";
 
 const conversion = (): UnitConversionSnapshot => ({ itemId: 1, version: 1, baseUnit: "cartridge", enteredUnit: "box",
   baseUnitsPerEnteredUnit: "50", enteredPrecision: 0, basePrecision: 0 });
@@ -721,5 +726,201 @@ describe("quarantine disposition, excess arrival decision and historical reconci
       movements: [{ movementId: 101, kind: "in", signedBaseQuantity: "80", alreadyAllocatedBaseQuantity: "80", expiryDate: null, unitCostMinor: null, payableId: null }],
     }));
   });
-});
 
+  it("R07: preserves requiresExpiry=true on legacy movements without expiryDate and creates lots as quarantined", () => {
+    const reconciled = planHistoricalReconciliation({
+      itemId: 1,
+      baseUnit: "cartridge",
+      basePrecision: 0,
+      conversionVersion: 1,
+      requiresExpiry: true,
+      locationId: "main-store",
+      reason: "Legacy stock without recorded expiry must stay quarantined until inspected",
+      movements: [
+        { movementId: 201, kind: "in", signedBaseQuantity: "40", alreadyAllocatedBaseQuantity: "0", expiryDate: null, unitCostMinor: 500, payableId: null },
+      ],
+    });
+    expect(reconciled.lotsToCreate).toHaveLength(1);
+    expect(reconciled.lotsToCreate[0]).toMatchObject({
+      movementId: 201,
+      requiresExpiry: true,
+      expiryDate: null,
+      status: "quarantined",
+    });
+  });
+
+  it("R08: rejects chronological outflow before inflow when no prior lot capacity exists, and supports mixed-state two-pass allocation", () => {
+    rejects("unresolved_historical_lineage", () => planHistoricalReconciliation({
+      itemId: 1,
+      baseUnit: "cartridge",
+      basePrecision: 0,
+      conversionVersion: 1,
+      requiresExpiry: true,
+      locationId: "main-store",
+      reason: "Outflow before inflow without existing lot capacity",
+      movements: [
+        { movementId: 301, kind: "out", signedBaseQuantity: "10", alreadyAllocatedBaseQuantity: "0", expiryDate: null, unitCostMinor: null, payableId: null },
+        { movementId: 302, kind: "in", signedBaseQuantity: "50", alreadyAllocatedBaseQuantity: "0", expiryDate: "2027-12-01", unitCostMinor: 500, payableId: null },
+      ],
+    }));
+
+    const mixedState = planHistoricalReconciliation({
+      itemId: 1,
+      baseUnit: "cartridge",
+      basePrecision: 0,
+      conversionVersion: 1,
+      requiresExpiry: true,
+      locationId: "main-store",
+      existingLotRemainingBaseQuantity: "100",
+      reason: "Mixed-state item with tracked receipt lot plus legacy unallocated movements",
+      movements: [
+        { movementId: 401, kind: "in", signedBaseQuantity: "20", alreadyAllocatedBaseQuantity: "0", expiryDate: "2027-12-01", unitCostMinor: 500, payableId: null },
+        { movementId: 402, kind: "out", signedBaseQuantity: "5", alreadyAllocatedBaseQuantity: "0", expiryDate: null, unitCostMinor: null, payableId: null },
+      ],
+    });
+    expect(mixedState.netReconciledBaseQuantity).toBe("15");
+    expect(mixedState.lotsToCreate[0]).toMatchObject({
+      movementId: 401,
+      status: "accepted",
+      requiresExpiry: true,
+    });
+    expect(mixedState.allocationsToCreate).toEqual([
+      { movementId: 401, sourceLotMovementId: 401, locationId: "main-store", baseQuantity: "20" },
+      { movementId: 402, sourceLotMovementId: 401, locationId: "main-store", baseQuantity: "5" },
+    ]);
+  });
+
+  it("R09: enforces currentDate on quarantine release so backdated resolutionDate cannot release expired or short-shelf-life stock", () => {
+    const line = quarantinedLine();
+    const order = issuedOrder();
+    rejects("invalid_resolution_date", () => planQuarantineResolution({
+      id: "qres-future",
+      order,
+      receiptLine: line,
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Future resolution date",
+      resolutionDate: "2026-10-20",
+      currentDate: "2026-10-15",
+    }));
+
+    rejects("expired_receipt", () => planQuarantineResolution({
+      id: "qres-backdated-expired",
+      order,
+      receiptLine: { ...line, expiryDate: "2026-11-01" },
+      priorResolutions: [],
+      action: "release",
+      quantity: "1",
+      reason: "Backdated resolutionDate while currentDate is within 30-day shelf life",
+      resolutionDate: "2026-09-01",
+      currentDate: "2026-10-15",
+    }));
+  });
+
+  it("R11: supports quarantine dispose without reopening supplier delivery and wires excessDecision into planInspectedReceipt", () => {
+    const line = quarantinedLine();
+    const order = issuedOrder();
+    const disposed = planQuarantineResolution({
+      id: "qres-dispose-1",
+      order,
+      receiptLine: line,
+      priorResolutions: [],
+      action: "dispose",
+      quantity: "1",
+      reason: "Safe destruction of compromised quarantine portion",
+      resolutionDate: "2026-10-12",
+      currentDate: "2026-10-15",
+    });
+    expect(disposed).toMatchObject({
+      action: "dispose",
+      baseQuantity: "50",
+      effectiveReceiptLine: {
+        receiptLineId: line.id,
+        releasedBaseQuantity: "0",
+        returnedBaseQuantity: "0",
+        disposedBaseQuantity: "50",
+        remainingQuarantinedBaseQuantity: "50",
+        effectiveLotStatus: "quarantined",
+      },
+      stockCompensation: {
+        itemId: 1,
+        locationId: "main-store",
+        baseQuantity: "50",
+        movementType: "out",
+        isReturn: false,
+      },
+      effects: { inventoryMovements: 1, payables: 0, expenses: 0 },
+    });
+
+    const excessReceipt = planInspectedReceipt(order, {
+      ...receipt(),
+      id: "receipt-excess-1",
+      lines: [{
+        orderLineId: "order-line-1",
+        arrivedQuantity: "4",
+        excessDecision: "return_excess_to_supplier",
+        excessReason: "1 box returned on delivery truck",
+        portions: [
+          {
+            ...receipt().lines[0].portions[0],
+            id: "receipt-line-within-order",
+            quantity: "3",
+          },
+          {
+            ...receipt().lines[0].portions[0],
+            id: "receipt-line-excess-rejected",
+            quantity: "1",
+            disposition: "rejected",
+            reason: "1 excess box returned on delivery truck",
+          },
+        ],
+      }],
+    }, [], "2026-10-11");
+    expect(excessReceipt.stockEntries).toEqual([
+      { receiptLineId: "receipt-line-within-order", itemId: 1, baseQuantity: "150", locationId: "main-store", availability: "available" },
+    ]);
+    expect(excessReceipt.excessDecisions).toEqual([
+      expect.objectContaining({
+        orderLineId: "order-line-1",
+        orderedBaseQuantity: "150",
+        withinOrderBaseQuantity: "150",
+        excessBaseQuantity: "50",
+        decision: "return_excess_to_supplier",
+        requiresOrderAmendment: false,
+      }),
+    ]);
+  });
+
+  it("R10: safeInventoryErrorMessage allowlists domain errors and blocks DSNs, constraint names, tokens and arbitrary internal messages", () => {
+    expect(safeInventoryErrorMessage(new InventoryDomainError("stale_version", "Version changed"))).toContain("تغيرت نسخة المستند");
+    for (const raw of [
+      "connect ECONNREFUSED 10.0.0.12:5432; api_key=sk-live-987654",
+      "duplicate key value violates unique constraint \"stock_lots_pkey\"",
+      "Invalid Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret",
+      "password authentication failed for user \"clinic_admin\"",
+      "permission denied for table supplier_invoices",
+      "Unrecognized internal driver stack frame at /app/node_modules/pg",
+    ]) {
+      const msg = safeInventoryErrorMessage(new Error(raw), raw);
+      expect(msg).toBe(DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE);
+      expect(msg).not.toContain("10.0.0.12");
+      expect(msg).not.toContain("sk-live");
+      expect(msg).not.toContain("stock_lots_pkey");
+      expect(msg).not.toContain("Bearer");
+      expect(msg).not.toContain("clinic_admin");
+    }
+
+    const scrubbed = sanitizeInventoryAuditDetails({
+      api_key: "sk-live-secret",
+      access_token: "tok-123",
+      privateKey: "pem-key",
+      note: "Connected to postgres://admin:pass@10.0.0.12:5432/clinic with Bearer eyJhbGciOi",
+      safeField: "ok",
+    });
+    expect(scrubbed).toEqual({
+      note: "Connected to [REDACTED] with [REDACTED]",
+      safeField: "ok",
+    });
+  });
+});

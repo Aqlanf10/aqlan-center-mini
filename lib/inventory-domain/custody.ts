@@ -166,11 +166,29 @@ export function attributableConsumedCost(input: {
   return { currency: input.currency, knownAttributableMinor, totalMinor: complete ? knownAttributableMinor : null, complete, pendingIds, excludedIds };
 }
 
-/** Signed prior adjustments: positive credit to doctor, negative debit; include linked reversals. */
-export interface SettlementAdjustment extends Scoped { readonly id: string; readonly currency: Currency; readonly signedMinor: number }
+/** Signed prior adjustments: positive credit to doctor, negative debit; include linked reversals.
+ * Only actually posted financial adjustments (postingState === "posted" with a postedEntryId) may be deducted.
+ */
+export interface SettlementAdjustment extends Scoped {
+  readonly id: string;
+  readonly currency: Currency;
+  readonly signedMinor: number;
+  readonly postingState?:
+    | "posted"
+    | "provisional"
+    | "objected"
+    | "unposted"
+    | "ready_for_authorized_review"
+    | "objected_under_review";
+  readonly postedEntryId?: string | null;
+}
 export function proposeSettlement(input: {
-  readonly scope: SettlementScope; readonly deductions: Money; readonly attributable: Money | null;
-  readonly prerequisitesComplete: boolean; readonly priorAdjustments: readonly SettlementAdjustment[];
+  readonly scope: SettlementScope;
+  readonly deductions: Money;
+  readonly attributable: Money | null;
+  readonly prerequisitesComplete: boolean;
+  readonly sourceBacked?: boolean;
+  readonly priorAdjustments: readonly SettlementAdjustment[];
 }) {
   checkScope(input.scope, input.scope); amount(input.deductions, input.deductions.currency);
   if (input.attributable) amount(input.attributable, input.deductions.currency);
@@ -180,15 +198,22 @@ export function proposeSettlement(input: {
     requireCurrency(adjustment.currency, "settlement", adjustment.id);
     if (adjustment.currency !== input.deductions.currency) throw new Error("currency_mismatch_requires_snapshot");
     if (!Number.isSafeInteger(adjustment.signedMinor)) throw new Error("invalid_adjustment");
+    if (adjustment.postingState !== undefined && adjustment.postingState !== "posted") {
+      throw new Error("unposted_settlement_adjustment");
+    }
+    if (adjustment.postedEntryId !== undefined && (!adjustment.postedEntryId || !adjustment.postedEntryId.trim())) {
+      throw new Error("unposted_settlement_adjustment");
+    }
     if (seen.has(adjustment.id)) throw new Error("duplicate_settlement_adjustment");
     seen.add(adjustment.id); prior += BigInt(adjustment.signedMinor);
   }
+  const sourceBacked = input.sourceBacked ?? true;
   const delta = input.attributable === null ? null : BigInt(input.deductions.amountMinor) - BigInt(input.attributable.amountMinor);
   const supplementalMinor = delta === null ? null : safe(delta - prior);
   return {
     currency: input.deductions.currency, targetDifferenceMinor: delta === null ? null : safe(delta), priorAdjustmentMinor: safe(prior), supplementalMinor,
     direction: supplementalMinor === null ? "undetermined" as const : supplementalMinor > 0 ? "due_to_doctor" as const : supplementalMinor < 0 ? "proposed_from_doctor" as const : "balanced" as const,
-    status: input.prerequisitesComplete && delta !== null ? "ready_for_authorized_review" as const : "provisional" as const,
+    status: input.prerequisitesComplete && sourceBacked && delta !== null ? "ready_for_authorized_review" as const : "provisional" as const,
     cashDeltaMinor: 0, automaticWageDeductionMinor: 0,
   };
 }
@@ -216,6 +241,69 @@ export function treatmentCostAfterDoctorRecovery(input: { readonly material: Mon
 }
 
 export type PackageSafetyPolicy = "safe_empty_return" | "safe_disposal_record" | "bulk_count" | "reusable_custody";
+const HAZARD_RANK: Record<"none" | "sharp" | "contaminated", number> = {
+  none: 0,
+  sharp: 1,
+  contaminated: 2,
+};
+
+export function classifyDefaultPackageSafety(item: {
+  readonly name?: string | null;
+  readonly category?: string | null;
+  readonly unit?: string | null;
+  readonly costSnapshot?: Record<string, unknown> | null;
+}): {
+  readonly minimumHazard: "none" | "sharp" | "contaminated";
+  readonly defaultPolicy: PackageSafetyPolicy;
+} {
+  const snapHazard = item.costSnapshot?.hazard;
+  const snapPolicy = item.costSnapshot?.policy;
+  if (
+    (snapHazard === "none" || snapHazard === "sharp" || snapHazard === "contaminated") &&
+    (snapPolicy === "safe_empty_return" || snapPolicy === "safe_disposal_record" || snapPolicy === "bulk_count" || snapPolicy === "reusable_custody")
+  ) {
+    return {
+      minimumHazard: snapHazard,
+      defaultPolicy: snapHazard !== "none" ? "safe_disposal_record" : snapPolicy,
+    };
+  }
+  const combined = `${item.category ?? ""} ${item.name ?? ""} ${item.unit ?? ""}`.toLowerCase();
+  if (/(?:contaminated|blood|biohazard|ملوث|دم)/i.test(combined)) {
+    return { minimumHazard: "contaminated", defaultPolicy: "safe_disposal_record" };
+  }
+  if (/(?:anesthesia|cartridge|carpule|needle|blade|scalpel|suture|sharp|endo\s*file|reamer|bur|إبرة|ابر|مشرط|شفرة|خدر|تخدير|خرطوش|كربول|مبرد|فايل)/i.test(combined)) {
+    return { minimumHazard: "sharp", defaultPolicy: "safe_disposal_record" };
+  }
+  if (/(?:ml|liter|gel|liquid|bond|etch|rinse|مل|سائل|جل|بوند)/i.test(combined)) {
+    return { minimumHazard: "none", defaultPolicy: "bulk_count" };
+  }
+  return { minimumHazard: "none", defaultPolicy: "safe_empty_return" };
+}
+
+export function resolvePackageSafetyWithFieldObservation(input: {
+  readonly minimumHazard: "none" | "sharp" | "contaminated";
+  readonly defaultPolicy: PackageSafetyPolicy;
+  readonly observedHazard?: "none" | "sharp" | "contaminated";
+  readonly requestedPolicy?: PackageSafetyPolicy;
+}): {
+  readonly effectiveHazard: "none" | "sharp" | "contaminated";
+  readonly effectivePolicy: PackageSafetyPolicy;
+} {
+  const observed = input.observedHazard ?? input.minimumHazard;
+  const requested = input.requestedPolicy ?? input.defaultPolicy;
+  if (!["none", "sharp", "contaminated"].includes(observed) || !["safe_empty_return", "safe_disposal_record", "bulk_count", "reusable_custody"].includes(requested)) {
+    throw new Error("unknown_package_safety_classification");
+  }
+  if (HAZARD_RANK[observed] < HAZARD_RANK[input.minimumHazard]) {
+    throw new Error("package_hazard_downgrade_forbidden");
+  }
+  const effectiveHazard = HAZARD_RANK[observed] >= HAZARD_RANK[input.minimumHazard] ? observed : input.minimumHazard;
+  if (effectiveHazard !== "none") {
+    return { effectiveHazard, effectivePolicy: "safe_disposal_record" };
+  }
+  return { effectiveHazard, effectivePolicy: requested };
+}
+
 export function packageEvidenceAction(hazard: "none" | "sharp" | "contaminated", policy: PackageSafetyPolicy) {
   if (!["none", "sharp", "contaminated"].includes(hazard) || !["safe_empty_return", "safe_disposal_record", "bulk_count", "reusable_custody"].includes(policy)) throw new Error("unknown_package_safety_classification");
   if (hazard !== "none" || policy === "safe_disposal_record") return "document_safe_disposal" as const;

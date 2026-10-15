@@ -174,7 +174,7 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
       (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='quarantined'),0)
        - COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id),0))::text AS quarantined,
       (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='rejected'),0)
-       + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='reject_return'),0))::text AS rejected
+       + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action IN ('reject_return','dispose')),0))::text AS rejected
       FROM goods_receipt_lines grl WHERE grl.order_id=$1 GROUP BY grl.order_line_id`,[order.id]);
     const prior:PriorInspectedQuantity[]=old.rows.map(row=>({orderLineId:row.order_line_id,acceptedBaseQuantity:row.accepted,quarantinedBaseQuantity:row.quarantined,rejectedBaseQuantity:row.rejected}));
     const postingDate=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
@@ -198,8 +198,8 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
       await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7::date,$8,'estimated',$9::jsonb)",[lotId,line.id,line.itemId,line.locationId,movement.rows[0].id,line.lotCode,line.expiryDate,line.disposition,JSON.stringify({source:"approved_order_quote",currency:order.currency,price:source.price,conversion:line.conversion,requiresExpiry:source.requiresExpiry,financialValuation:"pending_invoice_adapter"})]);
       await client.query("INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",[randomUUID(),movement.rows[0].id,lotId,line.locationId,entry.baseQuantity]);
     }
-    await writeInventoryAudit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines});
-    return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,financialEffects:plan.financialEffects};
+    await writeInventoryAudit(client,actor,"goods_receipt",receipt.id,"post",{version:receipt.version,actualArrivalDate:receipt.actualArrivalDate,postingDate,inspection:plan.lines,excessDecisions:plan.excessDecisions});
+    return {id:receipt.id,status:"posted" as const,remaining:plan.remaining,stockEntries:plan.stockEntries,excessDecisions:plan.excessDecisions,financialEffects:plan.financialEffects};
   });
 }
 export async function resolveQuarantineReceipt(
@@ -232,7 +232,8 @@ export async function resolveQuarantineReceipt(
       "SELECT id::text, receipt_line_id, action, base_qty::text FROM quarantine_dispositions WHERE receipt_line_id=$1 ORDER BY created_at, id",
       [input.receiptLineId],
     );
-    const resolutionDate = input.resolutionDate ?? clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+    const currentClinicDate = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
+    const resolutionDate = input.resolutionDate ?? currentClinicDate;
     const plan = planQuarantineResolution({
       id: input.id,
       order,
@@ -250,19 +251,20 @@ export async function resolveQuarantineReceipt(
       quantity: input.quantity,
       reason: input.reason,
       resolutionDate,
+      currentDate: currentClinicDate,
     });
     let movementId: number | null = null;
     if (plan.stockCompensation) {
       const lotRows = await client.query<{ id: string }>(
-        "SELECT id FROM stock_lots WHERE receipt_line_id=$1 FOR SHARE",
+        "SELECT id FROM stock_lots WHERE receipt_line_id=$1 FOR UPDATE",
         [plan.receiptLineId],
       );
       const lot = lotRows.rows[0];
       invariant(lot, "not_found", "Quarantined stock lot was not found");
       await client.query("SELECT id FROM inventory_items WHERE id=$1 FOR UPDATE", [plan.stockCompensation.itemId]);
       const movement = await client.query<{ id: number }>(
-        "INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'out',$2::numeric,NULL,$3,$4,NULL,TRUE) RETURNING id",
-        [plan.stockCompensation.itemId, plan.stockCompensation.baseQuantity, plan.stockCompensation.reason, actor.username],
+        "INSERT INTO inventory_movements(item_id,kind,qty,expiry_date,reason,created_by,unit_cost_minor,is_return) VALUES($1,'out',$2::numeric,NULL,$3,$4,NULL,$5) RETURNING id",
+        [plan.stockCompensation.itemId, plan.stockCompensation.baseQuantity, plan.stockCompensation.reason, actor.username, plan.stockCompensation.isReturn],
       );
       movementId = movement.rows[0].id;
       await client.query(

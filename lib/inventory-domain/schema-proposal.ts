@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS quarantine_dispositions (
   receipt_line_id TEXT NOT NULL REFERENCES goods_receipt_lines(id) ON DELETE RESTRICT,
   order_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE RESTRICT,
   order_line_id TEXT NOT NULL,
-  action TEXT NOT NULL CHECK(action IN ('release','reject_return')),
+  action TEXT NOT NULL CHECK(action IN ('release','reject_return','dispose')),
   base_qty NUMERIC(12,3) NOT NULL CHECK(base_qty > 0),
   movement_id INTEGER UNIQUE REFERENCES inventory_movements(id) ON DELETE RESTRICT,
   reason TEXT NOT NULL,

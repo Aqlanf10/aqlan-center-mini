@@ -452,7 +452,13 @@ export interface InspectionPortion {
 export interface ReceiptRevision {
   readonly id: string; readonly version: number; readonly orderId: string; readonly orderVersion: number;
   readonly supplierPartyId: number; readonly branchId: string; readonly actualArrivalDate: string;
-  readonly lines: ReadonlyArray<{ readonly orderLineId: string; readonly arrivedQuantity: string; readonly portions: readonly InspectionPortion[] }>;
+  readonly lines: ReadonlyArray<{
+    readonly orderLineId: string;
+    readonly arrivedQuantity: string;
+    readonly excessDecision?: ExcessArrivalAction | null;
+    readonly excessReason?: string | null;
+    readonly portions: readonly InspectionPortion[];
+  }>;
 }
 export interface PriorInspectedQuantity {
   readonly orderLineId: string; readonly acceptedBaseQuantity: string;
@@ -473,6 +479,7 @@ export interface ReceiptPlan {
   readonly remaining: ReadonlyArray<{ readonly orderLineId: string; readonly acceptedBaseQuantity: string;
     readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
     readonly remainingFulfillmentBaseQuantity: string; readonly remainingDeliveryBaseQuantity: string }>;
+  readonly excessDecisions: readonly ExcessArrivalDecisionPlan[];
   readonly financialEffects: { readonly payables: 0; readonly expenses: 0 };
 }
 
@@ -500,19 +507,41 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
   const lines: InspectedReceiptLine[] = [];
   const stockEntries: ReceiptPlan["stockEntries"][number][] = [];
   const remaining: ReceiptPlan["remaining"][number][] = [];
+  const excessDecisions: ExcessArrivalDecisionPlan[] = [];
   for (const orderLine of order.lines) {
     const ordered = quantityAtoms(convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity);
     const old = previous.get(orderLine.id);
     let accepted = quantityAtoms(old?.acceptedBaseQuantity ?? "0", 3, true);
     let quarantined = quantityAtoms(old?.quarantinedBaseQuantity ?? "0", 3, true);
     let rejected = quantityAtoms(old?.rejectedBaseQuantity ?? "0", 3, true);
-    invariant(accepted + quarantined <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted/held capacity");
+    invariant(accepted <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+    const remainingDelivery = ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n;
     const current = incoming.get(orderLine.id);
     if (current) {
       const arrived = quantityAtoms(convertQuantity(current.arrivedQuantity, orderLine.conversion).baseQuantity);
-      invariant(arrived <= ordered - accepted - quarantined, "overdelivery", "Arrival exceeds remaining delivery capacity; obtain an order revision first");
+      let excessAtoms = 0n;
+      if (arrived > remainingDelivery) {
+        invariant(
+          Boolean(current.excessDecision),
+          "overdelivery",
+          "Arrival exceeds remaining delivery capacity; obtain an order revision first",
+        );
+        const decisionPlan = planExcessArrivalDecision({
+          order,
+          orderLineId: orderLine.id,
+          prior,
+          arrivedQuantity: current.arrivedQuantity,
+          decision: current.excessDecision!,
+          reason: current.excessReason ?? "",
+        });
+        excessDecisions.push(decisionPlan);
+        excessAtoms = arrived - remainingDelivery;
+      }
       invariant(current.portions.length > 0, "unclassified_receipt", "Every arrived quantity must be inspected");
       let classified = 0n;
+      let currentAccepted = 0n;
+      let currentQuarantined = 0n;
+      let currentRejected = 0n;
       for (const portion of current.portions) {
         identifier(portion.id, "receipt portion"); identifier(portion.locationId, "receipt location");
         invariant(!ids.has(portion.id), "duplicate_source", "Receipt portion id is duplicated"); ids.add(portion.id);
@@ -532,10 +561,16 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
             invariant(days > 0 && days >= orderLine.minimumShelfLifeDays, "expired_receipt", "Accepted material fails the posting-date shelf-life policy");
           }
           accepted += amount;
+          currentAccepted += amount;
         } else {
           reason(portion.reason);
-          if (portion.disposition === "quarantined") quarantined += amount;
-          else rejected += amount;
+          if (portion.disposition === "quarantined") {
+            quarantined += amount;
+            currentQuarantined += amount;
+          } else {
+            rejected += amount;
+            currentRejected += amount;
+          }
         }
         lines.push({ id: portion.id, receiptId: receipt.id, orderId: order.id, orderVersion: order.version,
           orderLineId: orderLine.id, itemId: orderLine.itemId, supplierPartyId: order.supplierPartyId, branchId: order.branchId,
@@ -548,14 +583,30 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
         }
       }
       invariant(classified === arrived, "classification_mismatch", "Accepted + quarantined + rejected must equal exactly what arrived");
+      invariant(currentAccepted <= remainingDelivery && accepted <= ordered, "overdelivery", "Accepted quantity cannot exceed remaining ordered delivery capacity");
+      if (excessAtoms > 0n) {
+        if (current.excessDecision === "return_excess_to_supplier") {
+          invariant(
+            currentRejected >= excessAtoms && currentAccepted + currentQuarantined <= remainingDelivery,
+            "overdelivery",
+            "Excess quantity marked for supplier return must be classified as rejected",
+          );
+        } else {
+          invariant(
+            currentQuarantined >= excessAtoms,
+            "overdelivery",
+            "Excess quantity held for order amendment must be isolated in quarantine",
+          );
+        }
+      }
     }
     remaining.push({ orderLineId: orderLine.id, acceptedBaseQuantity: quantityText(accepted),
       quarantinedBaseQuantity: quantityText(quarantined), rejectedBaseQuantity: quantityText(rejected),
-      remainingFulfillmentBaseQuantity: quantityText(ordered - accepted),
-      remainingDeliveryBaseQuantity: quantityText(ordered - accepted - quarantined) });
+      remainingFulfillmentBaseQuantity: quantityText(ordered > accepted ? ordered - accepted : 0n),
+      remainingDeliveryBaseQuantity: quantityText(ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n) });
   }
   return freeze({ receiptId: receipt.id, receiptVersion: receipt.version, lines, stockEntries, remaining,
-    financialEffects: { payables: 0 as const, expenses: 0 as const } });
+    excessDecisions, financialEffects: { payables: 0 as const, expenses: 0 as const } });
 }
 
 export interface InvoiceReceiptAllocation {
@@ -719,7 +770,7 @@ export function matchSupplierInvoice(order: IssuedPurchaseOrder, invoice: Suppli
     status: issues.size === 0 ? "matched" : "needs_review", issues: [...issues], lines, total, charges, effects: NO_FINANCIAL_EFFECT });
 }
 
-export type QuarantineResolutionAction = "release" | "reject_return";
+export type QuarantineResolutionAction = "release" | "reject_return" | "dispose";
 export interface PriorQuarantineResolution {
   readonly id: string;
   readonly receiptLineId: string;
@@ -735,6 +786,7 @@ export interface QuarantineResolutionInput {
   readonly quantity: string;
   readonly reason: string;
   readonly resolutionDate: string;
+  readonly currentDate?: string;
 }
 export interface QuarantineResolutionPlan {
   readonly id: string;
@@ -751,6 +803,7 @@ export interface QuarantineResolutionPlan {
     readonly receiptLineId: string;
     readonly releasedBaseQuantity: string;
     readonly returnedBaseQuantity: string;
+    readonly disposedBaseQuantity: string;
     readonly remainingQuarantinedBaseQuantity: string;
     readonly effectiveLotStatus: "accepted" | "quarantined" | "recalled";
   };
@@ -759,7 +812,7 @@ export interface QuarantineResolutionPlan {
     readonly locationId: string;
     readonly baseQuantity: string;
     readonly movementType: "out";
-    readonly isReturn: true;
+    readonly isReturn: boolean;
     readonly reason: string;
   };
   readonly effects: { readonly inventoryMovements: 0 | 1; readonly payables: 0; readonly expenses: 0 };
@@ -768,10 +821,13 @@ export interface QuarantineResolutionPlan {
 /** Resolves quarantined receipt quantities via append-only evidence.
  * - "release" transitions quarantined stock to accepted usable stock after
  *   verifying non-damaged state, LOT, expiry, and minimum shelf-life policy at
- *   resolutionDate, without creating a duplicate 'in' movement.
+ *   both resolutionDate and currentDate, without creating a duplicate 'in' movement.
  * - "reject_return" rejects and returns quarantined stock to the supplier,
  *   restoring order delivery capacity for a replacement shipment and planning a
  *   single compensating 'out' return movement for stock items.
+ * - "dispose" records safe disposal of damaged/expired quarantined stock and
+ *   plans a single compensating 'out' (non-return) movement so disposed units
+ *   are removed from clinic stock without creating payables or expenses.
  */
 export function planQuarantineResolution(input: QuarantineResolutionInput): QuarantineResolutionPlan {
   validateOrder(input.order);
@@ -779,10 +835,17 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
   identifier(input.id, "quarantine resolution id");
   reason(input.reason);
   dateOnly(input.resolutionDate);
+  const effectiveCurrentDate = input.currentDate ?? input.resolutionDate;
+  dateOnly(effectiveCurrentDate);
   invariant(
-    input.action === "release" || input.action === "reject_return",
+    input.resolutionDate <= effectiveCurrentDate,
+    "invalid_resolution_date",
+    "Quarantine resolution date cannot be in the future",
+  );
+  invariant(
+    input.action === "release" || input.action === "reject_return" || input.action === "dispose",
     "invalid_quarantine_action",
-    "Quarantine resolution action must be release or reject_return",
+    "Quarantine resolution action must be release, reject_return, or dispose",
   );
   const { receiptLine } = input;
   identifier(receiptLine.id, "quarantine receipt line");
@@ -806,18 +869,24 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
   invariant(!prior.has(input.id), "duplicate_source", "Quarantine resolution id already exists");
   let releasedAtoms = 0n;
   let returnedAtoms = 0n;
+  let disposedAtoms = 0n;
   for (const row of prior.values()) {
     invariant(row.receiptLineId === receiptLine.id, "receipt_line_mismatch", "Prior resolution belongs to a different receipt line");
-    invariant(row.action === "release" || row.action === "reject_return", "invalid_quarantine_action", "Invalid prior quarantine action");
+    invariant(
+      row.action === "release" || row.action === "reject_return" || row.action === "dispose",
+      "invalid_quarantine_action",
+      "Invalid prior quarantine action",
+    );
     const qty = quantityAtoms(row.baseQuantity, conversion.basePrecision);
     if (row.action === "release") releasedAtoms += qty;
-    else returnedAtoms += qty;
+    else if (row.action === "reject_return") returnedAtoms += qty;
+    else disposedAtoms += qty;
   }
   const originalQuarantined = quantityAtoms(receiptLine.baseQuantity, conversion.basePrecision);
   const converted = convertQuantity(input.quantity, conversion);
   const currentAtoms = quantityAtoms(converted.baseQuantity, conversion.basePrecision);
   invariant(
-    releasedAtoms + returnedAtoms + currentAtoms <= originalQuarantined,
+    releasedAtoms + returnedAtoms + disposedAtoms + currentAtoms <= originalQuarantined,
     "quarantine_overresolved",
     "Quarantine resolution exceeds the remaining quarantined quantity",
   );
@@ -827,24 +896,37 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
     invariant(!orderLine.requiresExpiry || receiptLine.expiryDate !== null, "missing_expiry", "This item requires a known expiry date before quarantine release");
     if (receiptLine.expiryDate !== null) {
       dateOnly(receiptLine.expiryDate);
-      const days = (Date.parse(`${receiptLine.expiryDate}T00:00:00.000Z`) - Date.parse(`${input.resolutionDate}T00:00:00.000Z`)) / 86_400_000;
-      invariant(days > 0 && days >= orderLine.minimumShelfLifeDays, "expired_receipt", "Quarantined material fails the resolution-date shelf-life policy");
+      const daysAtResolution = (Date.parse(`${receiptLine.expiryDate}T00:00:00.000Z`) - Date.parse(`${input.resolutionDate}T00:00:00.000Z`)) / 86_400_000;
+      const daysAtCurrent = (Date.parse(`${receiptLine.expiryDate}T00:00:00.000Z`) - Date.parse(`${effectiveCurrentDate}T00:00:00.000Z`)) / 86_400_000;
+      invariant(
+        daysAtResolution > 0 &&
+          daysAtResolution >= orderLine.minimumShelfLifeDays &&
+          daysAtCurrent > 0 &&
+          daysAtCurrent >= orderLine.minimumShelfLifeDays,
+        "expired_receipt",
+        "Quarantined material fails the current-date or resolution-date shelf-life policy",
+      );
     }
     releasedAtoms += currentAtoms;
-  } else {
+  } else if (input.action === "reject_return") {
     returnedAtoms += currentAtoms;
+  } else {
+    disposedAtoms += currentAtoms;
   }
-  const remainingAtoms = originalQuarantined - releasedAtoms - returnedAtoms;
+  const remainingAtoms = originalQuarantined - releasedAtoms - returnedAtoms - disposedAtoms;
   const effectiveLotStatus: "accepted" | "quarantined" | "recalled" =
     remainingAtoms > 0n ? "quarantined" : releasedAtoms > 0n ? "accepted" : "recalled";
-  const stockCompensation = input.action === "reject_return" && orderLine.kind === "stock"
+  const stockCompensation = (input.action === "reject_return" || input.action === "dispose") && orderLine.kind === "stock"
     ? {
         itemId: orderLine.itemId,
         locationId: receiptLine.locationId,
         baseQuantity: converted.baseQuantity,
         movementType: "out" as const,
-        isReturn: true as const,
-        reason: `Quarantine rejection return ${input.id}: ${input.reason}`,
+        isReturn: input.action === "reject_return",
+        reason:
+          input.action === "reject_return"
+            ? `Quarantine rejection return ${input.id}: ${input.reason}`
+            : `Quarantine disposal ${input.id}: ${input.reason}`,
       }
     : null;
   return freeze({
@@ -862,6 +944,7 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
       receiptLineId: receiptLine.id,
       releasedBaseQuantity: quantityText(releasedAtoms),
       returnedBaseQuantity: quantityText(returnedAtoms),
+      disposedBaseQuantity: quantityText(disposedAtoms),
       remainingQuarantinedBaseQuantity: quantityText(remainingAtoms),
       effectiveLotStatus,
     },
@@ -913,8 +996,8 @@ export function planExcessArrivalDecision(input: {
   const ordered = quantityAtoms(convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity);
   const accepted = quantityAtoms(previous?.acceptedBaseQuantity ?? "0", 3, true);
   const quarantined = quantityAtoms(previous?.quarantinedBaseQuantity ?? "0", 3, true);
-  invariant(accepted + quarantined <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted/held capacity");
-  const remainingDelivery = ordered - accepted - quarantined;
+  invariant(accepted <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+  const remainingDelivery = ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n;
   const arrived = quantityAtoms(convertQuantity(input.arrivedQuantity, orderLine.conversion).baseQuantity);
   invariant(arrived > remainingDelivery, "no_excess_arrival", "Arrived quantity does not exceed remaining order delivery capacity");
   return freeze({
@@ -936,6 +1019,7 @@ export interface LegacyMovementRecord {
   readonly kind: "in" | "out" | "adjust";
   readonly signedBaseQuantity: string;
   readonly alreadyAllocatedBaseQuantity: string;
+  readonly existingLotRemainingBaseQuantity?: string;
   readonly expiryDate: string | null;
   readonly unitCostMinor: number | null;
   readonly payableId: number | null;
@@ -951,6 +1035,8 @@ export interface HistoricalReconciliationPlan {
     readonly locationId: string;
     readonly baseQuantity: string;
     readonly expiryDate: string | null;
+    readonly requiresExpiry: boolean;
+    readonly status: "accepted" | "quarantined";
     readonly costStatus: "known" | "missing";
     readonly costSnapshot: {
       readonly source: "legacy_reconciliation";
@@ -980,7 +1066,8 @@ export function planHistoricalReconciliation(input: {
   readonly baseUnit: string;
   readonly basePrecision: 0 | 1 | 2 | 3;
   readonly conversionVersion: number;
-  readonly requiresExpiry: boolean;
+  readonly requiresExpiry?: boolean;
+  readonly existingLotRemainingBaseQuantity?: string;
   readonly locationId: string;
   readonly reason: string;
   readonly movements: readonly LegacyMovementRecord[];
@@ -988,6 +1075,11 @@ export function planHistoricalReconciliation(input: {
   positiveId(input.itemId, "item id");
   identifier(input.locationId, "reconciliation location");
   reason(input.reason);
+  const requiresExpiry = input.requiresExpiry ?? true;
+  const topLevelExistingRemainingAtoms =
+    input.existingLotRemainingBaseQuantity !== undefined
+      ? quantityAtoms(input.existingLotRemainingBaseQuantity, input.basePrecision, true)
+      : 0n;
   const conversion = unitConversionSnapshot({
     itemId: input.itemId,
     version: input.conversionVersion,
@@ -1002,12 +1094,14 @@ export function planHistoricalReconciliation(input: {
   const positiveBuckets: Array<{
     movementId: number;
     remainingAtoms: bigint;
-    initialAtoms: bigint;
+    unallocatedInitialAtoms: bigint;
     expiryDate: string | null;
     unitCostMinor: number | null;
     payableId: number | null;
+    needsNewLot: boolean;
   }> = [];
   const negativeMovements: Array<{ movementId: number; neededAtoms: bigint }> = [];
+  let alreadyAllocatedNegativeAtoms = 0n;
   for (const row of input.movements) {
     positiveId(row.movementId, "historical movement id");
     invariant(!seen.has(row.movementId), "duplicate_source", `Duplicate historical movement: ${row.movementId}`);
@@ -1022,39 +1116,67 @@ export function planHistoricalReconciliation(input: {
     const allocatedAtoms = quantityAtoms(row.alreadyAllocatedBaseQuantity, input.basePrecision, true);
     invariant(allocatedAtoms <= magnitudeAtoms, "overallocated_movement", "Historical movement allocation exceeds its quantity");
     const unallocatedAtoms = magnitudeAtoms - allocatedAtoms;
-    if (unallocatedAtoms === 0n) continue;
     if (isNegative) {
-      negativeMovements.push({ movementId: row.movementId, neededAtoms: unallocatedAtoms });
+      alreadyAllocatedNegativeAtoms += allocatedAtoms;
+      if (unallocatedAtoms > 0n) {
+        negativeMovements.push({ movementId: row.movementId, neededAtoms: unallocatedAtoms });
+      }
     } else {
-      positiveBuckets.push({
-        movementId: row.movementId,
-        remainingAtoms: unallocatedAtoms,
-        initialAtoms: unallocatedAtoms,
-        expiryDate: row.expiryDate,
-        unitCostMinor: row.unitCostMinor,
-        payableId: row.payableId,
-      });
+      const existingRemainingAtoms =
+        row.existingLotRemainingBaseQuantity !== undefined
+          ? quantityAtoms(row.existingLotRemainingBaseQuantity, input.basePrecision, true)
+          : allocatedAtoms;
+      const availableAtoms = unallocatedAtoms + existingRemainingAtoms;
+      if (availableAtoms > 0n) {
+        positiveBuckets.push({
+          movementId: row.movementId,
+          remainingAtoms: availableAtoms,
+          unallocatedInitialAtoms: unallocatedAtoms,
+          expiryDate: row.expiryDate,
+          unitCostMinor: row.unitCostMinor,
+          payableId: row.payableId,
+          needsNewLot: unallocatedAtoms > 0n,
+        });
+      }
     }
   }
-  const totalPositive = positiveBuckets.reduce((sum, row) => sum + row.initialAtoms, 0n);
+  // When existingLotRemainingBaseQuantity was not explicitly supplied by DB, deduct already-allocated negative outflows FIFO from already-allocated positive capacity
+  if (alreadyAllocatedNegativeAtoms > 0n && input.movements.every((m) => m.existingLotRemainingBaseQuantity === undefined)) {
+    let toDeduct = alreadyAllocatedNegativeAtoms;
+    for (const bucket of positiveBuckets) {
+      if (toDeduct === 0n) break;
+      const existingPart = bucket.remainingAtoms - bucket.unallocatedInitialAtoms;
+      if (existingPart <= 0n) continue;
+      const cut = existingPart <= toDeduct ? existingPart : toDeduct;
+      bucket.remainingAtoms -= cut;
+      toDeduct -= cut;
+    }
+  }
+  const totalUnallocatedPositive = positiveBuckets.reduce((sum, row) => sum + row.unallocatedInitialAtoms, 0n);
+  const totalAvailablePositive = positiveBuckets.reduce((sum, row) => sum + row.remainingAtoms, 0n) + topLevelExistingRemainingAtoms;
   const totalNegative = negativeMovements.reduce((sum, row) => sum + row.neededAtoms, 0n);
-  invariant(totalPositive > 0n || totalNegative > 0n, "already_reconciled", "All historical movements for this item are already allocated");
-  invariant(totalPositive >= totalNegative, "negative_legacy_balance", "Historical negative movements exceed positive inflows");
+  invariant(totalUnallocatedPositive > 0n || totalNegative > 0n, "already_reconciled", "All historical movements for this item are already allocated");
+  invariant(totalAvailablePositive >= totalNegative, "negative_legacy_balance", "Historical negative movements exceed available positive inflows");
   const lotsToCreate: HistoricalReconciliationPlan["lotsToCreate"][number][] = [];
   const allocationsToCreate: HistoricalReconciliationPlan["allocationsToCreate"][number][] = [];
   for (const bucket of positiveBuckets) {
+    if (!bucket.needsNewLot) continue;
+    const lotStatus: "accepted" | "quarantined" =
+      requiresExpiry && bucket.expiryDate === null ? "quarantined" : "accepted";
     lotsToCreate.push({
       movementId: bucket.movementId,
       itemId: input.itemId,
       locationId: input.locationId,
-      baseQuantity: quantityText(bucket.initialAtoms),
+      baseQuantity: quantityText(bucket.unallocatedInitialAtoms),
       expiryDate: bucket.expiryDate,
+      requiresExpiry,
+      status: lotStatus,
       costStatus: bucket.unitCostMinor !== null ? "known" : "missing",
       costSnapshot: {
         source: "legacy_reconciliation",
         traceability: "legacy_unknown",
         conversion,
-        requiresExpiry: input.requiresExpiry && bucket.expiryDate !== null,
+        requiresExpiry,
         unitCostMinor: bucket.unitCostMinor,
         payableId: bucket.payableId,
         reason: input.reason,
@@ -1064,15 +1186,23 @@ export function planHistoricalReconciliation(input: {
       movementId: bucket.movementId,
       sourceLotMovementId: bucket.movementId,
       locationId: input.locationId,
-      baseQuantity: quantityText(bucket.initialAtoms),
+      baseQuantity: quantityText(bucket.unallocatedInitialAtoms),
     });
   }
+  let existingBucketsUsed = false;
   for (const neg of negativeMovements) {
     let needed = neg.neededAtoms;
+    // Pass 1: allocate against prior unallocated legacy positive movements first
     for (const bucket of positiveBuckets) {
       if (needed === 0n) break;
-      if (bucket.remainingAtoms === 0n) continue;
-      const take = bucket.remainingAtoms <= needed ? bucket.remainingAtoms : needed;
+      if (!bucket.needsNewLot || bucket.remainingAtoms === 0n) continue;
+      if (bucket.movementId > neg.movementId) continue;
+      const unallocatedAvail =
+        bucket.remainingAtoms <= bucket.unallocatedInitialAtoms
+          ? bucket.remainingAtoms
+          : bucket.unallocatedInitialAtoms;
+      if (unallocatedAvail === 0n) continue;
+      const take = unallocatedAvail <= needed ? unallocatedAvail : needed;
       bucket.remainingAtoms -= take;
       needed -= take;
       allocationsToCreate.push({
@@ -1082,13 +1212,36 @@ export function planHistoricalReconciliation(input: {
         baseQuantity: quantityText(take),
       });
     }
-    invariant(needed === 0n, "negative_legacy_balance", "Unable to allocate historical outflow across positive legacy movements");
+    // Pass 2: allocate any remaining unallocated outflow against prior existing tracked positive lot capacity
+    for (const bucket of positiveBuckets) {
+      if (needed === 0n) break;
+      if (bucket.remainingAtoms === 0n) continue;
+      if (bucket.movementId > neg.movementId) continue;
+      const take = bucket.remainingAtoms <= needed ? bucket.remainingAtoms : needed;
+      bucket.remainingAtoms -= take;
+      needed -= take;
+      existingBucketsUsed = true;
+      allocationsToCreate.push({
+        movementId: neg.movementId,
+        sourceLotMovementId: bucket.movementId,
+        locationId: input.locationId,
+        baseQuantity: quantityText(take),
+      });
+    }
+    invariant(
+      needed === 0n,
+      "unresolved_historical_lineage",
+      "Historical outflow precedes available positive inflow; cannot attribute lot lineage retroactively",
+    );
   }
+  const netReconciledAtoms = existingBucketsUsed
+    ? positiveBuckets.reduce((sum, row) => sum + row.remainingAtoms, 0n)
+    : totalUnallocatedPositive - totalNegative;
   return freeze({
     itemId: input.itemId,
     locationId: input.locationId,
     reason: input.reason,
-    netReconciledBaseQuantity: quantityText(totalPositive - totalNegative),
+    netReconciledBaseQuantity: quantityText(netReconciledAtoms),
     lotsToCreate,
     allocationsToCreate,
     effects: NO_FINANCIAL_EFFECT,

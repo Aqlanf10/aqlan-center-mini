@@ -15,9 +15,11 @@ export async function getInventorySummary(
 ): Promise<ToolExecutionResult> {
   if (!context.isDbConnected) {
     return {
-      success: false,
-      textSummary: "تعذّر الاتصال بقاعدة البيانات؛ لا يمكن تأكيد أرصدة المخزون أو سلامة المواد الآن.",
-      warnings: ["inventory_unavailable"],
+      success: true,
+      textSummary:
+        "📦 **تقرير المخزون:**\n⚠️ خدمة قاعدة البيانات غير متصلة حالياً؛ لا يمكن تأكيد أرصدة المخزون أو سلامة المواد حتى استعادة الاتصال.",
+      cards: [{ title: "المخزون", value: "غير متصل — غير مؤكد", tone: "calm" }],
+      warnings: ["inventory_unavailable", "قاعدة البيانات غير متصلة — حالة المخزون غير مؤكدة"],
       actions: [{ label: "فتح شاشة المخزون", href: "/inventory", actionType: "navigate" }],
     };
   }

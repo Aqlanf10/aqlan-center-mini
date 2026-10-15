@@ -20,10 +20,10 @@ import {
   summarizeTreatmentResult, treatmentFinancialSnapshot, type TreatmentIssue,
 } from "../lib/inventory-domain/treatment-cost";
 import {
-  attributableConsumedCost, calculateDeduction, convertSettlementMoney, packageEvidenceAction,
-  previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
-  reviewReplenishment, summarizeAppliedDeductions, treatmentCostAfterDoctorRecovery,
-  type AppliedDeduction, type AttributableConsumption,
+  attributableConsumedCost, calculateDeduction, classifyDefaultPackageSafety, convertSettlementMoney,
+  packageEvidenceAction, previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
+  resolvePackageSafetyWithFieldObservation, reviewReplenishment, summarizeAppliedDeductions,
+  treatmentCostAfterDoctorRecovery, type AppliedDeduction, type AttributableConsumption,
 } from "../lib/inventory-domain/custody";
 
 const issue = (overrides: Partial<TreatmentIssue> = {}): TreatmentIssue => ({
@@ -321,5 +321,113 @@ describe("safe package evidence and replenishment (pure contract, P64–69)", ()
     expect(underpriced.contributionMinor).toBe(-1_000);
     expect(underpriced.targetNetPriceMinor).toBe(20_000);
   });
+
+  it("R01 & R02: proposeSettlement rejects unposted priorAdjustments and keeps manual/unbacked proposals provisional", () => {
+    const baseInput = {
+      scope,
+      deductions: { currency: "SAR" as const, amountMinor: 12_000 },
+      attributable: { currency: "SAR" as const, amountMinor: 9_500 },
+      prerequisitesComplete: true,
+    };
+
+    for (const postingState of ["provisional", "ready_for_authorized_review", "objected_under_review"] as const) {
+      expect(() => proposeSettlement({
+        ...baseInput,
+        priorAdjustments: [{ ...scope, id: `unposted-${postingState}`, currency: "SAR", signedMinor: 2_500, postingState }],
+      })).toThrow("unposted_settlement_adjustment");
+    }
+
+    // Without sourceBacked=true, even if prerequisitesComplete=true is passed, status remains provisional
+    expect(proposeSettlement({
+      ...baseInput,
+      sourceBacked: false,
+      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted" }],
+    })).toMatchObject({
+      status: "provisional",
+      supplementalMinor: 500,
+      direction: "due_to_doctor",
+    });
+
+    // Only when both prerequisitesComplete=true and sourceBacked=true does status become ready_for_authorized_review
+    expect(proposeSettlement({
+      ...baseInput,
+      sourceBacked: true,
+      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted" }],
+    })).toMatchObject({
+      status: "ready_for_authorized_review",
+      supplementalMinor: 500,
+      direction: "due_to_doctor",
+    });
+  });
+
+  it("R04: classifyDefaultPackageSafety and resolvePackageSafetyWithFieldObservation forbid hazard downgrade on sharp/contaminated items", () => {
+    expect(classifyDefaultPackageSafety({ name: "إبر تخدير الأسنان", category: "anesthesia", unit: "cartridge" })).toEqual({
+      minimumHazard: "sharp",
+      defaultPolicy: "safe_disposal_record",
+    });
+    expect(classifyDefaultPackageSafety({ name: "Gutta Percha", category: "endodontics", unit: "cone" })).toEqual({
+      minimumHazard: "none",
+      defaultPolicy: "safe_empty_return",
+    });
+
+    const serverSharp = classifyDefaultPackageSafety({ name: "Surgical Scalpel Blade", category: "surgery", unit: "piece" });
+    expect(() => resolvePackageSafetyWithFieldObservation({
+      ...serverSharp,
+      observedHazard: "none",
+      requestedPolicy: "safe_empty_return",
+    })).toThrow("package_hazard_downgrade_forbidden");
+
+    const serverClean = classifyDefaultPackageSafety({ name: "Gutta Percha", category: "endodontics", unit: "cone" });
+    const upgraded = resolvePackageSafetyWithFieldObservation({
+      ...serverClean,
+      observedHazard: "contaminated",
+      requestedPolicy: "safe_empty_return",
+    });
+    expect(upgraded).toEqual({
+      effectiveHazard: "contaminated",
+      effectivePolicy: "safe_disposal_record",
+    });
+    expect(packageEvidenceAction(upgraded.effectiveHazard, upgraded.effectivePolicy)).toBe("document_safe_disposal");
+  });
 });
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { INVENTORY_CUSTODY_SQL } from "../lib/inventory-domain/custody-schema-proposal";
+import { INVENTORY_PROCUREMENT_SQL } from "../lib/inventory-domain/schema-proposal";
+
+describe("R03, R10, R11, R12 schema, API and UI bilingual/locator invariants", () => {
+  it("R03 & R11: schema proposals define custody_waste_approvals and dispose quarantine resolution without self-numbering migrations", () => {
+    expect(INVENTORY_CUSTODY_SQL).toContain("CREATE TABLE IF NOT EXISTS custody_waste_approvals");
+    expect(INVENTORY_CUSTODY_SQL).toContain("waste_approval_id IS NOT NULL");
+    expect(INVENTORY_PROCUREMENT_SQL).toContain("action IN ('release','reject_return','dispose')");
+  });
+
+  it("R12: DoctorCustody.tsx keeps 'الدفعة الصالحة' and 'كمية التحويل' unique to dispatch form, distinguishes consumption banner, and uses closableLots", () => {
+    const doctorCustodySrc = readFileSync(join(process.cwd(), "components", "inventory", "DoctorCustody.tsx"), "utf8");
+    const validLotAriaMatches = doctorCustodySrc.match(/aria-label=\{text\("الدفعة الصالحة"\)\}/g) ?? [];
+    const transferQtyLabelMatches = doctorCustodySrc.match(/text\("كمية التحويل"\)/g) ?? [];
+    expect(validLotAriaMatches).toHaveLength(1);
+    expect(transferQtyLabelMatches).toHaveLength(1);
+    expect(doctorCustodySrc).toContain("تم تسجيل استهلاك العهدة وتخفيض رصيد العهدة ومخزون المركز.");
+    expect(doctorCustodySrc).toContain("closableLots");
+    expect(doctorCustodySrc).not.toContain("prerequisitesComplete: true");
+  });
+
+  it("R10, R11 & R12: route.ts returns correlationId on 500 and ProcurementOperations/ProcurementAdministration translate errors and expose dispose + excessDecision", () => {
+    const routeSrc = readFileSync(join(process.cwd(), "app", "api", "inventory", "procurement", "route.ts"), "utf8");
+    expect(routeSrc).toContain("correlationId");
+    expect(routeSrc).toContain("DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE");
+    expect(routeSrc).toContain('case "custody.approve_waste"');
+
+    const opsSrc = readFileSync(join(process.cwd(), "components", "inventory", "ProcurementOperations.tsx"), "utf8");
+    expect(opsSrc).toContain('value="dispose"');
+    expect(opsSrc).toContain("excessDecision");
+    expect(opsSrc).toContain("t(command.message)");
+    expect(opsSrc).toContain("Select the supplier, line sources, and enter the quote reference.");
+
+    const adminSrc = readFileSync(join(process.cwd(), "components", "inventory", "ProcurementAdministration.tsx"), "utf8");
+    expect(adminSrc).toContain("t(command.message)");
+    expect(adminSrc).toContain("Enter a valid amount and valuation revision reason. Zero means a known free-of-charge value.");
+  });
+});

@@ -1,19 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { ensureSchema,getPool,type DbClient } from "../db";
+import { doctorOwnsPatient,ensureSchema,getPool,type DbClient } from "../db";
 import { withTransaction } from "../transactions";
 import { clinicDateString } from "../schedule";
 import { CLINIC_ZONE_FALLBACK } from "../clinicZone";
 import { invariant,InventoryDomainError,quantityAtoms,quantityText,decimalRatio } from "./quantities";
 import { allocateMinor,planHistoricalReconciliation } from "./procurement";
-import { packageEvidenceAction,proposeSettlement,reconcileCustody,reconcileEmptyPackage,type PackageSafetyPolicy } from "./custody";
+import { classifyDefaultPackageSafety,packageEvidenceAction,proposeSettlement,reconcileCustody,reconcileEmptyPackage,resolvePackageSafetyWithFieldObservation,type PackageSafetyPolicy } from "./custody";
 import { INVENTORY_CLINIC_SCOPE,inventoryOperation,requireInventoryActor,writeInventoryAudit,type InventoryActor } from "./procurement-store";
 import { requireCurrency,type Currency } from "../money";
 
 interface Location {id:string;label:string;kind:"store"|"custody"|"transit";doctor_party_id:number|null;branch_key:string;is_active:boolean}
-interface Lot {id:string;item_id:number;name:string;unit:string;status:string;unreleased_qty:string;receipt_location_id:string;expiry_date:string|null;lot_code:string|null;cost_status:string;cost_snapshot:Record<string,unknown>}
+interface Lot {id:string;item_id:number;name:string;category:string;unit:string;status:string;unreleased_qty:string;receipt_location_id:string;expiry_date:string|null;lot_code:string|null;cost_status:string;cost_snapshot:Record<string,unknown>}
 export interface CustodyDispatch {id:string;fromLocationId:string;toLocationId:string;transitLocationId:string;reason:string;lines:{id:string;lotId:string;quantity:string}[]}
 export interface CustodyAcknowledgement {id:string;transferId:string;reason:string;lines:{lineId:string;acceptedQuantity:string;returnedQuantity:string}[]}
 export interface LegacyReconciliationInput {id:string;itemId:number;locationId:string;reason:string;requiresExpiry?:boolean}
+export interface CustodyWasteApprovalInput {
+ id:string;
+ locationId:string;
+ lotId:string;
+ maxQuantity?:string;
+ quantity?:string;
+ reason:string;
+}
 export interface CustodyUsageInput {
  id:string;
  usageKey?:string;
@@ -28,6 +36,7 @@ export interface CustodyUsageInput {
  caseId?:string|null;
  procedureId?:string|null;
  wasteApprovalId?:string|null;
+ approvalId?:string|null;
  reason:string;
 }
 export interface CustodyStocktakeInput {
@@ -85,7 +94,7 @@ const BALANCES_SQL=`SELECT lot_id,location_id,SUM(delta)::text AS qty FROM (
 ) allocations GROUP BY lot_id,location_id`;
 async function balances(client:DbClient){const r=await client.query<{lot_id:string;location_id:string;qty:string}>(BALANCES_SQL);for(const row of r.rows)invariant(!row.qty.startsWith("-"),"allocation_reconciliation_required","A location/lot allocation is negative; reconcile source records before transfer");return r.rows;}
 async function locations(client:DbClient,ids?:string[]){return (await client.query<Location>("SELECT id,label,kind,doctor_party_id,branch_key,is_active FROM inventory_locations WHERE branch_key=$1 AND ($2::text[] IS NULL OR id=ANY($2::text[])) ORDER BY id FOR SHARE",[INVENTORY_CLINIC_SCOPE,ids??null])).rows;}
-async function lots(client:DbClient,ids?:string[]){return (await client.query<Lot>(`SELECT l.id,l.item_id,i.name,i.unit,
+async function lots(client:DbClient,ids?:string[]){return (await client.query<Lot>(`SELECT l.id,l.item_id,i.name,i.category,i.unit,
  CASE
   WHEN l.status='quarantined' AND l.receipt_line_id IS NOT NULL THEN
    CASE
@@ -171,12 +180,22 @@ export async function reconcileHistoricalMovements(actor:InventoryActor,key:stri
   const movementRows=await client.query<{id:number;kind:"in"|"out"|"adjust";qty:string;expiry_date:string|null;unit_cost_minor:string|null;payable_id:number|null;allocated_qty:string}>(`SELECT m.id,m.kind,m.qty::text,m.expiry_date::text,m.unit_cost_minor::text,m.payable_id,
    COALESCE((SELECT SUM(a.qty) FROM inventory_movement_allocations a WHERE a.movement_id=m.id),0)::text AS allocated_qty
    FROM inventory_movements m WHERE m.item_id=$1 ORDER BY m.id ASC FOR UPDATE`,[item.id]);
+  const existingLots=await client.query<{id:string;movement_id:number}>("SELECT id::text,movement_id FROM stock_lots WHERE item_id=$1",[item.id]);
+  const currentBalances=await balances(client);
+  const lotIdByMovement=new Map<number,string>();
+  const existingRemainingByMovement=new Map<number,string>();
+  for(const row of existingLots.rows){
+   lotIdByMovement.set(row.movement_id,row.id);
+   const rem=currentBalances.find(b=>b.lot_id===row.id&&b.location_id===place.id)?.qty??"0";
+   existingRemainingByMovement.set(row.movement_id,rem);
+  }
+  // Authoritative fail-closed expiry requirement: never allow client payload to disable requiresExpiry
   const plan=planHistoricalReconciliation({
    itemId:item.id,
    baseUnit:item.unit,
    basePrecision:basePrecisionValue,
    conversionVersion,
-   requiresExpiry:Boolean(input.requiresExpiry),
+   requiresExpiry:true,
    locationId:place.id,
    reason:input.reason,
    movements:movementRows.rows.map(row=>({
@@ -184,19 +203,17 @@ export async function reconcileHistoricalMovements(actor:InventoryActor,key:stri
     kind:row.kind,
     signedBaseQuantity:row.qty,
     alreadyAllocatedBaseQuantity:row.allocated_qty,
+    ...(existingRemainingByMovement.has(row.id)?{existingLotRemainingBaseQuantity:existingRemainingByMovement.get(row.id)!}:{}),
     expiryDate:row.expiry_date,
     unitCostMinor:row.unit_cost_minor===null?null:Number(row.unit_cost_minor),
     payableId:row.payable_id,
    })),
   });
-  const lotIdByMovement=new Map<number,string>();
-  const existingLots=await client.query<{id:string;movement_id:number}>("SELECT id::text,movement_id FROM stock_lots WHERE item_id=$1",[item.id]);
-  for(const row of existingLots.rows)lotIdByMovement.set(row.movement_id,row.id);
   for(const lot of plan.lotsToCreate){
    let lotId=lotIdByMovement.get(lot.movementId);
    if(!lotId){
     lotId=randomUUID();
-    await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,NULL,$2,$3,$4,NULL,$5::date,'accepted',$6,$7::jsonb)",[lotId,lot.itemId,lot.locationId,lot.movementId,lot.expiryDate,lot.costStatus,JSON.stringify(lot.costSnapshot)]);
+    await client.query("INSERT INTO stock_lots(id,receipt_line_id,item_id,location_id,movement_id,lot_code,expiry_date,status,cost_status,cost_snapshot) VALUES($1,NULL,$2,$3,$4,NULL,$5::date,$6,$7,$8::jsonb)",[lotId,lot.itemId,lot.locationId,lot.movementId,lot.expiryDate,lot.status,lot.costStatus,JSON.stringify(lot.costSnapshot)]);
     lotIdByMovement.set(lot.movementId,lotId);
    }
   }
@@ -210,6 +227,25 @@ export async function reconcileHistoricalMovements(actor:InventoryActor,key:stri
   return {id:input.id,itemId:item.id,locationId:place.id,status:"reconciled" as const,netReconciledBaseQuantity:plan.netReconciledBaseQuantity,lotsCreated:plan.lotsToCreate.length,allocationsCreated:plan.allocationsToCreate.length,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
  });
 }
+export async function approveCustodyWaste(actor:InventoryActor,key:string,input:CustodyWasteApprovalInput){
+ uuid(input.id);uuid(input.lotId);reason(input.reason);
+ invariant(typeof input.locationId==="string"&&input.locationId.trim().length>0,"invalid_location","Custody location is required");
+ await ready();return inventoryOperation(actor,key,"custody.approve_waste",input,true,async client=>{
+  const who=await requireInventoryActor(client,actor,true);
+  const places=await locations(client,[input.locationId]);const source=places[0];
+  invariant(source?.is_active&&source.kind==="custody"&&source.doctor_party_id!==null,"location_forbidden","Waste approval requires an active doctor custody location");
+  invariant(who.party_id===null||who.party_id!==source.doctor_party_id,"invalid_waste_approval","Custody waste approval requires an independent administrator");
+  const party=await client.query<{kind:string;is_active:boolean}>("SELECT kind,is_active FROM parties WHERE id=$1 FOR SHARE",[source.doctor_party_id]);
+  invariant(party.rows[0]?.kind==="doctor"&&party.rows[0]?.is_active,"doctor_unavailable","Custody location must belong to an active doctor");
+  const stock=await lots(client,[input.lotId]);const lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
+  const rawMaxQuantity=input.maxQuantity??input.quantity??"";
+  const precision=basePrecision(lot);const maxAtoms=quantityAtoms(rawMaxQuantity,precision);const maxQtyText=quantityText(maxAtoms);
+  const doc={id:input.id,locationId:source.id,lotId:lot.id,doctorPartyId:source.doctor_party_id,maxQuantity:maxQtyText,approvedBy:actor.userId,reason:input.reason};
+  await client.query("INSERT INTO custody_waste_approvals(id,location_id,lot_id,doctor_party_id,max_qty,reason,document,approved_by) VALUES($1,$2,$3,$4,$5::numeric,$6,$7::jsonb,$8)",[input.id,source.id,lot.id,source.doctor_party_id,maxQtyText,input.reason,JSON.stringify(doc),actor.userId]);
+  await writeInventoryAudit(client,actor,"custody_waste_approval",input.id,"approve_waste",doc);
+  return {...doc,status:"approved" as const,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
+ });
+}
 export async function recordCustodyUsage(actor:InventoryActor,key:string,input:CustodyUsageInput){
  uuid(input.id);uuid(input.lotId);reason(input.reason);
  invariant(["consumed","approved_waste","returned_to_store"].includes(input.kind),"invalid_custody_event","Invalid custody usage kind");
@@ -217,7 +253,8 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
  invariant(quantityState==="confirmed"||quantityState==="estimated","invalid_quantity_state","Quantity state must be confirmed or estimated");
  const usageKey=(typeof input.usageKey==="string"&&input.usageKey.trim()?input.usageKey.trim():input.id);
  invariant(usageKey.length>=1&&usageKey.length<=240,"invalid_document_id","Usage key must be 1 to 240 characters");
- if(input.kind==="approved_waste")invariant(typeof input.wasteApprovalId==="string"&&input.wasteApprovalId.trim().length>0,"missing_waste_approval","Approved waste requires an explicit wasteApprovalId");
+ const rawWasteApprovalId=typeof input.wasteApprovalId==="string"&&input.wasteApprovalId.trim()?input.wasteApprovalId.trim():typeof input.approvalId==="string"&&input.approvalId.trim()?input.approvalId.trim():null;
+ if(input.kind==="approved_waste")invariant(rawWasteApprovalId!==null&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawWasteApprovalId),"invalid_waste_approval","Approved waste requires a valid registered wasteApprovalId UUID");
  if(input.kind==="returned_to_store")invariant(typeof input.storeLocationId==="string"&&input.storeLocationId.trim().length>0,"location_forbidden","Returning unused custody material requires a store location");
  const opScope=input.kind==="returned_to_store"?"custody.return_to_store":"custody.consume";
  await ready();return inventoryOperation(actor,key,opScope,input,false,async client=>{
@@ -225,7 +262,7 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
   const placeIds=input.kind==="returned_to_store"&&input.storeLocationId?[input.locationId,input.storeLocationId]:[input.locationId];
   const places=await locations(client,placeIds);
   const source=places.find(row=>row.id===input.locationId);
-  invariant(source?.is_active&&source.kind==="custody","location_forbidden","Source must be an active doctor custody location");
+  invariant(source?.is_active&&source.kind==="custody"&&source.doctor_party_id!==null,"location_forbidden","Source must be an active doctor custody location");
   const party=await client.query<{kind:string;is_active:boolean}>("SELECT kind,is_active FROM parties WHERE id=$1 FOR SHARE",[source.doctor_party_id]);
   invariant(party.rows[0]?.kind==="doctor"&&party.rows[0]?.is_active,"doctor_unavailable","Custody location must belong to an active doctor");
   invariant(actor.role==="admin"||(actor.role==="doctor"&&who.party_id!==null&&source.doctor_party_id===who.party_id),"custody_owner_forbidden","Only the custody owner doctor or an administrator can record custody usage or return");
@@ -234,6 +271,7 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
    storePlace=places.find(row=>row.id===input.storeLocationId)??null;
    invariant(storePlace?.is_active&&storePlace.kind==="store","location_forbidden","Return destination must be an active clinic store location");
   }
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.usage:${usageKey}`]);
   const dup=await client.query<{id:string}>("SELECT id::text FROM custody_usage_events WHERE usage_key=$1 FOR SHARE",[usageKey]);
   invariant(!dup.rows.length,"duplicate_consumption","This custody usage key was already recorded");
   const stock=await lots(client,[input.lotId]);const lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
@@ -242,6 +280,100 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
   const precision=basePrecision(lot);const qtyAtoms=quantityAtoms(input.quantity,precision);const normalizedQty=quantityText(qtyAtoms);
   const availableAtoms=quantityAtoms(current.find(row=>row.lot_id===lot.id&&row.location_id===source.id)?.qty??"0",3,true);
   invariant(qtyAtoms<=availableAtoms,"insufficient_location_stock","Doctor custody location has insufficient balance for this lot");
+  if(input.kind==="approved_waste"){
+   const approvalId=rawWasteApprovalId!;
+   const approvalRows=await client.query<{id:string;location_id:string;lot_id:string;doctor_party_id:number;max_qty:string;approved_by:number;approver_role:string;approver_active:boolean;approver_party_id:number|null}>(`SELECT a.id::text,a.location_id,a.lot_id::text,a.doctor_party_id,a.max_qty::text,a.approved_by,
+    u.role AS approver_role,u.is_active AS approver_active,u.party_id AS approver_party_id
+    FROM custody_waste_approvals a JOIN users u ON u.id=a.approved_by WHERE a.id=$1 FOR UPDATE`,[approvalId]);
+   const approval=approvalRows.rows[0];
+   invariant(approval&&approval.approver_role==="admin"&&approval.approver_active,"invalid_waste_approval","Approved waste requires an active administrator approval record");
+   invariant(approval.approver_party_id===null||approval.approver_party_id!==source.doctor_party_id,"invalid_waste_approval","Self-approval of custody waste is forbidden");
+   invariant(approval.location_id===source.id&&approval.lot_id===lot.id&&approval.doctor_party_id===source.doctor_party_id,"invalid_waste_approval","Waste approval does not match this custody location, doctor, or lot");
+   const usedRows=await client.query<{used_qty:string}>("SELECT COALESCE(SUM(qty),0)::text AS used_qty FROM custody_usage_events WHERE waste_approval_id=$1 AND kind='approved_waste'",[approvalId]);
+   const usedAtoms=quantityAtoms(usedRows.rows[0]?.used_qty??"0",3,true);
+   const maxAtoms=quantityAtoms(approval.max_qty,3,true);
+   invariant(usedAtoms+qtyAtoms<=maxAtoms,"invalid_waste_approval","Waste quantity exceeds the remaining approved waste allowance");
+  }
+  const rawPatient=typeof input.patientId==="string"&&input.patientId.trim()?input.patientId.trim():null;
+  const rawVisit=typeof input.visitId==="string"&&input.visitId.trim()?input.visitId.trim():null;
+  const rawCase=typeof input.caseId==="string"&&input.caseId.trim()?input.caseId.trim():null;
+  const rawProcedure=typeof input.procedureId==="string"&&input.procedureId.trim()?input.procedureId.trim():null;
+  let verifiedPatientId:string|null=null;
+  let verifiedVisitId:string|null=null;
+  let verifiedCaseId:string|null=null;
+  let verifiedProcedureId:string|null=null;
+  let clinicalAttributionStatus:"none"|"verified"|"unmatched_pending_review"="none";
+  if(rawPatient||rawVisit||rawCase||rawProcedure){
+   invariant(input.kind==="consumed","clinical_context_mismatch","Clinical patient/visit attribution applies only to patient consumption");
+   let patientIdNum:number|null=null;
+   if(rawPatient){
+    invariant(/^[1-9]\d*$/.test(rawPatient),"clinical_context_mismatch","Invalid patient identifier");
+    patientIdNum=Number(rawPatient);
+    const pRows=await client.query<{id:number}>("SELECT id FROM patients WHERE id=$1 FOR SHARE",[patientIdNum]);
+    invariant(pRows.rows[0],"clinical_context_mismatch","Referenced patient was not found");
+    verifiedPatientId=String(patientIdNum);
+   }
+   let visitIdNum:number|null=null;
+   if(rawVisit){
+    invariant(/^[1-9]\d*$/.test(rawVisit),"clinical_context_mismatch","Invalid visit identifier");
+    visitIdNum=Number(rawVisit);
+    const vRows=await client.query<{id:number;patient_id:number|null;doctor_id:number|null}>("SELECT id,patient_id,doctor_id FROM visits WHERE id=$1 FOR SHARE",[visitIdNum]);
+    const visit=vRows.rows[0];
+    invariant(visit,"clinical_context_mismatch","Referenced visit was not found");
+    if(visit.patient_id!==null){
+     invariant(patientIdNum===null||patientIdNum===visit.patient_id,"clinical_context_mismatch","Visit does not belong to the specified patient");
+     patientIdNum=visit.patient_id;
+     verifiedPatientId=String(visit.patient_id);
+    }else{
+     invariant(patientIdNum===null,"clinical_context_mismatch","Unlinked visit does not match the specified patient");
+    }
+    invariant(visit.doctor_id===null||visit.doctor_id===source.doctor_party_id,"clinical_context_forbidden","Visit belongs to a different doctor");
+    verifiedVisitId=String(visit.id);
+   }
+   if(patientIdNum!==null){
+    const allowed=await doctorOwnsPatient(source.doctor_party_id,patientIdNum,client);
+    invariant(allowed,"clinical_context_forbidden","Doctor is not authorized to attribute material consumption to this patient");
+   }
+   let caseIdNum:number|null=null;
+   if(rawCase){
+    invariant(/^[1-9]\d*$/.test(rawCase),"clinical_context_mismatch","Invalid clinical case/plan identifier");
+    caseIdNum=Number(rawCase);
+    const cRows=await client.query<{id:number;patient_id:number;primary_doctor_id:number|null}>("SELECT id,patient_id,primary_doctor_id FROM treatment_plans WHERE id=$1 FOR SHARE",[caseIdNum]);
+    const planRow=cRows.rows[0];
+    invariant(planRow,"clinical_context_mismatch","Referenced clinical case/treatment plan was not found");
+    invariant(patientIdNum===null||planRow.patient_id===patientIdNum,"clinical_context_mismatch","Clinical case/treatment plan does not belong to the specified patient");
+    invariant(planRow.primary_doctor_id===null||planRow.primary_doctor_id===source.doctor_party_id,"clinical_context_forbidden","Clinical case/treatment plan belongs to a different doctor");
+    if(patientIdNum===null){
+     patientIdNum=planRow.patient_id;
+     verifiedPatientId=String(planRow.patient_id);
+    }
+    verifiedCaseId=String(planRow.id);
+   }
+   if(rawProcedure){
+    invariant(patientIdNum!==null||visitIdNum!==null,"clinical_context_mismatch","Procedure attribution requires a verified patient or visit");
+    if(/^[1-9]\d*$/.test(rawProcedure)){
+     const procNum=Number(rawProcedure);
+     const pvRows=await client.query<{id:number;patient_id:number;plan_id:number|null;doctor_id:number|null;visit_id:number|null}>("SELECT id,patient_id,plan_id,doctor_id,visit_id FROM planned_visits WHERE id=$1 FOR SHARE",[procNum]);
+     const pv=pvRows.rows[0];
+     if(pv){
+      invariant(patientIdNum===null||pv.patient_id===patientIdNum,"clinical_context_mismatch","Procedure does not belong to the specified patient");
+      invariant(visitIdNum===null||pv.visit_id===null||pv.visit_id===visitIdNum,"clinical_context_mismatch","Procedure does not belong to the specified visit");
+      invariant(caseIdNum===null||pv.plan_id===null||pv.plan_id===caseIdNum,"clinical_context_mismatch","Procedure does not belong to the specified treatment plan");
+      invariant(pv.doctor_id===null||pv.doctor_id===source.doctor_party_id,"clinical_context_forbidden","Procedure belongs to a different doctor");
+      verifiedProcedureId=String(pv.id);
+      clinicalAttributionStatus="verified";
+     }else{
+      verifiedProcedureId=rawProcedure;
+      clinicalAttributionStatus="unmatched_pending_review";
+     }
+    }else{
+     verifiedProcedureId=rawProcedure;
+     clinicalAttributionStatus="unmatched_pending_review";
+    }
+   }else{
+    clinicalAttributionStatus="verified";
+   }
+  }
   let movementId:number|null=null;
   if(input.kind==="consumed"||input.kind==="approved_waste"){
    const movementReason=`Custody ${input.kind} ${input.id}: ${input.reason}`;
@@ -249,10 +381,10 @@ export async function recordCustodyUsage(actor:InventoryActor,key:string,input:C
    movementId=movement.rows[0].id;
    await client.query("INSERT INTO inventory_movement_allocations(id,movement_id,lot_id,location_id,qty) VALUES($1,$2,$3,$4,$5::numeric)",[randomUUID(),movementId,lot.id,source.id,normalizedQty]);
   }
-  const doc={id:input.id,usageKey,locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,itemId:lot.item_id,kind:input.kind,baseQuantity:normalizedQty,quantityState,patientId:input.patientId??null,visitId:input.visitId??null,caseId:input.caseId??null,procedureId:input.procedureId??null,wasteApprovalId:input.wasteApprovalId??null,reason:input.reason};
-  await client.query("INSERT INTO custody_usage_events(id,usage_key,location_id,store_location_id,lot_id,movement_id,kind,qty,quantity_state,patient_id,visit_id,case_id,procedure_id,waste_approval_id,reason,cost_snapshot,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8::numeric,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18)",[input.id,usageKey,source.id,storePlace?.id??null,lot.id,movementId,input.kind,normalizedQty,quantityState,input.patientId??null,input.visitId??null,input.caseId??null,input.procedureId??null,input.wasteApprovalId??null,input.reason,JSON.stringify(lot.cost_snapshot),JSON.stringify(doc),actor.userId]);
-  await writeInventoryAudit(client,actor,"custody_usage",input.id,input.kind,{locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,baseQuantity:normalizedQty,quantityState,patientId:input.patientId??null,visitId:input.visitId??null,procedureId:input.procedureId??null});
-  return {id:input.id,usageKey,kind:input.kind,locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,baseQuantity:normalizedQty,movementId,clinicMovementEffects:movementId?1:0,payableEffects:0,cashEffects:0};
+  const doc={id:input.id,usageKey,locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,itemId:lot.item_id,kind:input.kind,baseQuantity:normalizedQty,quantityState,patientId:verifiedPatientId,visitId:verifiedVisitId,caseId:verifiedCaseId,procedureId:verifiedProcedureId,clinicalAttributionStatus,wasteApprovalId:rawWasteApprovalId,reason:input.reason};
+  await client.query("INSERT INTO custody_usage_events(id,usage_key,location_id,store_location_id,lot_id,movement_id,kind,qty,quantity_state,patient_id,visit_id,case_id,procedure_id,waste_approval_id,reason,cost_snapshot,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8::numeric,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17::jsonb,$18)",[input.id,usageKey,source.id,storePlace?.id??null,lot.id,movementId,input.kind,normalizedQty,quantityState,verifiedPatientId,verifiedVisitId,verifiedCaseId,verifiedProcedureId,rawWasteApprovalId,input.reason,JSON.stringify(lot.cost_snapshot),JSON.stringify(doc),actor.userId]);
+  await writeInventoryAudit(client,actor,"custody_usage",input.id,input.kind,{locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,baseQuantity:normalizedQty,quantityState,patientId:verifiedPatientId,visitId:verifiedVisitId,procedureId:verifiedProcedureId,clinicalAttributionStatus});
+  return {id:input.id,usageKey,kind:input.kind,locationId:source.id,storeLocationId:storePlace?.id??null,lotId:lot.id,baseQuantity:normalizedQty,clinicalAttributionStatus,movementId,clinicMovementEffects:movementId?1:0,payableEffects:0,cashEffects:0};
  });
 }
 export async function recordCustodyStocktake(actor:InventoryActor,key:string,input:CustodyStocktakeInput){
@@ -277,6 +409,42 @@ export async function recordCustodyStocktake(actor:InventoryActor,key:string,inp
   return {...doc,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
  });
 }
+async function custodyLotHistory(client:DbClient,locationId:string,lot:Lot,currentBalanceText:string){
+ const precision=basePrecision(lot);const scale=10n**BigInt(3-precision);
+ const toUnits=(atoms3:bigint)=>Number(atoms3/scale);
+ const inboundRows=await client.query<{inbound_qty:string;outbound_transfer_qty:string}>(`SELECT
+  (COALESCE((SELECT SUM(a.accepted_qty) FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id WHERE t.to_location_id=$1 AND l.lot_id=$2),0)
+   + COALESCE((SELECT SUM(ma.qty) FROM inventory_movement_allocations ma JOIN inventory_movements m ON m.id=ma.movement_id WHERE ma.location_id=$1 AND ma.lot_id=$2 AND (m.kind='in' OR (m.kind='adjust' AND m.qty>0))),0))::text AS inbound_qty,
+  GREATEST(COALESCE((SELECT SUM(l.qty) FROM inventory_transfer_lines l JOIN inventory_transfers t ON t.id=l.transfer_id WHERE t.from_location_id=$1 AND l.lot_id=$2),0)
+   - COALESCE((SELECT SUM(a.returned_qty) FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id WHERE t.from_location_id=$1 AND l.lot_id=$2),0),0)::text AS outbound_transfer_qty`,[locationId,lot.id]);
+ const usageRows=await client.query<{consumed_qty:string;waste_qty:string;returned_qty:string}>(`SELECT
+  COALESCE(SUM(qty) FILTER(WHERE kind='consumed' AND quantity_state='confirmed'),0)::text AS consumed_qty,
+  COALESCE(SUM(qty) FILTER(WHERE kind='approved_waste'),0)::text AS waste_qty,
+  COALESCE(SUM(qty) FILTER(WHERE kind='returned_to_store'),0)::text AS returned_qty
+  FROM custody_usage_events WHERE location_id=$1 AND lot_id=$2`,[locationId,lot.id]);
+ const inboundAtoms3=quantityAtoms(inboundRows.rows[0]?.inbound_qty??"0",3,true);
+ const outboundTransferAtoms3=quantityAtoms(inboundRows.rows[0]?.outbound_transfer_qty??"0",3,true);
+ const consumedAtoms3=quantityAtoms(usageRows.rows[0]?.consumed_qty??"0",3,true);
+ const wasteAtoms3=quantityAtoms(usageRows.rows[0]?.waste_qty??"0",3,true);
+ const returnedStoreAtoms3=quantityAtoms(usageRows.rows[0]?.returned_qty??"0",3,true);
+ const remainingAtoms3=quantityAtoms(currentBalanceText,3,true);
+ const returnedOrTransferredAtoms3=returnedStoreAtoms3+outboundTransferAtoms3;
+ return {
+  precision,
+  scale,
+  inboundAtoms3,
+  originalQuantity:quantityText(inboundAtoms3),
+  recordedConsumptionQuantity:quantityText(consumedAtoms3),
+  returnedOrTransferredQuantity:quantityText(returnedOrTransferredAtoms3),
+  approvedWasteQuantity:quantityText(wasteAtoms3),
+  remainingQuantity:quantityText(remainingAtoms3),
+  originalUnits:toUnits(inboundAtoms3),
+  consumedUnits:toUnits(consumedAtoms3),
+  returnedOrTransferredUnits:toUnits(returnedOrTransferredAtoms3),
+  wasteUnits:toUnits(wasteAtoms3),
+  remainingUnits:toUnits(remainingAtoms3),
+ };
+}
 export async function closeCustodyPackage(actor:InventoryActor,key:string,input:CustodyPackageClosureInput){
  uuid(input.id);uuid(input.lotId);reason(input.reason);
  invariant(typeof input.packageId==="string"&&input.packageId.trim().length>0&&input.packageId.trim().length<=240,"invalid_document_id","A packageId is required");
@@ -287,50 +455,172 @@ export async function closeCustodyPackage(actor:InventoryActor,key:string,input:
   invariant(source?.is_active&&source.kind==="custody","location_forbidden","Package closure requires an active doctor custody location");
   invariant(actor.role==="admin"||(actor.role==="doctor"&&who.party_id!==null&&source.doctor_party_id===who.party_id),"custody_owner_forbidden","Only the custody owner doctor or an administrator can close a custody package");
   const stock=await lots(client,[input.lotId]);const lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
-  const precision=basePrecision(lot);const scale=10n**BigInt(3-precision);
-  const toUnits=(val:string)=>Number(quantityAtoms(val,precision,true)/scale);
-  const priorRows=await client.query<{package_id:string;evidence_event_id:string}>("SELECT package_id,evidence_event_id FROM custody_package_closures WHERE package_id=$1 OR evidence_event_id=$2 FOR SHARE",[input.packageId.trim(),input.evidenceEventId.trim()]);
-  const expectedAction=mapDomainCall(()=>packageEvidenceAction(input.hazard,input.policy));
-  const plan=mapDomainCall(()=>reconcileEmptyPackage({
-   packageId:input.packageId.trim(),
-   evidenceEventId:input.evidenceEventId.trim(),
-   previousClosures:priorRows.rows.map(row=>({packageId:row.package_id,evidenceEventId:row.evidence_event_id})),
-   hazard:input.hazard,
-   policy:input.policy,
-   evidenceAction:input.evidenceAction??expectedAction,
-   originalAtoms:toUnits(input.originalQuantity),
-   recordedConsumptionAtoms:toUnits(input.recordedConsumptionQuantity),
-   returnedOrTransferredAtoms:toUnits(input.returnedOrTransferredQuantity),
-   approvedWasteAtoms:toUnits(input.approvedWasteQuantity),
-   remainingAtoms:toUnits(input.remainingQuantity),
+  const pkgKey=input.packageId.trim();const evKey=input.evidenceEventId.trim();
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.pkg:${pkgKey}`]);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.ev:${evKey}`]);
+  const current=await balances(client);
+  const currentBalanceText=current.find(row=>row.lot_id===lot.id&&row.location_id===source.id)?.qty??"0";
+  const history=await custodyLotHistory(client,source.id,lot,currentBalanceText);
+  invariant(history.inboundAtoms3>0n,"lot_not_in_custody_location","Lot was never allocated to this custody location");
+  const defaultSafety=classifyDefaultPackageSafety({name:lot.name,category:lot.category,unit:lot.unit,costSnapshot:lot.cost_snapshot});
+  const resolvedSafety=mapDomainCall(()=>resolvePackageSafetyWithFieldObservation({
+   minimumHazard:defaultSafety.minimumHazard,
+   defaultPolicy:defaultSafety.defaultPolicy,
+   observedHazard:input.hazard,
+   requestedPolicy:input.policy,
   }));
-  const doc={id:input.id,locationId:source.id,lotId:lot.id,...plan,reason:input.reason};
-  await client.query("INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)",[input.id,plan.packageId,plan.evidenceEventId,source.id,lot.id,input.hazard,input.policy,plan.evidenceAction,plan.unexplainedAtoms,plan.reviewRequired,input.reason,JSON.stringify(doc),actor.userId]);
+  const toUnits=(val:string)=>Number(quantityAtoms(val,history.precision,true)/history.scale);
+  const submittedOriginal=toUnits(input.originalQuantity);
+  const submittedConsumed=toUnits(input.recordedConsumptionQuantity);
+  const submittedReturned=toUnits(input.returnedOrTransferredQuantity);
+  const submittedWaste=toUnits(input.approvedWasteQuantity);
+  const submittedRemaining=toUnits(input.remainingQuantity);
+  invariant(
+   submittedOriginal===history.originalUnits&&
+   submittedConsumed===history.consumedUnits&&
+   submittedReturned===history.returnedOrTransferredUnits&&
+   submittedWaste===history.wasteUnits&&
+   submittedRemaining<=history.remainingUnits,
+   "package_history_mismatch",
+   "Submitted package closure quantities contradict server custody history",
+  );
+  const priorRows=await client.query<{package_id:string;evidence_event_id:string}>("SELECT package_id,evidence_event_id FROM custody_package_closures WHERE package_id=$1 OR evidence_event_id=$2 FOR SHARE",[pkgKey,evKey]);
+  const expectedAction=mapDomainCall(()=>packageEvidenceAction(resolvedSafety.effectiveHazard,resolvedSafety.effectivePolicy));
+  const plan=mapDomainCall(()=>reconcileEmptyPackage({
+   packageId:pkgKey,
+   evidenceEventId:evKey,
+   previousClosures:priorRows.rows.map(row=>({packageId:row.package_id,evidenceEventId:row.evidence_event_id})),
+   hazard:resolvedSafety.effectiveHazard,
+   policy:resolvedSafety.effectivePolicy,
+   evidenceAction:input.evidenceAction??expectedAction,
+   originalAtoms:history.originalUnits,
+   recordedConsumptionAtoms:history.consumedUnits,
+   returnedOrTransferredAtoms:history.returnedOrTransferredUnits,
+   approvedWasteAtoms:history.wasteUnits,
+   remainingAtoms:submittedRemaining,
+  }));
+  const doc={id:input.id,locationId:source.id,lotId:lot.id,hazard:resolvedSafety.effectiveHazard,policy:resolvedSafety.effectivePolicy,...plan,reason:input.reason};
+  await client.query("INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)",[input.id,plan.packageId,plan.evidenceEventId,source.id,lot.id,resolvedSafety.effectiveHazard,resolvedSafety.effectivePolicy,plan.evidenceAction,plan.unexplainedAtoms,plan.reviewRequired,input.reason,JSON.stringify(doc),actor.userId]);
   await writeInventoryAudit(client,actor,"custody_package",input.id,"close_package",doc);
   return {...doc,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
  });
+}
+function parseSettlementPeriodBounds(periodId:string):{startIso:string;endIso:string}{
+ const m=/^(\d{4})(?:-(annual|Q([1-4])|(0[1-9]|1[0-2])))?$/.exec(periodId);
+ invariant(m,"invalid_period","Settlement periodId must be YYYY, YYYY-annual, YYYY-Q1..Q4, or YYYY-MM");
+ const year=Number(m[1]);
+ invariant(year>=2020&&year<=2100,"invalid_period","Settlement period year is out of range");
+ if(!m[2]||m[2]==="annual"){
+  return {startIso:`${year}-01-01T00:00:00.000Z`,endIso:`${year+1}-01-01T00:00:00.000Z`};
+ }
+ if(m[3]){
+  const q=Number(m[3]);
+  const startMonth=(q-1)*3+1;
+  const endYear=q===4?year+1:year;
+  const endMonth=q===4?1:startMonth+3;
+  return {
+   startIso:`${year}-${String(startMonth).padStart(2,"0")}-01T00:00:00.000Z`,
+   endIso:`${endYear}-${String(endMonth).padStart(2,"0")}-01T00:00:00.000Z`,
+  };
+ }
+ const month=Number(m[4]);
+ const endYear=month===12?year+1:year;
+ const endMonth=month===12?1:month+1;
+ return {
+  startIso:`${year}-${String(month).padStart(2,"0")}-01T00:00:00.000Z`,
+  endIso:`${endYear}-${String(endMonth).padStart(2,"0")}-01T00:00:00.000Z`,
+ };
 }
 export async function proposeAnnualCustodySettlement(actor:InventoryActor,key:string,input:CustodySettlementProposalInput){
  uuid(input.id);reason(input.reason);
  invariant(Number.isSafeInteger(input.doctorPartyId)&&input.doctorPartyId>0,"invalid_identifier","A positive doctorPartyId is required");
  invariant(typeof input.periodId==="string"&&input.periodId.trim().length>0&&input.periodId.trim().length<=120,"invalid_identifier","A bounded periodId is required");
+ const periodId=input.periodId.trim();
+ const bounds=parseSettlementPeriodBounds(periodId);
  requireCurrency(input.currency,"custody_settlement",input.id);
  await ready();return inventoryOperation(actor,key,"custody.propose_settlement",input,true,async client=>{
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[JSON.stringify(["custody.settlement.scope",input.doctorPartyId,periodId,input.currency])]);
   const party=await client.query<{kind:string;is_active:boolean}>("SELECT kind,is_active FROM parties WHERE id=$1 FOR SHARE",[input.doctorPartyId]);
   invariant(party.rows[0]?.kind==="doctor"&&party.rows[0]?.is_active,"doctor_unavailable","Settlement must target an active doctor party");
-  const periodId=input.periodId.trim();
-  const priorRows=await client.query<{id:string;supplemental_minor:string}>("SELECT id::text,supplemental_minor::text FROM custody_annual_settlements WHERE doctor_party_id=$1 AND period_id=$2 AND currency=$3 AND supplemental_minor IS NOT NULL ORDER BY created_at,id FOR SHARE",[input.doctorPartyId,periodId,input.currency]);
+  const doctorLocations=await client.query<{id:string}>("SELECT id FROM inventory_locations WHERE branch_key=$1 AND kind='custody' AND doctor_party_id=$2 ORDER BY id FOR SHARE",[INVENTORY_CLINIC_SCOPE,input.doctorPartyId]);
+  const locIds=doctorLocations.rows.map(row=>row.id);
+  const usageRows=locIds.length
+   ? (await client.query<{id:string;lot_id:string;kind:string;qty:string;quantity_state:string;cost_snapshot:Record<string,unknown>;document:Record<string,unknown>}>(
+      "SELECT id::text,lot_id::text,kind,qty::text,quantity_state,cost_snapshot,document FROM custody_usage_events WHERE location_id=ANY($1::text[]) AND kind IN ('consumed','approved_waste') AND created_at>=$2::timestamptz AND created_at<$3::timestamptz ORDER BY created_at,id FOR SHARE",
+      [locIds,bounds.startIso,bounds.endIso],
+     )).rows
+   : [];
+  const stocktakeIssues=locIds.length
+   ? (await client.query<{cnt:number}>("SELECT COUNT(*)::int AS cnt FROM custody_stocktakes WHERE location_id=ANY($1::text[]) AND review_required=TRUE",[locIds])).rows[0]?.cnt??0
+   : 0;
+  const ledger=await ledgerRows(client);
+  const ledgerComplete=ledger.every(reconciled);
+  const allLots=usageRows.length?await lots(client,[...new Set(usageRows.map(r=>r.lot_id))]):[];
+  let serverConsumptionMinor=0;
+  let consumptionSourcesComplete=true;
+  for(const u of usageRows){
+   if(u.quantity_state!=="confirmed"||u.document?.clinicalAttributionStatus==="unmatched_pending_review"){
+    consumptionSourcesComplete=false;
+    continue;
+   }
+   const lot=allLots.find(l=>l.id===u.lot_id);
+   if(!lot){consumptionSourcesComplete=false;continue;}
+   const quote=roundedQuote(lot,u.qty);
+   if(!quote||quote.currency!==input.currency||lot.cost_status!=="known"){
+    consumptionSourcesComplete=false;
+    continue;
+   }
+   serverConsumptionMinor+=quote.amountMinor;
+  }
+  if(usageRows.length>0&&consumptionSourcesComplete&&input.attributableConsumptionMinor!==null&&input.attributableConsumptionMinor!==undefined){
+   invariant(
+    input.attributableConsumptionMinor===serverConsumptionMinor,
+    "settlement_source_mismatch",
+    "Submitted attributable consumption contradicts server-recorded custody usage",
+   );
+  }
+  // Unposted proposals in custody_annual_settlements are worksheets/proposals, NOT posted financial entries.
+  // Never subtract unposted/provisional/objected proposals as priorAdjustments (R01).
+  // Furthermore, until an authoritative commission deduction ledger adapter is integrated and all
+  // stocktake/cost/consumption sources are complete, proposals remain provisional worksheets (R02).
+  const hasAuthoritativeDeductionAdapter=false;
+  const serverPrerequisitesComplete=
+   hasAuthoritativeDeductionAdapter&&
+   ledgerComplete&&
+   stocktakeIssues===0&&
+   usageRows.length>0&&
+   consumptionSourcesComplete;
   const scope={doctorId:String(input.doctorPartyId),periodId};
   const proposal=mapDomainCall(()=>proposeSettlement({
    scope,
    deductions:{currency:input.currency,amountMinor:input.appliedDeductionsMinor},
    attributable:input.attributableConsumptionMinor===null?null:{currency:input.currency,amountMinor:input.attributableConsumptionMinor},
-   prerequisitesComplete:input.prerequisitesComplete??(input.attributableConsumptionMinor!==null),
-   priorAdjustments:priorRows.rows.map(row=>({id:row.id,doctorId:scope.doctorId,periodId:scope.periodId,currency:input.currency,signedMinor:Number(row.supplemental_minor)})),
+   prerequisitesComplete:serverPrerequisitesComplete,
+   sourceBacked:serverPrerequisitesComplete,
+   priorAdjustments:[],
   }));
-  const doc={id:input.id,doctorPartyId:input.doctorPartyId,periodId,currency:proposal.currency,appliedDeductionsMinor:input.appliedDeductionsMinor,attributableConsumptionMinor:input.attributableConsumptionMinor,targetDifferenceMinor:proposal.targetDifferenceMinor,priorAdjustmentMinor:proposal.priorAdjustmentMinor,supplementalMinor:proposal.supplementalMinor,direction:proposal.direction,status:proposal.status,cashDeltaMinor:0,automaticWageDeductionMinor:0,reason:input.reason};
+  const doc={
+   id:input.id,
+   doctorPartyId:input.doctorPartyId,
+   periodId,
+   periodBounds:bounds,
+   currency:proposal.currency,
+   appliedDeductionsMinor:input.appliedDeductionsMinor,
+   attributableConsumptionMinor:input.attributableConsumptionMinor,
+   serverVerifiedConsumptionMinor:consumptionSourcesComplete&&usageRows.length>0?serverConsumptionMinor:null,
+   unresolvedStocktakes:stocktakeIssues,
+   sourceStatus:"provisional_manual_worksheet" as const,
+   targetDifferenceMinor:proposal.targetDifferenceMinor,
+   priorAdjustmentMinor:proposal.priorAdjustmentMinor,
+   supplementalMinor:proposal.supplementalMinor,
+   direction:proposal.direction,
+   status:proposal.status,
+   cashDeltaMinor:0,
+   automaticWageDeductionMinor:0,
+   reason:input.reason,
+  };
   await client.query("INSERT INTO custody_annual_settlements(id,doctor_party_id,period_id,currency,applied_deductions_minor,attributable_consumption_minor,supplemental_minor,direction,status,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)",[input.id,input.doctorPartyId,periodId,proposal.currency,input.appliedDeductionsMinor,input.attributableConsumptionMinor,proposal.supplementalMinor,proposal.direction,proposal.status,input.reason,JSON.stringify(doc),actor.userId]);
-  await writeInventoryAudit(client,actor,"custody_settlement",input.id,"propose",{doctorPartyId:input.doctorPartyId,periodId,currency:proposal.currency,direction:proposal.direction,status:proposal.status});
+  await writeInventoryAudit(client,actor,"custody_settlement",input.id,"propose",{doctorPartyId:input.doctorPartyId,periodId,currency:proposal.currency,direction:proposal.direction,status:proposal.status,sourceStatus:doc.sourceStatus});
   return {...doc,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
  });
 }
@@ -362,10 +652,52 @@ export async function readDoctorCustody(actor:InventoryActor,offset=0){invariant
  const stocktakeRows=visibleIds.length?(await client.query<{id:string;location_id:string;lot_id:string;expected_qty:string;counted_qty:string;difference_qty:string;review_required:boolean;reason:string;created_at:Date}>("SELECT id::text,location_id,lot_id::text,expected_qty::text,counted_qty::text,difference_qty::text,review_required,reason,created_at FROM custody_stocktakes WHERE location_id=ANY($1::text[]) ORDER BY created_at DESC,id LIMIT 25",[visibleIds])).rows:[];
  const closureRows=visibleIds.length?(await client.query<{id:string;package_id:string;evidence_event_id:string;location_id:string;lot_id:string;hazard:string;policy:string;evidence_action:string;unexplained_atoms:string;review_required:boolean;reason:string;created_at:Date}>("SELECT id::text,package_id,evidence_event_id,location_id,lot_id::text,hazard,policy,evidence_action,unexplained_atoms::text,review_required,reason,created_at FROM custody_package_closures WHERE location_id=ANY($1::text[]) ORDER BY created_at DESC,id LIMIT 25",[visibleIds])).rows:[];
  const settlementRows=(await client.query<{id:string;doctor_party_id:number;period_id:string;currency:Currency;applied_deductions_minor:string;attributable_consumption_minor:string|null;supplemental_minor:string|null;direction:string;status:string;reason:string;created_at:Date;objection_count:number}>("SELECT s.id::text,s.doctor_party_id,s.period_id,s.currency,s.applied_deductions_minor::text,s.attributable_consumption_minor::text,s.supplemental_minor::text,s.direction,s.status,s.reason,s.created_at,(SELECT COUNT(*)::int FROM custody_settlement_objections o WHERE o.settlement_id=s.id) AS objection_count FROM custody_annual_settlements s WHERE ($1 OR s.doctor_party_id=$2) ORDER BY s.created_at DESC,s.id LIMIT 25",[actor.role==="admin",who.party_id])).rows;
+ // Build closableLots per custody location (including depleted 0-balance lots that had historical custody inbound allocation at that location — R06)
+ const custodyLocationIds=visible.filter(p=>p.kind==="custody").map(p=>p.id);
+ const historicalPairs=custodyLocationIds.length
+  ? (await client.query<{location_id:string;lot_id:string}>(`SELECT DISTINCT t.to_location_id AS location_id,l.lot_id::text AS lot_id
+     FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id
+     WHERE t.to_location_id=ANY($1::text[]) AND a.accepted_qty>0`,[custodyLocationIds])).rows
+  : [];
+ const closableByLocation=new Map<string,Array<{locationId:string;lotId:string;itemId:number;name:string;unit:string;lotCode:string|null;expiryDate:string|null;originalQuantity:string;inboundQuantity:string;recordedConsumptionQuantity:string;consumedQuantity:string;returnedOrTransferredQuantity:string;approvedWasteQuantity:string;remainingQuantity:string;quantity:string;minimumHazard:"none"|"sharp"|"contaminated";defaultHazard:"none"|"sharp"|"contaminated";defaultPolicy:PackageSafetyPolicy;alreadyClosed:boolean}>>();
+ for(const pair of historicalPairs){
+  const lot=stock.find(l=>l.id===pair.lot_id);
+  if(!lot)continue;
+  const balText=current.find(b=>b.lot_id===lot.id&&b.location_id===pair.location_id)?.qty??"0";
+  const hist=await custodyLotHistory(client,pair.location_id,lot,balText);
+  if(hist.inboundAtoms3<=0n)continue;
+  const safety=classifyDefaultPackageSafety({name:lot.name,category:lot.category,unit:lot.unit,costSnapshot:lot.cost_snapshot});
+  const alreadyClosed=closureRows.some(c=>c.location_id===pair.location_id&&c.lot_id===lot.id);
+  const arr=closableByLocation.get(pair.location_id)??[];
+  arr.push({
+   locationId:pair.location_id,
+   lotId:lot.id,
+   itemId:lot.item_id,
+   name:lot.name,
+   unit:lot.unit,
+   lotCode:lot.lot_code,
+   expiryDate:lot.expiry_date,
+   originalQuantity:hist.originalQuantity,
+   inboundQuantity:hist.originalQuantity,
+   recordedConsumptionQuantity:hist.recordedConsumptionQuantity,
+   consumedQuantity:hist.recordedConsumptionQuantity,
+   returnedOrTransferredQuantity:hist.returnedOrTransferredQuantity,
+   approvedWasteQuantity:hist.approvedWasteQuantity,
+   remainingQuantity:hist.remainingQuantity,
+   quantity:hist.remainingQuantity,
+   minimumHazard:safety.minimumHazard,
+   defaultHazard:safety.minimumHazard,
+   defaultPolicy:safety.defaultPolicy,
+   alreadyClosed,
+  });
+  closableByLocation.set(pair.location_id,arr);
+ }
+ const allClosableLots=Array.from(closableByLocation.values()).flat().filter(c=>!c.alreadyClosed);
  return {
   scope:INVENTORY_CLINIC_SCOPE,
   pricesAllowed:actor.role==="admin",
-  locations:visible.map(place=>({id:place.id,label:place.label,kind:place.kind,doctorPartyId:place.doctor_party_id,lots:current.filter(row=>row.location_id===place.id&&quantityAtoms(row.qty,3,true)>0n).map(row=>{const lot=stock.find(lot=>lot.id===row.lot_id)!;const quote=values.get(`${lot.id}:${place.id}`);return {lotId:lot.id,itemId:lot.item_id,name:lot.name,unit:lot.unit,quantity:quantityText(quantityAtoms(row.qty)),lotCode:lot.lot_code,expiryDate:lot.expiry_date,availability:eligible(lot,today)&&!incomplete.has(lot.item_id)?"available":"unavailable",trackingState:incomplete.has(lot.item_id)?"incomplete":"allocated",...(actor.role==="admin"?{quote:quote??null,costState:quote?"estimated":lot.cost_status==="known"?"known":"missing"}:{})};})})),
+  locations:visible.map(place=>({id:place.id,label:place.label,kind:place.kind,doctorPartyId:place.doctor_party_id,lots:current.filter(row=>row.location_id===place.id&&quantityAtoms(row.qty,3,true)>0n).map(row=>{const lot=stock.find(lot=>lot.id===row.lot_id)!;const quote=values.get(`${lot.id}:${place.id}`);return {lotId:lot.id,itemId:lot.item_id,name:lot.name,unit:lot.unit,quantity:quantityText(quantityAtoms(row.qty)),lotCode:lot.lot_code,expiryDate:lot.expiry_date,availability:eligible(lot,today)&&!incomplete.has(lot.item_id)?"available":"unavailable",trackingState:incomplete.has(lot.item_id)?"incomplete":"allocated",...(actor.role==="admin"?{quote:quote??null,costState:quote?"estimated":lot.cost_status==="known"?"known":"missing"}:{})};}),closableLots:(closableByLocation.get(place.id)??[]).filter(c=>!c.alreadyClosed)})),
+  closableLots:allClosableLots,
   storeLocations:allLocations.filter(row=>row.kind==="store"&&row.is_active).map(row=>({id:row.id,label:row.label})),
   pendingTransfers:pending,
   transferOffset:offset,

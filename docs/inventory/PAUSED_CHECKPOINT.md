@@ -1,28 +1,35 @@
-# Inventory independent completion checkpoint — 2026-10-15
+# Inventory independent completion & Argon repair checkpoint — 2026-10-15
 
-Resumed on 2026-10-15 under the root assignment authorizing independent inventory, procurement, and doctor custody completion on branch `feat/inventory-completion-20261015` starting from pinned commit `3ebaf9e28587b036f4952593bf0046598cf7b06b` (`feat/inventory-procurement-custody`). This authorization replaces the older pause notice within the independent inventory scope only; it does not authorize branch merges, deployment, or shared financial/schema mutations.
+Resumed on 2026-10-15 under the root assignment authorizing independent inventory, procurement, and doctor custody completion and the subsequent Argon repair cycle (`R00–R12`) on branch `feat/inventory-completion-20261015` starting from pinned commit `3ebaf9e28587b036f4952593bf0046598cf7b06b` (`feat/inventory-procurement-custody`). This authorization replaces the older pause notice within the independent inventory scope only; it does not authorize branch merges, deployment, or shared financial/schema mutations.
 
-Observed reference heads at checkpoint time:
+Observed reference heads:
 - `origin/main`: `d79df32b1ec8250d11c2d20fd284fd914e4da4ad` (PR #333 merged; migrations through `0061_financial_idempotency_keys.sql`)
 - `origin/feat/inventory-procurement-custody`: `3ebaf9e28587b036f4952593bf0046598cf7b06b` (exact match with pinned start commit)
-- `origin/feat/hr-main-recovery-20261015` (PR #334): `2c0522e2e092438ea2823f9d58391018cf59c7ea` (advanced from reference snapshot `023889449051699488fad972273ef6a5fee92eee`, reserving `0056–0058`)
+- `origin/feat/hr-main-recovery-20261015` (PR #334): `2c0522e2e092438ea2823f9d58391018cf59c7ea` (reserving `0056–0058`)
+- Preserved prior branch head before R00–R12 repair commit: `e74481cb6250bbefea1393248eff5e883fcc96f6`
 
-Completed in this independent assignment:
-1. **Priority 4.أ — Read-Error & Audit Hardening**:
-   - Hardened `getInventorySummary` in `lib/ai-tools/inventory-tools.ts`, `app/api/inventory/[id]/movements/route.ts`, `app/api/inventory/procurement/route.ts`, `app/inventory/page.tsx`, and `lib/inventory-domain/procurement-store.ts` + `lib/inventory-domain/presentation.ts` (`sanitizeInventoryAuditDetails`, `safeInventoryErrorMessage`) so database read failures never masquerade as zero stock, 100% healthy status, or false 404s, and audit/error payloads strip credentials, connection strings, SQL internals, and unauthorized purchase cost fields.
-2. **Priority 4.ب — Quarantine Resolution, Excess Arrival Decision, Replacement Capacity & Legacy Reconciliation**:
-   - Implemented `planQuarantineResolution`, `planExcessArrivalDecision`, and `planHistoricalReconciliation` in `lib/inventory-domain/procurement.ts`.
-   - Added append-only `quarantine_dispositions` in `lib/inventory-domain/schema-proposal.ts`, `resolveQuarantineReceipt` (`quarantine.resolve`) in `lib/inventory-domain/procurement-store.ts`, and `reconcileHistoricalMovements` (`legacy.reconcile`) in `lib/inventory-domain/custody-store.ts`, plus UI workflows in `components/inventory/ProcurementOperations.tsx` and `components/inventory/DoctorCustody.tsx`.
-3. **Priority 4.ج — Custody Consumption, Store Return, Stocktake, Safe Package Closure & Annual Settlement Review**:
-   - Added append-only `custody_usage_events`, `custody_stocktakes`, `custody_package_closures`, `custody_annual_settlements`, and `custody_settlement_objections` in `lib/inventory-domain/custody-schema-proposal.ts`.
-   - Implemented `recordCustodyUsage` (`custody.consume`, `custody.return_to_store`), `recordCustodyStocktake` (`custody.stocktake`), `closeCustodyPackage` (`custody.close_package`), `proposeAnnualCustodySettlement` (`custody.propose_settlement`), and `objectCustodySettlement` (`custody.object_settlement`) in `lib/inventory-domain/custody-store.ts` with UI panels in `components/inventory/DoctorCustody.tsx` and zero automatic debt, wage deduction, or cash entries.
-4. **Priority 4.د — Bilingual Copy (Arabic & English)**:
-   - Completed Arabic/English toggle and dictionaries across `components/inventory/ProcurementRequests.tsx`, `components/inventory/ProcurementAdministration.tsx`, `components/inventory/ProcurementOperations.tsx`, and `components/inventory/DoctorCustody.tsx`.
-
-Verification executed locally on this host:
-- Unit & contract suites (`vitest`): **145/145 passed** across `__tests__/inventory-foundation.test.ts` (14), `__tests__/inventory-procurement-domain.test.ts` (76), `__tests__/inventory-treatment-custody.test.ts` (44), `__tests__/inventory-lots.test.ts` (7), and `__tests__/inventory-http-registration.test.ts` (2), plus `__tests__/http-permissions.test.ts`.
-- Static gates: `npm run typecheck` (0 errors), `npm run lint` (0 errors), `npm run scan:money` (green), and `npm run ci:scan:body` (green).
-- PostgreSQL 18 (`npm run test:postgres`) and live DB-backed browser suites (`npm run test:security-http`) were **not** executed locally because PostgreSQL 18 is not installed on this machine; new PG tests were added to `__tests__/postgres/inventory-procurement-store.test.ts` and `__tests__/postgres/inventory-custody-transfer.test.ts` for execution in the PostgreSQL 18 CI/test environment.
+Completed in the R00–R12 repair cycle on top of `e74481cb6250bbefea1393248eff5e883fcc96f6`:
+1. **R00 — CI Build/Test Diagnosis & Repair**:
+   - Diagnosed GitHub Actions Run `38793021949` (`#2013`, job `116622173970`) on `e74481cb6250bbefea1393248eff5e883fcc96f6`: `npm test` failed on 1 test out of 8,973 (`__tests__/ai-assistant-tools.test.ts:111:27`, `returns friendly offline notice for inventory`) because `getInventorySummary` returned `success: false` without `"غير متصلة"` when `!context.isDbConnected`.
+   - Fixed `getInventorySummary` in `lib/ai-tools/inventory-tools.ts` to return a friendly offline notice (`success: true`, `textSummary` containing `"غير متصلة"`, `warnings: ["inventory_unavailable", ...]`, `cards: [{ title: "المخزون", value: "غير متصل — غير مؤكد", tone: "calm" }]`) without fabricating zero stock or healthy status, while keeping `success: false` on runtime query exceptions when `context.isDbConnected === true`.
+2. **R01 & R02 — Annual Custody Settlement Integrity (`proposeSettlement`, `proposeAnnualCustodySettlement`)**:
+   - Enforced `postingState === "posted"` on `priorAdjustments` in `proposeSettlement` (`unposted_settlement_adjustment`) and required `sourceBacked === true` for `"ready_for_authorized_review"`.
+   - Hardened `proposeAnnualCustodySettlement` in `lib/inventory-domain/custody-store.ts` with `pg_advisory_xact_lock` on `(doctorPartyId, periodId, currency)`, period format validation (`invalid_period_id`), server-side verification against `custody_usage_events` (`settlement_source_mismatch`), exclusion of unposted rows from `priorAdjustments`, and `"provisional"` status whenever a server-backed deduction ledger is absent.
+3. **R03 — Independent Waste Approval (`custody_waste_approvals`, `approveCustodyWaste`)**:
+   - Added append-only `custody_waste_approvals` table to `lib/inventory-domain/custody-schema-proposal.ts`, `approveCustodyWaste` (`custody.approve_waste`) in `lib/inventory-domain/custody-store.ts` and `app/api/inventory/procurement/route.ts`, and row-locked `FOR UPDATE` allowance verification in `recordCustodyUsage` when `kind === "approved_waste"`.
+4. **R04 & R06 — Server-Verified Package Safety, Depleted Lot Selection & Closure Lineage (`closeCustodyPackage`)**:
+   - Implemented `classifyDefaultPackageSafety` and `resolvePackageSafetyWithFieldObservation` in `lib/inventory-domain/custody.ts` forbidding hazard downgrade on sharp/contaminated items (`package_hazard_downgrade_forbidden`).
+   - Enforced server-side custody lot inbound ownership (`lot_not_in_custody_location`), exact history reconciliation (`package_history_mismatch`), and global `pg_advisory_xact_lock` on `packageId` and `evidenceEventId` in `closeCustodyPackage`, and exposed `closableLots` (including `0`-balance depleted lots) in `readDoctorCustody` and `components/inventory/DoctorCustody.tsx`.
+5. **R05 — Clinical Context Verification (`recordCustodyUsage`)**:
+   - Verified `patientId`, `visitId`, `caseId`, and `procedureId` against `patients`, `visits`, `treatment_plans`, `planned_visits`, and `doctorOwnsPatient` in `recordCustodyUsage` (`clinical_context_mismatch`, `clinical_context_forbidden`).
+6. **R07 & R08 — Historical Reconciliation Quarantine & Chronological Two-Pass Allocation (`planHistoricalReconciliation`, `reconcileHistoricalMovements`)**:
+   - Preserved `requiresExpiry: true` and created missing-expiry legacy lots with `status = "quarantined"` (`R07`).
+   - Enforced chronological inflow-before-outflow validation (`unresolved_historical_lineage`) and two-pass allocation supporting mixed-state items with existing tracked lot capacity (`R08`).
+7. **R09 & R11 — Quarantine Current-Date Guard, Disposal & Excess Arrival Decisions (`planQuarantineResolution`, `resolveQuarantineReceipt`, `planInspectedReceipt`)**:
+   - Validated `resolutionDate <= currentDate` and current-date shelf life on quarantine release (`R09`).
+   - Wired `"dispose"` quarantine resolution across domain, schema proposal, store, and `ProcurementOperations.tsx`, and wired `excessDecision` (`return_excess_to_supplier`, `hold_for_order_amendment`) into `planInspectedReceipt`, `postInspectedReceipt`, and `ProcurementOperations.tsx` (`R11`).
+8. **R10 & R12 — Allowlisted Error Sanitization, Correlation IDs, Locator Uniqueness & Bilingual UI**:
+   - Replaced blacklist-only `safeInventoryErrorMessage` with `ALLOWLISTED_DOMAIN_ERROR_MESSAGES` + `DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE`, expanded `sanitizeInventoryAuditDetails`, and added `correlationId` to 500 responses (`R10`).
+   - Restored Playwright locator uniqueness (`"الدفعة الصالحة"` and `"كمية التحويل"` exclusive to dispatch form), distinguished `custody.consume` completion feedback, and wrapped validation/command messages in `t(...)` across `ProcurementOperations.tsx` and `ProcurementAdministration.tsx` (`R12`).
 
 Shared files untouched: `lib/db.ts`, `lib/session.ts`, `lib/migrations.ts`, `schema/*`, shared invoice/payable/payment/commission/HR writers, and `.github/workflows/ci.yml`.
-
