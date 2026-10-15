@@ -294,6 +294,10 @@ describe("schema ownership harness safety", () => {
     expect(artifactContainsSensitiveText('{"x":"postgresql://u:p@localhost/db"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"x":"DATABASE_URL"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"username":"ci"}')).toBe(true);
+    expect(artifactContainsSensitiveText('{"expectedUsername":"synthetic-person"}')).toBe(true);
+    expect(artifactContainsSensitiveText("actorUsername = 'synthetic-person'")).toBe(true);
+    // PostgreSQL's double colon is a type cast, not a credential assignment.
+    expect(artifactContainsSensitiveText("(response ->> 'actorUsername'::text) = (intent ->> 'expectedUsername'::text)")).toBe(false);
     expect(artifactContainsSensitiveText('{"x":"127.0.0.1:5432"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"x":"RAILWAY_SERVICE_ID"}')).toBe(true);
     expect(artifactContainsSensitiveText('{"x":"INSERT INTO patients"}')).toBe(true);

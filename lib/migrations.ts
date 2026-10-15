@@ -90,6 +90,39 @@ export const MIGRATION_ADVISORY_LOCK_KEY = parseInt(
   16,
 );
 
+/** Register additive runtime extensions under the very same lock and per-file
+ * transaction as the CLI migrator. Legacy runtime DDL remains unregistered:
+ * startup must not replay historical financial/data backfills merely to add HR.
+ * Pre-existing unregistered extension tables fail their CREATE, never get adopted.
+ */
+export async function applyRuntimeMigrationFiles(pool: DbPool, files: MigrationFile[]): Promise<string[]> {
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY]);
+    try {
+      const applied = await listAppliedMigrations(client);
+      // Check every supplied contract before making any extension change.
+      for (const file of files) {
+        if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) throw new Error(`RUNTIME_MIGRATION_SOURCE_MISMATCH: ${file.version}`);
+        const row = applied.find(item => item.version === file.version);
+        if (row && (row.name !== file.name || row.checksum !== file.checksum || row.adopted)) {
+          throw new Error(`RUNTIME_MIGRATION_REGISTRY_MISMATCH: ${file.version}`);
+        }
+      }
+      await ensureSchemaMigrationsTable(client);
+      const appliedNow: string[] = [];
+      for (const file of files) {
+        if (applied.some(row => row.version === file.version)) continue;
+        await applyMigrationInTransaction(client, file, { adopted: false });
+        appliedNow.push(file.version);
+      }
+      return appliedNow;
+    } finally {
+      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY]).catch(() => {});
+    }
+  } finally { client.release(); }
+}
+
 /** الجداول والأعمدة التي لا يقوم النظام بدونها — قائمة فحص الانحراف الحرج (P1.2). */
 export const CRITICAL_SCHEMA_TABLES = [
   "ai_confirmation_claims",

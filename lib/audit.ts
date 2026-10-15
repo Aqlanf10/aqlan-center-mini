@@ -130,9 +130,50 @@ export type AuditAction =
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
-  | "system.reset";
+  | "system.reset"
+  | "hr.staff.create" | "hr.staff.update" | "hr.staff.link_user" | "hr.staff.unlink_user"
+  | "task.create" | "task.update" | "task.status" | "task.assign" | "task.visibility"
+  | "task.comment" | "task.checklist" | "task.link" | "task.unlink"
+  | "hr.contract.create" | "hr.contract.update" | "hr.contract.approve" | "hr.contract.terminate" | "hr.contract.addendum"
+  | "hr.schedule.create" | "hr.schedule.update"
+  | "hr.attendance.record" | "hr.attendance.correct" | "hr.attendance.overtime"
+  | "hr.leave.request" | "hr.leave.decision" | "hr.leave.balance_adjust"
+  | "hr.payroll.period.create" | "hr.payroll.calculate" | "hr.payroll.approve"
+  | "hr.payroll.disburse" | "hr.payroll.close" | "hr.settings.update";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
+  "hr.staff.create": "إنشاء ملف موظف",
+  "hr.staff.update": "تعديل ملف موظف",
+  "hr.staff.link_user": "ربط ملف موظف بحساب دخول",
+  "hr.staff.unlink_user": "فكّ ربط ملف موظف بحسابه",
+  "task.create": "إنشاء مهمة",
+  "task.update": "تعديل مهمة",
+  "task.status": "تغيير حالة مهمة",
+  "task.assign": "إسناد مهمة",
+  "task.visibility": "تحويل مهمة خاصة إلى مشتركة",
+  "task.comment": "تعليق على مهمة",
+  "task.checklist": "بند في قائمة تحقق مهمة",
+  "task.link": "ربط مهمة بسجل",
+  "task.unlink": "فكّ ربط مهمة عن سجل",
+  "hr.contract.create": "إنشاء مسودة عقد",
+  "hr.contract.update": "تعديل عقد",
+  "hr.contract.approve": "اعتماد عقد",
+  "hr.contract.terminate": "إنهاء عقد",
+  "hr.contract.addendum": "إصدار ملحق عقد",
+  "hr.schedule.create": "إنشاء جدول دوام",
+  "hr.schedule.update": "تعديل جدول دوام",
+  "hr.attendance.record": "تسجيل حضور وانصراف",
+  "hr.attendance.correct": "تصحيح سجل حضور",
+  "hr.attendance.overtime": "اعتماد ساعات إضافية",
+  "hr.leave.request": "تقديم طلب إجازة",
+  "hr.leave.decision": "قرار بشأن طلب إجازة",
+  "hr.leave.balance_adjust": "تعديل رصيد إجازات",
+  "hr.payroll.period.create": "إنشاء فترة مسير رواتب",
+  "hr.payroll.calculate": "احتساب مسير رواتب",
+  "hr.payroll.approve": "اعتماد مسير رواتب",
+  "hr.payroll.disburse": "صرف مستحقات مسير",
+  "hr.payroll.close": "إقفال فترة مسير رواتب",
+  "hr.settings.update": "تحديث سياسات الموارد البشرية",
   "invoice.create": "إنشاء فاتورة",
   "invoice.cancel": "إلغاء فاتورة",
   "invoice.correct": "تصحيح فاتورة",

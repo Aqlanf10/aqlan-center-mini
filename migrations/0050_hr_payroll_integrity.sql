@@ -1,0 +1,45 @@
+-- (HR-INT) سلامة المسير والصرف: لقطة شروط الأجر وأسباب الحجب، التزام العمولة المستقل، أجزاء الصرف، بصمة الطلب، العكس.
+-- إضافية خالصة فوق 0049 (لا تعديل لهجرةٍ مطبّقة). 0050 محجوزة ومعتمدة من dot لإصلاح تكامل الموارد البشرية ضمن PR #308 بعد فحص الفروع المفتوحة.
+-- اعتماد الرقم في الشفرة فقط؛ لا يُفترض عدم التطبيق اليدوي لـ0048/0049 في قواعد خارجية.
+-- Body must remain byte-for-byte equal to HR_PAYROLL_INTEGRITY_SQL after these comments.
+ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS commission_payable_id INTEGER REFERENCES payables(id) ON DELETE SET NULL;
+ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS pay_terms_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS blocker_codes TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE hr_payroll_items ADD COLUMN IF NOT EXISTS commission_basis_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS hr_payroll_items_comm_payable_idx ON hr_payroll_items (commission_payable_id) WHERE commission_payable_id IS NOT NULL;
+
+ALTER TABLE hr_payroll_disbursements ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+ALTER TABLE hr_payroll_disbursements ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMPTZ;
+ALTER TABLE hr_payroll_disbursements ADD COLUMN IF NOT EXISTS reversed_by TEXT;
+ALTER TABLE hr_payroll_disbursements ADD COLUMN IF NOT EXISTS reversal_reason TEXT CHECK (reversal_reason IS NULL OR length(btrim(reversal_reason)) BETWEEN 2 AND 500);
+
+CREATE TABLE IF NOT EXISTS hr_payroll_disbursement_parts (
+  id               SERIAL      PRIMARY KEY,
+  disbursement_id  INTEGER     NOT NULL REFERENCES hr_payroll_disbursements(id) ON DELETE CASCADE,
+  component        TEXT        NOT NULL CHECK (component IN ('salary', 'commission')),
+  amount_minor     BIGINT      NOT NULL CHECK (amount_minor > 0),
+  expense_id       INTEGER     NOT NULL REFERENCES expenses(id),
+  payable_id       INTEGER     REFERENCES payables(id) ON DELETE SET NULL,
+  UNIQUE (disbursement_id, component)
+);
+CREATE INDEX IF NOT EXISTS hr_payroll_disb_parts_expense_idx ON hr_payroll_disbursement_parts (expense_id);
+
+-- Preserve raw punches independently of the daily projection and approval decisions.
+CREATE TABLE IF NOT EXISTS hr_attendance_punch_events (
+  id SERIAL PRIMARY KEY,
+  attendance_id INTEGER NOT NULL REFERENCES hr_attendance_records(id),
+  staff_id INTEGER NOT NULL REFERENCES hr_staff(id),
+  punch_type TEXT NOT NULL CHECK (punch_type IN ('check_in','check_out')),
+  punched_at TIMESTAMPTZ NOT NULL,
+  source TEXT NOT NULL,
+  note TEXT,
+  recorded_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS hr_attendance_punch_events_attendance_idx ON hr_attendance_punch_events(attendance_id);
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_by DROP NOT NULL;
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_at DROP NOT NULL;
+ALTER TABLE hr_attendance_corrections ALTER COLUMN approved_at DROP DEFAULT;
+-- Existing corrections were applied immediately by 0048 code; keep that historical truth.
+ALTER TABLE hr_attendance_corrections ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('pending','approved','rejected'));
+ALTER TABLE hr_attendance_corrections ADD COLUMN IF NOT EXISTS decision_reason TEXT;
