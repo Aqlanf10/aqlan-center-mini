@@ -22,6 +22,7 @@ import { CLINIC_TIME_ZONE } from "./db";
 import { governingContractToday, hasSalary } from "./hr-pay-terms";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
+import { revalidateSessionInTransaction } from "./session";
 import type { AuditAction } from "./audit";
 import {
   canAssignTasks, canManageTask, canSeeTask, canUseTasks, canWorkOnTask,
@@ -790,6 +791,27 @@ export type HrTaskWriteAuthorizer = ((client: DbClient) => Promise<boolean>) & {
 class HrTaskAuthorityError extends Error {
   constructor(public status: number) { super("تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية."); }
 }
+/** Existing task → current account → subordinate records. A revocation which
+ * commits while the task lock is awaited must win; the canonical account SHARE
+ * lock then holds authority through commit. Expiry after any later lock wait
+ * throws inside the transaction so domain rows and task events roll back. */
+async function withTaskMutationTransaction<T>(
+  taskId: number, session: SessionPayload,
+  work: (client: DbClient, row: HrTaskRow | undefined) => Promise<T>,
+): Promise<T | { ok: false; error: string; status: number }> {
+  try {
+    return await withTransaction(getPool(), async client => {
+      const current = await client.query('SELECT * FROM hr_tasks WHERE id=$1 FOR UPDATE', [taskId]);
+      if (!(await revalidateSessionInTransaction(session, client))) throw new HrTaskAuthorityError(401);
+      const result = await work(client, current.rows[0] ? taskRowMapper(current.rows[0]) : undefined);
+      if (session.expiresAt < Date.now()) throw new HrTaskAuthorityError(401);
+      return result;
+    });
+  } catch (error) {
+    if (error instanceof HrTaskAuthorityError) return { ok: false, error: error.message, status: error.status };
+    throw error;
+  }
+}
 const taskRequestConflict = (): TaskMutationResult<never> => ({
   ok: false, status: 409, error: "تعذّر تأكيد طلب الإنشاء بهذا المفتاح. راجع مهامك قبل إنشاء طلب آخر.",
 });
@@ -819,16 +841,17 @@ export async function createTask(
   const fingerprint = TASK_CREATE_FINGERPRINT + createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
   try {
     return await withTransaction(getPool(), async (client): Promise<TaskMutationResult<HrTaskView>> => {
-      // Wait for this key before reading current authority. The signed route authorizer
-      // holds the live user FOR SHARE until COMMIT, after any prior key holder completes.
+      // Match mutation lock order for replay: key → existing task → live user.
+      // Never hold user SHARE while waiting for an existing task mutation which
+      // needs the same user's current authority.
       if (key !== null) await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`hr-task-create:${key}`]);
+      const existing = key === null ? null : await client.query("SELECT * FROM hr_tasks WHERE client_request_id = $1 FOR UPDATE", [key]);
       if (authorize && !(await authorize(client))) throw new HrTaskAuthorityError(403);
       const assertCurrent = () => {
         if (session.expiresAt < Date.now() || (authorize && !authorize.isCurrent())) throw new HrTaskAuthorityError(401);
       };
       assertCurrent();
-      if (key !== null) {
-        const existing = await client.query("SELECT * FROM hr_tasks WHERE client_request_id = $1 FOR UPDATE", [key]);
+      if (existing) {
         if (existing.rows[0]) {
           const row = taskRowMapper(existing.rows[0]);
           // A globally unique key never grants visibility, even to a manager.
@@ -937,7 +960,6 @@ export async function updateTask(
   taskId: number, patch: UpdateTaskPatch, session: SessionPayload,
 ): Promise<TaskMutationResult<HrTaskView>> {
   if (!canUseTasks(session.role)) return { ok: false as const, error: "المهام خارج صلاحيات دورك.", status: 403 };
-  const displayName = await sessionDisplayName(session);
 
   const managementChangeRequested =
     patch.title !== undefined
@@ -950,10 +972,9 @@ export async function updateTask(
 
   /* التدقيق بعد الالتزام — انظر updateStaff: سطر التدقيق لا يُكتب داخل معاملةٍ
      تحتفظ بقفل الصف، فلا جمود اتصالي تحت التحميل المتوازي. */
-  return withTransaction(getPool(), async (client) => {
-    const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
-    if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
-    const row = taskRowMapper(current.rows[0]);
+  return withTaskMutationTransaction(taskId, session, async (client, row) => {
+    if (!row) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    const displayName = await sessionDisplayName(session, client);
     const viewerStaffId = await staffIdForUser(session.userId, client);
     if (!canSeeTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
@@ -1080,11 +1101,9 @@ export async function addTaskComment(
   taskId: number, body: string, session: SessionPayload, clientRequestId?: string | null,
 ): Promise<TaskMutationResult<{ id: number; createdAt: string }>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
-  const displayName = await sessionDisplayName(session);
-  const inserted = await withTransaction(getPool(), async (client) => {
-    const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
-    if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
-    const row = taskRowMapper(current.rows[0]);
+  const inserted = await withTaskMutationTransaction(taskId, session, async (client, row) => {
+    if (!row) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    const displayName = await sessionDisplayName(session, client);
     const viewerStaffId = await staffIdForUser(session.userId, client);
     // التوحيد: غير المرئي (خاصةً لغير صاحبها) 404 بلا فرقٍ عن المجهول — لا استنتاج
     // بوجود مهمةٍ خاصة من 403. والعمل (تعليق) للمكلّف بعد ثبوت الرؤية.
@@ -1141,11 +1160,9 @@ export async function mutateTaskChecklist(
   taskId: number, operation: ChecklistOperation, session: SessionPayload,
 ): Promise<TaskMutationResult<{ ok: true }>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
-  const displayName = await sessionDisplayName(session);
-  const outcome = await withTransaction(getPool(), async (client) => {
-    const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
-    if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
-    const row = taskRowMapper(current.rows[0]);
+  const outcome = await withTaskMutationTransaction(taskId, session, async (client, row) => {
+    if (!row) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    const displayName = await sessionDisplayName(session, client);
     const viewerStaffId = await staffIdForUser(session.userId, client);
     // التوحيد: غير المرئي 404 بلا فرقٍ عن المجهول، والعمل بعد ثبوت الرؤية.
     if (!canSeeTask(row, session, viewerStaffId)) {
@@ -1220,24 +1237,21 @@ export async function addTaskLink(
   taskId: number, kind: TaskLinkKind, linkId: number, session: SessionPayload,
 ): Promise<TaskMutationResult<{ label: string }>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
-  const displayName = await sessionDisplayName(session);
-  const exists = await linkReadableForSession(session, kind, linkId);
-  if (!exists) {
-    return { ok: false, error: "السجل المطلوب ربطه غير موجود أو خارج صلاحياتك — الربط لا يمنح وصولًا.", status: 404 };
-  }
-  const label = await describeLinkTarget(session, kind, linkId);
-  if (label === null) return { ok: false, error: "السجل المطلوب ربطه غير موجود.", status: 404 };
 
-  const outcome = await withTransaction(getPool(), async (client) => {
-    const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
-    if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
-    const row = taskRowMapper(current.rows[0]);
+  const outcome = await withTaskMutationTransaction(taskId, session, async (client, row) => {
+    if (!row) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    const displayName = await sessionDisplayName(session, client);
     const viewerStaffId = await staffIdForUser(session.userId, client);
     // التوحيد: غير المرئي 404 بلا فرقٍ عن المجهول — لا استنتاج بوجود مهمةٍ خاصة.
     if (!canSeeTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
     }
     if (!canManageTask(row, session)) return { ok: false as const, error: "لا تدير هذه المهمة.", status: 403 };
+    if (!(await linkReadableForSession(session, kind, linkId, client))) {
+      return { ok: false as const, error: "السجل المطلوب ربطه غير موجود أو خارج صلاحياتك — الربط لا يمنح وصولًا.", status: 404 };
+    }
+    const label = await describeLinkTarget(session, kind, linkId, client);
+    if (label === null) return { ok: false as const, error: "السجل المطلوب ربطه غير موجود.", status: 404 };
     const duplicate = await client.query(
       `SELECT 1 FROM hr_task_links WHERE task_id = $1 AND link_kind = $2 AND link_id = $3`, [taskId, kind, linkId],
     );
@@ -1251,21 +1265,19 @@ export async function addTaskLink(
       taskId, actorUserId: session.userId, actorDisplayName: displayName,
       action: "link", field: kind, newValue: label, linkId,
     });
-    return { ok: true as const, wasPrivate: row.is_private };
+    return { ok: true as const, wasPrivate: row.is_private, label };
   });
   if (!outcome.ok) return outcome;
   await auditTask("task.link", session, taskId, `ربط مهمة (#${taskId}) بـ${TASK_LINK_KIND_LABEL[kind]}`,
     { kind, linkId, private: outcome.wasPrivate });
-  return { ok: true, value: { label } };
+  return { ok: true, value: { label: outcome.label } };
 }
 
 export async function removeTaskLink(taskId: number, linkId: number, session: SessionPayload): Promise<TaskMutationResult<{ ok: true }>> {
   if (!canUseTasks(session.role)) return { ok: false, error: "المهام خارج صلاحيات دورك.", status: 403 };
-  const displayName = await sessionDisplayName(session);
-  const outcome = await withTransaction(getPool(), async (client) => {
-    const current = await client.query(`SELECT * FROM hr_tasks WHERE id = $1 FOR UPDATE`, [taskId]);
-    if (!current.rowCount) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
-    const row = taskRowMapper(current.rows[0]);
+  const outcome = await withTaskMutationTransaction(taskId, session, async (client, row) => {
+    if (!row) return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };
+    const displayName = await sessionDisplayName(session, client);
     const viewerStaffId = await staffIdForUser(session.userId, client);
     if (!canSeeTask(row, session, viewerStaffId)) {
       return { ok: false as const, error: "المهمة غير موجودة أو غير مرئية لك.", status: 404 };

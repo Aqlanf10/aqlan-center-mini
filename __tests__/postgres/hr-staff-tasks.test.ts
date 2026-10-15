@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { sessionCredentialVersion } from "../../lib/auth";
 
 /**
  * (HR-1/HR-2) الموارد البشرية والمهام على PostgreSQL 18 الحقيقي:
@@ -72,6 +73,9 @@ beforeAll(async () => {
   (reception as { userId: number }).userId = receptionId;
   (doctor as { userId: number }).userId = doctorId;
   (otherDoctor as { userId: number }).userId = otherDoctorId;
+  for (const actor of [admin, reception, doctor, otherDoctor]) {
+    (actor as { credentialVersion: string }).credentialVersion = sessionCredentialVersion('x');
+  }
 });
 
 afterAll(async () => { await resetPoolForTesting(); });

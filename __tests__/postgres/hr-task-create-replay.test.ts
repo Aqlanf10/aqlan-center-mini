@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
-import type { SessionPayload } from "../../lib/auth";
+import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import type { CreateTaskInput } from "../../lib/hr";
 
 assertRealPostgresUrl();
@@ -22,6 +22,7 @@ beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!); await ensureSchema();
   for (const actor of [admin, doctor, other]) {
     actor.userId = Number((await getPool().query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,$1,'synthetic',$2) RETURNING id", [actor.username, actor.role])).rows[0].id);
+    actor.credentialVersion = sessionCredentialVersion('synthetic');
   }
   assigneeId = (await createStaff({ fullName: "Synthetic assignee", jobTitle: "Synthetic", department: "other",
     hireDate: null, workStatus: "active", endDate: null, contractKind: "commission", payTerms: null, phone: null, note: null }, admin)).id;

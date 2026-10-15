@@ -12236,6 +12236,13 @@ export async function voidExpense(
   return withTransaction(getPool(), async (client) => {
     const linked = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1",[id]);
     if (linked.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
+    // READ COMMITTED can see a payout committed after the early lookup. Lock
+    // the voucher first, then read its linkage again in a fresh statement.
+    // Hold this lock through the reversal; HR uses its own atomic reversal path.
+    const lockedExpense = await client.query("SELECT id FROM expenses WHERE id=$1 FOR UPDATE", [id]);
+    if (!lockedExpense.rows.length) return { ok: false, reason: "not_found" as const };
+    const lockedLink = await client.query("SELECT 1 FROM hr_payroll_disbursement_parts WHERE expense_id=$1 UNION SELECT 1 FROM hr_payroll_disbursements WHERE expense_id=$1 LIMIT 1", [id]);
+    if (lockedLink.rows.length) throw new Error("اعكس صرف المسير من وحدة الموظفين لتحديث جزأي الصرف ومستحقاته معًا.");
     return voidExpenseInTx(client,id,context);
   });
 }
