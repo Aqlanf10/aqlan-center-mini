@@ -1,0 +1,18 @@
+--- a/lib/clinic-reset.ts
++++ b/lib/clinic-reset.ts
+@@ -36,6 +36,15 @@
+   "endo_canal_records",
+   "endo_visits",
+   "endo_treatments",
++  // Pending Ortho source integration: append-only clinical records.
++  "ortho_case_study_artifact_events",
++  "ortho_case_study_export_manifests",
++  "ortho_case_study_revisions",
++  "ortho_retention_entries",
++  "ortho_decision_revisions",
++  "ortho_assessment_revisions",
++  "ortho_case_lifecycle_events",
++  "ortho_strategy_revisions",
+   "ortho_adjustments",
+   "ortho_cases",
+   "tooth_conditions",

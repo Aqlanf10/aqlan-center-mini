@@ -50,8 +50,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 6418,
-      "sha256": "0e370f3b2512b6127ebeece3fb7593a5edd46ee710aee826a92553c64aa2d51e"
+      "bytes": 6445,
+      "sha256": "0ce0487f9f7cd3176b1ff35c19bae8be5cbe9cab73445063a6efe7cc136e75b2"
     },
     {
       "path": "coordination/0051_ortho_treatment_strategy.sql.reference.txt",
@@ -100,53 +100,18 @@
     },
     {
       "path": "coordination/REVIEW.md",
-      "bytes": 4329,
-      "sha256": "31726d2b8c51753f1bc35b373d9bc5289fb6b089605cd8b66f3bf5fda66032bc"
+      "bytes": 5741,
+      "sha256": "f4baa348cb2ff86c340f82c07a14289521257c1f8bb982650e7dd8595eb83f75"
     },
     {
-      "path": "coordination/components__PatientOrtho.tsx.comparison.diff.txt",
-      "bytes": 96568,
-      "sha256": "20fd223181f44f66dd3dc63657ae3a40796cc55723267f6cd0856e685ff0291c"
+      "path": "coordination/lib__clinic-reset.ts.additions-only.patch.txt",
+      "bytes": 542,
+      "sha256": "ff2ccaa26e43767c6e30a23924dcbdac399cfdbac70de71b19294e7d26843f01"
     },
     {
-      "path": "coordination/lib__audit.ts.comparison.diff.txt",
-      "bytes": 10564,
-      "sha256": "0ddf4484aa14da11b8dba4917ca0db2d2a932069e3a1c298b52e0429c7ebd6c8"
-    },
-    {
-      "path": "coordination/lib__backup.ts.comparison.diff.txt",
-      "bytes": 684,
-      "sha256": "5787d60c734e3153e8112d0f3926a700ba7722369cfa4bdca5b8e180e7ecc64c"
-    },
-    {
-      "path": "coordination/lib__clinic-reset.ts.comparison.diff.txt",
-      "bytes": 1495,
-      "sha256": "ffcee4ec70546978617c1e4447d76339a934106e0ddd540e50c41846f013da69"
-    },
-    {
-      "path": "coordination/lib__db.ts.comparison.diff.txt",
-      "bytes": 122839,
-      "sha256": "c57dcd901cbeeaa23e51d8b526bc275ea4f1cff9e20e1ea5412490d51ee1aff8"
-    },
-    {
-      "path": "coordination/lib__http-permissions.ts.comparison.diff.txt",
-      "bytes": 10853,
-      "sha256": "87f09deb87bf0b816dfe4fe94c764c7b9f846280ea3d0da566fa2d07d4bb6f63"
-    },
-    {
-      "path": "coordination/lib__migrations.ts.comparison.diff.txt",
-      "bytes": 3046,
-      "sha256": "180374421dcf5baf3a3d4de3d60eaff7c4acd68024611119ae402ecb34d9b319"
-    },
-    {
-      "path": "coordination/lib__patient-access.ts.comparison.diff.txt",
-      "bytes": 1,
-      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
-    },
-    {
-      "path": "coordination/lib__session.ts.comparison.diff.txt",
-      "bytes": 1,
-      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      "path": "coordination/lib__http-permissions.ts.additions-only.patch.txt",
+      "bytes": 1048,
+      "sha256": "6b672560f835bba8a293ebd31d6507f7e3902371f6e2fab143f9dd0149aa9338"
     },
     {
       "path": "coordination/library-source-recovery.json",
@@ -155,8 +120,8 @@
     },
     {
       "path": "coordination/shared-contracts.json",
-      "bytes": 8491,
-      "sha256": "e56b92bc6bf0b8ffde00f30d2877821c79bcdcc535de70f5c70cba7f454367c0"
+      "bytes": 9236,
+      "sha256": "b9516945eea05f8fbe251f252c7c4d9ece7ae9878bed3bea39f5b6c2ba7f51c8"
     },
     {
       "path": "evidence/browser.txt",

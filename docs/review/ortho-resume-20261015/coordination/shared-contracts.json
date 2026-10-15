@@ -206,5 +206,18 @@
     "frozen": "82e6e52cfb72ee8f360c4a6d09c0ec41277c7d76",
     "presentation": "4fcc75e55bdee1ab96d206674b1d5cf9b7aae48b"
   },
-  "migration_0055_recovered_from_library": true
+  "migration_0055_recovered_from_library": true,
+  "historical_comparisons_withdrawn": true,
+  "pending_additions_only_proposals": [
+    "lib__clinic-reset.ts.additions-only.patch.txt",
+    "lib__http-permissions.ts.additions-only.patch.txt"
+  ],
+  "notes": [
+    "No shared application changes; patches are review-only.",
+    "No lib/migrations.ts replacement: preserve applyRuntimeMigrationFiles on main.",
+    "No lib/backup.ts change: preserve identityInsert and OVERRIDING SYSTEM VALUE.",
+    "Preserve all main HR keep tables and 0059\u20130061 financial wipe tables.",
+    "0055 grant tables reset/restore ownership unresolved and intentionally absent from proposed wipe additions.",
+    "HTTP role rows await root policy review; registration is not row/transaction authorization."
+  ]
 }

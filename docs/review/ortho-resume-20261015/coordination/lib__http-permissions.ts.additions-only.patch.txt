@@ -1,0 +1,19 @@
+--- a/lib/http-permissions.ts
++++ b/lib/http-permissions.ts
+@@ -152,6 +152,16 @@
+   "/api/opening-balances/access": { GET: CLINIC },
+   "/api/ortho": { GET: CLINIC, POST: CLINIC },
+   "/api/ortho/[id]": { GET: CLINIC, POST: CLINIC, PATCH: CLINIC },
++  "/api/ceph/[id]/link-case": { POST: CLINIC },
++  "/api/ortho/[id]/strategy": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/intake": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/assessment": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/case-decisions": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/retention-events": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/case-study": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/case-study/sources": { GET: CLINIC },
++  "/api/ortho/[id]/case-study/editor": { GET: CLINIC, POST: CLINICAL },
++  "/api/ortho/[id]/case-study/review": { GET: CLINIC },
+   "/api/ortho/adjustments/[id]/billing-decision": { POST: CLINIC },
+   "/api/ortho/baseline": { POST: CLINICAL },
+   "/api/ortho/billing-decisions": { GET: CLINIC },
