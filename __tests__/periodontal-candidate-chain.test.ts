@@ -43,4 +43,16 @@ describe("inactive periodontal candidate uses a reviewed collision-free test-onl
     expect(()=>periodontalCandidateMigrationVersion([...files,{version:"0060",filename:"0060_unreviewed.sql"}])).toThrow();
     expect(()=>periodontalCandidateMigrationVersion([...files.slice(0,43),{version:"0059",filename:"0059_unreviewed.sql"}])).toThrow();
   });
+  it("accepts only the exact composed HR/invoice chain and keeps the candidate test-only", () => {
+    const hr = ["0045_hr_staff.sql", "0046_hr_tasks.sql", "0048_hr_contracts_attendance_leaves.sql", "0049_hr_payroll_disbursements.sql", "0050_hr_payroll_integrity.sql", "0056_hr_employment_history.sql", "0057_hr_schedule_policy_versions.sql", "0058_hr_temporal_write_receipts.sql"].map(filename => ({ version: filename.slice(0, 4), filename }));
+    const files = [...baseline(), invoice, legacy, coverage, ...hr, {version:"0059",filename:"0059_invoice_debt_installments.sql"}, {version:"0060",filename:"0060_historical_treatment_documents.sql"}, {version:"0061",filename:"0061_invoice_correction_lineage.sql"}];
+    expect(periodontalCandidateMigrationVersion(files)).toBe("0062");
+    for (let index = 43; index < files.length; index++) {
+      const changed = files.map((file, n) => n === index ? { ...file, filename: `${file.version}_unreviewed.sql` } : file);
+      expect(() => periodontalCandidateMigrationVersion(changed)).toThrow();
+      expect(() => periodontalCandidateMigrationVersion(files.filter((_, n) => n !== index))).toThrow();
+    }
+    const reordered = [...files]; [reordered[43], reordered[44]] = [reordered[44], reordered[43]];
+    expect(() => periodontalCandidateMigrationVersion(reordered)).toThrow();
+  });
 });

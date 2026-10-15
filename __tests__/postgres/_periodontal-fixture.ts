@@ -7,6 +7,22 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length === 54) {
+    const hr = [
+      "0045_hr_staff.sql", "0046_hr_tasks.sql", "0048_hr_contracts_attendance_leaves.sql",
+      "0049_hr_payroll_disbursements.sql", "0050_hr_payroll_integrity.sql",
+      "0056_hr_employment_history.sql", "0057_hr_schedule_policy_versions.sql", "0058_hr_temporal_write_receipts.sql",
+    ];
+    for (const [index, filename] of hr.entries()) {
+      const file = files[43 + index];
+      if (file.filename !== filename || file.version !== filename.slice(0, 4)) {
+        throw new Error("Unreviewed HR migration suffix for periodontal test fixture.");
+      }
+    }
+    // Reuse the strict invoice-chain guard after validating all eight allocated
+    // HR extensions. This remains an isolated test candidate, never a migration.
+    return periodontalCandidateMigrationVersion([...files.slice(0, 43), ...files.slice(51)]);
+  }
   if(files.length===46&&files[45].version==="0061"&&files[45].filename==="0061_invoice_correction_lineage.sql"){
     periodontalCandidateMigrationVersion(files.slice(0,45));return "0062";
   }
