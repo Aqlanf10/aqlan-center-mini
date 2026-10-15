@@ -37,6 +37,8 @@ export const RESET_WIPE_TABLES = [
   "endo_visits",
   "endo_treatments",
   "ortho_adjustments",
+  "ortho_strategy_revisions",
+  "ortho_assessment_revisions",
   "ortho_cases",
   "tooth_conditions",
   "prescriptions",

@@ -1,0 +1,843 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-revision-migration-guard.test.ts __tests__/ortho-treatment-strategy-store.test.ts __tests__/ortho-treatment-strategy-ui.test.tsx
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts (84 tests | 69 failed) 5080ms
+     × appends one decoded clinical snapshot and audit, using server actor identity and ordered locks 11ms
+     × allows unlinked clinical text without plan permissions 2ms
+     × denies current patient scope even for an already accepted command 1ms
+     × requires current plan view permission when removing prior links 1ms
+     × requires current plan edit permission when removing prior links 1ms
+     × serializes two same-head fixture transactions; only one appends 1ms
+     × rolls the revision back when audit fails 6ms
+     × rolls back if the session expires during audit, without reacquiring plan locks 1ms
+     × appends retrospective documentation to completed without changing lifecycle 1ms
+     × appends retrospective documentation to discontinued without changing lifecycle 1ms
+     × records current documentation for active 1ms
+     × records current documentation for retention 1ms
+     × replays normalized text under stable user ID without resnapshotting historical labels or context 1ms
+     × conflicts on changed content under the same command ID 1ms
+     × keeps the idempotency namespace when the same active user has a newly valid role 3ms
+     × does not replay for a different stable actor using the same key 1ms
+     × reauthorizes the original linked predecessor when replaying an accepted link removal 1ms
+     × reports an ambiguous commit and reconciles by the original command without duplicating 1ms
+     × refuses foreign_bridge without scaffolding 1ms
+     × refuses missing_bridge without scaffolding 0ms
+     × rejects a foreign_patient problem 1ms
+     × rejects a other_case problem 0ms
+     × rejects a unlinked problem 0ms
+     × rejects a missing problem 0ms
+     × rejects a foreign_patient item rather than dropping it 0ms
+     × rejects a other_case item rather than dropping it 0ms
+     × rejects a funding_only item rather than dropping it 0ms
+     × rejects a missing item rather than dropping it 0ms
+     × locks unique referenced IDs in sorted order while preserving authored row/link order 1ms
+     × rechecks move_problem after the simulated lock wait 0ms
+     × rechecks move_item after the simulated lock wait 0ms
+     × rechecks delete_item after the simulated lock wait 0ms
+     × strictly decodes newly assembled snapshots before inserting invalid source labels 1ms
+     × rejects an aggregate snapshot over one MiB without truncating valid individual text 1ms
+     × distinguishes no saved revision from missing bridge and never creates one on read 1ms
+     × does not hide existing history behind bridge_missing when its bridge disappears 1ms
+     × returns selected history exactly and never falls back for an unknown revision 1ms
+     × redacts all historic plan IDs/names/tooth/site and current choices without plan view 1ms
+     × keeps historical item snapshot while current state is missing 1ms
+     × keeps historical item snapshot while current state is moved 1ms
+     × keeps historical item snapshot while current state is unavailable 0ms
+     × keeps current status unaltered rather than deriving completed/normal findings 1ms
+     × fails closed on extra_finance stored data 1ms
+     × fails closed on wrong_scope stored data 1ms
+     × fails closed on wrong_bridge stored data 1ms
+     × fails closed on bad_recorded_identity stored data 0ms
+     × fails closed on unsupported_schema stored data 0ms
+     × fails closed on wrong_context stored data 1ms
+     × fails closed on bad_date stored data 1ms
+     × fails closed on bad_metadata stored data 0ms
+     × does not allow a corrupt older revision to become an empty-success history 1ms
+     × refuses broken saved lineage instead of inventing a predecessor 1ms
+     × validates complete missing_ancestor lineage before new append or replay 1ms
+     × validates complete skipped_ancestor lineage before new append or replay 0ms
+     × validates complete cycle lineage before new append or replay 1ms
+     × validates complete duplicate_version lineage before new append or replay 0ms
+     × derives canRevise from both selected history and the current linked head 1ms
+     × allows unlinked current clinical correction without plan permissions but protects selected linked history 1ms
+     × reads and replays unchanged historical content for the authorized target, retaining recorded source identity 1ms
+     × fails source requests and never grants target access from the historical scalar 0ms
+     × requires both live canonical case owners to agree after ownership changes 1ms
+     × does not conceal or repair a revision whose live owner disagrees with the merged cases 1ms
+     × records the target for a new correction on the same lineage while old immutable bytes stay unchanged 1ms
+     × preserves current plan view authorization on post-merge replay and link removal 0ms
+     × preserves current plan edit authorization on post-merge replay and link removal 0ms
+     × rechecks original linked predecessor permissions for an accepted removal replayed after merge 0ms
+     × uses current target membership rather than recorded source identity to resolve historical links 1ms
+     × simulates merge-first sequencing: a waiting source save cannot append after ownership retires 0ms
+     × simulates append-first sequencing: merge waits, then changes only the completed row's live owner 5005ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 69 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > appends one decoded clinical snapshot and audit, using server actor identity and ordered locks
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:202:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > allows unlinked clinical text without plan permissions
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:223:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > denies current patient scope even for an already accepted command
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:246:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > requires current plan view permission when removing prior links
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > requires current plan edit permission when removing prior links
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:253:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > serializes two same-head fixture transactions; only one appends
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:263:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > rolls the revision back when audit fails
+AssertionError: expected [Function] to throw error including 'Synthetic audit failure' but got 'Unrecognized fixture query: SELECT id…'
+
+Expected: "Synthetic audit failure"
+Received: "Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE"
+
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:271:25
+    269|   it("rolls the revision back when audit fails", async () => {
+    270|     db.auditFails = true;
+    271|     await expect(save()).rejects.toThrow("Synthetic audit failure");
+       |                         ^
+    272|     expectNoAppend(); expect(db.events).toContain("ROLLBACK"); expect(…
+    273|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > rolls back if the session expires during audit, without reacquiring plan locks
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:279:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > appends retrospective documentation to completed without changing lifecycle
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > appends retrospective documentation to discontinued without changing lifecycle
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:286:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > records current documentation for active
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > orthodontic strategy append transaction > records current documentation for retention
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:293:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > replays normalized text under stable user ID without resnapshotting historical labels or context
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:304:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > conflicts on changed content under the same command ID
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:314:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > keeps the idempotency namespace when the same active user has a newly valid role
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:321:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > does not replay for a different stable actor using the same key
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:328:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > reauthorizes the original linked predecessor when replaying an accepted link removal
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:335:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > idempotent strategy commands > reports an ambiguous commit and reconciles by the original command without duplicating
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:345:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > refuses foreign_bridge without scaffolding
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > refuses missing_bridge without scaffolding
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:358:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a foreign_patient problem
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a other_case problem
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a unlinked problem
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a missing problem
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:366:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a foreign_patient item rather than dropping it
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a other_case item rather than dropping it
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a funding_only item rather than dropping it
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects a missing item rather than dropping it
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:374:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > locks unique referenced IDs in sorted order while preserving authored row/link order
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:380:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rechecks move_problem after the simulated lock wait
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rechecks move_item after the simulated lock wait
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rechecks delete_item after the simulated lock wait
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:390:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > strictly decodes newly assembled snapshots before inserting invalid source labels
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:395:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > reference scope and fresh membership > rejects an aggregate snapshot over one MiB without truncating valid individual text
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:407:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > distinguishes no saved revision from missing bridge and never creates one on read
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR SHARE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:286:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:414:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > does not hide existing history behind bridge_missing when its bridge disappears
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:422:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > returns selected history exactly and never falls back for an unknown revision
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:429:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > redacts all historic plan IDs/names/tooth/site and current choices without plan view
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:438:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > keeps historical item snapshot while current state is missing
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > keeps historical item snapshot while current state is moved
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > keeps historical item snapshot while current state is unavailable
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:448:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > keeps current status unaltered rather than deriving completed/normal findings
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:460:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on extra_finance stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on wrong_scope stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on wrong_bridge stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on bad_recorded_identity stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on unsupported_schema stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on wrong_context stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on bad_date stored data
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > fails closed on bad_metadata stored data
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:466:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > does not allow a corrupt older revision to become an empty-success history
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:482:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > refuses broken saved lineage instead of inventing a predecessor
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:489:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > validates complete missing_ancestor lineage before new append or replay
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > validates complete skipped_ancestor lineage before new append or replay
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > validates complete cycle lineage before new append or replay
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > exact strategy history and authorized projection > validates complete duplicate_version lineage before new append or replay
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:500:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > derives canRevise from both selected history and the current linked head
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:527:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > allows unlinked current clinical correction without plan permissions but protects selected linked history
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:538:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > reads and replays unchanged historical content for the authorized target, retaining recorded source identity
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:548:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > fails source requests and never grants target access from the historical scalar
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:564:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > requires both live canonical case owners to agree after ownership changes
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:576:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > does not conceal or repair a revision whose live owner disagrees with the merged cases
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:584:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > records the target for a new correction on the same lineage while old immutable bytes stay unchanged
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:592:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > preserves current plan view authorization on post-merge replay and link removal
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > preserves current plan edit authorization on post-merge replay and link removal
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:607:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > rechecks original linked predecessor permissions for an accepted removal replayed after merge
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:620:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > uses current target membership rather than recorded source identity to resolve historical links
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:629:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > simulates merge-first sequencing: a waiting source save cannot append after ownership retires
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:643:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/69]⎯
+
+ FAIL  __tests__/ortho-treatment-strategy-store.test.ts > patient-merge-compatible strategy provenance (simulated sequencing) > simulates append-first sequencing: merge waits, then changes only the completed row's live owner
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/ortho-treatment-strategy-store.test.ts:657:3
+    655|   });
+    656|
+    657|   it("simulates append-first sequencing: merge waits, then changes onl…
+       |   ^
+    658|     const locked = deferred(); const resume = deferred();
+    659|     db.afterItemLock = async () => { locked.resolve(); await resume.pr…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/69]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+Error: Unrecognized fixture query: SELECT id, patient_id, ortho_case_id, specialty FROM clinical_cases WHERE ortho_case_id = $1 FOR UPDATE
+ ❯ Object.query __tests__/ortho-treatment-strategy-store.test.ts:166:15
+    164|           audits.push(values[0]); this.afterAudit?.(); return result();
+    165|         }
+    166|         throw new Error(`Unrecognized fixture query: ${sql}`);
+       |               ^
+    167|       },
+    168|     };
+ ❯ lockOwner lib/ortho-treatment-strategy-store.ts:125:42
+ ❯ processTicksAndRejections node:internal/process/task_queues:103:5
+ ❯ lib/ortho-treatment-strategy-store.ts:321:19
+ ❯ transaction lib/ortho-treatment-strategy-store.ts:266:20
+
+This error originated in "__tests__/ortho-treatment-strategy-store.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "simulates append-first sequencing: merge waits, then changes only the completed row's live owner". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  69 failed | 41 passed (110)
+     Errors  1 error
+   Start at  20:49:05
+   Duration  6.40s (transform 330ms, setup 0ms, import 439ms, tests 5.33s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -1,0 +1,33 @@
+{
+  "baseline": "ce78247278397a02e8b9a0c437ab5605951a411c",
+  "before": "11c4764865f862254a0bae5fc833b70f4a5dccba",
+  "sources": {
+    "components/PatientOrtho.tsx": "3b314a7f9818cfa17702e3a06febc026589b31b92de641d43af920be377e4434",
+    "components/OrthoTreatmentStrategy.tsx": "1211d01de91fe1ee4e488331ea07c9f471f34c1fe848b828f57efb9fbad85eb5",
+    "__tests__/security-http/ortho-prescription-truth-built-page.test.ts": "92a80a702258d99a487dcb5d4955ede3165558e9a563f5dd8ec1ba54b6a61763"
+  },
+  "files": {
+    "README.md": "2ca3871a92b484792198877f9adc23b5e70bc3bafda1caf1dd99b52d2afa27a9",
+    "baseline-build-local-deps.txt": "f1ca8d96c1493abbaf2b01c0762932872f3a05334d27115e15fc2640fd6303b7",
+    "baseline-closed-custom-390.png": "a1d59e7ae65a9470dd87fb124a151cd60349966a0e6873cb26ad316655df211a",
+    "baseline-repro.txt": "0b16afe5baf7786d26d35bec711375f97292137e4f0dff1fff2a57138a1340ac",
+    "baseline-unrecorded-390.png": "46204fb07953828c2cf31dbe65d6d6cb4cef12dcfd8729a5d43a5d6a5b38d829",
+    "final-browser.txt": "c366a33c03a069ae06ba16be3cc8072a3dbebc11b223dd5fb22c84f1d550e8df",
+    "final-build.txt": "b9bb8c6f75eef7f02d3a86850f32d44afa0fbacddf33e73d7ac390cace067be7",
+    "final-lint.txt": "8ee3613faece37e0d0e18b850ca1b20b611f7641230a90b959bf6dbd6de17b89",
+    "final-source-units.txt": "7a60e12a989fad18e89ea66efecbbb3ba291d9ba02a2ce9ce71d7eda983039e6",
+    "final-types.txt": "d19ad367c96de7d684ec1b70c0229fb78457ad3d32123252e3bc07492864063a",
+    "final-visibility-evidence.txt": "b6345d0fadd2f0a19a690f9487e8232b66b6ee5e96c7dad5e110454e229a4cb3",
+    "head-before.txt": "9b3546856aeeeebd69a5b866358c0332006dd496a556a8897bae9dfd58c1e406",
+    "layout-before-unrecorded-390.json": "29cf56fa824d50e3ed45d8884ff2c24868cd7885982e58afec8fb4accddce44d",
+    "layout-before-unrecorded-390.png": "6e7da7a05d28b6fe1b4f27c751da3b51b8a6074fe71380b6188d7785040cf3f5",
+    "ortho-prescription-1280-bounds.json": "eed83a71ed4d6bb535adad100b0d5bc5da13b4d7b56910679b549c78620f8180",
+    "ortho-prescription-390-bounds.json": "373544d3342680b262d8cc51557669f1a53e0baafe7786c541877d31f5e51d5a",
+    "ortho-prescription-closed-custom-1280.png": "c900a53384eee6fee83e21a93704953bf97b736456971d2ff22a54f63cb3b4f3",
+    "ortho-prescription-closed-custom-390.png": "8589c70218f033477322bfcabfd09559d167b9883f7ec33134fac96c1f6c917d",
+    "ortho-prescription-unrecorded-1280.png": "cdfbd88b2ab055dcaa1321ca8cd3820d63c267fec218a327e5e568bdfbab39f7",
+    "ortho-prescription-unrecorded-390.png": "2bedf134b6e04a90d60cd9b5852964e6645f0af74190f9bd1a590befd42811ad",
+    "reproduction-identity.json": "4238da97fba848a3e71eb3795d627e201acdff3865198426615a1c90fab71955",
+    "source-hashes.json": "f6c4296085a24ae9dfa9ab42c363a7d9bf3bcbf09b774b2ac59373cbc468e272"
+  }
+}
