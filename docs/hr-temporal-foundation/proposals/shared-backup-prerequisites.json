@@ -1,0 +1,10 @@
+{
+  "status": "inert_unapplied_proposal",
+  "base": "1ee5ea74d023fffa142dfeffa442c2b7184cc7a5",
+  "patchSha256": "20e14ca38f2518790b63124fa9483e6159267166b04ba6b4854e2bb812172742",
+  "sourceFiles": {
+    "lib/backup.ts": "000ffc8aba82794cac63c43e16d0551d9904b4afafcbf8cc5b6ee6a1fe20d82c",
+    "lib/db.ts": "714c8df46434b80ef5686747cee302a91707b64bbef59eb647cf48673e1b0d66",
+    "lib/clinic-reset.ts": "6bd350095a9547e5f987c7b5dfbaab9dbfcd783eeadc7be81a10bf0e9b030e19"
+  }
+}

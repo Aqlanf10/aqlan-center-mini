@@ -27,8 +27,11 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await q(`TRUNCATE inventory_movements, inventory_items, expense_payable_allocations, expenses, payables, parties
+  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
+  // traverse even empty history tables. These isolated fixtures contain no HR rows.
+  await q(`TRUNCATE inventory_movements, inventory_items, expense_payable_allocations, expenses, payables
            RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM parties");
   [{ id: itemId }] = await q<{ id: number }>(
     `INSERT INTO inventory_items (name, category, unit, min_level, created_by)
      VALUES ('قفازات', 'other', 'علبة', 2, 'test') RETURNING id`,

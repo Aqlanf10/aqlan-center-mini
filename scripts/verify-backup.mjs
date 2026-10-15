@@ -5,6 +5,8 @@ import { writeFileSync, statSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 /**
  * هل النسخة الاحتياطية تُستعاد فعلًا؟
@@ -158,7 +160,13 @@ try {
   process.env.DATABASE_URL = withDatabase(source, restoreDb);
   process.env.SKIP_SEED = "true";
   await db.ensureSchema();
-  await db.getPool().query(sql);
+  const registryBefore = (await db.getPool().query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows;
+  // Exercise the real restore entry point. The target bootstrap owns its
+  // migration registry; source registry rows are metadata, not application data.
+  // No truncation or trigger bypass: application rows still use plain INSERT.
+  execFileSync(process.execPath, [fileURLToPath(new URL("./restore.mjs", import.meta.url)), dumpFile], { env: process.env, stdio: "pipe" });
+  const registryAfter = (await db.getPool().query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows;
+  check("الاستعادة الفعلية تحفظ سجل ترحيلات الهدف دون تغيير", JSON.stringify(registryAfter) === JSON.stringify(registryBefore));
   const after = await tableCounts(db.getPool());
 
   /* ── ٥: المقارنة — والاختلاف يُسمّى بسببه لا برقمٍ مبهم ── */

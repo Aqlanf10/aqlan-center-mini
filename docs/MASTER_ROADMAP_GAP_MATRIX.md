@@ -1,5 +1,9 @@
 # AQLAN CENTER MINI — Live Master Roadmap Gap Matrix
 
+## Employee module recovery candidate — 2026-10-15
+
+The owner has now prioritized employee-module implementation. The recovery branch starts from invoice main `d79df32b` and restores the isolated HR handoff, with fixes for cancelled decisions, stale leave readers, clinic-day reporting and unresolved wage sources. See [the Arabic source map, migration identities, validation and remaining policy gaps](HR_MAIN_RECOVERY_20261015_AR.md). This candidate supersedes the older HR priority hold below; it does not claim a merged release, complete configurable authority or complete allowance/deduction editing. Independent review, full CI and production schema reconciliation remain required before deployment; the parent thread owns merging/deployment.
+
 ## Latest verified checkpoint — 2026-10-08
 
 This checkpoint refreshes only the explicitly named slices and observations below. Retained older status statements are historical evidence, not a new independent audit of every roadmap row.

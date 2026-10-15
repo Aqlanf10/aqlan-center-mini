@@ -3,6 +3,7 @@ import {readFileSync} from "node:fs";
 import {Pool} from "pg";
 import {loadMigrationFiles,migrate} from "../../lib/migrations";
 import {LEGACY_TREATMENT_DOCUMENT_SQL} from "../../lib/legacy-treatment-document-schema";
+import {prepareBackupSql} from "../../lib/restore/sql.mjs";
 import {assertRealPostgresUrl,dropPublicSchema,stubPostgresEnv,createIsolatedDatabase,adminClient} from "./_setup";
 import type {SessionPayload} from "../../lib/auth";
 import type {HistoricalDocumentReceipt} from "../../lib/legacy-treatment-document";
@@ -238,8 +239,9 @@ describe("one heterogeneous historical document, one canonical opening bucket",(
     const name="aqlan_historical_document_restore_test";const restored=new Pool({connectionString:await createIsolatedDatabase(name),ssl:false});
     try{
       await migrate(restored as unknown as Parameters<typeof migrate>[0],{apply:true,files});
-      const all=(await restored.query("SELECT tablename FROM pg_tables WHERE schemaname='public'")).rows.map(row=>'"'+String(row.tablename).replaceAll('"','""')+'"');
-      await restored.query(`TRUNCATE ${all.join(',')} RESTART IDENTITY`);await restored.query(sql);
+      const registry=(await restored.query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows;
+      await restored.query(prepareBackupSql(sql).sql);
+      expect((await restored.query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows).toEqual(registry);
       for(const [index,table] of tables.entries())expect((await restored.query(`SELECT to_jsonb(t) AS facts FROM ${table} t ORDER BY ${table==="legacy_treatment_coverage_snapshots"?"agreement_id":"id"}`)).rows).toEqual(before[index]);
     }finally{await restored.end();const admin=adminClient("postgres");await admin.connect();try{await admin.query(`DROP DATABASE ${name} WITH(FORCE)`);}finally{await admin.end();}}
   },120000);

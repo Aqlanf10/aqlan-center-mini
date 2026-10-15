@@ -141,10 +141,12 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  // كل حالة في عيادة نظيفة: لا يتسرّب طبيبٌ أو دفعة من حالةٍ إلى أخرى.
-  // TRUNCATE لا يطلق حرّاس الصفوف (append-only) — تنظيف قاعدة اختبارٍ معزولة فقط.
-  await q(`TRUNCATE doctor_commission_history, payments, expenses, invoice_items, lab_orders, visits,
-                    invoices, patients, cashier_shifts, users, parties RESTART IDENTITY CASCADE`);
+  // The PostgreSQL global setup already admitted this disposable test target.
+  // Rebuild it per case: TRUNCATE CASCADE reaches immutable HR history, whose
+  // guard must remain active rather than being disabled for commission tests.
+  await resetPoolForTesting();
+  await dropPublicSchema(process.env.DATABASE_URL!);
+  await ensureSchema();
   const [shift] = await q<{ id: number }>(
     `INSERT INTO cashier_shifts (opened_by) VALUES ('p01') RETURNING id`,
   );

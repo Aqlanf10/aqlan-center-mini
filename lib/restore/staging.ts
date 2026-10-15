@@ -6,6 +6,7 @@ import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
 import { sslForConnection, parseDatabaseHost } from "../db-tls";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
+import { prepareBackupSql } from "./sql.mjs";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -121,22 +122,6 @@ async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKe
   return rows.filter((edge) => !edge.condeferrable && canReach(edge.parent_id, edge.child_id));
 }
 
-/** The archive has one outer transaction; the caller owns that transaction here. */
-function withoutArchiveTransaction(lines: string[]): string {
-  const opening = lines.findIndex((line) => line.trim() === "BEGIN;");
-  let closing = -1;
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (lines[index].trim() === "COMMIT;") {
-      closing = index;
-      break;
-    }
-  }
-  if (opening < 0 || closing <= opening || lines.slice(closing + 1).some((line) => line.trim())) {
-    throw new Error("ملف SQL لا يحوي إطار معاملة الاستعادة المتوقع.");
-  }
-  return lines.slice(opening + 1, closing).join("\n");
-}
-
 /**
  * تنفيذ الاستعادة المعزولة كاملة. كل خطوة تفشل توقف ما بعدها — والهدف
  * المعزول يمكن التخلي عنه بأمان في أي لحظة (هذا جوهر العزل).
@@ -199,17 +184,11 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
     // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
     const sqlText = Buffer.from(validated.sql).toString("utf8");
-    const lines = sqlText.split("\n");
-    const appliedLines: string[] = [];
-    for (const line of lines) {
-      if (/^INSERT INTO schema_migrations\s/.test(line)) {
-        result.skippedMigrationRecordLines += 1;
-        continue;
-      }
-      if (/^INSERT INTO\s/.test(line)) result.sqlRowsStatementLines += 1;
-      appliedLines.push(line);
-    }
-      const dataSql = withoutArchiveTransaction(appliedLines);
+      const prepared = prepareBackupSql(sqlText);
+      result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
+      result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
+      const dataSql = prepared.dataSql;
+      await client.query("SET standard_conforming_strings = on");
       await client.query("BEGIN");
       try {
         const cyclicKeys = await nonDeferrableCyclicForeignKeys(client);

@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv, createIsolatedDatabase, adminClient } from "./_setup";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
 import { DEBT_INSTALLMENTS_SQL } from "../../lib/debt-installments-schema";
+import { prepareBackupSql } from "../../lib/restore/sql.mjs";
 import type { SessionPayload } from "../../lib/auth";
 assertRealPostgresUrl();stubPostgresEnv();
 const db=await import("../../lib/db");
@@ -17,7 +18,7 @@ const input=(key:string,version=0)=>({target:target(),terms,expectedVersion:vers
 beforeAll(async()=>{
   await dropPublicSchema(process.env.DATABASE_URL!);
   const files=(await loadMigrationFiles()).filter(file=>file.version<="0059");expect(files.at(-1)?.filename).toBe("0059_invoice_debt_installments.sql");
-  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0059"]);
+  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0045","0046","0048","0049","0050","0056","0057","0058","0059"]);
   await migrate(db.getPool(),{apply:true,files:files.filter(f=>Number(f.version)<=43)});
   patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES('DEBT-SYN','Synthetic schedule') RETURNING id"))[0].id;
   invoiceId=(await q("INSERT INTO invoices(invoice_number,patient_id,base_currency,total_minor,discount_minor,created_by) VALUES('DEBT-OLD', $1,'SAR',60000,0,'synthetic') RETURNING id",[patientId]))[0].id;
@@ -76,8 +77,10 @@ describe("0059 existing-debt allocation storage",()=>{
     const url=await createIsolatedDatabase(name);const restored=new Pool({connectionString:url,ssl:false});
     try{
       await migrate(restored as unknown as Parameters<typeof migrate>[0],{apply:true,files:await loadMigrationFiles()});
-      const tables=(await restored.query("SELECT tablename FROM pg_tables WHERE schemaname='public'")).rows.map(r=>'"'+String(r.tablename).replaceAll('"','""')+'"');
-      await restored.query(`TRUNCATE ${tables.join(',')} RESTART IDENTITY`);await restored.query(sql);
+      const registry=(await restored.query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows;
+      // Fresh migrated target: preserve its registry and immutable history guards.
+      await restored.query(prepareBackupSql(sql).sql);
+      expect((await restored.query("SELECT to_jsonb(m)::text AS facts FROM schema_migrations m ORDER BY version")).rows).toEqual(registry);
       expect((await restored.query("SELECT to_jsonb(r) AS facts FROM debt_repayment_revisions r ORDER BY id")).rows).toEqual(prior);
       expect((await restored.query("SELECT to_jsonb(i) AS facts FROM invoices i ORDER BY id")).rows).toEqual(invoices);
     }finally{await restored.end();const admin=adminClient("postgres");await admin.connect();try{await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);}finally{await admin.end();}}

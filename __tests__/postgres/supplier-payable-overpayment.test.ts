@@ -116,9 +116,12 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  // TRUNCATE لا يطلق حرّاس الصفوف (append-only) — تنظيف قاعدة اختبارٍ معزولة فقط.
+  // تنظيف قاعدة اختبارٍ معزولة فقط مع إبقاء حراس السجل التاريخي فعّالين.
+  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
+  // traverse even empty history tables. These isolated fixtures contain no HR rows.
   await q(`TRUNCATE expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders, patients, cashier_shifts,
-                    parties, audit_log RESTART IDENTITY CASCADE`);
+                    audit_log RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM parties");
   await q(`INSERT INTO cashier_shifts (opened_by) VALUES ('p02')`);
 });
 
