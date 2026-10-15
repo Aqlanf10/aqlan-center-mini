@@ -13,7 +13,7 @@ export function CurrentPaySummary({ pay, staffId, compact = false }: { pay?: HrC
   const terms = pay.terms;
   return <div className="space-y-2" aria-label="الأجر الموثق اليوم">
     <p className="font-semibold">{terms?.kind === 'commission' ? 'تعاقد نسبة — بلا راتب ثابت' : terms?.salaryMinor != null && terms.currency
-      ? <span className="ltr-nums">{formatAmount(terms.salaryMinor, terms.currency)} {CURRENCY_SHORT[terms.currency]} — {terms.salaryPeriod ? HR_SALARY_PERIOD_LABEL[terms.salaryPeriod] : 'دورية غير موثقة'}</span>
+      ? <span><bdi dir="ltr">{formatAmount(terms.salaryMinor, terms.currency)}</bdi> {CURRENCY_SHORT[terms.currency]} — {terms.salaryPeriod ? HR_SALARY_PERIOD_LABEL[terms.salaryPeriod] : 'دورية غير موثقة'}</span>
       : 'مصدر الأجر يحتاج مراجعة'}</p>
     <p className="text-xs text-navy-600">{pay.source === 'contract' ? `المصدر: العقد ${pay.contract?.contractNumber} — إصدار ${pay.contract?.versionNumber}`
       : pay.source === 'staff_profile' ? 'المصدر: شروط الملف الابتدائية' : 'لا مصدر حاكم محسوم'} · يوم العيادة: <bdi>{pay.asOf}</bdi></p>

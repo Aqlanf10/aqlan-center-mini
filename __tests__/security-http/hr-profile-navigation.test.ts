@@ -23,6 +23,9 @@ beforeAll(async () => {
     const contract = await api('POST', '/api/hr/contracts', { staffId: id, title: `عقد اصطناعي ${currency}`, templateKind: 'support_staff', startDate: '2026-01-02', compensationKind: 'salary', baseSalaryMinor: amount, salaryCurrency: currency, salaryPeriod: 'monthly' });
     expect(contract.status, JSON.stringify(contract.body)).toBe(201);
     expect((await api('PATCH', `/api/hr/contracts/${contract.body.id}`, { action: 'transition', status: 'approved', reason: 'اعتماد اصطناعي' })).status).toBe(200);
+    // Synthetic older profile observation left behind when a future agreement
+    // becomes effective. The zero-write day rollover itself is proved on PostgreSQL.
+    await isolated.db.query("UPDATE hr_staff SET salary_amount_minor=10000, salary_effective_on='2026-01-01' WHERE id=$1", [id]);
     employees.push({ id, contractId: contract.body.id, currency, amount, name });
   }
 });
@@ -30,6 +33,7 @@ afterAll(async () => { await browser?.close(); await isolated?.close(); });
 it('HTTP private current-pay projection is precise in all currencies and denied to other roles', async () => {
   for (const employee of employees) {
     const read = await api('GET', `/api/hr/staff/${employee.id}`);
+    expect(read.body.staff.payTerms.amountMinor).toBe(10000);
     expect(read.body.staff.currentPay).toMatchObject({ source: 'contract', terms: { currency: employee.currency, salaryMinor: employee.amount }, contract: { id: employee.contractId }, profilePayLocked: true });
     for (const cookie of [h.sessions.reception.cookie, h.sessions.doctorA.cookie, h.sessions.accountant.cookie, h.sessions.cashier.cookie]) {
       expect((await api('GET', `/api/hr/staff/${employee.id}`, undefined, cookie)).status).toBe(403);
@@ -51,10 +55,22 @@ for (const width of [390, 1280]) it(`native employee links, wage source, metadat
     for (const person of employees) {
       const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: person.name, exact: true }) });
       await expect.poll(() => row.textContent()).toContain('المصدر: العقد');
+      await expect.poll(() => row.textContent()).toContain(({ YER: '150,000', SAR: '1,500.55', USD: '1,500.99' } as Record<string, string>)[person.currency]);
     }
     await page.getByRole('link', { name: employee.name, exact: true }).click();
     const profile = page.getByRole('dialog', { name: 'ملف الموظف الشامل' });
     await expect.poll(() => profile.textContent()).toContain('150,000');
+    const wageOrder = await profile.getByLabel('الأجر الموثق اليوم').locator('p').first().evaluate(element => {
+      const amount = element.querySelector('bdi');
+      if (!amount) throw new Error('Missing isolated wage number');
+      const node = [...amount.parentElement!.childNodes].find(child => child.nodeType === Node.TEXT_NODE && child.textContent?.includes('ر.ي'));
+      if (!node || node.nodeType !== Node.TEXT_NODE) throw new Error('Missing wage currency');
+      const offset = (node.textContent ?? '').indexOf('ر.ي');
+      if (offset < 0) throw new Error('Missing YER unit');
+      const range = document.createRange(); range.setStart(node, offset); range.setEnd(node, offset + 3);
+      return { amountLeft: amount.getBoundingClientRect().left, currencyRight: range.getBoundingClientRect().right };
+    });
+    expect(wageOrder.amountLeft).toBeGreaterThanOrEqual(wageOrder.currencyRight - 1);
     await page.screenshot({ path: join(evidence, `hr-profile-${width}.png`), fullPage: true });
     await profile.getByRole('button', { name: 'تعديل بيانات الموظف وربط الحساب' }).click();
     const editor = page.getByRole('dialog');
@@ -88,8 +104,16 @@ for (const width of [390, 1280]) it(`native employee links, wage source, metadat
     await expect.poll(() => page.url()).toContain(`tab=attendance&staffId=${employee.id}`);
     await page.screenshot({ path: join(evidence, `hr-profile-attendance-${width}.png`), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.goto(`${isolated.baseUrl}/print/hr/staff`);
+    for (const person of employees) {
+      const row = page.getByRole('row').filter({ hasText: person.name });
+      await expect.poll(() => row.textContent()).toContain(({ YER: '150,000', SAR: '1,500.55', USD: '1,500.99' } as Record<string, string>)[person.currency]);
+      expect(await row.textContent()).toContain('العقد');
+      expect(await row.textContent()).not.toContain('10,000');
+    }
+    if (width === 1280) await page.pdf({ path: join(evidence, 'hr-profile-wage-sources.pdf'), format: 'A4', printBackground: true });
     expect(errors).toEqual([]); expect(forbiddenWrites).toEqual([]);
-    writeFileSync(join(evidence, `hr-profile-result-${width}.json`), JSON.stringify({ syntheticOnly: true, width, employeeId: employee.id, contractId: employee.contractId, metadataRequestKeys: Object.keys(sent), errors, forbiddenWrites }, null, 2));
+    writeFileSync(join(evidence, `hr-profile-result-${width}.json`), JSON.stringify({ syntheticOnly: true, width, employeeId: employee.id, contractId: employee.contractId, metadataRequestKeys: Object.keys(sent), wageOrder, errors, forbiddenWrites }, null, 2));
   } catch (error) {
     await page.screenshot({ path: join(evidence, `hr-profile-failure-${width}.png`), fullPage: true }).catch(() => undefined);
     writeFileSync(join(evidence, `hr-profile-failure-${width}.json`), JSON.stringify({ url: page.url(), text: await page.textContent('body').catch(() => ''), errors }, null, 2));
