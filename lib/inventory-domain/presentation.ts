@@ -1,7 +1,7 @@
 import type { InventoryMovement } from "../db";
 
 const SENSITIVE_KEY_PATTERN = /^(password|password_?hash|cookie|session_?token|token|secret|authorization|database_?url|connection_?string|stack|sql|raw_?error)$/i;
-const FINANCIAL_KEY_PATTERN = /^(unitcostminor|unitpriceminor|payableid|baseamountminor|valueceiling|quote)$/i;
+const FINANCIAL_KEY_PATTERN = /^(unitcostminor|unitpriceminor|payableid|baseamountminor|valueceiling|quote|supplierinvoicenumber|invoicenumber)$/i;
 const SENSITIVE_TEXT_PATTERN = /(?:postgres(?:ql)?:\/\/\S+|bearer\s+[a-z0-9._~+/-]+=*|aqlan_session=\S+|password=\S+)/gi;
 
 function scrubText(value: string): string {

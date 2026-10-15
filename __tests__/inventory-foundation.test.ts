@@ -28,8 +28,9 @@ describe("Inventory foundation desired invariants", () => {
     mocks.detail.mockResolvedValue({ item: { id: 1 }, movements: [{ id: 1, kind: "in", qty: 10, unitCostMinor: 938475, payableId: 17 }], batches: { batches: [], adjustTotal: 0 } });
     const res = await GET(new Request("http://localhost/api/inventory/1"), { params: Promise.resolve({ id: "1" }) });
     expect(res.status).toBe(200);
-    expect(JSON.stringify(await res.json())).not.toContain("938475");
-    expect(JSON.stringify(await res.clone().json().catch(() => ({})))).not.toContain("unitCostMinor");
+    const serialized = JSON.stringify(await res.json());
+    expect(serialized).not.toContain("938475");
+    expect(serialized).not.toContain("unitCostMinor");
   });
   it("INV-12: existing summary reports unavailable without internal error disclosure", async () => {
     mocks.items.mockRejectedValue(new Error("private database detail"));

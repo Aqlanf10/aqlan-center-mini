@@ -23,4 +23,19 @@ describe("P13/P14/P29 domain allocation prerequisite (persistence integration pe
     expect(() => plan([lot(1, { expiryDate: "2026-02-30" })])).toThrow("calendar date");
     expect(plan([lot(1, { traceability: "legacy_unknown", expiryDate: null, expiryRequired: false })])[0].traceability).toBe("legacy_unknown");
   });
+  it("breaks equal-expiry FEFO ties deterministically by receivedSequence and allows today-expiring stock before midnight", () => {
+    expect(plan([
+      lot(10, { expiryDate: "2026-10-12", receivedSequence: 20, remainingQuantity: "1" }),
+      lot(11, { expiryDate: "2026-10-12", receivedSequence: 5, remainingQuantity: "1" }),
+    ], "2")).toEqual([
+      { lotId: 11, sourceMovementId: 11, quantity: "1", traceability: "recorded" },
+      { lotId: 10, sourceMovementId: 10, quantity: "1", traceability: "recorded" },
+    ]);
+  });
+  it("enforces item precision when issuing from valid lots so whole-piece items reject fractional requests", () => {
+    expect(() => planValidLotIssue({
+      itemId: 1, locationId: 1, branchId: 1, today: "2026-10-12", quantity: "1.5", precision: 0, lots: [lot(1)],
+    })).toThrow();
+  });
 });
+

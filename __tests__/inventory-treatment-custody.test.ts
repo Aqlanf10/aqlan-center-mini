@@ -250,4 +250,76 @@ describe("safe package evidence and replenishment (pure contract, P64–69)", ()
   it("rejects unknown safety classification instead of requesting a package return", () => {
     expect(() => packageEvidenceAction("none", "unknown" as "safe_empty_return")).toThrow("unknown_package_safety_classification");
   });
+  it("completes full custody lifecycle: dispatch -> partial return -> patient consumption -> approved waste -> stocktake -> safe package closure -> annual settlement without double-counting", () => {
+    // 1. Dispatch 50 units (1 box of 50 cones) from 200 store stock; accept 45, return 5 immediately to store
+    const transfer = previewCustodyTransfer({
+      sourceQuantityAtoms: 200,
+      sourceValue: { currency: "SAR", amountMinor: 20_000 },
+      dispatchedAtoms: 50,
+      acceptedAtoms: 45,
+      returnedAtoms: 5,
+    });
+    expect(transfer).toMatchObject({
+      sourceAtoms: 155,
+      inTransitAtoms: 0,
+      custodyAtoms: 45,
+      clinicQuantityAtoms: 200,
+      consumedAtoms: 0,
+      payableDeltaMinor: 0,
+      cashDeltaMinor: 0,
+    });
+
+    // 2. Doctor consumes 12 for patient visit, records 3 approved waste, returns 5 unused to store, counts 23 (2 variance for review)
+    const stocktake = reconcileCustody({
+      openingAtoms: transfer.custodyAtoms,
+      events: [
+        { id: "ev-consume-1", movementId: "mov-out-1", kind: "consumed", quantityAtoms: 12 },
+        { id: "ev-waste-1", movementId: "mov-out-2", kind: "approved_waste", quantityAtoms: 3, approvalId: "admin-waste-ok-1", reason: "Dropped ampoule" },
+        { id: "ev-ret-1", movementId: "mov-ret-1", kind: "returned_to_store", quantityAtoms: 5 },
+      ],
+      countedAtoms: 23,
+    });
+    expect(stocktake).toMatchObject({
+      expectedClosingAtoms: 25,
+      consumedAtoms: 12,
+      countDifferenceAtoms: -2,
+      reviewRequired: true,
+      automaticFinancialAdjustmentMinor: 0,
+    });
+    // Clinic-wide stock = 155 (store) + 5 (returned from custody) + 25 (expected custody closing) = 185 (200 - 12 consumed - 3 waste)
+    expect(transfer.sourceAtoms + 5 + stocktake.expectedClosingAtoms).toBe(185);
+
+    // 3. Safe package closure vs contaminated disposal
+    const safeClosure = reconcileEmptyPackage({
+      packageId: "pack-gutta-1",
+      evidenceEventId: "ev-close-1",
+      previousClosures: [],
+      hazard: "none",
+      policy: "safe_empty_return",
+      evidenceAction: "receive_safe_empty_package",
+      originalAtoms: 45,
+      recordedConsumptionAtoms: 12,
+      returnedOrTransferredAtoms: 5,
+      approvedWasteAtoms: 3,
+      remainingAtoms: 0,
+    });
+    expect(safeClosure).toMatchObject({
+      unexplainedAtoms: 25,
+      reviewRequired: true,
+      materialStockDeltaAtoms: 0,
+      consumptionDeltaAtoms: 0,
+      automaticDebtMinor: 0,
+    });
+
+    // 4. Price coverage warning: procedure price 150 SAR vs fixed direct cost 160 SAR flags negative contribution without calling it net profit
+    const underpriced = priceSimulation({
+      fixedCost: { currency: "SAR", amountMinor: 16_000 },
+      netPrice: { currency: "SAR", amountMinor: 15_000 },
+      targetMarginBp: 2_000,
+      commission: { basis: "included_in_fixed_cost" },
+    });
+    expect(underpriced.contributionMinor).toBe(-1_000);
+    expect(underpriced.targetNetPriceMinor).toBe(20_000);
+  });
 });
+
