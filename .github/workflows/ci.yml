@@ -15,7 +15,10 @@ jobs:
   quality:
     name: Typecheck, Lint, Test, Postgres, Audit, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    # The complete HR and financial PostgreSQL/browser suites exceeded the old
+    # 55-minute job budget. Keep every gate and individual test deadline intact;
+    # allow the full sequence to finish within a bounded execution window.
+    timeout-minutes: 75
 
     services:
       # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
