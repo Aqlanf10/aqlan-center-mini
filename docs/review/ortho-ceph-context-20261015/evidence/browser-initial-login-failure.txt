@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ceph-versioned-planes-browser.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ceph-versioned-planes-browser.test.ts (2 tests | 2 failed) 32979ms
+     × keeps new and historic stamps distinct at 390px 15949ms
+     × keeps new and historic stamps distinct at 1280px 15540ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ceph-versioned-planes-browser.test.ts > versioned ceph planes in the built browser and print consumer > keeps new and historic stamps distinct at 390px
+ FAIL  __tests__/security-http/ceph-versioned-planes-browser.test.ts > versioned ceph planes in the built browser and print consumer > keeps new and historic stamps distinct at 1280px
+TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('row').filter({ hasText: 'STEINER_SN_GOGN_V1' }) to be visible[22m
+
+ ❯ __tests__/security-http/ceph-versioned-planes-browser.test.ts:79:39
+     77|       expect(new URL(page.url()).pathname).toBe(`/ceph/${id}`);
+     78|       const row = (code: string) => page.getByRole("row").filter({ has…
+     79|       await row("STEINER_SN_GOGN_V1").waitFor();
+       |                                       ^
+     80|       expect(await row("STEINER_SN_GOGN_V1").innerText()).toContain("4…
+     81|       expect(await row("DOWNS_FH_GOME_V1").innerText()).toContain("60"…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  20:31:04
+   Duration  37.70s (transform 86ms, setup 0ms, import 520ms, tests 32.98s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -1,0 +1,113 @@
+{
+  "requests": [
+    {
+      "path": "/ceph/2",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/media/plex_arabic_400-s.p.0a8jtlzovcn2x.woff2",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/05rbm5fmm935u.css",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/media/plex_arabic_500-s.p.2nmq8_7j2wt1h.woff2",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/media/plex_arabic_600-s.p.2jzf714wbn4iw.woff2",
+      "status": 200
+    },
+    {
+      "path": "/logo-white.png",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/media/plex_arabic_700-s.p.0ej1b3dc64qt2.woff2",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/310vm2bl3xxpt.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/1s3cbkom_75et.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/1nnp0esxgmmg8.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/3fntmmi971322.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/0autwjjcxje-x.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/turbopack-1yt0h96a1eo74.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/0om4z-3ck9rys.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/0mrtydvdu-tyf.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/2z6-1t3_qkyzj.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/3as6lqnldxmkr.js",
+      "status": 200
+    },
+    {
+      "path": "/_next/static/chunks/1rj7ns8rte9vc.js",
+      "status": 200
+    },
+    {
+      "path": "/favicon.ico",
+      "status": 200
+    },
+    {
+      "path": "/api/auth/me",
+      "status": 200
+    },
+    {
+      "path": "/logo.png",
+      "status": 200
+    },
+    {
+      "path": "/login",
+      "status": 200
+    },
+    {
+      "path": "/api/booking-requests",
+      "status": 200
+    },
+    {
+      "path": "/api/lab",
+      "status": 200
+    },
+    {
+      "path": "/api/messages",
+      "status": 200
+    },
+    {
+      "path": "/logo-white.png",
+      "status": 200
+    },
+    {
+      "path": "/favicon.ico",
+      "status": 200
+    }
+  ],
+  "errors": []
+}

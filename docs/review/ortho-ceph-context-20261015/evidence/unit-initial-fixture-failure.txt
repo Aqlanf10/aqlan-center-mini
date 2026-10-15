@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ceph-patient-context.test.ts __tests__/ceph-ai.test.ts __tests__/ceph.test.ts __tests__/ceph-wits-zero.test.ts __tests__/ceph-versioned-planes.test.ts __tests__/ceph-compare.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+ ❯ __tests__/ceph-patient-context.test.ts (11 tests | 1 failed) 14ms
+     × retains known-age behavior while labelling it as a draft 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ceph-patient-context.test.ts > recorded Ceph patient context > retains known-age behavior while labelling it as a draft
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/ceph-patient-context.test.ts:33:60
+     31|   it("retains known-age behavior while labelling it as a draft", () =>…
+     32|     const dx = generateCephExpertDiagnosis(results, { age: 13 });
+     33|     expect(dx.treatmentRecommendations.growthModification).toBe(true);
+       |                                                            ^
+     34|     expect(dx.formatted.recommendationsText).toContain("العمر وحده لا …
+     35|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 86 passed (87)
+   Start at  20:29:22
+   Duration  1.18s (transform 161ms, setup 0ms, import 274ms, tests 109ms, environment 1ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

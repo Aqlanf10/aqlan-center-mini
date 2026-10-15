@@ -1,0 +1,16 @@
+2026-10-15 20:31:10.759 UTC [42] ERROR:  value "77681788428027577155" is out of range for type bigint
+2026-10-15 20:31:11.379 UTC [45] ERROR:  value "77681788428027577155" is out of range for type bigint
+2026-10-15 20:31:26.414 UTC [48] ERROR:  value "77681788428027577155" is out of range for type bigint
+2026-10-15 20:31:26.804 UTC [49] ERROR:  value "77681788428027577155" is out of range for type bigint
+2026-10-15 20:33:24.300 UTC [75] ERROR:  value "68803352431716925565795" is out of range for type bigint
+2026-10-15 20:33:24.681 UTC [78] ERROR:  value "68803352431716925565795" is out of range for type bigint
+2026-10-15 20:33:39.818 UTC [80] ERROR:  value "68803352431716925565795" is out of range for type bigint
+2026-10-15 20:33:40.153 UTC [81] ERROR:  value "68803352431716925565795" is out of range for type bigint
+
+Shared source: lib/db.ts:1503–1506
+SELECT setval('patient_number_seq', GREATEST(
+  (SELECT last_value FROM patient_number_seq),
+  (SELECT COALESCE(MAX(NULLIF(regexp_replace(patient_number, '\D', '', 'g'), '')::bigint), 0) FROM patients)
+), true);
+
+No shared application code changed. Fixture now uses width + eight hex characters, whose digit extraction is bounded.
