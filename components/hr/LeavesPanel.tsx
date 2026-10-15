@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useSession } from "@/components/SessionProvider";
 import { Modal } from "@/components/Modal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { clinicDateString } from "@/lib/schedule";
@@ -28,7 +29,13 @@ function leaveReferenceLabel(value: unknown): string {
   return `${name} (${id})`;
 }
 
-export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
+export function HrLeavesPanel(props: { isAdmin?: boolean }) {
+  const session = useSession();
+  // A new signed owner gets a new view, including forms, selections and readers.
+  return <HrLeavesView key={session ? `${session.username}\u0000${session.role}` : "signed-out"} {...props} />;
+}
+
+function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
   const [requests, setRequests] = useState<LeaveRequestItem[]>([]);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
@@ -37,6 +44,15 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(false);
+  const alive = useRef(true), leavesGeneration = useRef(0), balancesGeneration = useRef(0);
+  const balanceSelection = useRef(""), filterSelection = useRef("");
+  const decisionInFlight = useRef(false);
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; leavesGeneration.current++; balancesGeneration.current++; };
+  }, []);
 
   // Modals
   const [requestModalOpen, setRequestModalOpen] = useState(false);
@@ -58,6 +74,10 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const [adjReason, setAdjReason] = useState("تخصيص رصيد سنوي");
 
   const loadLeaves = useCallback(async () => {
+    if (!alive.current || statusFilter !== filterSelection.current) return;
+    const generation = ++leavesGeneration.current;
+    const current = () => alive.current && generation === leavesGeneration.current && statusFilter === filterSelection.current;
+    setLoading(true); setRequests([]); setError(null);
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
@@ -66,42 +86,49 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       const res = await fetch(`/api/hr/leaves?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error("تعذّر تحميل طلبات الإجازات.");
       const data = await res.json();
+      if (!current()) return;
+      if (!Array.isArray(data.requests) || !Array.isArray(data.types) || !Array.isArray(data.staff)) throw new Error("تعذّر التحقق من بيانات الإجازات.");
       setRequests(data.requests || []);
       setLeaveTypes(data.types || []);
       setStaffOptions(data.staff || []);
       setError(null);
     } catch (err: any) {
-      setError(err?.message || "حدث خطأ أثناء تحميل الإجازات.");
+      if (current()) { setRequests([]); setLeaveTypes([]); setStaffOptions([]); setError(err?.message || "حدث خطأ أثناء تحميل الإجازات."); }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [statusFilter]);
 
   const loadBalances = useCallback(async (staffId: string) => {
+    if (!alive.current || staffId !== balanceSelection.current) return;
+    const generation = ++balancesGeneration.current;
+    const current = () => alive.current && generation === balancesGeneration.current && staffId === balanceSelection.current;
+    setBalances([]); setBalanceError(null); setBalancesLoading(Boolean(staffId));
     if (!staffId) return;
     try {
       const res = await fetch(`/api/hr/leaves/balances?staffId=${staffId}`, { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setBalances(data);
-      }
+      if (!res.ok) throw new Error("تعذّر تحميل رصيد الموظف المختار.");
+      const data = await res.json();
+      if (!Array.isArray(data) || data.some(row => String(row.staffId) !== staffId)) throw new Error("تعذّر التحقق من رصيد الموظف المختار.");
+      if (current()) setBalances(data);
     } catch {
-      // Ignored
-    }
+      if (current()) { setBalances([]); setBalanceError("تعذّر تحميل رصيد الموظف المختار."); }
+    } finally { if (current()) setBalancesLoading(false); }
   }, []);
 
   useEffect(() => {
     void loadLeaves();
+    return () => { leavesGeneration.current++; };
   }, [loadLeaves]);
 
   useEffect(() => {
-    if (selectedStaffForBalance) {
-      void loadBalances(selectedStaffForBalance);
-    }
+    void loadBalances(selectedStaffForBalance);
+    return () => { balancesGeneration.current++; };
   }, [selectedStaffForBalance, loadBalances]);
 
   const handleCreateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!alive.current) return;
     if (!reqStaffId || !reqTypeId || !reqStartDate || !reqEndDate || !reqReason) {
       alert("يرجى ملء جميع الحقول الإلزامية.");
       return;
@@ -126,6 +153,7 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         throw new Error(err.message || "تعذّر رفع طلب الإجازة.");
       }
 
+      if (!alive.current) return;
       setRequestModalOpen(false);
       setReqReason("");
       setReqAttachmentRef("");
@@ -134,14 +162,17 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         void loadBalances(reqStaffId);
       }
     } catch (err: any) {
-      alert(err.message || "حدث خطأ أثناء رفع الطلب.");
+      if (alive.current) alert(err.message || "حدث خطأ أثناء رفع الطلب.");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDecideRequest = async (id: number, status: "approved" | "rejected" | "cancelled") => {
-    const notes = prompt(status === "approved" ? "ملاحظة الاعتماد (اختياري):" : "سبب رفض الإجازة:") || "";
+    if (!alive.current || !isAdmin || decisionInFlight.current) return;
+    const notes = prompt(status === "approved" ? "ملاحظة الاعتماد (اختياري):" : status === "cancelled" ? "سبب إلغاء الإجازة:" : "سبب رفض الإجازة:");
+    if (notes === null || !alive.current) return;
+    decisionInFlight.current = true; setSubmitting(true);
     try {
       const res = await fetch(`/api/hr/leaves/${id}`, {
         method: "PATCH",
@@ -157,17 +188,19 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         throw new Error(err.message || "تعذّر تنفيذ القرار.");
       }
 
+      if (!alive.current) return;
       void loadLeaves();
       if (selectedStaffForBalance) {
         void loadBalances(selectedStaffForBalance);
       }
     } catch (err: any) {
-      alert(err.message || "حدث خطأ أثناء معالجة القرار.");
-    }
+      if (alive.current) alert(err.message || "حدث خطأ أثناء معالجة القرار.");
+    } finally { decisionInFlight.current = false; if (alive.current) setSubmitting(false); }
   };
 
   const handleAdjustBalance = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!alive.current || !isAdmin) return;
     if (!adjStaffId || !adjTypeId) return;
     setSubmitting(true);
     try {
@@ -187,12 +220,13 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         throw new Error(err.message || "تعذّر تعديل الرصيد.");
       }
 
+      if (!alive.current) return;
       setAdjustModalOpen(false);
       if (selectedStaffForBalance === adjStaffId) {
         void loadBalances(adjStaffId);
       }
     } catch (err: any) {
-      alert(err.message || "حدث خطأ أثناء تعديل الرصيد.");
+      if (alive.current) alert(err.message || "حدث خطأ أثناء تعديل الرصيد.");
     } finally {
       setSubmitting(false);
     }
@@ -206,7 +240,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
           <label className="text-xs font-semibold text-navy-600">عرض رصيد الموظف:</label>
           <select
             value={selectedStaffForBalance}
-            onChange={(e) => setSelectedStaffForBalance(e.target.value)}
+            aria-label="عرض رصيد الموظف"
+            onChange={(e) => { balanceSelection.current = e.target.value; balancesGeneration.current++; setBalances([]); setBalanceError(null); setBalancesLoading(Boolean(e.target.value)); setSelectedStaffForBalance(e.target.value); }}
             className="rounded-xl border border-navy-200 bg-white px-3 py-2 text-sm text-navy-800 outline-none"
           >
             <option value="">اختر الموظف لعرض أرصدته...</option>
@@ -240,6 +275,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       </div>
 
       {/* Balance Badges */}
+      {balancesLoading && <p role="status" className="text-sm text-navy-500">جارٍ تحميل رصيد الموظف المختار…</p>}
+      {balanceError && <p role="alert" className="text-sm text-rose-700">{balanceError}</p>}
       {selectedStaffForBalance && balances.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {balances.map((b) => (
@@ -258,7 +295,8 @@ export function HrLeavesPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-navy-100 bg-white p-3 shadow-sm">
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="حالة طلب الإجازة"
+          onChange={(e) => { filterSelection.current = e.target.value; leavesGeneration.current++; setRequests([]); setLoading(true); setStatusFilter(e.target.value); }}
           className="rounded-xl border border-navy-200 bg-white px-3 py-1.5 text-sm text-navy-800 outline-none"
         >
           <option value="">جميع الحالات</option>

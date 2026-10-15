@@ -2,7 +2,8 @@
  * (HR-INT) مصدر شروط الأجر المعتمد للمسير — دالة نقية + قارئ من القاعدة.
  *
  * القاعدة: **العقد المعتمد/الفعّال الساري هو مصدر الأجر وتاريخ سريانه**. ملف الموظف (hr_staff) يحمل أجرًا ابتدائيًّا
- * يُستعمل مصدرًا وحيدًا فقط حين لا يغطي أي عقدٍ الفترة؛ وحين يغطيها عقدٌ يُزامَن الملف إليه عند التفعيل ولا يُعدَّل
+ * يُستعمل مصدرًا وحيدًا فقط قبل وجود عقد سابق موثق؛ انتهاء تغطية عقد لا يثبت الرجوع لهذا الأجر.
+ * وحين يغطيها عقدٌ يُزامَن الملف إليه عند التفعيل ولا يُعدَّل
  * بما يخالفه. فلا يبقى مصدران متناقضان، وإن وُجد تعارضٌ قديم يُعلن ويُمنع الاعتماد — لا يُختار أحد الرقمين تخمينًا.
  *
  * ما لم يحدّده المالك لا يُحسب ولا يُقسَّم: دوريةٌ غير شهرية، أجرٌ يتغير أثناء الفترة، التحاقٌ/انتهاء خدمةٍ منتصف الفترة،
@@ -17,6 +18,8 @@ export type SalaryPeriodUnit = "monthly" | "weekly" | "daily" | "per_shift";
 
 export type PayBlocker =
   | "commission_policy_conflict"
+  | "contract_priority_unresolved"
+  | "contract_coverage_unresolved"
   | "contract_lifecycle_unresolved"
   | "terms_conflict"
   | "terms_changed_in_period"
@@ -26,6 +29,8 @@ export type PayBlocker =
   | "no_pay_terms";
 
 export const PAY_BLOCKER_LABEL: Record<PayBlocker, string> = {
+  contract_priority_unresolved: "تغطي الفترة عقود مستقلة أو سلسلة ملاحق غير مكتملة؛ يلزم تحديد العقد المعتمد الحاكم قبل الاحتساب",
+  contract_coverage_unresolved: "انتهت تغطية عقد سابق ولا يوجد عقد يغطي الفترة؛ مصدر الأجر بعدها يحتاج إلى قرار موثق",
   commission_policy_conflict: "نسبة العقد تختلف عن سياسة محرك العمولات السارية؛ صحّح العقد أو اعتمد السياسة عبر مسار العمولات",
   contract_lifecycle_unresolved: "حالة العقد المرجعي لا تثبت استمرار أثره على الأجر؛ راجع تاريخ الأثر والشروط المعتمدة قبل الاحتساب",
   terms_conflict: "تعارض بين أجر ملف الموظف والعقد الساري",
@@ -51,6 +56,7 @@ export interface ProfileInput extends PayTerms {
 
 export interface ContractInput extends PayTerms {
   id: number;
+  parentContractId?: number | null;
   contractNumber: string;
   versionNumber: number;
   status: string;
@@ -100,6 +106,21 @@ const covers = (contract: ContractInput, day: string) =>
 const overlaps = (contract: ContractInput, start: string, end: string) =>
   contract.startDate <= end && (contract.endDate === null || contract.endDate >= start);
 
+/** Version numbers order addenda within one root only. Missing/cyclic ancestry
+ * cannot supply a priority rule between independent approved agreements. */
+function contractRoot(contract: ContractInput, all: readonly ContractInput[]): number | null {
+  const visited = new Set<number>();
+  let current = contract;
+  while (current.parentContractId != null) {
+    if (visited.has(current.id)) return null;
+    visited.add(current.id);
+    const parent = all.find(candidate => candidate.id === current.parentContractId);
+    if (!parent) return null;
+    current = parent;
+  }
+  return visited.has(current.id) ? null : current.id;
+}
+
 /** العقد الحاكم يوم معيّن: الأحدث إصدارًا بين الفعّالة/المعتمدة التي تغطي اليوم. */
 export function governingContractOn(contracts: readonly ContractInput[], day: string): ContractInput | null {
   const live = contracts.filter((contract) => isLive(contract.status) && covers(contract, day));
@@ -145,7 +166,12 @@ export function resolvePayTerms(
         if (next > start && next <= end) breakpoints.add(next);
       }
     }
-    const segments = [...breakpoints].sort().map((day) => candidates.filter((candidate) => covers(candidate, day)).sort(byVersion)[0] ?? null);
+    const segments = [...breakpoints].sort().map((day) => {
+      const covering = candidates.filter((candidate) => covers(candidate, day));
+      const roots = new Set(covering.map(candidate => contractRoot(candidate, contracts)));
+      if (roots.has(null) || roots.size > 1) blockers.push("contract_priority_unresolved");
+      return covering.sort(byVersion)[0] ?? null;
+    });
     const keys = new Set(segments.map((segment) => (segment ? contractEarningKey(segment) : "none")));
     if (keys.size > 1) blockers.push("terms_changed_in_period");
     if (segments.some((segment) => segment && !isLive(segment.status))) blockers.push("contract_lifecycle_unresolved");
@@ -162,6 +188,11 @@ export function resolvePayTerms(
         && payTermsKey(termsOf(profile)) !== payTermsKey(terms)) blockers.push("terms_conflict");
     }
   } else {
+    if (contracts.some(candidate => hasPayrollWitness(candidate) && candidate.startDate <= end)) {
+      // The current profile is an observation, not evidence of the wage after a
+      // previous agreement ended. Keep the draft visible but never accrue it.
+      blockers.push("contract_coverage_unresolved");
+    }
     terms = termsOf(profile);
     source = "staff_profile";
     if (hasSalary(terms.kind)) {
@@ -190,6 +221,7 @@ export function resolvePayTerms(
       contractNumber: contract?.contractNumber ?? null,
       contractStatus: contract?.status ?? null,
       versionNumber: contract?.versionNumber ?? null,
+      reviewContractIds: contracts.filter(candidate => hasPayrollWitness(candidate) && candidate.startDate <= end).map(candidate => candidate.id).sort((a, b) => a - b),
       kind: terms?.kind ?? null,
       baseSalaryMinor: terms && hasSalary(terms.kind) ? terms.salaryMinor : null,
       currency: terms && hasSalary(terms.kind) ? terms.currency : null,
@@ -208,7 +240,7 @@ const toNumberOrNull = (value: unknown): number | null => (value === null || val
 const toTextOrNull = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
 
 export const CONTRACT_SELECT = `
-  SELECT id, contract_number, version_number, status, start_date::text AS start_date, end_date::text AS end_date,
+  SELECT id, parent_contract_id, contract_number, version_number, status, start_date::text AS start_date, end_date::text AS end_date,
          compensation_kind, base_salary_minor, salary_currency, salary_period, commission_rate_percent, doctor_party_id,
          approved_by, approved_at::text AS approved_at
     FROM hr_contracts`;
@@ -216,6 +248,7 @@ export const CONTRACT_SELECT = `
 export function contractFromRow(row: Row): ContractInput {
   return {
     id: Number(row.id),
+    parentContractId: toNumberOrNull(row.parent_contract_id),
     contractNumber: String(row.contract_number),
     versionNumber: Number(row.version_number),
     status: String(row.status),

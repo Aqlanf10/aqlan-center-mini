@@ -2,6 +2,7 @@ import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
 import { withIsolation } from "./transactions";
 import { normalizeHrPolicy } from "./hr-settings-policy";
+import { payrollBlockerLabel } from "./hr-payroll-review";
 import { commissionTimeKey } from "./commission-time";
 /** HR payroll uses the existing commission engine, payables and append-only expenses. */
 import { createHash } from "node:crypto";
@@ -14,11 +15,10 @@ import { withTransaction } from "./transactions";
 import type { SessionPayload } from "./auth";
 import type { AuditAction } from "./audit";
 import { CLINIC_BASE_CURRENCY, toBaseAmount, type Currency } from "./money";
-import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { clinicDateString } from "./schedule";
 import { refusalMessage } from "./supplier-payments";
 import {
-  resolvePayTerms, loadStaffContracts, profileFromRow, hasSalary, hasCommission, PAY_BLOCKER_LABEL,
+  resolvePayTerms, loadStaffContracts, profileFromRow, hasSalary, hasCommission,
 } from "./hr-pay-terms";
 import {
   type HrPayrollPeriodView, type HrPayrollRunView, type HrPayrollItemView,
@@ -33,7 +33,7 @@ export class HrPayrollError extends Error {
 }
 const fail = (code: string, message: string, status = 409): never => { throw new HrPayrollError(code, status, message); };
 function assertPayTermsUnblocked(blockers: readonly string[]) {
-  if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map((b) => PAY_BLOCKER_LABEL[b as keyof typeof PAY_BLOCKER_LABEL] ?? b).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
+  if (blockers.length) fail("pay_terms_blocked", `لا يمكن الاعتماد: ${blockers.map(payrollBlockerLabel).join("؛ ")}. يلزم تصحيح التعارض أو قرار معتمد ثم إعادة الاحتساب.`);
 }
 export type HrPayrollWriteAuthorizer = ((client: DbClient) => Promise<boolean>) & { isCurrent: () => boolean };
 /** HTTP callers supply the live authorizer; trusted internal writers keep their explicit actor contract. */
@@ -609,6 +609,9 @@ export async function getHrReportSummary(): Promise<{
   }>;
 }> {
   const pool = getPool();
+  // Pin a single clinic-local day for both the query range and its displayed label.
+  // Database/session timezone and a midnight between queries cannot relabel 30 days as today.
+  const day = clinicDateString(new Date(), CLINIC_TIME_ZONE);
 
   const [staffRes, expiringRes, attRes, leaveRes, payrollRes] = await Promise.all([
     withIsolation(pool, 'REPEATABLE READ', async client => {
@@ -624,28 +627,28 @@ export async function getHrReportSummary(): Promise<{
       return { rows: [...groups.values()] };
     }),
     pool.query(`
-      SELECT c.id, c.staff_id, s.full_name as staff_name, c.contract_number, c.end_date,
-             (c.end_date - CURRENT_DATE)::int as days_remaining
+      SELECT c.id, c.staff_id, s.full_name as staff_name, c.contract_number, c.end_date::text AS end_date,
+             (c.end_date - $1::date)::int as days_remaining
       FROM hr_contracts c
       JOIN hr_staff s ON s.id = c.staff_id
       WHERE c.status IN ('active', 'approved')
         AND c.end_date IS NOT NULL
-        AND c.end_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')
+        AND c.end_date BETWEEN $1::date AND ($1::date + INTERVAL '30 days')
       ORDER BY c.end_date ASC
-    `),
+    `, [day]),
     pool.query(`
       SELECT COUNT(*) FILTER (WHERE status = 'late')::int as late_count,
              COUNT(*) FILTER (WHERE is_incomplete = true)::int as incomplete_count,
              COALESCE(SUM(overtime_minutes), 0)::bigint as total_overtime_mins
       FROM hr_attendance_records
-      WHERE attendance_date >= (CURRENT_DATE - INTERVAL '30 days')
-    `),
+      WHERE attendance_date = $1::date
+    `, [day]),
     pool.query(`
       SELECT COUNT(*) FILTER (WHERE status = 'approved')::int as approved_count,
              COUNT(*) FILTER (WHERE status = 'pending')::int as pending_count,
-             COALESCE(SUM(days_count) FILTER (WHERE status = 'approved' AND EXTRACT(YEAR FROM start_date) = EXTRACT(YEAR FROM CURRENT_DATE)), 0)::numeric as consumed_days
+             COALESCE(SUM(days_count) FILTER (WHERE status = 'approved' AND EXTRACT(YEAR FROM start_date) = EXTRACT(YEAR FROM $1::date)), 0)::numeric as consumed_days
       FROM hr_leave_requests
-    `),
+    `, [day]),
     pool.query(`
       SELECT currency,
              COALESCE(SUM(total_net_due_minor), 0)::bigint as total_net,
@@ -678,7 +681,7 @@ export async function getHrReportSummary(): Promise<{
 
   const attRow = attRes.rows[0] ?? {};
   const attendanceExceptions = {
-    date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
+    date: day,
     latePunchesCount: Number(attRow.late_count ?? 0),
     incompletePunchesCount: Number(attRow.incomplete_count ?? 0),
     totalOvertimeHours: Math.round(Number(attRow.total_overtime_mins ?? 0) / 60),

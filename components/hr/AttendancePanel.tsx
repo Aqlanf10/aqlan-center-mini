@@ -204,7 +204,8 @@ export function HrAttendancePanel({ isAdmin = false }: { isAdmin?: boolean }) {
   };
 
   const handleDecideCorrection = async (id: number, decision: "approved" | "rejected") => {
-    const reason = prompt(decision === "approved" ? "ملاحظة الاعتماد (اختياري):" : "سبب الرفض:") || "";
+    const reason = prompt(decision === "approved" ? "ملاحظة الاعتماد (اختياري):" : "سبب الرفض:");
+    if (reason === null) return;
     try {
       const res = await fetch("/api/hr/attendance/corrections", {
         method: "POST",

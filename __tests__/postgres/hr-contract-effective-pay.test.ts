@@ -98,6 +98,28 @@ it("an equal-effective-date profile contradiction remains blocked", async () => 
   await fixture.source.query("UPDATE hr_staff SET salary_amount_minor=99000 WHERE id=$1", [s.id]);
   expect((await prepare()).items[0].blockerCodes).toContain("terms_conflict");
 });
+it("independent overlapping contracts cannot gain payroll priority from their version or ID", async () => {
+  const s = await staff();
+  const first = await salaryContract(s.id), second = await salaryContract(s.id);
+  const { run, items } = await prepare();
+  expect(items[0].blockerCodes).toContain("contract_priority_unresolved");
+  expect(items[0].baseSalaryMinor).toBe(0);
+  expect(items[0].payTermsSnapshot.reviewContractIds).toEqual([first.id, second.id]);
+  const before = await financialState();
+  await expect(payroll.approvePayrollRun(run.id, admin)).rejects.toMatchObject({ code: "pay_terms_blocked" });
+  expect(await financialState()).toEqual(before);
+});
+it("post-contract payroll cannot silently substitute today's profile after coverage ends", async () => {
+  const s = await staff();
+  const c = await contracts.createContract({ staffId: s.id, templateKind: "support_staff", title: "Synthetic finite agreement", startDate: "2026-01-01", endDate: "2026-07-31", compensationKind: "salary", baseSalaryMinor: 120000, salaryCurrency: "YER", salaryPeriod: "monthly" }, admin);
+  await contracts.approveContract(c.id, admin);
+  const { run, items } = await prepare();
+  expect(items[0].blockerCodes).toContain("contract_coverage_unresolved");
+  expect(items[0].netDueMinor).toBe(0);
+  const before = await financialState();
+  await expect(payroll.approvePayrollRun(run.id, admin)).rejects.toMatchObject({ code: "pay_terms_blocked" });
+  expect(await financialState()).toEqual(before);
+});
 for (const status of ["expired", "terminated"] as const) it(`${status} approved contract cannot silently fall back to a rewritten profile for historical payroll`, async () => {
   const s = await staff(), c = await salaryContract(s.id);
   await contracts.transitionContractStatus(c.id, "active", "Synthetic activation", admin);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/Modal";
+import { payrollBlockerLabel, payrollReviewContractIds } from "@/lib/hr-payroll-review";
 import {
   HR_PAYROLL_ITEM_STATUS_LABELS,
   type HrCurrency,
@@ -467,14 +468,19 @@ export function HrPayrollPanel() {
             <tbody className="divide-y divide-navy-100 font-mono text-xs">
               {activeRun.items.map((item) => {
                 const hasCommission = item.commissionsMinor > 0;
-                const isPaid = item.remainingMinor <= 0;
+                const isPaid = item.netDueMinor > 0 && item.paidMinor >= item.netDueMinor && item.remainingMinor <= 0;
 
                 return (
                   <tr key={item.id} className="transition hover:bg-navy-50/40">
                     <td className="px-4 py-3 font-sans font-semibold text-navy-900">
                       <div>{item.staffName || `موظف #${item.staffId}`}</div>
                       {item.staffJobTitle && <div className="text-xs text-navy-500">{item.staffJobTitle}</div>}
-                      {item.blockerCodes.length > 0 && <div className="text-rose-700">يحتاج مراجعة شروط الأجر: {item.blockerCodes.join("، ")}</div>}
+                      {item.blockerCodes.length > 0 && <div className="mt-2 min-w-48 max-w-sm space-y-2 whitespace-normal font-normal text-rose-700" aria-label={`مراجعة استحقاق ${item.staffName}`}>
+                        <p className="font-semibold">الاستحقاق محجوب حتى مراجعة شروط الأجر</p>
+                        <ul className="list-inside list-disc space-y-1">{item.blockerCodes.map(code => <li key={code}>{payrollBlockerLabel(code)}</li>)}</ul>
+                        <p>المبلغ الصفري هنا لا يثبت عدم الاستحقاق. راجع العقود وتاريخ العمل؛ ثم أعد الاحتساب بعد توثيق القرار المطلوب.</p>
+                        {payrollReviewContractIds(item.payTermsSnapshot).map(id => <a key={id} className="block py-1 text-navy-800 underline" href={`/print/hr/contracts/${id}`} target="_blank" rel="noreferrer">قراءة العقد المرجعي #{id}</a>)}
+                      </div>}
                     </td>
                     <td className="px-4 py-3">{formatAmount(item.baseSalaryMinor, activeRun.currency as Currency)}</td>
                     <td className="px-4 py-3">{formatAmount(item.allowancesMinor, activeRun.currency as Currency)}</td>
@@ -517,11 +523,11 @@ export function HrPayrollPanel() {
                             : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {(HR_PAYROLL_ITEM_STATUS_LABELS as Record<string, string>)[item.status] || item.status}
+                        {item.blockerCodes.length > 0 ? "محجوب للمراجعة" : (HR_PAYROLL_ITEM_STATUS_LABELS as Record<string, string>)[item.status] || item.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-sans text-center">
-                      {!isPaid && activeRun.status === "approved" && currentPeriodObj?.status !== "closed" && (
+                      {item.remainingMinor > 0 && activeRun.status === "approved" && currentPeriodObj?.status !== "closed" && (
                         <button
                           type="button"
                           onClick={() => openDisburseForItem(item)}

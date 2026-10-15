@@ -96,6 +96,7 @@ export function HrReportsPanel() {
 
         <div className="rounded-2xl border border-navy-100 bg-white p-4 shadow-sm">
           <div className="text-xs font-semibold text-navy-500">استثناءات الدوام اليوم</div>
+          <div className="text-xs text-navy-500" dir="ltr">{report.attendanceExceptions.date}</div>
           <div className="mt-1 text-2xl font-bold text-navy-900">
             {report.attendanceExceptions.incompletePunchesCount}
           </div>
