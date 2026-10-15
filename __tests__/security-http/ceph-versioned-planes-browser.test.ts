@@ -64,6 +64,8 @@ describe("versioned ceph planes in the built browser and print consumer", () => 
       expect(opened.status).toBe(201); const id = (await opened.json()).id;
       expect((await authedMutation(`/api/ceph/${id}`, h.sessions.admin, "PATCH", JSON.stringify({ calibration: { x1: 0, y1: 0, x2: 100, y2: 0, mm: 50 } }))).status).toBe(200);
       const points: LandmarkMap = { S: { x: 100, y: 100 }, N: { x: 110, y: 100 },
+        A: { x: 50, y: 20 }, B: { x: 50, y: 80 },
+        OcclP: { x: 10, y: 50 }, OcclA: { x: 90, y: 50 },
         Po: { x: 100, y: 80 }, Or: { x: 100 + 10 * Math.sqrt(3), y: 90 },
         Go: { x: 100, y: 110 }, Gn: { x: 110, y: 120 }, Me: { x: 100 + 10 * Math.sqrt(3), y: 100 } };
       const landmarks = [...new Set([...REQUIRED_LANDMARKS, ...Object.keys(points)])].map((code, i) => ({ code,
@@ -87,7 +89,11 @@ describe("versioned ceph planes in the built browser and print consumer", () => 
       const current = (await db.query("SELECT code,value FROM ceph_measurements WHERE analysis_id=$1 ORDER BY code", [id])).rows;
       expect(current.find(r => r.code === "STEINER_SN_GOGN_V1").value).toBeCloseTo(45, 10);
       expect(current.find(r => r.code === "DOWNS_FH_GOME_V1").value).toBeCloseTo(60, 10);
+      expect(current.find(r => r.code === "WITS").value).toBe(0);
       await captureVisibleRow(page, row("STEINER_SN_GOGN_V1"), `.settings-ui-artifacts/ceph-versioned-current-${width}.png`);
+      await page.goto(`${baseUrl}/print/ceph/${id}`);
+      expect(await row("WITS").getByRole("cell").nth(1).innerText()).toBe("0mm");
+      await page.pdf({ path: `.settings-ui-artifacts/ceph-wits-zero-${width}.pdf`, format: "A4", printBackground: true });
       const historical = (await db.query(`INSERT INTO ceph_analyses(patient_id,document_id,status,phase,xray_date,created_by,completed_by,completed_at)
         VALUES($1,$2,'completed','during',NULL,'synthetic archive','synthetic archive',TIMESTAMPTZ '2026-10-14 23:30:00+00') RETURNING id`, [patientId, documentId])).rows[0].id;
       await db.query("INSERT INTO ceph_measurements(analysis_id,code,value) VALUES($1,'SNGOGN',31.678901234)", [historical]);

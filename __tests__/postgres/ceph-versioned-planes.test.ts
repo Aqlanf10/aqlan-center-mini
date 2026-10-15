@@ -40,6 +40,17 @@ const snapshot = async (id: number) => ({
 });
 
 describe("versioned planes through real PostgreSQL writers and readers", () => {
+  it("seals measured WITS zero and reads it back without treating it as absent", async () => {
+    const id = await draft();
+    expect(await fixture.db.updateCephLandmarks(id, [
+      { code: "A", x: 50, y: 20 }, { code: "B", x: 50, y: 80 },
+      { code: "OcclP", x: 10, y: 50 }, { code: "OcclA", x: 90, y: 50 },
+    ], "synthetic")).toMatchObject({ ok: true });
+    expect(await fixture.db.completeCephAnalysis(id, "synthetic")).toMatchObject({ ok: true });
+    expect((await fixture.db.getCephStudy(id))!.measurements.find(row => row.code === "WITS")?.value).toBe(0);
+    expect((await fixture.db.getCephAnalysisForCompare(id))!.measurements.find(row => row.code === "WITS")?.value).toBe(0);
+  });
+
   it("seals distinct 45° and 60° identities, keeps null date, and refuses editing a completed study", async () => {
     const id = await draft();
     expect(await fixture.db.completeCephAnalysis(id, "synthetic")).toMatchObject({ ok: true });
