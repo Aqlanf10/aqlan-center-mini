@@ -135,7 +135,35 @@ const english:Record<string,string>={
  "تم تخصيص الحركات التاريخية دون مضاعفة رصيد المخزون.": "Historical movements allocated without duplicating inventory balance.",
  "اختر طبيب العهدة والفترة والمخصوم الفعلي وسبب المقارنة قبل الحفظ.": "Select custody doctor, period, applied deductions, and comparison reason before saving.",
  "اكتب سبب الاعتراض قبل التسجيل.": "Enter the objection reason before submitting.",
- "حدث خطأ غير متوقع في معالجة المخزون. يرجى المحاولة لاحقًا.": "An unexpected inventory processing error occurred. Please try again later."
+ "حدث خطأ غير متوقع في معالجة المخزون. يرجى المحاولة لاحقًا.": "An unexpected inventory processing error occurred. Please try again later.",
+ "تعذّر تنفيذ العملية. راجع المدخلات والصلاحية.": "The operation could not be completed. Check inputs and permissions.",
+ "لا تملك صلاحية تنفيذ هذه العملية.": "You do not have permission to perform this operation.",
+ "تتطلب هذه العملية صلاحية الإدارة.": "This operation requires administrator permission.",
+ "العهدة المحددة لا تخص هذا الطبيب أو غير مصرح بها.": "The selected custody does not belong to this doctor or is unauthorized.",
+ "لا تملك صلاحية ربط الاستهلاك بهذا الملف السريري.": "You are not authorized to link consumption to this clinical record.",
+ "بيانات المريض أو الزيارة أو الإجراء غير متطابقة أو غير موجودة.": "Patient, visit, or procedure data is mismatched or not found.",
+ "يتطلب إثبات التالف في العهدة اعتمادًا إداريًا مستقلًا وصالحًا.": "Custody waste requires a valid independent administrative approval.",
+ "الدفعة المحددة لم يسبق استلامها في موقع العهدة هذا.": "The selected lot has not been received in this custody location.",
+ "كميات إغلاق العبوة لا تطابق السجل الفعلي لحركة الدفعة في العهدة.": "Package closure quantities do not match the actual custody lot movement history.",
+ "معرّف العبوة غير مرتبط بتحويل أو تخصيص استلام فعلي.": "Package ID is not linked to an actual transfer or receipt allocation.",
+ "معرّف العبوة لا يطابق موقع العهدة أو الدفعة المحددة.": "Package ID does not match the selected custody location or lot.",
+ "معرّف واقعة الإثبات غير مرتبط بسجل استهلاك أو جرد أو تالف أو إرجاع فعلي.": "Evidence event ID is not linked to an actual consumption, stocktake, waste, or return record.",
+ "معرّف واقعة الإثبات لا يطابق موقع العهدة أو الدفعة المحددة.": "Evidence event ID does not match the selected custody location or lot.",
+ "لا يُسمح بتغيير سياسة إثبات العبوة الافتراضية دون تصعيد خطورة موثق.": "Changing the default package evidence policy is not permitted without documented hazard escalation.",
+ "الأدوات الحادة والمواد الملوثة لا تعاد كعبوات فارغة؛ يلزم توثيق التخلص الآمن.": "Sharps and contaminated materials cannot be returned as empty packages; safe disposal must be documented.",
+ "لا يمكن خصم تسوية غير مرحّلة ماليًا من المقارنة السنوية.": "Unposted financial adjustments cannot be deducted from the annual comparison.",
+ "أرقام الاستهلاك المرسلة لا تطابق السجل الفعلي المؤكد في النظام.": "Submitted consumption figures do not match the confirmed system record.",
+ "صيغة فترة المقارنة السنوية غير صالحة.": "Invalid annual comparison period format.",
+ "يتعذر ربط الصرف التاريخي بدفعة سابقة مؤكدة دون تخمين بأثر رجعي.": "Cannot link historical issue to a confirmed prior lot without retroactive guessing.",
+ "الرصيد التاريخي لا يكفي لتسوية حركات الصرف دون تخمين رصيد افتتاحي.": "Historical balance is insufficient to reconcile issue movements without guessing an opening balance.",
+ "تمت تسوية الحركات التاريخية لهذا البند بالفعل.": "Historical movements for this item have already been reconciled.",
+ "تم إغلاق هذه العبوة أو استخدام مستند الإثبات مسبقًا.": "This package has already been closed or the evidence record was already used.",
+ "حركة الاستهلاك أو الإرجاع مسجلة مسبقًا لهذا المفتاح.": "Consumption or return movement is already recorded for this key.",
+ "الكمية المؤكدة تتجاوز الكمية المرسلة في التحويل.": "Confirmed quantity exceeds the dispatched transfer quantity.",
+ "تم إدراج تسوية مكررة في المقارنة السنوية.": "Duplicate settlement adjustment included in the annual comparison.",
+ "السجل المطلوب غير موجود.": "The requested record was not found.",
+ "رصيد الدفعة المتاح لا يكفي للكمية المطلوبة.": "Available lot balance is insufficient for the requested quantity.",
+ "لا يمكن صرف دفعة منتهية الصلاحية أو محجورة.": "Cannot issue an expired or quarantined lot."
 };
 type Statement=Awaited<ReturnType<typeof readDoctorCustody>>;
 export function DoctorCustody(){const session=useSession();return <CustodyStatement key={`${session?.username??"none"}:${session?.role??"none"}`} session={session}/>;}
@@ -251,7 +279,7 @@ function CustodyStatement({session}:{session:SessionInfo|null}){
      <form noValidate onSubmit={submitPackageClosure} className="space-y-3" data-testid="custody-package-closure-form">
       <div className="grid gap-2 sm:grid-cols-2">
        <label className="text-sm">{text("موقع العهدة للعبوة")}<select className="block mt-1 w-full rounded border border-blue-100 p-2" disabled={command.locked} value={pkgLocationId} onChange={event=>{setPkgLocationId(event.target.value);setPkgLotId("");}}><option value="">{text("اختر الموقع")}</option>{custodyLocations.map(row=><option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
-       <label className="text-sm">{text("دفعة العبوة في العهدة")}<select className="block mt-1 w-full rounded border border-blue-100 p-2" disabled={command.locked} value={pkgLotId} onChange={event=>{const nextLotId=event.target.value;setPkgLotId(nextLotId);const chosen=pkgLots.find(lot=>lot.lotId===nextLotId);if(chosen&&"inboundQuantity" in chosen){setPkgOriginal(chosen.inboundQuantity);setPkgConsumed(chosen.consumedQuantity);setPkgReturned(chosen.returnedOrTransferredQuantity);setPkgWaste(chosen.approvedWasteQuantity);setPkgRemaining(chosen.quantity);setPkgHazard(chosen.defaultHazard);setPkgPolicy(chosen.defaultPolicy);}}}><option value="">{text("اختر دفعة")}</option>{pkgLots.map(lot=><option key={lot.lotId} value={lot.lotId}>{lot.name} — {lot.quantity} {lot.unit}</option>)}</select></label>
+       <label className="text-sm">{text("دفعة العبوة في العهدة")}<select className="block mt-1 w-full rounded border border-blue-100 p-2" disabled={command.locked} value={pkgLotId} onChange={event=>{const nextLotId=event.target.value;setPkgLotId(nextLotId);const chosen=pkgLots.find(lot=>lot.lotId===nextLotId);if(chosen&&"inboundQuantity" in chosen){setPkgOriginal(chosen.inboundQuantity);setPkgConsumed(chosen.consumedQuantity);setPkgReturned(chosen.returnedOrTransferredQuantity);setPkgWaste(chosen.approvedWasteQuantity);setPkgRemaining(chosen.quantity);setPkgHazard(chosen.defaultHazard);setPkgPolicy(chosen.defaultPolicy);if("defaultPackageId" in chosen&&chosen.defaultPackageId&&!pkgId.trim())setPkgId(chosen.defaultPackageId);if("defaultEvidenceEventId" in chosen&&chosen.defaultEvidenceEventId&&!pkgEventId.trim())setPkgEventId(chosen.defaultEvidenceEventId);}}}><option value="">{text("اختر دفعة")}</option>{pkgLots.map(lot=><option key={lot.lotId} value={lot.lotId}>{lot.name} — {lot.quantity} {lot.unit}</option>)}</select></label>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
        <label className="text-sm">{text("معرف العبوة الفريد")}<input className="block mt-1 w-full rounded border border-blue-100 p-2" disabled={command.locked} value={pkgId} onChange={event=>setPkgId(event.target.value)}/></label>

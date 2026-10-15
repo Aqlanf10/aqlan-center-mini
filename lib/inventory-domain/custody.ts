@@ -92,9 +92,20 @@ export function calculateDeduction(input: {
 }
 export interface SettlementScope { readonly doctorId: string; readonly periodId: string }
 interface Scoped { readonly doctorId: string; readonly periodId: string }
+export function canonicalSettlementPeriodId(periodId: string): string {
+  required(periodId, "period");
+  const trimmed = periodId.trim();
+  if (/^\d{4}$/.test(trimmed)) return `${trimmed}-annual`;
+  return trimmed;
+}
 function checkScope(entry: Scoped, scope: SettlementScope): void {
   required(scope.doctorId, "doctor"); required(scope.periodId, "period");
-  if (entry.doctorId !== scope.doctorId || entry.periodId !== scope.periodId) throw new Error("settlement_scope_mismatch");
+  if (
+    entry.doctorId !== scope.doctorId ||
+    canonicalSettlementPeriodId(entry.periodId) !== canonicalSettlementPeriodId(scope.periodId)
+  ) {
+    throw new Error("settlement_scope_mismatch");
+  }
 }
 export interface AppliedDeduction extends Scoped {
   readonly id: string; readonly agreementVersionId: string; readonly currency: Currency;
@@ -167,7 +178,7 @@ export function attributableConsumedCost(input: {
 }
 
 /** Signed prior adjustments: positive credit to doctor, negative debit; include linked reversals.
- * Only actually posted financial adjustments (postingState === "posted" with a postedEntryId) may be deducted.
+ * Every adjustment MUST carry explicit postingState === "posted" and a non-empty postedEntryId.
  */
 export interface SettlementAdjustment extends Scoped {
   readonly id: string;
@@ -192,22 +203,29 @@ export function proposeSettlement(input: {
 }) {
   checkScope(input.scope, input.scope); amount(input.deductions, input.deductions.currency);
   if (input.attributable) amount(input.attributable, input.deductions.currency);
-  const seen = new Set<string>(); let prior = 0n;
+  const seen = new Set<string>();
+  const seenPostedEntries = new Set<string>();
+  let prior = 0n;
   for (const adjustment of input.priorAdjustments) {
     checkScope(adjustment, input.scope); required(adjustment.id, "adjustment");
     requireCurrency(adjustment.currency, "settlement", adjustment.id);
     if (adjustment.currency !== input.deductions.currency) throw new Error("currency_mismatch_requires_snapshot");
     if (!Number.isSafeInteger(adjustment.signedMinor)) throw new Error("invalid_adjustment");
-    if (adjustment.postingState !== undefined && adjustment.postingState !== "posted") {
+    if (adjustment.postingState !== "posted") {
       throw new Error("unposted_settlement_adjustment");
     }
-    if (adjustment.postedEntryId !== undefined && (!adjustment.postedEntryId || !adjustment.postedEntryId.trim())) {
+    if (typeof adjustment.postedEntryId !== "string" || !adjustment.postedEntryId.trim()) {
       throw new Error("unposted_settlement_adjustment");
     }
-    if (seen.has(adjustment.id)) throw new Error("duplicate_settlement_adjustment");
-    seen.add(adjustment.id); prior += BigInt(adjustment.signedMinor);
+    const entryKey = adjustment.postedEntryId.trim();
+    if (seen.has(adjustment.id) || seenPostedEntries.has(entryKey)) {
+      throw new Error("duplicate_settlement_adjustment");
+    }
+    seen.add(adjustment.id);
+    seenPostedEntries.add(entryKey);
+    prior += BigInt(adjustment.signedMinor);
   }
-  const sourceBacked = input.sourceBacked ?? true;
+  const sourceBacked = input.sourceBacked === true;
   const delta = input.attributable === null ? null : BigInt(input.deductions.amountMinor) - BigInt(input.attributable.amountMinor);
   const supplementalMinor = delta === null ? null : safe(delta - prior);
   return {
@@ -247,6 +265,12 @@ const HAZARD_RANK: Record<"none" | "sharp" | "contaminated", number> = {
   contaminated: 2,
 };
 
+/**
+ * Classifies package safety policy.
+ * Explicit item safety metadata recorded on `costSnapshot.hazard` and `costSnapshot.policy` is authoritative.
+ * When explicit metadata is absent, name/category/unit pattern matching acts only as a conservative fallback heuristic
+ * and does not replace clinical item master classification.
+ */
 export function classifyDefaultPackageSafety(item: {
   readonly name?: string | null;
   readonly category?: string | null;
@@ -301,7 +325,10 @@ export function resolvePackageSafetyWithFieldObservation(input: {
   if (effectiveHazard !== "none") {
     return { effectiveHazard, effectivePolicy: "safe_disposal_record" };
   }
-  return { effectiveHazard, effectivePolicy: requested };
+  if (requested !== input.defaultPolicy) {
+    throw new Error("package_policy_override_forbidden");
+  }
+  return { effectiveHazard, effectivePolicy: input.defaultPolicy };
 }
 
 export function packageEvidenceAction(hazard: "none" | "sharp" | "contaminated", policy: PackageSafetyPolicy) {

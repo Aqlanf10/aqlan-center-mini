@@ -5,15 +5,17 @@ import {
 } from "../lib/inventory-domain/quantities";
 import {
   allocateMinor, approveRequest, inspectIdempotency, matchSupplierInvoice, payloadIdentity,
-  planExcessArrivalDecision, planHistoricalReconciliation, planInspectedReceipt, planOrderIssue,
+  planExcessArrivalDecision, planHistoricalReconciliation, planInspectedReceipt, planOrderAmendment, planOrderIssue,
   planQuarantineResolution, requireCurrentApproval, supplierInvoiceDuplicateKey, valuationSnapshot,
   type CommittedSourceAllocation, type InvoiceReceiptAllocation, type IssuedPurchaseOrder, type PurchaseOrder,
   type ReceiptRevision, type RequestApproval, type RequestRevision, type SupplierInvoiceRevision,
 } from "../lib/inventory-domain/procurement";
 import {
   DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE,
+  publicInventoryErrorCode,
   safeInventoryErrorMessage,
   sanitizeInventoryAuditDetails,
+
 } from "../lib/inventory-domain/presentation";
 
 const conversion = (): UnitConversionSnapshot => ({ itemId: 1, version: 1, baseUnit: "cartridge", enteredUnit: "box",
@@ -919,8 +921,182 @@ describe("quarantine disposition, excess arrival decision and historical reconci
       safeField: "ok",
     });
     expect(scrubbed).toEqual({
-      note: "Connected to [REDACTED] with [REDACTED]",
+      note: "[REDACTED]",
       safeField: "ok",
     });
+
+    // Unknown InventoryDomainError code or snake_case message never leaks raw text or unallowlisted code
+    expect(safeInventoryErrorMessage(new InventoryDomainError("unknown_internal_code", "custom_snake_case_leak"))).toBe(DEFAULT_SAFE_INVENTORY_ERROR_MESSAGE);
+    expect(publicInventoryErrorCode("unknown_internal_code")).toBe("invalid_inventory_operation");
+    expect(publicInventoryErrorCode("order_amendment_required")).toBe("order_amendment_required");
+    expect(sanitizeInventoryAuditDetails({
+      reason: "Synthetic auth cookie: demo-secret-value",
+      safeReason: "Inspected synthetic batch",
+    })).toEqual({
+      reason: "[REDACTED]",
+      safeReason: "Inspected synthetic batch",
+    });
   });
+
+  it("PR338 Item 3 (R01/R10): disposedBaseQuantity reduces remaining delivery and fulfillment capacity without inflating accepted or rejected", () => {
+    const order = issuedOrder(); // 3 boxes = 150 cartridges
+    const afterDisposedHistory = [{
+      orderLineId: "order-line-1",
+      acceptedBaseQuantity: "50",
+      quarantinedBaseQuantity: "0",
+      rejectedBaseQuantity: "0",
+      disposedBaseQuantity: "50",
+    }];
+    // 50 accepted + 50 disposed = 100 delivered; only 1 box (50 cartridges) remains for delivery and fulfillment
+    const nextReceipt = planInspectedReceipt(order, {
+      ...receipt(),
+      id: "receipt-after-dispose",
+      lines: [{
+        orderLineId: "order-line-1",
+        arrivedQuantity: "1",
+        portions: [{
+          ...receipt().lines[0].portions[0],
+          id: "receipt-line-after-dispose",
+          quantity: "1",
+          lotCode: "LOT-AFTER-DISPOSE",
+        }],
+      }],
+    }, afterDisposedHistory, "2026-10-14");
+    expect(nextReceipt.remaining[0]).toEqual({
+      orderLineId: "order-line-1",
+      acceptedBaseQuantity: "100",
+      quarantinedBaseQuantity: "0",
+      rejectedBaseQuantity: "0",
+      disposedBaseQuantity: "50",
+      remainingFulfillmentBaseQuantity: "0",
+      remainingDeliveryBaseQuantity: "0",
+    });
+
+    // Attempting another shipment after 100 accepted + 50 disposed is rejected as overdelivery
+    rejects("overdelivery", () => planInspectedReceipt(order, {
+      ...receipt(),
+      id: "receipt-over-after-dispose",
+      lines: [{
+        orderLineId: "order-line-1",
+        arrivedQuantity: "1",
+        portions: [{
+          ...receipt().lines[0].portions[0],
+          id: "receipt-line-over-after-dispose",
+          quantity: "1",
+          lotCode: "LOT-OVER",
+        }],
+      }],
+    }, nextReceipt.remaining, "2026-10-15"));
+  });
+
+  it("PR338 Item 4 (R01/R09): hold_for_order_amendment blocks quarantine release until planOrderAmendment increases order capacity", () => {
+    const order = issuedOrder(); // version 1, 3 boxes = 150 cartridges
+    const heldReceipt = planInspectedReceipt(order, {
+      ...receipt(),
+      id: "receipt-hold-amend",
+      lines: [{
+        orderLineId: "order-line-1",
+        arrivedQuantity: "4",
+        excessDecision: "hold_for_order_amendment",
+        excessReason: "Hold 1 excess box in quarantine pending formal order amendment",
+        portions: [
+          {
+            ...receipt().lines[0].portions[0],
+            id: "rline-within-3",
+            quantity: "3",
+            disposition: "accepted",
+            lotCode: "LOT-WITHIN-3",
+          },
+          {
+            ...receipt().lines[0].portions[0],
+            id: "rline-held-excess-1",
+            quantity: "1",
+            disposition: "quarantined",
+            lotCode: "LOT-EXCESS-1",
+            reason: "Held for formal purchase order amendment",
+          },
+        ],
+      }],
+    }, [], "2026-10-11");
+
+    const heldLine = heldReceipt.lines.find((line) => line.id === "rline-held-excess-1")!;
+    expect(heldLine).toMatchObject({
+      disposition: "quarantined",
+      orderVersion: 1,
+      orderLineAcceptedAtReceiptBaseQuantity: "150",
+      heldForOrderAmendmentBaseQuantity: "50",
+    });
+
+    // Attempting to release the held excess while order is still version 1 (150 base units) fails with order_amendment_required
+    rejects("order_amendment_required", () => planQuarantineResolution({
+      id: "qres-before-amend",
+      order,
+      receiptLine: heldLine,
+      priorResolutions: [],
+      orderLineAcceptedBaseQuantity: "150",
+      action: "release",
+      quantity: "1",
+      reason: "Attempt release before order amendment",
+      resolutionDate: "2026-10-12",
+      currentDate: "2026-10-12",
+    }));
+
+    // Formal request + approval + order amendment to version 2 (4 boxes = 200 cartridges)
+    const req2: RequestRevision = {
+      ...request(),
+      id: "request-amend-2",
+      lines: [{ id: "request-line-amend-2", itemId: 1, quantity: "1", conversion: conversion() }],
+      value: { currency: "SAR", amountMinor: 10_000 },
+    };
+    const app2 = approveRequest({
+      ...approvalInput(req2),
+      decisions: [{ lineId: "request-line-amend-2", quantity: "1", reason: "Approve additional box for excess arrival" }],
+    });
+    const amendedPlan = planOrderAmendment({
+      currentOrder: order,
+      amendedOrder: {
+        ...draftOrder(),
+        version: 2,
+        lines: [{
+          ...draftOrder().lines[0],
+          quantity: "4",
+          sources: [
+            { id: "source-1", requestId: "request-1", requestLineId: "request-line-1", baseQuantity: "150" },
+            { id: "source-2", requestId: "request-amend-2", requestLineId: "request-line-amend-2", baseQuantity: "50" },
+          ],
+        }],
+      },
+      priorReceipts: heldReceipt.remaining,
+      priorAllocations: [],
+      requests: [
+        { request: request(), approval: approval() },
+        { request: req2, approval: app2 },
+      ],
+      supplier: { id: 21, active: true, isSupplier: true },
+      reason: "Amend PO to cover 1 excess box under approved request-amend-2",
+    });
+    expect(amendedPlan.order.version).toBe(2);
+    expect(amendedPlan.order.lines[0].quantity).toBe("4");
+
+    // Now releasing the held quarantine line under amendedOrder (v2, 200 base units) succeeds
+    const releasedAfterAmend = planQuarantineResolution({
+      id: "qres-after-amend",
+      order: amendedPlan.order,
+      receiptLine: heldLine,
+      priorResolutions: [],
+      orderLineAcceptedBaseQuantity: "150",
+      action: "release",
+      quantity: "1",
+      reason: "Release held excess after PO amendment v2",
+      resolutionDate: "2026-10-12",
+      currentDate: "2026-10-12",
+    });
+    expect(releasedAfterAmend.effectiveReceiptLine).toMatchObject({
+      releasedBaseQuantity: "50",
+      remainingQuarantinedBaseQuantity: "0",
+      effectiveLotStatus: "accepted",
+    });
+  });
+
+
 });

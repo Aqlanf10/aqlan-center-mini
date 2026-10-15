@@ -443,6 +443,97 @@ export function planOrderIssue(input: {
     totalMinor: safeMinor(subtotal + BigInt(order.shippingMinor) - BigInt(order.discountMinor)), effects: NO_FINANCIAL_EFFECT });
 }
 
+/** Plans an explicit purchase order amendment (version N -> N+1) backed by
+ * approved purchase request sources. Preserves existing lines and source
+ * allocations append-only and computes the incremental source allocations.
+ */
+export function planOrderAmendment(input: {
+  readonly currentOrder: IssuedPurchaseOrder;
+  readonly amendedOrder: PurchaseOrder;
+  readonly requests: readonly { readonly request: RequestRevision; readonly approval: RequestApproval }[];
+  readonly priorAllocations: readonly CommittedSourceAllocation[];
+  readonly priorReceipts?: readonly PriorInspectedQuantity[];
+  readonly supplier: { readonly id: number; readonly active: boolean; readonly isSupplier: boolean };
+  readonly reason: string;
+}): {
+  readonly order: IssuedPurchaseOrder;
+  readonly allocations: readonly CommittedSourceAllocation[];
+  readonly newAllocations: readonly CommittedSourceAllocation[];
+  readonly totalMinor: number;
+  readonly effects: typeof NO_FINANCIAL_EFFECT;
+} {
+  validateOrder(input.currentOrder);
+  invariant(input.currentOrder.status === "issued", "order_not_issued", "Only an issued order can be amended");
+  validateOrder(input.amendedOrder);
+  reason(input.reason);
+  invariant(
+    input.amendedOrder.id === input.currentOrder.id && input.amendedOrder.version === input.currentOrder.version + 1,
+    "stale_version",
+    "Order amendment must increment the current order version by one",
+  );
+  invariant(
+    input.amendedOrder.branchId === input.currentOrder.branchId &&
+      input.amendedOrder.supplierPartyId === input.currentOrder.supplierPartyId &&
+      input.amendedOrder.currency === input.currentOrder.currency,
+    "invalid_transition",
+    "Order amendment cannot change branch, supplier, or currency",
+  );
+  const amendedLinesById = unique(input.amendedOrder.lines, (line) => line.id, "amended order line");
+  const priorReceiptsByLine = unique(input.priorReceipts ?? [], (row) => row.orderLineId, "prior receipt total");
+  const currentSourceIds = new Set<string>();
+  for (const currentLine of input.currentOrder.lines) {
+    const amendedLine = amendedLinesById.get(currentLine.id);
+    invariant(amendedLine, "invalid_transition", "Order amendment cannot remove existing order lines");
+    invariant(
+      amendedLine.itemId === currentLine.itemId &&
+        amendedLine.kind === currentLine.kind &&
+        amendedLine.conversion.baseUnit === currentLine.conversion.baseUnit &&
+        amendedLine.conversion.basePrecision === currentLine.conversion.basePrecision,
+      "item_mismatch",
+      "Order amendment cannot alter an existing line's item or base unit",
+    );
+    const currentBaseAtoms = quantityAtoms(convertQuantity(currentLine.quantity, currentLine.conversion).baseQuantity);
+    const amendedBaseAtoms = quantityAtoms(convertQuantity(amendedLine.quantity, amendedLine.conversion).baseQuantity);
+    invariant(amendedBaseAtoms >= currentBaseAtoms, "invalid_transition", "Order amendment cannot reduce ordered line quantity");
+    const rec = priorReceiptsByLine.get(currentLine.id);
+    if (rec) {
+      const committedAtoms =
+        quantityAtoms(rec.acceptedBaseQuantity ?? "0", 3, true) +
+        quantityAtoms(rec.disposedBaseQuantity ?? "0", 3, true);
+      invariant(amendedBaseAtoms >= committedAtoms, "invalid_transition", "Amended quantity cannot be below already accepted/disposed quantity");
+    }
+    const amendedSourcesById = unique(amendedLine.sources, (s) => s.id, "amended line source");
+    for (const currentSource of currentLine.sources) {
+      currentSourceIds.add(currentSource.id);
+      const preserved = amendedSourcesById.get(currentSource.id);
+      invariant(
+        preserved &&
+          preserved.requestId === currentSource.requestId &&
+          preserved.requestLineId === currentSource.requestLineId &&
+          quantityAtoms(preserved.baseQuantity) === quantityAtoms(currentSource.baseQuantity),
+        "invalid_transition",
+        "Order amendment must preserve all previously committed source allocations",
+      );
+    }
+  }
+  const externalPriorAllocations = input.priorAllocations.filter((row) => !currentSourceIds.has(row.id));
+  const fullPlan = planOrderIssue({
+    order: input.amendedOrder,
+    requests: input.requests,
+    priorAllocations: externalPriorAllocations,
+    supplier: input.supplier,
+  });
+  const newAllocations = fullPlan.allocations.filter((row) => !currentSourceIds.has(row.id));
+  invariant(newAllocations.length > 0, "invalid_transition", "Order amendment must add at least one new approved source allocation");
+  return freeze({
+    order: fullPlan.order,
+    allocations: fullPlan.allocations,
+    newAllocations,
+    totalMinor: fullPlan.totalMinor,
+    effects: NO_FINANCIAL_EFFECT,
+  });
+}
+
 export type InspectionDisposition = "accepted" | "quarantined" | "rejected";
 export interface InspectionPortion {
   readonly id: string; readonly quantity: string; readonly disposition: InspectionDisposition;
@@ -463,6 +554,7 @@ export interface ReceiptRevision {
 export interface PriorInspectedQuantity {
   readonly orderLineId: string; readonly acceptedBaseQuantity: string;
   readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
+  readonly disposedBaseQuantity?: string;
 }
 export interface InspectedReceiptLine {
   readonly id: string; readonly receiptId: string; readonly orderId: string; readonly orderVersion: number;
@@ -470,6 +562,8 @@ export interface InspectedReceiptLine {
   readonly baseQuantity: string; readonly enteredQuantity: string; readonly conversion: UnitConversionSnapshot;
   readonly disposition: InspectionDisposition; readonly lotCode: string | null;
   readonly expiryDate: string | null; readonly locationId: string; readonly reason: string;
+  readonly orderLineAcceptedAtReceiptBaseQuantity?: string;
+  readonly heldForOrderAmendmentBaseQuantity?: string;
 }
 export interface ReceiptPlan {
   readonly receiptId: string; readonly receiptVersion: number;
@@ -478,6 +572,7 @@ export interface ReceiptPlan {
     readonly baseQuantity: string; readonly locationId: string; readonly availability: "available" | "quarantined" }>;
   readonly remaining: ReadonlyArray<{ readonly orderLineId: string; readonly acceptedBaseQuantity: string;
     readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
+    readonly disposedBaseQuantity: string;
     readonly remainingFulfillmentBaseQuantity: string; readonly remainingDeliveryBaseQuantity: string }>;
   readonly excessDecisions: readonly ExcessArrivalDecisionPlan[];
   readonly financialEffects: { readonly payables: 0; readonly expenses: 0 };
@@ -514,8 +609,9 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
     let accepted = quantityAtoms(old?.acceptedBaseQuantity ?? "0", 3, true);
     let quarantined = quantityAtoms(old?.quarantinedBaseQuantity ?? "0", 3, true);
     let rejected = quantityAtoms(old?.rejectedBaseQuantity ?? "0", 3, true);
-    invariant(accepted <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
-    const remainingDelivery = ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n;
+    const disposed = quantityAtoms(old?.disposedBaseQuantity ?? "0", 3, true);
+    invariant(accepted + disposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+    const remainingDelivery = ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n;
     const current = incoming.get(orderLine.id);
     if (current) {
       const arrived = quantityAtoms(convertQuantity(current.arrivedQuantity, orderLine.conversion).baseQuantity);
@@ -542,6 +638,11 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
       let currentAccepted = 0n;
       let currentQuarantined = 0n;
       let currentRejected = 0n;
+      const linePortions: Array<{
+        portion: InspectionPortion;
+        converted: ReturnType<typeof convertQuantity>;
+        amount: bigint;
+      }> = [];
       for (const portion of current.portions) {
         identifier(portion.id, "receipt portion"); identifier(portion.locationId, "receipt location");
         invariant(!ids.has(portion.id), "duplicate_source", "Receipt portion id is duplicated"); ids.add(portion.id);
@@ -572,18 +673,10 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
             currentRejected += amount;
           }
         }
-        lines.push({ id: portion.id, receiptId: receipt.id, orderId: order.id, orderVersion: order.version,
-          orderLineId: orderLine.id, itemId: orderLine.itemId, supplierPartyId: order.supplierPartyId, branchId: order.branchId,
-          baseQuantity: converted.baseQuantity, enteredQuantity: converted.enteredQuantity, conversion: converted.conversion,
-          disposition: portion.disposition, lotCode: portion.lotCode, expiryDate: portion.expiryDate,
-          locationId: portion.locationId, reason: portion.reason });
-        if (orderLine.kind === "stock" && portion.disposition !== "rejected") {
-          stockEntries.push({ receiptLineId: portion.id, itemId: orderLine.itemId, baseQuantity: converted.baseQuantity,
-            locationId: portion.locationId, availability: portion.disposition === "accepted" ? "available" : "quarantined" });
-        }
+        linePortions.push({ portion, converted, amount });
       }
       invariant(classified === arrived, "classification_mismatch", "Accepted + quarantined + rejected must equal exactly what arrived");
-      invariant(currentAccepted <= remainingDelivery && accepted <= ordered, "overdelivery", "Accepted quantity cannot exceed remaining ordered delivery capacity");
+      invariant(currentAccepted <= remainingDelivery && accepted + disposed <= ordered, "overdelivery", "Accepted quantity cannot exceed remaining ordered delivery capacity");
       if (excessAtoms > 0n) {
         if (current.excessDecision === "return_excess_to_supplier") {
           invariant(
@@ -599,11 +692,61 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
           );
         }
       }
+      const withinOrderQuarantineCap = remainingDelivery > currentAccepted ? remainingDelivery - currentAccepted : 0n;
+      let seenQuarantineAtoms = 0n;
+      const acceptedAndDisposedAfterReceiptText = quantityText(accepted + disposed);
+      for (const { portion, converted, amount } of linePortions) {
+        let heldForAmendmentText: string | undefined;
+        let acceptedAtReceiptText: string | undefined;
+        if (portion.disposition === "quarantined") {
+          acceptedAtReceiptText = acceptedAndDisposedAfterReceiptText;
+          const prevSeen = seenQuarantineAtoms;
+          seenQuarantineAtoms += amount;
+          if (excessAtoms > 0n && current.excessDecision === "hold_for_order_amendment") {
+            const nonHeldStart = prevSeen < withinOrderQuarantineCap ? prevSeen : withinOrderQuarantineCap;
+            const nonHeldEnd = seenQuarantineAtoms < withinOrderQuarantineCap ? seenQuarantineAtoms : withinOrderQuarantineCap;
+            const heldAtomsForPortion = amount - (nonHeldEnd - nonHeldStart);
+            heldForAmendmentText = quantityText(heldAtomsForPortion);
+          } else {
+            heldForAmendmentText = "0";
+          }
+        }
+        lines.push({
+          id: portion.id,
+          receiptId: receipt.id,
+          orderId: order.id,
+          orderVersion: order.version,
+          orderLineId: orderLine.id,
+          itemId: orderLine.itemId,
+          supplierPartyId: order.supplierPartyId,
+          branchId: order.branchId,
+          baseQuantity: converted.baseQuantity,
+          enteredQuantity: converted.enteredQuantity,
+          conversion: converted.conversion,
+          disposition: portion.disposition,
+          lotCode: portion.lotCode,
+          expiryDate: portion.expiryDate,
+          locationId: portion.locationId,
+          reason: portion.reason,
+          ...(acceptedAtReceiptText !== undefined ? { orderLineAcceptedAtReceiptBaseQuantity: acceptedAtReceiptText } : {}),
+          ...(heldForAmendmentText !== undefined ? { heldForOrderAmendmentBaseQuantity: heldForAmendmentText } : {}),
+        });
+        if (orderLine.kind === "stock" && portion.disposition !== "rejected") {
+          stockEntries.push({
+            receiptLineId: portion.id,
+            itemId: orderLine.itemId,
+            baseQuantity: converted.baseQuantity,
+            locationId: portion.locationId,
+            availability: portion.disposition === "accepted" ? "available" : "quarantined",
+          });
+        }
+      }
     }
     remaining.push({ orderLineId: orderLine.id, acceptedBaseQuantity: quantityText(accepted),
       quarantinedBaseQuantity: quantityText(quarantined), rejectedBaseQuantity: quantityText(rejected),
-      remainingFulfillmentBaseQuantity: quantityText(ordered > accepted ? ordered - accepted : 0n),
-      remainingDeliveryBaseQuantity: quantityText(ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n) });
+      disposedBaseQuantity: quantityText(disposed),
+      remainingFulfillmentBaseQuantity: quantityText(ordered > accepted + disposed ? ordered - accepted - disposed : 0n),
+      remainingDeliveryBaseQuantity: quantityText(ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n) });
   }
   return freeze({ receiptId: receipt.id, receiptVersion: receipt.version, lines, stockEntries, remaining,
     excessDecisions, financialEffects: { payables: 0 as const, expenses: 0 as const } });
@@ -782,6 +925,7 @@ export interface QuarantineResolutionInput {
   readonly order: IssuedPurchaseOrder;
   readonly receiptLine: InspectedReceiptLine & { readonly damaged?: boolean };
   readonly priorResolutions: readonly PriorQuarantineResolution[];
+  readonly orderLineAcceptedBaseQuantity?: string;
   readonly action: QuarantineResolutionAction;
   readonly quantity: string;
   readonly reason: string;
@@ -820,8 +964,9 @@ export interface QuarantineResolutionPlan {
 
 /** Resolves quarantined receipt quantities via append-only evidence.
  * - "release" transitions quarantined stock to accepted usable stock after
- *   verifying non-damaged state, LOT, expiry, and minimum shelf-life policy at
- *   both resolutionDate and currentDate, without creating a duplicate 'in' movement.
+ *   verifying non-damaged state, LOT, expiry, minimum shelf-life policy at
+ *   both resolutionDate and currentDate, and purchase order capacity / order
+ *   amendment requirements, without creating a duplicate 'in' movement.
  * - "reject_return" rejects and returns quarantined stock to the supplier,
  *   restoring order delivery capacity for a replacement shipment and planning a
  *   single compensating 'out' return movement for stock items.
@@ -855,6 +1000,7 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
     "receipt_owner_mismatch",
     "Quarantine receipt line belongs to another order, supplier, or branch",
   );
+  invariant(receiptLine.orderVersion <= input.order.version, "stale_order", "Quarantine receipt line is from a future order version");
   invariant(receiptLine.disposition === "quarantined", "not_quarantined", "Only a quarantined receipt line can be resolved");
   const orderLine = input.order.lines.find((line) => line.id === receiptLine.orderLineId);
   invariant(orderLine && orderLine.itemId === receiptLine.itemId, "item_mismatch", "Quarantine receipt line item does not match the order line");
@@ -907,6 +1053,37 @@ export function planQuarantineResolution(input: QuarantineResolutionInput): Quar
         "Quarantined material fails the current-date or resolution-date shelf-life policy",
       );
     }
+    const orderedAtoms = quantityAtoms(
+      convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity,
+      conversion.basePrecision,
+    );
+    const heldAtoms = quantityAtoms(
+      receiptLine.heldForOrderAmendmentBaseQuantity ?? "0",
+      conversion.basePrecision,
+      true,
+    );
+    const nonHeldQuarantinedAtoms =
+      originalQuarantined > heldAtoms ? originalQuarantined - heldAtoms : 0n;
+    if (heldAtoms > 0n && releasedAtoms + currentAtoms > nonHeldQuarantinedAtoms) {
+      invariant(
+        input.order.version > receiptLine.orderVersion,
+        "order_amendment_required",
+        "Excess quantity held for order amendment cannot be released before an approved order amendment",
+      );
+    }
+    const baselineOrderAcceptedAtoms =
+      input.orderLineAcceptedBaseQuantity !== undefined
+        ? quantityAtoms(input.orderLineAcceptedBaseQuantity, conversion.basePrecision, true)
+        : quantityAtoms(
+            receiptLine.orderLineAcceptedAtReceiptBaseQuantity ?? "0",
+            conversion.basePrecision,
+            true,
+          ) + releasedAtoms;
+    invariant(
+      baselineOrderAcceptedAtoms + currentAtoms <= orderedAtoms,
+      heldAtoms > 0n ? "order_amendment_required" : "overdelivery",
+      "Quarantine release would exceed the purchase order's approved quantity",
+    );
     releasedAtoms += currentAtoms;
   } else if (input.action === "reject_return") {
     returnedAtoms += currentAtoms;
@@ -996,8 +1173,9 @@ export function planExcessArrivalDecision(input: {
   const ordered = quantityAtoms(convertQuantity(orderLine.quantity, orderLine.conversion).baseQuantity);
   const accepted = quantityAtoms(previous?.acceptedBaseQuantity ?? "0", 3, true);
   const quarantined = quantityAtoms(previous?.quarantinedBaseQuantity ?? "0", 3, true);
-  invariant(accepted <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
-  const remainingDelivery = ordered > accepted + quarantined ? ordered - accepted - quarantined : 0n;
+  const disposed = quantityAtoms(previous?.disposedBaseQuantity ?? "0", 3, true);
+  invariant(accepted + disposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+  const remainingDelivery = ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n;
   const arrived = quantityAtoms(convertQuantity(input.arrivedQuantity, orderLine.conversion).baseQuantity);
   invariant(arrived > remainingDelivery, "no_excess_arrival", "Arrived quantity does not exceed remaining order delivery capacity");
   return freeze({
@@ -1060,6 +1238,15 @@ export interface HistoricalReconciliationPlan {
 /** Plans allocation of historical unallocated inventory_movements to an active
  * clinic store location without creating duplicate movements, payables, or
  * fabricated costs/LOT codes.
+ *
+ * Boundary note on `existingLotRemainingBaseQuantity` vs `alreadyAllocatedBaseQuantity` (R08):
+ * - In database-backed reconciliation (`reconcileHistoricalMovements`), the server
+ *   passes `existingLotRemainingBaseQuantity` on each positive movement from the
+ *   actual remaining `stock_lots` balance in the store. That value already reflects
+ *   any outflows allocated to that lot, so no secondary FIFO deduction is applied.
+ * - In pure unit-test callers that omit `existingLotRemainingBaseQuantity`, the
+ *   planner falls back to `alreadyAllocatedBaseQuantity` and deducts already-allocated
+ *   negative outflows FIFO from already-allocated positive capacity.
  */
 export function planHistoricalReconciliation(input: {
   readonly itemId: number;

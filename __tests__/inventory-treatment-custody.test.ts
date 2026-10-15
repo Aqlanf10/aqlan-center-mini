@@ -20,7 +20,7 @@ import {
   summarizeTreatmentResult, treatmentFinancialSnapshot, type TreatmentIssue,
 } from "../lib/inventory-domain/treatment-cost";
 import {
-  attributableConsumedCost, calculateDeduction, classifyDefaultPackageSafety, convertSettlementMoney,
+  attributableConsumedCost, calculateDeduction, canonicalSettlementPeriodId, classifyDefaultPackageSafety, convertSettlementMoney,
   packageEvidenceAction, previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
   resolvePackageSafetyWithFieldObservation, reviewReplenishment, summarizeAppliedDeductions,
   treatmentCostAfterDoctorRecovery, type AppliedDeduction, type AttributableConsumption,
@@ -185,9 +185,9 @@ describe("custody, actual deductions and settlement (pure contract, P49–63)", 
     expect(result).toMatchObject({ knownAttributableMinor: 1_000, totalMinor: null, pendingIds: ["waste"], excludedIds: ["excluded"] });
   });
   it("P57 supplemental proposal subtracts previous posted adjustment once", () => {
-    const input = { scope, deductions: { currency: "SAR" as const, amountMinor: 12_000 }, attributable: { currency: "SAR" as const, amountMinor: 9_500 }, prerequisitesComplete: true, priorAdjustments: [{ ...scope, id: "settlement1", currency: "SAR" as const, signedMinor: 2_000 }] };
+    const input = { scope, deductions: { currency: "SAR" as const, amountMinor: 12_000 }, attributable: { currency: "SAR" as const, amountMinor: 9_500 }, prerequisitesComplete: true, priorAdjustments: [{ ...scope, id: "settlement1", currency: "SAR" as const, signedMinor: 2_000, postingState: "posted" as const, postedEntryId: "entry-settlement-1" }] };
     expect(proposeSettlement(input).supplementalMinor).toBe(500);
-    expect(proposeSettlement({ ...input, priorAdjustments: [...input.priorAdjustments, { ...scope, id: "supplement1", currency: "SAR", signedMinor: 500 }] }).supplementalMinor).toBe(0);
+    expect(proposeSettlement({ ...input, priorAdjustments: [...input.priorAdjustments, { ...scope, id: "supplement1", currency: "SAR", signedMinor: 500, postingState: "posted", postedEntryId: "entry-supplement-1" }] }).supplementalMinor).toBe(0);
     expect(() => proposeSettlement({ ...input, priorAdjustments: [...input.priorAdjustments, ...input.priorAdjustments] })).toThrow("duplicate_settlement_adjustment");
   });
   it("P58 rejects mixing a different period or doctor instead of charging twice", () => {
@@ -341,7 +341,7 @@ describe("safe package evidence and replenishment (pure contract, P64–69)", ()
     expect(proposeSettlement({
       ...baseInput,
       sourceBacked: false,
-      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted" }],
+      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted", postedEntryId: "entry-posted-1" }],
     })).toMatchObject({
       status: "provisional",
       supplementalMinor: 500,
@@ -352,7 +352,7 @@ describe("safe package evidence and replenishment (pure contract, P64–69)", ()
     expect(proposeSettlement({
       ...baseInput,
       sourceBacked: true,
-      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted" }],
+      priorAdjustments: [{ ...scope, id: "posted-1", currency: "SAR", signedMinor: 2_000, postingState: "posted", postedEntryId: "entry-posted-1" }],
     })).toMatchObject({
       status: "ready_for_authorized_review",
       supplementalMinor: 500,
@@ -388,6 +388,36 @@ describe("safe package evidence and replenishment (pure contract, P64–69)", ()
       effectivePolicy: "safe_disposal_record",
     });
     expect(packageEvidenceAction(upgraded.effectiveHazard, upgraded.effectivePolicy)).toBe("document_safe_disposal");
+    expect(() => resolvePackageSafetyWithFieldObservation({
+      ...serverClean,
+      observedHazard: "none",
+      requestedPolicy: "safe_disposal_record",
+    })).toThrow("package_policy_override_forbidden");
+    expect(canonicalSettlementPeriodId("2026")).toBe("2026-annual");
+    expect(canonicalSettlementPeriodId("2026-annual")).toBe("2026-annual");
+    expect(summarizeAppliedDeductions({
+      scope: { doctorId: "doctor1", periodId: "2026-annual" },
+      currency: "SAR",
+      deductions: [deduction({ periodId: "2026" })],
+      reversals: [],
+    }).netAppliedMinor).toBe(600);
+    expect(() => proposeSettlement({
+      scope,
+      deductions: { currency: "SAR", amountMinor: 12_000 },
+      attributable: { currency: "SAR", amountMinor: 9_500 },
+      prerequisitesComplete: true,
+      priorAdjustments: [
+        { ...scope, id: "adj-1", currency: "SAR", signedMinor: 1_000, postingState: "posted", postedEntryId: "same-entry-1" },
+        { ...scope, id: "adj-2", currency: "SAR", signedMinor: 1_000, postingState: "posted", postedEntryId: "same-entry-1" },
+      ],
+    })).toThrow("duplicate_settlement_adjustment");
+    expect(() => proposeSettlement({
+      scope,
+      deductions: { currency: "SAR", amountMinor: 12_000 },
+      attributable: { currency: "SAR", amountMinor: 9_500 },
+      prerequisitesComplete: true,
+      priorAdjustments: [{ ...scope, id: "adj-no-entry", currency: "SAR", signedMinor: 1_000, postingState: "posted", postedEntryId: "  " }],
+    })).toThrow("unposted_settlement_adjustment");
   });
 });
 
