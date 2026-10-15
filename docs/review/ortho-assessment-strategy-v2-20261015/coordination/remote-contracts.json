@@ -1,0 +1,54 @@
+{
+  "observed_at": "2026-10-15T21:31:00.168224+00:00",
+  "refs": {
+    "origin/main": "ce78247278397a02e8b9a0c437ab5605951a411c",
+    "origin/feat/inventory-completion-20261015": "e74481cb6250bbefea1393248eff5e883fcc96f6",
+    "origin/feat/ortho-resume-clinical-20261014": "904b269e764762017f841d0027bfc347e33f48ec",
+    "origin/feat/ortho-assessment-strategy-v2-20261015": "4a02ace7581201bd380527fabf53938b4949de37"
+  },
+  "base": "ce78247278397a02e8b9a0c437ab5605951a411c",
+  "shared_contracts": {
+    "lib/db.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "3cc0f02e225399fd3b8e662a37b4eba2e19b904ccb6b546e62b17d30a898ee8f",
+      "origin/main": "3cc0f02e225399fd3b8e662a37b4eba2e19b904ccb6b546e62b17d30a898ee8f",
+      "origin/feat/inventory-completion-20261015": "a06ad70e2c5fa750b39de18bc6de985f454d1eae005115f67b4adef508f4f5d7",
+      "worktree": "eaab6a66c37eefe4feb7b6bb899dbd84ee86f5cd66a1a7b9ff07efa9e2e75f46"
+    },
+    "lib/migrations.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "f637d140e1bc2ad80015e00c1be793f0116f1619bbf8ee58966e350c56d64e2e",
+      "origin/main": "f637d140e1bc2ad80015e00c1be793f0116f1619bbf8ee58966e350c56d64e2e",
+      "origin/feat/inventory-completion-20261015": "240ca030da85020b52e199330b2647af01377006bcfcc7c2a747b698fc468659",
+      "worktree": "f1e4111487f29b6cb6f9de34a7190c52a978c18733bd74b31b7dc759ba97bc00"
+    },
+    "lib/http-permissions.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "57e2c82f0b9219d7eefca263d01ee68dc43b83dac38ca9c9f4e4665f0e1c89a9",
+      "origin/main": "57e2c82f0b9219d7eefca263d01ee68dc43b83dac38ca9c9f4e4665f0e1c89a9",
+      "origin/feat/inventory-completion-20261015": "3471612dd94f44920e4e5e40bfc252a5079197dd4971b52b12fe6695a7ba0acd",
+      "worktree": "2d2b849887625a07f6a7ddec46324a53e1dcfe53f9e4146af9fa625079d9f1fe"
+    },
+    "lib/clinic-reset.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "f38824ca7e05fd2e6c2479dc8b96b361def7dec0df8245963783631e885528e0",
+      "origin/main": "f38824ca7e05fd2e6c2479dc8b96b361def7dec0df8245963783631e885528e0",
+      "origin/feat/inventory-completion-20261015": "80651c75dec2a9ba2c97079dfa9cd9614e74934799794b619a9bdd3154adc28a",
+      "worktree": "1ef2d304d4626bc540abfa9134343747c8068f13d845f1829d714415d983c56b"
+    },
+    "lib/audit.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "3f7fe914fb99d4b991bcf67b4784761d7b3887d3f46011c7b3ecf957c45d6ebf",
+      "origin/main": "3f7fe914fb99d4b991bcf67b4784761d7b3887d3f46011c7b3ecf957c45d6ebf",
+      "origin/feat/inventory-completion-20261015": "5bdcef3edfba043684de53e5755b7d95b331580c010ede09cc44d99fc77a359a",
+      "worktree": "64088cd662e8db398fa5cf14b369281e97d4bad23ae592671dadb45905cd642f"
+    },
+    "components/PatientOrtho.tsx": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "fd5473cf2f90fb1dbc1bcd27fb8638aba6b4b20353543d9fc2a13eaf791bcf48",
+      "origin/main": "fd5473cf2f90fb1dbc1bcd27fb8638aba6b4b20353543d9fc2a13eaf791bcf48",
+      "origin/feat/inventory-completion-20261015": "132737c5fccb325fcbb3239d2ffbab9df9b1f5b884f627bb258a3b46af18761a",
+      "worktree": "bb9badd639c7d6d1ad9144b36678f08e7092abdaf265db7506998c784f6f00ab"
+    },
+    "lib/backup.ts": {
+      "ce78247278397a02e8b9a0c437ab5605951a411c": "19043e2ef228ab2f877e9375a0ca3ac3b86804ff4177bd7532703784bf1aebcd",
+      "origin/main": "19043e2ef228ab2f877e9375a0ca3ac3b86804ff4177bd7532703784bf1aebcd",
+      "origin/feat/inventory-completion-20261015": "000ffc8aba82794cac63c43e16d0551d9904b4afafcbf8cc5b6ee6a1fe20d82c",
+      "worktree": "19043e2ef228ab2f877e9375a0ca3ac3b86804ff4177bd7532703784bf1aebcd"
+    }
+  }
+}

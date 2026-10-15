@@ -1,0 +1,60 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+ ❯ __tests__/ortho-assessment-view-admission.test.tsx (7 tests | 1 failed) 41ms
+     × renders new draft inputs editable while retained callbacks still require committed document bytes 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-assessment-view-admission.test.tsx > actual assessment view handler admission > renders new draft inputs editable while retained callbacks still require committed document bytes
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/ortho-assessment-view-admission.test.tsx:133:60
+    131|     const editors = () => nodes(render()).filter(n => ["findings-edito…
+    132|     const oldOwners = editors().map(node => node.props.owner as { rend…
+    133|     expect(oldOwners.every(owner => owner.renderEditable)).toBe(true);
+       |                                                            ^
+    134|     reasonHandler()({ target: { value: "new document bytes" } }); rend…
+    135|     expect(editors().every(node => (node.props.owner as { renderEditab…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 550 passed (551)
+      Tests  1 failed | 9728 passed (9729)
+   Start at  21:13:07
+   Duration  390.74s (transform 16.86s, setup 0ms, import 68.37s, tests 239.62s, environment 68ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

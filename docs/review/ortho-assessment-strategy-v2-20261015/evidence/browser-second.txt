@@ -1,0 +1,44 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts (2 tests | 2 skipped) 792ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts [ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts:14:28
+     12|   expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
+     13|   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); a…
+     14|   browser = await chromium.launch({ headless: true, executablePath: pr…
+       |                            ^
+     15|   await mkdir(".settings-ui-artifacts", { recursive: true });
+     16| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 skipped (2)
+   Start at  21:04:22
+   Duration  5.40s (transform 31ms, setup 0ms, import 438ms, tests 792ms, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -1,0 +1,105 @@
+{
+  "source": "Fresh numbered/runtime schemas on a separate synthetic PostgreSQL18.6 container; no target catalog learning",
+  "code_head": "4a02ace7581201bd380527fabf53938b4949de37",
+  "sections": {
+    "columns": {
+      "identitiesAdded": 33,
+      "identitiesRemoved": 0,
+      "textValues": {
+        "baseType": {
+          "added": 0,
+          "removed": 0
+        },
+        "collation": {
+          "added": 0,
+          "removed": 0
+        },
+        "default": {
+          "added": 2,
+          "removed": 0
+        },
+        "formatType": {
+          "added": 0,
+          "removed": 0
+        },
+        "generated": {
+          "added": 0,
+          "removed": 0
+        },
+        "identity": {
+          "added": 0,
+          "removed": 0
+        },
+        "internalType": {
+          "added": 0,
+          "removed": 0
+        }
+      }
+    },
+    "constraints": {
+      "identitiesAdded": 76,
+      "identitiesRemoved": 0,
+      "textValues": {
+        "columns": {
+          "added": 15,
+          "removed": 0
+        },
+        "definition": {
+          "added": 29,
+          "removed": 0
+        },
+        "deleteAction": {
+          "added": 0,
+          "removed": 0
+        },
+        "matchType": {
+          "added": 0,
+          "removed": 0
+        },
+        "referencedColumns": {
+          "added": 1,
+          "removed": 0
+        },
+        "referencedSchema": {
+          "added": 0,
+          "removed": 0
+        },
+        "referencedTable": {
+          "added": 2,
+          "removed": 0
+        },
+        "type": {
+          "added": 0,
+          "removed": 0
+        },
+        "updateAction": {
+          "added": 0,
+          "removed": 0
+        }
+      }
+    },
+    "internalTriggers": {
+      "identitiesAdded": 40,
+      "identitiesRemoved": 0,
+      "textValues": {
+        "constraint": {
+          "added": 10,
+          "removed": 0
+        },
+        "definition": {
+          "added": 40,
+          "removed": 0
+        },
+        "enabled": {
+          "added": 0,
+          "removed": 0
+        },
+        "function": {
+          "added": 0,
+          "removed": 0
+        }
+      }
+    }
+  },
+  "sha256": "a3668a052257969095331fd8d4069414c0d873cf110ed8eca68946fd2ddc1685"
+}

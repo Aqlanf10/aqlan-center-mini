@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-revision-migration-guard.test.ts __tests__/ortho-treatment-strategy-store.test.ts __tests__/ortho-treatment-strategy-ui.test.tsx
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+
+ Test Files  3 passed (3)
+      Tests  110 passed (110)
+   Start at  20:50:18
+   Duration  1.17s (transform 304ms, setup 0ms, import 413ms, tests 371ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

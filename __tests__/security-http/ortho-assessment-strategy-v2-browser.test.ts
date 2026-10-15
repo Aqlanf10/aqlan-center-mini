@@ -22,7 +22,8 @@ async function seed(width: number) {
   const session = await loginStaff(username, "SyntheticOrtho#Pass1") as Session;
   const patient = (await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,$2) RETURNING id", [`SYN-UI-V2-${width}`, `حالة اصطناعية للتقييم ${width}`])).rows[0].id;
   const ortho = (await db.query("INSERT INTO ortho_cases(patient_id,created_by,status) VALUES($1,'synthetic','completed') RETURNING id", [patient])).rows[0].id;
-  const clinical = (await db.query("INSERT INTO clinical_cases(patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,'orthodontics','Synthetic explicit bridge',$2,'synthetic') RETURNING id", [patient, ortho])).rows[0].id;
+  const clinical = (await db.query("INSERT INTO clinical_cases(id,patient_id,specialty,title,ortho_case_id,created_by) VALUES($1,$2,'orthodontics','Synthetic explicit bridge',$3,'synthetic') RETURNING id", [900000 + width, patient, ortho])).rows[0].id;
+  expect(clinical).not.toBe(ortho); // Distinct numeric ids expose accidental aliasing.
   const problem = (await db.query("INSERT INTO patient_problems(patient_id,case_id,label,noted_by) VALUES($1,$2,'مشكلة اصطناعية موثقة','synthetic') RETURNING id", [patient, clinical])).rows[0].id;
   const command = assessmentCommandV2(); command.commandId = `synthetic_assessment_ui_${width}`;
   const response = await authedMutation(`/api/ortho/${ortho}/assessment`, session, "POST", JSON.stringify(command));
@@ -72,6 +73,9 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       await page.getByRole("button", { name: "التحقق بإعادة نفس طلب الحفظ", exact: true }).waitFor();
       const committed = await records(scope.ortho); expect(committed).toHaveLength(2);
       const content = committed[1].content;
+      expect((await db.query("SELECT ortho_case_id,clinical_case_id FROM ortho_assessment_revisions WHERE ortho_case_id=$1 ORDER BY version", [scope.ortho])).rows).toEqual([
+        { ortho_case_id: scope.ortho, clinical_case_id: scope.clinical }, { ortho_case_id: scope.ortho, clinical_case_id: scope.clinical },
+      ]);
       const observation = (id: string) => content.draft.observations.observations.filter((row: { id: string }) => row.id === id);
       expect(observation("width_11")).toHaveLength(1);
       expect(observation("width_11")[0].value).toEqual({ state: "measured", value: 7.5 });
@@ -117,6 +121,7 @@ describe("existing linked episodes: real built assessment/strategy editors", () 
       await strategy.getByRole("button", { name: "التحقق بإعادة نفس طلب الخطة", exact: true }).waitFor();
       const strategyRows = async () => (await db.query("SELECT id,command_id,request_fingerprint,rows FROM ortho_strategy_revisions WHERE ortho_case_id=$1 ORDER BY version", [scope.ortho])).rows;
       const strategyCommitted = await strategyRows(); expect(strategyCommitted).toHaveLength(1);
+      expect((await db.query("SELECT ortho_case_id,clinical_case_id FROM ortho_strategy_revisions WHERE ortho_case_id=$1", [scope.ortho])).rows).toEqual([{ ortho_case_id: scope.ortho, clinical_case_id: scope.clinical }]);
       await page.unroute(strategyPath);
       await strategy.getByRole("button", { name: "التحقق بإعادة نفس طلب الخطة", exact: true }).click();
       await strategy.getByTestId("ortho-strategy-saved").waitFor();

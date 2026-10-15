@@ -1,0 +1,508 @@
+{
+  "application_code_head": "4a02ace7581201bd380527fabf53938b4949de37",
+  "application_tree": "838f356d0b801e4ddca80493174d5691ad8827f3",
+  "recorded_at": "2026-10-15T21:39:03.563732+00:00",
+  "environment": {
+    "node": "22.23.3",
+    "postgres": "18.6",
+    "database": "Owned synthetic local fixtures only",
+    "next": "16.3.8"
+  },
+  "scope": "Existing explicitly linked Ortho cases; all analyses draft. No live migration, merge or deployment.",
+  "runs": [
+    {
+      "id": "unit",
+      "command": "npm test",
+      "evidence": "evidence/unit-full-4a02.txt",
+      "exit_code": 0,
+      "result": {
+        "files": 551,
+        "passed": 9729
+      }
+    },
+    {
+      "id": "postgres",
+      "command": "npm run test:postgres",
+      "evidence": "evidence/postgres-full-4a02.txt",
+      "exit_code": 0,
+      "result": {
+        "files": 209,
+        "passed": 2191,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "id": "browser_hr",
+      "command": "npm run test:security-http -- __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts __tests__/security-http/hr-temporal-history-ui.test.ts",
+      "evidence": "evidence/browser-editor-render.txt",
+      "exit_code": 0,
+      "result": {
+        "files": 2,
+        "passed": 9,
+        "widths": [
+          390,
+          1280
+        ]
+      }
+    },
+    {
+      "id": "browser_distinct_ids",
+      "command": "npm run test:security-http -- __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts",
+      "evidence": "evidence/browser-distinct-identities.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 2,
+        "widths": [
+          390,
+          1280
+        ],
+        "clinicalCaseIdDeliberatelyDifferent": true
+      }
+    },
+    {
+      "id": "build",
+      "command": "npm run build",
+      "evidence": "evidence/build-editor-render.txt",
+      "exit_code": 0,
+      "result": {}
+    },
+    {
+      "id": "types",
+      "command": "npm run typecheck",
+      "evidence": "evidence/typecheck-4a02.txt",
+      "exit_code": 0,
+      "result": {}
+    },
+    {
+      "id": "lint",
+      "command": "npm run lint",
+      "evidence": "evidence/lint-4a02.txt",
+      "exit_code": 0,
+      "result": {
+        "errors": 0,
+        "warnings": 208
+      }
+    },
+    {
+      "id": "ownership",
+      "command": "npm run schema:ownership:verify -- --output /tmp/ortho-v2-schema-ownership-4a02.json",
+      "evidence": "evidence/schema-ownership-4a02.txt",
+      "exit_code": 0,
+      "result": {
+        "unexpected": 0,
+        "historicalOpenFindings": 16
+      }
+    },
+    {
+      "id": "schema_contract",
+      "command": "npm run schema:contract:verify",
+      "evidence": "evidence/schema-contract-verify-4a02.txt",
+      "exit_code": 0,
+      "result": {}
+    },
+    {
+      "id": "operational",
+      "command": "npm run verify:ci",
+      "evidence": "evidence/operational-journeys.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 20,
+        "total": 20
+      }
+    },
+    {
+      "id": "preflight",
+      "command": "npm run build:preflight",
+      "evidence": "evidence/preflight-build.txt",
+      "exit_code": 0,
+      "result": {
+        "immutableAssets": 56
+      }
+    },
+    {
+      "id": "money_scan",
+      "command": "npm run scan:money",
+      "evidence": "evidence/money-scan.txt",
+      "exit_code": 0,
+      "result": {}
+    },
+    {
+      "id": "body_scan",
+      "command": "npm run ci:scan:body",
+      "evidence": "evidence/body-scan.txt",
+      "exit_code": 0,
+      "result": {}
+    },
+    {
+      "id": "dependency_audit",
+      "command": "npm run ci:audit",
+      "evidence": "evidence/dependency-audit.txt",
+      "exit_code": 1,
+      "result": {
+        "high": 6,
+        "blocker": "BRACES_EXCEPTION_REJECTED: invalid node range @next/eslint-plugin-next",
+        "scope": "Dependency files and exception guard unchanged from base; no bypass proposed"
+      }
+    }
+  ],
+  "ci": "Still in progress at evidence seal; no complete CI success claimed for the final delivery head.",
+  "historical_failures": "Earlier raw logs retained separately; they do not establish current-head success.",
+  "artifacts": [
+    {
+      "path": "README.md",
+      "bytes": 11829,
+      "sha256": "3003053616f57d6d9fcbd0eec0db6375b3af193c2f8c70c9b29895eb9d1fc8cc"
+    },
+    {
+      "path": "coordination/README.md",
+      "bytes": 4260,
+      "sha256": "39cfb0bd1e05a4f01ceccd8d6eda74cac39bfbafdc195d5df2c1ef88f64ce4de"
+    },
+    {
+      "path": "coordination/affected-test-union.patch.txt",
+      "bytes": 16363,
+      "sha256": "78eb2c4ec25b8dc41a59e68ac98b4e8be891b9a4ff405395b8057e51b1f99e8e"
+    },
+    {
+      "path": "coordination/current-shared-contracts.patch.txt",
+      "bytes": 163251,
+      "sha256": "1dd4b3bea8a9bf64651238a2a45ed7c1f551bcf8d54aa5c536cb554959338a0c"
+    },
+    {
+      "path": "coordination/dependency-audit-blocker.json",
+      "bytes": 2612,
+      "sha256": "44c3fcb47d6b97628ce6be2a3b4cc5bd8a92e1dc0a8f00fd2c5e1517bfc60898"
+    },
+    {
+      "path": "coordination/remote-contracts.json",
+      "bytes": 3621,
+      "sha256": "e9f2a1c942ebcf6cd400e8028e9e8174dbaa570e71f4342098e2e499c2d5733c"
+    },
+    {
+      "path": "evidence/body-scan.txt",
+      "bytes": 197,
+      "sha256": "03c46be524549274ff6ab21c8deb16829067e84c1727ad4fdd45b033e3cd5bcb"
+    },
+    {
+      "path": "evidence/browser-distinct-identities.txt",
+      "bytes": 796,
+      "sha256": "3b395b1e040b0229a40ccf6ac6ef4b875cd7f6fde16b68015d25aee869af9f5a"
+    },
+    {
+      "path": "evidence/browser-editor-render.txt",
+      "bytes": 852,
+      "sha256": "b0aad33d5275c1860c5f62e34620528bcc70848ca9481e1120d8f21c33ae4d3f"
+    },
+    {
+      "path": "evidence/browser-final-first.txt",
+      "bytes": 5061,
+      "sha256": "d4a8af5b7c9190ab960c557e244444274cb7b241fee7667320bd032650cb0fcc"
+    },
+    {
+      "path": "evidence/browser-initial.txt",
+      "bytes": 2242,
+      "sha256": "397218db1996dfe7a8c556d6cf87287787e931e36e437be28db803da6bec780a"
+    },
+    {
+      "path": "evidence/browser-second.txt",
+      "bytes": 2576,
+      "sha256": "b88f47895a309b3be103d6696e1b5497207df11819fa19f8ff35ef2917f3bd01"
+    },
+    {
+      "path": "evidence/browser-third.txt",
+      "bytes": 794,
+      "sha256": "ff099dea200768d057904258ec3b47b9b897802ac0981684b6d8b5a11755cfc2"
+    },
+    {
+      "path": "evidence/build-editor-render.txt",
+      "bytes": 12455,
+      "sha256": "2d8f8ee5e2f077f0665f844e2e5749a4b67c37b08fb54e2019f7b5f99a47e2f3"
+    },
+    {
+      "path": "evidence/build-final.txt",
+      "bytes": 12455,
+      "sha256": "7d26120111f282e51d0587f83153e3487a80d213f0d22b46ccf0972be2b913e3"
+    },
+    {
+      "path": "evidence/build-initial.txt",
+      "bytes": 12456,
+      "sha256": "7f69210aef62bf01fb6fbc588c91cfad10dbd1055c767d9dff9f02913d0892d2"
+    },
+    {
+      "path": "evidence/build-second.txt",
+      "bytes": 12455,
+      "sha256": "2022a0d91d67e57be619da191aae926d30cbad70d2198f10f1bcaf24727c65bb"
+    },
+    {
+      "path": "evidence/build-third.txt",
+      "bytes": 12456,
+      "sha256": "614c3ad70f777af34983ebd8134dca92196aaab8e9427257d5ab209f3c8bca59"
+    },
+    {
+      "path": "evidence/ci-4a02-observed.json",
+      "bytes": 8636,
+      "sha256": "c5f0c5777612cce6e6faef889bf220fc5e6f889014d2d0c90502869860a744e7"
+    },
+    {
+      "path": "evidence/dependency-audit.txt",
+      "bytes": 3530,
+      "sha256": "962b14ced72a2c06dacdffa2929d9315ee5321a5e0d7924eba32c75d003e5733"
+    },
+    {
+      "path": "evidence/disclosure-additions.json",
+      "bytes": 2238,
+      "sha256": "0978ab03a505a4c4e9269a4d5048a41ee7de752d204a835f32be898ebca9ca49"
+    },
+    {
+      "path": "evidence/disclosure-generation-stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/lint-4a02.txt",
+      "bytes": 59754,
+      "sha256": "4d520b3d151a880c94cca42e430612d769c1936a669eb512238030f531e74bf6"
+    },
+    {
+      "path": "evidence/lint-current.txt",
+      "bytes": 62584,
+      "sha256": "a81d4cb7322ba8d1f76ffbb07e247332bd43e41fa0e1c8b1b24488cc6dd4a45a"
+    },
+    {
+      "path": "evidence/lint-final.txt",
+      "bytes": 59754,
+      "sha256": "4d520b3d151a880c94cca42e430612d769c1936a669eb512238030f531e74bf6"
+    },
+    {
+      "path": "evidence/lint-focused-second.txt",
+      "bytes": 1688,
+      "sha256": "950d76095004d127d004506b404c72a99dc7979652713dba4eba4febbbcceb80"
+    },
+    {
+      "path": "evidence/money-scan.txt",
+      "bytes": 2081,
+      "sha256": "2648b92965d3b530d365a4680f443e90876e3b3aba1097c6ebf53a9b49f7a0b8"
+    },
+    {
+      "path": "evidence/operational-journeys.txt",
+      "bytes": 56053,
+      "sha256": "c52a336daaf85b2f2e0d0b98cebd6a4fe0b444d49d79bbacecb5d22d9b4fea82"
+    },
+    {
+      "path": "evidence/ortho-v2-assessment-1280.png",
+      "bytes": 300144,
+      "sha256": "5f36e2d982780f5b121ef58cc628b684d7cc098c37487209c77fe6eed5e54913"
+    },
+    {
+      "path": "evidence/ortho-v2-assessment-390.png",
+      "bytes": 237465,
+      "sha256": "d13247eb06dcb0e007d09a839e51172e1d36f94226562bdd97c82d5ed6174ce5"
+    },
+    {
+      "path": "evidence/ortho-v2-authority-1280.png",
+      "bytes": 99689,
+      "sha256": "4c5363d433653569ac78a2e163c34276a6ce9048d3486d9dd65ed33ee74325e2"
+    },
+    {
+      "path": "evidence/ortho-v2-authority-390.png",
+      "bytes": 51332,
+      "sha256": "56d1e199b63e100dc0e5d48b38fa9e1072008a1c8c122bc61f5704d7277b801f"
+    },
+    {
+      "path": "evidence/ortho-v2-strategy-1280.png",
+      "bytes": 194921,
+      "sha256": "1239fd35e831d9edccc2836bea415ec3559ad25936ebd03571c9feca9da64763"
+    },
+    {
+      "path": "evidence/ortho-v2-strategy-390.png",
+      "bytes": 138443,
+      "sha256": "ef9a28e92577a669fb1744397ce9c57098edff7eb09fc6c6e5090b06bcb0bef1"
+    },
+    {
+      "path": "evidence/postgres-backup-initial.txt",
+      "bytes": 2219,
+      "sha256": "4520c0789fe43c5cd2501df28674edc350783a724a0440bae8de361898850c20"
+    },
+    {
+      "path": "evidence/postgres-backup-second.txt",
+      "bytes": 729,
+      "sha256": "26a754cce9f08d949875f359bf6b6fe81aa2bf56217253f5539a5dfbf05bf459"
+    },
+    {
+      "path": "evidence/postgres-fingerprint-final.txt",
+      "bytes": 682,
+      "sha256": "6675c75ff2e6d368eaa589f5fc44e553b689fb43b0047650e224a3b6d24c5d95"
+    },
+    {
+      "path": "evidence/postgres-full-4a02.txt",
+      "bytes": 5579,
+      "sha256": "8a3be5cb2f527851322a966b08289c5b5805cef2f44fcf51f14689d3eeb073ca"
+    },
+    {
+      "path": "evidence/postgres-full-first.txt",
+      "bytes": 382767,
+      "sha256": "5393bd5536dc6837d5e9f16e50488b09ccc841cfe17b5f1789d5c95eb0d86639"
+    },
+    {
+      "path": "evidence/postgres-initial.txt",
+      "bytes": 691,
+      "sha256": "cf7c691c9e9c735a1734378ca5e99729216364067584784ef346db17ea0e99a3"
+    },
+    {
+      "path": "evidence/postgres-registration-cli-first.txt",
+      "bytes": 2076,
+      "sha256": "4d7fe46e9961b0cb7ac47b71ea493e47a1303011a597123a7e5bc7811cb03690"
+    },
+    {
+      "path": "evidence/postgres-registration-cli-second.txt",
+      "bytes": 691,
+      "sha256": "c17a0969ae4f2b543f04d86b92fcc9b5e30c103522d1347e2b8942ddcb5c0579"
+    },
+    {
+      "path": "evidence/postgres-registration-runtime.txt",
+      "bytes": 722,
+      "sha256": "20c9a218d5a93fbcff3ad69a7cf089d7bd6cfcb24154c4fca855ef2013dc7a9d"
+    },
+    {
+      "path": "evidence/postgres-union-fifth.txt",
+      "bytes": 693,
+      "sha256": "f852beaf62bfafd855faff5ad37d9b77c139032b0bdf4747ba131f83edf7ec51"
+    },
+    {
+      "path": "evidence/postgres-union-fourth.txt",
+      "bytes": 691,
+      "sha256": "d20ae3eb17a89582872bd78e248b6948080ad20b31751baf6c89a142effb34bf"
+    },
+    {
+      "path": "evidence/postgres-union-second.txt",
+      "bytes": 1909,
+      "sha256": "e3dc049147d5c8e3df189be52478fd9f8d93ad6e8ee3f4594f3d8878ae34d7ec"
+    },
+    {
+      "path": "evidence/postgres-union-third.txt",
+      "bytes": 691,
+      "sha256": "34a54bfcdd6be3b370c24537dcc25e40bf70f2d14c6a36f516e5c3995d6247e8"
+    },
+    {
+      "path": "evidence/preflight-build.txt",
+      "bytes": 880,
+      "sha256": "7f90fda996c0320d7ff64e7b55d6cd9d7977a6145fd547fc0d9151b136fb0490"
+    },
+    {
+      "path": "evidence/schema-contract-generate.txt",
+      "bytes": 456,
+      "sha256": "093314e997ad9d184943aa881cfcd49c761679facbbf53781f0fe8f9a20b535c"
+    },
+    {
+      "path": "evidence/schema-contract-verify-4a02.txt",
+      "bytes": 470,
+      "sha256": "5265466c480f642da5f157551f8038119764434fc4b184e00863077d73b9be73"
+    },
+    {
+      "path": "evidence/schema-ownership-4a02.txt",
+      "bytes": 540,
+      "sha256": "fcd41c2694a7c57704360952d7692e86bbc407b0e43909056903463d1752212b"
+    },
+    {
+      "path": "evidence/schema-ownership-report.json.gz",
+      "bytes": 268943,
+      "sha256": "260afd213f197d657fbb6271c077dae5b45320d51b01daa02bdd7f75bd0b992c"
+    },
+    {
+      "path": "evidence/schema-ownership.txt",
+      "bytes": 530,
+      "sha256": "5ea85e4c01342afd4578436de386e3e1e518a4eaa873442c9e703973dd58f1f2"
+    },
+    {
+      "path": "evidence/typecheck-4a02.txt",
+      "bytes": 257,
+      "sha256": "8762478f1c274e9c95b63dc4d5267ac409995b8191f21a501f9ffe28ca18e441"
+    },
+    {
+      "path": "evidence/typecheck-current.txt",
+      "bytes": 257,
+      "sha256": "8762478f1c274e9c95b63dc4d5267ac409995b8191f21a501f9ffe28ca18e441"
+    },
+    {
+      "path": "evidence/typecheck-final.txt",
+      "bytes": 257,
+      "sha256": "8762478f1c274e9c95b63dc4d5267ac409995b8191f21a501f9ffe28ca18e441"
+    },
+    {
+      "path": "evidence/typecheck.txt",
+      "bytes": 257,
+      "sha256": "8762478f1c274e9c95b63dc4d5267ac409995b8191f21a501f9ffe28ca18e441"
+    },
+    {
+      "path": "evidence/unit-client-confirmation.txt",
+      "bytes": 573,
+      "sha256": "3fee1cd31037ac253acf4745657b8f0629bbe93ff2c9033ab09d94af031258d2"
+    },
+    {
+      "path": "evidence/unit-editor-render.txt",
+      "bytes": 631,
+      "sha256": "fffd83a60adb3e607680b69e14a6ff809ec967fe330dd1837ff64c68376e3652"
+    },
+    {
+      "path": "evidence/unit-full-4a02.txt",
+      "bytes": 1074,
+      "sha256": "5231485dbb9b9da9be7f2c75d579dde24d2b0c9d31809a9d83d280ef24dc5328"
+    },
+    {
+      "path": "evidence/unit-full-final.txt",
+      "bytes": 2492,
+      "sha256": "786af2d57a2a8c12b3df61f06b3723afbf6146932f3238b49b48c55275fcf577"
+    },
+    {
+      "path": "evidence/unit-full-initial.txt",
+      "bytes": 8999,
+      "sha256": "0d67bcdd263a8dfb199a9451aaff346ce4763d0df7ca5061dc261348971cc91a"
+    },
+    {
+      "path": "evidence/unit-full-second.txt",
+      "bytes": 1283,
+      "sha256": "305b34436ec64f1eedd576527328cf61040d0bd539867ef66216d7e69c02b7e3"
+    },
+    {
+      "path": "evidence/unit-guard-ui-second.txt",
+      "bytes": 626,
+      "sha256": "ef00b469584a814c3845e453de0f774318ccc5b5f3225e2d6af03ba146dcfaf2"
+    },
+    {
+      "path": "evidence/unit-guard-ui.txt",
+      "bytes": 52810,
+      "sha256": "f768cec53228238b37ec9da6fb7479d22b1189529e424cf149f942e42492679c"
+    },
+    {
+      "path": "evidence/unit-initial.txt",
+      "bytes": 35534,
+      "sha256": "922d4ea7d59f6fe8d5fbf76bb60481a368ce6697c32350fa0fb54546d2c00e9b"
+    },
+    {
+      "path": "evidence/unit-second.txt",
+      "bytes": 2266,
+      "sha256": "215646475aed3407c7983526c5e2f58b7cba1a4982b830d23d3f11a72c19ce55"
+    },
+    {
+      "path": "evidence/unit-third.txt",
+      "bytes": 1019,
+      "sha256": "f0bebbfa25bbc8b3fd276da4baac8311645a4ab612ed41359c3d11ae73e7922c"
+    },
+    {
+      "path": "requirements-matrix.json",
+      "bytes": 191766,
+      "sha256": "4e34015e082d18b8074bf2de59ee828fc1e8b4f29bc707a255d9fdf6f58e128e"
+    },
+    {
+      "path": "source-manifest.json",
+      "bytes": 27428,
+      "sha256": "1fce9ac00f58a1a14a295367af6003ef49c63e0c7a10ff078545e14fa2a8a667"
+    },
+    {
+      "path": "verification-commands.md",
+      "bytes": 3468,
+      "sha256": "c0555f5c8a3936ded9e027f49f7263f2735b8d322997a7c793a2afb53c8dba2a"
+    }
+  ]
+}

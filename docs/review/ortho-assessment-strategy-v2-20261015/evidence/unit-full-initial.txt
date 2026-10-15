@@ -1,0 +1,190 @@
+
+> aqlan-center@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+ ❯ __tests__/patient-ortho-read-safety.test.tsx (77 tests | 10 failed) 1790ms
+     × labels absent prescription null as unrecorded rather than inventing Roth/MBT 20ms
+     × labels absent prescription "" as unrecorded rather than inventing Roth/MBT 6ms
+     × labels absent prescription "   " as unrecorded rather than inventing Roth/MBT 22ms
+     × preserves the exact recorded prescription "Roth" without substituting a default 9ms
+     × preserves the exact recorded prescription "MBT 022" without substituting a default 6ms
+     × preserves the exact recorded prescription "Roth / MBT" without substituting a default 6ms
+     × preserves the exact recorded prescription "وصفة خاصة مسجّلة" without substituting a default 5ms
+     × preserves the exact recorded prescription "  Custom / prescribed  " without substituting a default 6ms
+     × does not carry a previous recorded prescription through a refresh with unrecorded data 11ms
+     × keeps closed and legacy case prescriptions unrecorded without altering their context 7ms
+ ❯ __tests__/http-permissions.test.ts (14 tests | 1 failed) 58ms
+     × لا مسار طاقم بلا حارس جلسة في ملفه 9ms
+ ❯ __tests__/schema-preflight-cli.test.ts (9 tests | 1 failed) 50ms
+     × uses the immutable filesystem loader without importing the runtime/probe graph 33ms
+ ❯ __tests__/periodontal-schema.test.ts (7 tests | 1 failed) 20ms
+     × does not register schema, a numbered migration, a route or an editor 14ms
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ساقطة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+رحلة مصطنعة ناجحة — للاختبار
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+ ❯ __tests__/docs-drift-guard.test.ts (2 tests | 1 failed) 13ms
+     × كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md 9ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/docs-drift-guard.test.ts > حارس انحراف الوثائق > كل ملف في migrations/ مذكور باسمه في docs/DATABASE_MIGRATIONS.md
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "0051_ortho_treatment_strategy.sql",
++   "0052_ortho_assessment.sql",
++ ]
+
+ ❯ __tests__/docs-drift-guard.test.ts:21:21
+     19|     expect(files.length).toBeGreaterThan(0);
+     20|     const missing = files.filter((name) => !doc.includes(name));
+     21|     expect(missing).toEqual([]);
+       |                     ^
+     22|   });
+     23|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
+
+ FAIL  __tests__/http-permissions.test.ts > TD-04: كل مسار طاقم يستدعي حارسًا معروفًا > لا مسار طاقم بلا حارس جلسة في ملفه
+AssertionError: expected [ '/api/ortho/[id]/assessment' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "/api/ortho/[id]/assessment",
++ ]
+
+ ❯ __tests__/http-permissions.test.ts:171:23
+    169|       return staff && !GUARDS.test(route.source);
+    170|     }).map((route) => route.pattern);
+    171|     expect(unguarded).toEqual([]);
+       |                       ^
+    172|   });
+    173| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
+
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > labels absent prescription null as unrecorded rather than inventing Roth/MBT
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > labels absent prescription "" as unrecorded rather than inventing Roth/MBT
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > labels absent prescription "   " as unrecorded rather than inventing Roth/MBT
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > preserves the exact recorded prescription "Roth" without substituting a default
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > preserves the exact recorded prescription "MBT 022" without substituting a default
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > preserves the exact recorded prescription "Roth / MBT" without substituting a default
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > preserves the exact recorded prescription "وصفة خاصة مسجّلة" without substituting a default
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > preserves the exact recorded prescription "  Custom / prescribed  " without substituting a default
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > keeps closed and legacy case prescriptions unrecorded without altering their context
+AssertionError: expected [ 'GET /api/ortho/41/strategy' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "GET /api/ortho/41/strategy",
++ ]
+
+ ❯ __tests__/patient-ortho-read-safety.test.tsx:260:28
+    258|     return head.promise;
+    259|   });
+    260|   vi.stubGlobal("fetch", fetchMock);
+       |                            ^
+    261| });
+    262| afterEach(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
+
+ FAIL  __tests__/patient-ortho-read-safety.test.tsx > PatientOrtho recorded bracket prescription truth > does not carry a previous recorded prescription through a refresh with unrecorded data
+AssertionError: expected [ 'GET /api/ortho/41/strategy', …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "GET /api/ortho/41/strategy",
++   "GET /api/ortho/41/strategy",
++ ]
+
+ ❯ __tests__/patient-ortho-read-safety.test.tsx:260:28
+    258|     return head.promise;
+    259|   });
+    260|   vi.stubGlobal("fetch", fetchMock);
+       |                            ^
+    261| });
+    262| afterEach(() => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  __tests__/periodontal-schema.test.ts > unregistered periodontal SQL source contract (SQL never executed) > does not register schema, a numbered migration, a route or an editor
+AssertionError: expected [ '0001_baseline_schema.sql', …(55) ] to have a length of 54 but got 56
+
+- Expected
++ Received
+
+- 54
++ 56
+
+ ❯ __tests__/periodontal-schema.test.ts:14:86
+     12|   it("does not register schema, a numbered migration, a route or an ed…
+     13|     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONT…
+     14|     expect(readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$…
+       |                                                                                      ^
+     15|     expect(readdirSync("migrations")).toContain("0061_invoice_correcti…
+     16|     expect(readdirSync("migrations").some((name) => name.includes("per…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  __tests__/schema-preflight-cli.test.ts > read-only preflight connection contract > uses the immutable filesystem loader without importing the runtime/probe graph
+AssertionError: expected [ { version: '0001', …(4) }, …(55) ] to have a length of 54 but got 56
+
+- Expected
++ Received
+
+- 54
++ 56
+
+ ❯ __tests__/schema-preflight-cli.test.ts:74:19
+     72|     const files = await loadMigrationFiles();
+     73|     expect(files[0].version).toBe("0001");
+     74|     expect(files).toHaveLength(56);
+       |                   ^
+     75|     expect(files.at(-1)?.filename).toBe("0061_invoice_correction_linea…
+     76|     expect(files.slice(43).map(file => file.version)).toEqual(['0045',…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+
+ Test Files  5 failed | 546 passed (551)
+      Tests  14 failed | 9711 passed (9725)
+   Start at  20:54:38
+   Duration  315.16s (transform 12.60s, setup 0ms, import 53.72s, tests 191.50s, environment 64ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
