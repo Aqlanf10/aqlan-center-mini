@@ -15396,7 +15396,7 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
-import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets, type BackupSequenceState } from "./backup";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -15535,7 +15535,18 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   for (const link of familyGuarantorLinks) {
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
-  for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  const sequenceStates: Record<string, BackupSequenceState> = {};
+  // Sequences are not MVCC snapshots. Read their high-water state after the
+  // rows, without nextval, so failed/rolled-back allocations are not reused.
+  for (const table of withSerialId) {
+    const { rows: [sequence] } = await pool.query(`SELECT n.nspname,c.relname FROM pg_class c
+      JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=pg_get_serial_sequence($1,'id')::regclass`, [table]);
+    if (!sequence) throw new Error(`Missing backup sequence for ${table}`);
+    const quoted = [sequence.nspname, sequence.relname].map(value => '"' + String(value).replaceAll('"', '""') + '"').join('.');
+    const { rows: [state] } = await pool.query(`SELECT last_value::text,is_called FROM ${quoted}`);
+    sequenceStates[table] = { lastValue: String(state.last_value), isCalled: state.is_called as boolean };
+  }
+  for (const reset of sequenceResets(withSerialId, sequenceStates)) yield `${reset}\n`;
   yield `COMMIT;\n`;
 }
 

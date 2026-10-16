@@ -91,4 +91,19 @@ describe("النسخة الاحتياطية", () => {
     expect(reset).toContain("pg_get_serial_sequence('invoices', 'id')");
     expect(reset).toContain("MAX(id)");
   });
+
+  it("يحفظ فجوات BIGINT وحالة التسلسل غير المستعمل دون تقريب JavaScript", () => {
+    const [reset] = sequenceResets(['hr_identity_events'], {
+      hr_identity_events: { lastValue: '9007199254740993', isCalled: false },
+    });
+    expect(reset).toContain('GREATEST(9007199254740993::bigint');
+    expect(reset).toContain('>= 9007199254740993::bigint THEN true ELSE false END');
+    expect(reset).not.toContain('9007199254740992');
+  });
+
+  it("يرفض حالة تسلسل غير صالحة قبل تصدير SQL", () => {
+    expect(() => sequenceResets(['hr_identity_events'], {
+      hr_identity_events: { lastValue: '1; SELECT 1', isCalled: true },
+    })).toThrow('Invalid captured backup sequence state');
+  });
 });
