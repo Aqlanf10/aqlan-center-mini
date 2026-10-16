@@ -59,7 +59,45 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
   finally{for(const context of contexts)await context.close();}expect(await counts()).toEqual(before);expect((await db.query("SELECT SUM(CASE kind WHEN 'out' THEN -qty ELSE qty END)::text AS qty FROM inventory_movements WHERE item_id=$1",[itemId])).rows[0].qty).toBe(clinicBefore);
  });
  it("custody HTTP rejects forged receiver and redacts doctor view",async()=>{
-  const [lot]=(await db.query("SELECT id FROM stock_lots WHERE item_id=$1",[itemId])).rows;const transfer={id:randomUUID(),fromLocationId:location,toLocationId:custodyLocation,transitLocationId:transitLocation,reason:"Synthetic authorization witness",lines:[{id:randomUUID(),lotId:lot.id,quantity:"1"}]};expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("custody.dispatch",{transfer}))).status).toBe(201);const before=await counts();const acknowledgement={id:randomUUID(),transferId:transfer.id,reason:"Synthetic forged count",lines:[{lineId:transfer.lines[0].id,acceptedQuantity:"1",returnedQuantity:"0"}]};for(const actor of [h.sessions.doctorB,h.sessions.reception])expect((await authedMutation("/api/inventory/procurement",actor,"POST",operation("custody.acknowledge",{acknowledgement}))).status).toBe(403);expect((await authedGet("/api/inventory/procurement?view=custody",h.sessions.reception)).status).toBe(403);const view=await(await authedGet("/api/inventory/procurement?view=custody",h.sessions.doctorA)).json();expect(view.locations.map((row:{id:string})=>row.id)).toEqual([custodyLocation]);expect(JSON.stringify(view)).not.toContain('"quote"');expect(JSON.stringify(view)).not.toContain('unitPriceMinor');expect(await counts()).toEqual(before);
+  const [lot]=(await db.query("SELECT id FROM stock_lots WHERE item_id=$1",[itemId])).rows;
+  const transfer={id:randomUUID(),fromLocationId:location,toLocationId:custodyLocation,transitLocationId:transitLocation,reason:"Synthetic authorization witness",lines:[{id:randomUUID(),lotId:lot.id,quantity:"1"}]};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("custody.dispatch",{transfer}))).status).toBe(201);
+  const before=await counts();
+  const custodyCountsBefore=(await db.query("SELECT (SELECT COUNT(*) FROM inventory_transfer_acknowledgements WHERE transfer_id=$1)::int AS acks,(SELECT COUNT(*) FROM custody_usage_events WHERE location_id=$2)::int AS usages,(SELECT COUNT(*) FROM custody_stocktakes WHERE location_id=$2)::int AS stocktakes,(SELECT COUNT(*) FROM custody_package_closures WHERE location_id=$2)::int AS closures",[transfer.id,custodyLocation])).rows[0];
+  const acknowledgement={id:randomUUID(),transferId:transfer.id,reason:"Synthetic forged count",lines:[{lineId:transfer.lines[0].id,acceptedQuantity:"1",returnedQuantity:"0"}]};
+
+  const doctorBAckRes=await authedMutation("/api/inventory/procurement",h.sessions.doctorB,"POST",operation("custody.acknowledge",{acknowledgement}));
+  expect(doctorBAckRes.status).toBe(403);
+  expect(await doctorBAckRes.json()).toEqual({code:"custody_owner_forbidden",message:"لا تملك صلاحية التصرف في عهدة طبيب آخر."});
+
+  const doctorBConsumeRes=await authedMutation("/api/inventory/procurement",h.sessions.doctorB,"POST",operation("custody.consume",{usage:{id:randomUUID(),locationId:custodyLocation,lotId:lot.id,kind:"consumed",quantity:"1",reason:"Forged cross-owner consume"}}));
+  expect(doctorBConsumeRes.status).toBe(403);
+  expect(await doctorBConsumeRes.json()).toEqual({code:"custody_owner_forbidden",message:"لا تملك صلاحية التصرف في عهدة طبيب آخر."});
+
+  const doctorBStocktakeRes=await authedMutation("/api/inventory/procurement",h.sessions.doctorB,"POST",operation("custody.stocktake",{stocktake:{id:randomUUID(),locationId:custodyLocation,lotId:lot.id,countedQuantity:"0",reason:"Forged cross-owner stocktake"}}));
+  expect(doctorBStocktakeRes.status).toBe(403);
+  expect(await doctorBStocktakeRes.json()).toEqual({code:"custody_owner_forbidden",message:"لا تملك صلاحية التصرف في عهدة طبيب آخر."});
+
+  const doctorBCloseRes=await authedMutation("/api/inventory/procurement",h.sessions.doctorB,"POST",operation("custody.close_package",{packageClosure:{id:randomUUID(),packageId:transfer.lines[0].id,evidenceEventId:randomUUID(),locationId:custodyLocation,lotId:lot.id,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"1",recordedConsumptionQuantity:"1",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Forged cross-owner package closure"}}));
+  expect(doctorBCloseRes.status).toBe(403);
+  expect(await doctorBCloseRes.json()).toEqual({code:"custody_owner_forbidden",message:"لا تملك صلاحية التصرف في عهدة طبيب آخر."});
+
+  const receptionAckRes=await authedMutation("/api/inventory/procurement",h.sessions.reception,"POST",operation("custody.acknowledge",{acknowledgement}));
+  expect(receptionAckRes.status).toBe(403);
+  expect(await receptionAckRes.json()).toEqual({code:"custody_owner_forbidden",message:"لا تملك صلاحية التصرف في عهدة طبيب آخر."});
+
+  const receptionViewRes=await authedGet("/api/inventory/procurement?view=custody",h.sessions.reception);
+  expect(receptionViewRes.status).toBe(403);
+  expect(await receptionViewRes.json()).toEqual({code:"custody_read_forbidden",message:"لا تملك صلاحية الاطلاع على كشوف عهد المواد للأطباء."});
+
+  const custodyCountsAfter=(await db.query("SELECT (SELECT COUNT(*) FROM inventory_transfer_acknowledgements WHERE transfer_id=$1)::int AS acks,(SELECT COUNT(*) FROM custody_usage_events WHERE location_id=$2)::int AS usages,(SELECT COUNT(*) FROM custody_stocktakes WHERE location_id=$2)::int AS stocktakes,(SELECT COUNT(*) FROM custody_package_closures WHERE location_id=$2)::int AS closures",[transfer.id,custodyLocation])).rows[0];
+  expect(custodyCountsAfter).toEqual(custodyCountsBefore);
+
+  const view=await(await authedGet("/api/inventory/procurement?view=custody",h.sessions.doctorA)).json();
+  expect(view.locations.map((row:{id:string})=>row.id)).toEqual([custodyLocation]);
+  expect(JSON.stringify(view)).not.toContain('"quote"');
+  expect(JSON.stringify(view)).not.toContain('unitPriceMinor');
+  expect(await counts()).toEqual(before);
  });
  it("HTTP hold_for_order_amendment blocks quarantine release until order.amend, and audit_log redacts secrets",async()=>{
   const r1:RequestRevision={id:randomUUID(),version:1,branchId:"clinic",requestedBy:doctorId,reason:"SYN-HTTP-AMEND-REQ1",proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:20000},lines:[{id:randomUUID(),itemId,quantity:"2",conversion:conversion()}]};
@@ -71,19 +109,19 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
   const rec:ReceiptRevision={id:randomUUID(),version:1,orderId:po.id,orderVersion:1,branchId:"clinic",supplierPartyId:supplierId,actualArrivalDate:"2026-10-14",lines:[{orderLineId:po.lines[0].id,arrivedQuantity:"3",excessDecision:"hold_for_order_amendment",excessReason:"Hold 1 box pending PO amendment",portions:[{id:withinLineId,quantity:"2",disposition:"accepted",lotCode:"SYN-HTTP-AMEND-OK",expiryDate:"2027-11-01",locationId:location,damaged:false,reason:"2 boxes within order"},{id:excessLineId,quantity:"1",disposition:"quarantined",lotCode:"SYN-HTTP-AMEND-EX",expiryDate:"2027-11-01",locationId:location,damaged:false,reason:"1 box held for order amendment"}]}]};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("receipt.post",{document:rec}))).status).toBe(201);
   const blocked=await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("quarantine.resolve",{resolution:{id:randomUUID(),orderId:po.id,receiptLineId:excessLineId,action:"release",quantity:"1",reason:"Release before amendment",resolutionDate:"2026-10-15"}}));
-  expect(blocked.status).toBe(422);
-  expect(await blocked.json()).toEqual({error:"An approved purchase order amendment is required before releasing held excess arrival quantities",code:"order_amendment_required"});
+  expect(blocked.status).toBe(409);
+  expect(await blocked.json()).toEqual({code:"order_amendment_required",message:"يتطلب الإفراج عن الكمية الفائضة المحجورة اعتماد تعديل أمر الشراء أولًا."});
   const r2:RequestRevision={id:randomUUID(),version:1,branchId:"clinic",requestedBy:doctorId,reason:"SYN-HTTP-AMEND-REQ2",proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:10000},lines:[{id:randomUUID(),itemId,quantity:"1",conversion:conversion()}]};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("request.submit",{document:r2}))).status).toBe(201);
   expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("request.approve",{approval:{requestId:r2.id,version:1,decisions:[{lineId:r2.lines[0].id,quantity:"1",reason:"Approve 1 supplemental box"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:10000,rateToBase:"500",capturedAt:"2026-10-14T01:00:00Z",sourceRef:"quote-2"})}}))).status).toBe(200);
   const amendedOrder:PurchaseOrder={...po,version:2,lines:[{...po.lines[0],quantity:"3",sources:[po.lines[0].sources[0],{id:randomUUID(),requestId:r2.id,requestLineId:r2.lines[0].id,baseQuantity:"50"}]}]};
   const amendedRes=await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("order.amend",{amendment:{order:amendedOrder,reason:"PO amendment with secret: top-secret-value"}}));
-  expect(amendedRes.status).toBe(200);
+  expect(amendedRes.status).toBe(201);
   const auditRow=(await db.query("SELECT details::text AS details FROM audit_log WHERE entity='purchase_order' AND entity_id=$1 ORDER BY id DESC LIMIT 1",[po.id])).rows[0];
   expect(auditRow.details).toContain("[REDACTED]");
   expect(auditRow.details).not.toContain("top-secret-value");
   const releasedRes=await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("quarantine.resolve",{resolution:{id:randomUUID(),orderId:po.id,receiptLineId:excessLineId,action:"release",quantity:"1",reason:"Release after PO v2 amendment",resolutionDate:"2026-10-15"}}));
-  expect(releasedRes.status).toBe(200);
+  expect(releasedRes.status).toBe(201);
  });
  it.each([390,1280])("Point 5 (a657 review): custody UI package closure form populates per-tranche open quantities (10 and 20) and closes after checkpoint at %ipx in AR and EN",async width=>{
   const rTr:RequestRevision={id:randomUUID(),version:1,branchId:"clinic",requestedBy:doctorId,reason:`SYN-TRANCHE-UI-REQ-${width}`,proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:10000},lines:[{id:randomUUID(),itemId,quantity:"1",conversion:conversion()}]};
@@ -98,11 +136,26 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
   const t30={id:randomUUID(),fromLocationId:location,toLocationId:custodyLocation,transitLocationId:transitLocation,reason:`SYN-TR-DISPATCH-${width}`,lines:[{id:randomUUID(),lotId:trancheLotId,quantity:"30"}]};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("custody.dispatch",{transfer:t30}))).status).toBe(201);
   const ack1={id:randomUUID(),transferId:t30.id,reason:"First partial ack 10",lines:[{lineId:t30.lines[0].id,acceptedQuantity:"10",returnedQuantity:"0"}]};
-  const ack2={id:randomUUID(),transferId:t30.id,reason:"Second partial ack 20",lines:[{lineId:t30.lines[0].id,acceptedQuantity:"20",returnedQuantity:"0"}]};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.acknowledge",{acknowledgement:ack1}))).status).toBe(201);
+  const u5={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,kind:"consumed",quantity:"5",reason:"Consume 5 from ack1 before checkpoint"};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.consume",{usage:u5}))).status).toBe(201);
+  const cp1Res=await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.close_package",{packageClosure:{id:randomUUID(),packageId:`${ack1.id}:${t30.lines[0].id}`,evidenceEventId:u5.id,locationId:custodyLocation,lotId:trancheLotId,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"10",recordedConsumptionQuantity:"5",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"5",reason:"Checkpoint ack1 10/5/5 before ack2"}}));
+  expect(cp1Res.status).toBe(201);
+
+  const ack2={id:randomUUID(),transferId:t30.id,reason:"Second partial ack 20",lines:[{lineId:t30.lines[0].id,acceptedQuantity:"20",returnedQuantity:"0"}]};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.acknowledge",{acknowledgement:ack2}))).status).toBe(201);
-  const u20={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,kind:"consumed",quantity:"20",reason:"Consumed 20 across tranche 1 (10) and tranche 2 (10)"};
-  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.consume",{usage:u20}))).status).toBe(201);
+
+  // Verify open quantity after ack1 checkpoint (5) + ack2 (20) is 25 (5 on ack1, 20 on ack2)
+  const midRead=await(await authedGet("/api/inventory/procurement?view=custody",h.sessions.doctorA)).json();
+  const midClosable=midRead.closableLots.find((row:{lotId:string})=>row.lotId===trancheLotId);
+  expect(midClosable.lotOriginalQuantity).toBe("25");
+  expect(midClosable.tranches.map((tr:{packageId:string;originalQuantity:string})=>({packageId:tr.packageId,originalQuantity:tr.originalQuantity}))).toEqual([
+   {packageId:`${ack1.id}:${t30.lines[0].id}`,originalQuantity:"5"},
+   {packageId:`${ack2.id}:${t30.lines[0].id}`,originalQuantity:"20"},
+  ]);
+
+  const u15={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,kind:"consumed",quantity:"15",reason:"Consumed 15 across remaining tranche 1 (5) and tranche 2 (10)"};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.consume",{usage:u15}))).status).toBe(201);
   const st10={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,countedQuantity:"10",reason:"Counted 10 remaining in tranche 2"};
   expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.stocktake",{stocktake:st10}))).status).toBe(201);
 
@@ -110,9 +163,10 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
   const closable=custodyRead.closableLots.find((row:{lotId:string})=>row.lotId===trancheLotId);
   expect(closable).toMatchObject({
    defaultPackageId:`${ack1.id}:${t30.lines[0].id}`,
-   originalQuantity:"10",
-   recordedConsumptionQuantity:"10",
-   remainingQuantity:"0"
+   originalQuantity:"5",
+   recordedConsumptionQuantity:"5",
+   remainingQuantity:"0",
+   lotOriginalQuantity:"25"
   });
   expect(closable.tranches).toHaveLength(2);
 
@@ -128,15 +182,15 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
    await form.getByLabel("موقع العهدة للعبوة",{exact:true}).selectOption(custodyLocation);
    await form.getByLabel("دفعة العبوة في العهدة",{exact:true}).selectOption(trancheLotId);
    expect(await form.getByLabel("شريحة الاستلام / العبوة",{exact:true}).inputValue()).toBe(`${ack1.id}:${t30.lines[0].id}`);
-   expect(await form.getByLabel("كمية العبوة الأصلية",{exact:true}).inputValue()).toBe("10");
-   expect(await form.getByLabel("المستهلك المسجل",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("كمية العبوة الأصلية",{exact:true}).inputValue()).toBe("5");
+   expect(await form.getByLabel("المستهلك المسجل",{exact:true}).inputValue()).toBe("5");
    expect(await form.getByLabel("المتبقي بالعبوة",{exact:true}).inputValue()).toBe("0");
    await form.getByLabel("ملاحظة إغلاق العبوة / التخلص الآمن",{exact:true}).fill(`SYN-UI-CLOSE-TR1-${width}`);
    const close1ResPromise=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/inventory/procurement"&&response.request().method()==="POST");
    await form.getByRole("button",{name:"توثيق إغلاق العبوة / التخلص الآمن",exact:true}).click();
    const close1Res=await close1ResPromise;
    expect(close1Res.status()).toBe(201);
-   expect(await close1Res.json()).toMatchObject({closureKind:"terminal",originalQuantity:"10",retiredOriginalQuantity:"10"});
+   expect(await close1Res.json()).toMatchObject({closureKind:"terminal",originalQuantity:"5",retiredOriginalQuantity:"5"});
    await page.waitForFunction(()=>document.body.textContent?.includes("تم توثيق إغلاق العبوة أو التخلص الآمن وفق السياسة المعتمدة."));
    await root.getByText("مواد العهدة تبقى ملكًا للمركز.",{exact:false}).waitFor();
    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

@@ -1,6 +1,7 @@
 /** Proposals and reconciliations only. Existing inventory/commission writers own all posting. */
 import { FULL_RATE_BP } from "../materialRate";
 import { requireCurrency, type Currency } from "../money";
+import { invariant, quantityAtoms, quantityText } from "./quantities";
 import { proportionalCostMinor, type Money } from "./treatment-cost";
 
 function nonnegative(value: number, name: string): number {
@@ -336,6 +337,564 @@ export function canonicalCustodyReferenceKey(raw: string): string {
     .trim()
     .replace(/^checkpoint:[^:]+:/i, "")
     .replace(/^(?:(?:pkg|ev|transfer_ack|transfer_line|mov_alloc|mov|usage|stocktake|waste_approval|transfer_out):)+/i, "");
+}
+
+const UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const CHECKPOINT_ACK_RE = new RegExp(`^checkpoint:(${UUID_PART}):(?:(?:transfer_ack|pkg):)?(${UUID_PART}):(${UUID_PART})$`, "i");
+const TERMINAL_ACK_RE = new RegExp(`^(?:(?:transfer_ack|pkg):)?(${UUID_PART}):(${UUID_PART})$`, "i");
+const CHECKPOINT_SINGLE_RE = new RegExp(`^checkpoint:(${UUID_PART}):(?:(transfer_line|mov_alloc|pkg):)?(${UUID_PART})$`, "i");
+const TERMINAL_SINGLE_RE = new RegExp(`^(?:(transfer_line|mov_alloc|pkg):)?(${UUID_PART})$`, "i");
+const CANONICAL_ACK_RE = new RegExp(`^transfer_ack:(${UUID_PART}):(${UUID_PART})$`, "i");
+const CANONICAL_LINE_RE = new RegExp(`^transfer_line:(${UUID_PART})$`, "i");
+const CANONICAL_ALLOC_RE = new RegExp(`^mov_alloc:(${UUID_PART})$`, "i");
+
+export type ParsedCustodyClosureSource =
+  | {
+      readonly kind: "transfer_ack";
+      readonly isCheckpoint: boolean;
+      readonly closureId: string | null;
+      readonly ackId: string;
+      readonly lineId: string;
+      readonly rawSourceId: string;
+      readonly canonicalSourceId: string;
+    }
+  | {
+      readonly kind: "mov_alloc";
+      readonly isCheckpoint: boolean;
+      readonly closureId: string | null;
+      readonly allocationId: string;
+      readonly rawSourceId: string;
+      readonly canonicalSourceId: string;
+    }
+  | {
+      readonly kind: "legacy_transfer_line";
+      readonly isCheckpoint: boolean;
+      readonly closureId: string | null;
+      readonly lineId: string;
+      readonly rawSourceId: string;
+      readonly canonicalSourceId: string;
+    }
+  | {
+      readonly kind: "single_uuid";
+      readonly isCheckpoint: boolean;
+      readonly closureId: string | null;
+      readonly targetId: string;
+      readonly rawSourceId: string;
+    }
+  | {
+      readonly kind: "unrecognized";
+      readonly isCheckpoint: boolean;
+      readonly rawSourceId: string;
+    };
+
+/**
+ * Extracts the stored source identity of a `custody_package_closures` row using anchored UUID rules
+ * and optional `document.canonicalPackageSourceId` metadata.
+ * - Ack-specific checkpoints (`checkpoint:<closureId>:<ackId>:<lineId>`) carry 3 UUIDs after `checkpoint:`
+ *   and match ONLY `<ackId>:<lineId>`, never other acknowledgements on `<lineId>`.
+ * - Legacy line-only checkpoints (`checkpoint:<closureId>:<lineId>`) carry 2 UUIDs after `checkpoint:`.
+ */
+export function parseCustodyPackageClosureSource(
+  packageId: string,
+  document?: Record<string, unknown> | null,
+): ParsedCustodyClosureSource {
+  const trimmed = (packageId ?? "").trim();
+  const cpAck = CHECKPOINT_ACK_RE.exec(trimmed);
+  if (cpAck) {
+    const [, closureId, ackId, lineId] = cpAck;
+    return {
+      kind: "transfer_ack",
+      isCheckpoint: true,
+      closureId,
+      ackId,
+      lineId,
+      rawSourceId: `${ackId}:${lineId}`,
+      canonicalSourceId: `transfer_ack:${ackId}:${lineId}`,
+    };
+  }
+  const termAck = TERMINAL_ACK_RE.exec(trimmed);
+  if (termAck) {
+    const [, ackId, lineId] = termAck;
+    return {
+      kind: "transfer_ack",
+      isCheckpoint: false,
+      closureId: null,
+      ackId,
+      lineId,
+      rawSourceId: `${ackId}:${lineId}`,
+      canonicalSourceId: `transfer_ack:${ackId}:${lineId}`,
+    };
+  }
+  const cpSingle = CHECKPOINT_SINGLE_RE.exec(trimmed);
+  const termSingle = cpSingle ? null : TERMINAL_SINGLE_RE.exec(trimmed);
+  if (cpSingle || termSingle) {
+    const isCheckpoint = Boolean(cpSingle);
+    const closureId = cpSingle ? cpSingle[1] : null;
+    const prefix = (cpSingle ? cpSingle[2] : termSingle![1])?.toLowerCase() ?? null;
+    const targetId = cpSingle ? cpSingle[3] : termSingle![2];
+    const docCanonical =
+      typeof document?.canonicalPackageSourceId === "string"
+        ? document.canonicalPackageSourceId.trim()
+        : "";
+    const docAck = CANONICAL_ACK_RE.exec(docCanonical);
+    if (docAck && (docAck[1].toLowerCase() === targetId.toLowerCase() || docAck[2].toLowerCase() === targetId.toLowerCase())) {
+      const [, ackId, lineId] = docAck;
+      return {
+        kind: "transfer_ack",
+        isCheckpoint,
+        closureId,
+        ackId,
+        lineId,
+        rawSourceId: `${ackId}:${lineId}`,
+        canonicalSourceId: `transfer_ack:${ackId}:${lineId}`,
+      };
+    }
+    const docAlloc = CANONICAL_ALLOC_RE.exec(docCanonical);
+    if (prefix === "mov_alloc" || (docAlloc && docAlloc[1].toLowerCase() === targetId.toLowerCase())) {
+      return {
+        kind: "mov_alloc",
+        isCheckpoint,
+        closureId,
+        allocationId: targetId,
+        rawSourceId: targetId,
+        canonicalSourceId: `mov_alloc:${targetId}`,
+      };
+    }
+    const docLine = CANONICAL_LINE_RE.exec(docCanonical);
+    if (prefix === "transfer_line" || (docLine && docLine[1].toLowerCase() === targetId.toLowerCase())) {
+      return {
+        kind: "legacy_transfer_line",
+        isCheckpoint,
+        closureId,
+        lineId: targetId,
+        rawSourceId: targetId,
+        canonicalSourceId: `transfer_line:${targetId}`,
+      };
+    }
+    return {
+      kind: "single_uuid",
+      isCheckpoint,
+      closureId,
+      targetId,
+      rawSourceId: targetId,
+    };
+  }
+  return {
+    kind: "unrecognized",
+    isCheckpoint: /^checkpoint:/i.test(trimmed),
+    rawSourceId: canonicalCustodyReferenceKey(trimmed),
+  };
+}
+
+export interface CustodyInboundSourceRecord {
+  readonly kind: "transfer_ack" | "mov_alloc";
+  readonly rawId: string;
+  readonly canonicalId: string;
+  readonly ackId?: string | null;
+  readonly lineId?: string | null;
+  readonly transferId?: string | null;
+  readonly allocationId?: string | null;
+  readonly movementId?: string | null;
+  readonly acceptedQuantity: string;
+  readonly sourceTs: string;
+}
+
+export interface CustodyClosureRecord {
+  readonly id?: string;
+  readonly packageId: string;
+  readonly evidenceEventId?: string;
+  readonly originalQuantity: string;
+  readonly remainingQuantity?: string;
+  readonly document?: Record<string, unknown> | null;
+  readonly createdAt?: string;
+}
+
+export interface ResolvedCustodyTrancheSource {
+  readonly kind: "transfer_ack" | "mov_alloc";
+  readonly rawId: string;
+  readonly canonicalId: string;
+  readonly ackId: string | null;
+  readonly lineId: string | null;
+  readonly transferId: string | null;
+  readonly allocationId: string | null;
+  readonly movementId: string | null;
+  readonly sourceTs: string;
+  readonly initialAtoms3: bigint;
+  readonly retiredAtoms3: bigint;
+  readonly openAtoms3: bigint;
+  readonly initialQuantity: string;
+  readonly retiredQuantity: string;
+  readonly openQuantity: string;
+  readonly terminallyClosed: boolean;
+  readonly legacyReconciliationRequired: boolean;
+}
+
+export interface ResolvedCustodyPackageSourcesResult {
+  readonly sources: readonly ResolvedCustodyTrancheSource[];
+  readonly openTranches: readonly ResolvedCustodyTrancheSource[];
+  readonly legacyReconciliationRequiredLines: readonly string[];
+  readonly hasInvalidLegacyClosure: boolean;
+}
+
+/**
+ * Shared deterministic resolver used by both `verifyPackageSource` and `readDoctorCustody`.
+ * - Attributes ack-bound terminal and checkpoint closures strictly to their full `<ackId>:<lineId>` identity.
+ * - Handles legacy line-only closures (`<lineId>` or `checkpoint:<closureId>:<lineId>`) explicitly:
+ *   1. If `document.legacyAckAllocations` provides a documented one-time mapping whose positive shares
+ *      sum exactly to `originalQuantity` and stay within each acknowledgement's remaining accepted quantity,
+ *      attributes each share once to its mapped acknowledgement.
+ *   2. If the transfer line has only a single accepted acknowledgement and the legacy closure fits within
+ *      that acknowledgement's remaining capacity, attributes it once to that sole acknowledgement.
+ *   3. Otherwise (e.g. multiple acknowledgements on the same transfer line with an unmapped legacy line-only
+ *      closure, or any invalid/over-allocated legacy mapping), marks the transfer line as
+ *      `legacyReconciliationRequired: true` (`legacy_source_reconciliation_required`) and withholds ambiguous
+ *      tranches from automatic closure without guessing or double-deducting across acknowledgements.
+ */
+export function resolveCustodyPackageSources(input: {
+  readonly sources: readonly CustodyInboundSourceRecord[];
+  readonly closures: readonly CustodyClosureRecord[];
+}): ResolvedCustodyPackageSourcesResult {
+  type MutableSource = {
+    readonly kind: "transfer_ack" | "mov_alloc";
+    readonly rawId: string;
+    readonly canonicalId: string;
+    readonly ackId: string | null;
+    readonly lineId: string | null;
+    readonly transferId: string | null;
+    readonly allocationId: string | null;
+    readonly movementId: string | null;
+    readonly sourceTs: string;
+    readonly initialAtoms3: bigint;
+    retiredAtoms3: bigint;
+    terminallyClosed: boolean;
+    legacyReconciliationRequired: boolean;
+  };
+
+  const mutable: MutableSource[] = input.sources.map((src) => {
+    let ackId = src.ackId ?? null;
+    let lineId = src.lineId ?? null;
+    if (src.kind === "transfer_ack" && (!ackId || !lineId) && src.rawId.includes(":")) {
+      const [a, l] = src.rawId.split(":");
+      ackId = ackId ?? a;
+      lineId = lineId ?? l;
+    }
+    const allocationId = src.kind === "mov_alloc" ? (src.allocationId ?? src.rawId) : null;
+    return {
+      kind: src.kind,
+      rawId: src.rawId,
+      canonicalId: src.canonicalId,
+      ackId,
+      lineId,
+      transferId: src.transferId ?? null,
+      allocationId,
+      movementId: src.movementId ?? null,
+      sourceTs: src.sourceTs,
+      initialAtoms3: quantityAtoms(src.acceptedQuantity, 3, true),
+      retiredAtoms3: 0n,
+      terminallyClosed: false,
+      legacyReconciliationRequired: false,
+    };
+  });
+
+  const ackByKey = new Map<string, MutableSource>();
+  const acksByLine = new Map<string, MutableSource[]>();
+  const acksByAckId = new Map<string, MutableSource[]>();
+  const allocById = new Map<string, MutableSource>();
+
+  for (const s of mutable) {
+    if (s.kind === "transfer_ack" && s.ackId && s.lineId) {
+      ackByKey.set(`${s.ackId.toLowerCase()}:${s.lineId.toLowerCase()}`, s);
+      const lineKey = s.lineId.toLowerCase();
+      const lineArr = acksByLine.get(lineKey) ?? [];
+      lineArr.push(s);
+      acksByLine.set(lineKey, lineArr);
+      const ackKey = s.ackId.toLowerCase();
+      const ackArr = acksByAckId.get(ackKey) ?? [];
+      ackArr.push(s);
+      acksByAckId.set(ackKey, ackArr);
+    } else if (s.kind === "mov_alloc" && s.allocationId) {
+      allocById.set(s.allocationId.toLowerCase(), s);
+    }
+  }
+
+  const legacyLineClosures = new Map<string, Array<{ closure: CustodyClosureRecord; isCheckpoint: boolean }>>();
+  const modernClosures: Array<{ parsed: ParsedCustodyClosureSource; retired: bigint }> = [];
+  let hasInvalidLegacyClosure = false;
+
+  for (const c of input.closures) {
+    const parsed = parseCustodyPackageClosureSource(c.packageId, c.document);
+    const retired = quantityAtoms(c.originalQuantity ?? "0", 3, true);
+    if (parsed.kind === "legacy_transfer_line") {
+      const lineKey = parsed.lineId.toLowerCase();
+      const arr = legacyLineClosures.get(lineKey) ?? [];
+      arr.push({ closure: c, isCheckpoint: parsed.isCheckpoint });
+      legacyLineClosures.set(lineKey, arr);
+      continue;
+    }
+    if (parsed.kind === "single_uuid") {
+      const tid = parsed.targetId.toLowerCase();
+      if (!allocById.has(tid) && acksByLine.has(tid)) {
+        const arr = legacyLineClosures.get(tid) ?? [];
+        arr.push({ closure: c, isCheckpoint: parsed.isCheckpoint });
+        legacyLineClosures.set(tid, arr);
+        continue;
+      }
+    }
+    modernClosures.push({ parsed, retired });
+  }
+
+  const legacyReconciliationRequiredLinesSet = new Set<string>();
+
+  for (const [lineKey, closuresOnLine] of legacyLineClosures.entries()) {
+    const acksOnLine = acksByLine.get(lineKey) ?? [];
+    if (acksOnLine.length === 0) continue;
+    const canonicalLineId = acksOnLine[0].lineId ?? lineKey;
+
+    for (const { closure, isCheckpoint } of closuresOnLine) {
+      const legacyRetired = quantityAtoms(closure.originalQuantity ?? "0", 3, true);
+      const rawMap = closure.document?.legacyAckAllocations;
+      if (Array.isArray(rawMap)) {
+        let sumMapped = 0n;
+        let mapValid = legacyRetired > 0n && rawMap.length > 0;
+        const seenAckIds = new Set<string>();
+        const plannedShares: Array<{ target: MutableSource; shareAtoms3: bigint; terminal: boolean }> = [];
+
+        for (const entry of rawMap) {
+          if (!entry || typeof entry !== "object") {
+            mapValid = false;
+            break;
+          }
+          const rec = entry as Record<string, unknown>;
+          const ackId = typeof rec.acknowledgementId === "string" ? rec.acknowledgementId.trim().toLowerCase() : "";
+          const shareText = typeof rec.retiredOriginalQuantity === "string" ? rec.retiredOriginalQuantity.trim() : "";
+          if (!ackId || !shareText || seenAckIds.has(ackId)) {
+            mapValid = false;
+            break;
+          }
+          seenAckIds.add(ackId);
+          const target = acksOnLine.find((a) => a.ackId?.toLowerCase() === ackId);
+          if (!target || target.terminallyClosed) {
+            mapValid = false;
+            break;
+          }
+          let shareAtoms3 = 0n;
+          try {
+            shareAtoms3 = quantityAtoms(shareText, 3, false);
+          } catch {
+            mapValid = false;
+            break;
+          }
+          if (target.retiredAtoms3 + shareAtoms3 > target.initialAtoms3) {
+            mapValid = false;
+            break;
+          }
+          sumMapped += shareAtoms3;
+          plannedShares.push({
+            target,
+            shareAtoms3,
+            terminal: rec.terminal === true || (!isCheckpoint && target.retiredAtoms3 + shareAtoms3 === target.initialAtoms3),
+          });
+        }
+
+        if (!mapValid || sumMapped !== legacyRetired) {
+          for (const a of acksOnLine) a.legacyReconciliationRequired = true;
+          legacyReconciliationRequiredLinesSet.add(canonicalLineId);
+          hasInvalidLegacyClosure = true;
+          break;
+        }
+
+        for (const share of plannedShares) {
+          share.target.retiredAtoms3 += share.shareAtoms3;
+          if (share.terminal) share.target.terminallyClosed = true;
+        }
+        continue;
+      }
+
+      // Unmapped legacy line-only closure: unambiguous ONLY when there is a single accepted acknowledgement on this line
+      if (acksOnLine.length === 1) {
+        const onlyAck = acksOnLine[0];
+        const fitsCapacity =
+          legacyRetired > 0n &&
+          !onlyAck.terminallyClosed &&
+          onlyAck.retiredAtoms3 + legacyRetired <= onlyAck.initialAtoms3;
+        if (fitsCapacity) {
+          onlyAck.retiredAtoms3 += legacyRetired;
+          if (!isCheckpoint || onlyAck.retiredAtoms3 === onlyAck.initialAtoms3) {
+            onlyAck.terminallyClosed = true;
+          }
+        } else {
+          onlyAck.legacyReconciliationRequired = true;
+          legacyReconciliationRequiredLinesSet.add(canonicalLineId);
+          hasInvalidLegacyClosure = true;
+        }
+      } else {
+        for (const a of acksOnLine) a.legacyReconciliationRequired = true;
+        legacyReconciliationRequiredLinesSet.add(canonicalLineId);
+      }
+    }
+  }
+
+  for (const { parsed, retired } of modernClosures) {
+    if (parsed.kind === "transfer_ack") {
+      const target = ackByKey.get(`${parsed.ackId.toLowerCase()}:${parsed.lineId.toLowerCase()}`);
+      if (target) {
+        target.retiredAtoms3 += retired;
+        if (!parsed.isCheckpoint) target.terminallyClosed = true;
+      }
+      continue;
+    }
+    if (parsed.kind === "mov_alloc") {
+      const target = allocById.get(parsed.allocationId.toLowerCase());
+      if (target) {
+        target.retiredAtoms3 += retired;
+        if (!parsed.isCheckpoint) target.terminallyClosed = true;
+      }
+      continue;
+    }
+    if (parsed.kind === "single_uuid") {
+      const tid = parsed.targetId.toLowerCase();
+      const allocTarget = allocById.get(tid);
+      if (allocTarget) {
+        allocTarget.retiredAtoms3 += retired;
+        if (!parsed.isCheckpoint) allocTarget.terminallyClosed = true;
+        continue;
+      }
+      const ackTargets = acksByAckId.get(tid);
+      if (ackTargets && ackTargets.length === 1) {
+        ackTargets[0].retiredAtoms3 += retired;
+        if (!parsed.isCheckpoint) ackTargets[0].terminallyClosed = true;
+        continue;
+      }
+      if (ackTargets && ackTargets.length > 1) {
+        for (const a of ackTargets) a.legacyReconciliationRequired = true;
+        hasInvalidLegacyClosure = true;
+      }
+    }
+  }
+
+  for (const lineKey of legacyLineClosures.keys()) {
+    const acksOnLine = acksByLine.get(lineKey) ?? [];
+    if (acksOnLine.some((a) => a.retiredAtoms3 > a.initialAtoms3)) {
+      const canonicalLineId = acksOnLine[0]?.lineId ?? lineKey;
+      for (const a of acksOnLine) a.legacyReconciliationRequired = true;
+      legacyReconciliationRequiredLinesSet.add(canonicalLineId);
+      hasInvalidLegacyClosure = true;
+    }
+  }
+
+  const resolvedSources: ResolvedCustodyTrancheSource[] = mutable.map((s) => {
+    const terminallyClosed =
+      s.terminallyClosed || (!s.legacyReconciliationRequired && s.retiredAtoms3 >= s.initialAtoms3);
+    const openAtoms3 =
+      s.legacyReconciliationRequired || terminallyClosed || s.retiredAtoms3 >= s.initialAtoms3
+        ? 0n
+        : s.initialAtoms3 - s.retiredAtoms3;
+    return {
+      kind: s.kind,
+      rawId: s.rawId,
+      canonicalId: s.canonicalId,
+      ackId: s.ackId,
+      lineId: s.lineId,
+      transferId: s.transferId,
+      allocationId: s.allocationId,
+      movementId: s.movementId,
+      sourceTs: s.sourceTs,
+      initialAtoms3: s.initialAtoms3,
+      retiredAtoms3: s.retiredAtoms3,
+      openAtoms3,
+      initialQuantity: quantityText(s.initialAtoms3),
+      retiredQuantity: quantityText(s.retiredAtoms3),
+      openQuantity: quantityText(openAtoms3),
+      terminallyClosed,
+      legacyReconciliationRequired: s.legacyReconciliationRequired,
+    };
+  });
+
+  const openTranches = resolvedSources.filter(
+    (s) => !s.legacyReconciliationRequired && !s.terminallyClosed && s.openAtoms3 > 0n,
+  );
+
+  return {
+    sources: resolvedSources,
+    openTranches,
+    legacyReconciliationRequiredLines: [...legacyReconciliationRequiredLinesSet],
+    hasInvalidLegacyClosure,
+  };
+}
+
+export function matchCustodyPackageSource(
+  resolved: ResolvedCustodyPackageSourcesResult,
+  pkgKey: string,
+): ResolvedCustodyTrancheSource | null {
+  const trimmed = (pkgKey ?? "").trim().toLowerCase();
+  const normKey = canonicalCustodyReferenceKey(pkgKey).toLowerCase();
+  const candidates: Array<{ source: ResolvedCustodyTrancheSource; exactAckMatch: boolean }> = [];
+
+  for (const s of resolved.sources) {
+    if (s.kind === "transfer_ack" && s.ackId && s.lineId) {
+      const ackId = s.ackId.toLowerCase();
+      const lineId = s.lineId.toLowerCase();
+      const transferId = (s.transferId ?? "").toLowerCase();
+      const rawId = s.rawId.toLowerCase();
+      const canonicalId = s.canonicalId.toLowerCase();
+      const exactAckMatch =
+        trimmed === ackId ||
+        trimmed === `pkg:${ackId}` ||
+        trimmed === rawId ||
+        trimmed === `pkg:${rawId}` ||
+        trimmed === canonicalId ||
+        normKey === ackId ||
+        normKey === rawId;
+      const lineOrTransferMatch =
+        trimmed === lineId ||
+        trimmed === `pkg:${lineId}` ||
+        trimmed === `transfer_line:${lineId}` ||
+        (Boolean(transferId) && (trimmed === transferId || trimmed === `pkg:${transferId}`)) ||
+        normKey === lineId ||
+        (Boolean(transferId) && normKey === transferId);
+      if (exactAckMatch || lineOrTransferMatch) {
+        candidates.push({ source: s, exactAckMatch });
+      }
+    } else if (s.kind === "mov_alloc" && s.allocationId) {
+      const allocId = s.allocationId.toLowerCase();
+      const movId = (s.movementId ?? "").toLowerCase();
+      const canonicalId = s.canonicalId.toLowerCase();
+      const exactMatch =
+        trimmed === allocId ||
+        trimmed === `pkg:${allocId}` ||
+        trimmed === canonicalId ||
+        (Boolean(movId) && trimmed === `mov:${movId}`) ||
+        normKey === allocId ||
+        (Boolean(movId) && normKey === movId);
+      if (exactMatch) {
+        candidates.push({ source: s, exactAckMatch: true });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+
+  invariant(
+    !resolved.hasInvalidLegacyClosure && !candidates.some((c) => c.source.legacyReconciliationRequired),
+    "legacy_source_reconciliation_required",
+    "Legacy line-only package closure on this transfer line requires explicit source attribution before closing tranches",
+  );
+
+  let matching = candidates;
+  if (matching.length > 1 && matching.every((c) => !c.exactAckMatch)) {
+    const openMatching = matching.filter((c) => c.source.openAtoms3 > 0n && !c.source.terminallyClosed);
+    if (openMatching.length === 1) {
+      matching = openMatching;
+    } else if (openMatching.length === 0) {
+      matching = [matching[matching.length - 1]];
+    }
+  }
+  invariant(
+    matching.length === 1,
+    "ambiguous_package_source",
+    "Package identifier matches multiple custody source records; specify the exact transfer acknowledgement or allocation ID",
+  );
+  return matching[0].source;
 }
 
 export function packageEvidenceAction(hazard: "none" | "sharp" | "contaminated", policy: PackageSafetyPolicy) {

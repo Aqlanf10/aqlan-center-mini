@@ -182,6 +182,246 @@ describe("P49/51/55/61 custody allocation transactions (no financial posting)",(
    expect.objectContaining({packageId:`${ackTrB.id}:${trB.lines[0].id}`,canonicalPackageId:`transfer_ack:${ackTrB.id}:${trB.lines[0].id}`,originalQuantity:"20",recordedConsumptionQuantity:"5",remainingQuantity:"15"})
   ]);
  });
+ it("Requirements 1 & 2: checkpoint on ackA (10/5/5) never subtracts from ackB (20) on the same transfer line, supports multiple and out-of-order checkpoints, serializes concurrent closures, and enforces legacy_source_reconciliation_required on unmapped multi-ack legacy line closures",async()=>{
+  // 1. ackA=10 -> checkpoint 10/5/5 -> ackB=20 on the SAME transfer_line (open = 5 + 20 = 25), then terminalA=5 and terminalB=20 -> open = 0
+  const f1=await fixture();
+  const tSameLine=transfer(f1,"30");
+  const lineId1=tSameLine.lines[0].id;
+  await custody.dispatchCustodyTransfer(admin,key(),tSameLine);
+  const ackA=ack(tSameLine,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackA);
+  const uA1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f1.destination,lotId:f1.lot,kind:"consumed",quantity:"5",reason:"Consume 5 from ackA before checkpoint"});
+  const cpA=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackA.id}:${lineId1}`,
+   evidenceEventId:uA1.id,
+   locationId:f1.destination,
+   lotId:f1.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"5",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"5",
+   reason:"Checkpoint ackA retiring 5 of 10 with 5 remaining",
+  });
+  expect(cpA).toMatchObject({closureKind:"checkpoint",terminalClosure:false,originalQuantity:"10",retiredOriginalQuantity:"5",remainingQuantity:"5"});
+
+  const ackB=ack(tSameLine,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackB);
+  const viewAfterAckB=await custody.readDoctorCustody(doctorA);
+  const lotAfterAckB=viewAfterAckB.closableLots.find(r=>r.locationId===f1.destination&&r.lotId===f1.lot)!;
+  expect(lotAfterAckB).toBeDefined();
+  expect(lotAfterAckB.lotOriginalQuantity).toBe("25");
+  expect(lotAfterAckB.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackA.id}:${lineId1}`,originalQuantity:"5",remainingQuantity:"5"}),
+   expect.objectContaining({packageId:`${ackB.id}:${lineId1}`,originalQuantity:"20",remainingQuantity:"20"}),
+  ]);
+
+  // Consume remaining 5 on ackA and 20 on ackB
+  const uA2=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f1.destination,lotId:f1.lot,kind:"consumed",quantity:"5",reason:"Consume remaining 5 from ackA"});
+  const uB1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f1.destination,lotId:f1.lot,kind:"consumed",quantity:"20",reason:"Consume 20 from ackB"});
+  const stRace=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:f1.destination,lotId:f1.lot,countedQuantity:"0",reason:"Stocktake 0 for concurrency check"});
+
+  // Real PostgreSQL concurrency check: two simultaneous terminal closures on ackA (5) with distinct keys and distinct evidence
+  const raceOutcomes=await Promise.allSettled([
+   custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackA.id}:${lineId1}`,evidenceEventId:uA2.id,locationId:f1.destination,lotId:f1.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"5",recordedConsumptionQuantity:"5",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Concurrent terminalA #1"}),
+   custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackA.id}:${lineId1}`,evidenceEventId:stRace.id,locationId:f1.destination,lotId:f1.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"5",recordedConsumptionQuantity:"5",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Concurrent terminalA #2"}),
+  ]);
+  expect(raceOutcomes.filter(r=>r.status==="fulfilled")).toHaveLength(1);
+  expect(raceOutcomes.filter(r=>r.status==="rejected")).toHaveLength(1);
+
+  // After terminalA=5, only ackB=20 remains open
+  const viewAfterTermA=await custody.readDoctorCustody(doctorA);
+  const lotAfterTermA=viewAfterTermA.closableLots.find(r=>r.locationId===f1.destination&&r.lotId===f1.lot)!;
+  expect(lotAfterTermA.lotOriginalQuantity).toBe("20");
+  expect(lotAfterTermA.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackB.id}:${lineId1}`,originalQuantity:"20",recordedConsumptionQuantity:"20",remainingQuantity:"0"}),
+  ]);
+
+  // TerminalB=20 closes the rest with zero hidden remainder
+  const termB=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackB.id}:${lineId1}`,evidenceEventId:uB1.id,locationId:f1.destination,lotId:f1.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"20",recordedConsumptionQuantity:"20",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"TerminalB closes full 20"});
+  expect(termB).toMatchObject({closureKind:"terminal",terminalClosure:true,originalQuantity:"20",retiredOriginalQuantity:"20"});
+  const viewAfterTermB=await custody.readDoctorCustody(doctorA);
+  expect(viewAfterTermB.closableLots.find(r=>r.locationId===f1.destination&&r.lotId===f1.lot)).toBeUndefined();
+
+  // 2. Multiple checkpoints on ackA2 and out-of-order checkpoint on ackB2 BEFORE ackA2
+  const f2=await fixture();
+  const t2=transfer(f2,"30");
+  const lineId2=t2.lines[0].id;
+  await custody.dispatchCustodyTransfer(admin,key(),t2);
+  const ackA2=ack(t2,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackA2);
+  const u2_a1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f2.destination,lotId:f2.lot,kind:"consumed",quantity:"3",reason:"Consume 3 on ackA2"});
+  const u2_a2=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f2.destination,lotId:f2.lot,kind:"consumed",quantity:"4",reason:"Consume 4 on ackA2"});
+  const ackB2=ack(t2,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackB2);
+  const u2_b1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f2.destination,lotId:f2.lot,kind:"consumed",quantity:"8",reason:"Consume 8 on ackB2"});
+
+  // Checkpoint ackB2 FIRST (20 -> consume 8 -> remaining 12) before any checkpoint on ackA2
+  const cpB2First=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackB2.id}:${lineId2}`,evidenceEventId:u2_b1.id,locationId:f2.destination,lotId:f2.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"20",recordedConsumptionQuantity:"8",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"12",reason:"Out-of-order checkpoint on ackB2 before ackA2"});
+  expect(cpB2First).toMatchObject({closureKind:"checkpoint",originalQuantity:"20",retiredOriginalQuantity:"8",remainingQuantity:"12"});
+
+  // Now two consecutive checkpoints on ackA2 (10 -> 7 -> 3) using u2_a1 and u2_a2
+  const cpA2_1=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackA2.id}:${lineId2}`,evidenceEventId:u2_a1.id,locationId:f2.destination,lotId:f2.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"10",recordedConsumptionQuantity:"3",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"7",reason:"First checkpoint on ackA2"});
+  expect(cpA2_1).toMatchObject({closureKind:"checkpoint",originalQuantity:"10",retiredOriginalQuantity:"3",remainingQuantity:"7"});
+  const cpA2_2=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:`${ackA2.id}:${lineId2}`,evidenceEventId:u2_a2.id,locationId:f2.destination,lotId:f2.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"7",recordedConsumptionQuantity:"4",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"3",reason:"Second checkpoint on ackA2"});
+  expect(cpA2_2).toMatchObject({closureKind:"checkpoint",originalQuantity:"7",retiredOriginalQuantity:"4",remainingQuantity:"3"});
+
+  const viewMultiCp=await custody.readDoctorCustody(doctorA);
+  const lotMultiCp=viewMultiCp.closableLots.find(r=>r.locationId===f2.destination&&r.lotId===f2.lot)!;
+  expect(lotMultiCp.lotOriginalQuantity).toBe("15");
+  expect(lotMultiCp.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackA2.id}:${lineId2}`,originalQuantity:"3"}),
+   expect.objectContaining({packageId:`${ackB2.id}:${lineId2}`,originalQuantity:"12"}),
+  ]);
+
+  // 3. Requirement 2: Legacy line-only closure (<lineId> or checkpoint:<id>:<lineId>)
+  // 3a) Unambiguous single-ack line: legacy checkpoint:<id>:<lineId> retiring 4 from 10 leaves 6 open
+  const f3=await fixture();
+  const tSingle=transfer(f3,"10");
+  const lineSingle=tSingle.lines[0].id;
+  await custody.dispatchCustodyTransfer(admin,key(),tSingle);
+  const ackSingle=ack(tSingle,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackSingle);
+  const uSingle4=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f3.destination,lotId:f3.lot,kind:"consumed",quantity:"4",reason:"Consume 4 before legacy line-only checkpoint"});
+  const legacySingleId=key();
+  await db.getPool().query(
+   "INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,original_qty,consumed_qty,returned_qty,waste_qty,remaining_qty,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,'sharp','safe_disposal_record','document_safe_disposal',4,4,0,0,6,0,TRUE,'Legacy line-only checkpoint on single-ack line',$6::jsonb,$7)",
+   [legacySingleId,`checkpoint:${legacySingleId}:${lineSingle}`,uSingle4.id,f3.destination,f3.lot,JSON.stringify({id:legacySingleId,canonicalPackageSourceId:`transfer_line:${lineSingle}`}),doctorA.userId],
+  );
+  const viewSingleLegacy=await custody.readDoctorCustody(doctorA);
+  expect(viewSingleLegacy.legacySourceReconciliationRequired.filter(r=>r.lotId===f3.lot)).toEqual([]);
+  const lotSingleLegacy=viewSingleLegacy.closableLots.find(r=>r.locationId===f3.destination&&r.lotId===f3.lot)!;
+  expect(lotSingleLegacy.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackSingle.id}:${lineSingle}`,originalQuantity:"6"}),
+  ]);
+
+  // 3b) Ambiguous multi-ack line with unmapped legacy line-only closure -> exposes legacy_source_reconciliation_required & blocks closure until mapped
+  const f4=await fixture();
+  const tMultiLeg=transfer(f4,"30");
+  const lineMultiLeg=tMultiLeg.lines[0].id;
+  await custody.dispatchCustodyTransfer(admin,key(),tMultiLeg);
+  const ackLegA=ack(tMultiLeg,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackLegA);
+  const ackLegB=ack(tMultiLeg,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackLegB);
+  const uLeg5=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f4.destination,lotId:f4.lot,kind:"consumed",quantity:"5",reason:"Consume 5 on multi-ack legacy line"});
+  const uLegMore=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f4.destination,lotId:f4.lot,kind:"consumed",quantity:"25",reason:"Consume remaining 25 on multi-ack legacy line"});
+  const legacyAmbigId=key();
+  await db.getPool().query(
+   "INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,original_qty,consumed_qty,returned_qty,waste_qty,remaining_qty,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,'sharp','safe_disposal_record','document_safe_disposal',5,5,0,0,25,0,TRUE,'Unmapped legacy line-only checkpoint on multi-ack line',$6::jsonb,$7)",
+   [legacyAmbigId,`checkpoint:${legacyAmbigId}:${lineMultiLeg}`,uLeg5.id,f4.destination,f4.lot,JSON.stringify({id:legacyAmbigId,canonicalPackageSourceId:`transfer_line:${lineMultiLeg}`}),doctorA.userId],
+  );
+
+  const viewAmbig=await custody.readDoctorCustody(doctorA);
+  expect(viewAmbig.legacySourceReconciliationRequired).toContainEqual(
+   expect.objectContaining({
+    locationId:f4.destination,
+    lotId:f4.lot,
+    transferLineIds:[lineMultiLeg],
+    reason:"legacy_source_reconciliation_required",
+   }),
+  );
+  // Rejects closure on lineMultiLeg, ackLegA, or ackLegB with legacy_source_reconciliation_required
+  for(const targetPkg of [lineMultiLeg,`${ackLegA.id}:${lineMultiLeg}`,`${ackLegB.id}:${lineMultiLeg}`]){
+   await expect(custody.closeCustodyPackage(doctorA,key(),{
+    id:key(),
+    packageId:targetPkg,
+    evidenceEventId:uLegMore.id,
+    locationId:f4.destination,
+    lotId:f4.lot,
+    hazard:"sharp",
+    policy:"safe_disposal_record",
+    originalQuantity:"8",
+    recordedConsumptionQuantity:"8",
+    returnedOrTransferredQuantity:"0",
+    approvedWasteQuantity:"0",
+    remainingQuantity:"0",
+    reason:"Attempt closure while legacy line-only closure is unmapped",
+   })).rejects.toMatchObject({code:"legacy_source_reconciliation_required"});
+  }
+
+  // Historical closure records remain strictly immutable (append-only trigger blocks UPDATE)
+  await expect(
+   db.getPool().query(
+    "UPDATE custody_package_closures SET document = document || $2::jsonb WHERE id = $1",
+    [legacyAmbigId,JSON.stringify({legacyAckAllocations:[{acknowledgementId:ackLegA.id,retiredOriginalQuantity:"2"},{acknowledgementId:ackLegB.id,retiredOriginalQuantity:"3"}]})],
+   ),
+  ).rejects.toThrow(/append-only/i);
+
+  // 3c) Multi-ack line with a documented one-time legacyAckAllocations mapping (2 from ackMapA + 3 from ackMapB = 5) attributes each share once and allows closing remaining 8 and 17
+  const f5=await fixture();
+  const tMappedLeg=transfer(f5,"30");
+  const lineMappedLeg=tMappedLeg.lines[0].id;
+  await custody.dispatchCustodyTransfer(admin,key(),tMappedLeg);
+  const ackMapA=ack(tMappedLeg,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackMapA);
+  const ackMapB=ack(tMappedLeg,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackMapB);
+  const uMap5=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f5.destination,lotId:f5.lot,kind:"consumed",quantity:"5",reason:"Consume 5 on mapped legacy multi-ack line"});
+  const uMap8=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f5.destination,lotId:f5.lot,kind:"consumed",quantity:"8",reason:"Consume remaining 8 of ackMapA"});
+  const uMap17=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f5.destination,lotId:f5.lot,kind:"consumed",quantity:"17",reason:"Consume remaining 17 of ackMapB"});
+  const legacyMappedId=key();
+  await db.getPool().query(
+   "INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,original_qty,consumed_qty,returned_qty,waste_qty,remaining_qty,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,'sharp','safe_disposal_record','document_safe_disposal',5,5,0,0,25,0,TRUE,'Mapped legacy line-only checkpoint on multi-ack line',$6::jsonb,$7)",
+   [
+    legacyMappedId,
+    `checkpoint:${legacyMappedId}:${lineMappedLeg}`,
+    uMap5.id,
+    f5.destination,
+    f5.lot,
+    JSON.stringify({
+     id:legacyMappedId,
+     canonicalPackageSourceId:`transfer_line:${lineMappedLeg}`,
+     legacyAckAllocations:[
+      {acknowledgementId:ackMapA.id,retiredOriginalQuantity:"2"},
+      {acknowledgementId:ackMapB.id,retiredOriginalQuantity:"3"},
+     ],
+    }),
+    doctorA.userId,
+   ],
+  );
+  const viewMapped=await custody.readDoctorCustody(doctorA);
+  expect(viewMapped.legacySourceReconciliationRequired.filter(r=>r.lotId===f5.lot)).toEqual([]);
+  const lotMapped=viewMapped.closableLots.find(r=>r.locationId===f5.destination&&r.lotId===f5.lot)!;
+  expect(lotMapped.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackMapA.id}:${lineMappedLeg}`,originalQuantity:"8"}),
+   expect.objectContaining({packageId:`${ackMapB.id}:${lineMappedLeg}`,originalQuantity:"17"}),
+  ]);
+  await expect(custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackMapA.id}:${lineMappedLeg}`,
+   evidenceEventId:uMap8.id,
+   locationId:f5.destination,
+   lotId:f5.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"8",
+   recordedConsumptionQuantity:"8",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"0",
+   reason:"Terminal close remaining 8 on ackMapA",
+  })).resolves.toMatchObject({reviewRequired:true,remainingQuantity:"0"});
+  await expect(custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackMapB.id}:${lineMappedLeg}`,
+   evidenceEventId:uMap17.id,
+   locationId:f5.destination,
+   lotId:f5.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"17",
+   recordedConsumptionQuantity:"17",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"0",
+   reason:"Terminal close remaining 17 on ackMapB",
+  })).resolves.toMatchObject({reviewRequired:true,remainingQuantity:"0"});
+  expect((await custody.readDoctorCustody(doctorA)).closableLots.find(r=>r.lotId===f5.lot)).toBeUndefined();
+ });
 });
 
 

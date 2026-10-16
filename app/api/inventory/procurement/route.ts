@@ -60,6 +60,7 @@ const CONFLICT_CODES = new Set([
   "receipt_already_invoiced",
   "quarantine_overresolved",
   "already_reconciled",
+  "legacy_source_reconciliation_required",
   "duplicate_consumption",
   "package_or_evidence_already_closed",
   "transfer_overacknowledged",

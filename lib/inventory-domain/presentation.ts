@@ -21,6 +21,8 @@ const ALLOWLISTED_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   actor_forbidden: "لا تملك صلاحية تنفيذ هذه العملية.",
   operation_forbidden: "تتطلب هذه العملية صلاحية الإدارة.",
   custody_forbidden: "العهدة المحددة لا تخص هذا الطبيب أو غير مصرح بها.",
+  custody_owner_forbidden: "لا تملك صلاحية التصرف في عهدة طبيب آخر.",
+  custody_read_forbidden: "لا تملك صلاحية الاطلاع على كشوف عهد المواد للأطباء.",
   clinical_context_forbidden: "لا تملك صلاحية ربط الاستهلاك بهذا الملف السريري.",
   clinical_context_mismatch: "بيانات المريض أو الزيارة أو الإجراء غير متطابقة أو غير موجودة.",
   invalid_waste_approval: "يتطلب إثبات التالف في العهدة اعتمادًا إداريًا مستقلًا وصالحًا.",
@@ -28,8 +30,11 @@ const ALLOWLISTED_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   package_history_mismatch: "كميات إغلاق العبوة لا تطابق السجل الفعلي لحركة الدفعة في العهدة.",
   invalid_package_source: "معرّف العبوة غير مرتبط بتحويل أو تخصيص استلام فعلي.",
   package_source_mismatch: "معرّف العبوة لا يطابق موقع العهدة أو الدفعة المحددة.",
+  ambiguous_package_source: "معرّف العبوة يطابق أكثر من شريحة استلام مفتوحة؛ اختر شريحة الاستلام المحددة.",
+  legacy_source_reconciliation_required: "تتطلب إغلاقات العبوات التاريخية على سطر التحويل هذا تحديد نسبتها لكل استلام أولًا.",
   invalid_package_evidence: "معرّف واقعة الإثبات غير مرتبط بسجل استهلاك أو جرد أو تالف أو إرجاع فعلي.",
   package_evidence_mismatch: "معرّف واقعة الإثبات لا يطابق موقع العهدة أو الدفعة المحددة.",
+  ambiguous_package_evidence: "معرّف واقعة الإثبات يطابق أكثر من سجل؛ حدد معرّف الواقعة بدقة.",
   package_policy_override_forbidden: "لا يُسمح بتغيير سياسة إثبات العبوة الافتراضية دون تصعيد خطورة موثق.",
   unsafe_empty_return: "الأدوات الحادة والمواد الملوثة لا تعاد كعبوات فارغة؛ يلزم توثيق التخلص الآمن.",
   invalid_package_hazard: "تصنيف خطورة العبوة غير صالح.",
@@ -38,6 +43,7 @@ const ALLOWLISTED_DOMAIN_ERROR_MESSAGES: Record<string, string> = {
   unposted_settlement_adjustment: "لا يمكن خصم تسوية غير مرحّلة ماليًا من المقارنة السنوية.",
   settlement_source_mismatch: "أرقام الاستهلاك المرسلة لا تطابق السجل الفعلي المؤكد في النظام.",
   invalid_period: "صيغة فترة المقارنة السنوية غير صالحة.",
+  invalid_period_id: "صيغة فترة المقارنة السنوية غير صالحة.",
   unresolved_historical_lineage: "يتعذر ربط الصرف التاريخي بدفعة سابقة مؤكدة دون تخمين بأثر رجعي.",
   negative_legacy_balance: "الرصيد التاريخي لا يكفي لتسوية حركات الصرف دون تخمين رصيد افتتاحي.",
   already_reconciled: "تمت تسوية الحركات التاريخية لهذا البند بالفعل.",
@@ -141,9 +147,15 @@ export function sanitizeInventoryAuditDetails(
 }
 
 /** Returns only allowlisted public domain error codes, falling back to a generic public code. */
-export function publicInventoryErrorCode(code: unknown): string {
-  return typeof code === "string" && Object.prototype.hasOwnProperty.call(ALLOWLISTED_DOMAIN_ERROR_MESSAGES, code)
-    ? code
+export function publicInventoryErrorCode(codeOrError: unknown): string {
+  const candidate =
+    typeof codeOrError === "string"
+      ? codeOrError
+      : codeOrError instanceof InventoryDomainError
+        ? codeOrError.code
+        : null;
+  return typeof candidate === "string" && Object.prototype.hasOwnProperty.call(ALLOWLISTED_DOMAIN_ERROR_MESSAGES, candidate)
+    ? candidate
     : "invalid_inventory_operation";
 }
 

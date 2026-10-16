@@ -21,10 +21,12 @@ import {
 } from "../lib/inventory-domain/treatment-cost";
 import {
   attributableConsumedCost, calculateDeduction, canonicalCustodyReferenceKey, canonicalSettlementPeriodId, classifyDefaultPackageSafety, convertSettlementMoney,
-  packageEvidenceAction, previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
-  resolvePackageSafetyWithFieldObservation, reviewReplenishment, summarizeAppliedDeductions,
+  matchCustodyPackageSource, packageEvidenceAction, parseCustodyPackageClosureSource, previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
+  resolveCustodyPackageSources, resolvePackageSafetyWithFieldObservation, reviewReplenishment, summarizeAppliedDeductions,
   treatmentCostAfterDoctorRecovery, type AppliedDeduction, type AttributableConsumption,
 } from "../lib/inventory-domain/custody";
+import { InventoryDomainError } from "../lib/inventory-domain/quantities";
+import { publicInventoryErrorCode, safeInventoryErrorMessage } from "../lib/inventory-domain/presentation";
 
 const issue = (overrides: Partial<TreatmentIssue> = {}): TreatmentIssue => ({
   movementId: "out1", usageKey: "visit1/proc1/material1", itemId: "gutta", baseUnit: "cone", atomsPerUnit: 1,
@@ -522,5 +524,198 @@ describe("R03, R10, R11, R12 schema, API and UI bilingual/locator invariants", (
       reviewRequired: false,
       evidenceVerificationStatus: "verified_disposal_record",
     });
+  });
+
+  it("Requirement 1 & 2: parseCustodyPackageClosureSource, resolveCustodyPackageSources, and matchCustodyPackageSource isolate ack-specific checkpoints and explicitly handle legacy line-only closures", () => {
+    const closure1 = "11111111-1111-4111-8111-111111111111";
+    const closure2 = "11111111-1111-4111-8111-111111111112";
+    const ackA = "22222222-2222-4222-8222-222222222221";
+    const ackB = "22222222-2222-4222-8222-222222222222";
+    const lineId = "33333333-3333-4333-8333-333333333333";
+    const transferId = "44444444-4444-4444-8444-444444444444";
+
+    // 3-UUID checkpoint is strictly transfer_ack (ackA:lineId), never legacy line-only
+    expect(parseCustodyPackageClosureSource(`checkpoint:${closure1}:${ackA}:${lineId}`)).toEqual({
+      kind: "transfer_ack",
+      isCheckpoint: true,
+      closureId: closure1,
+      ackId: ackA,
+      lineId,
+      rawSourceId: `${ackA}:${lineId}`,
+      canonicalSourceId: `transfer_ack:${ackA}:${lineId}`,
+    });
+
+    // 2-UUID checkpoint without transfer_ack doc metadata is single_uuid / legacy_transfer_line
+    expect(parseCustodyPackageClosureSource(`checkpoint:${closure1}:${lineId}`)).toEqual({
+      kind: "single_uuid",
+      isCheckpoint: true,
+      closureId: closure1,
+      targetId: lineId,
+      rawSourceId: lineId,
+    });
+
+    // 1. ackA=10 -> checkpoint 10/5/5 -> ackB=20 on the same transfer line:
+    //    open must be 5 + 20 = 25 (checkpoint on ackA never subtracts from ackB!)
+    const sources = [
+      {
+        kind: "transfer_ack" as const,
+        rawId: `${ackA}:${lineId}`,
+        canonicalId: `transfer_ack:${ackA}:${lineId}`,
+        ackId: ackA,
+        lineId,
+        transferId,
+        acceptedQuantity: "10",
+        sourceTs: "2026-10-16T01:00:00.000Z",
+      },
+      {
+        kind: "transfer_ack" as const,
+        rawId: `${ackB}:${lineId}`,
+        canonicalId: `transfer_ack:${ackB}:${lineId}`,
+        ackId: ackB,
+        lineId,
+        transferId,
+        acceptedQuantity: "20",
+        sourceTs: "2026-10-16T02:00:00.000Z",
+      },
+    ];
+
+    const afterAckACheckpoint = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        {
+          id: closure1,
+          packageId: `checkpoint:${closure1}:${ackA}:${lineId}`,
+          originalQuantity: "5",
+          remainingQuantity: "5",
+        },
+      ],
+    });
+    expect(afterAckACheckpoint.legacyReconciliationRequiredLines).toEqual([]);
+    expect(afterAckACheckpoint.openTranches.map((t) => ({ rawId: t.rawId, openQuantity: t.openQuantity }))).toEqual([
+      { rawId: `${ackA}:${lineId}`, openQuantity: "5" },
+      { rawId: `${ackB}:${lineId}`, openQuantity: "20" },
+    ]);
+    expect(matchCustodyPackageSource(afterAckACheckpoint, `${ackA}:${lineId}`)?.openQuantity).toBe("5");
+    expect(matchCustodyPackageSource(afterAckACheckpoint, `${ackB}:${lineId}`)?.openQuantity).toBe("20");
+    // Line-level reference is ambiguous while both tranches remain open
+    expect(() => matchCustodyPackageSource(afterAckACheckpoint, lineId)).toThrowError(
+      expect.objectContaining({ code: "ambiguous_package_source" }),
+    );
+
+    // Terminal closures on ackA (5) and ackB (20) leave 0 open tranches and zero hidden remainder
+    const afterBothTerminal = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        { id: closure1, packageId: `checkpoint:${closure1}:${ackA}:${lineId}`, originalQuantity: "5", remainingQuantity: "5" },
+        { id: closure2, packageId: `${ackA}:${lineId}`, originalQuantity: "5", remainingQuantity: "0" },
+        { id: "11111111-1111-4111-8111-111111111113", packageId: `${ackB}:${lineId}`, originalQuantity: "20", remainingQuantity: "0" },
+      ],
+    });
+    expect(afterBothTerminal.openTranches).toHaveLength(0);
+    expect(matchCustodyPackageSource(afterBothTerminal, `${ackA}:${lineId}`)?.terminallyClosed).toBe(true);
+    expect(matchCustodyPackageSource(afterBothTerminal, `${ackB}:${lineId}`)?.terminallyClosed).toBe(true);
+
+    // 2. Multiple checkpoints on ackA (retiring 3 then 4 -> remaining 3) + checkpoint on ackB before ackA closes (retiring 8 -> remaining 12)
+    const multiCheckpoints = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        { id: closure1, packageId: `checkpoint:${closure1}:${ackA}:${lineId}`, originalQuantity: "3", remainingQuantity: "7" },
+        { id: closure2, packageId: `checkpoint:${closure2}:${ackA}:${lineId}`, originalQuantity: "4", remainingQuantity: "3" },
+        { id: "11111111-1111-4111-8111-111111111114", packageId: `checkpoint:11111111-1111-4111-8111-111111111114:${ackB}:${lineId}`, originalQuantity: "8", remainingQuantity: "12" },
+      ],
+    });
+    expect(multiCheckpoints.openTranches.map((t) => ({ rawId: t.rawId, openQuantity: t.openQuantity }))).toEqual([
+      { rawId: `${ackA}:${lineId}`, openQuantity: "3" },
+      { rawId: `${ackB}:${lineId}`, openQuantity: "12" },
+    ]);
+
+    // 3. Unambiguous single-acknowledgement legacy line-only closure (<lineId> or checkpoint:<id>:<lineId>)
+    const singleAckLegacy = resolveCustodyPackageSources({
+      sources: [sources[0]],
+      closures: [
+        { id: closure1, packageId: `checkpoint:${closure1}:${lineId}`, originalQuantity: "4", remainingQuantity: "6" },
+      ],
+    });
+    expect(singleAckLegacy.legacyReconciliationRequiredLines).toEqual([]);
+    expect(singleAckLegacy.openTranches.map((t) => ({ rawId: t.rawId, openQuantity: t.openQuantity }))).toEqual([
+      { rawId: `${ackA}:${lineId}`, openQuantity: "6" },
+    ]);
+
+    // 4. Ambiguous multi-acknowledgement legacy line-only closure without mapping -> legacy_source_reconciliation_required
+    const ambiguousLegacy = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        { id: closure1, packageId: `checkpoint:${closure1}:${lineId}`, originalQuantity: "5", remainingQuantity: "5" },
+      ],
+    });
+    expect(ambiguousLegacy.legacyReconciliationRequiredLines).toEqual([lineId]);
+    expect(ambiguousLegacy.openTranches).toEqual([]);
+    for (const key of [lineId, `${ackA}:${lineId}`, `${ackB}:${lineId}`]) {
+      expect(() => matchCustodyPackageSource(ambiguousLegacy, key)).toThrowError(
+        expect.objectContaining({ code: "legacy_source_reconciliation_required" }),
+      );
+    }
+
+    // 5. Documented one-time legacyAckAllocations mapping resolves multi-ack legacy closure cleanly
+    const mappedLegacy = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        {
+          id: closure1,
+          packageId: `checkpoint:${closure1}:${lineId}`,
+          originalQuantity: "12",
+          remainingQuantity: "18",
+          document: {
+            legacyAckAllocations: [
+              { acknowledgementId: ackA, retiredOriginalQuantity: "4" },
+              { acknowledgementId: ackB, retiredOriginalQuantity: "8" },
+            ],
+          },
+        },
+      ],
+    });
+    expect(mappedLegacy.legacyReconciliationRequiredLines).toEqual([]);
+    expect(mappedLegacy.hasInvalidLegacyClosure).toBe(false);
+    expect(mappedLegacy.openTranches.map((t) => ({ rawId: t.rawId, openQuantity: t.openQuantity }))).toEqual([
+      { rawId: `${ackA}:${lineId}`, openQuantity: "6" },
+      { rawId: `${ackB}:${lineId}`, openQuantity: "12" },
+    ]);
+
+    // 6. Invalid legacyAckAllocations (sum mismatch or over-capacity) triggers legacy_source_reconciliation_required
+    const badMappedLegacy = resolveCustodyPackageSources({
+      sources,
+      closures: [
+        {
+          id: closure1,
+          packageId: `checkpoint:${closure1}:${lineId}`,
+          originalQuantity: "12",
+          document: {
+            legacyAckAllocations: [
+              { acknowledgementId: ackA, retiredOriginalQuantity: "11" }, // exceeds ackA=10 capacity
+              { acknowledgementId: ackB, retiredOriginalQuantity: "1" },
+            ],
+          },
+        },
+      ],
+    });
+    expect(badMappedLegacy.legacyReconciliationRequiredLines).toEqual([lineId]);
+    expect(badMappedLegacy.hasInvalidLegacyClosure).toBe(true);
+    expect(() => matchCustodyPackageSource(badMappedLegacy, `${ackA}:${lineId}`)).toThrowError(
+      expect.objectContaining({ code: "legacy_source_reconciliation_required" }),
+    );
+  });
+
+  it("Requirement 3: allowlists custody_owner_forbidden, custody_read_forbidden, and legacy_source_reconciliation_required in presentation.ts", () => {
+    const ownerErr = new InventoryDomainError("custody_owner_forbidden", "Only the destination custody doctor can acknowledge receipt into doctor custody");
+    expect(publicInventoryErrorCode(ownerErr)).toBe("custody_owner_forbidden");
+    expect(safeInventoryErrorMessage(ownerErr)).toBe("لا تملك صلاحية التصرف في عهدة طبيب آخر.");
+
+    const readErr = new InventoryDomainError("custody_read_forbidden", "Custody statements are limited to the doctor owner or administrator");
+    expect(publicInventoryErrorCode(readErr)).toBe("custody_read_forbidden");
+    expect(safeInventoryErrorMessage(readErr)).toBe("لا تملك صلاحية الاطلاع على كشوف عهد المواد للأطباء.");
+
+    const legacyErr = new InventoryDomainError("legacy_source_reconciliation_required", "Legacy line-only package closure on this transfer line requires reconciliation");
+    expect(publicInventoryErrorCode(legacyErr)).toBe("legacy_source_reconciliation_required");
+    expect(safeInventoryErrorMessage(legacyErr)).toBe("تتطلب إغلاقات العبوات التاريخية على سطر التحويل هذا تحديد نسبتها لكل استلام أولًا.");
   });
 });
