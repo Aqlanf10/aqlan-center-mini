@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useHrNavigation, useHrStaffSelection } from "./HrNavigation";
 import { Modal } from "@/components/Modal";
 import type { SessionInfo } from "@/components/SessionProvider";
 import { newIdempotencyKey } from "@/lib/idempotency-key";
@@ -72,6 +73,10 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
   onReserveSave: (request: PendingContractSave, lease: ContractSaveAdmissionLease) => boolean;
   onSettleSave: (owner: string, expectedToken: string, request?: PendingContractSave) => boolean;
 }) {
+  const navigation = useHrNavigation();
+  const [selectedStaff, setSelectedStaff] = useHrStaffSelection();
+  const alive = useRef(false), readSequence = useRef(0), detailSequence = useRef(0);
+  useLayoutEffect(() => { alive.current = true; return () => { alive.current = false; readSequence.current++; detailSequence.current++; }; }, []);
   const saveAdmissionLease = useRef<ContractSaveAdmissionLease | undefined>(undefined);
   useLayoutEffect(() => {
     const lease = mountSaveAdmission(saveAdmission);
@@ -101,7 +106,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
   const [statusReason, setStatusReason] = useState("");
 
   // Create form state
-  const [formStaffId, setFormStaffId] = useState("");
+  const [formStaffId, setFormStaffId] = useState(selectedStaff);
   const [formTitle, setFormTitle] = useState("");
   const [formKind, setFormKind] = useState<HrContractKind>("support_staff");
   const [formStartDate, setFormStartDate] = useState(() => clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
@@ -139,28 +144,35 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
   const [addendumContent, setAddendumContent] = useState("");
 
   const loadContracts = useCallback(async () => {
+    if (!alive.current) return;
+    const sequence = ++readSequence.current;
+    setLoading(true); setContracts([]);
     try {
       const params = new URLSearchParams();
+      if (selectedStaff) params.set("staffId", selectedStaff);
       if (statusFilter) params.set("status", statusFilter);
       if (kindFilter) params.set("contractKind", kindFilter);
       const res = await fetch(`/api/hr/contracts?${params.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error("تعذّر تحميل العقود.");
       const data = await res.json();
+      if (!alive.current || sequence !== readSequence.current) return;
+      if (!Array.isArray(data) || (selectedStaff && data.some(row => String(row.staffId) !== selectedStaff))) throw new Error("تعذّر التحقق من هوية العقود.");
       setContracts(data);
       setError(null);
     } catch (err: any) {
-      setError(err?.message || "حدث خطأ أثناء تحميل العقود.");
+      if (alive.current && sequence === readSequence.current) setError(err?.message || "حدث خطأ أثناء تحميل العقود.");
     } finally {
-      setLoading(false);
+      if (alive.current && sequence === readSequence.current) setLoading(false);
     }
-  }, [statusFilter, kindFilter]);
+  }, [statusFilter, kindFilter, selectedStaff]);
+  useLayoutEffect(() => { setContracts([]); setLoading(true); return () => { readSequence.current++; }; }, [loadContracts]);
 
   const loadStaff = useCallback(async () => {
     try {
       const res = await fetch("/api/hr/staff", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        setStaffOptions(data);
+        if (alive.current) setStaffOptions(data);
       }
     } catch {
       // Ignored
@@ -172,18 +184,35 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
     void loadStaff();
   }, [loadContracts, loadStaff]);
 
-  const openDetails = async (contract: ContractItem) => {
-    setSelectedContract(contract);
+  const readDetails = useCallback(async (id: string) => {
+    if (!alive.current) return;
+    const sequence = ++detailSequence.current;
+    setSelectedContract(null); setContractDetails(null);
     try {
-      const res = await fetch(`/api/hr/contracts/${contract.id}`, { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setContractDetails(data);
-      }
-    } catch {
-      // Ignored
+      const res = await fetch(`/api/hr/contracts/${id}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("تعذّر تحميل العقد المحدد.");
+      const data = await res.json();
+      if (String(data?.contract?.id) !== id || (selectedStaff && String(data.contract.staffId) !== selectedStaff)) throw new Error("العقد لا يطابق الموظف المحدد.");
+      if (!alive.current || sequence !== detailSequence.current) return;
+      setSelectedContract(data.contract); setContractDetails(data);
+    } catch (err) {
+      if (alive.current && sequence === detailSequence.current) setError(err instanceof Error ? err.message : "تعذّر تحميل العقد.");
     }
+  }, [selectedStaff]);
+  const openDetails = (contract: ContractItem) => {
+    const id = String(contract.id);
+    if (navigation && navigation.contractId !== id) navigation.selectContract(id);
+    else void readDetails(id);
   };
+  const closeDetails = () => {
+    detailSequence.current++; setSelectedContract(null); setContractDetails(null);
+    if (navigation) navigation.selectContract("");
+  };
+  useEffect(() => {
+    // A saved detail link must not cover the owner's unresolved save review
+    // when this panel remounts. Explicit detail clicks remain available.
+    if (navigation?.contractId && !activeSave.current) void readDetails(navigation.contractId);
+  }, [navigation?.contractId, readDetails]);
 
   const applyTemplate = (template: "fixed" | "doctor_pct" | "doctor_salary" | "hybrid" | "probation") => {
     const presets = {
@@ -364,6 +393,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
 
   return (
     <section aria-label="إدارة العقود" className="space-y-4">
+      <label className="grid min-w-0 gap-1 text-sm">عقود الموظف<select aria-label="عقود الموظف" value={selectedStaff} onChange={event => setSelectedStaff(event.target.value)} className="w-full min-w-0 max-w-full rounded-xl border p-2"><option value="">كل الموظفين</option>{staffOptions.map(staff => <option key={staff.id} value={staff.id}>{staff.fullName}</option>)}</select></label>
       {pendingSave && <div role="status" className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <p>{pendingSave.phase === "awaiting" ? "جارٍ انتظار إيصال حفظ العقد؛ لا تُعِد الإرسال." : createModalOpen ? "طلب حفظ العقد معلق للمراجعة." : "نتيجة حفظ العقد غير مؤكدة. قد يكون الحفظ تم؛ لا تُعِد الإرسال قبل مراجعة قائمة العقود."}</p>
         <p>الطلب محفوظ في ذاكرة صفحة الموارد البشرية لهذا المستخدم فقط. تغيير التبويب أو إغلاق نافذة العقد لا يمحوه، لكن تحديث الصفحة أو مغادرتها يفقده؛ راجع القائمة أولاً لتجنب التكرار.</p>
@@ -784,7 +814,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
 
       {/* Contract Details & Addenda Modal */}
       {selectedContract && contractDetails && (
-        <Modal alignTop onClose={() => setSelectedContract(null)}>
+        <Modal alignTop onClose={closeDetails}>
           <div className="mx-auto w-full min-w-0 max-w-3xl rounded-2xl border border-navy-100 bg-white p-4 shadow-raised sm:p-5 [overflow-wrap:anywhere] [&_div]:min-w-0 [&_fieldset]:min-w-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-navy-100 pb-3">
               <div>
@@ -899,7 +929,7 @@ export function HrContractsPanel({ session, pendingSave, saveAdmission, mountSav
               </a>
               <button
                 type="button"
-                onClick={() => setSelectedContract(null)}
+                onClick={closeDetails}
                 className="rounded-xl bg-navy-100 px-4 py-2 text-xs font-semibold text-navy-800 hover:bg-navy-200"
               >
                 إغلاق

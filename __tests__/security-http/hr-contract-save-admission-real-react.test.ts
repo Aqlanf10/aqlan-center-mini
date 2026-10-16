@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { build } from "esbuild";
+import { hrNavigationAdapter } from "./_hr-navigation-adapter";
 import { chromium, type Browser, type Page } from "playwright";
 
 // Production HrPage + ContractsPanel + receipt/admission helper + Modal run
@@ -11,7 +12,7 @@ beforeAll(async () => {
     stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import HrPage from './app/hr/page';const root=createRoot(document.getElementById('root'));window.mountContractOwner=(username,role='admin')=>{window.syntheticContractSession=username?{username,role}:null;flushSync(()=>root.render(React.createElement(HrPage)));};`, resolveDir: process.cwd(), sourcefile: "synthetic-contract-admission.jsx", loader: "jsx" },
     bundle: true, write: false, jsx: "automatic", platform: "browser", format: "iife",
     define: { "process.env.NODE_ENV": '"development"' }, logLevel: "silent",
-    plugins: [{ name: "synthetic-contract-session", setup(build) {
+    plugins: [hrNavigationAdapter, { name: "synthetic-contract-session", setup(build) {
       build.onResolve({ filter: /(?:^|\/)SessionProvider$/ }, () => ({ path: "session", namespace: "contract-fixture" }));
       build.onResolve({ filter: /(?:^|\/)hr\/(?:Tasks|Staff|Attendance|Leaves|Payroll|Reports)Panel$/ }, args => ({ path: args.path, namespace: "contract-fixture" }));
       build.onResolve({ filter: /(?:^|\/)PageHeader$/ }, () => ({ path: "header", namespace: "contract-fixture" }));

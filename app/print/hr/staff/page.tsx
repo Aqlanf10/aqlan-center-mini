@@ -7,11 +7,10 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { HR_CONTRACT_KIND_LABEL, HR_DEPARTMENT_LABEL, HR_SALARY_PERIOD_LABEL, HR_WORK_STATUS_LABEL } from "@/lib/hr";
+import { PAY_BLOCKER_LABEL } from "@/lib/hr-pay-terms";
 import { isCurrency, formatAmount, CURRENCY_SHORT } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
-
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * كشف الطاقم وشروط الأجر — ملف طباعةٍ مستقل منظّم للمدير وحده.
@@ -40,24 +39,15 @@ export default async function HrStaffPrintPage({
   });
   const settings = await getSettingsSafe();
 
-  // مجموع لكل عملة على حدة — لا يجتمع الريال بالدولار أبدًا في سطر واحد.
-  // «الجاري» يُحسم بتاريخ التقرير **كما تراه القاعدة بتوقيت المركز** (dbTodayISO
-  // لا حساب UTC): شروطٌ بتاريخ سريانٍ لاحقٍ عليه لا تدخل الإجمالي — تظهر في
-  // صفوفها بأثناءها فقط.
-  const reportAsOf = await dbTodayISO();
+  // Same documented source/day as the private staff reader. This is a display
+  // total of monthly terms, never payroll accrual or a decision about deductions.
+  const reportAsOf = staff[0]?.currentPay?.asOf ?? await dbTodayISO();
   const salaryTotalsByCurrency = new Map<string, number>();
   for (const member of staff) {
-    if (
-      member.payTerms
-      && operationalStatus(member) !== "ended"
-      && operationalStatus(member) !== "unknown"
-      && member.payTerms.period === "monthly"
-      && member.payTerms.effectiveOn <= reportAsOf
-    ) {
-      salaryTotalsByCurrency.set(
-        member.payTerms.currency,
-        (salaryTotalsByCurrency.get(member.payTerms.currency) ?? 0) + member.payTerms.amountMinor,
-      );
+    const pay = member.currentPay, terms = pay?.terms;
+    if (terms?.salaryMinor != null && terms.currency && terms.salaryPeriod === "monthly"
+      && pay?.blockers.length === 0 && operationalStatus(member) !== "ended" && operationalStatus(member) !== "unknown") {
+      salaryTotalsByCurrency.set(terms.currency, (salaryTotalsByCurrency.get(terms.currency) ?? 0) + terms.salaryMinor);
     }
   }
 
@@ -65,7 +55,7 @@ export default async function HrStaffPrintPage({
     <div className="print-sheet hr-staff-sheet" dir="rtl">
       <PrintHeader settings={settings} title="كشف الطاقم وشروط الأجر" />
       <p className="report-meta">
-        صادر بتاريخ {friendlyDateLong(new Date().toISOString())} — عدد الملفات: {staff.length}
+        صادر بتاريخ {friendlyDateLong(reportAsOf)} — عدد الملفات: {staff.length}
         {departmentParam ? ` — القسم: ${HR_DEPARTMENT_LABEL[departmentParam as never]}` : ""}
         {statusParam ? ` — الحالة: ${HR_WORK_STATUS_LABEL[statusParam as never]}` : ""}
       </p>
@@ -89,7 +79,9 @@ export default async function HrStaffPrintPage({
           </tr>
         </thead>
         <tbody>
-          {staff.map((member, index) => (
+          {staff.map((member, index) => {
+            const pay = member.currentPay, terms = pay?.terms;
+            return (
             <tr key={member.id}>
               <td className="num">{index + 1}</td>
               <td>{member.fullName}</td>
@@ -98,14 +90,18 @@ export default async function HrStaffPrintPage({
               <td>{operationalStatusLabel(member)}</td>
               <td className="num">{member.hireDate ?? "—"}</td>
               <td className="num">{member.endDate ?? "—"}</td>
-              <td>{HR_CONTRACT_KIND_LABEL[member.contractKind]}</td>
-              <td className="num">{member.payTerms ? formatAmount(member.payTerms.amountMinor, isCurrency(member.payTerms.currency) ? member.payTerms.currency : "YER") : "—"}</td>
-              <td className="num">{member.payTerms ? `${member.payTerms.currency}${isCurrency(member.payTerms.currency) ? ` (${CURRENCY_SHORT[member.payTerms.currency]})` : ""}` : "—"}</td>
-              <td>{member.payTerms ? HR_SALARY_PERIOD_LABEL[member.payTerms.period] : "—"}</td>
-              <td className="num">{member.payTerms?.effectiveOn ?? "—"}</td>
+              <td>{terms ? HR_CONTRACT_KIND_LABEL[terms.kind] : "غير محسوم"}
+                <div>{pay?.source === "contract" ? `العقد ${pay.contract?.contractNumber} — إصدار ${pay.contract?.versionNumber}` : pay?.source === "staff_profile" ? "شروط الملف الابتدائية" : "مصدر الأجر يحتاج مراجعة"}</div>
+              </td>
+              <td className="num">{terms?.salaryMinor != null && terms.currency ? formatAmount(terms.salaryMinor, terms.currency) : "—"}
+                {Boolean(pay?.blockers.length) && <div dir="rtl">{pay!.blockers.map(code => PAY_BLOCKER_LABEL[code]).join("؛ ")}</div>}
+              </td>
+              <td className="num">{terms?.currency ? `${terms.currency} (${CURRENCY_SHORT[terms.currency]})` : "—"}</td>
+              <td>{terms?.salaryPeriod ? HR_SALARY_PERIOD_LABEL[terms.salaryPeriod] : "—"}</td>
+              <td className="num">{pay?.effectiveOn ?? "—"}</td>
               <td>{member.userId !== null ? "مرتبط" : "بلا حساب"}</td>
             </tr>
-          ))}
+          ); })}
           {staff.length === 0 && (
             <tr><td colSpan={13} className="empty">لا ملفات مطابقة.</td></tr>
           )}
@@ -122,10 +118,10 @@ export default async function HrStaffPrintPage({
               </li>
             ))}
           </ul>
-          <p className="hr-note">إجمالي شروط الملف للعرض، وليس استحقاق مسير. لا يدخل تاريخ مجهول أو ملف منتهٍ أو شرط راتب مستقبلي؛ الإيقاف لا يُفسر كخصم.</p>
+          <p className="hr-note">إجمالي الشروط الشهرية الموثقة للعرض، وليس استحقاق مسير. لا يدخل مصدر أجر محجوب للمراجعة أو تاريخ عمل مجهول أو ملف منتهٍ؛ الإيقاف لا يُفسر كخصم.</p>
         </section>
       )}
-      <p className="hr-note">تعاقدات «النسبة» للطبيبين تُقرأ من مصدر العمولات الحالي في الجهات ولا تظهر هنا كمبالغ راتب.</p>
+      <p className="hr-note">نسب العقود لا تُجمع مع الراتب هنا. الاستحقاق الفعلي يتبع سياسة محرك العمولات ومسار المسير المعتمد. يوم العيادة ومصدر شروط الأجر: {reportAsOf}</p>
 
       <PrintFooter settings={settings} />
       <PrintButton />

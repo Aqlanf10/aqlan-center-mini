@@ -234,3 +234,57 @@ it("policy change committed while approval waits for the doctor party lock canno
   expect(await financialState()).toEqual(before);
   expect((await db.commissionReport("2026-08-01", "2026-08-31")).find(row => row.doctorId === party.id && row.currency === "YER")?.earnedMinor).toBe(16000);
 });
+
+it.each([['YER', 150000], ['SAR', 150055], ['USD', 150099]] as const)('read-only %s projection activates a future agreement at the supplied clinic day without any new write', async (currency, amount) => {
+  const s = await staff();
+  const c = await contracts.createContract({ staffId: s.id, templateKind: 'support_staff', title: 'Synthetic future read only', startDate: '2099-02-01', compensationKind: 'salary', baseSalaryMinor: amount, salaryCurrency: currency, salaryPeriod: 'monthly' }, admin);
+  await contracts.approveContract(c.id, admin);
+  const { readCurrentStaffPay } = await import('../../lib/hr-current-pay');
+  const detail = await hr.getStaffDetail(s.id);
+  const state = async () => ({ financial: await financialState(), staff: (await fixture.source.query('SELECT to_jsonb(s)::text AS value FROM hr_staff s ORDER BY id')).rows, contracts: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_contracts c ORDER BY id')).rows, changes: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_staff_changes c ORDER BY id')).rows });
+  const before = await state(), client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    expect((await readCurrentStaffPay(client, [detail!.staff], '2099-01-31')).get(s.id)).toMatchObject({ source: 'staff_profile', terms: { salaryMinor: 100000 }, profilePayLocked: false });
+    expect((await readCurrentStaffPay(client, [detail!.staff], '2099-02-01')).get(s.id)).toMatchObject({ source: 'contract', terms: { salaryMinor: amount, currency }, contract: { id: c.id }, profilePayLocked: true });
+    await client.query('COMMIT');
+  } finally { client.release(); }
+  expect(await state()).toEqual(before);
+  expect((await hr.getStaffDetail(s.id))!.staff.payTerms!.amountMinor).toBe(100000);
+});
+it('read-only effective-day rollover changes compensation kind without rewriting the old profile or history', async () => {
+  const s = await staff('commission'), c = await salaryContract(s.id, '2099-02-01');
+  const { readCurrentStaffPay } = await import('../../lib/hr-current-pay');
+  const detail = (await hr.getStaffDetail(s.id))!;
+  const state = async () => ({ financial: await financialState(), staff: (await fixture.source.query('SELECT to_jsonb(s)::text AS value FROM hr_staff s ORDER BY id')).rows, contracts: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_contracts c ORDER BY id')).rows, changes: (await fixture.source.query('SELECT to_jsonb(c)::text AS value FROM hr_staff_changes c ORDER BY id')).rows });
+  const before = await state(), client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    expect((await readCurrentStaffPay(client, [detail.staff], '2099-01-31')).get(s.id)).toMatchObject({ source: 'staff_profile', terms: { kind: 'commission' } });
+    expect((await readCurrentStaffPay(client, [detail.staff], '2099-02-01')).get(s.id)).toMatchObject({ source: 'contract', terms: { kind: 'salary', salaryMinor: 120000 }, contract: { id: c.id } });
+    await client.query('COMMIT');
+  } finally { client.release(); }
+  expect(await state()).toEqual(before);
+  expect((await hr.getStaffDetail(s.id))!.staff.contractKind).toBe('commission');
+});
+it('detail and list agree on clinic today while the assignment directory and minimal read omit current pay', async () => {
+  const s = await staff(); await salaryContract(s.id);
+  const detail = (await hr.getStaffDetail(s.id))!, list = await hr.listStaff({ includePayTerms: true });
+  const day = (await fixture.source.query("SELECT (NOW() AT TIME ZONE $1)::date::text AS day", [db.CLINIC_TIME_ZONE])).rows[0].day;
+  expect(detail.staff.currentPay).toEqual(list.find(row => row.id === s.id)!.currentPay);
+  expect(detail.staff.currentPay).toMatchObject({ asOf: day, source: 'contract', profilePayLocked: true });
+  expect((await hr.listStaff({ includePayTerms: false })).every(row => !('currentPay' in row) && row.payTerms === null)).toBe(true);
+  expect(JSON.stringify(await hr.listStaffDirectory())).not.toContain('currentPay');
+});
+it('current contract-policy disagreement is read-only and does not copy the contract rate into financial policy', async () => {
+  const { s, party, c } = await doctor();
+  // An explicit approved agreement differs from the established 30% financial policy.
+  const addendum = await contracts.createContractAddendum(c.id, { title: 'Synthetic different agreement', startDate: '2026-01-02', addendumReason: 'Synthetic review', commissionRatePercent: 40 }, admin);
+  await contracts.approveContract(addendum.id, admin);
+  const before = await financialState(), originalParty = (await fixture.source.query('SELECT to_jsonb(p)::text AS value FROM parties p WHERE id=$1', [party.id])).rows;
+  const pay = (await hr.getStaffDetail(s.id))!.staff.currentPay!;
+  expect(pay).toMatchObject({ commissionPolicyPercent: 30, contract: { commissionRatePercent: 40 } });
+  expect(pay.blockers).toContain('commission_policy_conflict');
+  expect(await financialState()).toEqual(before);
+  expect((await fixture.source.query('SELECT to_jsonb(p)::text AS value FROM parties p WHERE id=$1', [party.id])).rows).toEqual(originalParty);
+});

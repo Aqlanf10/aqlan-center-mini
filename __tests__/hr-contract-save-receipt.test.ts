@@ -122,7 +122,7 @@ describe("canonical contract save receipt", () => {
     expect(settlement).not.toContain("canAdmit");
     expect(settlement).toContain("request.owner !== owner || request.token !== expectedToken");
     expect(handler).toContain("onSettleSave(request.owner, request.token) && lease.canAdmit()");
-    expect(parent).toContain("<HrContractsPanel key={owner}");
+    expect(parent).toContain("<HrContractsPanel key={`${owner}:${staffId}:${contractId}`}");
     expect(parent).toContain("pendingSave={contractSaves[owner]}");
     expect(parent).toContain("Object.values(contractSaves).some(Boolean)");
     expect(parent).toContain('window.addEventListener("beforeunload"');

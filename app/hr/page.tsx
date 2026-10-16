@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { HR_TABS, PROFILE_TABS, hrHref, hrId, type HrTab, type HrProfileTab } from '@/lib/hr-navigation';
+import { HrNavigationContext } from '@/components/hr/HrNavigation';
 import { createContractSaveAdmissionGate, type ContractSaveAdmissionLease, type PendingContractSave } from "@/lib/hr-contract-save-receipt";
 import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
@@ -22,7 +26,6 @@ const subscribeHydration = () => () => {};
 const clientHydrated = () => true;
 const serverHydrated = () => false;
 
-type HrTab = "tasks" | "staff" | "contracts" | "attendance" | "leaves" | "payroll" | "reports" | "settings";
 
 /**
  * «الموارد البشرية والمهام» — الوحدة الشاملة والمترابطة لإدارة الطاقم في مركز عقلان.
@@ -32,10 +35,22 @@ type HrTab = "tasks" | "staff" | "contracts" | "attendance" | "leaves" | "payrol
  * الإجازات والأرصدة ← المهام اليومية ← المسير ومستحقات النسبة ← الصرف والتقارير المالية.
  */
 export default function HrPage() {
+  return <Suspense fallback={<p role="status">جارٍ تحميل الموارد البشرية…</p>}><HrPageView /></Suspense>;
+}
+function HrPageView() {
   const session = useSession();
+  const searchParams = useSearchParams(), router = useRouter();
+  const query = searchParams.toString();
+  const requestedTab = searchParams.get('tab') as HrTab;
   const hydrated = useSyncExternalStore(subscribeHydration, clientHydrated, serverHydrated);
-  const [tab, setTab] = useState<HrTab>("tasks");
   const admin = isAdmin(session?.role);
+  const allowed = (id: HrTab) => ['tasks', 'leaves'].includes(id) || admin || (id === 'attendance' && session?.role === 'reception');
+  const tab = HR_TABS.includes(requestedTab) && allowed(requestedTab) ? requestedTab : 'tasks';
+  const staffId = admin || session?.role === 'reception' ? hrId(searchParams.get('staffId')) : '';
+  const contractId = admin ? hrId(searchParams.get('contractId')) : '';
+  const requestedProfileTab = searchParams.get('profileTab') as HrProfileTab;
+  const profileTab = PROFILE_TABS.includes(requestedProfileTab) ? requestedProfileTab : 'overview';
+  const href = (patch: Record<string, string | null>) => hrHref(query, patch);
   const owner = session ? `${session.username}\u0000${session.role}` : "";
   // Private contract intent belongs to this HR page and signed owner, above
   // tab mounting. It is never written to browser storage or automatically retried.
@@ -82,6 +97,10 @@ export default function HrPage() {
   ];
 
   return (
+    <HrNavigationContext.Provider value={{ staffId, profileTab, contractId, href,
+      selectStaff: id => router.push(href({ staffId: id || null, contractId: null }), { scroll: false }),
+      selectContract: id => router.push(href({ contractId: id || null }), { scroll: false }),
+      closeProfile: () => router.push(href({ staffId: null, contractId: null }), { scroll: false }) }}>
     <div className="mx-auto w-full max-w-7xl px-3 pb-20 pt-4 sm:px-6">
       <PageHeader
         title="الموارد البشرية والمهام"
@@ -98,21 +117,27 @@ export default function HrPage() {
         >
           {TABS.filter((t) => t.visible).map((t) => {
             const isActive = tab === t.id;
-            return (
-              <button
+            const className = `flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+              isActive ? "bg-navy-900 text-white shadow-md shadow-navy-950/20" : "text-navy-600 hover:bg-navy-50 hover:text-navy-900"
+            }`;
+            const content = <><span>{t.icon}</span><span>{t.label}</span></>;
+            // An aria-disabled anchor still navigates before React attaches.
+            // Native disabled buttons make the initial server affordance honest.
+            return hydrated ? (
+              <Link
                 key={t.id}
                 role="tab"
                 aria-selected={isActive}
-                disabled={!hydrated}
-                onClick={() => { if (hydrated) setTab(t.id); }}
-                className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-                  isActive
-                    ? "bg-navy-900 text-white shadow-md shadow-navy-950/20"
-                    : "text-navy-600 hover:bg-navy-50 hover:text-navy-900"
-                }`}
+                href={href({ tab: t.id })}
+                prefetch={false}
+                scroll={false}
+                className={className}
               >
-                <span>{t.icon}</span>
-                <span>{t.label}</span>
+                {content}
+              </Link>
+            ) : (
+              <button key={t.id} type="button" role="tab" aria-selected={isActive} disabled className={className}>
+                {content}
               </button>
             );
           })}
@@ -123,15 +148,16 @@ export default function HrPage() {
       <main className="min-h-[500px]">
         <HrHistoryDraftProvider view={tab}>
         {tab === "tasks" && <HrTasksPanel session={session} />}
-        {tab === "staff" && admin && <HrStaffPanel key={owner} />}
-        {tab === "contracts" && admin && <HrContractsPanel key={owner} session={session} pendingSave={contractSaves[owner]} saveAdmission={saveAdmission} mountSaveAdmission={saveAdmissionGate.mount} onReserveSave={reserveContractSave} onSettleSave={settleContractSave} />}
-        {tab === "attendance" && <HrAttendancePanel key={owner} isAdmin={admin} />}
-        {tab === "leaves" && <HrLeavesPanel isAdmin={admin} />}
+        {tab === "staff" && admin && <HrStaffPanel key={`${owner}:${staffId}`} />}
+        {tab === "contracts" && admin && <HrContractsPanel key={`${owner}:${staffId}:${contractId}`} session={session} pendingSave={contractSaves[owner]} saveAdmission={saveAdmission} mountSaveAdmission={saveAdmissionGate.mount} onReserveSave={reserveContractSave} onSettleSave={settleContractSave} />}
+        {tab === "attendance" && <HrAttendancePanel key={`${owner}:${staffId}`} isAdmin={admin} />}
+        {tab === "leaves" && <HrLeavesPanel key={`${owner}:${staffId}`} isAdmin={admin} />}
         {tab === "payroll" && admin && <div key={owner} className="space-y-4"><HrPayrollHistoryPanel /><HrPayrollPanel /></div>}
-        {tab === "reports" && admin && <HrReportsPanel />}
+        {tab === "reports" && admin && <HrReportsPanel key={owner} />}
         {tab === "settings" && admin && <HrSettingsPanel key={owner} />}
         </HrHistoryDraftProvider>
       </main>
     </div>
+    </HrNavigationContext.Provider>
   );
 }

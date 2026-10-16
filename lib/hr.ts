@@ -20,6 +20,7 @@ import { getPool, insertAuditRow, recordAudit, type DbClient, type DbPool } from
 import { withIsolation, withTransaction } from "./transactions";
 import { CLINIC_TIME_ZONE } from "./db";
 import { governingContractToday, hasSalary } from "./hr-pay-terms";
+import { readCurrentStaffPay } from "./hr-current-pay";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
@@ -107,7 +108,9 @@ export async function listStaff(options: {
   return withIsolation(getPool(), 'REPEATABLE READ', async client => {
     const result = await client.query(`SELECT * FROM hr_staff ${where} ORDER BY full_name`, params);
     const effective = await readOperationalEmployment(client, result.rows.map(row => Number(row.id)));
-    return result.rows.map(row => ({ ...staffToView(staffRowMapper(row), options.includePayTerms), operationalEmployment: effective.forStaff(staffRowMapper(row)) }))
+    const views = result.rows.map(row => ({ ...staffToView(staffRowMapper(row), options.includePayTerms), operationalEmployment: effective.forStaff(staffRowMapper(row)) }));
+    const pay = options.includePayTerms ? await readCurrentStaffPay(client, views, effective.day) : null;
+    return views.map(staff => ({ ...staff, ...(pay ? { currentPay: pay.get(staff.id) } : {}) }))
       .filter(staff => !options.status || staff.operationalEmployment.status === options.status);
   });
 }
@@ -169,8 +172,10 @@ export async function getStaffDetail(id: number): Promise<{
       };
     }
   }
+  const effective = await readOperationalEmployment(client, [id]);
+  const view = { ...staffToView(staff, true), operationalEmployment: effective.forStaff(staff) };
   return {
-    staff: { ...staffToView(staff, true), operationalEmployment: (await readOperationalEmployment(client, [id])).forStaff(staff) },
+    staff: { ...view, currentPay: (await readCurrentStaffPay(client, [view], effective.day)).get(id) },
     changes: changes.rows.map((row) => ({
       id: Number(row.id),
       actor: String(row.actor),

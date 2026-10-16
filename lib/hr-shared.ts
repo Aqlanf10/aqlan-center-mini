@@ -170,6 +170,8 @@ export interface HrStaffRow {
 
 /** شكل ملف الموظف كما يخرج من الخادم — المبالغ اختيارية لأنها للمدير وحده. */
 export interface HrStaffView {
+  /** Private read projection; omitted from directories and non-pay readers. */
+  currentPay?: import('./hr-current-pay').HrCurrentPay;
   id: number;
   fullName: string;
   jobTitle: string;

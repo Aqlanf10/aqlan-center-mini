@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useHrStaffSelection } from "./HrNavigation";
 import { useSession } from "@/components/SessionProvider";
 import { Modal } from "@/components/Modal";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
@@ -40,15 +41,20 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
   const [balances, setBalances] = useState<LeaveBalanceItem[]>([]);
-  const [selectedStaffForBalance, setSelectedStaffForBalance] = useState<string>("");
+  const [selectedStaffForBalance, setSelectedStaffForBalance] = useHrStaffSelection();
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const alive = useRef(true), leavesGeneration = useRef(0), balancesGeneration = useRef(0);
-  const balanceSelection = useRef(""), filterSelection = useRef("");
+  const balanceSelection = useRef(selectedStaffForBalance), filterSelection = useRef("");
   const decisionInFlight = useRef(false);
+  useLayoutEffect(() => {
+    balanceSelection.current = selectedStaffForBalance;
+    leavesGeneration.current++; balancesGeneration.current++;
+    setRequests([]); setBalances([]); setLoading(true);
+  }, [selectedStaffForBalance]);
   useLayoutEffect(() => {
     alive.current = true;
     return () => { alive.current = false; leavesGeneration.current++; balancesGeneration.current++; };
@@ -74,13 +80,14 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
   const [adjReason, setAdjReason] = useState("تخصيص رصيد سنوي");
 
   const loadLeaves = useCallback(async () => {
-    if (!alive.current || statusFilter !== filterSelection.current) return;
+    if (!alive.current || statusFilter !== filterSelection.current || selectedStaffForBalance !== balanceSelection.current) return;
     const generation = ++leavesGeneration.current;
-    const current = () => alive.current && generation === leavesGeneration.current && statusFilter === filterSelection.current;
+    const current = () => alive.current && generation === leavesGeneration.current && statusFilter === filterSelection.current && selectedStaffForBalance === balanceSelection.current;
     setLoading(true); setRequests([]); setError(null);
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
+      if (selectedStaffForBalance) params.set("staffId", selectedStaffForBalance);
       params.set("types", "true");
 
       const res = await fetch(`/api/hr/leaves?${params.toString()}`, { cache: "no-store" });
@@ -97,7 +104,7 @@ function HrLeavesView({ isAdmin = false }: { isAdmin?: boolean }) {
     } finally {
       if (current()) setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, selectedStaffForBalance]);
 
   const loadBalances = useCallback(async (staffId: string) => {
     if (!alive.current || staffId !== balanceSelection.current) return;
