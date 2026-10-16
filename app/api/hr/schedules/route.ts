@@ -1,3 +1,4 @@
+import { IdentityPreviewError } from "@/lib/hr-identity-preview";
 import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -108,7 +109,7 @@ export async function POST(request: Request) {
     console.error("Failed to create work schedule:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر إنشاء جدول العمل." },
-      { status: error instanceof HrWorkforceMutationError ? error.status : 400 }
+      { status: error instanceof HrWorkforceMutationError || error instanceof IdentityPreviewError ? error.status : 400 }
     );
   }
 }

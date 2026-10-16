@@ -13,7 +13,7 @@
 import type { DbClient } from "./db";
 import type { Currency } from "./money";
 
-export type PayKind = "commission" | "salary" | "salary_commission";
+export type PayKind = "commission" | "salary" | "salary_commission" | "unspecified";
 export type SalaryPeriodUnit = "monthly" | "weekly" | "daily" | "per_shift";
 
 export type PayBlocker =
@@ -138,6 +138,8 @@ export function resolvePayTerms(
   period: { start: string; end: string },
 ): PayTermsResolution {
   const { start, end } = period;
+  if (profile.kind === 'unspecified') return { inScope:false,terms:null,source:null,contract:null,
+    blockers:['no_pay_terms'],snapshot:{periodStart:start,periodEnd:end,identityOnly:true} };
   const blockers: PayBlocker[] = [];
   const base = { periodStart: start, periodEnd: end };
   const profileView = {

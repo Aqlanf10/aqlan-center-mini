@@ -32,10 +32,10 @@ export const HR_DEPARTMENTS = ["doctors", "assistants", "secretariat", "nursing"
 export type HrDepartment = (typeof HR_DEPARTMENTS)[number];
 
 export const HR_WORK_STATUSES = ["active", "suspended", "ended"] as const;
-export type HrWorkStatus = (typeof HR_WORK_STATUSES)[number];
+export type HrWorkStatus = (typeof HR_WORK_STATUSES)[number] | 'unconfirmed';
 
 export const HR_CONTRACT_KINDS = ["commission", "salary", "salary_commission"] as const;
-export type HrContractKind = (typeof HR_CONTRACT_KINDS)[number];
+export type HrContractKind = (typeof HR_CONTRACT_KINDS)[number] | 'unspecified';
 
 export const HR_SALARY_PERIODS = ["monthly", "weekly", "daily", "per_shift"] as const;
 export type HrSalaryPeriod = (typeof HR_SALARY_PERIODS)[number];
@@ -61,12 +61,14 @@ export const HR_DEPARTMENT_LABEL: Record<HrDepartment, string> = {
 };
 
 export const HR_WORK_STATUS_LABEL: Record<HrWorkStatus, string> = {
+  unconfirmed: 'علاقة العمل غير موثقة',
   active: "على رأس العمل",
   suspended: "موقوف مؤقتًا",
   ended: "انتهت خدمته",
 };
 
 export const HR_CONTRACT_KIND_LABEL: Record<HrContractKind, string> = {
+  unspecified: 'شروط التعاقد غير موثقة',
   commission: "نسبة",
   salary: "راتب",
   salary_commission: "راتب ونسبة",

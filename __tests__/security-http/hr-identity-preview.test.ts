@@ -91,8 +91,10 @@ for (const width of [390,1280]) it(`HR identity preview and explicit same-person
   page.on('pageerror',e=>errors.push(e.message));
   page.on('request',request=>{if(request.method()!=='GET')requests.push({method:request.method(),url:new URL(request.url()).pathname});});
   try {
+    const loaded=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/hr/identity-preview'&&response.request().method()==='GET');
     await page.goto(`${isolated.baseUrl}/hr?tab=identity`,{waitUntil:'domcontentloaded'});
-    await expect.poll(()=>page.locator(`[data-identity-key="user:${accountId}"]`).count()).toBe(1);
+    expect((await loaded).status()).toBe(200);
+    await expect.poll(()=>page.locator(`[data-identity-key="user:${accountId}"]`).count(),{timeout:10_000}).toBe(1);
     await page.getByText('مراجعة شخص بمعرفات صريحة — مؤقتة',{exact:true}).click();
     await page.getByLabel(`اختيار الحساب ${accountId}`,{exact:true}).check();
     await page.getByLabel(`اختيار الحساب ${doctorId}`,{exact:true}).check();
@@ -109,7 +111,7 @@ for (const width of [390,1280]) it(`HR identity preview and explicit same-person
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
     await page.screenshot({path:join(evidence,`hr-identity-${width}.png`),fullPage:true});
     await page.getByRole('button',{name:'تحديث المصادر'}).click();
-    await expect.poll(()=>page.locator(`[data-identity-key="user:${accountId}"]`).count()).toBe(1);
+    await expect.poll(()=>page.locator(`[data-identity-key="user:${accountId}"]`).count(),{timeout:10_000}).toBe(1);
     expect(await page.locator('[data-identity-key="review:1"]').count()).toBe(0);
     expect(requests.filter(r=>r.url.startsWith('/api/'))).toEqual([{method:'POST',url:'/api/hr/identity-preview'}]);
     expect(errors).toEqual([]);

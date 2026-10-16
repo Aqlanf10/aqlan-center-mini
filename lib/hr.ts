@@ -282,6 +282,10 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
     const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
     if (current.rowCount === 0) return { missing: true as const };
     const row = staffRowMapper(current.rows[0]);
+    if ((row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified')
+      && ['workStatus','hireDate','endDate','contractKind','payTerms'].some(key => key in patch)) {
+      return { ok:false,error:'هوية غير موثقة تشغيليًا؛ وثّق تاريخ العمل والعقد من مساراتهما المعتمدة أولًا.',status:409 };
+    }
     const changesHistoricalFields = (patch.workStatus !== undefined && patch.workStatus !== row.work_status)
       || (patch.hireDate !== undefined && patch.hireDate !== row.hire_date)
       || (patch.endDate !== undefined && patch.endDate !== row.end_date);
@@ -456,6 +460,9 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
   const outcome = await withTransaction(getPool(), async (client) => {
     const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
     if (current.rowCount === 0) return { ok: false as const, error: "ملف الموظف غير موجود.", status: 404 };
+    if (Number(current.rows[0].identity_revision ?? 0) > 0) {
+      return { ok:false as const,error:'انتقل الملف إلى روابط الهوية الصريحة؛ رابط الوصول القديم محفوظ ولا يُعدّل من هذا المسار.',status:409 };
+    }
     const row = staffRowMapper(current.rows[0]);
 
     if (userId === null) {

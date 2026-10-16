@@ -18,6 +18,8 @@ import type { AuditAction } from "./audit";
 import { CLINIC_TIME_ZONE } from "./db";
 import { governingContractToday, hasSalary } from "./hr-pay-terms";
 import { revalidateSessionInTransaction } from "./session";
+import { lockPersonIdentityForOperation } from "./hr-person-identity-schema-state";
+import { assertDocumentedStaffForOperation, assertPersonMayApprove, captureRequestIdentity } from "./hr-person-identity-approval";
 import {
   type HrContractTemplateKind,
   type HrContractStatus,
@@ -61,6 +63,7 @@ async function withWorkforceTransaction<T>(
 ): Promise<T> {
   if (!allowedRoles.includes(session.role)) throw new HrWorkforceMutationError("إدارة هذه العملية للمدير أو الدور المصرح به فقط.", 403);
   return withTransaction(getPool(), async client => {
+    await lockPersonIdentityForOperation(client);
     await authorizeWorkforceMutation(client, session);
     const result = await work(client);
     assertWorkforceSessionCurrent(session);
@@ -716,6 +719,7 @@ export async function createSchedule(
 ): Promise<HrWorkScheduleView> {
   const staffId = input.staffId !== undefined && input.staffId !== null ? Number(input.staffId) : null;
   return withWorkforceTransaction(session, ["admin"], async (client) => {
+    if (staffId !== null) await assertDocumentedStaffForOperation(client, staffId);
     const policy = await client.query("SELECT value FROM hr_settings WHERE key='attendance_policy' FOR SHARE");
     const grace = input.gracePeriodMins ?? (policy.rows[0] ? normalizeHrPolicy("attendance_policy", policy.rows[0].value).lateGraceMins as number : 0);
     validateSchedule({...input, gracePeriodMins: grace});
@@ -948,6 +952,7 @@ export async function recordAttendance(
 
 async function recordAttendanceInTx(client: DbClient, input: {staffId: number | string; attendanceDate: string; checkIn?: string | null; checkOut?: string | null; status?: HrAttendanceStatus; notes?: string | null}, session: SessionPayload, rawPunch?: {type: "check_in" | "check_out"; time: string}): Promise<HrAttendanceRecordView> {
     const staffId = Number(input.staffId);
+    await assertDocumentedStaffForOperation(client, staffId);
     const schedule = await attendanceSchedule(client, staffId, input.attendanceDate);
     if (schedule?.second_shift_start && !rawPunch) throw new Error("سجل بصمات كل فترة؛ زوج واحد لا يمثل يومًا بفترتين.");
     let workMins = 0;
@@ -1178,6 +1183,7 @@ export async function correctAttendanceRecord(
     const curr = currRows[0];
     await assertSinglePairCorrection(client,curr.schedule_id);
 
+    await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, hasRequest: false });
     // منع الموافقة الذاتية على تصحيح الحضور
     if (curr.staff_user_id === session.userId) {
       throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
@@ -1187,13 +1193,14 @@ export async function correctAttendanceRecord(
     const newOut = input.newCheckOut !== undefined ? (input.newCheckOut ? new Date(input.newCheckOut) : null) : curr.check_out_actual;
     const newStatus = input.newStatus ?? curr.status;
 
+    const identityEvidence = await captureRequestIdentity(client, curr.staff_id, session.userId);
     // تسجيل التصحيح في سجل التصحيحات append-only
     await client.query(
       `INSERT INTO hr_attendance_corrections (
         attendance_id, staff_id, field_corrected, old_check_in, new_check_in,
         old_check_out, new_check_out, old_status, new_status, reason,
-        requested_by, approved_by, approved_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+        requested_by, approved_by, approved_at${identityEvidence ? ",requester_user_id,identity_evidence" : ""}
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()${identityEvidence ? ",$13,$14::jsonb" : ""})`,
       [
         attId,
         curr.staff_id,
@@ -1207,6 +1214,7 @@ export async function correctAttendanceRecord(
         input.reason.trim(),
         session.username,
         session.username,
+        ...(identityEvidence ? [session.userId,JSON.stringify(identityEvidence)] : []),
       ],
     );
 
@@ -1255,12 +1263,13 @@ export async function requestAttendanceCorrection(
     const newIn = input.newCheckIn ? new Date(input.newCheckIn) : null;
     const newOut = input.newCheckOut ? new Date(input.newCheckOut) : null;
 
+    const identityEvidence = await captureRequestIdentity(client, curr.staff_id, session.userId);
     const { rows } = await client.query(
       `INSERT INTO hr_attendance_corrections (
         attendance_id, staff_id, field_corrected, old_check_in, new_check_in,
         old_check_out, new_check_out, old_status, new_status, reason,
-        requested_by, approved_by, approved_at, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, 'pending')
+        requested_by, approved_by, approved_at, status${identityEvidence ? ",requester_user_id,identity_evidence" : ""}
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, 'pending'${identityEvidence ? " ,$12,$13::jsonb" : ""})
       RETURNING *`,
       [
         attId,
@@ -1274,6 +1283,7 @@ export async function requestAttendanceCorrection(
         input.newStatus ?? curr.status,
         input.reason.trim(),
         session.username,
+        ...(identityEvidence ? [session.userId,JSON.stringify(identityEvidence)] : []),
       ],
     );
 
@@ -1337,6 +1347,7 @@ export async function decideAttendanceCorrection(
     if (!corrRows[0]) throw new Error("طلب تصحيح الحضور غير موجود.");
     const corr = corrRows[0];
 
+    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: corr.staff_id, requesterUserId: corr.requester_user_id, evidence: corr.identity_evidence, hasRequest: true });
     // منع الموافقة الذاتية
     if (decision === "approved" && (corr.requested_by === session.username || corr.staff_user_id === session.userId)) {
       throw new Error("لا يجوز اعتماد تصحيح الحضور ذاتيًا.");
@@ -1539,6 +1550,7 @@ export async function adjustLeaveBalance(
   if (sess.role!=="admin" || !Number.isSafeInteger(sId) || sId<1 || !Number.isInteger(yr) || yr<2000 || yr>9999 || !Number.isFinite(days) || days<0 || days>366) throw new Error("تخصيص رصيد غير صالح أو غير مصرح به.");
   return withWorkforceTransaction(sess, ["admin"], async (client) => {
     await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[sId]);
+    await assertDocumentedStaffForOperation(client, sId);
     const existing = await client.query("SELECT * FROM hr_leave_balances WHERE staff_id=$1 AND leave_type_code=$2 AND year=$3 FOR UPDATE",[sId,code,yr]);
     const pending = Number((await client.query("SELECT COALESCE(SUM(days_count),0) AS days FROM hr_leave_requests WHERE staff_id=$1 AND leave_type_code=$2 AND EXTRACT(YEAR FROM start_date)=$3 AND status IN ('pending','under_review')",[sId,code,yr])).rows[0].days);
     if (days+Number(existing.rows[0]?.carried_over_days ?? 0)<Number(existing.rows[0]?.used_days ?? 0)+pending) throw new Error("الرصيد المخصص أقل من الأيام المستخدمة والمعلقة.");
@@ -1650,9 +1662,12 @@ export async function createLeaveRequest(
   const days = (Date.parse(input.endDate)-Date.parse(input.startDate))/86400000+1;
   if (!Number.isInteger(days) || days<1 || input.startDate.slice(0,4)!==input.endDate.slice(0,4) || !input.reason.trim() || input.isPartialDay || input.daysCount!==days) throw new Error("حدد أيام إجازة كاملة ضمن سنة واحدة؛ سياسة الإجازة الجزئية لم تُعتمد.");
   return withTransaction(getPool(), async (client) => {
+    await lockPersonIdentityForOperation(client);
     const staff = await client.query("SELECT user_id FROM hr_staff WHERE id=$1 FOR UPDATE",[staffId]);
     if (!staff.rows[0] || (session.role!=="admin" && staff.rows[0].user_id!==session.userId)) throw new Error("الموظف غير موجود.");
     await authorizeWorkforceMutation(client, session);
+    await assertDocumentedStaffForOperation(client, staffId);
+    const identityEvidence = await captureRequestIdentity(client, staffId, session.userId);
     // ١) منع التداخل مع إجازات أخرى معتمدة أو قيد المراجعة
     const overlapRes = await client.query(
       `SELECT id FROM hr_leave_requests
@@ -1668,8 +1683,8 @@ export async function createLeaveRequest(
     const { rows } = await client.query(
       `INSERT INTO hr_leave_requests (
         staff_id, leave_type_code, start_date, end_date, days_count,
-        is_partial_day, partial_hours, reason, attachment_refs, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        is_partial_day, partial_hours, reason, attachment_refs, created_by${identityEvidence ? ',requester_user_id,identity_evidence' : ''}
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${identityEvidence ? ',$11,$12::jsonb' : ''})
       RETURNING *`,
       [
         staffId,
@@ -1682,6 +1697,7 @@ export async function createLeaveRequest(
         input.reason.trim(),
         JSON.stringify(input.attachmentRefs ?? []),
         session.username,
+        ...(identityEvidence ? [session.userId,JSON.stringify(identityEvidence)] : []),
       ],
     );
 
@@ -1729,6 +1745,7 @@ export async function decideLeaveRequest(
   if (!["approved","rejected","cancelled"].includes(decision)) throw new Error("قرار إجازة غير صالح.");
   const reqId = Number(requestId);
   return withTransaction(getPool(), async (client) => {
+    await lockPersonIdentityForOperation(client);
     const { rows: currRows } = await client.query(
       `SELECT lr.*, s.full_name as staff_name, s.user_id as staff_user_id
        FROM hr_leave_requests lr
@@ -1741,6 +1758,7 @@ export async function decideLeaveRequest(
 
     // Serialize balance, overlap and decisions on the same staff row.
     await client.query("SELECT id FROM hr_staff WHERE id=$1 FOR UPDATE",[curr.staff_id]);
+    if (decision === "approved") await assertPersonMayApprove(client, { actorUserId: session.userId, subjectStaffId: curr.staff_id, requesterUserId: curr.requester_user_id, evidence: curr.identity_evidence, hasRequest: true });
     // منع الموافقة الذاتية: لا يجوز لأي مستخدم (حتى المدير) اعتماد طلبه الخاص
     if (decision === "approved" && curr.staff_user_id === session.userId) {
       throw new Error("لا يجوز اعتماد طلب الإجازة ذاتيًا.");

@@ -1,5 +1,7 @@
 import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
+import { explicitStaffFinancialParty } from "./hr-person-financial-identity";
+import { lockPersonIdentityForOperation } from "./hr-person-identity-schema-state";
 import { withIsolation } from "./transactions";
 import { normalizeHrPolicy } from "./hr-settings-policy";
 import { payrollBlockerLabel } from "./hr-payroll-review";
@@ -41,6 +43,7 @@ async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrP
   work: (client: DbClient) => Promise<T>): Promise<T> {
   manager(session);
   return withTransaction(getPool(), async client => {
+    await lockPersonIdentityForOperation(client);
     if (authorize && !(await authorize(client))) fail("authority_changed", "تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية.", 403);
     if (session.expiresAt < Date.now()) fail("session_expired", "انتهت الجلسة؛ لم تُنفّذ العملية.", 401);
     const result = await work(client);
@@ -68,6 +71,13 @@ async function auditWithClient(client: DbClient, action: AuditAction, session: S
     actor: session.username, actorRole: session.role });
 }
 async function ensureStaffParty(client: DbClient, staffId: number, fullName: string, doctorId: number | null): Promise<number> {
+  const staff = (await client.query('SELECT to_jsonb(s)->>\'identity_revision\' AS revision FROM hr_staff s WHERE id=$1',[staffId])).rows[0];
+  const explicit = await explicitStaffFinancialParty(client,staffId,Number(staff?.revision ?? 0));
+  if (explicit) {
+    if (doctorId && (explicit.kind !== 'doctor' || explicit.partyId !== doctorId)) fail('identity_conflict','تعارض جهة الطبيب مع جهة الشخص الصريحة.');
+    await client.query('SELECT id FROM parties WHERE id=$1 FOR UPDATE',[explicit.partyId]);
+    return explicit.partyId;
+  }
   if (doctorId) {
     const { rows } = await client.query("SELECT id FROM parties WHERE id = $1 AND kind = 'doctor' FOR UPDATE", [doctorId]);
     if (!rows[0]) fail("doctor_missing", "جهة الطبيب المرتبطة بالعقد غير صالحة.");
@@ -186,6 +196,11 @@ export async function getPayrollRunById(id: number | string): Promise<HrPayrollR
   return rows[0] ? mapRunRow(rows[0]) : null;
 }
 async function staffResolution(client: DbClient, row: Row, period: Row, currency: Currency) {
+  if (row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified') {
+    return { inScope:false,terms:null,source:null,contract:null,blockers:[],snapshot:{identityOnly:true} };
+  }
+  const explicit = await explicitStaffFinancialParty(client,Number(row.id),Number(row.identity_revision ?? 0));
+  if (explicit) row.user_party_id = explicit.kind === 'doctor' ? explicit.partyId : null;
   const resolved = resolvePayTerms(profileFromRow(row), await loadStaffContracts(client, Number(row.id)), { start: period.start_date, end: period.end_date });
   const relevantCurrency = hasCommission(resolved.terms?.kind ?? row.contract_kind) || (resolved.terms?.currency ?? row.salary_currency) === currency;
   const employment = await readOperationalEmployment(client, [Number(row.id)]);

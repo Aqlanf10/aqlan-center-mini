@@ -1,3 +1,4 @@
+import { IdentityPreviewError } from "@/lib/hr-identity-preview";
 import { HrWorkforceMutationError } from "@/lib/hr-contracts-attendance";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -10,7 +11,6 @@ import {
   leaveStaffOptions,
   type CreateLeaveRequestInput,
 } from "@/lib/hr-contracts-attendance";
-import type { HrLeaveStatus } from "@/lib/hr-contracts-attendance-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
     console.error("Failed to create leave request:", error);
     return NextResponse.json(
       { message: error?.message || "تعذّر رفع طلب الإجازة." },
-      { status: error instanceof HrWorkforceMutationError ? error.status : 400 }
+      { status: error instanceof HrWorkforceMutationError || error instanceof IdentityPreviewError ? error.status : 400 }
     );
   }
 }

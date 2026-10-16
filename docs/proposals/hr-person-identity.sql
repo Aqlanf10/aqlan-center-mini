@@ -90,6 +90,11 @@ BEGIN
        (to_jsonb(OLD) - 'closed_at' - 'closed_event_id') THEN
     RAISE EXCEPTION 'hr identity link may only be closed once with evidence';
   END IF;
+  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.closed_event_id AND e.staff_id=NEW.staff_id
+    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'close_account' ELSE 'close_party' END
+    AND e.details->>'linkId'=NEW.id::text) THEN
+    RAISE EXCEPTION 'link closure requires matching identity event';
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -123,6 +128,29 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER hr_identity_party_kind BEFORE INSERT ON hr_staff_party_links
   FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_party_kind();
+
+CREATE FUNCTION aqlan_hr_identity_link_source() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS(SELECT 1 FROM hr_staff WHERE id=NEW.staff_id AND identity_revision>0) THEN
+    RAISE EXCEPTION 'identity links require a converted person';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.opened_event_id AND e.staff_id=NEW.staff_id
+    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'link_account' ELSE 'link_party' END
+    AND e.details->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'userId' ELSE 'partyId' END
+      = (to_jsonb(NEW)->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'user_id' ELSE 'party_id' END)) THEN
+    RAISE EXCEPTION 'link requires matching identity event';
+  END IF;
+  IF TG_TABLE_NAME='hr_staff_account_links' AND EXISTS(SELECT 1 FROM hr_staff
+    WHERE user_id=(to_jsonb(NEW)->>'user_id')::int AND id<>NEW.staff_id) THEN
+    RAISE EXCEPTION 'account has a reserved legacy access link';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER hr_identity_account_source BEFORE INSERT ON hr_staff_account_links
+  FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_source();
+CREATE TRIGGER hr_identity_party_source BEFORE INSERT ON hr_staff_party_links
+  FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_source();
 
 CREATE FUNCTION aqlan_hr_request_identity_immutable() RETURNS trigger AS $$
 BEGIN

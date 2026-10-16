@@ -4,12 +4,16 @@ export interface IdentityParty { id: number; label: string | null; kind: string;
 export interface IdentityStaff {
   id: number; label: string; userId: number | null; workStatus: string;
   hireDateRecorded: boolean; salaryTermsComplete: boolean; contractKind: string;
+  identityRevision?: number;
 }
+export interface IdentityAccountLink { id: string; staffId: number; userId: number; closed: boolean; openedEventId: string; closedEventId: string | null }
+export interface IdentityPartyLink { id: string; staffId: number; partyId: number; closed: boolean; openedEventId: string; closedEventId: string | null }
 export interface IdentityContractLink { id: number; staffId: number; partyId: number | null; status: string }
 export interface IdentityPayrollLink { staffId: number; partyId: number }
 export interface IdentitySources {
   accounts: IdentityAccount[]; parties: IdentityParty[]; staff: IdentityStaff[];
   contracts: IdentityContractLink[]; payrollLinks: IdentityPayrollLink[];
+  schemaFingerprint?: string; accountLinks?: IdentityAccountLink[]; partyLinks?: IdentityPartyLink[];
 }
 export interface IdentityDecision {
   userIds: number[]; partyIds: number[]; staffId: number | null; confirmedSamePerson: true;
@@ -35,6 +39,7 @@ export const IDENTITY_REASON_LABEL = {
   different_staff: 'الحسابات مرتبطة بملفات HR أخرى أو متعددة؛ لا دمج.',
   duplicate_selection: 'المصدر مختار في أكثر من قرار ضمن المعاينة.',
   select_existing_staff: 'يوجد ملف HR؛ يلزم اختياره صراحة بدل اقتراح ملف جديد.',
+  identity_incomplete: 'روابط الهوية لا تطابق حالة التحويل؛ يلزم مراجعة مصدر الهوية.',
 } as const;
 export type IdentityReason = keyof typeof IDENTITY_REASON_LABEL;
 export interface IdentityCandidate {
