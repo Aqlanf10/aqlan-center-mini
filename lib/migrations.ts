@@ -337,6 +337,18 @@ async function migrateHoldingLock(
   // Validate only the two pinned Ortho contracts before skipping applied files.
   for (const file of files) {
     if (file.version === "0051" || file.version === "0052") validateOrthoRevisionRegistry(file, applied.find(row => row.version === file.version));
+    // Runtime bundles already verify their bytes. The full migrator must make
+    // the same check before any pending file (or baseline adoption) can write.
+    if (createHash('sha256').update(file.sql).digest('hex') !== file.checksum) {
+      throw new Error(`MIGRATION_SOURCE_MISMATCH: ${file.version}`);
+    }
+    const row = applied.find(item => item.version === file.version);
+    if (row && row.checksum !== file.checksum) {
+      throw new Error(`بصمة الهجرة ${file.version} لا تطابق المسجَّلة — الملف عُدِّل بعد التطبيق.`);
+    }
+    if (row && (row.name !== file.name || (row.adopted && file.version !== BASELINE_VERSION))) {
+      throw new Error(`MIGRATION_REGISTRY_MISMATCH: ${file.version}`);
+    }
   }
   const appliedVersions = new Set(applied.map((row) => row.version));
   const appliedNow: string[] = [];

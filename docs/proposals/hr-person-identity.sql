@@ -134,7 +134,9 @@ CREATE TRIGGER hr_identity_legacy_guard BEFORE INSERT OR UPDATE ON hr_staff
 
 CREATE FUNCTION aqlan_hr_identity_party_kind() RETURNS trigger AS $$
 BEGIN
-  IF NOT EXISTS(SELECT 1 FROM parties WHERE id=NEW.party_id AND kind IN ('doctor','employee')) THEN
+  -- The current party kind constrains current links. Closed history is checked
+  -- against its opening and closing events by aqlan_hr_identity_link_source.
+  IF NEW.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM parties WHERE id=NEW.party_id AND kind IN ('doctor','employee')) THEN
     RAISE EXCEPTION 'hr financial identity requires doctor or employee party';
   END IF;
   RETURN NEW;
@@ -160,7 +162,15 @@ BEGIN
       = (to_jsonb(NEW)->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'user_id' ELSE 'party_id' END)) THEN
     RAISE EXCEPTION 'link requires matching identity event';
   END IF;
-  IF TG_TABLE_NAME='hr_staff_account_links' AND EXISTS(SELECT 1 FROM hr_staff
+  -- Closed rows are historical evidence, not current account claims. Restoring
+  -- them must validate their closing event just like the UPDATE path does.
+  IF NEW.closed_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM hr_identity_events e
+    WHERE e.id=NEW.closed_event_id AND e.staff_id=NEW.staff_id
+    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'close_account' ELSE 'close_party' END
+    AND e.details->>'linkId'=NEW.id::text) THEN
+    RAISE EXCEPTION 'closed link requires matching identity event';
+  END IF;
+  IF TG_TABLE_NAME='hr_staff_account_links' AND NEW.closed_at IS NULL AND EXISTS(SELECT 1 FROM hr_staff
     WHERE user_id=(to_jsonb(NEW)->>'user_id')::int AND id<>NEW.staff_id) THEN
     RAISE EXCEPTION 'account has a reserved legacy access link'
       USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';

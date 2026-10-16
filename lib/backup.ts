@@ -180,13 +180,25 @@ export function insertStatement(
  * بلا هذا يبدأ العدّاد من واحد فوق بيانات مستعادة، فتصطدم أول فاتورة جديدة برقم
  * موجود — واستعادةٌ تبدو ناجحة ثم تنفجر عند أول عملية أسوأ من استعادة تفشل صراحةً.
  */
-export function sequenceResets(tables: string[]): string[] {
-  return tables.map((table) =>
-    `SELECT setval(pg_get_serial_sequence('${table}', 'id'), ` +
-    `COALESCE((SELECT MAX(id) FROM ${table}), 1), ` +
-    `(SELECT MAX(id) IS NOT NULL FROM ${table})) ` +
-    `WHERE pg_get_serial_sequence('${table}', 'id') IS NOT NULL;`,
-  );
+export interface BackupSequenceState { lastValue: string; isCalled: boolean }
+export function sequenceResets(tables: string[], states: Record<string, BackupSequenceState> = {}): string[] {
+  return tables.map((table) => {
+    const state = states[table];
+    if (!state) return `SELECT setval(pg_get_serial_sequence('${table}', 'id'), ` +
+      `COALESCE((SELECT MAX(id) FROM ${table}), 1), ` +
+      `(SELECT MAX(id) IS NOT NULL FROM ${table})) ` +
+      `WHERE pg_get_serial_sequence('${table}', 'id') IS NOT NULL;`;
+    if (!/^[1-9][0-9]*$/.test(state.lastValue) || typeof state.isCalled !== 'boolean') {
+      throw new Error('Invalid captured backup sequence state');
+    }
+    // Keep consumed gaps (including failed transactions) and uncalled values.
+    // Explicit imported IDs may be ahead of the source sequence: never rewind
+    // below those restored rows. Values stay decimal strings, never JS numbers.
+    return `SELECT setval(pg_get_serial_sequence('${table}', 'id'), ` +
+      `GREATEST(${state.lastValue}::bigint, COALESCE((SELECT MAX(id) FROM ${table}), ${state.lastValue}::bigint)), ` +
+      `CASE WHEN (SELECT MAX(id) FROM ${table}) >= ${state.lastValue}::bigint THEN true ELSE ${state.isCalled} END) ` +
+      `WHERE pg_get_serial_sequence('${table}', 'id') IS NOT NULL;`;
+  });
 }
 
 export function backupFileName(clinicDate: string, clinicTime: string): string {
