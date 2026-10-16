@@ -8,7 +8,7 @@ import { identityDatabaseState } from '../helpers/hr-identity-state';
 import type { IdentityPreview } from '../../lib/hr-identity-preview-shared';
 
 let h: Harness, isolated: Awaited<ReturnType<typeof openHrJourneyServer>>, browser: Browser;
-let accountId: number, doctorId: number, partyId: number, unlinkedId: number;
+let accountId: number, doctorId: number, partyId: number, unlinkedId: number, overlapStaffId: number;
 const evidence = process.env.HR_IDENTITY_EVIDENCE_DIR ?? '/tmp/hr-identity-preview-evidence';
 async function api(method = 'GET', body?: unknown, cookie = h.sessions.admin.cookie) {
   return fetch(`${isolated.baseUrl}/api/hr/identity-preview`, { method, headers: { cookie, origin: isolated.baseUrl, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -25,6 +25,7 @@ beforeAll(async () => {
   const users = (await isolated.db.query("INSERT INTO users(username,display_name,password_hash,role,party_id,commission_config) VALUES ('previewmanager','شخص اصطناعي واحد','private-preview-hash','admin',NULL,NULL),('previewdoctor','شخص اصطناعي واحد','private-preview-hash','doctor',$1,'{\"defaultPercent\":40}'),('previewunlinked','طبيب غير مربوط اصطناعي','private-preview-hash','doctor',NULL,NULL) RETURNING id",[partyId])).rows;
   accountId=users[0].id; doctorId=users[1].id; unlinkedId=users[2].id;
   await isolated.db.query("INSERT INTO hr_staff(full_name,created_by) VALUES ('ملف اصطناعي ناقص','synthetic')");
+  overlapStaffId = (await isolated.db.query("INSERT INTO hr_staff(full_name,user_id,created_by) VALUES ('ملف اختبار التداخل',$1,'synthetic') RETURNING id", [unlinkedId])).rows[0].id;
 });
 afterAll(async () => { await browser?.close(); await isolated?.close(); });
 it('GET and temporary POST leave every table and sequence unchanged; unlinked doctor stays unlinked', async () => {
@@ -60,6 +61,27 @@ it('unconfirmed/tampered input is rejected and changed sources invalidate a temp
     expect((await api('POST',{sourceDigest:baseline.sourceDigest,decisions:[]})).status).toBe(409);
     expect(await identityDatabaseState(isolated.db)).toEqual(before);
   } finally { await isolated.db.query('UPDATE users SET is_active=TRUE WHERE id=$1',[doctorId]); }
+});
+it('both decision orders flag expanded staff/account and account/party overlap without any writes', async () => {
+  const before = await identityDatabaseState(isolated.db);
+  const baseline = await (await api()).json() as IdentityPreview;
+  const cases = [
+    [{ userIds: [], partyIds: [], staffId: overlapStaffId, confirmedSamePerson: true },
+      { userIds: [unlinkedId], partyIds: [], staffId: null, confirmedSamePerson: true }],
+    [{ userIds: [doctorId], partyIds: [], staffId: null, confirmedSamePerson: true },
+      { userIds: [], partyIds: [partyId], staffId: null, confirmedSamePerson: true }],
+  ];
+  for (const pair of cases) for (const decisions of [pair, [...pair].reverse()]) {
+    const response = await api('POST', { sourceDigest: baseline.sourceDigest, decisions });
+    expect(response.status).toBe(200);
+    const reviewed = ((await response.json()) as IdentityPreview).candidates.filter(c => c.explicit);
+    expect(reviewed).toHaveLength(2);
+    for (const candidate of reviewed) {
+      expect(candidate.action).toBe('conflict');
+      expect(candidate.reasons).toContain('duplicate_selection');
+    }
+  }
+  expect(await identityDatabaseState(isolated.db)).toEqual(before);
 });
 for (const width of [390,1280]) it(`HR identity preview and explicit same-person review at ${width}`, async () => {
   const context = await browser.newContext({ viewport: { width, height: 900 } });

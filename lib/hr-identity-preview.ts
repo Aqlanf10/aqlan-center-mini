@@ -46,14 +46,26 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
   const parties = new Map(sources.parties.map(p => [p.id, p]));
   const candidates: IdentityCandidate[] = [];
   const usedUsers = new Set<number>(), usedStaff = new Set<number>(), usedParties = new Set<number>();
-  const selected = new Map<string, number>();
-  for (const d of decisions) for (const key of [...d.userIds.map(id => `u:${id}`), ...d.partyIds.map(id => `p:${id}`), ...(d.staffId ? [`s:${d.staffId}`] : [])]) selected.set(key, (selected.get(key) ?? 0) + 1);
-  function candidate(key: string, initialUsers: number[], initialParties: number[], initialStaff: number[], decision?: IdentityDecision) {
+  function expand(initialUsers: number[], initialParties: number[], initialStaff: number[]) {
     const staffIds = ids([...initialStaff, ...sources.staff.filter(s => s.userId !== null && initialUsers.includes(s.userId)).map(s => s.id)]);
     const userIds = ids([...initialUsers, ...staffIds.flatMap(id => staff.get(id)?.userId ? [staff.get(id)!.userId!] : [])]);
     const partyIds = ids([...initialParties, ...userIds.flatMap(id => accounts.get(id)?.partyId ? [accounts.get(id)!.partyId!] : []),
       ...sources.contracts.filter(c => staffIds.includes(c.staffId) && c.partyId !== null && ['active','approved'].includes(c.status)).map(c => c.partyId!),
       ...sources.payrollLinks.filter(p => staffIds.includes(p.staffId)).map(p => p.partyId)]);
+    return { staffIds, userIds, partyIds };
+  }
+  const referenceKeys = (refs: ReturnType<typeof expand>) => [
+    ...refs.userIds.map(id => `u:${id}`), ...refs.partyIds.map(id => `p:${id}`), ...refs.staffIds.map(id => `s:${id}`),
+  ];
+  // Count each expanded reference once per decision, before classifying any of
+  // them. Otherwise a stored staff -> user -> party link can evade the raw-ID
+  // counter. This detects overlap; it never unions people via a shared party/name.
+  const expandedDecisions = decisions.map(d => expand(d.userIds, d.partyIds, d.staffId === null ? [] : [d.staffId]));
+  const selected = new Map<string, number>();
+  for (const refs of expandedDecisions) for (const key of referenceKeys(refs)) selected.set(key, (selected.get(key) ?? 0) + 1);
+  function candidate(key: string, initialUsers: number[], initialParties: number[], initialStaff: number[], decision?: IdentityDecision,
+    refs = expand(initialUsers, initialParties, initialStaff)) {
+    const { staffIds, userIds, partyIds } = refs;
     const reasons: IdentityReason[] = [], unknowns: IdentityReason[] = [];
     if (userIds.some(id => !accounts.has(id)) || staffIds.some(id => !staff.has(id)) || partyIds.some(id => !parties.has(id))) reasons.push('missing_source');
     if (partyIds.some(id => parties.has(id) && !['doctor','employee'].includes(parties.get(id)!.kind))) reasons.push('excluded_party');
@@ -63,7 +75,7 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
     // Shared contracts/payroll also require review even when no account is linked.
     if (partyIds.some(id => sources.contracts.some(c => c.partyId === id && ['active','approved'].includes(c.status) && !staffIds.includes(c.staffId))
       || sources.payrollLinks.some(p => p.partyId === id && !staffIds.includes(p.staffId)))) reasons.push('different_staff');
-    if (decision && [...userIds.map(id => `u:${id}`), ...partyIds.map(id => `p:${id}`), ...staffIds.map(id => `s:${id}`)].some(id => (selected.get(id) ?? 0) > 1)) reasons.push('duplicate_selection');
+    if (decision && referenceKeys(refs).some(id => (selected.get(id) ?? 0) > 1)) reasons.push('duplicate_selection');
     if (decision && decision.staffId === null && staffIds.length) reasons.push('select_existing_staff');
     if (!staffIds.length) unknowns.push('missing_staff', 'employment_unconfirmed');
     for (const id of staffIds) {
@@ -84,7 +96,7 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
     candidates.push({ key, action, userIds, staffIds, partyIds, reasons: [...new Set(reasons)], unknowns: [...new Set(unknowns)], explicit: Boolean(decision) });
     userIds.forEach(id => usedUsers.add(id)); staffIds.forEach(id => usedStaff.add(id)); partyIds.forEach(id => usedParties.add(id));
   }
-  decisions.forEach((d, i) => candidate(`review:${i+1}`, d.userIds, d.partyIds, d.staffId === null ? [] : [d.staffId], d));
+  decisions.forEach((d, i) => candidate(`review:${i+1}`, d.userIds, d.partyIds, d.staffId === null ? [] : [d.staffId], d, expandedDecisions[i]));
   for (const s of sources.staff) if (!usedStaff.has(s.id)) candidate(`staff:${s.id}`, [], [], [s.id]);
   for (const a of sources.accounts) if (!usedUsers.has(a.id)) candidate(`user:${a.id}`, [a.id], [], []);
   for (const p of sources.parties) if (!usedParties.has(p.id) && ['doctor','employee'].includes(p.kind)) candidate(`party:${p.id}`, [], [p.id], []);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildIdentityPreview, parseIdentityPreviewRequest } from '../lib/hr-identity-preview';
-import type { IdentitySources } from '../lib/hr-identity-preview-shared';
+import type { IdentityDecision, IdentitySources } from '../lib/hr-identity-preview-shared';
 
 function sources(): IdentitySources {
   return {
@@ -82,6 +82,73 @@ describe('identity evidence has no name-based person union or employment inferen
     const choice = { userIds: [1], partyIds: [], staffId: null, confirmedSamePerson: true as const };
     const result = buildIdentityPreview(sources(), [choice, choice]);
     expect(result.candidates.slice(0,2).every(c => c.action === 'conflict' && c.reasons.includes('duplicate_selection'))).toBe(true);
+  });
+  for (const reverse of [false, true]) {
+    it(`counts the overlap of staff20.userId1 and a user1 decision after expansion (reverse=${reverse})`, () => {
+      const input = sources(); input.staff[0].userId = 1;
+      const decisions: IdentityDecision[] = [
+        { userIds: [], partyIds: [], staffId: 20, confirmedSamePerson: true },
+        { userIds: [1], partyIds: [], staffId: null, confirmedSamePerson: true },
+      ];
+      const before = structuredClone(input);
+      const result = buildIdentityPreview(input, reverse ? [...decisions].reverse() : decisions);
+      for (const candidate of result.candidates.filter(c => c.explicit)) {
+        expect(candidate).toMatchObject({ action: 'conflict', userIds: [1], staffIds: [20] });
+        expect(candidate.reasons).toContain('duplicate_selection');
+      }
+      expect(result.counts.create).toBe(0); expect(result.counts.link).toBe(0);
+      expect(input).toEqual(before);
+    });
+    for (const source of ['account', 'staff-account', 'contract', 'payroll'] as const) {
+      it(`counts a ${source} derived party against an explicit party decision (reverse=${reverse})`, () => {
+        const input = sources(); input.staff[0].userId = 1;
+        if (source === 'account' || source === 'staff-account') input.accounts[0].partyId = 11;
+        if (source === 'contract') input.contracts = [{ id: 30, staffId: 20, partyId: 11, status: 'approved' }];
+        if (source === 'payroll') input.payrollLinks = [{ staffId: 20, partyId: 11 }];
+        const decisions: IdentityDecision[] = [
+          { userIds: source === 'account' ? [1] : [], partyIds: [], staffId: source === 'account' ? null : 20, confirmedSamePerson: true },
+          { userIds: [], partyIds: [11], staffId: null, confirmedSamePerson: true },
+        ];
+        const result = buildIdentityPreview(input, reverse ? [...decisions].reverse() : decisions);
+        const reviewed = result.candidates.filter(c => c.explicit);
+        expect(reviewed).toHaveLength(2);
+        for (const candidate of reviewed) {
+          expect(candidate.action).toBe('conflict');
+          expect(candidate.partyIds).toContain(11);
+          expect(candidate.reasons).toContain('duplicate_selection');
+        }
+        // A shared party is evidence of overlap, never a reverse person/account union.
+        expect(reviewed.find(c => !c.staffIds.length && !c.userIds.length)?.partyIds).toEqual([11]);
+      });
+    }
+    it(`detects a party derived independently by two decisions (reverse=${reverse})`, () => {
+      const input = sources(); input.accounts[0].partyId = 10;
+      const decisions: IdentityDecision[] = [1,2].map(id => ({ userIds: [id], partyIds: [], staffId: null, confirmedSamePerson: true }));
+      const reviewed = buildIdentityPreview(input, reverse ? [...decisions].reverse() : decisions).candidates.filter(c => c.explicit);
+      expect(reviewed).toHaveLength(2);
+      expect(reviewed.every(c => c.action === 'conflict' && c.reasons.includes('duplicate_selection'))).toBe(true);
+      expect(reviewed.map(c => c.userIds)).toEqual((reverse ? [2,1] : [1,2]).map(id => [id]));
+    });
+  }
+  it('counts each expanded source once per decision even through several stored link paths', () => {
+    const input = sources(); input.staff[0].userId = 1; input.accounts[0].partyId = 11;
+    input.contracts = [{ id: 30, staffId: 20, partyId: 11, status: 'approved' }];
+    input.payrollLinks = [{ staffId: 20, partyId: 11 }];
+    const result = buildIdentityPreview(input, [
+      { userIds: [1], partyIds: [11], staffId: 20, confirmedSamePerson: true },
+      { userIds: [2], partyIds: [10], staffId: null, confirmedSamePerson: true },
+    ]);
+    const reviewed = result.candidates.filter(c => c.explicit);
+    expect(reviewed.map(c => c.action)).toEqual(['skip','create']);
+    expect(reviewed.every(c => !c.reasons.includes('duplicate_selection'))).toBe(true);
+  });
+  it('keeps equal numeric IDs in distinct source namespaces and equal names in distinct identities', () => {
+    const input = sources(); input.parties.push({ id: 1, label: input.accounts[0].label, kind: 'doctor', active: true });
+    const result = buildIdentityPreview(input, [
+      { userIds: [1], partyIds: [], staffId: null, confirmedSamePerson: true },
+      { userIds: [], partyIds: [1], staffId: null, confirmedSamePerson: true },
+    ]);
+    expect(result.candidates.filter(c => c.explicit).every(c => c.action === 'create' && !c.reasons.includes('duplicate_selection'))).toBe(true);
   });
   it('validates only explicit, bounded identifier choices; rejects authority, credentials, names and unconfirmed unions', () => {
     const valid = { sourceDigest: 'a'.repeat(64), decisions: [{ userIds: [2,1], partyIds: [10], staffId: null, confirmedSamePerson: true }] };
