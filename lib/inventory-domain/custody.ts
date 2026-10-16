@@ -335,7 +335,7 @@ export function canonicalCustodyReferenceKey(raw: string): string {
   return raw
     .trim()
     .replace(/^checkpoint:[^:]+:/i, "")
-    .replace(/^(?:(?:pkg|ev|transfer_line|mov_alloc|mov|usage|stocktake|waste_approval|transfer_out):)+/i, "");
+    .replace(/^(?:(?:pkg|ev|transfer_ack|transfer_line|mov_alloc|mov|usage|stocktake|waste_approval|transfer_out):)+/i, "");
 }
 
 export function packageEvidenceAction(hazard: "none" | "sharp" | "contaminated", policy: PackageSafetyPolicy) {

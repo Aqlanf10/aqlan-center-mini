@@ -462,6 +462,8 @@ describe("R03, R10, R11, R12 schema, API and UI bilingual/locator invariants", (
 
     const canonKey = canonicalCustodyReferenceKey;
     expect(canonKey("pkg:line-1")).toBe("line-1");
+    expect(canonKey("transfer_ack:ack-1:line-1")).toBe("ack-1:line-1");
+    expect(canonKey("pkg:transfer_ack:ack-1:line-1")).toBe("ack-1:line-1");
     expect(canonKey("ev:usage:ev-1")).toBe("ev-1");
     expect(canonKey("checkpoint:cp-1:pkg:line-1")).toBe("line-1");
 

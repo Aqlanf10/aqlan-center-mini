@@ -84,6 +84,105 @@ describe("P49/51/55/61 custody allocation transactions (no financial posting)",(
   const close20=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:t20.lines[0].id,evidenceEventId:stNew.id,locationId:f.destination,lotId:f.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"20",recordedConsumptionQuantity:"20",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Close 20-unit tranche"});
   expect(close20).toMatchObject({closureKind:"terminal",originalQuantity:"20",retiredOriginalQuantity:"20"});
  });
+ it("a657 review Points 3, 4 & 5: partial acknowledgement tranches on one transfer_line close independently, source/evidence timestamps use actual receipt/ack/execution times, and readDoctorCustody returns per-tranche open quantities",async()=>{
+  // Point 3: dispatch 30 -> ack 10 -> consume 10 -> close 10 -> ack 20 -> consume 20 -> close 20 on same transfer_line; aliases of closed ack 10 rejected
+  const f=await fixture();
+  const t30=transfer(f,"30");
+  await custody.dispatchCustodyTransfer(admin,key(),t30);
+  const ack10=ack(t30,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack10);
+  const u10=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f.destination,lotId:f.lot,kind:"consumed",quantity:"10",reason:"Consume first partial ack of 10"});
+  const readAfterAck10=await custody.readDoctorCustody(doctorA);
+  const lotAfterAck10=readAfterAck10.closableLots.find(r=>r.locationId===f.destination&&r.lotId===f.lot)!;
+  expect(lotAfterAck10.defaultPackageId).toBe(`${ack10.id}:${t30.lines[0].id}`);
+  expect(lotAfterAck10).toMatchObject({originalQuantity:"10",recordedConsumptionQuantity:"10",remainingQuantity:"0"});
+  const closedAck10=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:lotAfterAck10.defaultPackageId!,evidenceEventId:u10.id,locationId:f.destination,lotId:f.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"10",recordedConsumptionQuantity:"10",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Close first partial ack tranche 10"});
+  expect(closedAck10).toMatchObject({closureKind:"terminal",terminalClosure:true,originalQuantity:"10",retiredOriginalQuantity:"10"});
+
+  const ack20=ack(t30,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack20);
+  const u20=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:f.destination,lotId:f.lot,kind:"consumed",quantity:"20",reason:"Consume second partial ack of 20 on same transfer line"});
+  // Attempting to reuse first closed partial ack via any alias is rejected
+  for(const alias of [ack10.id,`pkg:${ack10.id}`,`${ack10.id}:${t30.lines[0].id}`,`transfer_ack:${ack10.id}:${t30.lines[0].id}`,`pkg:transfer_ack:${ack10.id}:${t30.lines[0].id}`]){
+   await expect(custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:alias,evidenceEventId:u20.id,locationId:f.destination,lotId:f.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"10",recordedConsumptionQuantity:"10",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Reject alias of closed ack10"})).rejects.toMatchObject({code:"package_or_evidence_already_closed"});
+  }
+  const readAfterAck20=await custody.readDoctorCustody(doctorA);
+  const lotAfterAck20=readAfterAck20.closableLots.find(r=>r.locationId===f.destination&&r.lotId===f.lot)!;
+  expect(lotAfterAck20.defaultPackageId).toBe(`${ack20.id}:${t30.lines[0].id}`);
+  expect(lotAfterAck20).toMatchObject({originalQuantity:"20",recordedConsumptionQuantity:"20",remainingQuantity:"0"});
+  const closedAck20=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:t30.lines[0].id,evidenceEventId:u20.id,locationId:f.destination,lotId:f.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"20",recordedConsumptionQuantity:"20",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Close second partial ack tranche 20 on same transfer line"});
+  expect(closedAck20).toMatchObject({closureKind:"terminal",terminalClosure:true,originalQuantity:"20",retiredOriginalQuantity:"20"});
+
+  // Point 4a: Direct goods receipt into custody location uses receipt/movement created_at (not NOW()), accepting evidence recorded after receipt and before close
+  const fDirect=await fixture();
+  const reqDir={id:key(),version:1,branchId:"clinic",requestedBy:doctorA.userId,reason:"Direct custody receipt",proposedSupplierPartyId:supplier,value:{currency:"SAR" as const,amountMinor:10000},lines:[{id:key(),itemId:fDirect.itemId,quantity:"1",conversion:{itemId:fDirect.itemId,version:1,enteredUnit:"box",baseUnit:"cartridge",baseUnitsPerEnteredUnit:"50",enteredPrecision:0,basePrecision:0}}]};
+  await procurement.submitPurchaseRequest(doctorA,key(),reqDir);
+  await procurement.approvePurchaseRequest(admin,key(),{requestId:reqDir.id,version:1,decisions:[{lineId:reqDir.lines[0].id,quantity:"1",reason:"Approve direct custody receipt"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:10000,rateToBase:"500",capturedAt:"2026-10-15T01:00:00Z",sourceRef:"direct-rate"})});
+  const poDir={id:key(),version:1,branchId:"clinic",supplierPartyId:supplier,currency:"SAR" as const,shippingMinor:0,discountMinor:0,lines:[{id:key(),itemId:fDirect.itemId,kind:"stock" as const,quantity:"1",conversion:reqDir.lines[0].conversion,price:{state:"known" as const,currency:"SAR" as const,unitPriceMinor:10000,reason:"direct quote"},trackLot:true,requiresExpiry:true,minimumShelfLifeDays:30,sources:[{id:key(),requestId:reqDir.id,requestLineId:reqDir.lines[0].id,baseQuantity:"50"}]}]};
+  await procurement.issuePurchaseOrder(admin,key(),poDir);
+  const directPortionId=key();
+  await procurement.postInspectedReceipt(admin,key(),{id:key(),version:1,orderId:poDir.id,orderVersion:1,branchId:"clinic",supplierPartyId:supplier,actualArrivalDate:"2026-10-15",lines:[{orderLineId:poDir.lines[0].id,arrivedQuantity:"1",portions:[{id:directPortionId,quantity:"1",disposition:"accepted",lotCode:"SYN-DIRECT-CUSTODY-LOT",expiryDate:"2027-11-01",locationId:fDirect.destination,damaged:false,reason:"Direct receipt into custody location"}]}]});
+  const directLotId=(await db.getPool().query("SELECT id FROM stock_lots WHERE receipt_line_id=$1",[directPortionId])).rows[0].id;
+  const uDirect=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fDirect.destination,lotId:directLotId,kind:"consumed",quantity:"50",reason:"Consume 50 from direct receipt before closing"});
+  const readDirect=await custody.readDoctorCustody(doctorA);
+  const directClosable=readDirect.closableLots.find(r=>r.locationId===fDirect.destination&&r.lotId===directLotId)!;
+  expect(directClosable.tranches[0].canonicalPackageId).toMatch(/^mov_alloc:/);
+  const closedDirect=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:directClosable.defaultPackageId!,evidenceEventId:uDirect.id,locationId:fDirect.destination,lotId:directLotId,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"50",recordedConsumptionQuantity:"50",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"0",reason:"Close direct movement allocation tranche with post-receipt evidence"});
+  expect(closedDirect).toMatchObject({closureKind:"terminal",terminalClosure:true,originalQuantity:"50",retiredOriginalQuantity:"50"});
+
+  // Point 4b: Evidence created after dispatch but before acknowledgement (or from a prior retired waste event) is rejected; waste approval resolved to executed event uses execution timestamp
+  const fTime=await fixture();
+  const tOld=transfer(fTime,"10");
+  await custody.dispatchCustodyTransfer(admin,key(),tOld);
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ack(tOld,"10","0"));
+  const tNew=transfer(fTime,"10");
+  await custody.dispatchCustodyTransfer(admin,key(),tNew);
+  // While tNew is in transit (dispatched, not yet acknowledged), waste 10 from tOld and close tOld using stocktake evidence (leaving wAppOld/wExecOld unused in closures)
+  const wAppOld=key();
+  await custody.approveCustodyWaste(admin,key(),{id:wAppOld,locationId:fTime.destination,lotId:fTime.lot,quantity:"10",reason:"Waste 10 on old tranche"});
+  const wExecOld=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fTime.destination,lotId:fTime.lot,kind:"approved_waste",quantity:"10",approvalId:wAppOld,reason:"Execute waste 10 on old tranche before tNew ack"});
+  const stOld=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:fTime.destination,lotId:fTime.lot,countedQuantity:"0",reason:"Stocktake 0 to close old tranche"});
+  await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:tOld.lines[0].id,evidenceEventId:stOld.id,locationId:fTime.destination,lotId:fTime.lot,hazard:"sharp",policy:"safe_disposal_record",originalQuantity:"10",recordedConsumptionQuantity:"0",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"10",remainingQuantity:"0",reason:"Close tOld with stocktake"});
+  // Approve wAppForNew before ackNew, but execute it AFTER ackNew
+  const wAppForNew=key();
+  await custody.approveCustodyWaste(admin,key(),{id:wAppForNew,locationId:fTime.destination,lotId:fTime.lot,quantity:"2",reason:"Pre-approved waste 2 before ackNew"});
+  await new Promise(resolve=>setTimeout(resolve,15));
+  const ackNew=ack(tNew,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackNew);
+  const uNew8=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fTime.destination,lotId:fTime.lot,kind:"consumed",quantity:"8",reason:"Consume 8 after ackNew"});
+  // Attempting to close tNew (consumed=8, remaining=2 or consumed=10) using wAppOld or wExecOld (created before ackNew and with waste=0 on tNew) must fail package_evidence_mismatch
+  await expect(custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:tNew.lines[0].id,evidenceEventId:wAppOld,locationId:fTime.destination,lotId:fTime.lot,hazard:"sharp",policy:"safe_disposal_record",evidenceAction:"document_safe_disposal",originalQuantity:"10",recordedConsumptionQuantity:"8",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"2",reason:"Reject pre-ack waste evidence"})).rejects.toMatchObject({code:"package_evidence_mismatch"});
+  await expect(custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:tNew.lines[0].id,evidenceEventId:wExecOld.id,locationId:fTime.destination,lotId:fTime.lot,hazard:"sharp",policy:"safe_disposal_record",evidenceAction:"document_safe_disposal",originalQuantity:"10",recordedConsumptionQuantity:"8",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"0",remainingQuantity:"2",reason:"Reject pre-ack waste usage evidence"})).rejects.toMatchObject({code:"package_evidence_mismatch"});
+  // Now execute wAppForNew AFTER ackNew; closing tNew with wAppForNew uses the execution timestamp (>= ackNew) and succeeds as verified_disposal_record
+  await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fTime.destination,lotId:fTime.lot,kind:"approved_waste",quantity:"2",approvalId:wAppForNew,reason:"Execute 2 waste after ackNew"});
+  const closedNew=await custody.closeCustodyPackage(doctorA,key(),{id:key(),packageId:tNew.lines[0].id,evidenceEventId:wAppForNew,locationId:fTime.destination,lotId:fTime.lot,hazard:"sharp",policy:"safe_disposal_record",evidenceAction:"document_safe_disposal",originalQuantity:"10",recordedConsumptionQuantity:"8",returnedOrTransferredQuantity:"0",approvedWasteQuantity:"2",remainingQuantity:"0",reason:"Close tNew with post-ack executed waste"});
+  expect(closedNew).toMatchObject({closureKind:"terminal",terminalClosure:true,reviewRequired:false,evidenceVerificationStatus:"verified_disposal_record"});
+  void uNew8;
+
+  // Point 5: Two open tranches (10 and 20) in same lot do not produce source10/original30 in readDoctorCustody; each tranche reports its own open quantities and updates after partial checkpoint
+  const fUi=await fixture();
+  const trA=transfer(fUi,"10"),trB=transfer(fUi,"20");
+  await custody.dispatchCustodyTransfer(admin,key(),trA);
+  const ackTrA=ack(trA,"10","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackTrA);
+  await custody.dispatchCustodyTransfer(admin,key(),trB);
+  const ackTrB=ack(trB,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackTrB);
+  await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fUi.destination,lotId:fUi.lot,kind:"consumed",quantity:"15",reason:"Consume 15 across tranche A (10) and tranche B (5)"});
+  const readMulti=await custody.readDoctorCustody(doctorA);
+  const lotMulti=readMulti.closableLots.find(r=>r.locationId===fUi.destination&&r.lotId===fUi.lot)!;
+  expect(lotMulti.defaultPackageId).toBe(`${ackTrA.id}:${trA.lines[0].id}`);
+  expect(lotMulti).toMatchObject({
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"10",
+   remainingQuantity:"0"
+  });
+  expect(lotMulti.tranches).toEqual([
+   expect.objectContaining({packageId:`${ackTrA.id}:${trA.lines[0].id}`,canonicalPackageId:`transfer_ack:${ackTrA.id}:${trA.lines[0].id}`,originalQuantity:"10",recordedConsumptionQuantity:"10",remainingQuantity:"0"}),
+   expect.objectContaining({packageId:`${ackTrB.id}:${trB.lines[0].id}`,canonicalPackageId:`transfer_ack:${ackTrB.id}:${trB.lines[0].id}`,originalQuantity:"20",recordedConsumptionQuantity:"5",remainingQuantity:"15"})
+  ]);
+ });
 });
+
 
 

@@ -81,5 +81,85 @@ describe("unnumbered schema fixture: real procurement transactions",()=>{
   expect(line2Receipt.remaining.find(r=>r.orderLineId===newLineId)).toMatchObject({acceptedBaseQuantity:"50",remainingFulfillmentBaseQuantity:"0",remainingDeliveryBaseQuantity:"0"});
   void reqNewLine;
  });
+ it("a657 review Points 1, 2 & post-INSERT rollback: distributed FX rounding on earlier/later order amendments, approved-vs-unapproved excess disposal capacity, and post-INSERT failure injection rollback on purchase_order_lines",async()=>{
+  // 1) Point 1: SAR 1 minor unit then SAR 1 minor unit at rate 50 YER -> base allocations 1 and 0; amending earlier orderA and later orderB succeeds without valuation_mismatch
+  const convBox={itemId,version:1,baseUnit:"cartridge",enteredUnit:"box",baseUnitsPerEnteredUnit:"50",enteredPrecision:0,basePrecision:0};
+  const reqFx1:RequestRevision={id:key(),version:1,branchId:"clinic",requestedBy:doctor.userId,reason:"FX distributed rounding req 1",proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:100},lines:[{id:key(),itemId,quantity:"10",conversion:convBox}]};
+  await store.submitPurchaseRequest(doctor,key(),reqFx1);
+  await store.approvePurchaseRequest(admin,key(),{requestId:reqFx1.id,version:1,decisions:[{lineId:reqFx1.lines[0].id,quantity:"10",reason:"Approve 10 boxes at rate 50"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:100,rateToBase:"50",capturedAt:"2026-10-15T01:00:00Z",sourceRef:"fx-rate-50"})});
+  const reqFx2:RequestRevision={id:key(),version:1,branchId:"clinic",requestedBy:doctor.userId,reason:"FX distributed rounding req 2",proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:100},lines:[{id:key(),itemId,quantity:"4",conversion:convBox}]};
+  await store.submitPurchaseRequest(doctor,key(),reqFx2);
+  await store.approvePurchaseRequest(admin,key(),{requestId:reqFx2.id,version:1,decisions:[{lineId:reqFx2.lines[0].id,quantity:"4",reason:"Approve 4 supplemental boxes at rate 50"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:100,rateToBase:"50",capturedAt:"2026-10-15T01:00:00Z",sourceRef:"fx-rate-50-2"})});
+
+  const orderA:PurchaseOrder={id:key(),version:1,branchId:"clinic",supplierPartyId:supplierId,currency:"SAR",shippingMinor:0,discountMinor:0,lines:[{id:key(),itemId,kind:"stock",quantity:"1",conversion:convBox,price:{state:"known",currency:"SAR",unitPriceMinor:1,reason:"1 minor SAR"},trackLot:true,requiresExpiry:true,minimumShelfLifeDays:30,sources:[{id:key(),requestId:reqFx1.id,requestLineId:reqFx1.lines[0].id,baseQuantity:"50"}]}]};
+  const orderB:PurchaseOrder={id:key(),version:1,branchId:"clinic",supplierPartyId:supplierId,currency:"SAR",shippingMinor:0,discountMinor:0,lines:[{id:key(),itemId,kind:"stock",quantity:"1",conversion:convBox,price:{state:"known",currency:"SAR",unitPriceMinor:1,reason:"1 minor SAR"},trackLot:true,requiresExpiry:true,minimumShelfLifeDays:30,sources:[{id:key(),requestId:reqFx1.id,requestLineId:reqFx1.lines[0].id,baseQuantity:"50"}]}]};
+  await store.issuePurchaseOrder(admin,key(),orderA);
+  await store.issuePurchaseOrder(admin,key(),orderB);
+  const initialAllocs=(await db.getPool().query("SELECT order_id,amount_minor::int AS amount_minor,base_amount_minor::int AS base_amount_minor FROM purchase_order_source_allocations WHERE request_id=$1 ORDER BY CASE WHEN order_id=$2 THEN 0 ELSE 1 END,id",[reqFx1.id,orderA.id])).rows;
+  expect(initialAllocs.map(r=>({orderId:r.order_id,amount:r.amount_minor,base:r.base_amount_minor}))).toEqual([{orderId:orderA.id,amount:1,base:1},{orderId:orderB.id,amount:1,base:0}]);
+
+  // Amend earlier orderA (1 -> 2 boxes) while orderB carries base_amount_minor=0
+  const orderAAmended:PurchaseOrder={...orderA,version:2,lines:[{...orderA.lines[0],quantity:"2",sources:[orderA.lines[0].sources[0],{id:key(),requestId:reqFx1.id,requestLineId:reqFx1.lines[0].id,baseQuantity:"50"}]}]};
+  const amA=await store.amendPurchaseOrder(admin,key(),{order:orderAAmended,reason:"Amend earlier orderA under distributed FX rounding"});
+  expect(amA.version).toBe(2);
+  expect(amA.totalMinor).toBe(2);
+
+  // Amend later orderB (1 -> 3 boxes) across both reqFx1 and reqFx2, then repeat amendment on orderA (2 -> 3 boxes)
+  const orderBAmended:PurchaseOrder={...orderB,version:2,lines:[{...orderB.lines[0],quantity:"3",sources:[orderB.lines[0].sources[0],{id:key(),requestId:reqFx1.id,requestLineId:reqFx1.lines[0].id,baseQuantity:"50"},{id:key(),requestId:reqFx2.id,requestLineId:reqFx2.lines[0].id,baseQuantity:"50"}]}]};
+  const amB=await store.amendPurchaseOrder(admin,key(),{order:orderBAmended,reason:"Amend later orderB across two approved requests"});
+  expect(amB.version).toBe(2);
+  expect(amB.totalMinor).toBe(3);
+  const orderAAmendedV3:PurchaseOrder={...orderAAmended,version:3,lines:[{...orderAAmended.lines[0],quantity:"3",sources:[...orderAAmended.lines[0].sources,{id:key(),requestId:reqFx1.id,requestLineId:reqFx1.lines[0].id,baseQuantity:"50"}]}]};
+  const amAV3=await store.amendPurchaseOrder(admin,key(),{order:orderAAmendedV3,reason:"Second amendment on earlier orderA"});
+  expect(amAV3.version).toBe(3);
+  const finalReq1Allocs=(await db.getPool().query("SELECT SUM(amount_minor)::int AS amt,SUM(base_amount_minor)::int AS base_amt FROM purchase_order_source_allocations WHERE request_id=$1",[reqFx1.id])).rows[0];
+  expect(finalReq1Allocs).toEqual({amt:5,base_amt:3});
+
+  // 2) Post-INSERT failure injection rollback on purchase_order_lines
+  const injectedNewLineId=key();
+  await db.getPool().query(`CREATE FUNCTION synthetic_po_amend_fail() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN IF NEW.entity='purchase_order' AND NEW.entity_id='${orderA.id}' THEN RAISE EXCEPTION 'synthetic_post_line_insert_failpoint'; END IF; RETURN NEW; END; $$`);
+  await db.getPool().query("CREATE TRIGGER synthetic_po_amend_fail BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION synthetic_po_amend_fail()");
+  try{
+   const orderAWithInjectedLine:PurchaseOrder={...orderAAmendedV3,version:4,lines:[orderAAmendedV3.lines[0],{id:injectedNewLineId,itemId,kind:"stock",quantity:"1",conversion:convBox,price:{state:"known",currency:"SAR",unitPriceMinor:1,reason:"1 minor SAR new line"},trackLot:true,requiresExpiry:true,minimumShelfLifeDays:30,sources:[{id:key(),requestId:reqFx2.id,requestLineId:reqFx2.lines[0].id,baseQuantity:"50"}]}]};
+   await expect(store.amendPurchaseOrder(admin,key(),{order:orderAWithInjectedLine,reason:"Injected failure after INSERT INTO purchase_order_lines"})).rejects.toThrow("synthetic_post_line_insert_failpoint");
+   expect((await db.getPool().query("SELECT COUNT(*)::int AS n FROM purchase_order_lines WHERE id=$1",[injectedNewLineId])).rows[0].n).toBe(0);
+   expect((await store.readProcurementWorkbench(admin)).orders.find(r=>r.id===orderA.id)!.document.version).toBe(3);
+  }finally{
+   await db.getPool().query("DROP TRIGGER synthetic_po_amend_fail ON audit_log");
+   await db.getPool().query("DROP FUNCTION synthetic_po_amend_fail()");
+  }
+
+  // 3) Point 2: Order 2 boxes (100) -> receive 3 boxes (150) quarantined (held=50, start=100) -> amend to 3 boxes (150) -> release 120 and dispose 30 -> extra receipt of 30 requires replacement decision (not exempted by historical held marker)
+  const reqCap1=await approved("2");
+  const poCap:PurchaseOrder=order(reqCap1,"2");
+  await store.issuePurchaseOrder(admin,key(),poCap);
+  const qPortion150=key();
+  await store.postInspectedReceipt(admin,key(),{id:key(),version:1,orderId:poCap.id,orderVersion:1,supplierPartyId:supplierId,branchId:"clinic",actualArrivalDate:"2026-10-15",lines:[{orderLineId:poCap.lines[0].id,arrivedQuantity:"3",excessDecision:"hold_for_order_amendment",excessReason:"Hold 1 excess box (50 cartridges) for amendment",portions:[{id:qPortion150,quantity:"3",disposition:"quarantined",lotCode:"SYN-CAP-150",expiryDate:"2027-11-01",locationId,damaged:false,reason:"3 boxes quarantined together"}]}]});
+  const reqCap2=await approved("1");
+  const poCapV2:PurchaseOrder={...poCap,version:2,lines:[{...poCap.lines[0],quantity:"3",sources:[poCap.lines[0].sources[0],{id:key(),requestId:reqCap2.id,requestLineId:reqCap2.lines[0].id,baseQuantity:"50"}]}]};
+  await store.amendPurchaseOrder(admin,key(),{order:poCapV2,reason:"Amend order from 2 to 3 boxes (150 cartridges)"});
+  // Release 2 boxes (100) and dispose 1 box (50)
+  await store.resolveQuarantineReceipt(admin,key(),{id:key(),orderId:poCap.id,receiptLineId:qPortion150,action:"release",quantity:"2",reason:"Release 2 boxes",resolutionDate:"2026-10-15"});
+  await store.resolveQuarantineReceipt(admin,key(),{id:key(),orderId:poCap.id,receiptLineId:qPortion150,action:"dispose",quantity:"1",reason:"Dispose 1 box locally after order amendment approved all 3 boxes",resolutionDate:"2026-10-15"});
+  // Attempting a fresh accepted receipt of 1 box (50) without replacement decision must fail over_receipt_requires_decision
+  await expect(store.postInspectedReceipt(admin,key(),{id:key(),version:1,orderId:poCap.id,orderVersion:2,supplierPartyId:supplierId,branchId:"clinic",actualArrivalDate:"2026-10-15",lines:[{orderLineId:poCap.lines[0].id,arrivedQuantity:"1",portions:[{id:key(),quantity:"1",disposition:"accepted",lotCode:"SYN-CAP-EXTRA",expiryDate:"2027-11-01",locationId,damaged:false,reason:"Attempt extra box after approved excess was disposed"}]}]})).rejects.toMatchObject({code:"overdelivery"});
+
+  // Partial amendment + partial release + concurrency: Order 2 boxes (100) -> receive 4 boxes (200) quarantined (held=100, start=100) -> amend to 3 boxes (150, so 50 approved, 50 unapproved) -> concurrent release attempts of 2 boxes (100) each: only one can succeed after 1 box (50) is already released
+  const reqPart1=await approved("2");
+  const poPart:PurchaseOrder=order(reqPart1,"2");
+  await store.issuePurchaseOrder(admin,key(),poPart);
+  const qPortion200=key();
+  await store.postInspectedReceipt(admin,key(),{id:key(),version:1,orderId:poPart.id,orderVersion:1,supplierPartyId:supplierId,branchId:"clinic",actualArrivalDate:"2026-10-15",lines:[{orderLineId:poPart.lines[0].id,arrivedQuantity:"4",excessDecision:"hold_for_order_amendment",excessReason:"Hold 2 excess boxes",portions:[{id:qPortion200,quantity:"4",disposition:"quarantined",lotCode:"SYN-PART-200",expiryDate:"2027-11-01",locationId,damaged:false,reason:"4 boxes quarantined"}]}]});
+  const reqPart2=await approved("1");
+  await store.amendPurchaseOrder(admin,key(),{order:{...poPart,version:2,lines:[{...poPart.lines[0],quantity:"3",sources:[poPart.lines[0].sources[0],{id:key(),requestId:reqPart2.id,requestLineId:reqPart2.lines[0].id,baseQuantity:"50"}]}]},reason:"Partial amendment from 2 to 3 boxes (150 cartridges)"});
+  await store.resolveQuarantineReceipt(admin,key(),{id:key(),orderId:poPart.id,receiptLineId:qPortion200,action:"release",quantity:"2",reason:"Release first 2 boxes (100)",resolutionDate:"2026-10-15"});
+  const concurrentReleases=await Promise.allSettled([
+   store.resolveQuarantineReceipt(admin,key(),{id:key(),orderId:poPart.id,receiptLineId:qPortion200,action:"release",quantity:"1",reason:"Release 3rd approved box (50)",resolutionDate:"2026-10-15"}),
+   store.resolveQuarantineReceipt(admin,key(),{id:key(),orderId:poPart.id,receiptLineId:qPortion200,action:"release",quantity:"1",reason:"Concurrent release of 4th unapproved box (50)",resolutionDate:"2026-10-15"})
+  ]);
+  expect(concurrentReleases.filter(r=>r.status==="fulfilled")).toHaveLength(1);
+  expect(concurrentReleases.filter(r=>r.status==="rejected")).toHaveLength(1);
+ });
 });
+
 

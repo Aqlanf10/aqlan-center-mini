@@ -178,7 +178,10 @@ export async function issuePurchaseOrder(actor:InventoryActor,key:string,order:P
     return {id:order.id,status:"issued" as const,totalMinor:plan.totalMinor,currency:order.currency};
   });
 }
-async function orderPriorInspectedQuantities(client: DbClient, orderId: string): Promise<PriorInspectedQuantity[]> {
+async function orderPriorInspectedQuantities(client: DbClient, order: IssuedPurchaseOrder): Promise<PriorInspectedQuantity[]> {
+  const orderedByLine = Object.fromEntries(
+    order.lines.map((line) => [line.id, convertQuantity(line.quantity, line.conversion).baseQuantity]),
+  );
   const old = await client.query<{
     order_line_id: string;
     accepted: string;
@@ -196,7 +199,29 @@ async function orderPriorInspectedQuantities(client: DbClient, orderId: string):
        + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='reject_return'),0))::text AS rejected,
       COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='dispose'),0)::text AS disposed,
       COALESCE((
-        SELECT SUM(LEAST(qd_sum.disp_qty, COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0)))
+        SELECT SUM(
+          LEAST(
+            qd_sum.disp_qty,
+            CASE
+              WHEN COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0) <= 0 THEN 0
+              WHEN $3::int <= COALESCE((grl2.document->>'orderVersion')::int, 1)
+                THEN COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0)
+              ELSE GREATEST(
+                0,
+                LEAST(
+                  COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0),
+                  COALESCE(
+                    (grl2.document->>'orderLineHeldStartBaseQuantity')::numeric,
+                    COALESCE((grl2.document->>'orderLineAcceptedAtReceiptBaseQuantity')::numeric, 0)
+                      + GREATEST(grl2.base_qty - COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0), 0)
+                  )
+                  + COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0)
+                  - COALESCE(($2::jsonb->>grl2.order_line_id)::numeric, 0)
+                )
+              )
+            END
+          )
+        )
         FROM goods_receipt_lines grl2
         JOIN (
           SELECT receipt_line_id, SUM(base_qty) AS disp_qty
@@ -207,7 +232,7 @@ async function orderPriorInspectedQuantities(client: DbClient, orderId: string):
         WHERE grl2.order_id=$1 AND grl2.order_line_id=grl.order_line_id
       ),0)::text AS disposed_excess
      FROM goods_receipt_lines grl WHERE grl.order_id=$1 GROUP BY grl.order_line_id`,
-    [orderId],
+    [order.id, JSON.stringify(orderedByLine), order.version],
   );
   return old.rows.map((row) => ({
     orderLineId: row.order_line_id,
@@ -270,7 +295,7 @@ export async function amendPurchaseOrder(
       amountMinor: Number(row.amount_minor),
       baseAmountMinor: Number(row.base_amount_minor),
     }));
-    const priorReceipts = await orderPriorInspectedQuantities(client, currentOrder.id);
+    const priorReceipts = await orderPriorInspectedQuantities(client, currentOrder);
     const party = supplier.rows[0];
     const plan = planOrderAmendment({
       currentOrder,
@@ -324,7 +349,7 @@ export async function postInspectedReceipt(actor:InventoryActor,key:string,recei
   docId(receipt.id);scope(receipt.branchId);
   return inventoryOperation(actor,key,"receipt.post",receipt,true,async client=>{
     const order=await lockedOrder(client,receipt.orderId);
-    const prior=await orderPriorInspectedQuantities(client,order.id);
+    const prior=await orderPriorInspectedQuantities(client,order);
     const postingDate=clinicDateString(new Date(),CLINIC_ZONE_FALLBACK);
     const plan=planInspectedReceipt(order,receipt,prior,postingDate);
     const locations=[...new Set(plan.lines.map(line=>line.locationId))].sort();
@@ -377,23 +402,15 @@ export async function resolveQuarantineReceipt(
       "SELECT id FROM goods_receipt_lines WHERE order_id=$1 AND order_line_id=$2 ORDER BY id FOR UPDATE",
       [order.id, row.document.orderLineId],
     );
+    const priorTotals = await orderPriorInspectedQuantities(client, order);
+    const linePrior = priorTotals.find((p) => p.orderLineId === row.document.orderLineId);
     const lineTotals = await client.query<{ committed_qty: string }>(
-      `SELECT (
-        COALESCE((SELECT SUM(grl.base_qty) FROM goods_receipt_lines grl WHERE grl.order_id=$1 AND grl.order_line_id=$2 AND grl.disposition='accepted'), 0)
-        + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=$2 AND qd.action='release'), 0)
-        + COALESCE((
-          SELECT SUM(GREATEST(qd_sum.disp_qty - COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0), 0))
-          FROM goods_receipt_lines grl2
-          JOIN (
-            SELECT receipt_line_id, SUM(base_qty) AS disp_qty
-            FROM quarantine_dispositions
-            WHERE order_id=$1 AND order_line_id=$2 AND action='dispose'
-            GROUP BY receipt_line_id
-          ) qd_sum ON qd_sum.receipt_line_id = grl2.id
-          WHERE grl2.order_id=$1 AND grl2.order_line_id=$2
-        ), 0)
-      )::text AS committed_qty`,
-      [order.id, row.document.orderLineId],
+      "SELECT ($1::numeric + GREATEST($2::numeric - $3::numeric, 0))::text AS committed_qty",
+      [
+        linePrior?.acceptedBaseQuantity ?? "0",
+        linePrior?.disposedBaseQuantity ?? "0",
+        linePrior?.disposedExcessBaseQuantity ?? "0",
+      ],
     );
     const orderLineAcceptedBaseQuantity = lineTotals.rows[0]?.committed_qty ?? "0";
     const portionDamaged = row.receipt_doc.lines

@@ -85,4 +85,101 @@ describe("procurement HTTP/UI fixture, migration registration and finance postin
   const releasedRes=await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("quarantine.resolve",{resolution:{id:randomUUID(),orderId:po.id,receiptLineId:excessLineId,action:"release",quantity:"1",reason:"Release after PO v2 amendment",resolutionDate:"2026-10-15"}}));
   expect(releasedRes.status).toBe(200);
  });
+ it.each([390,1280])("Point 5 (a657 review): custody UI package closure form populates per-tranche open quantities (10 and 20) and closes after checkpoint at %ipx in AR and EN",async width=>{
+  const rTr:RequestRevision={id:randomUUID(),version:1,branchId:"clinic",requestedBy:doctorId,reason:`SYN-TRANCHE-UI-REQ-${width}`,proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:10000},lines:[{id:randomUUID(),itemId,quantity:"1",conversion:conversion()}]};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("request.submit",{document:rTr}))).status).toBe(201);
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("request.approve",{approval:{requestId:rTr.id,version:1,decisions:[{lineId:rTr.lines[0].id,quantity:"1",reason:"Approve 1 box for tranche UI test"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:10000,rateToBase:"500",capturedAt:"2026-10-15T01:00:00Z",sourceRef:"tranche-ui-quote"})}}))).status).toBe(200);
+  const poTr:PurchaseOrder={id:randomUUID(),version:1,branchId:"clinic",supplierPartyId:supplierId,currency:"SAR",shippingMinor:0,discountMinor:0,lines:[{id:randomUUID(),itemId,kind:"stock",quantity:"1",conversion:conversion(),price:{state:"known",currency:"SAR",unitPriceMinor:10000,reason:"tranche-ui-quote"},trackLot:true,requiresExpiry:true,minimumShelfLifeDays:30,sources:[{id:randomUUID(),requestId:rTr.id,requestLineId:rTr.lines[0].id,baseQuantity:"50"}]}]};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("order.issue",{document:poTr}))).status).toBe(201);
+  const recPortionId=randomUUID();
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("receipt.post",{document:{id:randomUUID(),version:1,orderId:poTr.id,orderVersion:1,branchId:"clinic",supplierPartyId:supplierId,actualArrivalDate:"2026-10-15",lines:[{orderLineId:poTr.lines[0].id,arrivedQuantity:"1",portions:[{id:recPortionId,quantity:"1",disposition:"accepted",lotCode:`SYN-TR-LOT-${width}`,expiryDate:"2027-11-01",locationId:location,damaged:false,reason:"Accepted for tranche UI test"}]}]}}))).status).toBe(201);
+  const trancheLotId=(await db.query("SELECT id FROM stock_lots WHERE receipt_line_id=$1",[recPortionId])).rows[0].id;
+
+  const t30={id:randomUUID(),fromLocationId:location,toLocationId:custodyLocation,transitLocationId:transitLocation,reason:`SYN-TR-DISPATCH-${width}`,lines:[{id:randomUUID(),lotId:trancheLotId,quantity:"30"}]};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.admin,"POST",operation("custody.dispatch",{transfer:t30}))).status).toBe(201);
+  const ack1={id:randomUUID(),transferId:t30.id,reason:"First partial ack 10",lines:[{lineId:t30.lines[0].id,acceptedQuantity:"10",returnedQuantity:"0"}]};
+  const ack2={id:randomUUID(),transferId:t30.id,reason:"Second partial ack 20",lines:[{lineId:t30.lines[0].id,acceptedQuantity:"20",returnedQuantity:"0"}]};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.acknowledge",{acknowledgement:ack1}))).status).toBe(201);
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.acknowledge",{acknowledgement:ack2}))).status).toBe(201);
+  const u20={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,kind:"consumed",quantity:"20",reason:"Consumed 20 across tranche 1 (10) and tranche 2 (10)"};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.consume",{usage:u20}))).status).toBe(201);
+  const st10={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,countedQuantity:"10",reason:"Counted 10 remaining in tranche 2"};
+  expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.stocktake",{stocktake:st10}))).status).toBe(201);
+
+  const custodyRead=await(await authedGet("/api/inventory/procurement?view=custody",h.sessions.doctorA)).json();
+  const closable=custodyRead.closableLots.find((row:{lotId:string})=>row.lotId===trancheLotId);
+  expect(closable).toMatchObject({
+   defaultPackageId:`${ack1.id}:${t30.lines[0].id}`,
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"10",
+   remainingQuantity:"0"
+  });
+  expect(closable.tranches).toHaveLength(2);
+
+  const context=await browser.newContext({viewport:{width,height:900}});
+  const [name,...value]=h.sessions.doctorA.cookie.split("=");
+  await context.addCookies([{name,value:value.join("="),url:baseUrl}]);
+  try{
+   const page=await context.newPage();
+   await page.goto(`${baseUrl}/inventory/custody`,{waitUntil:"domcontentloaded"});
+   const root=page.getByTestId("doctor-custody");
+   await root.getByText("مواد العهدة تبقى ملكًا للمركز.",{exact:false}).waitFor();
+   const form=root.getByTestId("custody-package-closure-form");
+   await form.getByLabel("موقع العهدة للعبوة",{exact:true}).selectOption(custodyLocation);
+   await form.getByLabel("دفعة العبوة في العهدة",{exact:true}).selectOption(trancheLotId);
+   expect(await form.getByLabel("شريحة الاستلام / العبوة",{exact:true}).inputValue()).toBe(`${ack1.id}:${t30.lines[0].id}`);
+   expect(await form.getByLabel("كمية العبوة الأصلية",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("المستهلك المسجل",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("المتبقي بالعبوة",{exact:true}).inputValue()).toBe("0");
+   await form.getByLabel("ملاحظة إغلاق العبوة / التخلص الآمن",{exact:true}).fill(`SYN-UI-CLOSE-TR1-${width}`);
+   const close1ResPromise=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/inventory/procurement"&&response.request().method()==="POST");
+   await form.getByRole("button",{name:"توثيق إغلاق العبوة / التخلص الآمن",exact:true}).click();
+   const close1Res=await close1ResPromise;
+   expect(close1Res.status()).toBe(201);
+   expect(await close1Res.json()).toMatchObject({closureKind:"terminal",originalQuantity:"10",retiredOriginalQuantity:"10"});
+   await page.waitForFunction(()=>document.body.textContent?.includes("تم توثيق إغلاق العبوة أو التخلص الآمن وفق السياسة المعتمدة."));
+   await root.getByText("مواد العهدة تبقى ملكًا للمركز.",{exact:false}).waitFor();
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+
+   // Switch to English and record checkpoint on Tranche 2 (20 original, 10 consumed, 10 remaining)
+   await root.getByRole("button",{name:"English",exact:true}).click();
+   await root.getByRole("heading",{name:"Doctor material custody",exact:true}).waitFor();
+   expect(await root.getAttribute("dir")).toBe("ltr");
+   await form.getByLabel("Custody package lot",{exact:true}).selectOption(trancheLotId);
+   expect(await form.getByLabel("Receipt / package tranche",{exact:true}).inputValue()).toBe(`${ack2.id}:${t30.lines[0].id}`);
+   expect(await form.getByLabel("Original package quantity",{exact:true}).inputValue()).toBe("20");
+   expect(await form.getByLabel("Recorded consumed quantity",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("Remaining in package",{exact:true}).inputValue()).toBe("10");
+   await form.getByLabel("Evidence event ID",{exact:true}).fill(st10.id);
+   await form.getByLabel("Package closure / safe disposal note",{exact:true}).fill(`SYN-UI-CP-TR2-${width}`);
+   const cpResPromise=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/inventory/procurement"&&response.request().method()==="POST");
+   await form.getByRole("button",{name:"Record package closure / safe disposal",exact:true}).click();
+   const cpRes=await cpResPromise;
+   expect(cpRes.status()).toBe(201);
+   expect(await cpRes.json()).toMatchObject({closureKind:"checkpoint",originalQuantity:"20",retiredOriginalQuantity:"10",remainingQuantity:"10"});
+   await root.getByText("Custody materials remain clinic property.",{exact:false}).waitFor();
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+
+   // Consume remaining 10, reload, and verify post-checkpoint default open quantity is 10/10/0 and closes cleanly
+   const uRem10={id:randomUUID(),locationId:custodyLocation,lotId:trancheLotId,kind:"consumed",quantity:"10",reason:"Consume remaining 10 after checkpoint"};
+   expect((await authedMutation("/api/inventory/procurement",h.sessions.doctorA,"POST",operation("custody.consume",{usage:uRem10}))).status).toBe(201);
+   await page.goto(`${baseUrl}/inventory/custody`,{waitUntil:"domcontentloaded"});
+   await root.getByText("مواد العهدة تبقى ملكًا للمركز.",{exact:false}).waitFor();
+   await form.getByLabel("موقع العهدة للعبوة",{exact:true}).selectOption(custodyLocation);
+   await form.getByLabel("دفعة العبوة في العهدة",{exact:true}).selectOption(trancheLotId);
+   expect(await form.getByLabel("شريحة الاستلام / العبوة",{exact:true}).inputValue()).toBe(`${ack2.id}:${t30.lines[0].id}`);
+   expect(await form.getByLabel("كمية العبوة الأصلية",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("المستهلك المسجل",{exact:true}).inputValue()).toBe("10");
+   expect(await form.getByLabel("المتبقي بالعبوة",{exact:true}).inputValue()).toBe("0");
+   await form.getByLabel("ملاحظة إغلاق العبوة / التخلص الآمن",{exact:true}).fill(`SYN-UI-CLOSE-TR2-FINAL-${width}`);
+   const close2ResPromise=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/inventory/procurement"&&response.request().method()==="POST");
+   await form.getByRole("button",{name:"توثيق إغلاق العبوة / التخلص الآمن",exact:true}).click();
+   const close2Res=await close2ResPromise;
+   expect(close2Res.status()).toBe(201);
+   expect(await close2Res.json()).toMatchObject({closureKind:"terminal",originalQuantity:"10",retiredOriginalQuantity:"10"});
+  }finally{
+   await context.close();
+  }
+ });
 });
+

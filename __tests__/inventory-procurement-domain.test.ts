@@ -1290,5 +1290,265 @@ describe("quarantine disposition, excess arrival decision and historical reconci
     });
   });
 
+  it("Point 1 (a657 review): amending an earlier order under distributed FX rounding validates full history and preserves cumulative base deltas", () => {
+    const pieceConv: UnitConversionSnapshot = {
+      itemId: 1,
+      version: 1,
+      baseUnit: "cartridge",
+      enteredUnit: "cartridge",
+      baseUnitsPerEnteredUnit: "1",
+      enteredPrecision: 0,
+      basePrecision: 0,
+    };
+    const reqSar: RequestRevision = {
+      id: "req-fx-sar",
+      version: 1,
+      branchId: "branch-1",
+      requestedBy: 10,
+      reason: "FX distributed rounding test",
+      proposedSupplierPartyId: 21,
+      value: { currency: "SAR", amountMinor: 100 },
+      lines: [{ id: "req-fx-line", itemId: 1, quantity: "10", conversion: pieceConv }],
+    };
+    const appSar = approveRequest({
+      request: reqSar,
+      state: "submitted",
+      actorId: 11,
+      canApprove: true,
+      allowedBranchIds: ["branch-1"],
+      policy: { version: 1, currency: "YER", limitMinor: 200_000, allowSelfApproval: false },
+      selfApprovalReason: null,
+      valuation: valuationSnapshot({
+        currency: "SAR",
+        amountMinor: 100,
+        purpose: "approval_estimate",
+        rateToBase: "50",
+        capturedAt: "2026-10-15T10:00:00Z",
+        sourceRef: "fx-50",
+      }),
+      decisions: [{ lineId: "req-fx-line", quantity: "10", reason: "Approve 10 units" }],
+    });
+
+    const orderAPlan = planOrderIssue({
+      order: {
+        id: "po-fx-a",
+        version: 1,
+        branchId: "branch-1",
+        supplierPartyId: 21,
+        currency: "SAR",
+        shippingMinor: 0,
+        discountMinor: 0,
+        lines: [{
+          id: "line-fx-a",
+          itemId: 1,
+          kind: "stock",
+          quantity: "1",
+          conversion: pieceConv,
+          price: { state: "known", currency: "SAR", unitPriceMinor: 1, reason: "1 halala" },
+          trackLot: true,
+          requiresExpiry: true,
+          minimumShelfLifeDays: 30,
+          sources: [{ id: "src-fx-a1", requestId: reqSar.id, requestLineId: "req-fx-line", baseQuantity: "1" }],
+        }],
+      },
+      requests: [{ request: reqSar, approval: appSar }],
+      priorAllocations: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+    });
+    expect(orderAPlan.allocations[0]).toMatchObject({ amountMinor: 1, baseAmountMinor: 1 });
+
+    const orderBPlan = planOrderIssue({
+      order: {
+        id: "po-fx-b",
+        version: 1,
+        branchId: "branch-1",
+        supplierPartyId: 21,
+        currency: "SAR",
+        shippingMinor: 0,
+        discountMinor: 0,
+        lines: [{
+          id: "line-fx-b",
+          itemId: 1,
+          kind: "stock",
+          quantity: "1",
+          conversion: pieceConv,
+          price: { state: "known", currency: "SAR", unitPriceMinor: 1, reason: "1 halala" },
+          trackLot: true,
+          requiresExpiry: true,
+          minimumShelfLifeDays: 30,
+          sources: [{ id: "src-fx-b1", requestId: reqSar.id, requestLineId: "req-fx-line", baseQuantity: "1" }],
+        }],
+      },
+      requests: [{ request: reqSar, approval: appSar }],
+      priorAllocations: orderAPlan.allocations,
+      supplier: { id: 21, active: true, isSupplier: true },
+    });
+    expect(orderBPlan.allocations[0]).toMatchObject({ amountMinor: 1, baseAmountMinor: 0 });
+
+    const allPrior = [...orderAPlan.allocations, ...orderBPlan.allocations];
+    const amendedA = planOrderAmendment({
+      currentOrder: orderAPlan.order,
+      amendedOrder: {
+        ...orderAPlan.order,
+        version: 2,
+        lines: [{
+          ...orderAPlan.order.lines[0],
+          quantity: "2",
+          sources: [
+            ...orderAPlan.order.lines[0].sources,
+            { id: "src-fx-a2", requestId: reqSar.id, requestLineId: "req-fx-line", baseQuantity: "1" },
+          ],
+        }],
+      },
+      requests: [{ request: reqSar, approval: appSar }],
+      priorAllocations: allPrior,
+      priorReceipts: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+      reason: "Amend earlier order A under distributed FX rounding",
+    });
+
+    expect(amendedA.newAllocations).toHaveLength(1);
+    expect(amendedA.newAllocations[0]).toMatchObject({
+      id: "src-fx-a2",
+      amountMinor: 1,
+      baseAmountMinor: 1,
+    });
+    const persistedTotalBase = [...allPrior, ...amendedA.newAllocations].reduce((s, a) => s + a.baseAmountMinor, 0);
+    expect(persistedTotalBase).toBe(2);
+
+    rejects("valuation_mismatch", () => planOrderAmendment({
+      currentOrder: orderAPlan.order,
+      amendedOrder: {
+        ...orderAPlan.order,
+        version: 2,
+        lines: [{
+          ...orderAPlan.order.lines[0],
+          quantity: "2",
+          sources: [
+            ...orderAPlan.order.lines[0].sources,
+            { id: "src-fx-a2-bad", requestId: reqSar.id, requestLineId: "req-fx-line", baseQuantity: "1" },
+          ],
+        }],
+      },
+      requests: [{ request: reqSar, approval: appSar }],
+      priorAllocations: [
+        orderAPlan.allocations[0],
+        { ...orderBPlan.allocations[0], baseAmountMinor: 5 },
+      ],
+      priorReceipts: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+      reason: "Tampered history must still fail valuation_mismatch",
+    }));
+  });
+
+  it("Point 2 (a657 review): excess approved by order amendment is no longer exempt from capacity when disposed", () => {
+    const pieceConv: UnitConversionSnapshot = {
+      itemId: 1,
+      version: 1,
+      baseUnit: "cartridge",
+      enteredUnit: "cartridge",
+      baseUnitsPerEnteredUnit: "1",
+      enteredPrecision: 0,
+      basePrecision: 0,
+    };
+    const order10: IssuedPurchaseOrder = {
+      ...issuedOrder(),
+      version: 1,
+      lines: [{
+        ...issuedOrder().lines[0],
+        id: "oline-10",
+        quantity: "10",
+        conversion: pieceConv,
+        sources: [{ id: "src-10", requestId: "request-1", requestLineId: "request-line-1", baseQuantity: "10" }],
+      }],
+    };
+
+    const rec15 = planInspectedReceipt(order10, {
+      ...receipt(),
+      id: "rec-15-quar",
+      orderVersion: 1,
+      lines: [{
+        orderLineId: "oline-10",
+        arrivedQuantity: "15",
+        excessDecision: "hold_for_order_amendment",
+        excessReason: "Hold 5 excess pending amendment",
+        portions: [{
+          ...receipt().lines[0].portions[0],
+          id: "q-line-15",
+          quantity: "15",
+          disposition: "quarantined",
+          lotCode: "LOT-15-Q",
+        }],
+      }],
+    }, [], "2026-10-11");
+
+    const qLine = rec15.lines[0];
+    expect(qLine.heldForOrderAmendmentBaseQuantity).toBe("5");
+    expect(qLine.orderLineHeldStartBaseQuantity).toBe("10");
+
+    const order15: IssuedPurchaseOrder = {
+      ...order10,
+      version: 2,
+      lines: [{
+        ...order10.lines[0],
+        quantity: "15",
+      }],
+    };
+
+    const rel12 = planQuarantineResolution({
+      id: "res-rel-12",
+      order: order15,
+      receiptLine: qLine,
+      priorResolutions: [],
+      orderLineAcceptedBaseQuantity: "0",
+      action: "release",
+      quantity: "12",
+      reason: "Release 12 after amendment to 15",
+      resolutionDate: "2026-10-12",
+      currentDate: "2026-10-12",
+    });
+    expect(rel12.effectiveReceiptLine.remainingQuarantinedBaseQuantity).toBe("3");
+
+    const disp3 = planQuarantineResolution({
+      id: "res-disp-3",
+      order: order15,
+      receiptLine: qLine,
+      priorResolutions: [{ id: "res-rel-12", receiptLineId: qLine.id, action: "release", baseQuantity: "12" }],
+      orderLineAcceptedBaseQuantity: "12",
+      action: "dispose",
+      quantity: "3",
+      reason: "Dispose remaining 3 locally after amendment approved all 15",
+      resolutionDate: "2026-10-12",
+      currentDate: "2026-10-12",
+    });
+    expect(disp3.effectiveReceiptLine.remainingQuarantinedBaseQuantity).toBe("0");
+
+    const priorHistoryAfterAmendAndDispose = [{
+      orderLineId: "oline-10",
+      acceptedBaseQuantity: "12",
+      quarantinedBaseQuantity: "0",
+      rejectedBaseQuantity: "0",
+      disposedBaseQuantity: "3",
+      disposedExcessBaseQuantity: "0",
+    }];
+
+    rejects("overdelivery", () => planInspectedReceipt(order15, {
+      ...receipt(),
+      id: "rec-extra-3",
+      orderVersion: 2,
+      lines: [{
+        orderLineId: "oline-10",
+        arrivedQuantity: "3",
+        portions: [{
+          ...receipt().lines[0].portions[0],
+          id: "acc-extra-3",
+          quantity: "3",
+          disposition: "accepted",
+          lotCode: "LOT-EXTRA-3",
+        }],
+      }],
+    }, priorHistoryAfterAmendAndDispose, "2026-10-13"));
+  });
+
 
 });
