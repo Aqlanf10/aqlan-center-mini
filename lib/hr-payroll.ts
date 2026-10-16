@@ -2,6 +2,7 @@ import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
 import { explicitStaffFinancialParty } from "./hr-person-financial-identity";
 import { lockPersonIdentityForOperation } from "./hr-person-identity-schema-state";
+import { IdentityPreviewError } from "./hr-identity-preview";
 import { withIsolation } from "./transactions";
 import { normalizeHrPolicy } from "./hr-settings-policy";
 import { payrollBlockerLabel } from "./hr-payroll-review";
@@ -42,7 +43,7 @@ export type HrPayrollWriteAuthorizer = ((client: DbClient) => Promise<boolean>) 
 async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrPayrollWriteAuthorizer | undefined,
   work: (client: DbClient) => Promise<T>): Promise<T> {
   manager(session);
-  return withTransaction(getPool(), async client => {
+  try { return await withTransaction(getPool(), async client => {
     await lockPersonIdentityForOperation(client);
     if (authorize && !(await authorize(client))) fail("authority_changed", "تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية.", 403);
     if (session.expiresAt < Date.now()) fail("session_expired", "انتهت الجلسة؛ لم تُنفّذ العملية.", 401);
@@ -52,7 +53,14 @@ async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrP
       fail("session_expired", "انتهت الجلسة أثناء الانتظار؛ تراجعت العملية بالكامل.", 401);
     }
     return result;
-  });
+  }); } catch (error) {
+    // Preserve the existing payroll API error contract after the transaction
+    // rolls back; identity conflicts are actionable refusals, not server faults.
+    if (error instanceof IdentityPreviewError) {
+      throw new HrPayrollError(error.status === 503 ? "identity_schema_unavailable" : "identity_conflict", error.status, error.message);
+    }
+    throw error;
+  }
 }
 function manager(session: SessionPayload) {
   if (!session || session.role !== "admin") fail("forbidden", "إدارة المسير والصرف للمدير وحده.", 403);

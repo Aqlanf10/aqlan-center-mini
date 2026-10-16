@@ -88,6 +88,31 @@ it('actual HTTP correction remains protected after closing the second account li
   expect(await identityDatabaseState(isolated.db)).toEqual(before);
   expect((await api('/api/hr/attendance/corrections','POST',{action:'decide',id:request.id,decision:'approved',reason:'Independent reviewer'})).status).toBe(200);
 });
+it('payroll returns an identity conflict in every currency and rolls back its draft without financial writes',async()=>{
+  const opened=await api('/api/hr/payroll/periods','POST',{periodMonth:'2026-12'});expect(opened.status).toBe(201);
+  const period=await opened.json();
+  await isolated.db.query('UPDATE parties SET is_active=FALSE WHERE id=$1',[partyId]);
+  // The existing calculation allocates a draft serial before validating staff;
+  // rollback may consume that serial, but no table or other sequence may change.
+  const withoutDraftSequence=(state:Record<string,unknown>)=>Object.fromEntries(Object.entries(state).filter(([key])=>key!=='sequence:hr_payroll_runs_id_seq'));
+  try{
+    const before=withoutDraftSequence(await identityDatabaseState(isolated.db));
+    for(const currency of ['YER','SAR','USD']){
+      const response=await api('/api/hr/payroll/runs','POST',{action:'calculate',periodId:String(period.id),currency});
+      expect(response.status).toBe(409);expect((await response.json()).code).toBe('identity_conflict');
+      expect(withoutDraftSequence(await identityDatabaseState(isolated.db))).toEqual(before);
+    }
+  }finally{await isolated.db.query('UPDATE parties SET is_active=TRUE WHERE id=$1',[partyId]);}
+});
+it('payroll exposes a partial identity schema as unavailable before any write',async()=>{
+  await isolated.db.query('ALTER TABLE hr_identity_import_runs DISABLE TRIGGER hr_identity_runs_append_only');
+  try{
+    const before=await identityDatabaseState(isolated.db);
+    const response=await api('/api/hr/payroll/periods','POST',{periodMonth:'2026-12'});
+    expect(response.status).toBe(503);expect((await response.json()).code).toBe('identity_schema_unavailable');
+    expect(await identityDatabaseState(isolated.db)).toEqual(before);
+  }finally{await isolated.db.query('ALTER TABLE hr_identity_import_runs ENABLE TRIGGER hr_identity_runs_append_only');}
+});
 for(const width of [390,1280])it(`converted identity preview renders safely at ${width}`,async()=>{
   const context=await browser.newContext({viewport:{width,height:900}}),pair=h.sessions.admin.cookie.split(';')[0],at=pair.indexOf('=');
   await context.addCookies([{name:pair.slice(0,at),value:pair.slice(at+1),url:isolated.baseUrl}]);
