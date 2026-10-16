@@ -1,5 +1,5 @@
 -- PROPOSAL ONLY: unnumbered, unregistered, no startup execution or data backfill.
--- Base: main fe3b66740882b83aeeeee969de6bace7ed50a492. Number reserved by parent.
+-- Base: main fe3b66740882b83aeeeee969de6bace7ed50a492. No number reserved.
 -- Test fixtures apply this SQL explicitly inside their isolated PostgreSQL DB.
 ALTER TABLE hr_staff ADD COLUMN identity_revision INTEGER NOT NULL DEFAULT 0 CHECK (identity_revision >= 0);
 ALTER TABLE hr_staff DROP CONSTRAINT hr_staff_work_status_check;
@@ -105,17 +105,31 @@ CREATE TRIGGER hr_party_link_history BEFORE UPDATE OR DELETE ON hr_staff_party_l
 
 CREATE FUNCTION aqlan_hr_identity_legacy_guard() RETURNS trigger AS $$
 BEGIN
-  IF NEW.identity_revision < OLD.identity_revision OR NEW.identity_revision > OLD.identity_revision + 1 THEN
-    RAISE EXCEPTION 'identity revision must advance one step';
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.identity_revision < OLD.identity_revision OR NEW.identity_revision > OLD.identity_revision + 1 THEN
+      RAISE EXCEPTION 'identity revision must advance one step';
+    END IF;
+    IF OLD.identity_revision > 0 AND (NEW.user_id IS DISTINCT FROM OLD.user_id
+      OR NEW.user_linked_at IS DISTINCT FROM OLD.user_linked_at) THEN
+      RAISE EXCEPTION 'converted identity preserves the legacy access link';
+    END IF;
   END IF;
-  IF OLD.identity_revision > 0 AND (NEW.user_id IS DISTINCT FROM OLD.user_id
-    OR NEW.user_linked_at IS DISTINCT FROM OLD.user_linked_at) THEN
-    RAISE EXCEPTION 'converted identity preserves the legacy access link';
+  IF NEW.user_id IS NOT NULL AND (TG_OP='INSERT' OR NEW.user_id IS DISTINCT FROM OLD.user_id) THEN
+    -- The same account lock is taken by the explicit-link INSERT trigger. The
+    -- check follows the lock so a concurrent writer cannot claim the other side.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'identity account claims require read committed isolation' USING ERRCODE='40001';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('hr-person-account:' || NEW.user_id::text,0));
+    IF EXISTS(SELECT 1 FROM hr_staff_account_links WHERE user_id=NEW.user_id AND staff_id<>NEW.id AND closed_at IS NULL) THEN
+      RAISE EXCEPTION 'account already belongs to another converted person'
+        USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';
+    END IF;
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-CREATE TRIGGER hr_identity_legacy_guard BEFORE UPDATE ON hr_staff
+CREATE TRIGGER hr_identity_legacy_guard BEFORE INSERT OR UPDATE ON hr_staff
   FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_legacy_guard();
 
 CREATE FUNCTION aqlan_hr_identity_party_kind() RETURNS trigger AS $$
@@ -131,6 +145,12 @@ CREATE TRIGGER hr_identity_party_kind BEFORE INSERT ON hr_staff_party_links
 
 CREATE FUNCTION aqlan_hr_identity_link_source() RETURNS trigger AS $$
 BEGIN
+  IF TG_TABLE_NAME='hr_staff_account_links' THEN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'identity account claims require read committed isolation' USING ERRCODE='40001';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('hr-person-account:' || (to_jsonb(NEW)->>'user_id'),0));
+  END IF;
   IF NOT EXISTS(SELECT 1 FROM hr_staff WHERE id=NEW.staff_id AND identity_revision>0) THEN
     RAISE EXCEPTION 'identity links require a converted person';
   END IF;
@@ -142,7 +162,8 @@ BEGIN
   END IF;
   IF TG_TABLE_NAME='hr_staff_account_links' AND EXISTS(SELECT 1 FROM hr_staff
     WHERE user_id=(to_jsonb(NEW)->>'user_id')::int AND id<>NEW.staff_id) THEN
-    RAISE EXCEPTION 'account has a reserved legacy access link';
+    RAISE EXCEPTION 'account has a reserved legacy access link'
+      USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';
   END IF;
   RETURN NEW;
 END;

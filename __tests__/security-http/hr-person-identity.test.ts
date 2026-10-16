@@ -63,6 +63,15 @@ it('linking identities creates no apply route and grants no private task or rost
   expect((await api('/api/hr/identity-preview','GET',undefined,h.sessions.doctorA.cookie)).status).toBe(403);
   expect((await api('/api/hr/identity-apply','POST',{decisions:[decision()]})).status).toBe(404);
 });
+it('the legacy HTTP writer cannot take a converted secondary account or create an access link',async()=>{
+  const legacyId=(await isolated.db.query(`INSERT INTO hr_staff(full_name,created_by,work_status,contract_kind,hire_date,end_date)
+    VALUES('ملف قديم اصطناعي بلا حساب','synthetic','ended','commission','2025-01-01','2025-12-31') RETURNING id`)).rows[0].id;
+  const before=await identityDatabaseState(isolated.db);
+  const response=await api(`/api/hr/staff/${legacyId}`,'PATCH',{action:'link_user',userId:b.userId,reason:'محاولة ربط متعارضة اصطناعية'});
+  expect(response.status).toBe(409);
+  expect(await identityDatabaseState(isolated.db)).toEqual(before);
+  expect((await isolated.db.query('SELECT user_id FROM hr_staff WHERE id=$1',[legacyId])).rows[0].user_id).toBeNull();
+});
 it('an actual HTTP leave request rejects both accounts of its beneficiary and allows an independent reviewer',async()=>{
   const balance=await api('/api/hr/leaves/balances','POST',{staffId,leaveTypeId:'annual',year:2026,allocatedDays:8,reason:'Synthetic balance'});expect(balance.ok).toBe(true);
   const created=await api('/api/hr/leaves','POST',{staffId,leaveTypeCode:'annual',startDate:'2026-11-10',endDate:'2026-11-10',daysCount:1,reason:'طلب إجازة اصطناعي'},cookieA);
@@ -88,7 +97,7 @@ it('actual HTTP correction remains protected after closing the second account li
   expect(await identityDatabaseState(isolated.db)).toEqual(before);
   expect((await api('/api/hr/attendance/corrections','POST',{action:'decide',id:request.id,decision:'approved',reason:'Independent reviewer'})).status).toBe(200);
 });
-it('payroll returns an identity conflict in every currency and rolls back its draft without financial writes',async()=>{
+it('payroll rejects an eligible financial conflict and skips unrelated currencies without financial writes',async()=>{
   const opened=await api('/api/hr/payroll/periods','POST',{periodMonth:'2026-12'});expect(opened.status).toBe(201);
   const period=await opened.json();
   await isolated.db.query('UPDATE parties SET is_active=FALSE WHERE id=$1',[partyId]);
@@ -96,11 +105,18 @@ it('payroll returns an identity conflict in every currency and rolls back its dr
   // rollback may consume that serial, but no table or other sequence may change.
   const withoutDraftSequence=(state:Record<string,unknown>)=>Object.fromEntries(Object.entries(state).filter(([key])=>key!=='sequence:hr_payroll_runs_id_seq'));
   try{
-    const before=withoutDraftSequence(await identityDatabaseState(isolated.db));
     for(const currency of ['YER','SAR','USD']){
+      const before=withoutDraftSequence(await identityDatabaseState(isolated.db));
       const response=await api('/api/hr/payroll/runs','POST',{action:'calculate',periodId:String(period.id),currency});
-      expect(response.status).toBe(409);expect((await response.json()).code).toBe('identity_conflict');
-      expect(withoutDraftSequence(await identityDatabaseState(isolated.db))).toEqual(before);
+      if(currency==='YER'){
+        expect(response.status).toBe(409);expect((await response.json()).code).toBe('identity_conflict');
+        expect(withoutDraftSequence(await identityDatabaseState(isolated.db))).toEqual(before);
+      }else{
+        expect(response.status).toBe(201);const run=await response.json();expect(run.totalNetDueMinor).toBe(0);
+        expect((await isolated.db.query('SELECT id FROM hr_payroll_items WHERE run_id=$1',[run.id])).rows).toEqual([]);
+        const after=await identityDatabaseState(isolated.db);
+        for(const table of ['users','parties','payables','expenses','hr_payroll_disbursements'])expect(after[`table:${table}`]).toEqual(before[`table:${table}`]);
+      }
     }
   }finally{await isolated.db.query('UPDATE parties SET is_active=TRUE WHERE id=$1',[partyId]);}
 });

@@ -210,8 +210,6 @@ async function staffResolution(client: DbClient, row: Row, period: Row, currency
   if (row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified') {
     return { inScope:false,terms:null,source:null,contract:null,blockers:[],snapshot:{identityOnly:true} };
   }
-  const explicit = await explicitStaffFinancialParty(client,Number(row.id),Number(row.identity_revision ?? 0));
-  if (explicit) row.user_party_id = explicit.kind === 'doctor' ? explicit.partyId : null;
   const resolved = resolvePayTerms(profileFromRow(row), await loadStaffContracts(client, Number(row.id)), { start: period.start_date, end: period.end_date });
   const relevantCurrency = hasCommission(resolved.terms?.kind ?? row.contract_kind) || (resolved.terms?.currency ?? row.salary_currency) === currency;
   const employment = await readOperationalEmployment(client, [Number(row.id)]);
@@ -220,6 +218,11 @@ async function staffResolution(client: DbClient, row: Row, period: Row, currency
     fail("employment_history_required", "فترة المسير تتضمن حالة غير نشطة أو تاريخًا غير معروف أو تعارض نطاق؛ يلزم مراجعة الأثر قبل الاحتساب أو الاعتماد، دون خصم تلقائي.");
   }
   if (relevantCurrency && !review.documented && row.work_status === "suspended" && resolved.inScope) fail("employment_history_required", "تاريخ سريان الإيقاف غير موثق؛ راجع الاستحقاق قبل الاحتساب أو الاعتماد.");
+  // An unrelated identity cannot block this period/currency. Keep the existing
+  // temporal review above, then validate financial identity only for its scope.
+  if (!resolved.inScope || !resolved.terms || !relevantCurrency) return resolved;
+  const explicit = await explicitStaffFinancialParty(client,Number(row.id),Number(row.identity_revision ?? 0));
+  if (explicit) row.user_party_id = explicit.kind === 'doctor' ? explicit.partyId : null;
   const contract = resolved.contract;
   if (contract && hasCommission(contract.kind) && contract.commissionRatePercent !== null) {
     const doctorId = contract.doctorPartyId ?? row.user_party_id;
