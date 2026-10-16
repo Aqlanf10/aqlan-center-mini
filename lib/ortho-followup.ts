@@ -74,7 +74,7 @@ export interface NextAppointmentInfo {
   serviceName?: string | null;
   doctorName?: string | null;
   appointmentType?: string | null;
-  matchBasis?: "designated_service" | "legacy_type" | null;
+  matchBasis?: "designated_service" | "legacy_type" | "planned_case_sessions" | null;
   reason?: string;
 }
 

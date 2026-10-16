@@ -1,0 +1,18 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-planned-followup.test.ts __tests__/ortho-followup-booking-context.test.ts __tests__/ortho-followup-board-projection.test.ts __tests__/ortho-followup.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-followups-20261016
+
+
+ Test Files  4 passed (4)
+      Tests  137 passed (137)
+   Start at  04:01:00
+   Duration  1.15s (transform 130ms, setup 0ms, import 217ms, tests 98ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

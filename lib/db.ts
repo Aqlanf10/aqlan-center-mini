@@ -22156,6 +22156,23 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
                        WHERE a2.patient_id = a.patient_id AND a2.status = 'no_show'
                        ORDER BY a2.scheduled_date DESC, a2.id DESC LIMIT 1)
      ),
+     planned_sessions AS (
+       SELECT s.planned_visit_id, jsonb_agg(jsonb_build_object(
+           'id', s.id, 'plannedVisitId', s.planned_visit_id, 'status', s.status, 'visitId', s.visit_id,
+           'itemId', i.id, 'itemPlanId', i.plan_id, 'itemStatus', i.status, 'itemCategory', i.category,
+           'clinicalCaseId', i.case_id, 'casePatientId', sc.patient_id,
+           'caseSpecialty', sc.specialty, 'caseStatus', sc.status,
+           'orthoCaseId', so.id, 'orthoPatientId', so.patient_id
+         ) ORDER BY s.id) AS items
+         FROM treatment_sessions s
+         LEFT JOIN plan_items i ON i.id = s.plan_item_id
+         LEFT JOIN clinical_cases sc ON sc.id = i.case_id
+         LEFT JOIN ortho_cases so ON so.id = sc.ortho_case_id AND so.patient_id = sc.patient_id
+        WHERE EXISTS (SELECT 1 FROM appointments candidate
+                       WHERE candidate.planned_visit_id = s.planned_visit_id
+                         AND candidate.status IN ('booked', 'arrived'))
+        GROUP BY s.planned_visit_id
+     ),
      bookings AS (
        SELECT ap.patient_id, jsonb_agg(jsonb_build_object(
            'id', ap.id, 'patientId', ap.patient_id,
@@ -22169,7 +22186,15 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
            'referral', CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object(
              'id', r.id, 'patientId', r.patient_id, 'toSpecialty', r.to_specialty,
              'caseId', r.case_id, 'casePatientId', rc.patient_id, 'orthoCaseId', linked_ortho.id) END,
-           'plannedVisitId', ap.planned_visit_id
+           'plannedVisitId', ap.planned_visit_id,
+           'plannedVisit', CASE WHEN pv.id IS NULL THEN NULL ELSE jsonb_build_object(
+             'id', pv.id, 'patientId', pv.patient_id, 'planId', pv.plan_id,
+             'planPatientId', plan.patient_id, 'planStatus', plan.status,
+             'status', pv.status, 'appointmentId', pv.appointment_id,
+             'visitId', pv.visit_id, 'visitPatientId', visit.patient_id,
+             'visitPlannedVisitId', visit.planned_visit_id, 'visitAppointmentId', visit.appointment_id,
+             'visitSigned', CASE WHEN visit.id IS NULL THEN NULL ELSE visit.signed_at IS NOT NULL END,
+             'sessions', COALESCE(planned_sessions.items, '[]'::jsonb)) END
          ) ORDER BY ap.scheduled_date, ap.scheduled_time, ap.id) AS items
            FROM appointments ap
            LEFT JOIN appointment_services svc ON svc.id = ap.service_id
@@ -22177,6 +22202,10 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
            LEFT JOIN patient_referrals r ON r.id = ap.referral_id AND r.patient_id = ap.patient_id
            LEFT JOIN clinical_cases rc ON rc.id = r.case_id AND rc.patient_id = ap.patient_id
            LEFT JOIN ortho_cases linked_ortho ON linked_ortho.id = rc.ortho_case_id AND linked_ortho.patient_id = ap.patient_id
+           LEFT JOIN planned_visits pv ON pv.id = ap.planned_visit_id AND pv.patient_id = ap.patient_id
+           LEFT JOIN treatment_plans plan ON plan.id = pv.plan_id AND plan.patient_id = ap.patient_id
+           LEFT JOIN visits visit ON visit.id = pv.visit_id AND visit.patient_id = ap.patient_id
+           LEFT JOIN planned_sessions ON planned_sessions.planned_visit_id = pv.id
           WHERE ap.status IN ('booked', 'arrived')
           GROUP BY ap.patient_id
      )

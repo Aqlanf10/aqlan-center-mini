@@ -1,0 +1,86 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-followup-board-context.test.ts __tests__/postgres/ortho-baseline.test.ts __tests__/postgres/visit-flow-ortho-attach.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-followups-20261016
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-followup-board-context.test.ts (31 tests | 3 failed) 2606ms
+     × does not infer periodic case linkage from a shared master plan or planned visit 26ms
+     × does not reuse a shared plan or doctor as evidence for another case of the same patient 13ms
+     × reviews foreign-patient plans, items and clinical bridges without hiding the inconsistent appointment 37ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-followup-board-context.test.ts > real referral/case/Ortho bridge joins preserve patient boundaries > does not infer periodic case linkage from a shared master plan or planned visit
+AssertionError: expected [ Array(1) ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
++     "appointmentType": "follow_up",
++     "date": "2026-10-08",
++     "doctorName": "Synthetic responsible orthodontist",
+      "id": 29,
+      "matchBasis": null,
+-     "reason": "planned_visit_requires_review",
++     "reason": "unresolved_planned_visit",
++     "serviceName": "Synthetic appointment service: ORTHO_FOLLOW_UP",
++     "status": "booked",
++     "time": "10:30",
+    },
+  ]
+
+ ❯ __tests__/postgres/ortho-followup-board-context.test.ts:429:51
+    427|     const row = await boardRow(caseId);
+    428|     expect(row.nextAppointment).toBeNull();
+    429|     expect(row.bookingContext.reviewAppointments).toEqual([expect.obje…
+       |                                                   ^
+    430|       id, reason: "planned_visit_requires_review", matchBasis: null,
+    431|     })]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/postgres/ortho-followup-board-context.test.ts > existing planned-session / plan-item / clinical-case read projection > does not reuse a shared plan or doctor as evidence for another case of the same patient
+error: duplicate key value violates unique constraint "ortho_cases_one_open"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ q __tests__/postgres/ortho-followup-board-context.test.ts:34:11
+     32|
+     33| async function q<T = Record<string, unknown>>(sql: string, params: unk…
+     34|   return (await db.getPool().query<T>(sql, params)).rows;
+       |           ^
+     35| }
+     36|
+ ❯ orthoCase __tests__/postgres/ortho-followup-board-context.test.ts:161:11
+ ❯ __tests__/postgres/ortho-followup-board-context.test.ts:593:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/postgres/ortho-followup-board-context.test.ts > existing planned-session / plan-item / clinical-case read projection > reviews foreign-patient plans, items and clinical bridges without hiding the inconsistent appointment
+error: duplicate key value violates unique constraint "treatment_sessions_seq_uniq"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ q __tests__/postgres/ortho-followup-board-context.test.ts:34:11
+     32|
+     33| async function q<T = Record<string, unknown>>(sql: string, params: unk…
+     34|   return (await db.getPool().query<T>(sql, params)).rows;
+       |           ^
+     35| }
+     36|
+ ❯ __tests__/postgres/ortho-followup-board-context.test.ts:628:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  3 failed | 46 passed (49)
+   Start at  04:02:19
+   Duration  10.74s (transform 1.78s, setup 0ms, import 2.47s, tests 7.42s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

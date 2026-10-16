@@ -1,0 +1,17 @@
+{
+  "base": "928bb7e5d140797c8654fc59016b3beb02acbb14",
+  "protected": {
+    "hr339": {
+      "head": "6b3002322b47388f04ecd38316b523df0ee25d9a",
+      "overlap": []
+    },
+    "inventory338": {
+      "head": "1dfe59323d1dbf9c409e76921a451d09b9d45ebc",
+      "overlap": []
+    }
+  },
+  "schemaChanges": false,
+  "newMigration": false,
+  "financialWriterChanges": false,
+  "sharedDbScope": "orthoFollowupBoard read SELECT only; existing writer/sign/plan-link functions unchanged."
+}

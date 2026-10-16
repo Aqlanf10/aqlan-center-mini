@@ -1,0 +1,19 @@
+[BABEL] Note: The code generator has deoptimised the styling of /workspace/aqlan-ortho-followups-20261016/lib/db.ts as it exceeds the max of 500KB.
+
+/workspace/aqlan-ortho-followups-20261016/lib/db.ts
+     22:21  warning  'PoolClient' is defined but never used. Allowed unused vars must match /^_/u             @typescript-eslint/no-unused-vars
+     30:8   warning  'fs' is defined but never used. Allowed unused vars must match /^_/u                     @typescript-eslint/no-unused-vars
+     31:8   warning  'path' is defined but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+    109:35  warning  'isCephMeasurementCode' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  10414:10  warning  'isUniqueViolation' is defined but never used. Allowed unused vars must match /^_/u      @typescript-eslint/no-unused-vars
+  16054:26  warning  'normalizeBillingRule' is defined but never used. Allowed unused vars must match /^_/u   @typescript-eslint/no-unused-vars
+  16054:48  warning  'normalizeSessionCount' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  16055:38  warning  'suggestVisitMinutes' is defined but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+
+✖ 8 problems (0 errors, 8 warnings)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
