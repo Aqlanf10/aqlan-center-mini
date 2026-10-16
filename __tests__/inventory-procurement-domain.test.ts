@@ -1098,5 +1098,197 @@ describe("quarantine disposition, excess arrival decision and historical reconci
     });
   });
 
+  it("PR338 Round 2 Item 1 (P1): planOrderAmendment preserves historical commitment deltas across repricing, shipping/discount, FX rounding, and repeated amendments", () => {
+    const pieceConv = unitConversionSnapshot({
+      itemId: 1,
+      version: 1,
+      baseUnit: "cartridge",
+      enteredUnit: "cartridge",
+      baseUnitsPerEnteredUnit: "1",
+      enteredPrecision: 0,
+      basePrecision: 0,
+    });
+    const req20: RequestRevision = {
+      id: "req-budget-2000",
+      version: 1,
+      branchId: "clinic",
+      requestedBy: 12,
+      reason: "Approved 20 pieces with 2000 YER ceiling",
+      proposedSupplierPartyId: 21,
+      value: { currency: "YER", amountMinor: 2_000 },
+      lines: [{ id: "req-line-20", itemId: 1, quantity: "20", conversion: pieceConv }],
+    };
+    const app20 = approveRequest({
+      request: req20,
+      state: "submitted",
+      actorId: 1,
+      canApprove: true,
+      allowedBranchIds: ["clinic"],
+      policy: { version: 1, currency: "YER", limitMinor: 50_000, allowSelfApproval: false },
+      selfApprovalReason: null,
+      valuation: valuationSnapshot({
+        purpose: "approval_estimate",
+        currency: "YER",
+        amountMinor: 2_000,
+        rateToBase: "1",
+        capturedAt: "2026-10-10T08:00:00Z",
+        sourceRef: "yer-ceiling",
+      }),
+      decisions: [{ lineId: "req-line-20", quantity: "20", reason: "Approve 20 pieces at 2000 YER ceiling" }],
+    });
+
+    const initialPlan = planOrderIssue({
+      order: {
+        id: "order-budget-1",
+        version: 1,
+        branchId: "clinic",
+        supplierPartyId: 21,
+        currency: "YER",
+        shippingMinor: 0,
+        discountMinor: 0,
+        lines: [{
+          id: "oline-1",
+          itemId: 1,
+          kind: "stock",
+          quantity: "10",
+          conversion: pieceConv,
+          price: { state: "known", currency: "YER", unitPriceMinor: 100, reason: "Initial quote 100 YER" },
+          trackLot: true,
+          requiresExpiry: true,
+          minimumShelfLifeDays: 30,
+          sources: [{ id: "src-10", requestId: req20.id, requestLineId: "req-line-20", baseQuantity: "10" }],
+        }],
+      },
+      requests: [{ request: req20, approval: app20 }],
+      priorAllocations: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+    });
+    expect(initialPlan.totalMinor).toBe(1_000);
+    expect(initialPlan.allocations[0].amountMinor).toBe(1_000);
+
+    const amendedPlan = planOrderAmendment({
+      currentOrder: initialPlan.order,
+      amendedOrder: {
+        ...initialPlan.order,
+        version: 2,
+        lines: [{
+          ...initialPlan.order.lines[0],
+          quantity: "15",
+          price: { state: "known", currency: "YER", unitPriceMinor: 120, reason: "Repriced quote 120 YER" },
+          sources: [
+            { id: "src-10", requestId: req20.id, requestLineId: "req-line-20", baseQuantity: "10" },
+            { id: "src-5", requestId: req20.id, requestLineId: "req-line-20", baseQuantity: "5" },
+          ],
+        }],
+      },
+      requests: [{ request: req20, approval: app20 }],
+      priorAllocations: initialPlan.allocations,
+      priorReceipts: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+      reason: "Amend quantity to 15 and reprice to 120 YER",
+    });
+    expect(amendedPlan.newAllocations).toHaveLength(1);
+    expect(amendedPlan.newAllocations[0].amountMinor).toBe(800);
+    const persistedAfterAmend = [...initialPlan.allocations, ...amendedPlan.newAllocations];
+    expect(persistedAfterAmend.reduce((sum, a) => sum + a.amountMinor, 0)).toBe(1_800);
+
+    rejects("source_budget_exceeded", () => planOrderIssue({
+      order: {
+        id: "order-budget-2",
+        version: 1,
+        branchId: "clinic",
+        supplierPartyId: 21,
+        currency: "YER",
+        shippingMinor: 0,
+        discountMinor: 0,
+        lines: [{
+          id: "oline-2",
+          itemId: 1,
+          kind: "stock",
+          quantity: "5",
+          conversion: pieceConv,
+          price: { state: "known", currency: "YER", unitPriceMinor: 80, reason: "Second order 80 YER" },
+          trackLot: true,
+          requiresExpiry: true,
+          minimumShelfLifeDays: 30,
+          sources: [{ id: "src-rem-5", requestId: req20.id, requestLineId: "req-line-20", baseQuantity: "5" }],
+        }],
+      },
+      requests: [{ request: req20, approval: app20 }],
+      priorAllocations: persistedAfterAmend,
+      supplier: { id: 21, active: true, isSupplier: true },
+    }));
+
+    rejects("invalid_transition", () => planOrderAmendment({
+      currentOrder: amendedPlan.order,
+      amendedOrder: {
+        ...amendedPlan.order,
+        version: 3,
+        lines: [{
+          ...amendedPlan.order.lines[0],
+          requiresExpiry: false,
+          quantity: "20",
+          sources: [
+            ...amendedPlan.order.lines[0].sources,
+            { id: "src-last-5", requestId: req20.id, requestLineId: "req-line-20", baseQuantity: "5" },
+          ],
+        }],
+      },
+      requests: [{ request: req20, approval: app20 }],
+      priorAllocations: persistedAfterAmend,
+      priorReceipts: [],
+      supplier: { id: 21, active: true, isSupplier: true },
+      reason: "Attempt to weaken requiresExpiry during amendment",
+    }));
+  });
+
+  it("PR338 Round 2 Item 6 (P2): disposing held excess arrival does not invalidate receipt history for subsequent multi-line receipts", () => {
+    const multiLineOrder: IssuedPurchaseOrder = {
+      ...issuedOrder(),
+      lines: [
+        issuedOrder().lines[0],
+        {
+          ...issuedOrder().lines[0],
+          id: "order-line-2",
+          quantity: "2",
+          sources: [{ id: "source-line-2", requestId: "request-1", requestLineId: "request-line-1", baseQuantity: "100" }],
+        },
+      ],
+    };
+
+    const historyAfterHeldDispose = [{
+      orderLineId: "order-line-1",
+      acceptedBaseQuantity: "150",
+      quarantinedBaseQuantity: "0",
+      rejectedBaseQuantity: "0",
+      disposedBaseQuantity: "50",
+      disposedExcessBaseQuantity: "50",
+    }];
+
+    const line2Receipt = planInspectedReceipt(multiLineOrder, {
+      ...receipt(),
+      id: "receipt-line2-normal",
+      lines: [{
+        orderLineId: "order-line-2",
+        arrivedQuantity: "2",
+        portions: [
+          { ...receipt().lines[0].portions[0], id: "rl2-acc", quantity: "2", disposition: "accepted", lotCode: "LOT-L2-ACC" },
+        ],
+      }],
+    }, historyAfterHeldDispose, "2026-10-12");
+
+    expect(line2Receipt.remaining.find((r) => r.orderLineId === "order-line-1")).toMatchObject({
+      acceptedBaseQuantity: "150",
+      disposedBaseQuantity: "50",
+      remainingFulfillmentBaseQuantity: "0",
+      remainingDeliveryBaseQuantity: "0",
+    });
+    expect(line2Receipt.remaining.find((r) => r.orderLineId === "order-line-2")).toMatchObject({
+      acceptedBaseQuantity: "100",
+      remainingFulfillmentBaseQuantity: "0",
+      remainingDeliveryBaseQuantity: "0",
+    });
+  });
+
 
 });

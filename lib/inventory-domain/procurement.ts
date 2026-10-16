@@ -492,14 +492,39 @@ export function planOrderAmendment(input: {
       "item_mismatch",
       "Order amendment cannot alter an existing line's item or base unit",
     );
+    invariant(
+      amendedLine.conversion.version === currentLine.conversion.version &&
+        amendedLine.conversion.enteredUnit === currentLine.conversion.enteredUnit &&
+        amendedLine.conversion.enteredPrecision === currentLine.conversion.enteredPrecision &&
+        decimalRatio(amendedLine.conversion.baseUnitsPerEnteredUnit).numerator *
+          decimalRatio(currentLine.conversion.baseUnitsPerEnteredUnit).denominator ===
+          decimalRatio(currentLine.conversion.baseUnitsPerEnteredUnit).numerator *
+            decimalRatio(amendedLine.conversion.baseUnitsPerEnteredUnit).denominator,
+      "invalid_transition",
+      "Order amendment cannot alter an existing line's unit conversion",
+    );
+    invariant(
+      (!currentLine.trackLot || amendedLine.trackLot) &&
+        (!currentLine.requiresExpiry || amendedLine.requiresExpiry) &&
+        amendedLine.minimumShelfLifeDays >= currentLine.minimumShelfLifeDays,
+      "invalid_transition",
+      "Order amendment cannot weaken lot tracking, expiry requirement, or minimum shelf life on an existing line",
+    );
     const currentBaseAtoms = quantityAtoms(convertQuantity(currentLine.quantity, currentLine.conversion).baseQuantity);
     const amendedBaseAtoms = quantityAtoms(convertQuantity(amendedLine.quantity, amendedLine.conversion).baseQuantity);
     invariant(amendedBaseAtoms >= currentBaseAtoms, "invalid_transition", "Order amendment cannot reduce ordered line quantity");
     const rec = priorReceiptsByLine.get(currentLine.id);
     if (rec) {
-      const committedAtoms =
-        quantityAtoms(rec.acceptedBaseQuantity ?? "0", 3, true) +
-        quantityAtoms(rec.disposedBaseQuantity ?? "0", 3, true);
+      const recAccepted = quantityAtoms(rec.acceptedBaseQuantity ?? "0", 3, true);
+      const recDisposed = quantityAtoms(rec.disposedBaseQuantity ?? "0", 3, true);
+      const recDisposedExcess =
+        rec.disposedExcessBaseQuantity !== undefined
+          ? quantityAtoms(rec.disposedExcessBaseQuantity, 3, true)
+          : recAccepted + recDisposed > currentBaseAtoms && recAccepted <= currentBaseAtoms
+            ? recAccepted + recDisposed - currentBaseAtoms
+            : 0n;
+      const recWithinOrderDisposed = recDisposed > recDisposedExcess ? recDisposed - recDisposedExcess : 0n;
+      const committedAtoms = recAccepted + recWithinOrderDisposed;
       invariant(amendedBaseAtoms >= committedAtoms, "invalid_transition", "Amended quantity cannot be below already accepted/disposed quantity");
     }
     const amendedSourcesById = unique(amendedLine.sources, (s) => s.id, "amended line source");
@@ -517,17 +542,112 @@ export function planOrderAmendment(input: {
     }
   }
   const externalPriorAllocations = input.priorAllocations.filter((row) => !currentSourceIds.has(row.id));
+  const providedCurrentAllocations = input.priorAllocations.filter((row) => currentSourceIds.has(row.id));
+  const currentOrderAllocations =
+    providedCurrentAllocations.length === currentSourceIds.size
+      ? providedCurrentAllocations
+      : (() => {
+          const baseline = planOrderIssue({
+            order: input.currentOrder,
+            requests: input.requests,
+            priorAllocations: externalPriorAllocations,
+            supplier: input.supplier,
+          });
+          return baseline.allocations.map(
+            (row) => providedCurrentAllocations.find((p) => p.id === row.id) ?? row,
+          );
+        })();
   const fullPlan = planOrderIssue({
     order: input.amendedOrder,
     requests: input.requests,
     priorAllocations: externalPriorAllocations,
     supplier: input.supplier,
   });
-  const newAllocations = fullPlan.allocations.filter((row) => !currentSourceIds.has(row.id));
-  invariant(newAllocations.length > 0, "invalid_transition", "Order amendment must add at least one new approved source allocation");
+  const rawNewAllocations = fullPlan.allocations.filter((row) => !currentSourceIds.has(row.id));
+  invariant(rawNewAllocations.length > 0, "invalid_transition", "Order amendment must add at least one new approved source allocation");
+  const requestsById = unique(input.requests, (row) => row.request.id, "approved request");
+  const currentAllocationsById = new Map(currentOrderAllocations.map((row) => [row.id, row]));
+  const newAllocationsById = new Map<string, CommittedSourceAllocation>();
+  const involvedRequestIds = new Set(fullPlan.allocations.map((row) => row.requestId));
+  for (const requestId of involvedRequestIds) {
+    const ceiling = requestsById.get(requestId)!.approval.valueCeiling!;
+    const externalMoney = externalPriorAllocations
+      .filter((row) => row.requestId === requestId)
+      .reduce((sum, row) => sum + BigInt(minorAmount(row.amountMinor)), 0n);
+    const externalBase = externalPriorAllocations
+      .filter((row) => row.requestId === requestId)
+      .reduce((sum, row) => sum + BigInt(minorAmount(row.baseAmountMinor)), 0n);
+    const persistedCurrentMoney = currentOrderAllocations
+      .filter((row) => row.requestId === requestId)
+      .reduce((sum, row) => sum + BigInt(minorAmount(row.amountMinor)), 0n);
+    const persistedCurrentBase = currentOrderAllocations
+      .filter((row) => row.requestId === requestId)
+      .reduce((sum, row) => sum + BigInt(minorAmount(row.baseAmountMinor)), 0n);
+    const targetOrderMoney = fullPlan.allocations
+      .filter((row) => row.requestId === requestId)
+      .reduce((sum, row) => sum + BigInt(minorAmount(row.amountMinor)), 0n);
+    const deltaMoney = targetOrderMoney - persistedCurrentMoney;
+    invariant(
+      deltaMoney >= 0n,
+      "invalid_transition",
+      "Order amendment cannot reduce previously committed source allocation value",
+    );
+    invariant(
+      externalMoney + persistedCurrentMoney + deltaMoney <= BigInt(ceiling.amountMinor),
+      "source_budget_exceeded",
+      "Combined issued value exceeds the fixed approved budget",
+    );
+    const targetCumulativeBase = BigInt(
+      valuationSnapshot({
+        ...ceiling,
+        amountMinor: safeMinor(externalMoney + persistedCurrentMoney + deltaMoney),
+      }).baseAmountMinor,
+    );
+    const deltaBase = targetCumulativeBase - externalBase - persistedCurrentBase;
+    invariant(
+      deltaBase >= 0n,
+      "invalid_transition",
+      "Order amendment cannot reduce previously committed base currency valuation",
+    );
+    const newGroup = rawNewAllocations.filter((row) => row.requestId === requestId);
+    if (newGroup.length === 0) {
+      invariant(
+        deltaMoney === 0n && deltaBase === 0n,
+        "invalid_transition",
+        "Order amendment cannot alter the monetary commitment of a request without a new source allocation for that request",
+      );
+      continue;
+    }
+    const rawNewTotal = newGroup.reduce((sum, row) => sum + BigInt(row.amountMinor), 0n);
+    const moneyWeights = newGroup.map((row) => ({
+      id: row.id,
+      weight: rawNewTotal > 0n ? String(row.amountMinor) : String(quantityAtoms(row.baseQuantity)),
+    }));
+    const moneyParts = new Map(
+      allocateMinor(safeMinor(deltaMoney), moneyWeights).map((row) => [row.id, row.amountMinor]),
+    );
+    const baseWeights = newGroup.map((row) => ({
+      id: row.id,
+      weight: deltaMoney > 0n ? String(moneyParts.get(row.id)!) : String(quantityAtoms(row.baseQuantity)),
+    }));
+    const baseParts = new Map(
+      allocateMinor(safeMinor(deltaBase), baseWeights).map((row) => [row.id, row.amountMinor]),
+    );
+    for (const row of newGroup) {
+      newAllocationsById.set(row.id, {
+        ...row,
+        amountMinor: moneyParts.get(row.id)!,
+        baseAmountMinor: baseParts.get(row.id)!,
+      });
+    }
+  }
+  const newAllocations = rawNewAllocations.map((row) => newAllocationsById.get(row.id)!);
+  const allocations = fullPlan.allocations.map(
+    (row) => currentAllocationsById.get(row.id) ?? newAllocationsById.get(row.id)!,
+  );
   return freeze({
     order: fullPlan.order,
-    allocations: fullPlan.allocations,
+    allocations,
     newAllocations,
     totalMinor: fullPlan.totalMinor,
     effects: NO_FINANCIAL_EFFECT,
@@ -555,6 +675,7 @@ export interface PriorInspectedQuantity {
   readonly orderLineId: string; readonly acceptedBaseQuantity: string;
   readonly quarantinedBaseQuantity: string; readonly rejectedBaseQuantity: string;
   readonly disposedBaseQuantity?: string;
+  readonly disposedExcessBaseQuantity?: string;
 }
 export interface InspectedReceiptLine {
   readonly id: string; readonly receiptId: string; readonly orderId: string; readonly orderVersion: number;
@@ -610,8 +731,15 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
     let quarantined = quantityAtoms(old?.quarantinedBaseQuantity ?? "0", 3, true);
     let rejected = quantityAtoms(old?.rejectedBaseQuantity ?? "0", 3, true);
     const disposed = quantityAtoms(old?.disposedBaseQuantity ?? "0", 3, true);
-    invariant(accepted + disposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
-    const remainingDelivery = ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n;
+    const disposedExcess =
+      old?.disposedExcessBaseQuantity !== undefined
+        ? quantityAtoms(old.disposedExcessBaseQuantity, 3, true)
+        : accepted + disposed > ordered && accepted <= ordered
+          ? accepted + disposed - ordered
+          : 0n;
+    const withinOrderDisposed = disposed > disposedExcess ? disposed - disposedExcess : 0n;
+    invariant(accepted + withinOrderDisposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+    const remainingDelivery = ordered > accepted + quarantined + withinOrderDisposed ? ordered - accepted - quarantined - withinOrderDisposed : 0n;
     const current = incoming.get(orderLine.id);
     if (current) {
       const arrived = quantityAtoms(convertQuantity(current.arrivedQuantity, orderLine.conversion).baseQuantity);
@@ -676,7 +804,7 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
         linePortions.push({ portion, converted, amount });
       }
       invariant(classified === arrived, "classification_mismatch", "Accepted + quarantined + rejected must equal exactly what arrived");
-      invariant(currentAccepted <= remainingDelivery && accepted + disposed <= ordered, "overdelivery", "Accepted quantity cannot exceed remaining ordered delivery capacity");
+      invariant(currentAccepted <= remainingDelivery && accepted + withinOrderDisposed <= ordered, "overdelivery", "Accepted quantity cannot exceed remaining ordered delivery capacity");
       if (excessAtoms > 0n) {
         if (current.excessDecision === "return_excess_to_supplier") {
           invariant(
@@ -694,7 +822,7 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
       }
       const withinOrderQuarantineCap = remainingDelivery > currentAccepted ? remainingDelivery - currentAccepted : 0n;
       let seenQuarantineAtoms = 0n;
-      const acceptedAndDisposedAfterReceiptText = quantityText(accepted + disposed);
+      const acceptedAndDisposedAfterReceiptText = quantityText(accepted + withinOrderDisposed);
       for (const { portion, converted, amount } of linePortions) {
         let heldForAmendmentText: string | undefined;
         let acceptedAtReceiptText: string | undefined;
@@ -745,8 +873,8 @@ export function planInspectedReceipt(order: IssuedPurchaseOrder, receipt: Receip
     remaining.push({ orderLineId: orderLine.id, acceptedBaseQuantity: quantityText(accepted),
       quarantinedBaseQuantity: quantityText(quarantined), rejectedBaseQuantity: quantityText(rejected),
       disposedBaseQuantity: quantityText(disposed),
-      remainingFulfillmentBaseQuantity: quantityText(ordered > accepted + disposed ? ordered - accepted - disposed : 0n),
-      remainingDeliveryBaseQuantity: quantityText(ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n) });
+      remainingFulfillmentBaseQuantity: quantityText(ordered > accepted + withinOrderDisposed ? ordered - accepted - withinOrderDisposed : 0n),
+      remainingDeliveryBaseQuantity: quantityText(ordered > accepted + quarantined + withinOrderDisposed ? ordered - accepted - quarantined - withinOrderDisposed : 0n) });
   }
   return freeze({ receiptId: receipt.id, receiptVersion: receipt.version, lines, stockEntries, remaining,
     excessDecisions, financialEffects: { payables: 0 as const, expenses: 0 as const } });
@@ -1174,8 +1302,15 @@ export function planExcessArrivalDecision(input: {
   const accepted = quantityAtoms(previous?.acceptedBaseQuantity ?? "0", 3, true);
   const quarantined = quantityAtoms(previous?.quarantinedBaseQuantity ?? "0", 3, true);
   const disposed = quantityAtoms(previous?.disposedBaseQuantity ?? "0", 3, true);
-  invariant(accepted + disposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
-  const remainingDelivery = ordered > accepted + quarantined + disposed ? ordered - accepted - quarantined - disposed : 0n;
+  const disposedExcess =
+    previous?.disposedExcessBaseQuantity !== undefined
+      ? quantityAtoms(previous.disposedExcessBaseQuantity, 3, true)
+      : accepted + disposed > ordered && accepted <= ordered
+        ? accepted + disposed - ordered
+        : 0n;
+  const withinOrderDisposed = disposed > disposedExcess ? disposed - disposedExcess : 0n;
+  invariant(accepted + withinOrderDisposed <= ordered, "invalid_receipt_history", "Existing receipts exceed the order's accepted capacity");
+  const remainingDelivery = ordered > accepted + quarantined + withinOrderDisposed ? ordered - accepted - quarantined - withinOrderDisposed : 0n;
   const arrived = quantityAtoms(convertQuantity(input.arrivedQuantity, orderLine.conversion).baseQuantity);
   invariant(arrived > remainingDelivery, "no_excess_arrival", "Arrived quantity does not exceed remaining order delivery capacity");
   return freeze({

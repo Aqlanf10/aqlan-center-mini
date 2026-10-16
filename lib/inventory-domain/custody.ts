@@ -331,6 +331,13 @@ export function resolvePackageSafetyWithFieldObservation(input: {
   return { effectiveHazard, effectivePolicy: input.defaultPolicy };
 }
 
+export function canonicalCustodyReferenceKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^checkpoint:[^:]+:/i, "")
+    .replace(/^(?:(?:pkg|ev|transfer_line|mov_alloc|mov|usage|stocktake|waste_approval|transfer_out):)+/i, "");
+}
+
 export function packageEvidenceAction(hazard: "none" | "sharp" | "contaminated", policy: PackageSafetyPolicy) {
   if (!["none", "sharp", "contaminated"].includes(hazard) || !["safe_empty_return", "safe_disposal_record", "bulk_count", "reusable_custody"].includes(policy)) throw new Error("unknown_package_safety_classification");
   if (hazard !== "none" || policy === "safe_disposal_record") return "document_safe_disposal" as const;
@@ -343,18 +350,49 @@ export function reconcileEmptyPackage(input: {
   readonly previousClosures: readonly { readonly packageId: string; readonly evidenceEventId: string }[];
   readonly hazard: "none" | "sharp" | "contaminated"; readonly policy: PackageSafetyPolicy;
   readonly evidenceAction: ReturnType<typeof packageEvidenceAction>;
+  readonly disposalEvidenceVerified?: boolean;
   readonly originalAtoms: number; readonly recordedConsumptionAtoms: number; readonly returnedOrTransferredAtoms: number;
   readonly approvedWasteAtoms: number; readonly remainingAtoms: number;
 }) {
   required(input.packageId, "unique_package"); required(input.evidenceEventId, "evidence_event");
-  if (input.previousClosures.some((row) => row.packageId === input.packageId || row.evidenceEventId === input.evidenceEventId)) throw new Error("package_or_evidence_already_closed");
+  const pkgCanonical = canonicalCustodyReferenceKey(input.packageId);
+  const evCanonical = canonicalCustodyReferenceKey(input.evidenceEventId);
+  if (
+    input.previousClosures.some(
+      (row) =>
+        (!row.packageId.startsWith("checkpoint:") && canonicalCustodyReferenceKey(row.packageId) === pkgCanonical) ||
+        canonicalCustodyReferenceKey(row.evidenceEventId) === evCanonical,
+    )
+  ) {
+    throw new Error("package_or_evidence_already_closed");
+  }
   const expectedAction = packageEvidenceAction(input.hazard, input.policy);
   if (input.evidenceAction !== expectedAction) throw new Error("unsafe_or_inapplicable_package_evidence");
   for (const value of [input.originalAtoms, input.recordedConsumptionAtoms, input.returnedOrTransferredAtoms, input.approvedWasteAtoms, input.remainingAtoms]) nonnegative(value, "package_quantity");
   if (!input.originalAtoms) throw new Error("empty_original_package");
   if (expectedAction === "receive_safe_empty_package" && input.remainingAtoms !== 0) throw new Error("material_return_requires_separate_inspected_movement");
   const unexplainedAtoms = safe(BigInt(input.originalAtoms) - BigInt(input.recordedConsumptionAtoms) - BigInt(input.returnedOrTransferredAtoms) - BigInt(input.approvedWasteAtoms) - BigInt(input.remainingAtoms));
-  return { packageId: input.packageId, evidenceEventId: input.evidenceEventId, evidenceAction: expectedAction, unexplainedAtoms, reviewRequired: unexplainedAtoms !== 0, materialStockDeltaAtoms: 0, consumptionDeltaAtoms: 0, automaticDebtMinor: 0 };
+  const disposalUnverified = expectedAction === "document_safe_disposal" && input.disposalEvidenceVerified === false;
+  const evidenceVerificationStatus =
+    expectedAction === "document_safe_disposal"
+      ? input.disposalEvidenceVerified === true
+        ? ("verified_disposal_record" as const)
+        : ("unverified_attestation_requires_review" as const)
+      : ("verified_custody_event" as const);
+  const terminalClosure = input.remainingAtoms === 0;
+  return {
+    packageId: input.packageId,
+    evidenceEventId: input.evidenceEventId,
+    evidenceAction: expectedAction,
+    evidenceVerificationStatus,
+    closureKind: terminalClosure ? ("terminal" as const) : ("checkpoint" as const),
+    terminalClosure,
+    unexplainedAtoms,
+    reviewRequired: unexplainedAtoms !== 0 || disposalUnverified,
+    materialStockDeltaAtoms: 0,
+    consumptionDeltaAtoms: 0,
+    automaticDebtMinor: 0,
+  };
 }
 
 export function reviewReplenishment(input: {

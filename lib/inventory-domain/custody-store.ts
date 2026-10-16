@@ -5,7 +5,7 @@ import { clinicDateString } from "../schedule";
 import { CLINIC_ZONE_FALLBACK } from "../clinicZone";
 import { invariant,InventoryDomainError,quantityAtoms,quantityText,decimalRatio } from "./quantities";
 import { allocateMinor,planHistoricalReconciliation } from "./procurement";
-import { canonicalSettlementPeriodId,classifyDefaultPackageSafety,packageEvidenceAction,proposeSettlement,reconcileCustody,reconcileEmptyPackage,resolvePackageSafetyWithFieldObservation,type PackageSafetyPolicy } from "./custody";
+import { canonicalCustodyReferenceKey,canonicalSettlementPeriodId,classifyDefaultPackageSafety,packageEvidenceAction,proposeSettlement,reconcileCustody,reconcileEmptyPackage,resolvePackageSafetyWithFieldObservation,type PackageSafetyPolicy } from "./custody";
 import { INVENTORY_CLINIC_SCOPE,inventoryOperation,requireInventoryActor,writeInventoryAudit,type InventoryActor } from "./procurement-store";
 import { requireCurrency,type Currency } from "../money";
 
@@ -188,14 +188,15 @@ export async function reconcileHistoricalMovements(actor:InventoryActor,key:stri
   const conversionVersion=unitRows.rows[0]?.version??1;
   const basePrecisionValue=(unitRows.rows[0]?.base_precision??0) as 0|1|2|3;
   const expiryPolicyRows=await client.query<{requires_expiry:boolean}>(`SELECT COALESCE(
-   (SELECT (l.cost_snapshot->>'requiresExpiry')::boolean FROM stock_lots l WHERE l.item_id=$1 AND l.cost_snapshot ? 'requiresExpiry' ORDER BY l.movement_id DESC,l.id DESC LIMIT 1),
-   (SELECT (line->>'requiresExpiry')::boolean FROM purchase_orders po CROSS JOIN LATERAL jsonb_array_elements(po.document->'lines') AS line WHERE (line->>'itemId')::int=$1 AND line ? 'requiresExpiry' ORDER BY po.created_at DESC,po.id DESC LIMIT 1),
+   (SELECT BOOL_OR(req_exp) FROM (
+    SELECT (l.cost_snapshot->>'requiresExpiry')::boolean AS req_exp FROM stock_lots l WHERE l.item_id=$1 AND l.cost_snapshot ? 'requiresExpiry'
+    UNION ALL
+    SELECT (line->>'requiresExpiry')::boolean AS req_exp FROM purchase_orders po CROSS JOIN LATERAL jsonb_array_elements(po.document->'lines') AS line WHERE (line->>'itemId')::int=$1 AND line ? 'requiresExpiry'
+    UNION ALL
+    SELECT (line->>'requiresExpiry')::boolean AS req_exp FROM inventory_operations op CROSS JOIN LATERAL jsonb_array_elements(op.result->'order'->'lines') AS line WHERE op.scope='order.amend' AND (line->>'itemId')::int=$1 AND line ? 'requiresExpiry'
+   ) policy_sources),
    TRUE
   ) AS requires_expiry`,[item.id]);
-
-
-
-
   const serverRequiresExpiry=expiryPolicyRows.rows[0]?.requires_expiry!==false;
   const movementRows=await client.query<{id:number;kind:"in"|"out"|"adjust";qty:string;expiry_date:string|null;unit_cost_minor:string|null;payable_id:number|null;allocated_qty:string}>(`SELECT m.id,m.kind,m.qty::text,m.expiry_date::text,m.unit_cost_minor::text,m.payable_id,
    COALESCE((SELECT SUM(a.qty) FROM inventory_movement_allocations a WHERE a.movement_id=m.id),0)::text AS allocated_qty
@@ -494,32 +495,60 @@ async function custodyLotHistory(client:DbClient,locationId:string,lot:Lot,curre
   remainingUnits:toUnits(remainingAtoms3),
  };
 }
-async function verifyPackageSource(client:DbClient,pkgKey:string,locationId:string,lotId:string){
- const r=await client.query<{location_id:string;lot_id:string}>(`SELECT t.to_location_id AS location_id,l.lot_id::text AS lot_id
+async function verifyPackageSource(client:DbClient,pkgKey:string,locationId:string,lotId:string):Promise<{canonicalId:string;rawId:string;sourceQty:string|null;sourceTs:string|null}>{
+ const normKey=canonicalCustodyReferenceKey(pkgKey);
+ const r=await client.query<{location_id:string;lot_id:string;canonical_id?:string;raw_id?:string;source_qty?:string;source_ts?:string}>(`SELECT t.to_location_id AS location_id,l.lot_id::text AS lot_id,'transfer_line:'||l.id::text AS canonical_id,l.id::text AS raw_id,
+   GREATEST(SUM(a.accepted_qty)-COALESCE((SELECT SUM(c.original_qty) FROM custody_package_closures c WHERE c.package_id=l.id::text OR c.package_id LIKE 'checkpoint:%:'||l.id::text),0),0)::text AS source_qty,
+   MIN(t.created_at)::text AS source_ts
   FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id
-  WHERE a.accepted_qty>0 AND $1 IN (l.id::text,a.acknowledgement_id::text,t.id::text,'pkg:'||l.id::text,'pkg:'||a.acknowledgement_id::text,'pkg:'||t.id::text,a.acknowledgement_id::text||':'||l.id::text)
+  WHERE a.accepted_qty>0 AND ($1 IN (l.id::text,a.acknowledgement_id::text,t.id::text,'pkg:'||l.id::text,'pkg:'||a.acknowledgement_id::text,'pkg:'||t.id::text,a.acknowledgement_id::text||':'||l.id::text) OR $2 IN (l.id::text,a.acknowledgement_id::text,t.id::text,a.acknowledgement_id::text||':'||l.id::text))
+  GROUP BY t.to_location_id,l.lot_id,l.id
   UNION ALL
-  SELECT ma.location_id,ma.lot_id::text AS lot_id
+  SELECT ma.location_id,ma.lot_id::text AS lot_id,'mov_alloc:'||ma.id::text AS canonical_id,ma.id::text AS raw_id,
+   GREATEST(ma.qty-COALESCE((SELECT SUM(c.original_qty) FROM custody_package_closures c WHERE c.package_id=ma.id::text OR c.package_id LIKE 'checkpoint:%:'||ma.id::text),0),0)::text AS source_qty,
+   NOW()::text AS source_ts
   FROM inventory_movement_allocations ma JOIN inventory_movements m ON m.id=ma.movement_id
-  WHERE (m.kind='in' OR (m.kind='adjust' AND m.qty>0)) AND ma.qty>0 AND $1 IN (ma.id::text,'pkg:'||ma.id::text,'mov:'||m.id::text)`,[pkgKey]);
+  WHERE (m.kind='in' OR (m.kind='adjust' AND m.qty>0)) AND ma.qty>0 AND ($1 IN (ma.id::text,'pkg:'||ma.id::text,'mov:'||m.id::text) OR $2 IN (ma.id::text,m.id::text))`,[pkgKey,normKey]);
  invariant(r.rows.length>0,"invalid_package_source","Package identifier does not match any server-recorded custody receipt or transfer line");
- invariant(r.rows.some(row=>row.location_id===locationId&&row.lot_id===lotId),"package_source_mismatch","Package identifier belongs to a different custody location or lot");
+ const matching=r.rows.filter(row=>row.location_id===locationId&&row.lot_id===lotId);
+ invariant(matching.length>0,"package_source_mismatch","Package identifier belongs to a different custody location or lot");
+ invariant(matching.length===1,"ambiguous_package_source","Package identifier matches multiple custody source records; specify the exact transfer line or allocation ID");
+ const matched=matching[0];
+ return {
+  canonicalId:matched.canonical_id??`pkg:${normKey}`,
+  rawId:matched.raw_id??normKey,
+  sourceQty:matched.source_qty??null,
+  sourceTs:matched.source_ts??null,
+ };
 }
-async function verifyPackageEvidence(client:DbClient,evKey:string,locationId:string,lotId:string){
- const r=await client.query<{location_id:string;lot_id:string}>(`SELECT u.location_id,u.lot_id::text AS lot_id
-  FROM custody_usage_events u WHERE $1 IN (u.id::text,u.usage_key,'ev:'||u.id::text,'ev:'||u.usage_key)
+async function verifyPackageEvidence(client:DbClient,evKey:string,locationId:string,lotId:string):Promise<{canonicalId:string;rawId:string;kind:string;evTs:string|null}>{
+ const normKey=canonicalCustodyReferenceKey(evKey);
+ const r=await client.query<{location_id:string;lot_id:string;canonical_id?:string;raw_id?:string;ev_kind?:string;ev_ts?:string}>(`SELECT u.location_id,u.lot_id::text AS lot_id,'usage:'||u.id::text AS canonical_id,u.id::text AS raw_id,u.kind::text AS ev_kind,u.created_at::text AS ev_ts
+  FROM custody_usage_events u WHERE $1 IN (u.id::text,u.usage_key,'ev:'||u.id::text,'ev:'||u.usage_key) OR $2 IN (u.id::text,u.usage_key)
   UNION ALL
-  SELECT s.location_id,s.lot_id::text AS lot_id
-  FROM custody_stocktakes s WHERE $1 IN (s.id::text,'ev:'||s.id::text)
+  SELECT s.location_id,s.lot_id::text AS lot_id,'stocktake:'||s.id::text AS canonical_id,s.id::text AS raw_id,'stocktake' AS ev_kind,s.created_at::text AS ev_ts
+  FROM custody_stocktakes s WHERE $1 IN (s.id::text,'ev:'||s.id::text) OR $2=s.id::text
   UNION ALL
-  SELECT w.location_id,w.lot_id::text AS lot_id
-  FROM custody_waste_approvals w WHERE $1 IN (w.id::text,'ev:'||w.id::text)
+  SELECT w.location_id,w.lot_id::text AS lot_id,'waste_approval:'||w.id::text AS canonical_id,
+   COALESCE((SELECT u.id::text FROM custody_usage_events u WHERE u.waste_approval_id=w.id::text AND u.kind='approved_waste' ORDER BY u.created_at DESC,u.id LIMIT 1),w.id::text) AS raw_id,
+   CASE WHEN EXISTS (SELECT 1 FROM custody_usage_events u WHERE u.waste_approval_id=w.id::text AND u.kind='approved_waste') THEN 'executed_waste_approval' ELSE 'unexecuted_waste_approval' END AS ev_kind,
+   w.created_at::text AS ev_ts
+  FROM custody_waste_approvals w WHERE $1 IN (w.id::text,'ev:'||w.id::text) OR $2=w.id::text
   UNION ALL
-  SELECT t.from_location_id AS location_id,l.lot_id::text AS lot_id
+  SELECT t.from_location_id AS location_id,l.lot_id::text AS lot_id,'transfer_out:'||l.id::text AS canonical_id,l.id::text AS raw_id,'transfer_out' AS ev_kind,t.created_at::text AS ev_ts
   FROM inventory_transfer_lines l JOIN inventory_transfers t ON t.id=l.transfer_id
-  WHERE $1 IN (l.id::text,t.id::text,'ev:'||l.id::text,'ev:'||t.id::text)`,[evKey]);
+  WHERE $1 IN (l.id::text,t.id::text,'ev:'||l.id::text,'ev:'||t.id::text) OR $2 IN (l.id::text,t.id::text)`,[evKey,normKey]);
  invariant(r.rows.length>0,"invalid_package_evidence","Evidence event identifier does not match any server-recorded custody usage, stocktake, or waste event");
- invariant(r.rows.some(row=>row.location_id===locationId&&row.lot_id===lotId),"package_evidence_mismatch","Evidence event belongs to a different doctor custody location or lot");
+ const matching=r.rows.filter(row=>row.location_id===locationId&&row.lot_id===lotId);
+ invariant(matching.length>0,"package_evidence_mismatch","Evidence event belongs to a different doctor custody location or lot");
+ invariant(matching.length===1,"ambiguous_package_evidence","Evidence identifier matches multiple records; specify the exact event ID");
+ const matched=matching[0];
+ return {
+  canonicalId:matched.canonical_id??`ev:${normKey}`,
+  rawId:matched.raw_id??normKey,
+  kind:matched.ev_kind??"consumed",
+  evTs:matched.ev_ts??null,
+ };
 }
 export async function closeCustodyPackage(actor:InventoryActor,key:string,input:CustodyPackageClosureInput){
  uuid(input.id);uuid(input.lotId);reason(input.reason);
@@ -533,9 +562,6 @@ export async function closeCustodyPackage(actor:InventoryActor,key:string,input:
   const stock=await lots(client,[input.lotId]);const lot=stock[0];invariant(lot,"not_found","Custody lot was not found");
   await lockItems(client,[lot.item_id]);
   const pkgKey=input.packageId.trim();const evKey=input.evidenceEventId.trim();
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.lot_loc:${source.id}:${lot.id}`]);
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.pkg:${pkgKey}`]);
-  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.ev:${evKey}`]);
   const current=await balances(client);
   const currentBalanceText=current.find(row=>row.lot_id===lot.id&&row.location_id===source.id)?.qty??"0";
   const history=await custodyLotHistory(client,source.id,lot,currentBalanceText);
@@ -547,45 +573,78 @@ export async function closeCustodyPackage(actor:InventoryActor,key:string,input:
    observedHazard:input.hazard,
    requestedPolicy:input.policy,
   }));
-  const priorRows=await client.query<{package_id:string;evidence_event_id:string}>("SELECT package_id,evidence_event_id FROM custody_package_closures WHERE package_id=$1 OR evidence_event_id=$2 FOR SHARE",[pkgKey,evKey]);
-  if(priorRows.rows.length>0||history.inboundAtoms3<=0n){
+  const resolvedSource=await verifyPackageSource(client,pkgKey,source.id,lot.id);
+  const resolvedEvidence=await verifyPackageEvidence(client,evKey,source.id,lot.id);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.lot_loc:${source.id}:${lot.id}`]);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.pkg:${resolvedSource.rawId}`]);
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`custody.ev:${resolvedEvidence.rawId}`]);
+  const priorRows=await client.query<{package_id:string;evidence_event_id:string}>("SELECT package_id,evidence_event_id FROM custody_package_closures WHERE package_id=$1 OR evidence_event_id=$2 FOR SHARE",[resolvedSource.rawId,resolvedEvidence.rawId]);
+  const toUnits=(val:string)=>Number(quantityAtoms(val,history.precision,true)/history.scale);
+  const sourceOpenUnits=resolvedSource.sourceQty!==null?toUnits(resolvedSource.sourceQty):null;
+  if(priorRows.rows.some(row=>!row.package_id.startsWith("checkpoint:")&&canonicalCustodyReferenceKey(row.package_id)===resolvedSource.rawId)||priorRows.rows.some(row=>canonicalCustodyReferenceKey(row.evidence_event_id)===resolvedEvidence.rawId)||history.inboundAtoms3<=0n||(sourceOpenUnits!==null&&sourceOpenUnits<=0)){
    throw new InventoryDomainError("package_or_evidence_already_closed","Package source, evidence event, or lot custody tranche was already closed");
   }
-  await verifyPackageSource(client,pkgKey,source.id,lot.id);
-  await verifyPackageEvidence(client,evKey,source.id,lot.id);
-  invariant(pkgKey!==evKey,"invalid_package_evidence","Package source and evidence event must be distinct server records");
-  const toUnits=(val:string)=>Number(quantityAtoms(val,history.precision,true)/history.scale);
+  invariant(pkgKey!==evKey&&resolvedSource.rawId!==resolvedEvidence.rawId&&resolvedSource.canonicalId!==resolvedEvidence.canonicalId,"invalid_package_evidence","Package source and evidence event must be distinct server records");
+  if(resolvedSource.sourceTs&&resolvedEvidence.evTs){
+   const srcTime=Date.parse(resolvedSource.sourceTs);
+   const evTime=Date.parse(resolvedEvidence.evTs);
+   invariant(!Number.isFinite(srcTime)||!Number.isFinite(evTime)||evTime>=srcTime,"package_evidence_mismatch","Evidence event occurred before the selected package source was received");
+  }
   const submittedOriginal=toUnits(input.originalQuantity);
   const submittedConsumed=toUnits(input.recordedConsumptionQuantity);
   const submittedReturned=toUnits(input.returnedOrTransferredQuantity);
   const submittedWaste=toUnits(input.approvedWasteQuantity);
   const submittedRemaining=toUnits(input.remainingQuantity);
+  const retiredOriginal=submittedOriginal-submittedRemaining;
+  const remainingOpenOriginal=history.originalUnits-retiredOriginal;
+  const remainingOpenConsumed=history.consumedUnits-submittedConsumed;
+  const remainingOpenReturned=history.returnedOrTransferredUnits-submittedReturned;
+  const remainingOpenWaste=history.wasteUnits-submittedWaste;
+  const remainingOpenBalance=history.remainingUnits-submittedRemaining;
+  const singleTranche=submittedOriginal===history.originalUnits;
   invariant(
-   submittedOriginal===history.originalUnits&&
-   submittedConsumed===history.consumedUnits&&
-   submittedReturned===history.returnedOrTransferredUnits&&
-   submittedWaste===history.wasteUnits&&
-   submittedRemaining<=history.remainingUnits,
+   submittedOriginal>0&&
+   submittedOriginal<=history.originalUnits&&
+   (sourceOpenUnits===null||submittedOriginal===sourceOpenUnits)&&
+   (singleTranche
+    ?(submittedConsumed===history.consumedUnits&&
+      submittedReturned===history.returnedOrTransferredUnits&&
+      submittedWaste===history.wasteUnits&&
+      submittedRemaining<=history.remainingUnits)
+    :(submittedConsumed<=history.consumedUnits&&
+      submittedReturned<=history.returnedOrTransferredUnits&&
+      submittedWaste<=history.wasteUnits&&
+      submittedRemaining<=history.remainingUnits&&
+      remainingOpenConsumed+remainingOpenReturned+remainingOpenWaste+remainingOpenBalance<=remainingOpenOriginal)),
    "package_history_mismatch",
    "Submitted package closure quantities contradict server custody history",
   );
   const expectedAction=mapDomainCall(()=>packageEvidenceAction(resolvedSafety.effectiveHazard,resolvedSafety.effectivePolicy));
+  const disposalEvidenceVerified=input.evidenceAction==="document_safe_disposal"&&(resolvedEvidence.kind==="approved_waste"||resolvedEvidence.kind==="executed_waste_approval");
   const plan=mapDomainCall(()=>reconcileEmptyPackage({
-   packageId:pkgKey,
-   evidenceEventId:evKey,
+   packageId:resolvedSource.rawId,
+   evidenceEventId:resolvedEvidence.rawId,
    previousClosures:priorRows.rows.map(row=>({packageId:row.package_id,evidenceEventId:row.evidence_event_id})),
    hazard:resolvedSafety.effectiveHazard,
    policy:resolvedSafety.effectivePolicy,
    evidenceAction:input.evidenceAction??expectedAction,
-   originalAtoms:history.originalUnits,
-   recordedConsumptionAtoms:history.consumedUnits,
-   returnedOrTransferredAtoms:history.returnedOrTransferredUnits,
-   approvedWasteAtoms:history.wasteUnits,
+   disposalEvidenceVerified,
+   originalAtoms:submittedOriginal,
+   recordedConsumptionAtoms:submittedConsumed,
+   returnedOrTransferredAtoms:submittedReturned,
+   approvedWasteAtoms:submittedWaste,
    remainingAtoms:submittedRemaining,
   }));
+  const isTerminal=submittedRemaining===0;
+  const persistedPackageId=isTerminal?resolvedSource.rawId:`checkpoint:${input.id}:${resolvedSource.rawId}`;
+  const submittedOriginalText=quantityText(BigInt(submittedOriginal)*history.scale);
+  const retiredOriginalText=quantityText(BigInt(Math.max(0,retiredOriginal))*history.scale);
+  const submittedConsumedText=quantityText(BigInt(submittedConsumed)*history.scale);
+  const submittedReturnedText=quantityText(BigInt(submittedReturned)*history.scale);
+  const submittedWasteText=quantityText(BigInt(submittedWaste)*history.scale);
   const submittedRemainingText=quantityText(BigInt(submittedRemaining)*history.scale);
-  const doc={id:input.id,locationId:source.id,lotId:lot.id,hazard:resolvedSafety.effectiveHazard,policy:resolvedSafety.effectivePolicy,originalQuantity:history.originalQuantity,recordedConsumptionQuantity:history.recordedConsumptionQuantity,returnedOrTransferredQuantity:history.returnedOrTransferredQuantity,approvedWasteQuantity:history.approvedWasteQuantity,remainingQuantity:submittedRemainingText,...plan,reason:input.reason};
-  await client.query("INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,original_qty,consumed_qty,returned_qty,waste_qty,remaining_qty,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14,$15,$16,$17::jsonb,$18)",[input.id,plan.packageId,plan.evidenceEventId,source.id,lot.id,resolvedSafety.effectiveHazard,resolvedSafety.effectivePolicy,plan.evidenceAction,history.originalQuantity,history.recordedConsumptionQuantity,history.returnedOrTransferredQuantity,history.approvedWasteQuantity,submittedRemainingText,plan.unexplainedAtoms,plan.reviewRequired,input.reason,JSON.stringify(doc),actor.userId]);
+  const doc={id:input.id,locationId:source.id,lotId:lot.id,hazard:resolvedSafety.effectiveHazard,policy:resolvedSafety.effectivePolicy,canonicalPackageSourceId:resolvedSource.canonicalId,canonicalEvidenceId:resolvedEvidence.canonicalId,evidenceKind:resolvedEvidence.kind,originalQuantity:submittedOriginalText,retiredOriginalQuantity:retiredOriginalText,recordedConsumptionQuantity:submittedConsumedText,returnedOrTransferredQuantity:submittedReturnedText,approvedWasteQuantity:submittedWasteText,remainingQuantity:submittedRemainingText,...plan,reason:input.reason};
+  await client.query("INSERT INTO custody_package_closures(id,package_id,evidence_event_id,location_id,lot_id,hazard,policy,evidence_action,original_qty,consumed_qty,returned_qty,waste_qty,remaining_qty,unexplained_atoms,review_required,reason,document,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14,$15,$16,$17::jsonb,$18)",[input.id,persistedPackageId,resolvedEvidence.rawId,source.id,lot.id,resolvedSafety.effectiveHazard,resolvedSafety.effectivePolicy,plan.evidenceAction,retiredOriginalText,submittedConsumedText,submittedReturnedText,submittedWasteText,submittedRemainingText,plan.unexplainedAtoms,plan.reviewRequired,input.reason,JSON.stringify(doc),actor.userId]);
   await writeInventoryAudit(client,actor,"custody_package",input.id,"close_package",doc);
   return {...doc,clinicMovementEffects:0,payableEffects:0,cashEffects:0};
  });
@@ -762,19 +821,19 @@ export async function readDoctorCustody(actor:InventoryActor,offset=0){invariant
   const safety=classifyDefaultPackageSafety({name:lot.name,category:lot.category,unit:lot.unit,costSnapshot:lot.cost_snapshot});
   const alreadyClosed=hist.inboundAtoms3<=0n;
   const pkgCandidateRows=await client.query<{pkg_id:string}>(`SELECT candidate.pkg_id FROM (
-    SELECT l.id::text AS pkg_id,t.created_at AS ts FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id WHERE t.to_location_id=$1 AND l.lot_id=$2 AND a.accepted_qty>0
+    SELECT l.id::text AS pkg_id,MIN(t.created_at) AS ts FROM inventory_transfer_ack_lines a JOIN inventory_transfer_lines l ON l.id=a.transfer_line_id JOIN inventory_transfers t ON t.id=l.transfer_id WHERE t.to_location_id=$1 AND l.lot_id=$2 AND a.accepted_qty>0 GROUP BY l.id
     UNION ALL
     SELECT ma.id::text AS pkg_id,NOW() AS ts FROM inventory_movement_allocations ma JOIN inventory_movements m ON m.id=ma.movement_id WHERE ma.location_id=$1 AND ma.lot_id=$2 AND (m.kind='in' OR (m.kind='adjust' AND m.qty>0)) AND ma.qty>0
    ) candidate WHERE NOT EXISTS (SELECT 1 FROM custody_package_closures c WHERE c.package_id=candidate.pkg_id)
-   ORDER BY candidate.ts DESC,candidate.pkg_id LIMIT 1`,[pair.location_id,lot.id]);
+   ORDER BY candidate.ts ASC,candidate.pkg_id LIMIT 1`,[pair.location_id,lot.id]);
   const evCandidateRows=await client.query<{ev_id:string}>(`SELECT candidate.ev_id FROM (
-    SELECT u.id::text AS ev_id,u.created_at AS ts FROM custody_usage_events u WHERE u.location_id=$1 AND u.lot_id=$2
+    SELECT u.id::text AS ev_id,u.created_at AS ts,CASE WHEN u.kind='approved_waste' THEN 1 ELSE 2 END AS prio FROM custody_usage_events u WHERE u.location_id=$1 AND u.lot_id=$2
     UNION ALL
-    SELECT s.id::text AS ev_id,s.created_at AS ts FROM custody_stocktakes s WHERE s.location_id=$1 AND s.lot_id=$2
+    SELECT s.id::text AS ev_id,s.created_at AS ts,3 AS prio FROM custody_stocktakes s WHERE s.location_id=$1 AND s.lot_id=$2
     UNION ALL
-    SELECT w.id::text AS ev_id,w.created_at AS ts FROM custody_waste_approvals w WHERE w.location_id=$1 AND w.lot_id=$2
+    SELECT w.id::text AS ev_id,w.created_at AS ts,4 AS prio FROM custody_waste_approvals w WHERE w.location_id=$1 AND w.lot_id=$2
    ) candidate WHERE NOT EXISTS (SELECT 1 FROM custody_package_closures c WHERE c.evidence_event_id=candidate.ev_id)
-   ORDER BY candidate.ts DESC,candidate.ev_id LIMIT 1`,[pair.location_id,lot.id]);
+   ORDER BY candidate.prio ASC,candidate.ts DESC,candidate.ev_id LIMIT 1`,[pair.location_id,lot.id]);
   const arr=closableByLocation.get(pair.location_id)??[];
   arr.push({
    locationId:pair.location_id,

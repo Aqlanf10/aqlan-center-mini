@@ -101,12 +101,14 @@ function failure(error: unknown) {
     );
   }
   const correlationId = randomUUID();
+  const rawErrorName = error instanceof Error ? error.name : typeof error;
+  const errorType = /^[A-Za-z0-9_]{1,48}$/.test(rawErrorName) ? rawErrorName : "Error";
   console.error(
     JSON.stringify({
       event: "inventory_api_error",
       correlationId,
       code: "inventory_unavailable",
-      errorType: error instanceof Error ? error.name : typeof error,
+      errorType,
     }),
   );
   return NextResponse.json(

@@ -185,6 +185,7 @@ async function orderPriorInspectedQuantities(client: DbClient, orderId: string):
     quarantined: string;
     rejected: string;
     disposed: string;
+    disposed_excess: string;
   }>(
     `SELECT grl.order_line_id,
       (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='accepted'),0)
@@ -193,7 +194,18 @@ async function orderPriorInspectedQuantities(client: DbClient, orderId: string):
        - COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id),0))::text AS quarantined,
       (COALESCE(SUM(grl.base_qty) FILTER(WHERE grl.disposition='rejected'),0)
        + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='reject_return'),0))::text AS rejected,
-      COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='dispose'),0)::text AS disposed
+      COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=grl.order_line_id AND qd.action='dispose'),0)::text AS disposed,
+      COALESCE((
+        SELECT SUM(LEAST(qd_sum.disp_qty, COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0)))
+        FROM goods_receipt_lines grl2
+        JOIN (
+          SELECT receipt_line_id, SUM(base_qty) AS disp_qty
+          FROM quarantine_dispositions
+          WHERE order_id=$1 AND action='dispose'
+          GROUP BY receipt_line_id
+        ) qd_sum ON qd_sum.receipt_line_id = grl2.id
+        WHERE grl2.order_id=$1 AND grl2.order_line_id=grl.order_line_id
+      ),0)::text AS disposed_excess
      FROM goods_receipt_lines grl WHERE grl.order_id=$1 GROUP BY grl.order_line_id`,
     [orderId],
   );
@@ -203,6 +215,7 @@ async function orderPriorInspectedQuantities(client: DbClient, orderId: string):
     quarantinedBaseQuantity: row.quarantined,
     rejectedBaseQuantity: row.rejected,
     disposedBaseQuantity: row.disposed,
+    disposedExcessBaseQuantity: row.disposed_excess,
   }));
 }
 async function lockedOrder(client:DbClient,id:string):Promise<IssuedPurchaseOrder>{
@@ -272,7 +285,14 @@ export async function amendPurchaseOrder(
       },
       reason: input.reason,
     });
-    for (const line of input.order.lines) {
+    const existingLineIds = new Set(currentOrder.lines.map((line) => line.id));
+    for (const line of plan.order.lines) {
+      if (!existingLineIds.has(line.id)) {
+        await client.query(
+          "INSERT INTO purchase_order_lines(order_id,id,item_id,ordered_base_qty) VALUES($1,$2,$3,$4::numeric)",
+          [plan.order.id, line.id, line.itemId, convertQuantity(line.quantity, line.conversion).baseQuantity],
+        );
+      }
       for (const source of line.sources) {
         const added = plan.newAllocations.find((row) => row.id === source.id);
         if (!added) continue;
@@ -360,7 +380,18 @@ export async function resolveQuarantineReceipt(
     const lineTotals = await client.query<{ committed_qty: string }>(
       `SELECT (
         COALESCE((SELECT SUM(grl.base_qty) FROM goods_receipt_lines grl WHERE grl.order_id=$1 AND grl.order_line_id=$2 AND grl.disposition='accepted'), 0)
-        + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=$2 AND qd.action IN ('release', 'dispose')), 0)
+        + COALESCE((SELECT SUM(qd.base_qty) FROM quarantine_dispositions qd WHERE qd.order_id=$1 AND qd.order_line_id=$2 AND qd.action='release'), 0)
+        + COALESCE((
+          SELECT SUM(GREATEST(qd_sum.disp_qty - COALESCE((grl2.document->>'heldForOrderAmendmentBaseQuantity')::numeric, 0), 0))
+          FROM goods_receipt_lines grl2
+          JOIN (
+            SELECT receipt_line_id, SUM(base_qty) AS disp_qty
+            FROM quarantine_dispositions
+            WHERE order_id=$1 AND order_line_id=$2 AND action='dispose'
+            GROUP BY receipt_line_id
+          ) qd_sum ON qd_sum.receipt_line_id = grl2.id
+          WHERE grl2.order_id=$1 AND grl2.order_line_id=$2
+        ), 0)
       )::text AS committed_qty`,
       [order.id, row.document.orderLineId],
     );

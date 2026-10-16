@@ -20,7 +20,7 @@ import {
   summarizeTreatmentResult, treatmentFinancialSnapshot, type TreatmentIssue,
 } from "../lib/inventory-domain/treatment-cost";
 import {
-  attributableConsumedCost, calculateDeduction, canonicalSettlementPeriodId, classifyDefaultPackageSafety, convertSettlementMoney,
+  attributableConsumedCost, calculateDeduction, canonicalCustodyReferenceKey, canonicalSettlementPeriodId, classifyDefaultPackageSafety, convertSettlementMoney,
   packageEvidenceAction, previewCustodyTransfer, proposeSettlement, reconcileCustody, reconcileEmptyPackage,
   resolvePackageSafetyWithFieldObservation, reviewReplenishment, summarizeAppliedDeductions,
   treatmentCostAfterDoctorRecovery, type AppliedDeduction, type AttributableConsumption,
@@ -459,5 +459,66 @@ describe("R03, R10, R11, R12 schema, API and UI bilingual/locator invariants", (
     const adminSrc = readFileSync(join(process.cwd(), "components", "inventory", "ProcurementAdministration.tsx"), "utf8");
     expect(adminSrc).toContain("t(command.message)");
     expect(adminSrc).toContain("Enter a valid amount and valuation revision reason. Zero means a known free-of-charge value.");
+
+    const canonKey = canonicalCustodyReferenceKey;
+    expect(canonKey("pkg:line-1")).toBe("line-1");
+    expect(canonKey("ev:usage:ev-1")).toBe("ev-1");
+    expect(canonKey("checkpoint:cp-1:pkg:line-1")).toBe("line-1");
+
+    expect(() => reconcileEmptyPackage({
+      ...packageInput(),
+      packageId: "pkg:unique-pack1",
+      evidenceEventId: "ev-new",
+      previousClosures: [{ packageId: "unique-pack1", evidenceEventId: "receipt1" }],
+    })).toThrow("package_or_evidence_already_closed");
+    expect(() => reconcileEmptyPackage({
+      ...packageInput(),
+      packageId: "pack-new",
+      evidenceEventId: "ev:receipt1",
+      previousClosures: [{ packageId: "unique-pack1", evidenceEventId: "receipt1" }],
+    })).toThrow("package_or_evidence_already_closed");
+
+    const checkpointPlan = reconcileEmptyPackage({
+      packageId: "sharp-pack-1",
+      evidenceEventId: "st-checkpoint-1",
+      previousClosures: [],
+      hazard: "sharp",
+      policy: "safe_disposal_record",
+      evidenceAction: "document_safe_disposal",
+      disposalEvidenceVerified: false,
+      originalAtoms: 30,
+      recordedConsumptionAtoms: 0,
+      returnedOrTransferredAtoms: 0,
+      approvedWasteAtoms: 0,
+      remainingAtoms: 30,
+    });
+    expect(checkpointPlan).toMatchObject({
+      closureKind: "checkpoint",
+      terminalClosure: false,
+      reviewRequired: true,
+      evidenceVerificationStatus: "unverified_attestation_requires_review",
+    });
+
+    const terminalPlan = reconcileEmptyPackage({
+      packageId: "sharp-pack-1",
+      evidenceEventId: "waste-exec-1",
+      previousClosures: [{ packageId: "checkpoint:cp-1:sharp-pack-1", evidenceEventId: "st-checkpoint-1" }],
+      hazard: "sharp",
+      policy: "safe_disposal_record",
+      evidenceAction: "document_safe_disposal",
+      disposalEvidenceVerified: true,
+      originalAtoms: 30,
+      recordedConsumptionAtoms: 28,
+      returnedOrTransferredAtoms: 0,
+      approvedWasteAtoms: 2,
+      remainingAtoms: 0,
+    });
+    expect(terminalPlan).toMatchObject({
+      closureKind: "terminal",
+      terminalClosure: true,
+      unexplainedAtoms: 0,
+      reviewRequired: false,
+      evidenceVerificationStatus: "verified_disposal_record",
+    });
   });
 });
