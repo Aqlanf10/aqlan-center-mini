@@ -194,6 +194,38 @@ it('history and legacy access cannot be rewritten or deleted, even by direct SQL
   await expect(fixture.source.query('UPDATE hr_identity_import_runs SET response=\'{}\' WHERE id=$1',[receipt.runId])).rejects.toThrow(/append-only/);
   await expect(fixture.source.query('INSERT INTO hr_staff_account_links(staff_id,user_id,opened_event_id) SELECT staff_id,user_id,opened_event_id FROM hr_staff_account_links WHERE staff_id=$1 LIMIT 1',[p.staffId])).rejects.toMatchObject({code:'23505'});
 });
+it('payroll rechecks an explicit employee party after its lock wait and then reuses it without paying',async()=>{
+  const partyId=(await fixture.source.query("INSERT INTO parties(name,kind) VALUES('Synthetic explicit payroll employee','employee') RETURNING id")).rows[0].id;
+  const a=await account('admin'),b=await account('admin');
+  const staffId=(await fixture.source.query(`INSERT INTO hr_staff(full_name,user_id,created_by,work_status,contract_kind,hire_date,
+    salary_amount_minor,salary_currency,salary_period,salary_effective_on)
+    VALUES('Synthetic documented salary',$1,'synthetic','active','salary','2025-01-01',125000,'YER','monthly','2025-01-01') RETURNING id`,[a.userId])).rows[0].id;
+  await apply({a,b,partyId,staffId});
+  const payroll=await import('../../lib/hr-payroll'),period=await payroll.getOrCreatePayrollPeriod('2025-12',reviewer);
+  const run=await payroll.calculatePayrollRun(period.id,'YER',reviewer);
+  const baseline=await identityDatabaseState(fixture.source),blocker=await fixture.source.connect();
+  let outcome:Promise<unknown>|undefined;
+  try{
+    await blocker.query('BEGIN');await blocker.query('UPDATE parties SET is_active=FALSE WHERE id=$1',[partyId]);
+    const pid=(await blocker.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    outcome=payroll.approvePayrollRun(run.id,reviewer).then(value=>({ok:true,value}),error=>({ok:false,error}));
+    let blocked=false;for(let i=0;i<200;i++){
+      blocked=(await blocker.query('SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS blocked',[pid])).rows[0].blocked;
+      if(blocked)break;await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    expect(blocked).toBe(true);await blocker.query('COMMIT');
+    expect(await outcome).toMatchObject({ok:false,error:{code:'identity_conflict',status:409}});
+  }finally{await blocker.query('ROLLBACK');blocker.release();await outcome;await fixture.source.query('UPDATE parties SET is_active=TRUE WHERE id=$1',[partyId]);}
+  const withoutParty=(state:Record<string,unknown>)=>Object.fromEntries(Object.entries(state).filter(([key])=>key!=='table:parties'));
+  expect(withoutParty(await identityDatabaseState(fixture.source))).toEqual(withoutParty(baseline));
+  const before=await identityDatabaseState(fixture.source),approved=await payroll.approvePayrollRun(run.id,reviewer);
+  expect(approved.status).toBe('approved');
+  const after=await identityDatabaseState(fixture.source);
+  for(const key of ['table:parties','sequence:parties_id_seq','table:expenses','table:hr_payroll_disbursements'])expect(after[key]).toEqual(before[key]);
+  expect((await fixture.source.query(`SELECT p.party_id,p.amount_minor::text,p.currency FROM hr_payroll_items i JOIN payables p ON p.id=i.payable_id
+    WHERE i.staff_id=$1 AND i.run_id=$2`,[staffId,run.id])).rows).toEqual([{party_id:partyId,amount_minor:'125000',currency:'YER'}]);
+  await payroll.approvePayrollRun(run.id,reviewer);expect(await identityDatabaseState(fixture.source)).toEqual(after);
+});
 it('a missing uniqueness guard fails closed rather than accepting a new schema fingerprint',async()=>{
   await fixture.source.query('DROP INDEX hr_staff_account_links_current_user');
   try{await expect(readHrIdentityPreview(fixture.source,reviewer)).rejects.toMatchObject({status:503});}

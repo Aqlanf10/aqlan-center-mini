@@ -84,6 +84,9 @@ async function ensureStaffParty(client: DbClient, staffId: number, fullName: str
   if (explicit) {
     if (doctorId && (explicit.kind !== 'doctor' || explicit.partyId !== doctorId)) fail('identity_conflict','تعارض جهة الطبيب مع جهة الشخص الصريحة.');
     await client.query('SELECT id FROM parties WHERE id=$1 FOR UPDATE',[explicit.partyId]);
+    // The party can be disabled or reclassified by a writer while this lock is
+    // awaited. Recheck under the acquired lock before creating any payable.
+    await explicitStaffFinancialParty(client,staffId,Number(staff?.revision ?? 0));
     return explicit.partyId;
   }
   if (doctorId) {
