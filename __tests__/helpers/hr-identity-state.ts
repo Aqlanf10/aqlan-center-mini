@@ -1,6 +1,6 @@
-import type { Pool } from 'pg';
+import type { DbClient } from '../../lib/db';
 /** Synthetic DB evidence: hash every public table and observe every sequence without nextval. */
-export async function identityDatabaseState(db: Pick<Pool, 'query'>) {
+export async function identityDatabaseState(db: Pick<DbClient, 'query'>) {
   const { rows: tables } = await db.query("SELECT tablename AS name FROM pg_tables WHERE schemaname='public' ORDER BY tablename");
   const result: Record<string, unknown> = {};
   for (const { name } of tables) {

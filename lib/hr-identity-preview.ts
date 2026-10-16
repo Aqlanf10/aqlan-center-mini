@@ -36,22 +36,36 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
   const sources: IdentitySources = {
     accounts: input.accounts.map(a => ({ id: a.id, label: a.label, role: a.role, active: a.active, partyId: a.partyId })).sort((a,b) => a.id-b.id),
     staff: input.staff.map(s => ({ id: s.id, label: s.label, userId: s.userId, workStatus: s.workStatus,
-      hireDateRecorded: s.hireDateRecorded, salaryTermsComplete: s.salaryTermsComplete, contractKind: s.contractKind })).sort((a,b) => a.id-b.id),
+      hireDateRecorded: s.hireDateRecorded, salaryTermsComplete: s.salaryTermsComplete, contractKind: s.contractKind,
+      ...(s.identityRevision !== undefined ? { identityRevision: s.identityRevision } : {}) })).sort((a,b) => a.id-b.id),
     parties: input.parties.map(p => ({ id: p.id, label: ['doctor','employee'].includes(p.kind) ? p.label : null, kind: p.kind, active: p.active })).sort((a,b) => a.id-b.id),
     contracts: input.contracts.map(c => ({ id: c.id, staffId: c.staffId, partyId: c.partyId, status: c.status })).sort((a,b) => a.id-b.id),
     payrollLinks: input.payrollLinks.map(p => ({ staffId: p.staffId, partyId: p.partyId })).sort((a,b) => a.staffId-b.staffId || a.partyId-b.partyId),
+    ...(input.schemaFingerprint ? { schemaFingerprint: input.schemaFingerprint,
+      accountLinks: (input.accountLinks ?? []).map(l => ({ id: l.id, staffId: l.staffId, userId: l.userId, closed: l.closed,
+        openedEventId: l.openedEventId, closedEventId: l.closedEventId })).sort((a,b) => a.id.localeCompare(b.id)),
+      partyLinks: (input.partyLinks ?? []).map(l => ({ id: l.id, staffId: l.staffId, partyId: l.partyId, closed: l.closed,
+        openedEventId: l.openedEventId, closedEventId: l.closedEventId })).sort((a,b) => a.id.localeCompare(b.id)),
+    } : {}),
   };
   const accounts = new Map(sources.accounts.map(a => [a.id, a]));
   const staff = new Map(sources.staff.map(s => [s.id, s]));
   const parties = new Map(sources.parties.map(p => [p.id, p]));
   const candidates: IdentityCandidate[] = [];
   const usedUsers = new Set<number>(), usedStaff = new Set<number>(), usedParties = new Set<number>();
+  const staffUsers = (id: number) => (staff.get(id)?.identityRevision ?? 0) > 0
+    ? (sources.accountLinks ?? []).filter(l => l.staffId === id && !l.closed).map(l => l.userId)
+    : staff.get(id)?.userId ? [staff.get(id)!.userId!] : [];
   function expand(initialUsers: number[], initialParties: number[], initialStaff: number[]) {
-    const staffIds = ids([...initialStaff, ...sources.staff.filter(s => s.userId !== null && initialUsers.includes(s.userId)).map(s => s.id)]);
-    const userIds = ids([...initialUsers, ...staffIds.flatMap(id => staff.get(id)?.userId ? [staff.get(id)!.userId!] : [])]);
+    const staffIds = ids([...initialStaff, ...sources.staff.filter(s => staffUsers(s.id).some(id => initialUsers.includes(id))).map(s => s.id)]);
+    const userIds = ids([...initialUsers, ...staffIds.flatMap(staffUsers)]);
     const partyIds = ids([...initialParties, ...userIds.flatMap(id => accounts.get(id)?.partyId ? [accounts.get(id)!.partyId!] : []),
+      // Retained legacy access is not an identity fallback, but its existing
+      // financial reference cannot be silently discarded when closing a link.
+      ...staffIds.flatMap(id => { const userId = staff.get(id)?.userId; const partyId = userId ? accounts.get(userId)?.partyId : null; return partyId ? [partyId] : []; }),
       ...sources.contracts.filter(c => staffIds.includes(c.staffId) && c.partyId !== null && ['active','approved'].includes(c.status)).map(c => c.partyId!),
-      ...sources.payrollLinks.filter(p => staffIds.includes(p.staffId)).map(p => p.partyId)]);
+      ...sources.payrollLinks.filter(p => staffIds.includes(p.staffId)).map(p => p.partyId),
+      ...(sources.partyLinks ?? []).filter(p => !p.closed && staffIds.includes(p.staffId)).map(p => p.partyId)]);
     return { staffIds, userIds, partyIds };
   }
   const referenceKeys = (refs: ReturnType<typeof expand>) => [
@@ -71,15 +85,19 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
     if (partyIds.some(id => parties.has(id) && !['doctor','employee'].includes(parties.get(id)!.kind))) reasons.push('excluded_party');
     if (partyIds.length > 1) reasons.push('different_parties');
     if (staffIds.length > 1 || (decision?.staffId && staffIds.some(id => id !== decision.staffId))) reasons.push('different_staff');
+    if (staffIds.some(id => ((staff.get(id)?.identityRevision ?? 0) > 0 && !sources.schemaFingerprint)
+      || ((staff.get(id)?.identityRevision ?? 0) === 0 && (sources.accountLinks ?? []).some(l => l.staffId === id && !l.closed)))) reasons.push('identity_incomplete');
     if (partyIds.some(id => sources.accounts.some(a => a.partyId === id && !userIds.includes(a.id)))) reasons.push('shared_party');
     // Shared contracts/payroll also require review even when no account is linked.
     if (partyIds.some(id => sources.contracts.some(c => c.partyId === id && ['active','approved'].includes(c.status) && !staffIds.includes(c.staffId))
-      || sources.payrollLinks.some(p => p.partyId === id && !staffIds.includes(p.staffId)))) reasons.push('different_staff');
+      || sources.payrollLinks.some(p => p.partyId === id && !staffIds.includes(p.staffId))
+      || (sources.partyLinks ?? []).some(p => !p.closed && p.partyId === id && !staffIds.includes(p.staffId)))) reasons.push('different_staff');
     if (decision && referenceKeys(refs).some(id => (selected.get(id) ?? 0) > 1)) reasons.push('duplicate_selection');
     if (decision && decision.staffId === null && staffIds.length) reasons.push('select_existing_staff');
     if (!staffIds.length) unknowns.push('missing_staff', 'employment_unconfirmed');
     for (const id of staffIds) {
       const s = staff.get(id); if (!s) continue;
+      if (s.workStatus === 'unconfirmed' || s.contractKind === 'unspecified') unknowns.push('employment_unconfirmed');
       if (!s.hireDateRecorded) unknowns.push('missing_hire_date');
       if (!sources.contracts.some(c => c.staffId === id && ['approved','active'].includes(c.status))) unknowns.push('missing_contract');
       if (['salary','salary_commission'].includes(s.contractKind) && !s.salaryTermsComplete) unknowns.push('incomplete_salary');
@@ -90,7 +108,9 @@ export function buildIdentityPreview(input: IdentitySources, decisions: Identity
     if (reasons.length) action = 'conflict';
     else if (decision) {
       action = decision.staffId === null ? 'create'
-        : userIds.some(id => staff.get(decision.staffId!)?.userId !== id) || initialParties.some(id => !sources.accounts.some(a => a.id === staff.get(decision.staffId!)?.userId && a.partyId === id)) ? 'link' : 'skip';
+        : userIds.some(id => !staffUsers(decision.staffId!).includes(id)) || initialParties.some(id => (staff.get(decision.staffId!)?.identityRevision ?? 0) > 0
+          ? !(sources.partyLinks ?? []).some(l => !l.closed && l.staffId === decision.staffId && l.partyId === id)
+          : !sources.accounts.some(a => a.id === staff.get(decision.staffId!)?.userId && a.partyId === id)) ? 'link' : 'skip';
     }
     reasons.push(decision ? 'explicit_preview' : staffIds.length ? 'existing_staff' : 'employment_unconfirmed');
     candidates.push({ key, action, userIds, staffIds, partyIds, reasons: [...new Set(reasons)], unknowns: [...new Set(unknowns)], explicit: Boolean(decision) });

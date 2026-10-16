@@ -15,6 +15,9 @@ export interface HrCurrentPay {
 }
 
 export function currentStaffPay(staff: HrStaffView, contracts: readonly ContractInput[], day: string): HrCurrentPay {
+  if (staff.workStatus === 'unconfirmed' || staff.contractKind === 'unspecified') return {
+    asOf:day,source:null,terms:null,effectiveOn:null,contract:null,profilePayLocked:true,blockers:['no_pay_terms'],commissionPolicyPercent:null,
+  };
   const resolution = resolvePayTerms({ kind: staff.contractKind, salaryMinor: staff.payTerms?.amountMinor ?? null,
     currency: staff.payTerms?.currency as PayTerms['currency'] ?? null, salaryPeriod: staff.payTerms?.period ?? null,
     effectiveOn: staff.payTerms?.effectiveOn ?? null, hireDate: staff.hireDate, endDate: staff.endDate }, contracts, { start: day, end: day });

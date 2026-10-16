@@ -1,5 +1,7 @@
 import { readOperationalEmployment } from "./hr-operational-employment";
 import { hasDocumentedEmploymentHistory } from "./hr-temporal-legacy-guard";
+import { lockPersonIdentityForOperation } from "./hr-person-identity-schema-state";
+import { IdentityPreviewError } from "./hr-identity-preview";
 /**
  * (HR-1/HR-2) الموارد البشرية والمهام — **طبقة القاعدة والخادم**.
  *
@@ -282,6 +284,10 @@ export async function updateStaff(id: number, patch: UpdateStaffPatch, session: 
     const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
     if (current.rowCount === 0) return { missing: true as const };
     const row = staffRowMapper(current.rows[0]);
+    if ((row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified')
+      && ['workStatus','hireDate','endDate','contractKind','payTerms'].some(key => key in patch)) {
+      return { ok:false,error:'هوية غير موثقة تشغيليًا؛ وثّق تاريخ العمل والعقد من مساراتهما المعتمدة أولًا.',status:409 };
+    }
     const changesHistoricalFields = (patch.workStatus !== undefined && patch.workStatus !== row.work_status)
       || (patch.hireDate !== undefined && patch.hireDate !== row.hire_date)
       || (patch.endDate !== undefined && patch.endDate !== row.end_date);
@@ -454,8 +460,12 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
   { ok: true; staff: HrStaffView } | { ok: false; error: string; status: number }
 > {
   const outcome = await withTransaction(getPool(), async (client) => {
+    const identityInstalled = await lockPersonIdentityForOperation(client);
     const current = await client.query(`SELECT * FROM hr_staff WHERE id = $1 FOR UPDATE`, [id]);
     if (current.rowCount === 0) return { ok: false as const, error: "ملف الموظف غير موجود.", status: 404 };
+    if (Number(current.rows[0].identity_revision ?? 0) > 0) {
+      return { ok:false as const,error:'انتقل الملف إلى روابط الهوية الصريحة؛ رابط الوصول القديم محفوظ ولا يُعدّل من هذا المسار.',status:409 };
+    }
     const row = staffRowMapper(current.rows[0]);
 
     if (userId === null) {
@@ -483,6 +493,10 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
     const user = await client.query(`SELECT id, username, display_name, is_active FROM users WHERE id = $1`, [userId]);
     if (user.rowCount === 0) return { ok: false as const, error: "حساب الدخول غير موجود — أنشئه من شاشة المستخدمين أولًا.", status: 404 };
     if (!user.rows[0].is_active) return { ok: false as const, error: "حساب الدخول معطّل — لا يمكن ربطه.", status: 400 };
+    if (identityInstalled && (await client.query(`SELECT id FROM hr_staff_account_links
+      WHERE user_id=$1 AND staff_id<>$2 AND closed_at IS NULL`, [userId, id])).rows.length) {
+      return { ok: false as const, error: 'الحساب مرتبط بهوية شخص آخر؛ لا يمكن نقله من مسار الربط القديم.', status: 409 };
+    }
     // الفريدية بنيوية (UNIQUE) لكن الرسالة العربية هنا أوضح من خطأ القاعدة.
     const taken = await client.query(`SELECT id, full_name FROM hr_staff WHERE user_id = $1 AND id <> $2`, [userId, id]);
     if (taken.rowCount && taken.rowCount > 0) {
@@ -506,6 +520,13 @@ export async function setStaffUserLink(id: number, userId: number | null, reason
       actorRole: session.role,
     });
     return { ok: true as const, kind: "link" as const, fullName: row.full_name, userId, username: String(user.rows[0].username) } as const;
+  }).catch((error: unknown) => {
+    if (error instanceof IdentityPreviewError) return { ok: false as const, error: error.message, status: error.status };
+    if (error && typeof error === 'object' && 'code' in error && error.code === '23505' && 'constraint' in error
+      && ['hr_identity_account_person_unique', 'hr_staff_user_id_key'].includes(String(error.constraint))) {
+      return { ok: false as const, error: 'تغيّر ارتباط الحساب بالتزامن؛ راجع هوية الشخص قبل إعادة المحاولة.', status: 409 };
+    }
+    throw error;
   });
   if (!outcome.ok) return outcome;
   const refreshedRow = staffRowMapper((await getPool().query(`SELECT * FROM hr_staff WHERE id = $1`, [id])).rows[0]);

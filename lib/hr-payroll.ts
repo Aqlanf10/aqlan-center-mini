@@ -1,5 +1,8 @@
 import { readOperationalEmployment } from "./hr-operational-employment";
 import { employmentPeriodReview } from "./hr-operational-employment-shared";
+import { explicitStaffFinancialParty } from "./hr-person-financial-identity";
+import { lockPersonIdentityForOperation } from "./hr-person-identity-schema-state";
+import { IdentityPreviewError } from "./hr-identity-preview";
 import { withIsolation } from "./transactions";
 import { normalizeHrPolicy } from "./hr-settings-policy";
 import { payrollBlockerLabel } from "./hr-payroll-review";
@@ -40,7 +43,8 @@ export type HrPayrollWriteAuthorizer = ((client: DbClient) => Promise<boolean>) 
 async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrPayrollWriteAuthorizer | undefined,
   work: (client: DbClient) => Promise<T>): Promise<T> {
   manager(session);
-  return withTransaction(getPool(), async client => {
+  try { return await withTransaction(getPool(), async client => {
+    await lockPersonIdentityForOperation(client);
     if (authorize && !(await authorize(client))) fail("authority_changed", "تغيّرت صلاحية الجلسة؛ لم تُنفّذ العملية.", 403);
     if (session.expiresAt < Date.now()) fail("session_expired", "انتهت الجلسة؛ لم تُنفّذ العملية.", 401);
     const result = await work(client);
@@ -49,7 +53,14 @@ async function withPayrollTransaction<T>(session: SessionPayload, authorize: HrP
       fail("session_expired", "انتهت الجلسة أثناء الانتظار؛ تراجعت العملية بالكامل.", 401);
     }
     return result;
-  });
+  }); } catch (error) {
+    // Preserve the existing payroll API error contract after the transaction
+    // rolls back; identity conflicts are actionable refusals, not server faults.
+    if (error instanceof IdentityPreviewError) {
+      throw new HrPayrollError(error.status === 503 ? "identity_schema_unavailable" : "identity_conflict", error.status, error.message);
+    }
+    throw error;
+  }
 }
 function manager(session: SessionPayload) {
   if (!session || session.role !== "admin") fail("forbidden", "إدارة المسير والصرف للمدير وحده.", 403);
@@ -68,6 +79,16 @@ async function auditWithClient(client: DbClient, action: AuditAction, session: S
     actor: session.username, actorRole: session.role });
 }
 async function ensureStaffParty(client: DbClient, staffId: number, fullName: string, doctorId: number | null): Promise<number> {
+  const staff = (await client.query('SELECT to_jsonb(s)->>\'identity_revision\' AS revision FROM hr_staff s WHERE id=$1',[staffId])).rows[0];
+  const explicit = await explicitStaffFinancialParty(client,staffId,Number(staff?.revision ?? 0));
+  if (explicit) {
+    if (doctorId && (explicit.kind !== 'doctor' || explicit.partyId !== doctorId)) fail('identity_conflict','تعارض جهة الطبيب مع جهة الشخص الصريحة.');
+    await client.query('SELECT id FROM parties WHERE id=$1 FOR UPDATE',[explicit.partyId]);
+    // The party can be disabled or reclassified by a writer while this lock is
+    // awaited. Recheck under the acquired lock before creating any payable.
+    await explicitStaffFinancialParty(client,staffId,Number(staff?.revision ?? 0));
+    return explicit.partyId;
+  }
   if (doctorId) {
     const { rows } = await client.query("SELECT id FROM parties WHERE id = $1 AND kind = 'doctor' FOR UPDATE", [doctorId]);
     if (!rows[0]) fail("doctor_missing", "جهة الطبيب المرتبطة بالعقد غير صالحة.");
@@ -186,6 +207,9 @@ export async function getPayrollRunById(id: number | string): Promise<HrPayrollR
   return rows[0] ? mapRunRow(rows[0]) : null;
 }
 async function staffResolution(client: DbClient, row: Row, period: Row, currency: Currency) {
+  if (row.work_status === 'unconfirmed' || row.contract_kind === 'unspecified') {
+    return { inScope:false,terms:null,source:null,contract:null,blockers:[],snapshot:{identityOnly:true} };
+  }
   const resolved = resolvePayTerms(profileFromRow(row), await loadStaffContracts(client, Number(row.id)), { start: period.start_date, end: period.end_date });
   const relevantCurrency = hasCommission(resolved.terms?.kind ?? row.contract_kind) || (resolved.terms?.currency ?? row.salary_currency) === currency;
   const employment = await readOperationalEmployment(client, [Number(row.id)]);
@@ -194,6 +218,11 @@ async function staffResolution(client: DbClient, row: Row, period: Row, currency
     fail("employment_history_required", "فترة المسير تتضمن حالة غير نشطة أو تاريخًا غير معروف أو تعارض نطاق؛ يلزم مراجعة الأثر قبل الاحتساب أو الاعتماد، دون خصم تلقائي.");
   }
   if (relevantCurrency && !review.documented && row.work_status === "suspended" && resolved.inScope) fail("employment_history_required", "تاريخ سريان الإيقاف غير موثق؛ راجع الاستحقاق قبل الاحتساب أو الاعتماد.");
+  // An unrelated identity cannot block this period/currency. Keep the existing
+  // temporal review above, then validate financial identity only for its scope.
+  if (!resolved.inScope || !resolved.terms || !relevantCurrency) return resolved;
+  const explicit = await explicitStaffFinancialParty(client,Number(row.id),Number(row.identity_revision ?? 0));
+  if (explicit) row.user_party_id = explicit.kind === 'doctor' ? explicit.partyId : null;
   const contract = resolved.contract;
   if (contract && hasCommission(contract.kind) && contract.commissionRatePercent !== null) {
     const doctorId = contract.doctorPartyId ?? row.user_party_id;
