@@ -29,6 +29,7 @@ export interface PlannedFollowupFacts {
   visitId: number | null;
   visitPatientId: number | null;
   visitPlannedVisitId: number | null;
+  visitAppointmentId: number | null;
   visitSigned: boolean | null;
   sessions: PlannedFollowupSessionFacts[];
 }
@@ -51,12 +52,21 @@ export function plannedFollowupRefusal(target: FollowupTarget, appointmentId: nu
   if (status !== "scheduled" && status !== "in_progress") return "planned_visit_not_pending";
   if (visitId === null) {
     if (status !== "scheduled" || own(facts, "visitPatientId") !== null
-      || own(facts, "visitPlannedVisitId") !== null || own(facts, "visitSigned") !== null) {
+      || own(facts, "visitPlannedVisitId") !== null || own(facts, "visitAppointmentId") !== null
+      || own(facts, "visitSigned") !== null) {
       return "unresolved_planned_visit_record";
     }
   } else if (!id(visitId) || status !== "in_progress" || own(facts, "visitPatientId") !== target.patientId
     || own(facts, "visitPlannedVisitId") !== plannedVisitId || own(facts, "visitSigned") !== false) {
     return "unresolved_planned_visit_record";
+  }
+  if (visitId !== null) {
+    const visitAppointmentId = own(facts, "visitAppointmentId");
+    // Starting from a planned visit can leave this NULL until arrival. Preserve
+    // that legacy absence, but never treat an omitted projection as NULL or
+    // contradict arriveAppointment's refusal of a different non-NULL booking.
+    if (visitAppointmentId !== null && !id(visitAppointmentId)) return "unresolved_planned_visit_appointment";
+    if (visitAppointmentId !== null && visitAppointmentId !== appointmentId) return "conflicting_planned_visit_appointment";
   }
   const sessions = own(facts, "sessions");
   if (!Array.isArray(sessions) || !sessions.length) return "planned_sessions_missing";

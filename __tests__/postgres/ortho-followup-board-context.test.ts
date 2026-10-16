@@ -664,6 +664,31 @@ describe("existing planned-session / plan-item / clinical-case read projection",
     }
   });
 
+  it("keeps a contradictory clinical-visit appointment backlink for review without repairing any row", async () => {
+    const target = await plannedFixture();
+    const otherAppointment = 1_200_000_000 + target.caseId;
+    const visitId = 1_300_000_000 + target.caseId;
+    expect(new Set([target.booking, otherAppointment, visitId, target.clinical]).size).toBe(4);
+    await q(`INSERT INTO appointments (id, patient_id, scheduled_date, scheduled_time, status, appointment_type)
+      VALUES ($1, $2, $3::date, '15:00', 'cancelled', 'consultation')`, [otherAppointment, target.patientId, TODAY]);
+    await q(`INSERT INTO visits (id, patient_id, patient_name, planned_visit_id, appointment_id, status)
+      VALUES ($1, $2, 'Synthetic conflicting appointment backlink', $3, $4, 'in_chair')`,
+    [visitId, target.patientId, target.planned, otherAppointment]);
+    await q("UPDATE planned_visits SET status='in_progress', visit_id=$2 WHERE id=$1", [target.planned, visitId]);
+    await q("UPDATE treatment_sessions SET status='in_progress', visit_id=$2 WHERE id=$1", [target.session, visitId]);
+    const before = await databaseSnapshot();
+    expect(await db.arriveAppointment(target.booking, { actor: ACTOR })).toBe(false);
+    expect(await databaseSnapshot()).toEqual(before);
+    for (let read = 0; read < 2; read++) {
+      const row = await boardRow(target.caseId);
+      expect(row.nextAppointment).toBeNull();
+      expect(row.bookingContext.reviewAppointments).toEqual([expect.objectContaining({
+        id: target.booking, reason: "conflicting_planned_visit_appointment", matchBasis: null,
+      })]);
+    }
+    expect(await databaseSnapshot()).toEqual(before);
+  });
+
   it("resolves an arrived planned visit but reviews signed or foreign-patient clinical visit links", async () => {
     const target = await plannedFixture();
     const [visit] = await q<{ id: number }>(`INSERT INTO visits (patient_id, patient_name, planned_visit_id, status)
@@ -671,7 +696,13 @@ describe("existing planned-session / plan-item / clinical-case read projection",
     await q("UPDATE planned_visits SET status='in_progress', visit_id=$2 WHERE id=$1", [target.planned, visit.id]);
     await q("UPDATE treatment_sessions SET status='in_progress', visit_id=$2 WHERE id=$1", [target.session, visit.id]);
     await q("UPDATE appointments SET status='arrived' WHERE id=$1", [target.booking]);
+    await q("UPDATE visits SET appointment_id=$2 WHERE id=$1", [visit.id, target.booking]);
     expect((await boardRow(target.caseId)).nextAppointment).toMatchObject({ id: target.booking, status: "arrived", matchBasis: "planned_case_sessions" });
+    await q("UPDATE visits SET appointment_id=NULL WHERE id=$1", [visit.id]);
+    const legacyBefore = await databaseSnapshot();
+    expect((await boardRow(target.caseId)).nextAppointment).toMatchObject({ id: target.booking, matchBasis: "planned_case_sessions" });
+    expect(await databaseSnapshot()).toEqual(legacyBefore);
+    expect(await q("SELECT appointment_id FROM visits WHERE id=$1", [visit.id])).toEqual([{ appointment_id: null }]);
     await q("UPDATE visits SET signed_at=NOW(), signed_by=$2, status='done' WHERE id=$1", [visit.id, ACTOR]);
     expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
     const foreignPatient = await patient();

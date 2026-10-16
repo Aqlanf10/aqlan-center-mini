@@ -13,7 +13,7 @@ const session = (change: Partial<PlannedFollowupSessionFacts> = {}): PlannedFoll
 const planned = (change: Partial<PlannedFollowupFacts> = {}): PlannedFollowupFacts => ({
   id: 61, patientId: 10, planId: 31, planPatientId: 10, planStatus: "active",
   status: "scheduled", appointmentId: 101, visitId: null, visitPatientId: null,
-  visitPlannedVisitId: null, visitSigned: null, sessions: [session()], ...change,
+  visitPlannedVisitId: null, visitAppointmentId: null, visitSigned: null, sessions: [session()], ...change,
 });
 const booking = (change: Partial<FollowupBookingFacts> = {}): FollowupBookingFacts => ({
   id: 101, patientId: 10, scheduledDate: "2026-10-20", scheduledTime: "10:30", status: "booked",
@@ -32,6 +32,35 @@ describe("exact existing planned case sessions", () => {
     expect(classify({ status: "arrived", plannedVisit: planned({ status: "in_progress", visitId: 91,
       visitPatientId: 10, visitPlannedVisitId: 61, visitSigned: false,
       sessions: [session({ status: "in_progress", visitId: 91 })] }) }).basis).toBe("planned_case_sessions");
+  });
+  it("reviews a conflicting appointment backlink on an otherwise matching open clinical visit", () => {
+    const facts = { ...planned({ status: "in_progress", visitId: 91,
+      visitPatientId: 10, visitPlannedVisitId: 61, visitSigned: false,
+      sessions: [session({ status: "in_progress", visitId: 91 })] }), visitAppointmentId: 102 };
+    expect(new Set([101, 102, 91, 61, 51, 41]).size).toBe(6);
+    expect(classify({ status: "arrived", plannedVisit: facts })).toEqual({
+      classification: "needs_review", reason: "conflicting_planned_visit_appointment", basis: null,
+    });
+  });
+  it.each([null, 101])("preserves a %s backlink under the existing arrival contract without inventing one", visitAppointmentId => {
+    const facts = planned({ status: "in_progress", visitId: 91, visitPatientId: 10,
+      visitPlannedVisitId: 61, visitAppointmentId, visitSigned: false,
+      sessions: [session({ status: "in_progress", visitId: 91 })] });
+    expect(classify({ status: "arrived", plannedVisit: facts }).basis).toBe("planned_case_sessions");
+    expect(facts.visitAppointmentId).toBe(visitAppointmentId);
+  });
+  it.each([undefined, 0, -1, 101.5, "101", Number.MAX_SAFE_INTEGER + 1])("reviews an unresolved clinical visit appointment projection %s", visitAppointmentId => {
+    const facts = { ...planned({ status: "in_progress", visitId: 91, visitPatientId: 10,
+      visitPlannedVisitId: 61, visitSigned: false }), visitAppointmentId } as PlannedFollowupFacts;
+    expect(classify({ status: "arrived", plannedVisit: facts }).reason).toBe("unresolved_planned_visit_appointment");
+  });
+  it("does not accept an inherited backlink or appointment metadata without a clinical visit", () => {
+    const facts = planned({ status: "in_progress", visitId: 91, visitPatientId: 10,
+      visitPlannedVisitId: 61, visitSigned: false });
+    delete (facts as Partial<PlannedFollowupFacts>).visitAppointmentId;
+    Object.setPrototypeOf(facts, { visitAppointmentId: 101 });
+    expect(classify({ plannedVisit: facts }).reason).toBe("unresolved_planned_visit_appointment");
+    expect(classify({ plannedVisit: planned({ visitAppointmentId: 101 }) }).reason).toBe("unresolved_planned_visit_record");
   });
   it("keeps service-less legacy periodic purpose, but never invents it from the plan or title", () => {
     expect(classify({ serviceId: null, service: null }).basis).toBe("planned_case_sessions");

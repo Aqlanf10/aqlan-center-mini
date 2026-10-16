@@ -3180,7 +3180,8 @@
       "required_evidence": "all O01-O52",
       "verification": "Not accepted as a complete original requirement on the limited linked-case integration head",
       "current_evidence": [
-        "New pure/PG/real HTTP proofs: patient/Ortho/clinical IDs distinct; same-plan other-case, foreign-patient and mixed-specialty session chains remain review-only. Images/export excluded."
+        "New pure/PG/real HTTP proofs: patient/Ortho/clinical IDs distinct; same-plan other-case, foreign-patient and mixed-specialty session chains remain review-only. Images/export excluded.",
+        "appointment-consistency-fix: written visit appointment backlinks must agree; explicit legacy NULL preserved without repair, missing projection reviewed."
       ],
       "accepted": false
     },
@@ -3813,7 +3814,8 @@
       "verification": "Full original scenario remains unaccepted; prior main evidence and this narrow read-only slice are separated below.",
       "partial_evidence": [
         "Separate patient/Ortho/clinical bridge and source-scope PostgreSQL tests; full imaging scenario not run.",
-        "New pure/PG/real HTTP proofs: patient/Ortho/clinical IDs distinct; same-plan other-case, foreign-patient and mixed-specialty session chains remain review-only. Images/export excluded."
+        "New pure/PG/real HTTP proofs: patient/Ortho/clinical IDs distinct; same-plan other-case, foreign-patient and mixed-specialty session chains remain review-only. Images/export excluded.",
+        "Review correction: visits.appointment_id is projected; a different booking stays needs_review without repair. Exact/NULL/missing semantics and distinct identities verified by unit, real PG and HTTP/browser tests."
       ]
     },
     {
@@ -4283,5 +4285,6 @@
   "scope": "Read-only exact planned-visit/session/item/case booking projection. Existing save/sign writers reused unchanged; no schema, finance writer, new visit, baseline duplication or full journey acceptance.",
   "prior_matrix_source": "docs/review/ortho-assessment-strategy-v2-20261015/requirements-matrix.json",
   "ledger_sha256": "7dc8afaa065a6779f7f796910c87ce38e4a8ee1fbf20095d31b7713470339438",
-  "historical_inventory_note": "Packet inventory/proposed paths are retained from the prior matrix as historical source references, not as implementation or verification claims for this limited branch. Every full requirement/scenario remains unaccepted."
+  "historical_inventory_note": "Packet inventory/proposed paths are retained from the prior matrix as historical source references, not as implementation or verification claims for this limited branch. Every full requirement/scenario remains unaccepted.",
+  "latest_remote_main_observed": "fe3b6674"
 }

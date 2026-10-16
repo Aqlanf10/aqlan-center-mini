@@ -8,8 +8,8 @@ import { baseUrl, harness } from "./_server";
 // The browser may only read; links/messages/bookings are never sent or opened.
 let h: Awaited<ReturnType<typeof harness>>, db: Client, browser: Browser;
 let today: string;
-const fixtures = new Map<number, { patientId: number; caseId: number; mixedCaseId: number; bookingId: number;
-  patientName: string; mixedName: string; foreignName: string }>();
+const fixtures = new Map<number, { patientId: number; caseId: number; mixedCaseId: number; conflictCaseId: number; bookingId: number;
+  patientName: string; mixedName: string; conflictName: string; foreignName: string }>();
 async function insert(sql: string, values: unknown[]) {
   return (await db.query<{ id: number }>(sql, values)).rows[0].id;
 }
@@ -50,16 +50,28 @@ beforeAll(async () => {
       const booking = await insert(`INSERT INTO appointments (patient_id,scheduled_date,scheduled_time,status,service_id,appointment_type,doctor_id,planned_visit_id)
         VALUES ($1,$2::date,'10:30','booked',$3,'follow_up',$4,$5) RETURNING id`, [patient, today, serviceId, owner, planned]);
       await db.query("UPDATE planned_visits SET appointment_id=$2 WHERE id=$1", [planned, booking]);
-      return { patient, ortho, booking };
+      return { patient, ortho, booking, planned };
     };
     const patientName = `متابعة خطة حالة اصطناعية ${width}`;
     const mixedName = `زيارة مختلطة للمراجعة اصطناعية ${width}`;
+    const conflictName = `رابط موعد متعارض للمراجعة اصطناعي ${width}`;
     const foreignName = `مريض طبيب آخر محجوب اصطناعي ${width}`;
     const exact = await create(patientName, doctor);
     const mixed = await create(mixedName, doctor, true);
+    const conflict = await create(conflictName, doctor);
+    const otherAppointment = 1_100_000_000 + conflict.ortho, visitId = 1_200_000_000 + conflict.ortho;
+    expect(new Set([conflict.booking, otherAppointment, visitId, 1_400_000_000 + conflict.ortho]).size).toBe(4);
+    await db.query(`INSERT INTO appointments (id,patient_id,scheduled_date,scheduled_time,status,appointment_type)
+      VALUES ($1,$2,$3::date,'15:00','cancelled','consultation')`, [otherAppointment, conflict.patient, today]);
+    await db.query(`INSERT INTO visits (id,patient_id,patient_name,planned_visit_id,appointment_id,status)
+      VALUES ($1,$2,'Synthetic conflicting appointment visit',$3,$4,'in_chair')`,
+    [visitId, conflict.patient, conflict.planned, otherAppointment]);
+    await db.query("UPDATE planned_visits SET status='in_progress',visit_id=$2 WHERE id=$1", [conflict.planned, visitId]);
+    await db.query("UPDATE treatment_sessions SET status='in_progress',visit_id=$2 WHERE planned_visit_id=$1", [conflict.planned, visitId]);
+    await db.query("UPDATE appointments SET status='arrived' WHERE id=$1", [conflict.booking]);
     await create(foreignName, foreignDoctor);
-    fixtures.set(width, { patientId: exact.patient, caseId: exact.ortho, mixedCaseId: mixed.ortho, bookingId: exact.booking,
-      patientName, mixedName, foreignName });
+    fixtures.set(width, { patientId: exact.patient, caseId: exact.ortho, mixedCaseId: mixed.ortho, conflictCaseId: conflict.ortho, bookingId: exact.booking,
+      patientName, mixedName, conflictName, foreignName });
   }
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   await mkdir(".settings-ui-artifacts", { recursive: true });
@@ -114,13 +126,18 @@ describe("read-only exact planned Ortho follow-up in the real board", () => {
       const rows = payload.buckets.flatMap((bucket: { rows: Array<{ caseId: number; patientName: string }> }) => bucket.rows);
       expect(rows.find((r: { caseId: number }) => r.caseId === fixture.caseId).nextAppointment).toMatchObject({ id: fixture.bookingId, matchBasis: "planned_case_sessions" });
       expect(rows.find((r: { caseId: number }) => r.caseId === fixture.mixedCaseId).bookingContext.reviewAppointments[0].reason).toBe("different_or_unresolved_planned_case");
+      const conflictRow = rows.find((r: { caseId: number }) => r.caseId === fixture.conflictCaseId);
+      expect(conflictRow.nextAppointment).toBeNull();
+      expect(conflictRow.bookingContext.reviewAppointments[0].reason).toBe("conflicting_planned_visit_appointment");
       expect(JSON.stringify(payload)).not.toContain(fixture.foreignName);
       await page.getByRole("button", { name: /^منذ ٨ أسابيع\+/ }).click();
       const exact = page.locator("li").filter({ has: page.getByRole("link", { name: fixture.patientName, exact: true }) });
       const mixed = page.locator("li").filter({ has: page.getByRole("link", { name: fixture.mixedName, exact: true }) });
+      const conflict = page.locator("li").filter({ has: page.getByRole("link", { name: fixture.conflictName, exact: true }) });
       await exact.getByText(/جلسات خطة مرتبطة بهذه الحالة؛ الحجز لا يثبت التنفيذ/).waitFor();
       await mixed.getByText("يحتاج مراجعة سياق المتابعة", { exact: false }).waitFor();
-      await capture(exact, width, "exact"); await capture(mixed, width, "review");
+      await conflict.getByText("يحتاج مراجعة سياق المتابعة", { exact: false }).waitFor();
+      await capture(exact, width, "exact"); await capture(mixed, width, "review"); await capture(conflict, width, "conflict");
       expect(await snapshot()).toEqual(before); expect(unexpected).toEqual([]); expect(errors).toEqual([]);
     } finally { await context.close(); }
   });

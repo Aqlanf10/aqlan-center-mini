@@ -1,5 +1,5 @@
 diff --git a/lib/db.ts b/lib/db.ts
-index 7958afaa..85aecde6 100644
+index 7958afaa..2708155f 100644
 --- a/lib/db.ts
 +++ b/lib/db.ts
 @@ -22156,6 +22156,23 @@ export async function orthoFollowupBoard(today: string): Promise<OrthoFollowupRo
@@ -37,7 +37,7 @@ index 7958afaa..85aecde6 100644
 +             'planPatientId', plan.patient_id, 'planStatus', plan.status,
 +             'status', pv.status, 'appointmentId', pv.appointment_id,
 +             'visitId', pv.visit_id, 'visitPatientId', visit.patient_id,
-+             'visitPlannedVisitId', visit.planned_visit_id,
++             'visitPlannedVisitId', visit.planned_visit_id, 'visitAppointmentId', visit.appointment_id,
 +             'visitSigned', CASE WHEN visit.id IS NULL THEN NULL ELSE visit.signed_at IS NOT NULL END,
 +             'sessions', COALESCE(planned_sessions.items, '[]'::jsonb)) END
           ) ORDER BY ap.scheduled_date, ap.scheduled_time, ap.id) AS items

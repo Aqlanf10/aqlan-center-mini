@@ -906,10 +906,14 @@ jobs:
             .settings-ui-artifacts/ortho-planned-followup-exact-1280.png
             .settings-ui-artifacts/ortho-planned-followup-review-390.png
             .settings-ui-artifacts/ortho-planned-followup-review-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-conflict-390.png
+            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.png
             .settings-ui-artifacts/ortho-planned-followup-exact-390.json
             .settings-ui-artifacts/ortho-planned-followup-exact-1280.json
             .settings-ui-artifacts/ortho-planned-followup-review-390.json
             .settings-ui-artifacts/ortho-planned-followup-review-1280.json
+            .settings-ui-artifacts/ortho-planned-followup-conflict-390.json
+            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
