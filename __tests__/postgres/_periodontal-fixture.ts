@@ -7,6 +7,42 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  if (files.length === 56) {
+    const ortho = files.filter(file => file.version === "0051" || file.version === "0052");
+    if (ortho.length !== 2 || ortho[0].filename !== "0051_ortho_treatment_strategy.sql" || ortho[1].filename !== "0052_ortho_assessment.sql") {
+      throw new Error("Unreviewed Ortho strategy/assessment union for periodontal test fixture.");
+    }
+    // Strip only the exact two root-authorized additions, then preserve every
+    // existing HR/finance chain guard. No number is allocated by this fixture.
+    return periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0051" && file.version !== "0052"));
+  }
+  if (files.length === 54) {
+    const hr = [
+      "0045_hr_staff.sql", "0046_hr_tasks.sql", "0048_hr_contracts_attendance_leaves.sql",
+      "0049_hr_payroll_disbursements.sql", "0050_hr_payroll_integrity.sql",
+      "0056_hr_employment_history.sql", "0057_hr_schedule_policy_versions.sql", "0058_hr_temporal_write_receipts.sql",
+    ];
+    for (const [index, filename] of hr.entries()) {
+      const file = files[43 + index];
+      if (file.filename !== filename || file.version !== filename.slice(0, 4)) {
+        throw new Error("Unreviewed HR migration suffix for periodontal test fixture.");
+      }
+    }
+    // Reuse the strict invoice-chain guard after validating all eight allocated
+    // HR extensions. This remains an isolated test candidate, never a migration.
+    return periodontalCandidateMigrationVersion([...files.slice(0, 43), ...files.slice(51)]);
+  }
+  if(files.length===46&&files[45].version==="0061"&&files[45].filename==="0061_invoice_correction_lineage.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,45));return "0062";
+  }
+  // Root-allocated0059/0060 are reviewed non-contiguous extensions. The inactive
+  // candidate remains test-only and must not fill another branch's reservations.
+  if(files.length===45&&files[44].version==="0060"&&files[44].filename==="0060_historical_treatment_documents.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,44));return "0061";
+  }
+  if(files.length===44&&files[43].version==="0059"&&files[43].filename==="0059_invoice_debt_installments.sql"){
+    periodontalCandidateMigrationVersion(files.slice(0,43));return "0060";
+  }
   const expectedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
   if (files.length < 40 || files.length > 43) throw new Error("Unreviewed shipped migration baseline for periodontal candidate.");
   files.forEach((file, index) => {

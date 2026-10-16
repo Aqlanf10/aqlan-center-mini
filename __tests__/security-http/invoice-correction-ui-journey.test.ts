@@ -58,12 +58,12 @@ describe("تصحيح فاتورةٍ بمبلغٍ زائد من حساب المر
     try {
       const invoices = page.getByRole("region", { name: "الفواتير" });
       await invoices.getByRole("button", { name: "تصحيح" }).click();
-      const editor = page.getByRole("group", { name: /^تصحيح / });
-      await editor.getByLabel("سعر تنظيف وتلميع").fill("50000");
+      const editor = page.getByTestId("invoice-correction-editor");
+      await editor.getByLabel("سعر التصحيح 1").fill("50000");
       await editor.getByLabel("سبب التصحيح").fill("السعر المعتمد ٥٠ ألفًا");
-      await editor.getByText(/تخفيض/).waitFor();
-      await editor.getByRole("button", { name: "صحّح الفاتورة" }).click();
-      await page.getByRole("status").getByText(/وصدرت بدلها/).waitFor();
+      await editor.getByText(/بعد التصحيح:/).waitFor();
+      await editor.getByRole("button", { name: "تأكيد تصحيح الفاتورة" }).click();
+      await page.getByRole("status").getByText(/حُفظ التصحيح/).waitFor();
 
       const { rows } = await db.query<{ status: string; total_minor: string }>(
         `SELECT status, total_minor::text FROM invoices WHERE patient_id = $1 ORDER BY id`, [patientId]);

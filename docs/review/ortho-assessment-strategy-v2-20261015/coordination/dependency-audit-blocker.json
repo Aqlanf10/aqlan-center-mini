@@ -1,0 +1,100 @@
+{
+  "code_head": "4a02ace7581201bd380527fabf53938b4949de37",
+  "base": "ce78247278397a02e8b9a0c437ab5605951a411c",
+  "failure": "BRACES_EXCEPTION_REJECTED: invalid node range @next/eslint-plugin-next",
+  "meaning": "npm audit vulnerability.range is empty; this is not a Node.js engine range error. No exception or dependency modification is proposed by this Ortho slice.",
+  "vulnerabilities": [
+    {
+      "name": "@next/eslint-plugin-next",
+      "severity": "high",
+      "range": "",
+      "via": [
+        "fast-glob"
+      ]
+    },
+    {
+      "name": "braces",
+      "severity": "high",
+      "range": "",
+      "via": [
+        {
+          "source": 1240992,
+          "name": "braces",
+          "dependency": "braces",
+          "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+          "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
+          "severity": "high",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=3.0.3"
+        }
+      ]
+    },
+    {
+      "name": "chokidar",
+      "severity": "high",
+      "range": "",
+      "via": [
+        "braces"
+      ]
+    },
+    {
+      "name": "fast-glob",
+      "severity": "high",
+      "range": "",
+      "via": [
+        "micromatch"
+      ]
+    },
+    {
+      "name": "micromatch",
+      "severity": "high",
+      "range": "",
+      "via": [
+        "braces"
+      ]
+    },
+    {
+      "name": "tailwindcss",
+      "severity": "high",
+      "range": "",
+      "via": [
+        "chokidar",
+        "fast-glob",
+        "micromatch"
+      ]
+    }
+  ],
+  "unchanged": [
+    {
+      "path": "package.json",
+      "sha256": "ff50dcc2a742db16243aa15d236fa2b4e075a4fef1be2aa836d5612135ed7260",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "5df7ced31497dc6de92937fa41e995e3e7912856f51ade2b56ce4e169dbb3bd5",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "scripts/ci-audit.mjs",
+      "sha256": "9c38c4934e61c6f3a2a465f169680a20f2bc2e4bdfc953f09e4798e04b60c50d",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/scoped-braces-exception.mjs",
+      "sha256": "a4a052d0a56a65056c3e686e2d856d837b98d41af3bbe767e97c651d021742bc",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/braces-exception-pins.mjs",
+      "sha256": "cb8270a104d9704866046688e40e7c41154d1abd1521605008e3ed3f6f9267da",
+      "unchanged_from_base": true
+    }
+  ]
+}

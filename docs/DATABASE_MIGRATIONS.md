@@ -12,6 +12,12 @@
 
 ## البنية
 
+إضافات فرع الفاتورة الموحدة (اختُبرت على PostgreSQL محلي معزول فقط):
+
+- `0059_invoice_debt_installments.sql`: جداول سداد الدين وإصداراتها وتخصيص التحصيل، دون إنشاء دين إضافي.
+- `0060_historical_treatment_documents.sql`: مستند تاريخي متعدد البنود وإصدارات تصحيحه الإلحاقية، مع حماية نطاق العلاج؛ المتبقي وحده رصيد افتتاحي، دون فاتورة أو سند للمدفوع السابق.
+- `0061_invoice_correction_lineage.sql`: تسلسل تصحيح الفواتير وإقراراته وبصمة ربط العلاج، مع بقاء إيصالات الأصل وتسوية المتبقي عبر التسلسل دون تكرار التحصيل.
+
 ```
 migrations/
   0001_baseline_schema.sql                 ← خط الأساس: DDL + مزامنة عدادات الأعمال عبر setval
@@ -58,6 +64,28 @@ migrations/
   0042_legacy_treatment_agreements.sql ← العلاج السابق للنظام: جدول legacy_treatment_agreements للاتفاق التاريخي (المتفق والمدفوع قبل النظام والمتبقي عند البداية بعملته وتاريخه، وبنده وحالته، وصلته بصف تاريخ الرصيد الافتتاحي) — المتبقي وحده رصيد افتتاحي، بلا فاتورة أو إيصال؛ إلحاقي بحارس لا يسمح إلا بالإبطال، وفهارس تمنع اتفاقين حيّين لنفس (مريض، خدمة، سن) أو لنفس البند — جدول جديد بلا تعديل لقائم (INV-LINK LEGACY)
   0043_legacy_treatment_coverage.sql   ← لقطة التغطية الثابتة للعلاج التاريخي: legacy_treatment_coverage_snapshots (صف واحد لكل اتفاق: نمط الموقع، والأسنان، والنطاق، والأسطح) مع دالة التحقق aqlan_legacy_coverage_site_valid حسب فئة الخدمة، وحارس يطابق الخدمة والسن المرجعي للاتفاق ويرفض التعديل والحذف المستقل — إضافية، بلا تعبئة للصفوف القديمة ولا مال ولا موافقة (INV-LINK LEGACY)
 ```
+
+## إضافة HR في فرع التكامل المحلي
+
+إضافة توثيق التقويم المحدودة في فرع `feat/ortho-assessment-strategy-v2-20261015`:
+
+- `0051_ortho_treatment_strategy.sql`: مراجعات خطة الحالة الإلحاقية لحالة تقويم قائمة ذات جسر سريري صريح، دون إنشاء حالة أو تنفيذ مالي.
+- `0052_ortho_assessment.sql`: مراجعات التقييم والقياسات الإلحاقية؛ الحسابات مسودات للمراجعة السريرية، دون منح اعتماد علاجي.
+
+الملفان محفوظان ببايتاتهما الأصلية؛ يصبح اتحاد الملفات في هذا الفرع56 ملفًا. الإقلاع يضيفهما عبر القفل المشترك ومعاملات الملفات القائمة مع رفض الكائنات القديمة غير المسجلة وتعارضات السجل. حارس CLI المحدود اعتُمد من الجذر وطُبق قبل تخطي المسجل وداخل معاملة الكتابة؛ هذه ليست شهادة جاهزية للدمج أو التطبيق الحي.
+
+الملفات التالية من مصدر HR المحفوظ ضمن سلسلة هذا الفرع، دون إعادة ترقيم أو تعديل محتواها:
+
+- `0045_hr_staff.sql`: ملف الموظف وسجل تعديلاته.
+- `0046_hr_tasks.sql`: المهام وتعليقاتها وقوائمها وروابطها وأحداثها.
+- `0048_hr_contracts_attendance_leaves.sql`: العقود والحضور والإجازات والإعدادات.
+- `0049_hr_payroll_disbursements.sql`: صرف الرواتب وأجزاؤه.
+- `0050_hr_payroll_integrity.sql`: قيود سلامة مسير الرواتب والصرف.
+- `0056_hr_employment_history.sql`: السجل المؤرخ الإلحاقي للموظف.
+- `0057_hr_schedule_policy_versions.sql`: نسخ الجداول والسياسات، نسخة R1 ذات البصمة `8e4bf0f0adf3d2284f64bd792b3903958ce6ed62923b4cb0c61ac405b82b8791`.
+- `0058_hr_temporal_write_receipts.sql`: إيصالات كتابة التاريخ الإلحاقية؛ تخصيص المنسق موثق في `docs/hr-composed-integration/MIGRATION_ALLOCATION.md`، بنفس بايتات المقترح المحفوظ.
+
+هذه قائمة مصدر محلي وليست شهادة تطبيق على قاعدة حية. المشغّل الكامل في تركيب15 أكتوبر يسجل54 ملفًا مع0059–0061 للفواتير؛ الإقلاع يسجل امتدادات0056–0058 فقط بعد DDL القديم، دون إعادة تعبئة البيانات المالية القديمة. SQL الإيصالات المنسوخ من المقترح محفوظ بنفس البصمة؛ وصفه التاريخي بأنه غير مرقم مستبدل بسجل التخصيص الجديد. لا يُستدل على فراغ الأرقام الغائبة من غياب ملفاتها. تفاصيل الحدود وموانع الاستعادة في `docs/hr-composed-integration/SOURCE_MAP_AR.md`.
 
 المصدر الحي لهذه القائمة هو مجلد `migrations/` نفسه — إن اختلفت القائمة أعلاه
 عنه فالمجلد هو الصحيح وهذه الوثيقة هي المتأخرة.
@@ -449,6 +477,13 @@ harness callers retain their existing template choice; it is not shipped in the 
 It never expands policy from live catalog content. Review source changes before
 committing any regenerated policy; do not add Production unknowns automatically.
 CI regenerates the policy from fresh source schemas and checks exact equality.
+
+Invoice continuation, 2026-10-14: regenerated the disclosure candidate on disposable
+PG18.6 from the reviewed 0059–0061 source additions. The two removed/replaced legacy
+constraint fingerprints follow 0060's explicit amount/opening constraint replacements;
+the remaining differences describe the new debt, historical-document and invoice-correction
+objects. No operator database was queried. Exact regeneration and the private template1
+canary tests passed; the equality and disclosure guards remain unchanged.
 
 Each selector invocation has its own read-only snapshot. Combine captures only
 when **all eleven aggregate hashes/counts, registry evidence, source/projector/

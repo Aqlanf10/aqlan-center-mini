@@ -1,5 +1,9 @@
 "use client";
 
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged, type PlanItemDraftSnapshot } from "@/lib/plan-item-draft-navigation";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMoneyAttempt } from "./useMoneyAttempt";
 import { MoneyAttemptNotice } from "./MoneyAttemptNotice";
@@ -7,14 +11,12 @@ import {
   CURRENCIES,
   CURRENCY_LABEL,
   CURRENCY_SHORT,
-  formatAmount,
   formatMoney,
-  isCurrency,
   parseAmount,
   toInputAmount,
   type Currency,
 } from "@/lib/money";
-import { PLAN_STATUS_LABEL, groupItemsByVisit, splitInstallments, type BillingStatus, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
+import { PLAN_STATUS_LABEL, groupItemsByVisit, type BillingStatus, type PlanItemStatus, type PlanStatus } from "@/lib/plans";
 import {
   BILLING_RULE_LABEL, BILLING_RULES, PLANNED_VISIT_STATUS_LABEL,
   type BillingRule, type PlannedVisitStatus,
@@ -23,28 +25,16 @@ import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { friendlyDateLong } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { ServiceSelect } from "./ServiceSelect";
-import { TemplatePlanForm } from "./TemplatePlanForm";
 import { ToothField } from "./ToothPicker";
 import { useSession } from "./SessionProvider";
 import { ReceiptCorrectionLauncher } from "./ReceiptCorrectionLauncher";
-import { QuickPlanForm } from "./QuickPlanForm";
-import { QuickAgreementPlanForm } from "./QuickAgreementPlanForm";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { LegacyOrthoPlanContext } from "./LegacyOrthoPlanContext";
 import { hasLegacyHistory, legacyCoverageIsLive, ordinaryPlanProgress, planConsentIsCurrent, type HistoricalPlanItem } from "./legacy-treatment-view";
 import { LegacyPlanHistory } from "./LegacyPlanHistory";
 
-/**
- * خطط علاج المريض — زرٌّ واحد، والتعقيد خيارٌ داخل النموذج (المواصفة §٧).
- *
- * كان إنشاء الخطة طريقين ظاهرين للمستخدم (سريرية ببنود / مالية بأقساط)؛ والآن
- * زرٌّ واحد «+ إنشاء خطة علاج» يفتح نموذجًا واحدًا: الاسم والتخصص والطبيب والبنود،
- * ثم طريقة التسعير (بنودٌ مسعَّرة أو مبلغٌ متفق عليه)، ثم طريقة الدفع (حسب
- * المنفَّذ أو أقساط أو جدول مخصص). والكائن في القاعدة واحد في الحالتين.
- *
- * والطبيب يرى خططه سريريًا (البنود والجلسات والزيارات المخطَّطة) — وكل ما هو
- * مالي يُخفى عنه في الخادم إلا بإذنٍ صريح.
- */
+/** Existing plans and clinical drafts remain here. New financial treatment is
+ * created only through the Account invoice / historical-agreement entry. */
 
 interface Service { id: number; name: string; category: string | null; priceMinor: number }
 interface Doctor { id: number; name: string }
@@ -52,7 +42,7 @@ interface Doctor { id: number; name: string }
 interface PlanItem extends HistoricalPlanItem {
   id: number; serviceId: number | null; serviceName: string; toothCode: number | null; surfaces: string | null;
   quantity: number; unitPriceMinor: number; totalMinor: number;
-  status: PlanItemStatus; visitId: number | null;
+  status: PlanItemStatus; visitId: number | null; caseId?: number | null;
   /* تنظيم الجلسات: رقم الجلسة المخططة وقاعدة الفوترة وحالتها والجلسات المنجزة وطبيب البند. */
   plannedVisitNumber?: number; billingRule?: BillingRule;
   billingStatus?: BillingStatus; sessionCount?: number;
@@ -83,9 +73,14 @@ interface PlannedVisit {
   appointmentDate: string | null; appointmentTime: string | null; note: string | null;
 }
 
-const SPECIALTIES = ["علاج عام", "تقويم", "زراعة", "تركيبات", "جراحة", "تجميل"];
 
-export function PatientPlans({ patientId }: { patientId: number }) {
+interface PatientPlansProps {
+  patientId: number; context?: ClinicalNavigationContext;
+  onOpenClinicalContext?: (context: ClinicalNavigationContext, target?: string) => unknown;
+  onNavigationGuardChange?: (guard: () => boolean) => () => void;
+  onOpenTreatmentEntry?: () => unknown;
+}
+export function PatientPlans({ patientId, ...props }: PatientPlansProps) {
   const session = useSession();
   // A new patient, principal or permission snapshot owns fresh state. In
   // particular A → B → A cannot resurrect A's previously visible collections.
@@ -93,26 +88,22 @@ export function PatientPlans({ patientId }: { patientId: number }) {
   if (!session || (session.role === "doctor" && session.permissions?.canViewPlans === false)) {
     return <p role="status" className="rounded-xl border border-slate-200 p-4 text-sm text-slate-500">غير مصرّح لك بعرض خطط العلاج.</p>;
   }
-  return <PatientPlansContent key={scope} patientId={patientId} />;
+  return <PatientPlansContent key={scope} patientId={patientId} {...props} />;
 }
 
-function PatientPlansContent({ patientId }: { patientId: number }) {
+function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavigationGuardChange, onOpenTreatmentEntry }: PatientPlansProps) {
+  const session = useSession();
+  const financialAuthority = JSON.stringify([session?.username, session?.role, session?.permissions ?? null]);
   // (TD-05) الأساس دستوري من الكود — وعملة كل خطةٍ تُعرض بعملتها هي.
   const fallback: Currency = CLINIC_BASE_CURRENCY;
   const [plans, setPlans] = useState<Plan[]>([]);
   const [plannedVisits, setPlannedVisits] = useState<PlannedVisit[]>([]);
   const [canSeeFinancial, setCanSeeFinancial] = useState(false);
-  const [base, setBase] = useState<Currency>(fallback);
   const [loading, setLoading] = useState(true);
   const [readUnavailable, setReadUnavailable] = useState(false);
   const [readDenied, setReadDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [quickCreating, setQuickCreating] = useState(false);
-  const [agreementCreating, setAgreementCreating] = useState(false);
-  /* (SPEC-T1) خطة من قالب التخصص — بجانب الإنشاء اليدوي لا بدلًا منه. */
-  const [fromTemplate, setFromTemplate] = useState(false);
   const [payFor, setPayFor] = useState<number | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payCurrency, setPayCurrency] = useState<Currency>(fallback);
@@ -141,7 +132,6 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         if (response.status === 401 || response.status === 403) {
           setReadDenied(true); setLastReceipt(null); setPayFor(null); setPayAmount("");
           setPlans([]); setPlannedVisits([]); setConsentFor(null);
-          setQuickCreating(false); setAgreementCreating(false); setFromTemplate(false); setCreating(false);
         }
         throw new Error(response.status === 401 || response.status === 403
           ? "غير مصرّح لك بعرض خطط العلاج." : "تعذّر تحميل الخطط.");
@@ -154,7 +144,6 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
       setPlans(payload.plans as Plan[]);
       setPlannedVisits(Array.isArray(payload.plannedVisits) ? payload.plannedVisits : []);
       setCanSeeFinancial(payload.canSeeFinancial === true);
-      if (isCurrency(payload.baseCurrency)) setBase(payload.baseCurrency);
       setError(null);
     } catch (loadError) {
       if (!current()) return;
@@ -185,6 +174,27 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
   // DOT-PF-01: share pending collections with the patient collection modal.
   const money = useMoneyAttempt(`collection:${patientId}`, canSeeFinancial && !readUnavailable && !readDenied);
 
+  const itemGuards = useRef(new Map<number, () => boolean>());
+  const registerItemGuard = useCallback((planId: number, guard: () => boolean) => {
+    itemGuards.current.set(planId, guard);
+    return () => { if (itemGuards.current.get(planId) === guard) itemGuards.current.delete(planId); };
+  }, []);
+  const canLeave = useCallback(() => {
+    if (!readRef.current.active || busy || money.attempt !== null) return false;
+    for (const guard of itemGuards.current.values()) if (!guard()) return false;
+    return !(consentFor !== null || payFor !== null)
+      || window.confirm("هناك مسودة خطة أو تحصيل غير محفوظة. هل تريد مغادرة القسم؟");
+  }, [busy, money.attempt, consentFor, payFor]);
+  useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
+  const visiblePlans = plans.filter((plan) => (context?.planId === undefined || plan.id === context.planId)
+    && (context?.planItemId === undefined || plan.items.some((item) => item.id === context.planItemId))
+    && (context?.clinicalCaseId === undefined || plan.items.some((item) => item.caseId === context.clinicalCaseId)));
+  const openItem = (planId: number, item: PlanItem, target?: string) => {
+    if (!readRef.current.active || loading || readDenied || readUnavailable || !onOpenClinicalContext) return;
+    if (!onNavigationGuardChange && !canLeave()) return;
+    onOpenClinicalContext({ patientId, planId, planItemId: item.id, ...(item.caseId != null ? { clinicalCaseId: item.caseId } : {}) }, target);
+  };
+
   const collect = async (plan?: Plan) => {
     if (!readRef.current.active || busy) return;
     const body = JSON.stringify({ amount: payAmount, currency: payCurrency });
@@ -209,6 +219,10 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
 
   return (
     <div data-testid="patient-plans-content">
+      <TreatmentFinancialContext patientId={patientId} authorityKey={financialAuthority} canView={canSeeFinancial && !loading && !readDenied && !readUnavailable}
+        planId={context?.planId} planItemId={context?.planItemId} clinicalCaseId={context?.clinicalCaseId} orthoCaseId={context?.orthoCaseId}
+        onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} />
+      {!loading && !readDenied && !readUnavailable && visiblePlans.length === 0 && (context?.planId !== undefined || context?.planItemId !== undefined || context?.clinicalCaseId !== undefined) ? <p role="status" data-testid="plan-context-unavailable" className="rounded-xl border border-amber-300 p-3 text-sm">لا توجد خطة متاحة مرتبطة بهذا المرجع. لم يتم اختيار خطة أخرى.</p> : null}
       {canSeeFinancial && !readUnavailable && !readDenied ? (
         <MoneyAttemptNotice attempt={money.attempt} onRetry={() => void collect()} />
       ) : null}
@@ -232,84 +246,18 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         </div>
       ) : null}
 
-      {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} /> : null}
+      {!readDenied ? <LegacyOrthoPlanContext patientId={patientId} onOpenClinicalContext={onOpenClinicalContext ? (reference) => { if (!onNavigationGuardChange && !canLeave()) return; onOpenClinicalContext(reference); } : undefined} /> : null}
 
-      {/* المداخل الواضحة: السرعة أولًا، والتعقيد عند الحاجة. كلها تنتهي إلى محرك V2 نفسه. */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <button
-          disabled={(loading || readUnavailable) && !quickCreating}
-          onClick={() => {
-            setQuickCreating((open) => !open);
-            setAgreementCreating(false); setFromTemplate(false); setCreating(false);
-          }}
-          className="w-full rounded-2xl border-2 border-sky-300 bg-sky-50 py-2.5 text-sm font-extrabold text-sky-800"
-        >
-          {quickCreating ? "إغلاق الخطة السريعة" : "⚡ خطة سريعة"}
-        </button>
-        <button
-          disabled={(loading || readUnavailable) && !agreementCreating}
-          onClick={() => {
-            setAgreementCreating((open) => !open);
-            setQuickCreating(false); setFromTemplate(false); setCreating(false);
-          }}
-          className="w-full rounded-2xl border-2 border-violet-300 bg-violet-50 py-2.5 text-sm font-extrabold text-violet-800"
-        >
-          {agreementCreating ? "إغلاق الاتفاق" : "🦷 تقويم / مبلغ متفق"}
-        </button>
-        <button
-          disabled={(loading || readUnavailable) && !fromTemplate}
-          onClick={() => {
-            setFromTemplate((open) => !open);
-            setQuickCreating(false); setAgreementCreating(false); setCreating(false);
-          }}
-          className="w-full rounded-2xl border-2 border-navy-800 bg-white py-2.5 text-sm font-extrabold text-navy-800"
-        >
-          {fromTemplate ? "إغلاق القوالب" : "📋 قالب تخصص"}
-        </button>
-        <button
-          disabled={(loading || readUnavailable) && !creating}
-          onClick={() => {
-            setCreating((open) => !open);
-            setQuickCreating(false); setAgreementCreating(false); setFromTemplate(false);
-          }}
-          className="w-full rounded-2xl bg-navy-800 py-2.5 text-sm font-extrabold text-white"
-        >
-          {creating ? "إغلاق المتقدمة" : "⚙️ خطة متقدمة"}
-        </button>
+      <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
+        <p className="text-sm font-bold">إنشاء العلاج من الفاتورة / الاتفاق</p>
+        <p className="mt-1 text-xs text-slate-600">اختر علاجًا جديدًا أو علاجًا بدأ قبل النظام من حساب المريض. السجلات والخطط القائمة محفوظة هنا؛ إضافة مسودة سريرية لا تسجّل فاتورة أو دفعة.</p>
+        {onOpenTreatmentEntry ? <button type="button" disabled={loading || readUnavailable || readDenied}
+          data-testid="plans-open-treatment-entry" onClick={() => {
+            if (!readRef.current.active || loading || readUnavailable || readDenied) return;
+            if (!onNavigationGuardChange && !canLeave()) return;
+            onOpenTreatmentEntry();
+          }} className="mt-2 min-h-11 rounded-xl bg-navy-800 px-4 py-2 text-sm font-bold text-white">فاتورة / اتفاق علاج</button> : null}
       </div>
-
-      {quickCreating ? (
-        <QuickPlanForm
-          patientId={patientId} base={base}
-          onSaved={() => { setQuickCreating(false); void load(); }}
-          onError={setError}
-          onAdvanced={() => { setQuickCreating(false); setCreating(true); }}
-        />
-      ) : null}
-
-      {agreementCreating ? (
-        <QuickAgreementPlanForm
-          patientId={patientId} base={base}
-          onSaved={() => { setAgreementCreating(false); void load(); }}
-          onError={setError}
-        />
-      ) : null}
-
-      {fromTemplate ? (
-        <TemplatePlanForm
-          patientId={patientId} base={base}
-          onSaved={() => { setFromTemplate(false); void load(); }}
-          onError={setError}
-        />
-      ) : null}
-
-      {creating ? (
-        <NewPlanFormV2
-          patientId={patientId} base={base} busy={busy}
-          onSaved={() => { setCreating(false); void load(); }}
-          onError={setError}
-        />
-      ) : null}
 
       {loading && plans.length > 0 ? (
         <p role="status" className="mb-2 text-xs text-slate-500">جارٍ تحديث الخطط…</p>
@@ -322,7 +270,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
         </p>
       ) : (
         <ul className="space-y-3">
-          {plans.map((plan) => {
+          {visiblePlans.map((plan) => {
             const hasHistory = plan.items.some(hasLegacyHistory);
             const currentConsent = planConsentIsCurrent(plan);
             const coverageVerified = plan.items.filter(hasLegacyHistory).every(legacyCoverageIsLive);
@@ -472,7 +420,7 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
               ) : null}
 
               {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial}
+                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
                   onChanged={() => void load()} onError={setError} />
               ) : null}
 
@@ -557,405 +505,17 @@ function PatientPlansContent({ patientId }: { patientId: number }) {
 }
 
 /**
- * نموذج الخطة الموحَّد — الرحلة V2.
- *
- * الأقسام الثلاثة (§٧): البيانات، البنود العلاجية بقواعد الفوترة وجلساتها، ثم
- * طريقة التسعير وطريقة الدفع. والإجمالي يُشتقّ من البنود حيثما وُجدت بنود —
- * رقمان لعملٍ واحد هما بذرة كل خلافٍ لاحق مع المريض.
- */
-function NewPlanFormV2({ patientId, base, busy, onSaved, onError }: {
-  patientId: number; base: Currency; busy: boolean;
-  onSaved: () => void; onError: (message: string | null) => void;
-}) {
-  const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
-  /* (TD-05) عملة الاتفاق — اختيارٌ صريح لا فرضٌ صامت: مريض التقويم قد يتعاقد
-     بالدولار أو السعودي، والقائمة تعرض الثلاثة، والافتراضي هو العملة الأساسية. */
-  const [currency, setCurrency] = useState<Currency>(base);
-  const [title, setTitle] = useState("خطة علاج ترميمي");
-  const [specialty, setSpecialty] = useState(SPECIALTIES[0]);
-  const [doctorId, setDoctorId] = useState<string>("");
-  const [startDate, setStartDate] = useState(today);
-  const [rows, setRows] = useState<PlanItemDraftRow[]>([]);
-  const [pricingMode, setPricingMode] = useState<"items" | "agreed">("items");
-  const [agreedTotal, setAgreedTotal] = useState("");
-  const [paymentMode, setPaymentMode] = useState<"per_procedure" | "installments" | "custom">("per_procedure");
-  const [installmentCount, setInstallmentCount] = useState("12");
-  const [everyDays, setEveryDays] = useState("30");
-  const [customInstallments, setCustomInstallments] = useState<{ dueDate: string; amount: string }[]>([]);
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const [services, setServices] = useState<Service[]>([]);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-
-  useEffect(() => {
-    void (async () => {
-      const [serviceResponse, doctorResponse] = await Promise.all([
-        fetch("/api/services", { cache: "no-store" }),
-        fetch("/api/parties?kind=doctor", { cache: "no-store" }),
-      ]);
-      if (serviceResponse.ok) {
-        const payload = await serviceResponse.json();
-        setServices((payload.services ?? payload) as Service[]);
-      }
-      if (doctorResponse.ok) {
-        const payload = await doctorResponse.json();
-        setDoctors(Array.isArray(payload) ? payload : payload.balances ?? []);
-      }
-    })();
-  }, []);
-
-  const itemsTotalMinor = rows.reduce((sum, row) => {
-    const service = services.find((item) => String(item.id) === row.serviceId);
-    const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-    const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
-    return sum + unit * Math.max(1, Math.round(Number(row.quantity) || 1));
-  }, 0);
-  const agreedTotalMinor = pricingMode === "agreed" ? (parseAmount(agreedTotal, currency) ?? 0) : 0;
-  const planTotalMinor = pricingMode === "items" ? itemsTotalMinor : agreedTotalMinor;
-
-  const previewInstallments = paymentMode === "installments" && planTotalMinor > 0
-    ? splitInstallments(planTotalMinor, Number(installmentCount) || 1, startDate, Number(everyDays) || 30)
-    : [];
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (saving || busy) return;
-    setSaving(true);
-    onError(null);
-
-    const items = rows
-      .filter((row) => row.serviceId)
-      .map((row) => {
-        const service = services.find((item) => String(item.id) === row.serviceId);
-        const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-        return {
-          serviceId: Number(row.serviceId),
-          serviceName: service?.name ?? "",
-          category: service?.category ?? null,
-          toothCode: row.tooth.trim() ? Number(row.tooth.trim()) : null,
-          surfaces: row.surfaces.trim() || null,
-          quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
-          // (TD-05) سعر الدليل أساسيّ — لا يُنسخ بعملة اتفاقٍ مختلفة بلا إذن.
-          unitPriceMinor: typed ?? (currency === base && service ? service.priceMinor : 0),
-          billingRule: row.billingRule,
-          sessionCount: Math.max(1, Math.round(Number(row.sessions) || 1)),
-          note: null,
-          ...(row.priceReason?.trim() ? { priceReason: row.priceReason.trim() } : {}),
-        };
-      });
-
-    if (items.length === 0 && paymentMode !== "installments" && pricingMode !== "agreed") {
-      onError("أضف بندًا واحدًا على الأقل، أو اختر طريقة تسعيرٍ بمبلغٍ متفق عليه.");
-      setSaving(false);
-      return;
-    }
-
-    const installments =
-      paymentMode === "installments"
-        ? splitInstallments(planTotalMinor, Number(installmentCount) || 1, startDate, Number(everyDays) || 30)
-            .map((part) => ({ dueDate: part.dueDate, amountMinor: part.amountMinor }))
-        : paymentMode === "custom"
-          ? customInstallments
-              .map((row) => ({
-                dueDate: row.dueDate,
-                amountMinor: parseAmount(row.amount, currency) ?? 0,
-              }))
-              .filter((row) => row.dueDate && row.amountMinor > 0)
-          : [];
-
-    try {
-      const response = await fetch("/api/plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "v2",
-          patientId,
-          title, specialty,
-          currency,
-          primaryDoctorId: doctorId ? Number(doctorId) : null,
-          startDate,
-          note: note.trim() || null,
-          items,
-          billingMode: paymentMode === "per_procedure" ? "per_procedure"
-            : paymentMode === "installments" ? "installments" : "custom_schedule",
-          total: pricingMode === "agreed" ? agreedTotal : undefined,
-          count: paymentMode === "installments" ? Number(installmentCount) : undefined,
-          everyDays: paymentMode === "installments" ? Number(everyDays) : undefined,
-          installments: installments.length > 0 ? installments : undefined,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) { onError(payload?.message ?? "تعذّر حفظ الخطة."); return; }
-      onSaved();
-    } catch {
-      onError("تعذّر الاتصال بالخادم.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <form onSubmit={submit} className="mb-4 rounded-2xl border border-navy-800 bg-white p-4">
-      <h3 className="mb-1 text-sm font-extrabold text-navy-900">خطة علاج جديدة</h3>
-      <p className="mb-3 text-[11px] leading-4 text-slate-500">
-        تُبنى بالبنود والجلسات والزيارات المخطَّطة في عمليةٍ واحدة. الخطة اتفاقٌ لا
-        دَين: لا يدخل الحساب إلا ما نُفِّذ ووُلِّد استحقاقه وفق قاعدة الفوترة.
-      </p>
-
-      {/* ١) البيانات */}
-      <input value={title} onChange={(event) => setTitle(event.target.value)}
-        placeholder="اسم الخطة — مثل: علاج ترميمي شامل" aria-label="اسم الخطة"
-        className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-      <div className="mb-3 flex flex-wrap gap-2">
-        <label className="flex-1">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">التخصص</span>
-          <select value={specialty} onChange={(event) => setSpecialty(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            {SPECIALTIES.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </label>
-        <label className="flex-1">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">الطبيب المعالج</span>
-          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            <option value="">—</option>
-            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
-          </select>
-        </label>
-        <label className="w-40">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">تاريخ البدء</span>
-          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-        </label>
-        <label className="w-44">
-          <span className="mb-1 block text-[11px] font-bold text-slate-500">عملة الاتفاق</span>
-          <select value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}
-            aria-label="عملة الاتفاق"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
-            {CURRENCIES.map((option) => (
-              <option key={option} value={option}>{CURRENCY_LABEL[option]}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      {/* ٢) البنود العلاجية — بقاعدة فوترةٍ وعدد جلسات لكل بند */}
-      {rows.map((row, index) => {
-        const service = services.find((item) => String(item.id) === row.serviceId);
-        const typed = row.price.trim() ? parseAmount(row.price, currency) : null;
-        const unit = typed ?? (currency === base && service ? service.priceMinor : 0);
-        const sessions = Math.max(1, Math.round(Number(row.sessions) || 1));
-        return (
-          <div key={index} className="mb-2 space-y-1.5 rounded-xl border border-slate-100 bg-slate-50/50 p-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="min-w-[12rem] flex-1">
-                <ServiceSelect
-                  services={services}
-                  value={row.serviceId ? Number(row.serviceId) : null}
-                  onChange={(id, srv) => {
-                    setRows((current) => current.map((item, i) =>
-                      i === index
-                        ? {
-                            ...item,
-                            serviceId: id ? String(id) : "",
-                            // (TD-05) بعملة اتفاقٍ مختلفة لا يُقترح سعر الدليل — يُكتب يدويًا.
-                            price: currency === base && srv ? formatAmount(srv.priceMinor, base) : "",
-                          }
-                        : item));
-                  }}
-                  base={base}
-                  placeholder={currency === base ? "— اختر الإجراء من الدليل —" : "— اختر الإجراء ثم اكتب سعره بعملة الاتفاق —"}
-                  ariaLabel="الإجراء"
-                />
-              </div>
-              <ToothField value={row.tooth} className="w-20"
-                onChange={(tooth) => setRows((current) => current.map((item, i) => i === index ? { ...item, tooth } : item))} />
-              <input value={row.quantity} onChange={(event) =>
-                setRows((current) => current.map((item, i) => i === index ? { ...item, quantity: event.target.value } : item))}
-                placeholder="1" aria-label="الكمية" inputMode="numeric" dir="ltr"
-                className="w-16 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm" />
-              <input value={row.price} onChange={(event) =>
-                setRows((current) => current.map((item, i) => i === index ? { ...item, price: event.target.value } : item))}
-                placeholder="السعر" aria-label="السعر" inputMode="decimal" dir="ltr"
-                className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold" />
-              <button type="button"
-                onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
-                className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm font-bold text-red-500 hover:bg-red-50"
-                title="حذف البند">✕</button>
-            </div>
-            {/* (FIN-5) سعرٌ يخالف الدليل (أو يُكتب بعملة اتفاق) قرارٌ مسبَّب: الخصم في حدّ الإعدادات
-                لغير المدير، والرفع للمدير — والخادم يحكم ويدقّق كما في الزيارة والفاتورة. */}
-            {service && row.price.trim() && (currency !== base || typed !== service.priceMinor) ? (
-              <input value={row.priceReason ?? ""} maxLength={300}
-                onChange={(event) => setRows((current) => current.map((item, i) => i === index ? { ...item, priceReason: event.target.value } : item))}
-                placeholder="سبب تغيير السعر عن الدليل (مثل: خصم عائلة)" aria-label="سبب تغيير السعر"
-                className="w-full rounded-xl border border-amber-200 bg-amber-50/40 px-2.5 py-1.5 text-xs" />
-            ) : null}
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              <label className="flex items-center gap-1 font-bold text-slate-600">
-                قاعدة الفوترة:
-                <select value={row.billingRule}
-                  onChange={(event) => setRows((current) => current.map((item, i) =>
-                    i === index ? { ...item, billingRule: event.target.value as BillingRule } : item))}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]">
-                  {BILLING_RULES.map((rule) => <option key={rule} value={rule}>{BILLING_RULE_LABEL[rule]}</option>)}
-                </select>
-              </label>
-              <label className="flex items-center gap-1 font-bold text-slate-600">
-                الجلسات:
-                <input value={row.sessions} inputMode="numeric" dir="ltr"
-                  onChange={(event) => setRows((current) => current.map((item, i) =>
-                    i === index ? { ...item, sessions: event.target.value } : item))}
-                  className="w-12 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]" />
-              </label>
-              {unit > 0 && sessions > 1 && row.billingRule === "per_session" ? (
-                <span className="text-slate-500">
-                  لكل جلسة ≈ {formatAmount(Math.floor(unit / sessions), currency)}
-                </span>
-              ) : null}
-            </div>
-          </div>
-        );
-      })}
-
-      <div className="flex flex-wrap gap-2">
-        <button type="button"
-          onClick={() => setRows((current) => [
-            ...current,
-            { serviceId: "", tooth: "", quantity: "1", price: "", sessions: "1", surfaces: "", billingRule: "on_completion" },
-          ])}
-          className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
-          + بند علاجي
-        </button>
-      </div>
-
-      {/* ٣) طريقة التسعير */}
-      <fieldset className="mt-3 mb-2 rounded-xl border border-slate-200 p-2.5">
-        <legend className="px-1 text-[11px] font-extrabold text-slate-600">طريقة التسعير</legend>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setPricingMode("items")}
-            className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
-              pricingMode === "items" ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
-            }`}>
-            حسب البنود — الإجمالي مشتقّ منها
-          </button>
-          <button type="button" onClick={() => setPricingMode("agreed")}
-            className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
-              pricingMode === "agreed" ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
-            }`}>
-            مبلغ إجمالي متفق عليه
-          </button>
-        </div>
-        {pricingMode === "agreed" ? (
-          <input value={agreedTotal} onChange={(event) => setAgreedTotal(event.target.value)}
-            placeholder="المبلغ الإجمالي المتفق عليه" aria-label="المبلغ المتفق عليه"
-            inputMode="decimal" dir="ltr"
-            className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
-        ) : (
-          <p className="mt-1.5 text-[11px] text-slate-500">
-            الإجمالي من البنود: <span className="font-extrabold text-navy-900">{formatMoney(itemsTotalMinor, currency)}</span>
-          </p>
-        )}
-      </fieldset>
-
-      {/* ٤) طريقة الدفع */}
-      <fieldset className="mb-3 rounded-xl border border-slate-200 p-2.5">
-        <legend className="px-1 text-[11px] font-extrabold text-slate-600">طريقة الدفع</legend>
-        <div className="flex flex-wrap gap-2">
-          {([
-            ["per_procedure", "حسب الخدمات المنفَّذة"],
-            ["installments", "دفعة أولى + أقساط"],
-            ["custom", "جدول دفعات مخصص"],
-          ] as const).map(([mode, label]) => (
-            <button key={mode} type="button" onClick={() => setPaymentMode(mode)}
-              className={`flex-1 rounded-xl border px-3 py-2 text-xs font-bold ${
-                paymentMode === mode ? "border-navy-800 bg-navy-50 text-navy-900" : "border-slate-200 bg-white text-slate-600"
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {paymentMode === "installments" ? (
-          <div className="mt-2 flex flex-wrap gap-2">
-            <input value={installmentCount} onChange={(event) => setInstallmentCount(event.target.value)}
-              placeholder="عدد الأقساط" aria-label="عدد الأقساط" inputMode="numeric" dir="ltr"
-              className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-            <input value={everyDays} onChange={(event) => setEveryDays(event.target.value)}
-              placeholder="كل كم يوم" aria-label="المدة بين الأقساط" inputMode="numeric" dir="ltr"
-              className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-          </div>
-        ) : null}
-
-        {paymentMode === "custom" ? (
-          <div className="mt-2 space-y-1.5">
-            {customInstallments.map((row, index) => (
-              <div key={index} className="flex gap-2">
-                <input type="date" value={row.dueDate}
-                  onChange={(event) => setCustomInstallments((current) =>
-                    current.map((item, i) => i === index ? { ...item, dueDate: event.target.value } : item))}
-                  aria-label="تاريخ الدفعة"
-                  className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-                <input value={row.amount} inputMode="decimal" dir="ltr"
-                  onChange={(event) => setCustomInstallments((current) =>
-                    current.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))}
-                  placeholder="المبلغ" aria-label="مبلغ الدفعة"
-                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold" />
-                <button type="button"
-                  onClick={() => setCustomInstallments((current) => current.filter((_, i) => i !== index))}
-                  className="rounded-xl border border-slate-200 px-2.5 py-2 text-sm font-bold text-red-500">✕</button>
-              </div>
-            ))}
-            <button type="button"
-              onClick={() => setCustomInstallments((current) => [...current, { dueDate: startDate, amount: "" }])}
-              className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">
-              + دفعة
-            </button>
-          </div>
-        ) : null}
-
-        {previewInstallments.length > 0 ? (
-          <p className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-            {previewInstallments.length} قسطًا · الأول {formatMoney(previewInstallments[0].amountMinor, currency)} في{" "}
-            {friendlyDateLong(previewInstallments[0].dueDate)} · الأخير في{" "}
-            {friendlyDateLong(previewInstallments[previewInstallments.length - 1].dueDate)}
-          </p>
-        ) : null}
-      </fieldset>
-
-      <input value={note} onChange={(event) => setNote(event.target.value)}
-        placeholder="ملاحظة (اختياري)" aria-label="ملاحظة"
-        className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-
-      <p className="mb-3 text-sm font-extrabold text-navy-900">
-        إجمالي الخطة: {formatMoney(planTotalMinor, currency)}
-      </p>
-
-      <button type="submit" disabled={saving || busy || planTotalMinor <= 0}
-        className="w-full rounded-xl bg-navy-800 py-2.5 text-sm font-extrabold text-white disabled:opacity-50">
-        {saving ? "جارٍ الحفظ…" : "أنشئ الخطة بجلساتها وزياراتها"}
-      </button>
-    </form>
-  );
-}
-
-interface PlanItemDraftRow {
-  serviceId: string; tooth: string; quantity: string;
-  price: string; sessions: string; surfaces: string; billingRule: BillingRule;
-  /** (FIN-5) سبب سعرٍ يخالف الدليل — يطلبه الخادم للخصم أو الرفع. */
-  priceReason?: string;
-}
-
-/**
  * بنود الخطة — المسوّدة تُبنى، ثم تُقفل بالموافقة.
  *
  * قبل الموافقة: تُضاف البنود وتُحذف بحرّية، والإجمالي يتحرّك معها. وبعدها: قائمةٌ
  * للقراءة تُطبع ويُوقّع عليها المريض. والفرق بين الحالتين ظاهرٌ في الشاشة نفسها —
  * لا في رأس من يستعملها.
  */
-function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
+function PlanItems({ plan, canSeeFinancial, context, onOpenItem, registerGuard, onChanged, onError }: {
   plan: Plan; canSeeFinancial: boolean;
+  context?: ClinicalNavigationContext;
+  onOpenItem: (item: PlanItem, target?: string) => void;
+  registerGuard: (planId: number, guard: () => boolean) => () => void;
   onChanged: () => void; onError: (message: string | null) => void;
 }) {
   // (TD-05) أسعار بنود هذه الخطة بعملة اتفاقها — لا بعملة الدفاتر.
@@ -976,6 +536,12 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
   const [itemPriceReason, setItemPriceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const locked = Boolean(plan.consentAt);
+  const [itemBaseline, setItemBaseline] = useState<PlanItemDraftSnapshot>(INITIAL_PLAN_ITEM_DRAFT);
+  const itemSnapshot: PlanItemDraftSnapshot = { serviceId, tooth, surfaces, targetVisitNumber, sessionCount, billingRule, doctorId, itemPrice, itemPriceReason };
+  const itemDirty = planItemDraftChanged(itemSnapshot, itemBaseline);
+  const itemGuard = useCallback(() => !busy && (locked || !itemDirty
+    || window.confirm("هناك بند خطة غير محفوظ. هل تريد مغادرة القسم؟")), [busy, locked, itemDirty]);
+  useLayoutEffect(() => registerGuard(plan.id, itemGuard), [registerGuard, plan.id, itemGuard]);
   const historicalItems = plan.items.filter(hasLegacyHistory);
   const ordinaryProgress = historicalItems.length > 0 ? ordinaryPlanProgress(plan.items) : plan.itemsProgress;
   const visitGroups = groupItemsByVisit(plan.items.filter((item) => !hasLegacyHistory(item)));
@@ -993,6 +559,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
           const list = (payload.services ?? payload) as Service[];
           setServices(list);
           setServiceId((current) => current ?? list[0]?.id ?? null);
+          setItemBaseline((current) => current.serviceId === null ? { ...current, serviceId: list[0]?.id ?? null } : current);
         }
         if (docRes.ok) {
           const docPayload = await docRes.json();
@@ -1032,6 +599,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
       setSessionCount("1");
       setItemPrice("");
       setItemPriceReason("");
+      setItemBaseline({ ...itemSnapshot, tooth: "", surfaces: "", sessionCount: "1", itemPrice: "", itemPriceReason: "" });
       onChanged();
     } catch {
       onError("تعذّر الاتصال بالخادم.");
@@ -1064,6 +632,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
         </span>
       </div>
 
+      {historicalItems.length > 0 ? <div className="mb-2 flex flex-wrap gap-2">{historicalItems.map((item) => <button key={item.id} type="button" disabled={busy} data-testid={`plan-item-open-case-${item.id}`} className="min-h-11 rounded-lg border px-3 text-xs" onClick={() => onOpenItem(item)}>فتح حالة البند #{item.id}</button>)}</div> : null}
       <LegacyPlanHistory items={historicalItems} currency={base} canSeeFinancial={canSeeFinancial} consented={planConsentIsCurrent(plan)} />
       {visitGroups.length === 0 ? (
         <p className="text-xs text-slate-400">{historicalItems.length > 0 ? "لا بنود أخرى مخططة هنا." : "لا بنود بعد."}</p>
@@ -1099,7 +668,7 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                 </div>
                 <ul className="space-y-1">
                   {group.items.map((item) => (
-                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
+                    <li key={item.id} data-testid={`plan-item-${item.id}`} aria-current={context?.planItemId === item.id ? "true" : undefined} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
                       <span className="flex min-w-0 flex-1 items-center gap-1.5">
                         {item.status === "done" ? <span className="text-emerald-600">✓</span> : null}
                         <span className={`truncate font-bold ${item.status === "done" ? "text-emerald-700" : ""}`}>
@@ -1129,6 +698,9 @@ function PlanItems({ plan, canSeeFinancial, onChanged, onError }: {
                           <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">{item.doctorName}</span>
                         ) : null}
                       </span>
+                      <button type="button" data-testid={`plan-item-open-case-${item.id}`} disabled={busy} onClick={() => onOpenItem(item)} className="min-h-11 shrink-0 rounded-lg border px-2 text-xs font-bold">
+                        {item.caseId != null ? `فتح الحالة #${item.caseId}` : "مراجعة ارتباط الحالة"}
+                      </button>
                       <span className="shrink-0 font-bold">{formatMoney(item.totalMinor, base)}</span>
                       {locked ? null : (
                         <button onClick={() => void remove(item.id)} disabled={busy}

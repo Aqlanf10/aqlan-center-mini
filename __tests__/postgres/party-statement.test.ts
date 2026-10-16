@@ -23,7 +23,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await q(`TRUNCATE expense_payable_allocations, expenses, payables, cashier_shifts, parties RESTART IDENTITY CASCADE`);
+  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
+  // traverse even empty history tables. These isolated fixtures contain no HR rows.
+  await q(`TRUNCATE expense_payable_allocations, expenses, payables, cashier_shifts RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM parties");
 });
 
 afterAll(async () => {

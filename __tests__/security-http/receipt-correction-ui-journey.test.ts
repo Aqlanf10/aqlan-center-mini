@@ -89,21 +89,17 @@ describe("DOT-PF-01 correction reconciliation", () => {
       await editor.getByRole("button", { name: "صحّح السند", exact: true }).click();
       await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).waitFor();
       await editor.getByRole("button", { name: "إلغاء", exact: true }).click();
-      // An ordinary ledger refresh can observe the committed reversal. Its
-      // zero-remaining receipt must retain access to the exact pending request.
+      // Navigation is blocked while an unresolved financial command exists.
       await tab.getByRole("button", { name: /الملخص/ }).first().click();
-      const refreshed = tab.waitForResponse((response) => response.url().endsWith(`/api/patients/${patientId}/ledger`));
-      await tab.getByRole("button", { name: /الحساب/ }).first().click();
-      const ledger = await (await refreshed).json();
-      expect(ledger.payments).toContainEqual(expect.objectContaining({ id: wrongId, kind: "payment", amountMinor: 500 }));
-      // The canonical read includes only positive remaining amounts (HAVING > 0).
-      expect(ledger.receiptRemaining).toBeTypeOf("object");
-      expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
-      await expect.poll(() => originalRow.count()).toBe(1);
-      await expect.poll(() => correctionButton.count()).toBe(1);
-      await correctionButton.click();
-      await editor.getByRole("button", { name: "إعادة التحقق من العملية السابقة" }).click();
-      await tab.getByText(/وصدر بدله/).first().waitFor();
+      expect(new URL(tab.url()).searchParams.get("tab")).toBe("account");
+      tab.once("dialog",dialog=>void dialog.accept());
+      const refreshed=tab.waitForResponse(response=>response.url().endsWith(`/api/patients/${patientId}/ledger`));
+      await tab.reload({waitUntil:"domcontentloaded"});
+      const ledger=await(await refreshed).json();
+      expect(ledger.payments).toContainEqual(expect.objectContaining({id:wrongId,kind:"payment",amountMinor:500}));
+      expect(ledger.receiptRemaining).toBeTypeOf("object");expect(ledger.receiptRemaining).not.toHaveProperty(String(wrongId));
+      await tab.getByTestId("money-command-recovery").getByRole("button",{name:"إعادة التحقق من العملية السابقة",exact:true}).click();
+      await tab.getByText(/تأكد تصحيح السند السابق/).first().waitFor();
       expect(requests).toHaveLength(2);
       expect(requests[1]).toEqual(requests[0]);
       const { rows } = await db.query<{ kind: string; amount_minor: string; patient_id: number }>(

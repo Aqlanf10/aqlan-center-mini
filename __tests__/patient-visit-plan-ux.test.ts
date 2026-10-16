@@ -56,19 +56,27 @@ describe("(P3) catalogPriceFor shows the catalog price in the context currency",
   });
 });
 
-describe("(P2/P5) quick plans post to the one V2 plan engine", () => {
-  it("both quick forms send mode v2 to /api/plans and no other plan endpoint exists", () => {
-    for (const file of ["components/QuickPlanForm.tsx", "components/QuickAgreementPlanForm.tsx"]) {
-      const source = readFileSync(file, "utf8");
-      expect(source).toMatch(/fetch\("\/api\/plans"/);
-      expect(source).toMatch(/mode: "v2"/);
-      expect(source).not.toMatch(/\/api\/quick-plan|quick_plans/);
-    }
+describe("(P2/P5) treatment creation uses the canonical invoice or historical writer", () => {
+  it("Plans opens the shared entry; its old independent forms cannot create a plan", () => {
+    const plans = readFileSync("components/PatientPlans.tsx", "utf8");
+    expect(plans).toContain('data-testid="plans-open-treatment-entry"');
+    expect(plans).toContain("onOpenTreatmentEntry()");
+    expect(plans).not.toMatch(/QuickPlanForm|QuickAgreementPlanForm|TemplatePlanForm|fetch\("\/api\/plans"/);
+    const ledger = readFileSync("components/PatientLedger.tsx", "utf8");
+    expect(ledger).toContain('<TreatmentEntryChoice');
+    expect(ledger).toContain('fetch("/api/invoices"');
+    expect(ledger).toContain('fetch(`/api/patients/${patientId}/historical-documents`');
+    expect(ledger).not.toMatch(/fetch\("\/api\/plans"|\/api\/quick-plan|quick_plans/);
   });
 
-  it("the quick plan sends catalog prices only — no free price field", () => {
-    const source = readFileSync("components/QuickPlanForm.tsx", "utf8");
-    expect(source).toMatch(/unitPriceMinor: price\.minor/);
-    expect(source).not.toMatch(/priceReason/);
+  it("canonical creation retains server catalog authority and authorized override reasons", () => {
+    const parser = readFileSync("lib/invoice-input.ts", "utf8");
+    expect(parser).toContain("services.get(serviceId)");
+    expect(parser).toContain("service.name");
+    const route = readFileSync("app/api/invoices/route.ts", "utf8");
+    expect(route).toContain("checkInvoiceAuthority(");
+    expect(route).toContain("role: session.role");
+    expect(route).toContain('settings["billing.max_discount_percent"]');
+    expect(route.indexOf("if (!authority.ok)")).toBeLessThan(route.indexOf("await createLinkedInvoice("));
   });
 });

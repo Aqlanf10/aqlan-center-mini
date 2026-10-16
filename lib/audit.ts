@@ -18,6 +18,7 @@ export type AuditAction =
   | "invoice.create" | "invoice.cancel" | "invoice.correct" | "invoice.status"
   | "payment.create" | "payment.refund" | "payment.idempotent_replay"
   | "payment.recover_installment"
+  | "debt_repayment.create" | "debt_repayment.revise" | "debt_repayment.cancel" | "debt_repayment.collect"
   /* (RC-1) تصحيح سند قبض خطأ: عكسٌ + سندٌ بديل (أو إبطالٌ وحده) — بسببٍ مكتوب. */
   | "payment.correct"
   | "expense.create"
@@ -50,6 +51,7 @@ export type AuditAction =
   | "legacy_balance_arrangement.create" | "legacy_balance_arrangement.cancel"
   /* (INV-LEGACY) علاجٌ بدأ قبل النظام: الاتفاق التاريخي وإبطاله. */
   | "legacy_treatment.create" | "legacy_treatment.void"
+  | "legacy_document.create" | "legacy_document.correct"
   | "fx.revalue"
   | "journal.manual"
   | "settings.update"
@@ -92,6 +94,7 @@ export type AuditAction =
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
+  | "ortho.strategy_revision" | "ortho.assessment.append"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -128,14 +131,59 @@ export type AuditAction =
   | "family.create" | "family.link" | "family.unlink" | "family.guarantor" | "family.rename"
   | "backup.full_download" | "backup.complete"
   /* إعادة الضبط: مسح البيانات التجريبية كلها — فعلٌ لا يتكرر إلا بقرار المالك. */
-  | "system.reset";
+  | "system.reset"
+  | "hr.staff.create" | "hr.staff.update" | "hr.staff.link_user" | "hr.staff.unlink_user"
+  | "task.create" | "task.update" | "task.status" | "task.assign" | "task.visibility"
+  | "task.comment" | "task.checklist" | "task.link" | "task.unlink"
+  | "hr.contract.create" | "hr.contract.update" | "hr.contract.approve" | "hr.contract.terminate" | "hr.contract.addendum"
+  | "hr.schedule.create" | "hr.schedule.update"
+  | "hr.attendance.record" | "hr.attendance.correct" | "hr.attendance.overtime"
+  | "hr.leave.request" | "hr.leave.decision" | "hr.leave.balance_adjust"
+  | "hr.payroll.period.create" | "hr.payroll.calculate" | "hr.payroll.approve"
+  | "hr.payroll.disburse" | "hr.payroll.close" | "hr.settings.update";
 
 export const AUDIT_LABEL: Record<AuditAction, string> = {
+  "hr.staff.create": "إنشاء ملف موظف",
+  "hr.staff.update": "تعديل ملف موظف",
+  "hr.staff.link_user": "ربط ملف موظف بحساب دخول",
+  "hr.staff.unlink_user": "فكّ ربط ملف موظف بحسابه",
+  "task.create": "إنشاء مهمة",
+  "task.update": "تعديل مهمة",
+  "task.status": "تغيير حالة مهمة",
+  "task.assign": "إسناد مهمة",
+  "task.visibility": "تحويل مهمة خاصة إلى مشتركة",
+  "task.comment": "تعليق على مهمة",
+  "task.checklist": "بند في قائمة تحقق مهمة",
+  "task.link": "ربط مهمة بسجل",
+  "task.unlink": "فكّ ربط مهمة عن سجل",
+  "hr.contract.create": "إنشاء مسودة عقد",
+  "hr.contract.update": "تعديل عقد",
+  "hr.contract.approve": "اعتماد عقد",
+  "hr.contract.terminate": "إنهاء عقد",
+  "hr.contract.addendum": "إصدار ملحق عقد",
+  "hr.schedule.create": "إنشاء جدول دوام",
+  "hr.schedule.update": "تعديل جدول دوام",
+  "hr.attendance.record": "تسجيل حضور وانصراف",
+  "hr.attendance.correct": "تصحيح سجل حضور",
+  "hr.attendance.overtime": "اعتماد ساعات إضافية",
+  "hr.leave.request": "تقديم طلب إجازة",
+  "hr.leave.decision": "قرار بشأن طلب إجازة",
+  "hr.leave.balance_adjust": "تعديل رصيد إجازات",
+  "hr.payroll.period.create": "إنشاء فترة مسير رواتب",
+  "hr.payroll.calculate": "احتساب مسير رواتب",
+  "hr.payroll.approve": "اعتماد مسير رواتب",
+  "hr.payroll.disburse": "صرف مستحقات مسير",
+  "hr.payroll.close": "إقفال فترة مسير رواتب",
+  "hr.settings.update": "تحديث سياسات الموارد البشرية",
   "invoice.create": "إنشاء فاتورة",
   "invoice.cancel": "إلغاء فاتورة",
   "invoice.correct": "تصحيح فاتورة",
   "invoice.status": "تغيير حالة فاتورة يدويًّا",
   "payment.recover_installment": "استعادة تحصيل قسط معكوس على فاتورته الأصلية",
+  "debt_repayment.create": "توزيع سداد دين قائم",
+  "debt_repayment.revise": "مراجعة جدول سداد دين قائم",
+  "debt_repayment.cancel": "إلغاء جدول سداد دون إلغاء الدين",
+  "debt_repayment.collect": "تحصيل دفعة على دين مجدول",
   "payment.create": "سند قبض",
   "payment.refund": "استرداد",
   "payment.correct": "تصحيح سند قبض",
@@ -178,6 +226,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "opening_balance.clear": "حذف رصيد افتتاحي",
   "legacy_balance_arrangement.create": "ترتيب تحصيل رصيد سابق",
   "legacy_balance_arrangement.cancel": "إلغاء ترتيب تحصيل رصيد سابق",
+  "legacy_document.create": "تسجيل اتفاق تاريخي متعدد البنود",
+  "legacy_document.correct": "تصحيح اتفاق تاريخي متعدد البنود",
   "legacy_treatment.create": "تسجيل علاج بدأ قبل النظام (اتفاق تاريخي)",
   "legacy_treatment.void": "إبطال اتفاق علاج بدأ قبل النظام",
   "fx.revalue": "إعادة تقييم عملة",
@@ -306,6 +356,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.book_next": "حجز جلسة التقويم القادمة",
   "ortho.baseline": "تسجيل حالة تقويم سابقة (قبل النظام)",
   "ortho.case_create": "فتح حالة تقويم",
+  "ortho.strategy_revision": "توثيق مراجعة خطة الحالة التقويمية",
+  "ortho.assessment.append": "حفظ مراجعة تقييم وقياسات الحالة التقويمية",
   "visit.create": "فتح زيارة اليوم",
   "service_material.set": "ربط خدمة بمادة استهلاك",
   "service_material.remove": "إزالة ربط خدمة بمادة",

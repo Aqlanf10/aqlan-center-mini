@@ -1,5 +1,7 @@
 "use client";
 
+import { clinicalContextHref, type ClinicalNavigationContext } from "@/lib/patient-navigation";
+
 import { useEffect, useState } from "react";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, PHASE_LABEL,
@@ -23,16 +25,17 @@ type ReadState =
   | { patientId: number; phase: "error" | "denied" };
 
 /** Clinical references only: no archive amounts, agreements, or writes. */
-export function LegacyOrthoPlanContext({ patientId }: { patientId: number }) {
+type LegacyContextProps = { patientId: number; onOpenClinicalContext?: (context: ClinicalNavigationContext) => unknown };
+export function LegacyOrthoPlanContext({ patientId, onOpenClinicalContext }: LegacyContextProps) {
   const session = useSession();
   if (!session) return null;
   // A new patient or authority scope gets a new component instance. Even
   // A→B→A must load fresh instead of reviving the first A's ready state.
   const scope = JSON.stringify([patientId, session.username, session.role, session.permissions ?? null]);
-  return <ScopedLegacyOrthoPlanContext key={scope} patientId={patientId} />;
+  return <ScopedLegacyOrthoPlanContext key={scope} patientId={patientId} onOpenClinicalContext={onOpenClinicalContext} />;
 }
 
-function ScopedLegacyOrthoPlanContext({ patientId }: { patientId: number }) {
+function ScopedLegacyOrthoPlanContext({ patientId, onOpenClinicalContext }: LegacyContextProps) {
   const [result, setResult] = useState<ReadState | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -125,7 +128,8 @@ function ScopedLegacyOrthoPlanContext({ patientId }: { patientId: number }) {
                 <p className="mt-1 text-xs text-slate-600">
                   {PHASE_LABEL[row.phase]} · بدء العلاج: <bdi>{row.startDate}</bdi>
                 </p>
-                <a href={`/patients/${patientId}?tab=ortho`}
+                <a href={clinicalContextHref(patientId, { orthoCaseId: row.id, pillar: "wires" }, "ortho")}
+                  onClick={(event) => { if (onOpenClinicalContext) { event.preventDefault(); onOpenClinicalContext({ patientId, orthoCaseId: row.id, pillar: "wires" }); } }}
                   className="mt-2 inline-block rounded-lg border border-navy-200 px-3 py-1.5 text-xs font-bold text-navy-900">
                   متابعة الحالة من ملف التقويم
                 </a>

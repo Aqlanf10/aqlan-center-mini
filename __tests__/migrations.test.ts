@@ -186,11 +186,10 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     const pool = getPool();
     await pool.query("ALTER TABLE payments DROP COLUMN note");
     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
-    // لم يُسجَّل الأساس — القاعدة المنحرفة بأسماء مطابقة لم تعد تكفي
-    const { rows } = await pool.query<{ exists: boolean }>(
-      "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
-    );
-    expect(rows[0]?.exists).toBe(false);
+    // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
+    const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058']);
+    expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
   });
 
   it("انحراف دقيق (نوع عمود مالي مختلف) → BASELINE_SCHEMA_MISMATCH", async () => {

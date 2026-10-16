@@ -1,17 +1,20 @@
+import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, listParties, listPatientInvoices, listServices } from "@/lib/db";
-import { createLinkedInvoice } from "@/lib/invoice-linkage-db";
+import { listParties, listPatientInvoices, listServices } from "@/lib/db";
+import { createLinkedInvoice, recoverLinkedInvoice } from "@/lib/invoice-linkage-db";
 import {
-  INVOICE_LINKAGE_MESSAGE, invoiceRequestFingerprint, linkageRefusalStatus,
+  INVOICE_IDEMPOTENCY_PATTERN, INVOICE_LINKAGE_MESSAGE, linkageRefusalStatus,
 } from "@/lib/invoice-clinical-linkage";
 import { effectiveTemplates } from "@/lib/specialty-templates";
 import { checkInvoiceAuthority, formatPriceOverrides } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
-import { parseInvoiceInput } from "@/lib/invoice-input";
+import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceTemplateRequestFingerprint, hasInvoiceCatalogQuote, invoiceCatalogRequestFingerprint } from "@/lib/invoice-template";
+import { InvoiceTemplateAuthorityError, InvoiceTemplateBusyError, InvoiceTemplateAuthorizationError } from "@/lib/invoice-template-db";
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
 
 export const dynamic = "force-dynamic";
 
@@ -47,17 +50,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  const templateIntent = source && typeof source === "object" && !Array.isArray(source)
+    && source.templateSelection !== null && typeof source.templateSelection === "object" && !Array.isArray(source.templateSelection);
+  const catalogIntent = source && typeof source === "object" && !Array.isArray(source) && hasInvoiceCatalogQuote(source);
+
+  // A lost acknowledgement must remain recoverable after a catalogue/template edit.
+  // The stored versioned raw intent includes actor, patient and all submitted values.
+  // This read-only path never treats a key alone, GET, or current expansion as proof.
+  if ((templateIntent || catalogIntent)
+    && typeof source.idempotencyKey === "string" && INVOICE_IDEMPOTENCY_PATTERN.test(source.idempotencyKey.trim())
+    && Number.isInteger(Number(source.patientId)) && Number(source.patientId) > 0) {
+    try {
+      const recovered = await recoverLinkedInvoice({ patientId: Number(source.patientId), idempotencyKey: source.idempotencyKey.trim(),
+        requestHash: templateIntent ? invoiceTemplateRequestFingerprint(source, session) : invoiceCatalogRequestFingerprint(source, session), createdBy: session.username, session,...(typeof source.visitId==="number"?{visitId:source.visitId}:{}) });
+      if (recovered && !recovered.ok) return NextResponse.json({ code: recovered.reason,
+        message: recovered.reason === "no_patient" ? "المريض غير موجود." : INVOICE_LINKAGE_MESSAGE[recovered.reason],
+      }, { status: recovered.reason === "no_patient" ? 404 : linkageRefusalStatus(recovered.reason) });
+      if (recovered?.ok) return NextResponse.json({ ...recovered.invoice, clinical: { planId: recovered.planId, links: recovered.links },
+        ...(typeof source.visitId==="number"?{visitId:recovered.visitId}:{}),
+        ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(recovered.invoice.patientId,recovered.invoice.id)} : {}), replayed: true }, { status: 200 });
+    } catch (error) {
+      if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
+      return NextResponse.json({ message: "تعذّر التحقق من نتيجة الطلب السابق؛ احتفظ بالمفتاح نفسه وأعد المحاولة." }, { status: 500 });
+    }
+  }
 
   const services = new Map((await listServices(true)).map((service) => [service.id, service]));
   const doctors = new Set((await listParties("doctor")).map((party) => party.id));
-  const parsed = parseInvoiceInput(source, services, doctors);
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: 400 });
-  const { patientId, baseCurrency: base, items, authorityLines, discountMinor, note, idempotencyKey } = parsed;
+  const settings = await invoicePricingSettings();
+  const parsed = parseInvoiceCommand(source, services, doctors, settings, true);
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message, ...(parsed.code ? { code: parsed.code } : {}) }, { status: parsed.status ?? 400 });
+  const { patientId, baseCurrency: base, existingPlanId, items, authorityLines, discountMinor, note, idempotencyKey } = parsed;
 
   /* (FIN-4) حدّ الخصم نفسه الذي يحكم الزيارة: سعر خدمة الدليل المكتوب أقل، والخصم على
      الفاتورة — بسببٍ مكتوب، ولغير المدير حتى `billing.max_discount_percent`. */
-  const settings = await getSettings();
-  const authority = checkInvoiceAuthority({
+  const authority = checkInvoiceAuthority({ requireInvoiceManualReason:true,
     lines: authorityLines,
     currency: base,
     rates: foreignRatesFromSettings(settings),
@@ -73,11 +100,15 @@ export async function POST(request: Request) {
 
   try {
     const result = await createLinkedInvoice({
-      patientId, baseCurrency: base, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
+      patientId,...(parsed.visitId!==undefined?{visitId:parsed.visitId}:{}), baseCurrency: base, existingPlanId, discountMinor, note, createdBy: session.username, actorRole: session.role, items,
       templates: effectiveTemplates(settings["plans.specialty_templates"]).templates,
       idempotencyKey,
-      requestHash: idempotencyKey ? invoiceRequestFingerprint({ patientId, currency: base, discountMinor, note, items }) : null,
+      ...(parsed.template ? { templateAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }
+        : { catalogueAuthority: { source, fingerprint: invoiceCommandFingerprint(parsed), session } }),
+      requestHash: idempotencyKey ? parsed.template ? invoiceTemplateRequestFingerprint(source, session)
+        : catalogIntent ? invoiceCatalogRequestFingerprint(source, session) : invoiceCommandFingerprint(parsed) : null,
       auditDetails: {
+        ...(parsed.template ? { قالب_العلاج: parsed.template.templateId, نسخة_القالب: parsed.template.version } : {}),
         ...(authority.discount ? { سبب_الخصم: authority.discount.reason, نسبة_الخصم: authority.discount.percent } : {}),
         ...(authority.overrides.length ? { أسعار_معدلة: formatPriceOverrides(authority.overrides) } : {}),
       },
@@ -89,10 +120,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: prefix + INVOICE_LINKAGE_MESSAGE[result.reason] }, { status });
     }
     return NextResponse.json(
-      { ...result.invoice, clinical: { planId: result.planId, links: result.links }, replayed: result.replayed },
+      { ...result.invoice, clinical: { planId: result.planId, links: result.links },...(result.visitId!==undefined?{visitId:result.visitId}:{}),
+        ...(Object.hasOwn(source,"repaymentTerms") ? {repayment:await invoiceDebtRepaymentReceipt(patientId,result.invoice.id)} : {}), replayed: result.replayed },
       { status: result.replayed ? 200 : 201 },
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof DebtRepaymentError) return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
+    if (error instanceof InvoiceTemplateAuthorizationError) return NextResponse.json({ code: error.code, message: error.message }, { status: 401 });
+    if (error instanceof InvoiceTemplateAuthorityError || error instanceof InvoiceTemplateBusyError) return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
     return NextResponse.json({ message: "تعذّر إنشاء الفاتورة. أعد المحاولة." }, { status: 500 });
   }
 }

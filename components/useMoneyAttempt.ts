@@ -3,8 +3,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { moneyAttempts, type MoneyRequest } from "@/lib/money-attempt";
 import { useSession } from "./SessionProvider";
+import {useDurableMoneyAttempt,type MoneyDurableContext} from "./useDurableMoneyAttempt";
 
-export function useMoneyAttempt(owner: string, visible = true, viewKey = owner) {
+export function useMoneyAttempt(owner: string, visible = true, viewKey = owner, durableContext?:MoneyDurableContext) {
   const session = useSession();
   const scope = JSON.stringify([session?.username, session?.role, session?.permissions ?? null, owner]);
   const snapshot = useCallback(() => moneyAttempts.get(scope), [scope]);
@@ -20,5 +21,6 @@ export function useMoneyAttempt(owner: string, visible = true, viewKey = owner) 
     const result = await moneyAttempts.run(scope, request);
     return token === lifetime.current ? result : null;
   };
-  return { attempt, run, consume: (confirmed: NonNullable<typeof attempt>) => moneyAttempts.consume(scope, confirmed) };
+  const durable=useDurableMoneyAttempt(owner,durableContext??null,visible,viewKey);
+  return durableContext?durable:{ attempt, run, consume: (confirmed: NonNullable<typeof attempt>) => moneyAttempts.consume(scope, confirmed),ready:true,error:null };
 }

@@ -1,0 +1,48 @@
+
+> aqlan-center@0.1.0 test
+> vitest run __tests__/ortho-planned-followup.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-followups-20261016
+
+ ❯ __tests__/ortho-planned-followup.test.ts (45 tests | 1 failed) 25ms
+     × reviews a conflicting appointment backlink on an otherwise matching open clinical visit 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/ortho-planned-followup.test.ts > exact existing planned case sessions > reviews a conflicting appointment backlink on an otherwise matching open clinical visit
+AssertionError: expected { …(3) } to deeply equal { Object (classification, reason, ...) }
+
+- Expected
++ Received
+
+  {
+-   "basis": null,
+-   "classification": "needs_review",
+-   "reason": "conflicting_planned_visit_appointment",
++   "basis": "planned_case_sessions",
++   "classification": "identified_followup",
++   "reason": "planned_periodic_case_sessions",
+  }
+
+ ❯ __tests__/ortho-planned-followup.test.ts:41:66
+     39|       sessions: [session({ status: "in_progress", visitId: 91 })] }), …
+     40|     expect(new Set([101, 102, 91, 61, 51, 41]).size).toBe(6);
+     41|     expect(classify({ status: "arrived", plannedVisit: facts })).toEqu…
+       |                                                                  ^
+     42|       classification: "needs_review", reason: "conflicting_planned_vis…
+     43|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 44 passed (45)
+   Start at  05:20:01
+   Duration  264ms (transform 71ms, setup 0ms, import 91ms, tests 25ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -43,7 +43,9 @@ beforeAll(async () => {
     CREATE TEMP TABLE legacy_treatment_agreements (id integer PRIMARY KEY, patient_id integer, service_name text,
       specialty text, tooth_code integer, currency text, agreed_minor bigint, previously_paid_minor bigint,
       remaining_minor bigint, historical_as_of date, status text, void_reason text, plan_item_id integer, case_id integer,
-      service_id integer, opening_effect text);
+      service_id integer, opening_effect text, document_id integer, document_line integer);
+    CREATE TEMP TABLE legacy_treatment_documents (id integer PRIMARY KEY, patient_id integer, currency text, line_count integer);
+    CREATE TEMP TABLE legacy_treatment_document_revisions (id integer PRIMARY KEY, document_id integer, version integer, total_minor bigint, discount_minor bigint, previously_paid_minor bigint, remaining_minor bigint, historical_as_of date, lines jsonb);
     CREATE TEMP TABLE legacy_treatment_coverage_snapshots (agreement_id integer PRIMARY KEY,
       snapshot_tooth_codes smallint[], snapshot_scope text, format_version integer, service_id integer, service_category text,
       anchor_tooth_code smallint, snapshot_mode text, snapshot_surfaces text, recorded_by text, recorded_at timestamptz);
@@ -65,7 +67,7 @@ beforeEach(async () => {
     pg_temp.services,pg_temp.treatment_plans,pg_temp.plan_installments,pg_temp.plan_items,pg_temp.visit_procedures,
     pg_temp.ortho_cases,pg_temp.ortho_adjustments,pg_temp.endo_treatments,pg_temp.endo_visits,pg_temp.treatment_sessions,
     pg_temp.invoices,pg_temp.invoice_items,pg_temp.audit_log,pg_temp.legacy_treatment_agreements,
-    pg_temp.legacy_treatment_coverage_snapshots,pg_temp.payments,pg_temp.patient_opening_balances,pg_temp.payables,pg_temp.expense_categories,
+    pg_temp.legacy_treatment_coverage_snapshots,pg_temp.legacy_treatment_documents,pg_temp.legacy_treatment_document_revisions,pg_temp.payments,pg_temp.patient_opening_balances,pg_temp.payables,pg_temp.expense_categories,
     pg_temp.expenses,pg_temp.expense_payable_allocations`);
 });
 afterAll(async () => { await client.end(); });

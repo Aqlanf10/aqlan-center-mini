@@ -1,0 +1,609 @@
+{
+  "base": "ce78247278397a02e8b9a0c437ab5605951a411c",
+  "source": "82e6e52cfb72ee8f360c4a6d09c0ec41277c7d76",
+  "code_head": "4a02ace7581201bd380527fabf53938b4949de37",
+  "purpose": "Existing linked cases; strategy and draft assessment-v2 only; no lifecycle or approval grants",
+  "files": [
+    {
+      "path": "__tests__/fixtures/ortho-assessment-schema2.ts",
+      "new_file": true,
+      "current_sha256": "2a1d394dc1627a471c6ab00ef5329e0587524c21731c4c6e325d6b130af8a0df",
+      "source_sha256": "2a1d394dc1627a471c6ab00ef5329e0587524c21731c4c6e325d6b130af8a0df",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/fixtures/ortho-strategy.ts",
+      "new_file": true,
+      "current_sha256": "7adbe8a25718b32344aecf69d7a84811c48d54be0b682f2493528487bdb362ae",
+      "source_sha256": "7adbe8a25718b32344aecf69d7a84811c48d54be0b682f2493528487bdb362ae",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/migrations.test.ts",
+      "new_file": false,
+      "current_sha256": "e659a8f2aced5d9fa67af5e4370f9e4b2df31a1ca1850d17d2c179b581288a65",
+      "source_sha256": "d250029847c0d2ebf71a6c4c13c40afa928855658e95cce1b8f9e076dcd71f4f",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "cb4f2a5a1750e8bfbaaeea7616318bbfde36a8ba7f8e2512ba2f0a951a51f0e3"
+    },
+    {
+      "path": "__tests__/ortho-assessment-arithmetic-2_1_0.test.ts",
+      "new_file": true,
+      "current_sha256": "f3c0a95f0ea3f0f15b468f223f1943828543b4544452fd2663f0f4daa47d65a7"
+    },
+    {
+      "path": "__tests__/ortho-assessment-contract-v2.test.ts",
+      "new_file": true,
+      "current_sha256": "2018aa40248764e6b7765659191d5bbc1157276bff124b28f95bfa2393e3782b",
+      "source_sha256": "2018aa40248764e6b7765659191d5bbc1157276bff124b28f95bfa2393e3782b",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/ortho-assessment-findings-v2.test.ts",
+      "new_file": true,
+      "current_sha256": "8af4d14cf203c24488fef5b1737350b1c88011a044a3900f453de012129fd60b",
+      "source_sha256": "8af4d14cf203c24488fef5b1737350b1c88011a044a3900f453de012129fd60b",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/ortho-assessment-measurement-editor-v2.test.ts",
+      "new_file": true,
+      "current_sha256": "c93ef4627ab62f491853e6959b125c8361792e7c6156e94d51013ebf503f88aa",
+      "source_sha256": "c93ef4627ab62f491853e6959b125c8361792e7c6156e94d51013ebf503f88aa",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/ortho-assessment-owner-v2.test.ts",
+      "new_file": true,
+      "current_sha256": "375b1fe9e7911be6de00943504a72010a1b1fe2cdab677a810b42f717d7c2366",
+      "source_sha256": "375b1fe9e7911be6de00943504a72010a1b1fe2cdab677a810b42f717d7c2366",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/ortho-assessment-view-admission.test.tsx",
+      "new_file": true,
+      "current_sha256": "ecf30cf5bad8e6faeea5634eb6a06b84a245a3d79f32e8289c71d7d5d66995e8",
+      "source_sha256": "a3da4735400f0699e1c96bbab03549cc4f7d8ccf414c99f89be6f9134c122794",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "__tests__/ortho-revision-migration-guard.test.ts",
+      "new_file": true,
+      "current_sha256": "084d4c5bbeee0a2d892a1a81fef1824c5d7139db0eb396a8c25f73f23380e6a4"
+    },
+    {
+      "path": "__tests__/ortho-treatment-strategy-route.test.ts",
+      "new_file": true,
+      "current_sha256": "5fbacd1ff0c80b4252449b0d8bf46df41041184bd7cc00fc12bd95c2c31fa700",
+      "source_sha256": "5fbacd1ff0c80b4252449b0d8bf46df41041184bd7cc00fc12bd95c2c31fa700",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/ortho-treatment-strategy-schema.test.ts",
+      "new_file": true,
+      "current_sha256": "3f504235f52ef86445330e2f5676a5c5adaa5190f121e548802309576bb7f06a",
+      "source_sha256": "84c5632d2566e548ef5acb5c006cfed89b0c8ba26bcbea60d80bac0a4e8fef1b",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "__tests__/ortho-treatment-strategy-store.test.ts",
+      "new_file": true,
+      "current_sha256": "268465e70e908a440edd4cf74a0d020fc805a1e89424515d0da717879509a8ce",
+      "source_sha256": "5b6245db95196277ec134d1542aed63a936d95b06b9304128f4e74fd923a9f73",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "__tests__/ortho-treatment-strategy-ui.test.tsx",
+      "new_file": true,
+      "current_sha256": "f942c6ad931722602923286b951ca67f185d87251fa0ed46f754768e2a2fdd93",
+      "source_sha256": "2170a57f8af1bee3e382408a8a1d048683d144100c2ac4615b0d3bed406eecdc",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "__tests__/ortho-treatment-strategy.test.ts",
+      "new_file": true,
+      "current_sha256": "193c836a9a91813ed6f3355e07bc7ac7724668616612fc6e26b3e87a911e4f08",
+      "source_sha256": "193c836a9a91813ed6f3355e07bc7ac7724668616612fc6e26b3e87a911e4f08",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "__tests__/patient-ortho-read-safety.test.tsx",
+      "new_file": false,
+      "current_sha256": "ae67c1488b1a0b4833f40103dd6d961c5effdb21eb14e5eb004dce7db42fec5a",
+      "source_sha256": "5d42561169c329503c7687dfd3e2b12e79ced7908f818c1df1a4143f90231d50",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "7ea7c99ee3a68aeafc026f769cad22bb1723bf1543e82ca1708a99bffbbc6aa4"
+    },
+    {
+      "path": "__tests__/periodontal-schema.test.ts",
+      "new_file": false,
+      "current_sha256": "8d6fa95b8b0553f5a5c9ffda2121c5f196c9623638aeb1778b01cbd821f88d27",
+      "source_sha256": "4da87f37de579bb3be4829dab8f84572e3586e988ad6928c874e52d2b8eaf92f",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "39d87790478e9c1778390b31c91cbbd7b2e653c0a6775d55a698eddc790fc443"
+    },
+    {
+      "path": "__tests__/postgres/_periodontal-fixture.ts",
+      "new_file": false,
+      "current_sha256": "880bea34268fffd1b9772d333f12b8208084c74c2f57ef993bba5b3259b21e07",
+      "source_sha256": "69499ead9e74081e9040c31cefd88772c92c7918312d55a9485888e189159d90",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "5b672ab9236be81c276eb9b46cb936fc7f57d718474087442d45e02f1aa658e2"
+    },
+    {
+      "path": "__tests__/postgres/debt-installments-storage.test.ts",
+      "new_file": false,
+      "current_sha256": "63185659b11dbf6116ca6b35220778eedb7ef00c98eb96deb21bd233fbc31057",
+      "main_base_sha256": "580fb1aa8d6a33b8f6c58faf10ed4231b05ef93d14a2e1b719cd165432528970"
+    },
+    {
+      "path": "__tests__/postgres/hr-composed-backup.test.ts",
+      "new_file": false,
+      "current_sha256": "2e6f5281cad9688edceb66dfbdb42532fd7480d0da25a165b4564aaf9cb36245",
+      "main_base_sha256": "bf1e43acab0a3f0b6d8bb4188ef552c38569692ebd6e94a6a32dbe46987d616c"
+    },
+    {
+      "path": "__tests__/postgres/hr-runtime-registration.test.ts",
+      "new_file": false,
+      "current_sha256": "d1072403c36edf04a7d63a15f78c27395f541434837aa34c5d55cde9b53fd48f",
+      "main_base_sha256": "0688b60ce6ac551fb7551715d23b7516345e36e636f27e65debcbe129caf97ae"
+    },
+    {
+      "path": "__tests__/postgres/legacy-doctor-fk-compatibility.test.ts",
+      "new_file": false,
+      "current_sha256": "1eb5668bb3e4ef9f56be7552a839d1c510f1ce19083999cfa854af9c6e3a211a",
+      "source_sha256": "345b6a368f4f05514acbfcc2de966ac1aa12b518c2ba12dc785fe8ccd5745487",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "bb8ae4fb9bff0fcdafc17920dbb870cb3c0a4e6c579718ca176a36074f45a65f"
+    },
+    {
+      "path": "__tests__/postgres/ortho-assessment-strategy-union.test.ts",
+      "new_file": true,
+      "current_sha256": "fcc0b88e88904e58a85e1c3f6619a912b8c4e5eca05f504c583b4fdf06958988"
+    },
+    {
+      "path": "__tests__/postgres/ortho-revision-backup.test.ts",
+      "new_file": true,
+      "current_sha256": "f32cb3494ffa5ad4a8e21fbd0f9b16d6a8379a1a652971e7f6c503a8fc933b05"
+    },
+    {
+      "path": "__tests__/postgres/ortho-revision-registration.test.ts",
+      "new_file": true,
+      "current_sha256": "e5fddd63ba3aeb98a1abb82a49d4913004cacbf61190f8b5ee118112ef923e3c"
+    },
+    {
+      "path": "__tests__/postgres/schema-ownership.test.ts",
+      "new_file": false,
+      "current_sha256": "0621a3cfc880a25d596c85033a879eaa56973a63c8cb7df5c224c0f8bc14d19b",
+      "source_sha256": "70a97b4f33e1865b697af5f547176f2672aba768e35660843cfd9891e9142f52",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "8c3fcabd7fa0bb57d54bedd6725fdde093a48bf3599bdbe1345244110643efcc"
+    },
+    {
+      "path": "__tests__/schema-preflight-cli.test.ts",
+      "new_file": false,
+      "current_sha256": "1aa11d0f94490178029cf92181bd25a07f840db2729620de1f66598f35c74ae4",
+      "source_sha256": "c4993791aaf5cf77f60dc43adbd30d78d63dbde333119a6313da31e2d824ae0f",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "6248f68a8be70ec76dc0c1130658e91123d31ae3bb2108670544148e601334a8"
+    },
+    {
+      "path": "__tests__/security-http/hr-temporal-history-ui.test.ts",
+      "new_file": false,
+      "current_sha256": "9aaf2a94e294db07e832d78994c13e04a583c34feec3dfd1180c6c3cbdbb3872",
+      "main_base_sha256": "9087331b61a96484c06741851dd04d0e3086c89acbd07dc320398b1cbde551bd"
+    },
+    {
+      "path": "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts",
+      "new_file": true,
+      "current_sha256": "4c538ac508d94a9ddcadf3f9bc10999316945d9e3f02712cff13b6e34a6d5497"
+    },
+    {
+      "path": "app/api/ortho/[id]/assessment/route.ts",
+      "new_file": false,
+      "current_sha256": "1063199afdac530206d55f16a12bd16278175d223fc43e263c3877ff5b7d737b",
+      "source_sha256": "212286f2472091ca7d1612b2586fb34641a642f34774f6cc88a413632b2c1f87",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "app/api/ortho/[id]/strategy/route.ts",
+      "new_file": false,
+      "current_sha256": "442d23279b049b8afa42926a9a746f76b3161289996f21627e196dc16cf361d9",
+      "source_sha256": "442d23279b049b8afa42926a9a746f76b3161289996f21627e196dc16cf361d9",
+      "byte_identical_to_source": true,
+      "main_base_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "components/OrthoAssessmentFindingsV2.tsx",
+      "new_file": true,
+      "current_sha256": "ff673badc39041e30c2d0a84e282acb8d07616be10df9e5ec7c1a06d290068d3",
+      "source_sha256": "7e97ceaa55625bc0dc8ba3f122b4e758d0c69cbaafef0698b44df33224f2bcd7",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "components/OrthoAssessmentMeasurementsV2.tsx",
+      "new_file": true,
+      "current_sha256": "9300b437b9248f5208a6eef4bfd26c9a0313c1af0ddbf626b2b7b76989aa408e",
+      "source_sha256": "db98ba9789b676c31f52e59929e8268a0b2163511fda591e22d52a11cec4c38f",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "components/OrthoCaseAssessmentV2.tsx",
+      "new_file": true,
+      "current_sha256": "5df18d2328797ed8bc10a3d266f45cce268532bd57dfdc4477acb0dfcba5c861",
+      "source_sha256": "009c9b791551852c0228c26fae4593a2ac1eac6aaccb5e7799c009bda068bbe7",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "components/OrthoTreatmentStrategy.tsx",
+      "new_file": true,
+      "current_sha256": "16be2c34ee649e961993043eea37261d37bc0d7284a6f35b3259e9043ffd452d",
+      "source_sha256": "ccc7f10e88848b53e7973644e029a92b920f03e4142b881373b293d7debec81b",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "new_file": false,
+      "current_sha256": "bb9badd639c7d6d1ad9144b36678f08e7092abdaf265db7506998c784f6f00ab",
+      "source_sha256": "3079d4a21d78cc43ed51d90faa4a8062714cd2ae5db6677747afab6c5a190505",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "fd5473cf2f90fb1dbc1bcd27fb8638aba6b4b20353543d9fc2a13eaf791bcf48"
+    },
+    {
+      "path": "docs/DATABASE_MIGRATIONS.md",
+      "new_file": false,
+      "current_sha256": "699a2a268557615e8e6493e704acd15c6079699faec7074d9502d3153e5d6745",
+      "source_sha256": "acff781950d393cd7aa534bbb3894916ece9da314650b830598ef29b75ebbe40",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "2e95fd601de4a38e52dd68eeea16f50489ca186d47731ed5bbad1d9b8baba03b"
+    },
+    {
+      "path": "lib/audit.ts",
+      "new_file": false,
+      "current_sha256": "64088cd662e8db398fa5cf14b369281e97d4bad23ae592671dadb45905cd642f",
+      "source_sha256": "8bea48acb2bf68453c87842127002693a485a2f47b32ddaa43a56bd53604cc5b",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "3f7fe914fb99d4b991bcf67b4784761d7b3887d3f46011c7b3ecf957c45d6ebf"
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "new_file": false,
+      "current_sha256": "1ef2d304d4626bc540abfa9134343747c8068f13d845f1829d714415d983c56b",
+      "source_sha256": "6a946af0c352269966ad650c1bc1e281ce12c45a336745b9215eb19f58784393",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "f38824ca7e05fd2e6c2479dc8b96b361def7dec0df8245963783631e885528e0"
+    },
+    {
+      "path": "lib/db.ts",
+      "new_file": false,
+      "current_sha256": "eaab6a66c37eefe4feb7b6bb899dbd84ee86f5cd66a1a7b9ff07efa9e2e75f46",
+      "source_sha256": "73cd968ac33b770b953b4a36e04c2e80d4f7cc0804ad8dd72664526f93f2c667",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "3cc0f02e225399fd3b8e662a37b4eba2e19b904ccb6b546e62b17d30a898ee8f"
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "new_file": false,
+      "current_sha256": "2d2b849887625a07f6a7ddec46324a53e1dcfe53f9e4146af9fa625079d9f1fe",
+      "source_sha256": "d78bc4be752059ddf87609b2fe407edf3ebb20a39507420313aa991d0627743a",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "57e2c82f0b9219d7eefca263d01ee68dc43b83dac38ca9c9f4e4665f0e1c89a9"
+    },
+    {
+      "path": "lib/migrations.ts",
+      "new_file": false,
+      "current_sha256": "f1e4111487f29b6cb6f9de34a7190c52a978c18733bd74b31b7dc759ba97bc00",
+      "source_sha256": "9414448a7a4b232d749a72c20c38d838f67dfc6f6c4801b710c6b2d05ca522ad",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "f637d140e1bc2ad80015e00c1be793f0116f1619bbf8ee58966e350c56d64e2e"
+    },
+    {
+      "path": "lib/ortho-assessment-arithmetic-2_1_0.ts",
+      "new_file": true,
+      "current_sha256": "ec0ff7d102cd0e69c0454f5cc8c611acc9773f63e65252ba2150132759678dc0",
+      "source_sha256": "ec0ff7d102cd0e69c0454f5cc8c611acc9773f63e65252ba2150132759678dc0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-authority.ts",
+      "new_file": true,
+      "current_sha256": "c4fffbfe048f84a97bb3e3a6e6e61dd97a40ba5b625eeadb6505c883f5dc3b39",
+      "source_sha256": "c4fffbfe048f84a97bb3e3a6e6e61dd97a40ba5b625eeadb6505c883f5dc3b39",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-client-v2.ts",
+      "new_file": true,
+      "current_sha256": "acdac2f15d9e55a5631845652fe6f08310cf865564dab1c3f15c89070d30f3ec",
+      "source_sha256": "acdac2f15d9e55a5631845652fe6f08310cf865564dab1c3f15c89070d30f3ec",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-command-v2.ts",
+      "new_file": true,
+      "current_sha256": "39af0214762273e2f28a97708a04257361693bdcec247eed9f284371f2851cc0",
+      "source_sha256": "39af0214762273e2f28a97708a04257361693bdcec247eed9f284371f2851cc0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-editor-v2.ts",
+      "new_file": true,
+      "current_sha256": "b1b051fdc4958224799b81a2e5d62eef02b0b2286535d97695a2b7b308e98d9f",
+      "source_sha256": "b1b051fdc4958224799b81a2e5d62eef02b0b2286535d97695a2b7b308e98d9f",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-engine-2_1_0.ts",
+      "new_file": true,
+      "current_sha256": "094e7c236fb7b8f3ac7988f0cc63e3f362a72b547252265851d4e3b45fbc237f",
+      "source_sha256": "094e7c236fb7b8f3ac7988f0cc63e3f362a72b547252265851d4e3b45fbc237f",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-engine-v2.ts",
+      "new_file": true,
+      "current_sha256": "da65f52d37b0cfbb2722f5d31dc2176368d3fab798a39717c079ba69d54bfac6",
+      "source_sha256": "da65f52d37b0cfbb2722f5d31dc2176368d3fab798a39717c079ba69d54bfac6",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-findings-v2.ts",
+      "new_file": true,
+      "current_sha256": "1d9f7e52665c230f3a17e5398197097b32873b80a3141a21df76da763dd9dbf0",
+      "source_sha256": "1d9f7e52665c230f3a17e5398197097b32873b80a3141a21df76da763dd9dbf0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-limits.ts",
+      "new_file": true,
+      "current_sha256": "f1ef7299be4ac3c5a5051c994dd4c89eb38f2d6d5007c6e5d56e1f8214ccb13e",
+      "source_sha256": "f1ef7299be4ac3c5a5051c994dd4c89eb38f2d6d5007c6e5d56e1f8214ccb13e",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-measurement-editor-v2.ts",
+      "new_file": true,
+      "current_sha256": "b711dff3d17227b1b9aced3deae8133be3d54bb10c9813927643748cf09c9fda",
+      "source_sha256": "b711dff3d17227b1b9aced3deae8133be3d54bb10c9813927643748cf09c9fda",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-measurement-set-v2.ts",
+      "new_file": true,
+      "current_sha256": "a47e58ea3a0590cb102bb628b13990d5c80f47df9f0389e4da4296ca41a391d0",
+      "source_sha256": "a47e58ea3a0590cb102bb628b13990d5c80f47df9f0389e4da4296ca41a391d0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-model.ts",
+      "new_file": true,
+      "current_sha256": "11e4ff499740e8d9a682dba75b1aa5c1e3f543ca6bebf1ae934418cbe6c904a1",
+      "source_sha256": "11e4ff499740e8d9a682dba75b1aa5c1e3f543ca6bebf1ae934418cbe6c904a1",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-owner-v2.ts",
+      "new_file": true,
+      "current_sha256": "2137233cad212d24d312fc3b25b1cbfd77f06d0366279ed531c15661129f9ef0",
+      "source_sha256": "2137233cad212d24d312fc3b25b1cbfd77f06d0366279ed531c15661129f9ef0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-persisted-v2.ts",
+      "new_file": true,
+      "current_sha256": "bfa7aa582146e3b9f51b47428dd46fa50069f3a827b88646ca7f6bc4264a4881",
+      "source_sha256": "bfa7aa582146e3b9f51b47428dd46fa50069f3a827b88646ca7f6bc4264a4881",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-read-v2.ts",
+      "new_file": true,
+      "current_sha256": "834fddca7f4f8be2154e4ae05db175c986f850b5cbcb359c71283be185a81828",
+      "source_sha256": "834fddca7f4f8be2154e4ae05db175c986f850b5cbcb359c71283be185a81828",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-response-v2.ts",
+      "new_file": true,
+      "current_sha256": "e73bcc801adf3dbaf0fc33a41f3a19e2c974a2d27830b06e039af1e50b99730f",
+      "source_sha256": "e73bcc801adf3dbaf0fc33a41f3a19e2c974a2d27830b06e039af1e50b99730f",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-runtime.generated.json",
+      "new_file": true,
+      "current_sha256": "697dead1e9cba2361501470ac6a6dd4156a10a5f4bf8f70ced642aaa2323367c"
+    },
+    {
+      "path": "lib/ortho-assessment-runtime.ts",
+      "new_file": true,
+      "current_sha256": "a7e3b67559aec2c04b51698965a6a0b16de86e90771a6e2bc0cb5900637125f0"
+    },
+    {
+      "path": "lib/ortho-assessment-schema.ts",
+      "new_file": true,
+      "current_sha256": "8494c2c3f42d3df3394228fd492aa72d81865f066bd8068c80ad84822b3777d9",
+      "source_sha256": "8494c2c3f42d3df3394228fd492aa72d81865f066bd8068c80ad84822b3777d9",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-store.ts",
+      "new_file": true,
+      "current_sha256": "e540e49c0c8115ab5adb42de55c274815a069501bb73fe67ca1b8e6ac6d3ec00",
+      "source_sha256": "31dc4a1706d8bc4fcbde401c5e46c25c499cc4568962a76b894a084d5f9e2273",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "lib/ortho-assessment-v2.ts",
+      "new_file": true,
+      "current_sha256": "00f782b85852f422d7494fa3abe7263a509d69d19fe17e462467ed24fed7fd1f",
+      "source_sha256": "00f782b85852f422d7494fa3abe7263a509d69d19fe17e462467ed24fed7fd1f",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-assessment-versioned-sources.ts",
+      "new_file": true,
+      "current_sha256": "b37ac68af8706fb445d71931289d28896c8b7c390626008cc4b8884ce25e3316",
+      "source_sha256": "e016324c626abf40587124484b30be8a6808d15700b2437075a168366d205efc",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "lib/ortho-documentation-context.ts",
+      "new_file": true,
+      "current_sha256": "605fa65b7d292cce5bf4c647c797c3373633a1ae5c9154a30f1bea6039aa6ee9"
+    },
+    {
+      "path": "lib/ortho-journey-route.ts",
+      "new_file": true,
+      "current_sha256": "792310da8e60e820b289f1758eb5bb091da0547a099f07fd9fac4f403c3ea7d0",
+      "source_sha256": "792310da8e60e820b289f1758eb5bb091da0547a099f07fd9fac4f403c3ea7d0",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-revision-migration-guard.ts",
+      "new_file": true,
+      "current_sha256": "a62b9012bdecd700ea94bbe5d906388bdf6b42e21b2493391d2c81f8c5f71d7e"
+    },
+    {
+      "path": "lib/ortho-route-handler.ts",
+      "new_file": true,
+      "current_sha256": "b9a5bc59583f58b79903c59d742cfcfe930f0b9cb26344749bc25f1478856ec5",
+      "source_sha256": "b9a5bc59583f58b79903c59d742cfcfe930f0b9cb26344749bc25f1478856ec5",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-strategy-client.ts",
+      "new_file": true,
+      "current_sha256": "705741b9f4a5bbbf09775ce2ba7a6e94f921a8a4d6dcaadc1d5ecfd95abe4d60",
+      "source_sha256": "0e2e578d849098d55c0af1127462647e634e84fa5c1645b8c8b6278799ae594c",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "lib/ortho-treatment-strategy-schema.ts",
+      "new_file": true,
+      "current_sha256": "8d175018068775d3f30e175fd2700110e4c42d8165e4ca3b75e3578031e85b41",
+      "source_sha256": "8d175018068775d3f30e175fd2700110e4c42d8165e4ca3b75e3578031e85b41",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "lib/ortho-treatment-strategy-store.ts",
+      "new_file": true,
+      "current_sha256": "f5a3460d46d4cfa7f293da696569b0403af629c8a6873b04f3b9d706dfd408c1",
+      "source_sha256": "81ad33405a0a384dac0ba5fd657b486814b4e99793fa568fe24bac86c6e18f3b",
+      "byte_identical_to_source": false
+    },
+    {
+      "path": "lib/ortho-treatment-strategy.ts",
+      "new_file": true,
+      "current_sha256": "efb9a692180e6163967e8aabc0dee9510b895149eec4cb4e8d67f68585c5319e",
+      "source_sha256": "efb9a692180e6163967e8aabc0dee9510b895149eec4cb4e8d67f68585c5319e",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "migrations/0051_ortho_treatment_strategy.sql",
+      "new_file": true,
+      "current_sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e",
+      "source_sha256": "44ff94771e962a48fa27d05de941e0c096d19000d66078a6fbe477ae4265157e",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "migrations/0052_ortho_assessment.sql",
+      "new_file": true,
+      "current_sha256": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2",
+      "source_sha256": "92113a0e96c51edc5596508c9b40f742df5bff38b0e80518504034bd74acbae2",
+      "byte_identical_to_source": true
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "new_file": false,
+      "current_sha256": "5f03210e5df4ad022b6a9d8cfd5229286cd6565de0dd950c3e6a2426cf6e9b97",
+      "source_sha256": "670cc1a6dd73fe8ccb051a1c4543f9cefefb0973405e1a7160e5fab17f28f2a9",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "8557ef59f59c0c8fbe823aa7ddb287169efa2857295b403c8f92b9cf2227f771"
+    },
+    {
+      "path": "schema/preflight-disclosure.pg18.json",
+      "new_file": false,
+      "current_sha256": "a3668a052257969095331fd8d4069414c0d873cf110ed8eca68946fd2ddc1685",
+      "source_sha256": "06c45497de77f857399b96bacfec78b769183f09eb389a51731f78d2fb5c9aa7",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "a0bf43585d7cc0bcd6de4e763680532cad2f48b479441b41daf27f63545664c4"
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "new_file": false,
+      "current_sha256": "487fca42f8378917e57e1a4c7ed71c0b4ee1edb3d65c43c850a34f857d31f954",
+      "source_sha256": "b771b260259c3e624db5cc3ffde1f37af97d9a75ad8996384e81c6c59499aba7",
+      "byte_identical_to_source": false,
+      "main_base_sha256": "fdf4907862e09c5d0a97ebd27c6bcfa757168e86c8a5d0f36d480974ae5a720d"
+    }
+  ],
+  "protected": [
+    {
+      "path": "lib/session.ts",
+      "sha256": "4f6116288bd91b5b3b91283bd7199e309f461bb2f254184445f4b45ab0cb03ff",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/patient-access.ts",
+      "sha256": "5534d241e5e90f3e029129ff42a15122a21ad03c271e1b64e1f59a71c300cff3",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/backup.ts",
+      "sha256": "19043e2ef228ab2f877e9375a0ca3ac3b86804ff4177bd7532703784bf1aebcd",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "package.json",
+      "sha256": "ff50dcc2a742db16243aa15d236fa2b4e075a4fef1be2aa836d5612135ed7260",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "5df7ced31497dc6de92937fa41e995e3e7912856f51ade2b56ce4e169dbb3bd5",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "scripts/ci-audit.mjs",
+      "sha256": "9c38c4934e61c6f3a2a465f169680a20f2bc2e4bdfc953f09e4798e04b60c50d",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/scoped-braces-exception.mjs",
+      "sha256": "a4a052d0a56a65056c3e686e2d856d837b98d41af3bbe767e97c651d021742bc",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "lib/braces-exception-pins.mjs",
+      "sha256": "cb8270a104d9704866046688e40e7c41154d1abd1521605008e3ed3f6f9267da",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "schema/baseline-schema-manifest.pg18.json",
+      "sha256": "2446a7e00f76820097794d7dffa83bed9193e0ebf06bc9ccc853cf10830a19f6",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "migrations/0056_hr_employment_history.sql",
+      "sha256": "cc87396b7d3cd5035c67f1dfa0f2dedbe2ed904a618722b12b833c969cf7c112",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "migrations/0057_hr_schedule_policy_versions.sql",
+      "sha256": "8e4bf0f0adf3d2284f64bd792b3903958ce6ed62923b4cb0c61ac405b82b8791",
+      "unchanged_from_base": true
+    },
+    {
+      "path": "migrations/0058_hr_temporal_write_receipts.sql",
+      "sha256": "1c2c0a3582cb5777fe6cf063d0ba5d1bbe04ef6acbbf035382a7fceeb9a6b972",
+      "unchanged_from_base": true
+    }
+  ],
+  "verification_test_overlay": {
+    "path": "__tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts",
+    "purpose": "Distinct numeric Ortho/clinical ids and persisted SQL bridge assertions; application code unchanged from code_head",
+    "sha256": "8ca9ae74ae5639b0001fb5bbc61666bad0f3957080344ff3199f74298a9771bc"
+  }
+}

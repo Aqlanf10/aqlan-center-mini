@@ -1,3 +1,4 @@
+import {invoiceQuantityAllowed} from "../lib/invoice-clinical-linkage";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createElement } from "react";
@@ -7,7 +8,7 @@ import { Odontogram, OdontogramRow } from "../components/dental/Odontogram";
 import { SurfaceSelector, toggleSurface } from "../components/dental/SurfaceSelector";
 import { ToothSelectionDialog } from "../components/dental/ToothSelectionDialog";
 import {
-  PER_TOOTH_SPLIT_NOTICE, TOOTH_REQUIRED_MESSAGE, applyToothSelection, emptyToothFields, invoiceToothMode, removeRowAt,
+  PER_TOOTH_SPLIT_NOTICE, TOOTH_REQUIRED_MESSAGE, applyToothSelection, applyHistoricalToothSelection, emptyToothFields, invoiceToothMode, removeRowAt,
   replaceRowService, selectionLabel, selectionOfRow, setRowScope, toothPayload, toothProblem, usesToothChart,
   type ToothRowLike,
 } from "../components/dental/invoice-tooth-selection";
@@ -162,5 +163,26 @@ describe("(INV-LINK TOOTH) one shared odontogram", () => {
     expect(dialog).toContain("تحديد الأسنان — علاج عصب");
     expect(dialog).toContain('data-testid="tooth-dialog-split-notice"');
     expect(dialog).toContain('data-testid="tooth-dialog-confirm"');
+  });
+});
+
+
+describe("historical original episode pricing", () => {
+  it("keeps a 300000 bridge over 14–16 as one original value and one coverage identity", () => {
+    const original=row({price:"300000"});
+    const result=applyHistoricalToothSelection([original],0,"multi_tooth_episode",{teeth:[16,14,15],surfaces:"",scope:null},key);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({key:original.key,price:"300000",toothCode:14,episodeTeeth:[14,15,16],groupId:null});
+  });
+  it("keeps independent root canal teeth as independent lines", () => {
+    expect(applyHistoricalToothSelection([row()],0,"per_tooth_episode",{teeth:[16,17],surfaces:"",scope:null},key).map(row=>row.toothCode)).toEqual([16,17]);
+  });
+});
+
+
+describe("service pricing unit quantities",()=>{
+  it("prices an arch or region once while preserving per-tooth and financial units",()=>{
+    for(const category of ["ortho","cleaning"]){expect(invoiceQuantityAllowed(category,1)).toBe(true);expect(invoiceQuantityAllowed(category,2)).toBe(false);}
+    expect(invoiceQuantityAllowed("rct",2)).toBe(true);expect(invoiceQuantityAllowed("xray",2)).toBe(true);
   });
 });

@@ -87,12 +87,13 @@ async function close(context: BrowserContext) { await context.close(); contexts.
 async function invoiceDraft(patientId: number, category: Category, tooth: number | null) {
   const view = await open("reception", patientId);
   const { page } = view;
-  await page.getByRole("button", { name: "فاتورة يدوية", exact: true }).click();
+  await page.getByTestId("treatment-entry-open").click();
+  await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
   await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(services[category]));
   // Explicit reception choice from the authorized catalogue, never inferred from the signer.
   await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
   if (tooth === null) {
-    await page.getByTestId("invoice-row-0").getByTestId("scope-both").click();
+    await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
     expect(await page.getByTestId("invoice-tooth-button-0").count()).toBe(0);
   } else {
     await page.getByTestId("invoice-tooth-button-0").click();
@@ -109,7 +110,10 @@ async function invoiceDraft(patientId: number, category: Category, tooth: number
     await dialog.waitFor({ state: "detached" });
     expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(tooth));
   }
-  await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]').waitFor();
+  const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+  await proof.waitFor({state:"attached"});
+  if(!await proof.isVisible())await proof.locator("..").locator("summary").click();
+  await proof.waitFor();
   expect(await page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).isEnabled()).toBe(true);
   return view;
 }
@@ -119,10 +123,12 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
   const first = await invoiceDraft(patientId, category, tooth);
   const second = mode === "two_tabs" ? await invoiceDraft(patientId, category, tooth) : null;
   const keys: string[] = [];
+  const bodies: unknown[] = [];
   let dropped = false;
   if (mode === "lost_response") await first.page.route("**/api/invoices", async (route) => {
     if (route.request().method() !== "POST") { await route.continue(); return; }
     keys.push(String(route.request().postDataJSON().idempotencyKey ?? ""));
+    bodies.push(route.request().postDataJSON());
     if (!dropped) {
       dropped = true;
       const committed = await route.fetch();
@@ -133,12 +139,16 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
   const save = first.page.getByRole("button", { name: "احفظ الفاتورة", exact: true });
   if (mode === "lost_response") {
     await save.click();
-    await first.page.getByRole("alert", { name: "خطأ حساب المريض" }).filter({ hasText: "تعذّر الاتصال بالخادم" }).waitFor();
+    await first.page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).filter({ hasText: "تعذّر الاتصال بالخادم" }).waitFor();
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(1);
+    expect(await save.isEnabled()).toBe(false);
   }
-  const responsePromise = first.page.waitForResponse((response) => response.url().endsWith("/api/invoices") && response.request().method() === "POST");
-  if (mode === "double_click") await save.dblclick(); else await save.click();
-  const response = await responsePromise;
+  const [response] = await Promise.all([
+    first.page.waitForResponse((response) => response.url().endsWith("/api/invoices") && response.request().method() === "POST"),
+    mode === "lost_response"
+      ? first.page.getByRole("button", { name: "إعادة نفس طلب الفاتورة", exact: true }).click()
+      : mode === "double_click" ? save.dblclick() : save.click(),
+  ]);
   expect(response.status()).toBe(mode === "lost_response" ? 200 : 201);
   const result = await response.json() as Invoice;
   await first.page.getByTestId("invoice-clinical-notice").waitFor();
@@ -146,12 +156,13 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
     expect(keys).toHaveLength(2);
     expect(keys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
     expect(keys[1]).toBe(keys[0]);
+    expect(bodies[1]).toEqual(bodies[0]);
   }
   if (second) {
     const refused = second.page.waitForResponse((candidate) => candidate.url().endsWith("/api/invoices") && candidate.request().method() === "POST");
     await second.page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).click();
     expect((await refused).status()).toBe(409);
-    await second.page.getByRole("alert", { name: "خطأ حساب المريض" }).waitFor();
+    await second.page.getByRole("alert", { name: "تعذّر حفظ إجراء الحساب" }).waitFor();
     await close(second.context);
   }
   await close(first.context);

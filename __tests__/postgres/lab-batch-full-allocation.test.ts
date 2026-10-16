@@ -175,8 +175,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Existing isolated-PG reset pattern; do not disable append-only/FK guards.
-  await q(`TRUNCATE expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders,
-                    patients, cashier_shifts, parties, audit_log RESTART IDENTITY CASCADE`);
+  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
+  // traverse even empty history tables. These isolated fixtures contain no HR rows.
+  await q(`TRUNCATE party_opening_advances, expense_payable_allocations, expenses, payables, lab_order_tracking, lab_orders,
+                    patients, cashier_shifts, audit_log RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM parties");
   await q("INSERT INTO cashier_shifts (opened_by) VALUES ($1)", [ACTOR]);
 });
 

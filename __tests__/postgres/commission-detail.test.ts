@@ -132,10 +132,14 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  // Keep HR append-only/FK guards active: parent TRUNCATE CASCADE would
+  // traverse even empty history tables. These isolated fixtures contain no HR rows.
   await q(`TRUNCATE commission_case_overrides, doctor_commission_history, payments, expenses, invoice_items, lab_orders,
                     visit_procedures, inventory_movements, service_materials, inventory_items, plan_items, clinical_cases,
-                    treatment_plans, visits, invoices, patients, cashier_shifts, users, parties, services
+                    treatment_plans, visits, invoices, patients, cashier_shifts, services
            RESTART IDENTITY CASCADE`);
+  await q("DELETE FROM users");
+  await q("DELETE FROM parties");
   const [shift] = await q<{ id: number }>(`INSERT INTO cashier_shifts (opened_by) VALUES ('cd') RETURNING id`);
   shiftId = shift.id;
 });

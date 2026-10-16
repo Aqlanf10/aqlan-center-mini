@@ -31,12 +31,18 @@ const expectedExcludes = [
   "./.dependency-audit/**/*",
 ];
 const exclusions = nextConfig.outputFileTracingExcludes ?? {};
+const routeMatchers = new Map<string, (file: string) => boolean>();
 
 function excluded(route: string, file: string): boolean {
-  const patterns = Object.entries(exclusions)
-    .filter(([routeGlob]) => picomatch(routeGlob, options)(route))
-    .flatMap(([, values]) => values.map((value) => path.join(root, value)));
-  return patterns.length > 0 && picomatch(patterns, options)(path.join(root, file));
+  let matcher = routeMatchers.get(route);
+  if (!matcher) {
+    const patterns = Object.entries(exclusions)
+      .filter(([routeGlob]) => picomatch(routeGlob, options)(route))
+      .flatMap(([, values]) => values.map((value) => path.join(root, value)));
+    matcher = patterns.length > 0 ? picomatch(patterns, options) : () => false;
+    routeMatchers.set(route, matcher);
+  }
+  return matcher(path.join(root, file));
 }
 
 function files(directory: string): string[] {
@@ -128,6 +134,7 @@ describe("temporary development-only runtime tracing boundary", () => {
 
   it("does not let runtime app, component or library imports depend on excluded development tooling", () => {
     expect(runtimeSources.length).toBeGreaterThan(600);
+    const violations: string[] = [];
     for (const file of runtimeSources) {
       for (const specifier of importedModules(file)) {
         const target = specifier.startsWith("@/") ? specifier.slice(2)
@@ -135,9 +142,12 @@ describe("temporary development-only runtime tracing boundary", () => {
           : `node_modules/${specifier}`;
         // Extensionless imports resolve to the same reviewed module too.
         for (const candidate of [target, `${target}.mjs`, `${target}/index.mjs`]) {
-          expect(excluded("/api/backup/full", candidate), `${file} imports ${specifier}`).toBe(false);
+          if (excluded("/api/backup/full", candidate)) violations.push(`${file} imports ${specifier} → ${candidate}`);
         }
       }
     }
+    // Keep every source/import/candidate check, with all offending paths on
+    // failure, without constructing thousands of passing assertion objects.
+    expect(violations).toEqual([]);
   });
 });

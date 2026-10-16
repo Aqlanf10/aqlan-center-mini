@@ -4,6 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
+import { canViewMoney } from "@/lib/roles";
+import TreatmentFinancialContext from "./TreatmentFinancialContext";
+import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 import {
   APPLIANCE_LABEL, ARCHES_LABEL, CASE_STATUS_LABEL, ELASTIC_LABEL, PHASE_HINT,
   PHASE_LABEL, PHASE_ORDER, RETAINER_LABEL, SLOT_LABEL,
@@ -22,6 +25,9 @@ import { clinicDateString } from "@/lib/schedule";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
 import { PatientDiagnosis } from "./PatientDiagnosis";
+import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAssessmentV2";
+import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
+import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
@@ -137,6 +143,8 @@ interface SavedAdjustment {
 export const ORTHO_PARENT_READ_TIMEOUT_MS = 15_000;
 type OrthoReadState = "loading" | "ready" | "error" | "denied";
 type Draft = { values: Map<string, unknown>; edits: Map<string, unknown>; urls: Set<string>; active: boolean; busy: boolean; uncertain: boolean; dirty: boolean;
+  strategyView: { readonly readVersion: number; subscribe(listener: () => void): () => void; notify(refresh?: boolean): void; clear(): void };
+  settleField(name: string, value: unknown): void;
   activate: () => void; markUncertain: () => void; trackEdit: (name: string, previous: unknown, next: unknown) => void;
 };
 type Mutation = { draft: Draft; sequence: number; denial: number; active: boolean };
@@ -145,6 +153,7 @@ type OrthoOwner = {
   readSequence: number; mutationSequence: number; denialSequence: number;
   controller: AbortController | null; timer: ReturnType<typeof setTimeout> | null;
   cases: OrthoCase[]; drafts: Map<string, Draft>; mutations: Set<Mutation>;
+  assessments: Map<number, AssessmentOwnerV2>;
   deny: () => void;
   activate: () => void; activateStandaloneDraft: (key: string, draft: Draft) => void; retire: () => void;
   bindDenial: (deny: () => void) => void; denyRead: () => void;
@@ -158,7 +167,7 @@ const OrthoOwnerContext = createContext<OrthoOwner | null>(null);
 function makeOwner(standalone = false): OrthoOwner {
   const owner: OrthoOwner = { active: false, denied: false, clinical: standalone, contact: standalone, standalone,
     readSequence: 0, mutationSequence: 0, denialSequence: 0, controller: null, timer: null,
-    cases: [], drafts: new Map(), mutations: new Set(), deny: () => {},
+    cases: [], drafts: new Map(), assessments: new Map(), mutations: new Set(), deny: () => {},
     activate: () => { owner.active = true; },
     activateStandaloneDraft: (key, draft) => {
       owner.active = true; owner.clinical = true; owner.contact = true;
@@ -169,12 +178,14 @@ function makeOwner(standalone = false): OrthoOwner {
     denyRead: () => {
       owner.denied = true; owner.clinical = false; owner.contact = false;
       owner.denialSequence++; owner.controller?.abort(); owner.cases = [];
+      for (const assessment of owner.assessments.values()) assessment.invalidateRead();
       owner.clearTimer();
       for (const operation of owner.mutations) {
         operation.active = false; operation.draft.markUncertain();
       }
     },
     beginRead: (controller) => {
+      for (const assessment of owner.assessments.values()) assessment.invalidateRead();
       owner.controller?.abort();
       if (owner.timer !== null) clearTimeout(owner.timer);
       owner.controller = controller;
@@ -183,6 +194,7 @@ function makeOwner(standalone = false): OrthoOwner {
       return sequence;
     },
     retireRead: () => {
+      for (const assessment of owner.assessments.values()) assessment.invalidateRead();
       owner.controller?.abort(); owner.readSequence++; owner.clearTimer();
       owner.clinical = false; owner.contact = false; owner.cases = [];
     },
@@ -200,7 +212,21 @@ function sameDraftValue(before: unknown, after: unknown) {
     && before.length === after.length && before.every((value, index) => Object.is(value, after[index])));
 }
 function makeDraft(): Draft {
+  const strategyListeners = new Set<() => void>();
+  let strategyReadVersion = 0;
   const draft: Draft = { values: new Map(), edits: new Map(), urls: new Set(), active: true, busy: false, uncertain: false, dirty: false,
+    strategyView: {
+      get readVersion() { return strategyReadVersion; },
+      subscribe: (listener) => { strategyListeners.add(listener); return () => { strategyListeners.delete(listener); }; },
+      notify: (refresh = false) => {
+        if (refresh) strategyReadVersion++;
+        for (const listener of [...strategyListeners]) listener();
+      },
+      clear: () => { strategyListeners.clear(); },
+    },
+    settleField: (name, value) => {
+      draft.values.set(name, value); draft.edits.delete(name); draft.dirty = draft.edits.size > 0;
+    },
     activate: () => { draft.active = true; },
     markUncertain: () => { draft.uncertain = true; },
     trackEdit: (name, previous, next) => {
@@ -228,7 +254,7 @@ function disposeDraft(owner: OrthoOwner, key: string) {
   if (!draft) return;
   draft.active = false;
   for (const url of draft.urls) URL.revokeObjectURL(url);
-  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); owner.drafts.delete(key);
+  draft.urls.clear(); draft.values.clear(); draft.edits.clear(); draft.strategyView.clear(); owner.drafts.delete(key);
 }
 function retireOwner(owner: OrthoOwner) {
   owner.active = false; owner.clinical = false; owner.contact = false;
@@ -236,6 +262,8 @@ function retireOwner(owner: OrthoOwner) {
   if (owner.timer !== null) clearTimeout(owner.timer);
   for (const operation of owner.mutations) operation.active = false;
   for (const key of owner.drafts.keys()) disposeDraft(owner, key);
+  for (const assessment of owner.assessments.values()) assessment.retire();
+  owner.assessments.clear();
 }
 function sessionScope(session: SessionInfo | null) {
   return JSON.stringify(session ? [session.username, session.role, session.permissions ?? null] : null);
@@ -252,6 +280,14 @@ function beginMutation(owner: OrthoOwner, draft: Draft, allowed: boolean): Mutat
 }
 function endMutation(owner: OrthoOwner, operation: Mutation) {
   operation.active = false; operation.draft.busy = false; owner.mutations.delete(operation);
+}
+function beginRetryMutation(owner: OrthoOwner, draft: Draft, allowed: boolean): Mutation | null {
+  if (!allowed || !draft.active || !draft.uncertain || draft.busy) return null;
+  // Reconcile only the frozen command; a failed admission keeps it uncertain.
+  draft.uncertain = false;
+  const operation = beginMutation(owner, draft, true);
+  if (!operation) draft.uncertain = true;
+  return operation;
 }
 function mayUpload(session: SessionInfo | null) {
   return !!session?.username?.trim() && (session.role === "admin" || session.role === "reception"
@@ -289,10 +325,19 @@ function useOrthoDraft(key: string, patientId?: number, caseId?: number) {
   const caseGranted = () => owner.active && !owner.denied && owner.clinical
     && (caseId === undefined || owner.standalone || owner.cases.some((row) => row.id === caseId));
   return { owner, draft, session, editable, field, caseGranted,
+    viewActive: () => lease.active && caseGranted(),
+    settle: (name: string, value: unknown) => {
+      if (!caseGranted() || !draft.active || draft.busy || draft.uncertain) return;
+      draft.settleField(name, value); redraw();
+    },
     commit: (name: string, value: unknown) => { if (!owner.active || owner.denied || !draft.active) return; draft.values.set(name, value); redraw(); },
     begin: (allowed = true) => {
       if (!lease.active) return null;
       const operation = beginMutation(owner, draft, allowed && caseGranted());
+      redraw(); return operation;
+    },
+    beginRetry: (allowed = true) => {
+      const operation = beginRetryMutation(owner, draft, allowed && lease.active && caseGranted());
       redraw(); return operation;
     },
     current: (operation: Mutation) => currentMutation(owner, operation),
@@ -334,8 +379,11 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
+  context?: ClinicalNavigationContext;
+  onContextChange?: (context: ClinicalNavigationContext) => unknown;
+  onOpenTreatmentEntry?: () => unknown;
   onClinicalChange?: () => void;
   /** The page owns navigation; cleanup retires only this exact registration. */
   onNavigationGuardChange?: (guard: () => boolean) => () => void;
@@ -347,6 +395,8 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
   const canLeave = useCallback(() => {
     if (!owner.active) return false;
     const drafts = [...owner.drafts.values()].filter((draft) => draft.active);
+    const assessments = [...owner.assessments.values()];
+    if (assessments.some(assessment => !assessment.canLeave(() => true))) return false;
     if (owner.mutations.size > 0 || drafts.some((draft) => draft.busy)) return false;
     if (drafts.some((draft) => draft.uncertain)) {
       return window.confirm("نتيجة الحفظ غير مؤكدة؛ قد يكون الطلب نُفّذ. المغادرة لا تلغي الطلب ولا تعيد إرساله، وستُترك أي مسودة غير محفوظة. هل تريد مغادرة القسم؟");
@@ -354,16 +404,17 @@ export function PatientOrtho({ patientId, onClinicalChange, onNavigationGuardCha
     // A confirmed booking is retained for its receipt, not an unsaved form.
     // Initial field defaults never mark a draft dirty. Confirming departure
     // only permits navigation; the existing owner cleanup disposes the draft.
-    return !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
+    return !assessments.some(assessment => assessment.needsUnloadWarning())
+      && !drafts.some((draft) => draft.dirty && !draft.values.get("booked") && draft.values.get("signed") !== true)
       || window.confirm("هناك عمل غير محفوظ في التقويم. هل تريد تجاهله ومغادرة القسم؟");
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: number; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -463,7 +514,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
   const safeError = (message: string | null) => { if (owner.active && !owner.denied) setError(message); };
 
   const open = cases.find((row) => row.status === "active" || row.status === "retention");
-  const unsignedTodayVisitId = cases.flatMap((row) => row.adjustments)
+  const unsignedTodayVisitId = cases.filter((row) => context?.orthoCaseId === undefined || row.id === context.orthoCaseId).flatMap((row) => row.adjustments)
     .find((entry) => entry.doneOn === today && entry.visitId !== null && !entry.visitSigned)?.visitId ?? null;
   const savedCaseAvailable = saved !== null && cases.some((row) => row.id === saved.caseId);
   const signVisitId = (savedCaseAvailable ? saved?.visitId : null) ?? unsignedTodayVisitId;
@@ -505,8 +556,21 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
     </div>;
   }
 
+  if (context?.patientId !== undefined && context.patientId !== patientId
+    || context?.orthoCaseId !== undefined && !cases.some((row) => row.id === context.orthoCaseId)
+    || context?.clinicalCaseId !== undefined && context.orthoCaseId === undefined) {
+    return <p role="alert" data-testid="ortho-context-unavailable">الحالة المطلوبة غير متاحة في كابينة التقويم. لم يتم اختيار حالة بديلة.</p>;
+  }
+  const visibleCases = context?.orthoCaseId === undefined ? cases : cases.filter((row) => row.id === context.orthoCaseId);
   return (
     <div className="space-y-4" data-testid="patient-ortho-workspace" data-read-state="ready">
+      {onOpenTreatmentEntry ? <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm">
+        <p>لإضافة علاج جديد أو اتفاق سابق، ابدأ من الحساب لربط الخطة والفاتورة أو الرصيد السابق.</p>
+        <button type="button" onClick={() => onOpenTreatmentEntry()} className="mt-2 min-h-11 rounded-lg bg-sky-800 px-3 text-white">إضافة علاج أو اتفاق</button>
+      </div> : null}
+      {context?.orthoCaseId !== undefined ? <TreatmentFinancialContext patientId={patientId} authorityKey={sessionScope(session)} canView={!!session && canViewMoney(session.role)}
+        planId={context.planId} planItemId={context.planItemId} clinicalCaseId={context.clinicalCaseId} orthoCaseId={context.orthoCaseId}
+        onOpenClinicalContext={(reference) => onContextChange?.(reference)} /> : null}
       <button type="button" aria-label="تحديث كابينة التقويم" onClick={load}
         className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold">تحديث كابينة التقويم</button>
       {owner.drafts.get("case-patch")?.uncertain ? <UncertainWrite draft={owner.drafts.get("case-patch")!} /> : null}
@@ -625,10 +689,10 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
       {/* قائمة حالات التقويم مع هيكلية الأركان الأربعة */}
       {cases.length > 0 && (
         <ul className="space-y-4">
-          {cases.map((row) => {
+          {visibleCases.map((row) => {
             const live = row.status === "active" || row.status === "retention";
             const wires = wiresFor(row.slot);
-            const currentPillar: OrthoPillar = activePillars[row.id] ?? "wires";
+            const currentPillar: OrthoPillar = activePillars[row.id] ?? (context?.orthoCaseId === row.id ? context.pillar : undefined) ?? "wires";
 
             return (
               <li
@@ -638,7 +702,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                 }`}
               >
                 {/* رأس الحالة التقويمية */}
-                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                <div className={`border-b border-slate-100 bg-slate-50/70 ${currentPillar === "prescription" ? "p-3 sm:p-4" : "p-4"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-800 text-xs font-bold text-white">
@@ -688,7 +752,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                     ) : null}
 
                   {/* شريط الإحصائيات السريعة ومعدل التقدم */}
-                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                  <div className={`mt-3 grid ${currentPillar === "prescription" ? "grid-cols-4 [&>div]:py-1 sm:[&>div]:py-2" : "grid-cols-2 sm:grid-cols-4"} gap-2 text-center text-xs`}>
                     <div className="rounded-xl bg-white p-2 border border-slate-200/80">
                       <p className="font-extrabold text-navy-900">{monthsText(row.progress.monthsElapsed)}</p>
                       <p className="text-[10px] text-slate-500">انقضى من العلاج</p>
@@ -741,6 +805,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                     return (
                       <button
                         key={tab.key}
+                        aria-label={tab.label}
                         onClick={() => { if (currentCase(row.id)) setPillarForCase(row.id, tab.key); }}
                         className={`flex-1 py-2.5 text-xs font-black transition-all border-b-2 flex items-center justify-center gap-1.5 ${
                           isSelected
@@ -757,7 +822,7 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                 </div>
 
                 {/* محتوى الركن المختار */}
-                <div className="p-4">
+                <div className={currentPillar === "prescription" ? "p-2 sm:p-4" : "p-4"}>
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
@@ -954,48 +1019,50 @@ function PatientOrthoWorkspace({ patientId, onClinicalChange }: { patientId: num
                       {/* التحليل السريري للفكين وتصنيف الحالة (Malocclusion Diagnosis) */}
                       <section className="rounded-2xl border border-slate-200 bg-white p-3.5">
                         <PatientDiagnosis patientId={patientId} orthoCaseId={row.id} onError={safeError} />
+                        <OrthoAssessmentPanelV2 patientId={patientId} caseRow={row} />
                       </section>
                     </div>
                   )}
 
                   {/* ────────────────── الركن الثالث: الخطة والميكانيكا الحيوية ────────────────── */}
                   {currentPillar === "prescription" && (
-                    <div className="space-y-4">
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <h4 className="mb-3 text-xs font-black text-navy-900">
+                    <div className="space-y-2 sm:space-y-4">
+                      <OrthoStrategyPanel patientId={patientId} caseRow={row} />
+                      <div className="rounded-2xl border border-slate-200 bg-white p-2 sm:p-4">
+                        <h4 className="mb-2 text-xs sm:mb-3 font-black text-navy-900">
                           وصفة الجهاز والمواصفات الميكانيكية
                         </h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">نوع الجهاز</span>
-                            <span className="font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
+                        <div className="grid grid-cols-1 gap-0.5 text-xs sm:grid-cols-3 sm:gap-3">
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">نوع الجهاز</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{APPLIANCE_LABEL[row.appliance]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">الفكّان المعالجان</span>
-                            <span className="font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">الفكّان المعالجان</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{ARCHES_LABEL[row.arches]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">مقاس الشق (Slot)</span>
-                            <span className="font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">مقاس الشق (Slot)</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{SLOT_LABEL[row.slot]}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">فلسفة البراكيت</span>
-                            <span className="font-black text-navy-900 font-mono" dir="ltr">
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">فلسفة البراكيت</span>
+                            <span className="min-w-0 break-words font-black text-navy-900 font-mono" dir="ltr">
                               {row.bracketSystem?.trim() ? row.bracketSystem : "غير مسجّلة"}
                             </span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">تاريخ البدء</span>
-                            <span className="font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">تاريخ البدء</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{friendlyDateLong(row.startDate)}</span>
                           </div>
-                          <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-                            <span className="block text-[10px] text-slate-500 font-bold">المدة المخططة</span>
-                            <span className="font-black text-navy-900">{row.plannedMonths} شهرًا</span>
+                          <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 sm:block sm:rounded-xl sm:border sm:border-slate-100 sm:bg-slate-50 sm:p-2.5">
+                            <span className="text-xs text-slate-500 font-bold sm:block">المدة المخططة</span>
+                            <span className="min-w-0 break-words font-black text-navy-900">{row.plannedMonths} شهرًا</span>
                           </div>
                         </div>
 
                         {row.note && (
-                          <div className="mt-3 rounded-xl bg-slate-50 p-3 border border-slate-100 text-xs">
+                          <div className="mt-2 rounded-xl bg-slate-50 p-2 sm:mt-3 sm:p-3 border border-slate-100 text-xs">
                             <span className="block font-bold text-slate-500 mb-1">ملاحظات خطة العلاج والميكانيكا:</span>
                             <p className="text-slate-800">{row.note}</p>
                           </div>
@@ -2034,4 +2101,81 @@ function LegacyBaselineForm({ patientId, today, onSaved, onError }: {
       </button>
     </form>
   );
+}
+
+
+/** The new planning UI shares the existing case-owner draft and mutation guard. */
+function OrthoStrategyPanel({ patientId, caseRow }: { patientId: number; caseRow: OrthoCase }) {
+  const life = useOrthoDraft(`strategy:${caseRow.id}`, patientId, caseRow.id);
+  const [, redrawStrategy] = useState(0);
+  useLayoutEffect(() => {
+    const notify = () => { if (life.viewActive()) redrawStrategy(value => value + 1); };
+    return life.draft.strategyView.subscribe(notify);
+  }, [life]);
+  const notifyStrategy = (refresh = false) => {
+    if (!life.caseGranted() || !life.draft.active) return;
+    life.draft.strategyView.notify(refresh);
+  };
+  const [document, setDocument] = life.field("document", "");
+  const [problemLabel, setProblemLabel] = life.field("problemLabel", "");
+  const [problemSite, setProblemSite] = life.field("problemSite", "");
+  const lifetime: StrategyLifetime = {
+    identity: life.draft, active: life.viewActive, editable: life.editable, denied: () => life.owner.deny(),
+    busy: life.draft.busy, uncertain: life.draft.uncertain, dirty: life.draft.dirty,
+    readVersion: life.draft.strategyView.readVersion, refresh: () => notifyStrategy(true),
+    values: { document, problemLabel, problemSite },
+    change: (field, value) => ({ document: setDocument, problemLabel: setProblemLabel, problemSite: setProblemSite })[field](value),
+    settle: (field, value) => { life.settle(field, value); notifyStrategy(); },
+    begin: () => {
+      const operation = life.begin(life.session?.role === "doctor" || life.session?.role === "admin");
+      if (!operation) return null;
+      return { current: () => life.current(operation), checkHeaders: response => life.checkHeaders(response, operation),
+        markUncertain: () => { life.uncertain(); notifyStrategy(); },
+        finish: () => { life.finish(operation); notifyStrategy(); } };
+    },
+    beginRetry: () => {
+      const operation = life.beginRetry(life.session?.role === "doctor" || life.session?.role === "admin");
+      if (!operation) return null;
+      return { current: () => life.current(operation), checkHeaders: response => life.checkHeaders(response, operation),
+        markUncertain: () => { life.uncertain(); notifyStrategy(); },
+        finish: () => { life.finish(operation); notifyStrategy(); } };
+    },
+  };
+  return <OrthoTreatmentStrategy patientId={patientId} orthoCaseId={caseRow.id}
+    caseTitle={`تقويم ${(caseRow.appliance === null ? "الجهاز غير مسجل" : APPLIANCE_LABEL[caseRow.appliance])} · ${(caseRow.arches === null ? "نطاق العلاج غير مسجل" : ARCHES_LABEL[caseRow.arches])}`} lifetime={lifetime} />;
+}
+
+/** Dedicated assessment lifetime survives parent reads and pillar remounts.
+ * It never uses the strategy document or acknowledges a write from GET. */
+function OrthoAssessmentPanelV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" }) {
+  const parent = useContext(OrthoOwnerContext)!;
+  const session = useSession();
+  const canWrite = session?.role === "admin" || session?.role === "doctor";
+  const [opened, setOpened] = useState(() => parent.assessments.has(caseRow.id));
+  if (!opened) return <button type="button" className="mb-4 min-h-11 rounded-lg border px-3 py-2 text-sm"
+    onClick={() => { if (parent.active && !parent.denied && parent.clinical) setOpened(true); }}>فتح التقييم السريري والقياسات</button>;
+  if (!canWrite) return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} sectionView={sectionView} />;
+  return <OwnedAssessmentV2 patientId={patientId} caseRow={caseRow} sectionView={sectionView} />;
+}
+function OwnedAssessmentV2({ patientId, caseRow, sectionView }: { patientId: number; caseRow: OrthoCase; sectionView?: "interview" | "extraoral" | "intraoral" | "measurements" }) {
+  const parent = useContext(OrthoOwnerContext)!;
+  const [owner] = useState(() => parent.assessments.get(caseRow.id) ?? makeAssessmentOwnerV2({
+    patientId, orthoCaseId: caseRow.id,
+    authorized: () => parent.active && !parent.denied && parent.clinical && parent.cases.some(row => row.id === caseRow.id),
+    deny: () => parent.deny(),
+  }));
+  const [, redraw] = useState(0);
+  useLayoutEffect(() => {
+    parent.assessments.set(caseRow.id, owner); owner.activate();
+    const unsubscribe = owner.subscribe(() => redraw(value => value + 1));
+    return unsubscribe; // Parent retirement owns disposal, not a temporary view.
+  }, [owner, parent, caseRow.id]);
+  const lifetime: AssessmentLifetimeV2 = {
+    identity: owner, active: owner.active, editable: owner.editable, denied: owner.denied,
+    busy: owner.busy, uncertain: owner.uncertain, dirty: owner.dirty, readVersion: owner.readVersion,
+    values: { document: owner.document }, change: (_field, value) => owner.change(value),
+    settle: (_field, value) => owner.settle(value), refresh: owner.refresh,
+    begin: owner.begin, beginRetry: owner.beginRetry,
+  };
+  return <OrthoCaseAssessmentV2 patientId={patientId} orthoCaseId={caseRow.id} lifetime={lifetime} sectionView={sectionView} />;
 }

@@ -181,6 +181,7 @@ export default function OrthoFollowupPage() {
                       {appointment.status === "arrived" ? " · وصل" : " · محجوز"}
                       {appointment.matchBasis === "legacy_type" ? " · مصنف حسب نوع الموعد القديم" : ""}
                       {appointment.matchBasis === "designated_service" ? " · حسب تصنيف الخدمة الحالي" : ""}
+                      {appointment.matchBasis === "planned_case_sessions" ? " · جلسات خطة مرتبطة بهذه الحالة؛ الحجز لا يثبت التنفيذ" : ""}
                     </p>
                   ) : (
                     <p className="mt-0.5 text-[11px] font-bold text-amber-700">لا موعد متابعة تقويم مؤكد</p>
@@ -193,6 +194,7 @@ export default function OrthoFollowupPage() {
                       {past.status === "arrived" ? " · وصل" : " · محجوز"}
                       {past.matchBasis === "legacy_type" ? " · مصنف حسب نوع الموعد القديم" : ""}
                       {past.matchBasis === "designated_service" ? " · حسب تصنيف الخدمة الحالي" : ""}
+                      {past.matchBasis === "planned_case_sessions" ? " · جلسات خطة مرتبطة بهذه الحالة؛ الحجز لا يثبت التنفيذ" : ""}
                     </p>
                   ) : null}
                   {existing.length ? (

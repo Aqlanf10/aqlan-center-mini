@@ -202,16 +202,22 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 }
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
-  const expected = Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0"));
+  const expected = [...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
+    '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061'];
   const actual = files.map((file) => file.version);
-  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql"];
+  const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
+    '0045_hr_staff.sql', '0046_hr_tasks.sql', '0048_hr_contracts_attendance_leaves.sql',
+    '0049_hr_payroll_disbursements.sql', '0050_hr_payroll_integrity.sql',
+    '0051_ortho_treatment_strategy.sql', '0052_ortho_assessment.sql', '0056_hr_employment_history.sql',
+    '0057_hr_schedule_policy_versions.sql', '0058_hr_temporal_write_receipts.sql',
+    '0059_invoice_debt_installments.sql', '0060_historical_treatment_documents.sql', '0061_invoice_correction_lineage.sql'];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
 }
 
 export function artifactContainsSensitiveText(serialized: string): boolean {
-  return /(postgres(?:ql)?:\/\/|["']?(?:password|username|hostname|host|port)["']?\s*[=:]|TEST_DATABASE_URL|DATABASE_URL|POSTGRES_URL|POSTGRES_PRISMA_URL|POSTGRES_URL_NON_POOLING|RAILWAY_[A-Z0-9_]+|(?:127\.0\.0\.1|localhost):\d+|INSERT\s+INTO)/i.test(serialized);
+  return /(postgres(?:ql)?:\/\/|["']?(?:password|username|hostname|host|port)["']?\s*(?:=|:(?!:))|TEST_DATABASE_URL|DATABASE_URL|POSTGRES_URL|POSTGRES_PRISMA_URL|POSTGRES_URL_NON_POOLING|RAILWAY_[A-Z0-9_]+|(?:127\.0\.0\.1|localhost):\d+|INSERT\s+INTO)/i.test(serialized);
 }
 
 export function parseOwnershipCliArgs(argv: string[]): string {
@@ -430,6 +436,12 @@ export async function runSchemaOwnershipCharacterization(
     }
     if (migrationCatalog.registry.rows.length !== provenance.length) {
       throw new Error("SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: unexpected registry row count.");
+    }
+    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058'].includes(item.version));
+    if (runtimeCatalog.registry.rows.length !== runtimeExtensions.length || runtimeExtensions.some(item =>
+      !runtimeCatalog.registry.rows.some(row => row.version === item.version && row.name === item.name
+        && row.checksum === item.checksum && row.adopted === false))) {
+      throw new Error('SCHEMA_OWNERSHIP_RUNTIME_REGISTRY_MISMATCH: expected exact0051–0052 and0056–0058 extension contracts.');
     }
 
     const rawComparison = compareDetailedSchemaCatalogs(migrationCatalog, runtimeCatalog);

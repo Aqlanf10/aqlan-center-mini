@@ -97,7 +97,7 @@ export const DAILY_CLINIC_LEGACY_AGREEMENTS_SQL = `
  SELECT la.id, la.patient_id, la.service_name, la.specialty, la.tooth_code, la.currency,
         la.agreed_minor::text AS agreed_minor, la.previously_paid_minor::text AS previously_paid_minor,
         la.remaining_minor::text AS remaining_minor, la.historical_as_of::text AS historical_as_of,
-        la.status, la.void_reason, la.plan_item_id, la.case_id, la.service_id, la.opening_effect,
+        la.status, la.void_reason, la.plan_item_id, la.case_id, la.service_id, la.opening_effect, la.document_id, la.document_line,
         cs.agreement_id IS NOT NULL AS coverage_recorded, cs.snapshot_tooth_codes AS coverage_teeth,
         cs.snapshot_scope AS coverage_scope,
         CASE WHEN cs.agreement_id IS NULL THEN NULL ELSE json_build_object(
@@ -109,6 +109,17 @@ export const DAILY_CLINIC_LEGACY_AGREEMENTS_SQL = `
    LEFT JOIN legacy_treatment_coverage_snapshots cs ON cs.agreement_id = la.id
   WHERE la.patient_id = ANY($1::int[])
   ORDER BY la.patient_id, la.id`;
+
+/** Header money comes only from the latest append-only revision. NULL line cash
+ * facts must never be coerced to zero or allocated across clinical treatments. */
+export const DAILY_CLINIC_HISTORICAL_DOCUMENTS_SQL = `
+ SELECT d.id, d.patient_id, d.currency, d.line_count, r.version, r.total_minor::text,
+        r.discount_minor::text, r.previously_paid_minor::text, r.remaining_minor::text,
+        r.historical_as_of::text, r.lines
+   FROM legacy_treatment_documents d
+   LEFT JOIN LATERAL (SELECT * FROM legacy_treatment_document_revisions
+     WHERE document_id=d.id ORDER BY version DESC LIMIT 1) r ON TRUE
+  WHERE d.patient_id=ANY($1::int[]) ORDER BY d.id`;
 
 function legacyOpeningEffect(value: unknown): "none" | "created" | "increased" {
   if (value === "none" || value === "created" || value === "increased") return value;
@@ -234,7 +245,8 @@ export async function loadDailyClinicReportSource(
     originalInvoiceId: integer(row.original_invoice_id), correctedInvoiceNumber: String(row.corrected_invoice_number),
     reason: nullableText(row.reason), at: timestamp(row.created_at), actor: String(row.actor),
   }));
-  const legacyAgreements: DailyClinicSourceLegacyAgreement[] = (await rows(runner, DAILY_CLINIC_LEGACY_AGREEMENTS_SQL, [patientIds])).map((row) => ({
+  const legacyRows = await rows(runner, DAILY_CLINIC_LEGACY_AGREEMENTS_SQL, [patientIds]);
+  const legacyAgreements: DailyClinicSourceLegacyAgreement[] = legacyRows.filter((row) => row.document_id == null).map((row) => ({
     id: integer(row.id), patientId: integer(row.patient_id), serviceName: String(row.service_name), specialty: String(row.specialty),
     toothCode: nullableInteger(row.tooth_code), coverageRecorded: row.coverage_recorded === true,
     coverageTeeth: Array.isArray(row.coverage_teeth) ? (row.coverage_teeth as unknown[]).map(integer) : null,
@@ -245,6 +257,42 @@ export async function loadDailyClinicReportSource(
     ...legacyCoverage(row),
     openingEffect: legacyOpeningEffect(row.opening_effect),
   }));
+  const historicalDocuments = (await rows(runner, DAILY_CLINIC_HISTORICAL_DOCUMENTS_SQL, [patientIds])).map((row) => {
+    const id = integer(row.id), patientId = integer(row.patient_id);
+    const linked = legacyRows.filter((line) => line.document_id != null && integer(line.document_id) === id)
+      .sort((a, b) => integer(a.document_line) - integer(b.document_line));
+    if (!Array.isArray(row.lines) || row.lines.length !== integer(row.line_count) || linked.length !== row.lines.length) {
+      throw new DailyClinicReportIntegrityError("Historical document line count conflict");
+    }
+    const recordedLines = row.lines;
+    let lineTotal = 0, lineDiscount = 0;
+    const lines = linked.map((line, index) => {
+      const saved = recordedLines[index] as Record<string, unknown> | null;
+      if (!saved || typeof saved !== "object" || integer(line.document_line) !== index
+        || integer(line.patient_id) !== patientId || line.currency !== row.currency || line.status !== "live"
+        || line.previously_paid_minor !== null || line.remaining_minor !== null || line.opening_effect !== "none"
+        || integer(saved.agreementId) !== integer(line.id) || integer(saved.planItemId) !== integer(line.plan_item_id)
+        || nullableInteger(saved.caseId) !== nullableInteger(line.case_id) || integer(saved.serviceId) !== integer(line.service_id)) {
+        throw new DailyClinicReportIntegrityError("Historical document clinical ownership conflict");
+      }
+      const price = integer(saved.unitPriceMinor), discount = integer(saved.discountMinor), net = integer(saved.netMinor);
+      if (price <= 0 || discount < 0 || discount > price || net !== price - discount) {
+        throw new DailyClinicReportIntegrityError("Historical document line arithmetic conflict");
+      }
+      lineTotal = integer(lineTotal + price); lineDiscount = integer(lineDiscount + discount);
+      return { agreementId: integer(line.id), planItemId: integer(line.plan_item_id), caseId: nullableInteger(line.case_id),
+        serviceName: String(line.service_name), ...legacyCoverage(line) };
+    });
+    if (lineTotal !== integer(row.total_minor) || lineDiscount !== integer(row.discount_minor)) {
+      throw new DailyClinicReportIntegrityError("Historical document aggregate allocation conflict");
+    }
+    return { id, patientId, currency: String(row.currency), version: integer(row.version), totalMinor: integer(row.total_minor),
+      discountMinor: integer(row.discount_minor), previouslyPaidMinor: integer(row.previously_paid_minor), remainingMinor: integer(row.remaining_minor),
+      historicalAsOf: String(row.historical_as_of), lines };
+  });
+  if (legacyRows.some((line) => line.document_id != null && !historicalDocuments.some((document) => document.id === integer(line.document_id)))) {
+    throw new DailyClinicReportIntegrityError("Missing historical document header");
+  }
   const paymentsRaw = await rows(runner, `
     SELECT y.id, y.patient_id, p.full_name AS patient_name, y.receipt_number,
            y.invoice_id, y.plan_id, y.opening_currency, y.currency,
@@ -268,7 +316,7 @@ export async function loadDailyClinicReportSource(
   }));
   const expenses = await loadDailyClinicExpenseReport({ date, timeZone }, runner);
   return { date, clinicTimeZone: timeZone, generatedAt: timestamp(clock[0].generated_at), selectedDayCutoff: timestamp(clock[0].cutoff),
-    visits, plans, items, work, invoices, invoiceLines, invoiceCorrections, legacyAgreements, payments, openings,
+    visits, plans, items, work, invoices, invoiceLines, invoiceCorrections, legacyAgreements, historicalDocuments, payments, openings,
     additionalPlanLinks: sessionLinks.map((row) => ({ planId: integer(row.plan_id), patientId: integer(row.patient_id), visitId: integer(row.visit_id) })),
     expenses };
 }

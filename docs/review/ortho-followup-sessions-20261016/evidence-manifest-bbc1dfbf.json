@@ -1,0 +1,47 @@
+{
+  "base": "928bb7e5d140797c8654fc59016b3beb02acbb14",
+  "sources": {
+    ".github/workflows/ci.yml": "b90bbffd8b600cdc0a53200a7cce569f6bbed8118d275555483a58424eaee30e",
+    "lib/db.ts": "d0d369827fb61f3070d460e2142ddcf546107722b6f233d5ade9fb762c83cbf3",
+    "lib/ortho-planned-followup.ts": "2ea7bdd820d5ba9f5342101ed89bac1b69cf27f245335e0a33212ccf66a64424",
+    "lib/ortho-followup-booking-context.ts": "2bd9566b067f450372b10595da6484478f1c1572d763f4a473b8322e4c64e014",
+    "lib/ortho-followup.ts": "06baee8c1050b042a6e54435ac7e7605bc22b91d3ce93de7a079c843e030b055",
+    "app/ortho/page.tsx": "f8bb38db8b20b24d162370b2652bd88affbc45bd8ced1b978d9ba234edec64d1",
+    "__tests__/ortho-planned-followup.test.ts": "99333b6978f1d32a5a4499169ac5e8c88f1ff88ad98b726fb71bf0d20c37b1b4",
+    "__tests__/postgres/ortho-followup-board-context.test.ts": "d8367cf13fcf933e49a183ef2607c3da97217ba29e9aed4f663f7f819021666b",
+    "__tests__/security-http/ortho-planned-case-followup-built-page.test.ts": "38948dda019f9cddd125887b0ef5d2e377eb2552d12efa7e01b7a03b22f5d3ad"
+  },
+  "files": {
+    "README.md": "62f85e4b700a1d5cdb1ff405444b220614337ab560baa87349402e068b510759",
+    "coordination.json": "73593a0dc78c0ca9ad24546c82a6aa6a391a44fc09127ddc54bf1b1d17e0c363",
+    "evidence/browser-initial.txt": "e170a659be277c0d1ba80322b6bdaceeb54d50f32f09ecae49184accbd0399fb",
+    "evidence/build-initial.txt.gz": "7a9d15b8633cd06596ef1c56e4a9b89f53791870ed196fc6a4ce0f90d896b5a0",
+    "evidence/lint-current.txt": "284e8a5a2e31b4c0002335c0e25f9ec46f5589e46548fe852d57d8f6423e6b81",
+    "evidence/ortho-planned-followup-exact-1280.json": "cf0dbcfee13a0ddf722517eea60fd389687a932b0cf5dbfdf2620c327c5a84cd",
+    "evidence/ortho-planned-followup-exact-1280.png": "1ef34fbe590df3b266f341f0bb0ebbace232f085b488d1dff992be79de52b3ef",
+    "evidence/ortho-planned-followup-exact-390.json": "4f1758227ba0e27025ed366d5596d35be48034a529e978830794cea447e0fb8a",
+    "evidence/ortho-planned-followup-exact-390.png": "f9d66a9bb45734f1b06cdf121628de1fb9a45ddf6314699e3420be77e9adfa3b",
+    "evidence/ortho-planned-followup-review-1280.json": "fd259e35e10e6dcf7560048905d5c0e76401a60b2354d1b86495f4c6c5c77717",
+    "evidence/ortho-planned-followup-review-1280.png": "adaa765080c3cea945136d5c940de64dafa55cd8576834803ef2c98725a45c07",
+    "evidence/ortho-planned-followup-review-390.json": "607257afa93cdd7769ba8238313dbba68dc7683069c5ae659321479fa343d186",
+    "evidence/ortho-planned-followup-review-390.png": "5ecba07538a7ec5c59a6e54fcb1c290d430a57c09f94bcfd6af4ec78f026da98",
+    "evidence/postgres-final.txt": "0e8c24a2751872e6f293fdfac37c231b076a2223c56160a4c557909bea3cd919",
+    "evidence/postgres-initial.txt": "5dd993654c4410e845f139fbecdb403ceb68e6a9ac3614fd33dd9a578a2a48f0",
+    "evidence/postgres-second.txt": "07ffe51be5f3c7ac78cb4f9c46edcb04dffa94770367e9b5c7be20138031aad4",
+    "evidence/types-current.txt": "d19ad367c96de7d684ec1b70c0229fb78457ad3d32123252e3bc07492864063a",
+    "evidence/unit-final.txt": "6a5532a245947a6e59e9e898747440c4f087c6261665a04ed923161af0ccb5e9",
+    "evidence/unit-initial.txt": "16aea17942f1997d6ed0980ee5d48dbdd0e271e98becb1eec1be276f17f79db4",
+    "requirements-matrix.json": "2a00a313a82fe0e64f23b3f5b4bd55eb16e1169d4ca9120cf8c661de41e15065",
+    "shared-db.patch.txt": "4d1301406f028ca16fa8a6cafe254acdaf178ebf67b15cf02dee3188053639df"
+  },
+  "results": {
+    "unit": 164,
+    "postgres": 50,
+    "browser": 9,
+    "build": "success",
+    "types": "success",
+    "lintErrors": 0,
+    "lintExistingWarnings": 8
+  },
+  "buildRawSha256": "1b27937390a345a1295b46179b7ee9b63b1cf02bd8bd9c39f2f5b42e09c57566"
+}

@@ -10,7 +10,9 @@ import { LEGACY_CASE_LABEL, LEGACY_TREATMENT_MESSAGE, type LegacyTreatmentPrevie
 import { newIdempotencyKey } from "@/lib/idempotency-key";
 import { ServiceSelect } from "./ServiceSelect";
 import { useSession } from "./SessionProvider";
+import { DebtRepaymentEditor, readDebtRepaymentDraft, type DebtRepaymentDraft } from "./DebtRepaymentEditor";
 import { ToothSelectionDialog } from "./dental/ToothSelectionDialog";
+import workspace from "./InvoiceWorkspace.module.css";
 import {
   MODE_HINT, emptyToothFields, invoiceToothMode, selectionLabel, selectionOfRow, toothPayload, toothProblem, usesToothChart,
   type ToothFields, type ToothSelection,
@@ -71,6 +73,7 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
   const [previouslyPaidAmount, setPreviouslyPaidAmount] = useState("");
   const [historicalAsOf, setHistoricalAsOf] = useState("");
   const [note, setNote] = useState("");
+  const [repaymentDraft,setRepaymentDraft]=useState<DebtRepaymentDraft>({mode:"full",rows:[]});
   const [read, setRead] = useState<LegacyRead | null>(null);
 
   const clinicalServices = useMemo(
@@ -165,6 +168,8 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
   const saveReady = valid && evidence?.status === "ready" && !mustChoose;
 
   const existingOpening = positions?.find((position) => position.currency === currency) ?? null;
+  const repaymentRemainingMinor=(existingOpening?.remainingMinor??0)+(historical?.remainingMinor??0);
+  const repayment=readDebtRepaymentDraft(repaymentDraft,currency,repaymentRemainingMinor);
   const refused = evidence?.status === "refused";
   const caseText = !casePreview || serviceId === null ? null
     : casePreview.mode === "existing" ? `ستُربط بالحالة الموجودة: ${casePreview.title ?? `#${casePreview.id}`}`
@@ -179,9 +184,10 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
 
   return (
     <section aria-label="علاج بدأ قبل النظام" data-testid="legacy-treatment-form"
-      className="mb-4 rounded-2xl border border-indigo-300 bg-white p-4">
-      <h3 className="text-sm font-bold text-navy-900">علاج بدأ قبل النظام</h3>
-      <p className="mb-3 mt-1 text-xs leading-5 text-slate-600">
+      className={`mb-4 ${workspace.workspace} ${workspace.legacy}`}>
+      <header className={workspace.header}><div><span className={workspace.eyebrow}>اتفاق العلاج · سجل سابق للنظام</span><h3>علاج بدأ قبل النظام</h3></div><span className={workspace.badge}>اتفاق تاريخي</span></header>
+      <div className={workspace.legacyBody}>
+      <p className="mb-4 text-sm leading-7 text-slate-600">
         لحالةٍ بدأت قبل تشغيل النظام: يُحفظ الاتفاق الأصلي والمدفوع سابقًا كحقيقةٍ تاريخية، ويدخل الحساب المتبقي وحده رصيدًا سابقًا.
         لا فاتورة بكامل الاتفاق ولا سند للمدفوع سابقًا ولا حركة في الصندوق.
         تقدّم العلاج السابق غير معلوم من المبالغ؛ لا يُنشئ التسجيل جلسات سابقة أو موافقة علاج تلقائية.
@@ -233,7 +239,7 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
         <label className="min-w-0 text-xs font-semibold">
           عملة الاتفاق
           <select value={currency} aria-label="عملة الاتفاق" className={fieldClass}
-            onChange={(event) => { if (isCurrency(event.target.value)) { setCurrency(event.target.value); setAgreedAmount(""); setPreviouslyPaidAmount(""); } }}>
+            onChange={(event) => { if (isCurrency(event.target.value)) { setCurrency(event.target.value); setAgreedAmount(""); setPreviouslyPaidAmount("");setRepaymentDraft({mode:"full",rows:[]}); } }}>
             {CURRENCIES.map((value) => <option key={value} value={value}>{CURRENCY_LABEL[value]}</option>)}
           </select>
         </label>
@@ -319,14 +325,18 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
         ) : null}
       </div>
 
+      {historical ? <div className="mt-3">
+        {existingOpening ? <p className="mb-2 text-xs text-slate-600">الجدول يوزع كامل المتبقي على الرصيد السابق بهذه العملة، بما فيه متبقي هذا الاتفاق. وجود جدول نشط يتطلب مراجعته أولًا.</p> : null}
+        <DebtRepaymentEditor value={repaymentDraft} onChange={setRepaymentDraft} currency={currency} remainingMinor={repaymentRemainingMinor} today={today} disabled={busy} />
+      </div> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" disabled={busy || !saveReady}
+        <button type="button" disabled={busy || !saveReady || !repayment.ok}
           onClick={async () => {
-            if (submitting.current || busy || !saveReady) return;
+            if (submitting.current || busy || !saveReady || !repayment.ok) return;
             submitting.current = true;
             try {
               await onSubmit({ serviceId, ...sitePayload, caseId: caseId || null, currency, agreedAmount,
-                previouslyPaidAmount, historicalAsOf, note: note.trim() || null, idempotencyKey });
+                previouslyPaidAmount, historicalAsOf, note: note.trim() || null, idempotencyKey,repaymentTerms:repayment.value,repaymentRemainingMinor });
             } finally { submitting.current = false; }
           }}
           className="min-h-11 rounded-xl bg-indigo-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
@@ -335,6 +345,7 @@ function LegacyTreatmentFormContent({ patientId, base, services, positions, busy
         <button type="button" onClick={onCancel} className="min-h-11 rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
           إلغاء
         </button>
+      </div>
       </div>
       {chartOpen && service ? (
         <ToothSelectionDialog purpose="legacy_agreement" patientId={patientId} mode={toothMode} serviceName={service.name}

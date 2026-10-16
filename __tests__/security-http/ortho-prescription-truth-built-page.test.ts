@@ -69,6 +69,18 @@ async function openPrescription(card: Locator) {
 }
 async function capture(card: Locator, kind: "unrecorded" | "closed-custom", width: number) {
   const value = prescription(card);
+  const strategy = card.getByTestId("ortho-strategy-editor");
+  const bridgeMessage = "هذه الحالة غير مرتبطة بعد بقائمة المشاكل السريرية. لم يُنشأ رابط تلقائي.";
+  await strategy.getByText(bridgeMessage, { exact: true }).waitFor();
+  const refresh = strategy.getByRole("button", { name: "تحديث سجل الخطة", exact: true });
+  const caseId = (await card.locator("span").filter({ hasText: /^#\d+$/ }).textContent())!.slice(1);
+  const [read] = await Promise.all([
+    card.page().waitForResponse(response => response.request().method() === "GET"
+      && new URL(response.url()).pathname.endsWith(`/ortho/${caseId}/strategy`)),
+    refresh.click(),
+  ]);
+  expect(read.status()).toBe(200);
+  await strategy.getByText(bridgeMessage, { exact: true }).waitFor();
   await card.page().evaluate(async () => { await document.fonts.ready; });
   // Keep the complete case card below the app's fixed top bar. Scrolling only
   // its prescription into view allowed the header to cover case identity/status
@@ -86,6 +98,30 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(frame.top).toBeGreaterThanOrEqual(79);
   expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
   expect(frame.identityExposed).toBe(true);
+  const visibleContent = await card.evaluate(element => {
+    const strategy = element.querySelector('[data-testid="ortho-strategy-editor"]')!;
+    const specifications = strategy.nextElementSibling!;
+    const nodes = [...strategy.querySelectorAll("h4, p, button"), ...specifications.querySelectorAll("h4, span, p")];
+    return nodes.map(node => {
+      const rect = node.getBoundingClientRect();
+      const range = document.createRange(); range.selectNodeContents(node);
+      const text = range.getBoundingClientRect();
+      return { text: node.textContent, fontSize: parseFloat(getComputedStyle(node).fontSize),
+        visible: getComputedStyle(node).visibility, display: getComputedStyle(node).display,
+        left: text.left, right: text.right, top: text.top, bottom: text.bottom,
+        exposed: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)),
+        isButton: node.tagName === "BUTTON", width: rect.width, height: rect.height };
+    });
+  });
+  for (const entry of visibleContent) {
+    expect(entry.fontSize).toBeGreaterThanOrEqual(12);
+    expect(entry.visible).toBe("visible"); expect(entry.display).not.toBe("none");
+    expect(entry.left).toBeGreaterThanOrEqual(-1); expect(entry.right).toBeLessThanOrEqual(width + 1);
+    expect(entry.top).toBeGreaterThanOrEqual(79); expect(entry.bottom).toBeLessThanOrEqual(frame.viewportHeight + 1);
+    expect(entry.exposed).toBe(true);
+    if (entry.isButton) { expect(entry.width).toBeGreaterThanOrEqual(44); expect(entry.height).toBeGreaterThanOrEqual(44); }
+  }
+
   const geometry = await value.evaluate((element) => {
     const box = element.getBoundingClientRect(); const cell = element.parentElement!.getBoundingClientRect();
     const range = document.createRange(); range.selectNodeContents(element); const text = range.getBoundingClientRect();
@@ -108,7 +144,7 @@ async function capture(card: Locator, kind: "unrecorded" | "closed-custom", widt
   expect(geometry.cell.right).toBeLessThanOrEqual(width + 1);
   expect(geometry.documentWidth).toBeLessThanOrEqual(width + 1);
   await card.screenshot({ path: `.settings-ui-artifacts/ortho-prescription-${kind}-${width}.png` });
-  return { ...geometry, frame };
+  return { ...geometry, frame, visibleContent };
 }
 
 describe("built orthodontic prescription truth", () => {

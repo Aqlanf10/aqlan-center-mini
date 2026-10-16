@@ -15,7 +15,10 @@ jobs:
   quality:
     name: Typecheck, Lint, Test, Postgres, Audit, Build
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    # The complete HR and financial PostgreSQL/browser suites exceeded the old
+    # 55-minute job budget. Keep every gate and individual test deadline intact;
+    # allow the full sequence to finish within a bounded execution window.
+    timeout-minutes: 75
 
     services:
       # (P1.3/P1.22) PostgreSQL حقيقي لاختبارات التكامل والتزامن والاستعادة —
@@ -246,7 +249,40 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils
 
       - name: HTTP security integration tests
+        env:
+          HR_EVIDENCE_DIR: /tmp/hr-evidence
         run: npm run test:security-http
+
+      # Explicit synthetic HR viewports/PDFs only; no browser state, cookies,
+      # traces, database dumps or employee data from an external environment.
+      - name: Upload employee workflow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hr-workflow-ui
+          path: |
+            /tmp/hr-evidence/hr-workforce-390.png
+            /tmp/hr-evidence/hr-profile-390.png
+            /tmp/hr-evidence/hr-profile-1280.png
+            /tmp/hr-evidence/hr-profile-attendance-390.png
+            /tmp/hr-evidence/hr-profile-attendance-1280.png
+            /tmp/hr-evidence/hr-profile-result-390.json
+            /tmp/hr-evidence/hr-profile-result-1280.json
+            /tmp/hr-evidence/hr-profile-wage-sources.pdf
+            /tmp/hr-evidence/hr-workforce-1280.png
+            /tmp/hr-evidence/hr-phone-390.png
+            /tmp/hr-evidence/hr-tasks-desktop-1280.png
+            /tmp/hr-evidence/future-approved-390.png
+            /tmp/hr-evidence/future-approved-1280.png
+            /tmp/hr-evidence/terminal-blocked-390.png
+            /tmp/hr-evidence/terminal-blocked-1280.png
+            /tmp/hr-evidence/hr-nextday-approved-390.png
+            /tmp/hr-evidence/hr-nextday-approved-1280.png
+            /tmp/hr-evidence/hr-payroll-multipage-390.pdf
+            /tmp/hr-evidence/hr-staff-report.pdf
+            /tmp/hr-evidence/hr-tasks-report.pdf
+          if-no-files-found: error
+          retention-days: 7
 
       # Exactly three intercepted synthetic report screenshots; no live clinic data,
       # traces, browser storage, or broad artifact directory uploads.
@@ -855,6 +891,29 @@ jobs:
             .settings-ui-artifacts/ortho-unbooked-followup-1280.png
             .settings-ui-artifacts/ortho-unbooked-followup-390-bounds.json
             .settings-ui-artifacts/ortho-unbooked-followup-1280-bounds.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      # Exact synthetic read-only planned case links and review cards only.
+      - name: Upload planned orthodontic case follow-up evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-planned-case-followup-ui
+          path: |
+            .settings-ui-artifacts/ortho-planned-followup-exact-390.png
+            .settings-ui-artifacts/ortho-planned-followup-exact-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-review-390.png
+            .settings-ui-artifacts/ortho-planned-followup-review-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-conflict-390.png
+            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-exact-390.json
+            .settings-ui-artifacts/ortho-planned-followup-exact-1280.json
+            .settings-ui-artifacts/ortho-planned-followup-review-390.json
+            .settings-ui-artifacts/ortho-planned-followup-review-1280.json
+            .settings-ui-artifacts/ortho-planned-followup-conflict-390.json
+            .settings-ui-artifacts/ortho-planned-followup-conflict-1280.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

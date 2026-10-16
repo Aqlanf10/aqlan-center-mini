@@ -267,6 +267,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
 
   it("keeps the baseline probe action-sensitive and leaves schema, registry, and rows unchanged", async () => {
     const before = await projectDetailedSchemaReadOnly(client);
+    const registryBefore = (await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows;
     const rowsBefore = async () => ({
       visits: (await client.query("SELECT * FROM visits ORDER BY id")).rows,
       parties: (await client.query("SELECT * FROM parties ORDER BY id")).rows,
@@ -291,8 +292,12 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
     expect(await projectDetailedSchemaReadOnly(client)).toEqual(before);
     expect(await rowsBefore()).toEqual(originalRows);
     expect(await doctorFk(client)).toEqual(initialFk);
-    expect((await client.query("SELECT to_regclass('public.schema_migrations') IS NULL AS absent")).rows)
-      .toEqual([{ absent: path !== "fresh_numbered" }]);
+    expect((await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
+    // Runtime now registers only the three reviewed HR extensions. The probe
+    // must still never adopt the legacy baseline or rewrite any existing row.
+    const expectedFiles = path === "fresh_numbered" ? files : files.filter(file => ["0051", "0052", "0056", "0057", "0058"].includes(file.version));
+    expect(registryBefore.map(({version,name,checksum,adopted}) => ({version,name,checksum,adopted})))
+      .toEqual(expectedFiles.map(({version,name,checksum}) => ({version,name,checksum,adopted:false})));
     expect((await client.query(
       "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'aqlan_baseline_probe%'",
     )).rows).toEqual([]);

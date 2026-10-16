@@ -11,7 +11,10 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
   });
   it("does not register schema, a numbered migration, a route or an editor", () => {
     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
-    expect(readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name))).toHaveLength(43);
+    const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
+    expect(files).toHaveLength(56);
+    expect(files.filter(name => /^005[12]_/.test(name)).sort()).toEqual(["0051_ortho_treatment_strategy.sql", "0052_ortho_assessment.sql"]);
+    expect(readdirSync("migrations")).toContain("0061_invoice_correction_lineage.sql");
     expect(readdirSync("migrations").some((name) => name.includes("periodontal"))).toBe(false);
     expect(readdirSync("app/api/patients/[id]")).not.toContain("periodontal");
     expect(readFileSync("components/DentalChart.tsx", "utf8")).toContain("recordingAvailable={false}");

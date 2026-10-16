@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { correctPayment, getSettings, type CorrectPaymentRefusal, type CorrectionTarget } from "@/lib/db";
+import { correctPayment, getPayment, getPaymentByIdempotencyKey, getSettings, type CorrectPaymentRefusal, type CorrectionTarget } from "@/lib/db";
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
 import { requireSession } from "@/lib/session";
@@ -70,7 +70,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (amountMinor === null || amountMinor <= 0) {
       return NextResponse.json({ message: "اكتب مبلغ السند الصحيح أكبر من صفر." }, { status: 400 });
     }
-    const exchangeRate = rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
+    const saved=idempotencyKey?await getPaymentByIdempotencyKey(idempotencyKey):null;
+    const original=saved?await getPayment(paymentId):null;
+    const exchangeRate = saved&&saved.patientId===original?.patientId&&saved.createdBy===session.username&&saved.currency===currency
+      ?saved.exchangeRate:rateFromSettings(await getSettings(), currency, CLINIC_BASE_CURRENCY);
     if (exchangeRate === null) {
       return NextResponse.json({ message: "سعر الصرف غير مضبوط. اضبطه في الإعدادات قبل قبض عملة أجنبية." }, { status: 409 });
     }
@@ -100,7 +103,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ message: refusal.message }, { status: refusal.status });
     }
     return NextResponse.json(
-      { reversal: result.reversal, replacement: result.replacement, replayed: result.replayed },
+      { original: result.original, reversal: result.reversal, replacement: result.replacement, replayed: result.replayed, idempotencyKey },
       { status: result.replayed ? 200 : 201 },
     );
   } catch {

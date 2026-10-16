@@ -1,0 +1,1050 @@
+[
+  {
+    "relname": "hr_attendance_corrections",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "identity_evidence",
+        "jsonb",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "requester_user_id",
+        "integer",
+        false,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_attendance_corrections_identity_evidence_check",
+        "c",
+        true,
+        "CHECK (((identity_evidence IS NULL) OR (jsonb_typeof(identity_evidence) = 'object'::text)))"
+      ],
+      [
+        "hr_attendance_corrections_requester_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      ]
+    ],
+    "indexes": [],
+    "triggers": [
+      [
+        "hr_correction_identity_immutable",
+        "O",
+        "CREATE TRIGGER hr_correction_identity_immutable BEFORE UPDATE ON public.hr_attendance_corrections FOR EACH ROW EXECUTE FUNCTION aqlan_hr_request_identity_immutable()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_request_identity_immutable()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id OR NEW.identity_evidence IS DISTINCT FROM OLD.identity_evidence THEN\n    RAISE EXCEPTION 'request identity evidence is immutable';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_identity_events",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "action",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "actor_user_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "details",
+        "jsonb",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "id",
+        "bigint",
+        true,
+        "nextval('hr_identity_events_id_seq'::regclass)",
+        "",
+        ""
+      ],
+      [
+        "reason",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "recorded_at",
+        "timestamp with time zone",
+        true,
+        "clock_timestamp()",
+        "",
+        ""
+      ],
+      [
+        "revision",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "run_id",
+        "uuid",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "source_ref",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "staff_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_identity_events_action_check",
+        "c",
+        true,
+        "CHECK ((action = ANY (ARRAY['create'::text, 'confirm'::text, 'link_account'::text, 'close_account'::text, 'link_party'::text, 'close_party'::text])))"
+      ],
+      [
+        "hr_identity_events_action_not_null",
+        "n",
+        true,
+        "NOT NULL action"
+      ],
+      [
+        "hr_identity_events_actor_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_identity_events_actor_user_id_not_null",
+        "n",
+        true,
+        "NOT NULL actor_user_id"
+      ],
+      [
+        "hr_identity_events_details_check",
+        "c",
+        true,
+        "CHECK ((jsonb_typeof(details) = 'object'::text))"
+      ],
+      [
+        "hr_identity_events_details_not_null",
+        "n",
+        true,
+        "NOT NULL details"
+      ],
+      [
+        "hr_identity_events_id_not_null",
+        "n",
+        true,
+        "NOT NULL id"
+      ],
+      [
+        "hr_identity_events_pkey",
+        "p",
+        true,
+        "PRIMARY KEY (id)"
+      ],
+      [
+        "hr_identity_events_reason_check",
+        "c",
+        true,
+        "CHECK (((length(btrim(reason)) >= 3) AND (length(btrim(reason)) <= 1000)))"
+      ],
+      [
+        "hr_identity_events_reason_not_null",
+        "n",
+        true,
+        "NOT NULL reason"
+      ],
+      [
+        "hr_identity_events_recorded_at_not_null",
+        "n",
+        true,
+        "NOT NULL recorded_at"
+      ],
+      [
+        "hr_identity_events_revision_check",
+        "c",
+        true,
+        "CHECK ((revision > 0))"
+      ],
+      [
+        "hr_identity_events_revision_not_null",
+        "n",
+        true,
+        "NOT NULL revision"
+      ],
+      [
+        "hr_identity_events_run_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (run_id) REFERENCES hr_identity_import_runs(id) DEFERRABLE INITIALLY DEFERRED"
+      ],
+      [
+        "hr_identity_events_run_id_not_null",
+        "n",
+        true,
+        "NOT NULL run_id"
+      ],
+      [
+        "hr_identity_events_source_ref_check",
+        "c",
+        true,
+        "CHECK (((length(btrim(source_ref)) >= 3) AND (length(btrim(source_ref)) <= 200)))"
+      ],
+      [
+        "hr_identity_events_source_ref_not_null",
+        "n",
+        true,
+        "NOT NULL source_ref"
+      ],
+      [
+        "hr_identity_events_staff_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (staff_id) REFERENCES hr_staff(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_identity_events_staff_id_not_null",
+        "n",
+        true,
+        "NOT NULL staff_id"
+      ]
+    ],
+    "indexes": [
+      [
+        "hr_identity_events_pkey",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_identity_events_pkey ON public.hr_identity_events USING btree (id)"
+      ],
+      [
+        "hr_identity_events_staff_idx",
+        false,
+        true,
+        true,
+        true,
+        "CREATE INDEX hr_identity_events_staff_idx ON public.hr_identity_events USING btree (staff_id, revision, id)"
+      ]
+    ],
+    "triggers": [
+      [
+        "hr_identity_events_append_only",
+        "O",
+        "CREATE TRIGGER hr_identity_events_append_only BEFORE DELETE OR UPDATE ON public.hr_identity_events FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_append_only()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'hr identity evidence is append-only'; END;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_identity_import_runs",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "actor_user_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "id",
+        "uuid",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "intent_digest",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "operation",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "plan_digest",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "recorded_at",
+        "timestamp with time zone",
+        true,
+        "clock_timestamp()",
+        "",
+        ""
+      ],
+      [
+        "request_id",
+        "text",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "response",
+        "jsonb",
+        true,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_identity_import_runs_actor_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_identity_import_runs_actor_user_id_not_null",
+        "n",
+        true,
+        "NOT NULL actor_user_id"
+      ],
+      [
+        "hr_identity_import_runs_actor_user_id_operation_request_id_key",
+        "u",
+        true,
+        "UNIQUE (actor_user_id, operation, request_id)"
+      ],
+      [
+        "hr_identity_import_runs_id_not_null",
+        "n",
+        true,
+        "NOT NULL id"
+      ],
+      [
+        "hr_identity_import_runs_intent_digest_check",
+        "c",
+        true,
+        "CHECK ((intent_digest ~ '^[a-f0-9]{64}$'::text))"
+      ],
+      [
+        "hr_identity_import_runs_intent_digest_not_null",
+        "n",
+        true,
+        "NOT NULL intent_digest"
+      ],
+      [
+        "hr_identity_import_runs_operation_check",
+        "c",
+        true,
+        "CHECK ((operation = ANY (ARRAY['apply'::text, 'correct'::text])))"
+      ],
+      [
+        "hr_identity_import_runs_operation_not_null",
+        "n",
+        true,
+        "NOT NULL operation"
+      ],
+      [
+        "hr_identity_import_runs_pkey",
+        "p",
+        true,
+        "PRIMARY KEY (id)"
+      ],
+      [
+        "hr_identity_import_runs_plan_digest_check",
+        "c",
+        true,
+        "CHECK ((plan_digest ~ '^[a-f0-9]{64}$'::text))"
+      ],
+      [
+        "hr_identity_import_runs_plan_digest_key",
+        "u",
+        true,
+        "UNIQUE (plan_digest)"
+      ],
+      [
+        "hr_identity_import_runs_plan_digest_not_null",
+        "n",
+        true,
+        "NOT NULL plan_digest"
+      ],
+      [
+        "hr_identity_import_runs_recorded_at_not_null",
+        "n",
+        true,
+        "NOT NULL recorded_at"
+      ],
+      [
+        "hr_identity_import_runs_request_id_check",
+        "c",
+        true,
+        "CHECK (((length(request_id) >= 8) AND (length(request_id) <= 100)))"
+      ],
+      [
+        "hr_identity_import_runs_request_id_not_null",
+        "n",
+        true,
+        "NOT NULL request_id"
+      ],
+      [
+        "hr_identity_import_runs_response_check",
+        "c",
+        true,
+        "CHECK ((jsonb_typeof(response) = 'object'::text))"
+      ],
+      [
+        "hr_identity_import_runs_response_not_null",
+        "n",
+        true,
+        "NOT NULL response"
+      ]
+    ],
+    "indexes": [
+      [
+        "hr_identity_import_runs_actor_user_id_operation_request_id_key",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_identity_import_runs_actor_user_id_operation_request_id_key ON public.hr_identity_import_runs USING btree (actor_user_id, operation, request_id)"
+      ],
+      [
+        "hr_identity_import_runs_pkey",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_identity_import_runs_pkey ON public.hr_identity_import_runs USING btree (id)"
+      ],
+      [
+        "hr_identity_import_runs_plan_digest_key",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_identity_import_runs_plan_digest_key ON public.hr_identity_import_runs USING btree (plan_digest)"
+      ]
+    ],
+    "triggers": [
+      [
+        "hr_identity_runs_append_only",
+        "O",
+        "CREATE TRIGGER hr_identity_runs_append_only BEFORE DELETE OR UPDATE ON public.hr_identity_import_runs FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_append_only()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_append_only()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN RAISE EXCEPTION 'hr identity evidence is append-only'; END;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_leave_requests",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "identity_evidence",
+        "jsonb",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "requester_user_id",
+        "integer",
+        false,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_leave_requests_identity_evidence_check",
+        "c",
+        true,
+        "CHECK (((identity_evidence IS NULL) OR (jsonb_typeof(identity_evidence) = 'object'::text)))"
+      ],
+      [
+        "hr_leave_requests_requester_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      ]
+    ],
+    "indexes": [],
+    "triggers": [
+      [
+        "hr_leave_identity_immutable",
+        "O",
+        "CREATE TRIGGER hr_leave_identity_immutable BEFORE UPDATE ON public.hr_leave_requests FOR EACH ROW EXECUTE FUNCTION aqlan_hr_request_identity_immutable()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_request_identity_immutable()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF NEW.requester_user_id IS DISTINCT FROM OLD.requester_user_id OR NEW.identity_evidence IS DISTINCT FROM OLD.identity_evidence THEN\n    RAISE EXCEPTION 'request identity evidence is immutable';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_staff",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "contract_kind",
+        "text",
+        true,
+        "'unspecified'::text",
+        "",
+        ""
+      ],
+      [
+        "end_date",
+        "date",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "hire_date",
+        "date",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "identity_revision",
+        "integer",
+        true,
+        "0",
+        "",
+        ""
+      ],
+      [
+        "salary_amount_minor",
+        "bigint",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "salary_currency",
+        "text",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "salary_effective_on",
+        "date",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "salary_period",
+        "text",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "user_id",
+        "integer",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "user_linked_at",
+        "timestamp with time zone",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "work_status",
+        "text",
+        true,
+        "'unconfirmed'::text",
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_staff_contract_kind_check",
+        "c",
+        true,
+        "CHECK ((contract_kind = ANY (ARRAY['unspecified'::text, 'commission'::text, 'salary'::text, 'salary_commission'::text])))"
+      ],
+      [
+        "hr_staff_identity_revision_check",
+        "c",
+        true,
+        "CHECK ((identity_revision >= 0))"
+      ],
+      [
+        "hr_staff_pay_terms_complete",
+        "c",
+        true,
+        "CHECK (((contract_kind = 'commission'::text) OR ((contract_kind = 'unspecified'::text) AND (salary_amount_minor IS NULL) AND (salary_currency IS NULL) AND (salary_period IS NULL) AND (salary_effective_on IS NULL)) OR ((contract_kind = ANY (ARRAY['salary'::text, 'salary_commission'::text])) AND (salary_amount_minor IS NOT NULL) AND (salary_currency IS NOT NULL) AND (salary_period IS NOT NULL) AND (salary_effective_on IS NOT NULL))))"
+      ],
+      [
+        "hr_staff_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"
+      ],
+      [
+        "hr_staff_user_id_key",
+        "u",
+        true,
+        "UNIQUE (user_id)"
+      ],
+      [
+        "hr_staff_work_status_check",
+        "c",
+        true,
+        "CHECK ((work_status = ANY (ARRAY['unconfirmed'::text, 'active'::text, 'suspended'::text, 'ended'::text])))"
+      ]
+    ],
+    "indexes": [
+      [
+        "hr_staff_user_id_key",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_user_id_key ON public.hr_staff USING btree (user_id)"
+      ]
+    ],
+    "triggers": [
+      [
+        "hr_identity_legacy_guard",
+        "O",
+        "CREATE TRIGGER hr_identity_legacy_guard BEFORE INSERT OR UPDATE ON public.hr_staff FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_legacy_guard()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_legacy_guard()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF TG_OP = 'UPDATE' THEN\n    IF NEW.identity_revision < OLD.identity_revision OR NEW.identity_revision > OLD.identity_revision + 1 THEN\n      RAISE EXCEPTION 'identity revision must advance one step';\n    END IF;\n    IF OLD.identity_revision > 0 AND (NEW.user_id IS DISTINCT FROM OLD.user_id\n      OR NEW.user_linked_at IS DISTINCT FROM OLD.user_linked_at) THEN\n      RAISE EXCEPTION 'converted identity preserves the legacy access link';\n    END IF;\n  END IF;\n  IF NEW.user_id IS NOT NULL AND (TG_OP='INSERT' OR NEW.user_id IS DISTINCT FROM OLD.user_id) THEN\n    -- The same account lock is taken by the explicit-link INSERT trigger. The\n    -- check follows the lock so a concurrent writer cannot claim the other side.\n    IF current_setting('transaction_isolation') <> 'read committed' THEN\n      RAISE EXCEPTION 'identity account claims require read committed isolation' USING ERRCODE='40001';\n    END IF;\n    PERFORM pg_advisory_xact_lock(hashtextextended('hr-person-account:' || NEW.user_id::text,0));\n    IF EXISTS(SELECT 1 FROM hr_staff_account_links WHERE user_id=NEW.user_id AND staff_id<>NEW.id AND closed_at IS NULL) THEN\n      RAISE EXCEPTION 'account already belongs to another converted person'\n        USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';\n    END IF;\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_staff_account_links",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "closed_at",
+        "timestamp with time zone",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "closed_event_id",
+        "bigint",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "id",
+        "bigint",
+        true,
+        "nextval('hr_staff_account_links_id_seq'::regclass)",
+        "",
+        ""
+      ],
+      [
+        "opened_at",
+        "timestamp with time zone",
+        true,
+        "clock_timestamp()",
+        "",
+        ""
+      ],
+      [
+        "opened_event_id",
+        "bigint",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "staff_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "user_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_staff_account_links_check",
+        "c",
+        true,
+        "CHECK (((closed_at IS NULL) = (closed_event_id IS NULL)))"
+      ],
+      [
+        "hr_staff_account_links_check1",
+        "c",
+        true,
+        "CHECK (((closed_at IS NULL) OR (closed_at >= opened_at)))"
+      ],
+      [
+        "hr_staff_account_links_closed_event_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (closed_event_id) REFERENCES hr_identity_events(id)"
+      ],
+      [
+        "hr_staff_account_links_id_not_null",
+        "n",
+        true,
+        "NOT NULL id"
+      ],
+      [
+        "hr_staff_account_links_opened_at_not_null",
+        "n",
+        true,
+        "NOT NULL opened_at"
+      ],
+      [
+        "hr_staff_account_links_opened_event_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (opened_event_id) REFERENCES hr_identity_events(id)"
+      ],
+      [
+        "hr_staff_account_links_opened_event_id_not_null",
+        "n",
+        true,
+        "NOT NULL opened_event_id"
+      ],
+      [
+        "hr_staff_account_links_pkey",
+        "p",
+        true,
+        "PRIMARY KEY (id)"
+      ],
+      [
+        "hr_staff_account_links_staff_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (staff_id) REFERENCES hr_staff(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_staff_account_links_staff_id_not_null",
+        "n",
+        true,
+        "NOT NULL staff_id"
+      ],
+      [
+        "hr_staff_account_links_user_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_staff_account_links_user_id_not_null",
+        "n",
+        true,
+        "NOT NULL user_id"
+      ]
+    ],
+    "indexes": [
+      [
+        "hr_staff_account_links_current_user",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_account_links_current_user ON public.hr_staff_account_links USING btree (user_id) WHERE (closed_at IS NULL)"
+      ],
+      [
+        "hr_staff_account_links_pkey",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_account_links_pkey ON public.hr_staff_account_links USING btree (id)"
+      ],
+      [
+        "hr_staff_account_links_staff_history",
+        false,
+        true,
+        true,
+        true,
+        "CREATE INDEX hr_staff_account_links_staff_history ON public.hr_staff_account_links USING btree (staff_id, user_id, id)"
+      ]
+    ],
+    "triggers": [
+      [
+        "hr_account_link_history",
+        "O",
+        "CREATE TRIGGER hr_account_link_history BEFORE DELETE OR UPDATE ON public.hr_staff_account_links FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_history()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_link_history()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'hr identity links cannot be deleted'; END IF;\n  IF OLD.closed_at IS NOT NULL OR NEW.closed_at IS NULL OR NEW.closed_event_id IS NULL\n    OR (to_jsonb(NEW) - 'closed_at' - 'closed_event_id') IS DISTINCT FROM\n       (to_jsonb(OLD) - 'closed_at' - 'closed_event_id') THEN\n    RAISE EXCEPTION 'hr identity link may only be closed once with evidence';\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.closed_event_id AND e.staff_id=NEW.staff_id\n    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'close_account' ELSE 'close_party' END\n    AND e.details->>'linkId'=NEW.id::text) THEN\n    RAISE EXCEPTION 'link closure requires matching identity event';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ],
+      [
+        "hr_identity_account_source",
+        "O",
+        "CREATE TRIGGER hr_identity_account_source BEFORE INSERT ON public.hr_staff_account_links FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_source()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_link_source()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF TG_TABLE_NAME='hr_staff_account_links' THEN\n    IF current_setting('transaction_isolation') <> 'read committed' THEN\n      RAISE EXCEPTION 'identity account claims require read committed isolation' USING ERRCODE='40001';\n    END IF;\n    PERFORM pg_advisory_xact_lock(hashtextextended('hr-person-account:' || (to_jsonb(NEW)->>'user_id'),0));\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_staff WHERE id=NEW.staff_id AND identity_revision>0) THEN\n    RAISE EXCEPTION 'identity links require a converted person';\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.opened_event_id AND e.staff_id=NEW.staff_id\n    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'link_account' ELSE 'link_party' END\n    AND e.details->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'userId' ELSE 'partyId' END\n      = (to_jsonb(NEW)->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'user_id' ELSE 'party_id' END)) THEN\n    RAISE EXCEPTION 'link requires matching identity event';\n  END IF;\n  IF TG_TABLE_NAME='hr_staff_account_links' AND EXISTS(SELECT 1 FROM hr_staff\n    WHERE user_id=(to_jsonb(NEW)->>'user_id')::int AND id<>NEW.staff_id) THEN\n    RAISE EXCEPTION 'account has a reserved legacy access link'\n      USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ]
+    ]
+  },
+  {
+    "relname": "hr_staff_party_links",
+    "relkind": "r",
+    "relpersistence": "p",
+    "relrowsecurity": false,
+    "columns": [
+      [
+        "closed_at",
+        "timestamp with time zone",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "closed_event_id",
+        "bigint",
+        false,
+        null,
+        "",
+        ""
+      ],
+      [
+        "id",
+        "bigint",
+        true,
+        "nextval('hr_staff_party_links_id_seq'::regclass)",
+        "",
+        ""
+      ],
+      [
+        "opened_at",
+        "timestamp with time zone",
+        true,
+        "clock_timestamp()",
+        "",
+        ""
+      ],
+      [
+        "opened_event_id",
+        "bigint",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "party_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ],
+      [
+        "staff_id",
+        "integer",
+        true,
+        null,
+        "",
+        ""
+      ]
+    ],
+    "constraints": [
+      [
+        "hr_staff_party_links_check",
+        "c",
+        true,
+        "CHECK (((closed_at IS NULL) = (closed_event_id IS NULL)))"
+      ],
+      [
+        "hr_staff_party_links_check1",
+        "c",
+        true,
+        "CHECK (((closed_at IS NULL) OR (closed_at >= opened_at)))"
+      ],
+      [
+        "hr_staff_party_links_closed_event_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (closed_event_id) REFERENCES hr_identity_events(id)"
+      ],
+      [
+        "hr_staff_party_links_id_not_null",
+        "n",
+        true,
+        "NOT NULL id"
+      ],
+      [
+        "hr_staff_party_links_opened_at_not_null",
+        "n",
+        true,
+        "NOT NULL opened_at"
+      ],
+      [
+        "hr_staff_party_links_opened_event_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (opened_event_id) REFERENCES hr_identity_events(id)"
+      ],
+      [
+        "hr_staff_party_links_opened_event_id_not_null",
+        "n",
+        true,
+        "NOT NULL opened_event_id"
+      ],
+      [
+        "hr_staff_party_links_party_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_staff_party_links_party_id_not_null",
+        "n",
+        true,
+        "NOT NULL party_id"
+      ],
+      [
+        "hr_staff_party_links_pkey",
+        "p",
+        true,
+        "PRIMARY KEY (id)"
+      ],
+      [
+        "hr_staff_party_links_staff_id_fkey",
+        "f",
+        true,
+        "FOREIGN KEY (staff_id) REFERENCES hr_staff(id) ON DELETE RESTRICT"
+      ],
+      [
+        "hr_staff_party_links_staff_id_not_null",
+        "n",
+        true,
+        "NOT NULL staff_id"
+      ]
+    ],
+    "indexes": [
+      [
+        "hr_staff_party_links_current_party",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_party_links_current_party ON public.hr_staff_party_links USING btree (party_id) WHERE (closed_at IS NULL)"
+      ],
+      [
+        "hr_staff_party_links_current_staff",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_party_links_current_staff ON public.hr_staff_party_links USING btree (staff_id) WHERE (closed_at IS NULL)"
+      ],
+      [
+        "hr_staff_party_links_pkey",
+        true,
+        true,
+        true,
+        true,
+        "CREATE UNIQUE INDEX hr_staff_party_links_pkey ON public.hr_staff_party_links USING btree (id)"
+      ]
+    ],
+    "triggers": [
+      [
+        "hr_identity_party_kind",
+        "O",
+        "CREATE TRIGGER hr_identity_party_kind BEFORE INSERT ON public.hr_staff_party_links FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_party_kind()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_party_kind()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF NOT EXISTS(SELECT 1 FROM parties WHERE id=NEW.party_id AND kind IN ('doctor','employee')) THEN\n    RAISE EXCEPTION 'hr financial identity requires doctor or employee party';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ],
+      [
+        "hr_identity_party_source",
+        "O",
+        "CREATE TRIGGER hr_identity_party_source BEFORE INSERT ON public.hr_staff_party_links FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_source()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_link_source()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF TG_TABLE_NAME='hr_staff_account_links' THEN\n    IF current_setting('transaction_isolation') <> 'read committed' THEN\n      RAISE EXCEPTION 'identity account claims require read committed isolation' USING ERRCODE='40001';\n    END IF;\n    PERFORM pg_advisory_xact_lock(hashtextextended('hr-person-account:' || (to_jsonb(NEW)->>'user_id'),0));\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_staff WHERE id=NEW.staff_id AND identity_revision>0) THEN\n    RAISE EXCEPTION 'identity links require a converted person';\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.opened_event_id AND e.staff_id=NEW.staff_id\n    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'link_account' ELSE 'link_party' END\n    AND e.details->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'userId' ELSE 'partyId' END\n      = (to_jsonb(NEW)->>CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'user_id' ELSE 'party_id' END)) THEN\n    RAISE EXCEPTION 'link requires matching identity event';\n  END IF;\n  IF TG_TABLE_NAME='hr_staff_account_links' AND EXISTS(SELECT 1 FROM hr_staff\n    WHERE user_id=(to_jsonb(NEW)->>'user_id')::int AND id<>NEW.staff_id) THEN\n    RAISE EXCEPTION 'account has a reserved legacy access link'\n      USING ERRCODE='23505', CONSTRAINT='hr_identity_account_person_unique';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ],
+      [
+        "hr_party_link_history",
+        "O",
+        "CREATE TRIGGER hr_party_link_history BEFORE DELETE OR UPDATE ON public.hr_staff_party_links FOR EACH ROW EXECUTE FUNCTION aqlan_hr_identity_link_history()",
+        "CREATE OR REPLACE FUNCTION public.aqlan_hr_identity_link_history()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'hr identity links cannot be deleted'; END IF;\n  IF OLD.closed_at IS NOT NULL OR NEW.closed_at IS NULL OR NEW.closed_event_id IS NULL\n    OR (to_jsonb(NEW) - 'closed_at' - 'closed_event_id') IS DISTINCT FROM\n       (to_jsonb(OLD) - 'closed_at' - 'closed_event_id') THEN\n    RAISE EXCEPTION 'hr identity link may only be closed once with evidence';\n  END IF;\n  IF NOT EXISTS(SELECT 1 FROM hr_identity_events e WHERE e.id=NEW.closed_event_id AND e.staff_id=NEW.staff_id\n    AND e.action=CASE WHEN TG_TABLE_NAME='hr_staff_account_links' THEN 'close_account' ELSE 'close_party' END\n    AND e.details->>'linkId'=NEW.id::text) THEN\n    RAISE EXCEPTION 'link closure requires matching identity event';\n  END IF;\n  RETURN NEW;\nEND;\n$function$\n"
+      ]
+    ]
+  }
+]

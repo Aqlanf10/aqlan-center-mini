@@ -1,0 +1,492 @@
+{
+  "branch": "feat/invoice-monthly-schedule-20261014",
+  "pr": "https://github.com/Aqlanf10/aqlan-center-mini/pull/333",
+  "implementationCheckpoint": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+  "syntheticOnly": true,
+  "artifacts": [
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/historical-contract-admin-1280.png",
+      "bytes": 151324,
+      "sha256": "15ea0c896c826fc5b0cb73ecd5290c5bd94c49b36b1acf95eedcdf0339c2f354"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/historical-contract-admin.pdf",
+      "bytes": 249744,
+      "sha256": "39c2e85faafad71435a71d726409da4f71f1a574910d0e25b9cd8cbdb4ee140d"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/historical-contract-reception-390.png",
+      "bytes": 132129,
+      "sha256": "635651d86b489f107b663ad04919faf09c518c60170a692fe119658474cd7ca1"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/historical-contract-reception.pdf",
+      "bytes": 249845,
+      "sha256": "dd8d5b51ca2d1e4f075cd76823feb028e149cd8677cd23540c01765f1dfb0462"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-admin-1280.png",
+      "bytes": 116629,
+      "sha256": "70ed7489bd0a120b7aad2c7da8bb59efeb129c3c23bbb99ec72ec8b046c78324"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-admin.pdf",
+      "bytes": 247673,
+      "sha256": "0f75900c609ee0133198f07cd34e5b2f3a45e505856d7b6b14bfa9c6287b97ef"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-reception-390.png",
+      "bytes": 95965,
+      "sha256": "2635719494004070bb1524bbafb1ff8e5bf103dd478d0379502d0641e36974ed"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-contract-reception.pdf",
+      "bytes": 247734,
+      "sha256": "36fe8eaa93cf30b1cba5ea435cb7f76868c5c37b3c9aa065a4bf545c1d9873e4"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-SAR-admin-1280.png",
+      "bytes": 199911,
+      "sha256": "18fa118eb4be373a2f2066b655bbce010bb5f9482acb91a698e42fb976da03da"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-SAR-reception-390.png",
+      "bytes": 144386,
+      "sha256": "f2020a933e944d687d8e9abbfc12f719503cf41d1c6a6076013a681b2d378081"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-USD-admin-1280.png",
+      "bytes": 198170,
+      "sha256": "ee9ede62469197f1da715a3a5b26380d502293be8a8f262500681efe3c88bc6b"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-USD-reception-390.png",
+      "bytes": 142602,
+      "sha256": "8db2954dd54f69f3ba09f8c1e98ecae54c6765246b96113e4312beeaf2feaa2e"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-YER-admin-1280.png",
+      "bytes": 193941,
+      "sha256": "91f4a8e9fb966ad88af5a3156c43d4031653cb431bd906d0014821e7b59ada33"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quote-YER-reception-390.png",
+      "bytes": 141643,
+      "sha256": "c29468e062d8c566ed9be12c701278568880b25cd00a4a8f9d3350c3713a12e1"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quoted-admin-1280.png",
+      "bytes": 248741,
+      "sha256": "0245d08f5398a5812047880e9710723418a8a2927e94e591024f5aa5110f6b95"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-quoted-reception-390.png",
+      "bytes": 188458,
+      "sha256": "4e1930ccf0c9b5a05384a168b43f80879560c0d40f4fc8a2b424f5796d803762"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-rounded-zero-admin-1280.png",
+      "bytes": 206359,
+      "sha256": "98031e9a3b6300ee81f6db7cc447a45b303954678106c60ac323323aa025ff18"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-rounded-zero-reception-390.png",
+      "bytes": 149034,
+      "sha256": "a0871ffbbf5500eb9a4f03ff8776e4772247417577a7f19d963e302b44f3a47d"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-statement-admin-1280.png",
+      "bytes": 45847,
+      "sha256": "92e471af587bd3ffaa65a93281fc0044120f516589d75335cccb8f79c0bdd37b"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-statement-reception-390.png",
+      "bytes": 38613,
+      "sha256": "16390e09cf69b061426673007a957be60e5ee7b50efd63105c96df4b0506c0a1"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-template-converted-admin-1280.png",
+      "bytes": 266445,
+      "sha256": "bcfff0b7536809887e0f0f760893f408e7ee1b86ad3c2839af5980cd89821453"
+    },
+    {
+      "path": "docs/evidence/invoice-pricing-contract-20261014/invoice-template-converted-reception-390.png",
+      "bytes": 204496,
+      "sha256": "76e2c513c7ef15aeb87ad4564ce47e91b245922eaca51c90c65663e4b6411cab"
+    }
+  ],
+  "checks": [
+    {
+      "label": "invoice-quote-source-complete-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "seconds": 20.418,
+      "before": {
+        "head": "fdc1d54685e355d019bf4f2062184335c606a594",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "after": {
+        "head": "fdc1d54685e355d019bf4f2062184335c606a594",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "logSha256": "ae1d4ee22cca828d90b4155e239a161b804f316d130ab5ffb4a692d0854ce1e8"
+    },
+    {
+      "label": "invoice-quote-complete-full-unit",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--reporter=default",
+        "--reporter=json",
+        "--outputFile=/workspace/reviews/invoice-resume-20261014/invoice-quote-complete-full-unit-results.json"
+      ],
+      "exitCode": 0,
+      "seconds": 302.034,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "975a70e3bb7c38dba7a2269421c59b62d2790b9920b55b00241dd71f021c3bb8",
+        "files": 1937
+      },
+      "logSha256": "f127985c40599a65bedfddbb16212bb7540a59db59ae185aa9e1336bc4be7516"
+    },
+    {
+      "label": "invoice-quote-financial-postgres",
+      "command": [
+        "npm",
+        "run",
+        "test:postgres",
+        "--",
+        "__tests__/postgres/invoice-catalog-authority.test.ts",
+        "__tests__/postgres/invoice-template-linkage.test.ts",
+        "__tests__/postgres/historical-document-storage.test.ts",
+        "__tests__/postgres/debt-installment-collection.test.ts",
+        "__tests__/postgres/debt-installments-storage.test.ts",
+        "__tests__/postgres/historical-debt-repayment.test.ts",
+        "__tests__/postgres/invoice-settlement-position.test.ts",
+        "__tests__/postgres/invoice-revision.test.ts",
+        "__tests__/postgres/invoice-correction.test.ts",
+        "__tests__/postgres/receipt-correction.test.ts",
+        "__tests__/postgres/invoice-walkout-lineage.test.ts",
+        "__tests__/postgres/daily-clinic-report-writers.test.ts",
+        "__tests__/postgres/daily-clinic-report-invoice-linkage.test.ts",
+        "__tests__/postgres/opening-balance-currency.test.ts",
+        "__tests__/postgres/shift-close.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 64.885,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "logSha256": "d5ddc42705c4266a277a5c60e57cf47f5ea1fecd001d513e042631acead86c96"
+    },
+    {
+      "label": "invoice-quote-financial-http",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/invoice-quote-contract-ui.test.ts",
+        "__tests__/security-http/invoice-monthly-schedule-ui.test.ts",
+        "__tests__/security-http/invoice-workspace-acceptance-ui.test.ts",
+        "__tests__/security-http/manual-invoice-discount-http.test.ts",
+        "__tests__/security-http/debt-repayment-workspace-ui.test.ts",
+        "__tests__/security-http/historical-document-workspace-ui.test.ts",
+        "__tests__/security-http/invoice-currency-transition-ui.test.ts",
+        "__tests__/security-http/invoice-visual-evidence-journey.test.ts",
+        "__tests__/security-http/daily-clinic-real-records-ui.test.ts",
+        "__tests__/security-http/invoice-correction-ui-journey.test.ts",
+        "__tests__/security-http/invoice-clinic-continuity-journey.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 189.336,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "6e62d558106b4853c76a2502c0df461f6d48b5d2055e80be3932d716b2fbd7be",
+        "files": 1937
+      },
+      "logSha256": "cd15b296425811a093f831ab020c9197f18f78b04bb956e5e007f28100ac5dc1"
+    },
+    {
+      "label": "invoice-contract-currency-refund-lineage",
+      "command": [
+        "npm",
+        "run",
+        "test:postgres",
+        "--",
+        "__tests__/postgres/invoice-revision.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 12.579,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "logSha256": "9124bc6726952bb9d59f28ad0c90f035f97449de830c31ea4a1a31955e74eb8a"
+    },
+    {
+      "label": "invoice-final-numbering-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "seconds": 16.93,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "f4f84039426b95c7fd93cf57bef9655bda80708c8af2b19826a3fa9b7305402a",
+        "sourceAndTestsSha256": "b758ef04fb5876f0bef8d086f3102cfabff8d537c051ead840bf86a57fda69d1",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "f4f84039426b95c7fd93cf57bef9655bda80708c8af2b19826a3fa9b7305402a",
+        "sourceAndTestsSha256": "b758ef04fb5876f0bef8d086f3102cfabff8d537c051ead840bf86a57fda69d1",
+        "files": 1937
+      },
+      "logSha256": "707b3a84a52008eb82f7865dda3a0c458def3100dafee4e557d67c7d494d37a9"
+    },
+    {
+      "label": "invoice-final-numbering-browser",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/invoice-quote-contract-ui.test.ts",
+        "__tests__/security-http/invoice-monthly-schedule-ui.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 30.28,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "f4f84039426b95c7fd93cf57bef9655bda80708c8af2b19826a3fa9b7305402a",
+        "sourceAndTestsSha256": "b758ef04fb5876f0bef8d086f3102cfabff8d537c051ead840bf86a57fda69d1",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "f4f84039426b95c7fd93cf57bef9655bda80708c8af2b19826a3fa9b7305402a",
+        "sourceAndTestsSha256": "b758ef04fb5876f0bef8d086f3102cfabff8d537c051ead840bf86a57fda69d1",
+        "files": 1937
+      },
+      "logSha256": "73b052fe797b024828852375ce77a4cb6fe7d2e9a166a245602e2f69aa0c9684"
+    },
+    {
+      "label": "invoice-final-review-typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "seconds": 8.431,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "logSha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060"
+    },
+    {
+      "label": "invoice-final-review-lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "exitCode": 0,
+      "seconds": 78.95,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "f4f84039426b95c7fd93cf57bef9655bda80708c8af2b19826a3fa9b7305402a",
+        "sourceAndTestsSha256": "b758ef04fb5876f0bef8d086f3102cfabff8d537c051ead840bf86a57fda69d1",
+        "files": 1937
+      },
+      "logSha256": "f922b5f1fd64f84cf3f74c5eb932b9f0643e1d00475c7613929d4e0f2d439dbf"
+    },
+    {
+      "label": "invoice-final-review-money",
+      "command": [
+        "npm",
+        "run",
+        "scan:money"
+      ],
+      "exitCode": 0,
+      "seconds": 0.592,
+      "before": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "after": {
+        "head": "d8339f7ff17847553f153c8bf06e34a10b816b88",
+        "appSourceSha256": "8f53cffa3c630b6bf79b8b0bf140878e14b0fa63993e164cd94df83459938fea",
+        "sourceAndTestsSha256": "4d296d7671c84e74e02871cb5231ddb8f31f35e61d8ec0674dfbcfdf32b07597",
+        "files": 1937
+      },
+      "logSha256": "e379a47c23e24d7bb24fde45ab41acc15ba982e43e217959d27787067dca4d75"
+    },
+    {
+      "label": "invoice-rounded-zero-boundary-unit",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "__tests__/invoice-price-quote.test.ts",
+        "__tests__/invoice-template.test.ts",
+        "__tests__/invoice-template-preview.test.ts",
+        "__tests__/invoice-pricing.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 1.668,
+      "before": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "8bdfa7b575d3529ff71632c8e0bd7b0d68bbfe7bfa24d4a3a1bb1c9e8eff78f8",
+        "sourceAndTestsSha256": "7aef0e94f2c662811ca5492beddc9eb4f2fa1927df6a5edf27d237e8f3d00488",
+        "files": 1937
+      },
+      "after": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "8bdfa7b575d3529ff71632c8e0bd7b0d68bbfe7bfa24d4a3a1bb1c9e8eff78f8",
+        "sourceAndTestsSha256": "7aef0e94f2c662811ca5492beddc9eb4f2fa1927df6a5edf27d237e8f3d00488",
+        "files": 1937
+      },
+      "logSha256": "63768f6888072467da0f2f34ff952a983f11ad3e1c4c7242541775a2b1a787ff"
+    },
+    {
+      "label": "invoice-rounded-zero-final-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "seconds": 16.047,
+      "before": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "after": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "logSha256": "b18f96740c63c20b7945b01093d74748981ec8a2b4cb74421a01d5a208e01396"
+    },
+    {
+      "label": "invoice-rounded-zero-final-lint",
+      "command": [
+        "node_modules/.bin/eslint",
+        "lib/invoice-price-quote.ts",
+        "lib/invoice-input.ts",
+        "lib/invoice-template.ts",
+        "components/PatientLedger.tsx",
+        "__tests__/invoice-price-quote.test.ts",
+        "__tests__/invoice-template.test.ts",
+        "__tests__/security-http/invoice-quote-contract-ui.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 2.724,
+      "before": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "after": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "logSha256": "3e3a14f9f82d785d1845c4363bb8b63d6fa066c0456684d3a04c801e8a3f3a8f"
+    },
+    {
+      "label": "invoice-rounded-zero-browser",
+      "command": [
+        "npm",
+        "run",
+        "test:security-http",
+        "--",
+        "__tests__/security-http/invoice-quote-contract-ui.test.ts"
+      ],
+      "exitCode": 0,
+      "seconds": 24.971,
+      "before": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "after": {
+        "head": "7c6df4be010212e9ea6b85989788cbdbef807889",
+        "appSourceSha256": "7df15b9b7ab5c010fad2b149706ec0d1496eba0facacfb23575fae83152f9862",
+        "sourceAndTestsSha256": "dc24a2bdfc37eb9b4fdcd3db01f989ca4580b53b924b6bd8be21dac43ec8c61f",
+        "files": 1937
+      },
+      "logSha256": "c621f3fbff214bcf146c85103afc9a973a8b54946aa144cda396c4e959d77114"
+    }
+  ],
+  "remaining": "Required CI on final pushed head; no merge/deployment authorized.",
+  "reviewedCheckpoint": "7c6df4be010212e9ea6b85989788cbdbef807889",
+  "roundedZeroCorrection": "Converted0 source snapshot is not an accepted automatic offer; positive manual price and invoice reason required; native0 and rounding unchanged."
+}

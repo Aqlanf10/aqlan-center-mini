@@ -1,9 +1,10 @@
 /**
- * Read-only periodic Ortho follow-up classification. Not wired to the board.
+ * Read-only periodic Ortho follow-up classification used by the board.
  * Inputs are projections of existing records, not new persistent links.
  * A match identifies appointment purpose; it does not prove exact case linkage
  * or completion of clinical work. Due dates are deliberately not an input.
  */
+import { plannedFollowupRefusal, type PlannedFollowupFacts } from "./ortho-planned-followup";
 export interface FollowupTarget {
   patientId: number;
   orthoCaseId: number;
@@ -35,13 +36,14 @@ export interface FollowupBookingFacts {
     orthoCaseId: number | null;
   } | null;
   plannedVisitId: number | null;
+  plannedVisit?: PlannedFollowupFacts | null;
 }
 
 export type FollowupBookingClass = "identified_followup" | "other" | "needs_review" | "excluded";
 export interface FollowupBookingDecision {
   classification: FollowupBookingClass;
   reason: string;
-  basis: "designated_service" | "legacy_type" | null;
+  basis: "designated_service" | "legacy_type" | "planned_case_sessions" | null;
 }
 
 const SERVICE_SPECIALTIES = new Set([
@@ -123,9 +125,17 @@ export function classifyFollowupBooking(target: FollowupTarget, booking: Followu
     // Canonical referral specialties currently have no orthodontics identifier.
     if (specialty !== "other") return decision("needs_review", "contrary_referral_specialty");
   }
-  // A planned visit can span specialties. Defer until item/session facts exist;
-  // shared plan_id or doctor_id alone must never satisfy this classifier.
-  if (plannedVisitId !== null) return decision("needs_review", "planned_visit_requires_review");
+  // Pending sessions must resolve all the way to this patient's exact case.
+  // This proves linkage only; the periodic-purpose checks below still apply.
+  if (plannedVisitId !== null) {
+    const refusal = plannedFollowupRefusal(target, booking.id, plannedVisitId as number, own(booking, "plannedVisit"));
+    if (refusal) return decision("needs_review", refusal);
+  } else if (own(booking, "plannedVisit") != null) {
+    return decision("needs_review", "inconsistent_planned_visit");
+  }
+  const identified = (reason: string, basis: "designated_service" | "legacy_type") => plannedVisitId !== null
+    ? decision("identified_followup", "planned_periodic_case_sessions", "planned_case_sessions")
+    : decision("identified_followup", reason, basis);
 
   const type = own(booking, "appointmentType");
   if (type !== undefined && type !== null && (typeof type !== "string" || !LEGACY_TYPES.has(type))) {
@@ -135,7 +145,7 @@ export function classifyFollowupBooking(target: FollowupTarget, booking: Followu
   if (serviceId === null) {
     if (service !== null) return decision("needs_review", "inconsistent_service");
     return type === "follow_up"
-      ? decision("identified_followup", "service_less_legacy", "legacy_type")
+      ? identified("service_less_legacy", "legacy_type")
       : type === undefined || type === null || type === "other"
         ? decision("needs_review", "untyped_legacy") : decision("other", "different_legacy_type");
   }
@@ -155,7 +165,7 @@ export function classifyFollowupBooking(target: FollowupTarget, booking: Followu
   if ((legacyType !== null && legacyType !== "follow_up") || (type != null && type !== "follow_up")) {
     return decision("needs_review", "conflicting_periodic_type");
   }
-  return decision("identified_followup", "designated_periodic_service", "designated_service");
+  return identified("designated_periodic_service", "designated_service");
 }
 
 export type ClassifiedFollowupBooking = FollowupBookingDecision & {

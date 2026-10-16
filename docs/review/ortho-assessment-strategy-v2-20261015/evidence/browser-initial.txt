@@ -1,0 +1,41 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts (2 tests | 1 failed) 48910ms
+     × saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 390px 18280ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts > existing linked episodes: real built assessment/strategy editors > saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 390px
+TimeoutError: locator.click: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: /السجلات والسيفالومتري/ })[22m
+
+ ❯ openAssessment __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts:35:69
+     33| async function openAssessment(page: Page, patient: number) {
+     34|   await page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=or…
+     35|   await page.getByRole("button", { name: /السجلات والسيفالومتري/ }).cl…
+       |                                                                     ^
+     36|   await page.getByRole("button", { name: "فتح التقييم السريري والقياسا…
+     37|   await page.getByTestId("assessment-v2-saved").waitFor();
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts:50:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  20:59:40
+   Duration  54.74s (transform 40ms, setup 0ms, import 523ms, tests 48.91s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

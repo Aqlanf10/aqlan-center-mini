@@ -11,8 +11,9 @@
  * البند اليدوي بلا خدمة يبقى حرًّا — سعرٌ يُكتب لا يُقارن بشيء (ويُدقَّق في invoice.create).
  */
 import { decideProcedurePrice, type PriceOverrideKind } from "./price-authority";
-import { catalogPriceIn, type ForeignRates, type PricedService } from "./service-pricing";
+import { type ForeignRates, type PricedService } from "./service-pricing";
 import { CLINIC_BASE_CURRENCY, type Currency } from "./money";
+import { invoiceCatalogPrice } from "./invoice-catalog-price";
 
 export interface InvoiceLineAuthorityInput {
   description: string;
@@ -23,6 +24,7 @@ export interface InvoiceLineAuthorityInput {
   /** هل كُتب السعر صراحةً؟ بلا سعرٍ مكتوب يؤخذ سعر الدليل فلا انحراف. */
   explicit: boolean;
   reason: string | null;
+  convertedQuoteAccepted?: boolean;
 }
 
 export interface InvoicePriceOverride {
@@ -47,6 +49,8 @@ export function checkInvoiceAuthority(input: {
   totalMinor: number;
   discountMinor: number;
   discountReason: string | null;
+  /** Invoice catalogue commands only. Plans/visits keep their existing policy. */
+  requireInvoiceManualReason?: boolean;
 }): InvoiceAuthorityDecision {
   const overrides: InvoicePriceOverride[] = [];
   /* مرجع الحد المجمَّع: كل بندٍ بسعر دليله المقرَّر إن كان له، وإلا بسعره المكتوب — فخصم
@@ -58,11 +62,24 @@ export function checkInvoiceAuthority(input: {
       referenceMinor += quantity * Math.max(0, line.requestedMinor);
       continue;
     }
-    const priced = catalogPriceIn(line.service, input.currency, input.rates);
-    // سعرٌ خاص بعملةٍ أجنبية قرّره المالك مقرَّرٌ بذاته؛ والمحوَّل يتبع تقرير السعر اليمني.
-    const configured = priced.minor === null ? false
-      : priced.source === "catalog" && input.currency !== CLINIC_BASE_CURRENCY ? true
-        : line.service.priceConfigured;
+    const priced = { minor: invoiceCatalogPrice(line.service, input.currency) };
+    const configured = priced.minor !== null;
+    if (input.requireInvoiceManualReason && !configured && !line.convertedQuoteAccepted && (line.reason?.trim().length ?? 0) < 3) {
+      return { ok: false, message: `اكتب سبب التسعير اليدوي لخدمة «${line.description}» بهذه العملة.` };
+    }
+    if (!configured && line.convertedQuoteAccepted) {
+      referenceMinor += quantity * Math.max(0, line.requestedMinor);
+      continue;
+    }
+    // An explicit native zero is a configured price, never an unpriced offer.
+    if (input.requireInvoiceManualReason && priced.minor === 0 && line.requestedMinor > 0) {
+      if (input.role !== "admin") return { ok: false, message: `سعر «${line.description}» أعلى من سعر الدليل — رفع السعر للمدير وحده.` };
+      if ((line.reason?.trim().length ?? 0) < 3) return { ok: false, message: `اكتب سبب تغيير سعر «${line.description}» عن سعر الدليل.` };
+      overrides.push({ description: line.description, kind: "increase", catalogMinor: 0, requestedMinor: line.requestedMinor,
+        discountPercent: null, reason: line.reason!.trim().slice(0, 300) });
+      referenceMinor += quantity * line.requestedMinor;
+      continue;
+    }
     const decision = decideProcedurePrice({
       serviceName: line.description,
       catalogMinor: priced.minor ?? 0,

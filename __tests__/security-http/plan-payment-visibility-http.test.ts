@@ -247,7 +247,8 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
       expect(await content.getByRole("button", { name: "تحصيل قسط", exact: true }).count()).toBe(0);
       expect(await content.getByLabel("أسطح البند", { exact: true }).inputValue()).toBe("MO");
       expect(await content.getByLabel("كيف وُثّقت الموافقة").inputValue()).toBe("Synthetic unsaved consent draft");
-      expect(await content.getByRole("button", { name: "⚡ خطة سريعة", exact: true }).isDisabled()).toBe(true);
+      // This owning doctor can view payments but cannot issue financial entries.
+      expect(await content.getByTestId("plans-open-treatment-entry").count()).toBe(0);
       expect(await content.innerText()).not.toContain("لا توجد خطط علاج");
       mode = "denied";
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -263,7 +264,7 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
       expect(await content.getByText("المدفوع", { exact: true }).count()).toBe(0);
       expect(await content.innerText()).not.toContain(title);
       expect(await content.innerText()).not.toContain("لا توجد خطط علاج");
-      expect(await content.getByRole("button", { name: "⚡ خطة سريعة", exact: true }).isDisabled()).toBe(true);
+      expect(await content.getByTestId("plans-open-treatment-entry").count()).toBe(0);
       await readableCard(content);
       await content.screenshot({ path: `.settings-ui-artifacts/plan-payment-denied-${width}.png` });
       expect(writes).toEqual([]); expect(external).toEqual([]); expect(errors).toEqual([]);
