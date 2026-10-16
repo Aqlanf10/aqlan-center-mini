@@ -10,6 +10,7 @@ import { useSession } from "@/components/SessionProvider";
 import { PageHeader } from "@/components/PageHeader";
 import { HrTasksPanel } from "@/components/hr/TasksPanel";
 import { HrStaffPanel } from "@/components/hr/StaffPanel";
+import { HrIdentityPreviewPanel } from "@/components/hr/IdentityPreviewPanel";
 import { HrContractsPanel } from "@/components/hr/ContractsPanel";
 import { HrAttendancePanel } from "@/components/hr/AttendancePanel";
 import { HrLeavesPanel } from "@/components/hr/LeavesPanel";
@@ -88,6 +89,7 @@ function HrPageView() {
   const TABS = [
     { id: "tasks" as HrTab, label: "المهام", icon: "✓", visible: true },
     { id: "staff" as HrTab, label: "الطاقم", icon: "👥", visible: admin },
+    { id: "identity" as HrTab, label: "معاينة الهوية", icon: "≡", visible: admin },
     { id: "contracts" as HrTab, label: "العقود", icon: "📄", visible: admin },
     { id: "attendance" as HrTab, label: "الدوام والحضور", icon: "⏱️", visible: admin || session?.role === "reception" },
     { id: "leaves" as HrTab, label: "الإجازات", icon: "🌴", visible: true },
@@ -149,6 +151,7 @@ function HrPageView() {
         <HrHistoryDraftProvider view={tab}>
         {tab === "tasks" && <HrTasksPanel session={session} />}
         {tab === "staff" && admin && <HrStaffPanel key={`${owner}:${staffId}`} />}
+        {tab === "identity" && admin && <HrIdentityPreviewPanel key={owner} />}
         {tab === "contracts" && admin && <HrContractsPanel key={`${owner}:${staffId}:${contractId}`} session={session} pendingSave={contractSaves[owner]} saveAdmission={saveAdmission} mountSaveAdmission={saveAdmissionGate.mount} onReserveSave={reserveContractSave} onSettleSave={settleContractSave} />}
         {tab === "attendance" && <HrAttendancePanel key={`${owner}:${staffId}`} isAdmin={admin} />}
         {tab === "leaves" && <HrLeavesPanel key={`${owner}:${staffId}`} isAdmin={admin} />}

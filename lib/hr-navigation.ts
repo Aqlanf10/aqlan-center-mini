@@ -1,4 +1,4 @@
-export const HR_TABS = ['tasks', 'staff', 'contracts', 'attendance', 'leaves', 'payroll', 'reports', 'settings'] as const;
+export const HR_TABS = ['tasks', 'staff', 'identity', 'contracts', 'attendance', 'leaves', 'payroll', 'reports', 'settings'] as const;
 export type HrTab = typeof HR_TABS[number];
 export const PROFILE_TABS = ['overview', 'contract', 'attendance', 'leaves'] as const;
 export type HrProfileTab = typeof PROFILE_TABS[number];
