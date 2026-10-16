@@ -422,6 +422,255 @@ describe("P49/51/55/61 custody allocation transactions (no financial posting)",(
   })).resolves.toMatchObject({reviewRequired:true,remainingQuantity:"0"});
   expect((await custody.readDoctorCustody(doctorA)).closableLots.find(r=>r.lotId===f5.lot)).toBeUndefined();
  });
+ it("fa900 review P2: cumulative evidence retirement prevents subtracting later event w2/c2 across two earlier closures to revive exhausted w1/c1 after w3/c3 arrives",async()=>{
+  const pause=()=>new Promise(resolve=>setTimeout(resolve,15));
+
+  // 1) Approved waste branch: sources A=10, B=10, C=20 -> w1=10, w2=10 -> closeA(waste=10, stocktake), closeB(waste=10, stocktake) -> w3=10 -> checkpoint C(20/waste 10/rem 10) rejects w1 & w2 with zero DB writes, accepts w3 with verified_disposal_record
+  const fWaste=await fixture();
+  const trWA=transfer(fWaste,"10"),trWB=transfer(fWaste,"10"),trWC=transfer(fWaste,"20");
+  await custody.dispatchCustodyTransfer(admin,key(),trWA);
+  await custody.dispatchCustodyTransfer(admin,key(),trWB);
+  await custody.dispatchCustodyTransfer(admin,key(),trWC);
+  const ackWA=ack(trWA,"10","0"),ackWB=ack(trWB,"10","0"),ackWC=ack(trWC,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackWA);
+  await pause();
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackWB);
+  await pause();
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackWC);
+  await pause();
+
+  const appW1=key();
+  await custody.approveCustodyWaste(admin,key(),{id:appW1,locationId:fWaste.destination,lotId:fWaste.lot,quantity:"10",reason:"Approve w1=10"});
+  const w1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fWaste.destination,lotId:fWaste.lot,kind:"approved_waste",quantity:"10",approvalId:appW1,reason:"Execute w1=10"});
+  await pause();
+
+  const appW2=key();
+  await custody.approveCustodyWaste(admin,key(),{id:appW2,locationId:fWaste.destination,lotId:fWaste.lot,quantity:"10",reason:"Approve w2=10"});
+  const w2=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fWaste.destination,lotId:fWaste.lot,kind:"approved_waste",quantity:"10",approvalId:appW2,reason:"Execute w2=10"});
+  await pause();
+
+  const stWA=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:fWaste.destination,lotId:fWaste.lot,countedQuantity:"20",reason:"Stocktake after w1+w2 for closeA"});
+  const closeWA=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackWA.id}:${trWA.lines[0].id}`,
+   evidenceEventId:stWA.id,
+   locationId:fWaste.destination,
+   lotId:fWaste.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"0",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"10",
+   remainingQuantity:"0",
+   reason:"Close source A=10 waste=10 with stocktake stWA",
+  });
+  expect(closeWA).toMatchObject({closureKind:"terminal",reviewRequired:true});
+  await pause();
+
+  const stWB=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:fWaste.destination,lotId:fWaste.lot,countedQuantity:"20",reason:"Stocktake after w1+w2 for closeB"});
+  const closeWB=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackWB.id}:${trWB.lines[0].id}`,
+   evidenceEventId:stWB.id,
+   locationId:fWaste.destination,
+   lotId:fWaste.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"0",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"10",
+   remainingQuantity:"0",
+   reason:"Close source B=10 waste=10 with stocktake stWB",
+  });
+  expect(closeWB).toMatchObject({closureKind:"terminal",reviewRequired:true});
+  await pause();
+
+  const appW3=key();
+  await custody.approveCustodyWaste(admin,key(),{id:appW3,locationId:fWaste.destination,lotId:fWaste.lot,quantity:"10",reason:"Approve w3=10 after closeA and closeB"});
+  const w3=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fWaste.destination,lotId:fWaste.lot,kind:"approved_waste",quantity:"10",approvalId:appW3,reason:"Execute w3=10 after closeA and closeB"});
+
+  // Verify strict chronological ordering of timestamps in PostgreSQL
+  const wasteOrder=(await db.getPool().query<{ordered:boolean}>(
+   `SELECT (
+      (SELECT created_at FROM custody_usage_events WHERE id=$1::uuid) < (SELECT created_at FROM custody_usage_events WHERE id=$2::uuid)
+      AND (SELECT created_at FROM custody_usage_events WHERE id=$2::uuid) < (SELECT created_at FROM custody_package_closures WHERE id=$3::uuid)
+      AND (SELECT created_at FROM custody_package_closures WHERE id=$3::uuid) < (SELECT created_at FROM custody_package_closures WHERE id=$4::uuid)
+      AND (SELECT created_at FROM custody_package_closures WHERE id=$4::uuid) < (SELECT created_at FROM custody_usage_events WHERE id=$5::uuid)
+    ) AS ordered`,
+   [w1.id,w2.id,closeWA.id,closeWB.id,w3.id],
+  )).rows[0].ordered;
+  expect(wasteOrder).toBe(true);
+
+  const wasteCountsBefore=(await db.getPool().query<{closures:number;usages:number}>(
+   "SELECT (SELECT COUNT(*)::int FROM custody_package_closures WHERE location_id=$1 AND lot_id=$2) AS closures,(SELECT COUNT(*)::int FROM custody_usage_events WHERE location_id=$1 AND lot_id=$2) AS usages",
+   [fWaste.destination,fWaste.lot],
+  )).rows[0];
+
+  // Presenting exhausted w1 (or its approval appW1, or exhausted w2) on C checkpoint (20 / waste 10 / remaining 10) must fail package_evidence_mismatch with zero DB writes
+  for(const retiredEvId of [w1.id,appW1,w2.id,appW2]){
+   await expect(custody.closeCustodyPackage(doctorA,key(),{
+    id:key(),
+    packageId:`${ackWC.id}:${trWC.lines[0].id}`,
+    evidenceEventId:retiredEvId,
+    locationId:fWaste.destination,
+    lotId:fWaste.lot,
+    hazard:"sharp",
+    policy:"safe_disposal_record",
+    evidenceAction:"document_safe_disposal",
+    originalQuantity:"20",
+    recordedConsumptionQuantity:"0",
+    returnedOrTransferredQuantity:"0",
+    approvedWasteQuantity:"10",
+    remainingQuantity:"10",
+    reason:"Reject exhausted waste evidence on source C checkpoint",
+   })).rejects.toMatchObject({code:"package_evidence_mismatch"});
+  }
+
+  const wasteCountsAfterReject=(await db.getPool().query<{closures:number;usages:number}>(
+   "SELECT (SELECT COUNT(*)::int FROM custody_package_closures WHERE location_id=$1 AND lot_id=$2) AS closures,(SELECT COUNT(*)::int FROM custody_usage_events WHERE location_id=$1 AND lot_id=$2) AS usages",
+   [fWaste.destination,fWaste.lot],
+  )).rows[0];
+  expect(wasteCountsAfterReject).toEqual(wasteCountsBefore);
+
+  // Presenting fresh unretired w3 succeeds on C checkpoint (20 / waste 10 / remaining 10) with verified_disposal_record and reviewRequired: false
+  const closeWC=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackWC.id}:${trWC.lines[0].id}`,
+   evidenceEventId:w3.id,
+   locationId:fWaste.destination,
+   lotId:fWaste.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   evidenceAction:"document_safe_disposal",
+   originalQuantity:"20",
+   recordedConsumptionQuantity:"0",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"10",
+   remainingQuantity:"10",
+   reason:"Accept fresh w3=10 on source C checkpoint",
+  });
+  expect(closeWC).toMatchObject({
+   closureKind:"checkpoint",
+   terminalClosure:false,
+   reviewRequired:false,
+   evidenceVerificationStatus:"verified_disposal_record",
+   retiredOriginalQuantity:"10",
+   remainingQuantity:"10",
+  });
+
+  // 2) Confirmed consumption branch: sources A=10, B=10, C=20 -> c1=10, c2=10 -> closeA(consumed=10, stocktake), closeB(consumed=10, stocktake) -> c3=10 -> checkpoint C(20/consumed 10/rem 10) rejects c1 & c2 with zero DB writes, accepts c3
+  const fCons=await fixture();
+  const trCA=transfer(fCons,"10"),trCB=transfer(fCons,"10"),trCC=transfer(fCons,"20");
+  await custody.dispatchCustodyTransfer(admin,key(),trCA);
+  await custody.dispatchCustodyTransfer(admin,key(),trCB);
+  await custody.dispatchCustodyTransfer(admin,key(),trCC);
+  const ackCA=ack(trCA,"10","0"),ackCB=ack(trCB,"10","0"),ackCC=ack(trCC,"20","0");
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackCA);
+  await pause();
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackCB);
+  await pause();
+  await custody.acknowledgeCustodyTransfer(doctorA,key(),ackCC);
+  await pause();
+
+  const c1=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fCons.destination,lotId:fCons.lot,kind:"consumed",quantity:"10",reason:"Record c1=10"});
+  await pause();
+  const c2=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fCons.destination,lotId:fCons.lot,kind:"consumed",quantity:"10",reason:"Record c2=10"});
+  await pause();
+
+  const stCA=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:fCons.destination,lotId:fCons.lot,countedQuantity:"20",reason:"Stocktake after c1+c2 for closeCA"});
+  const closeCA=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackCA.id}:${trCA.lines[0].id}`,
+   evidenceEventId:stCA.id,
+   locationId:fCons.destination,
+   lotId:fCons.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"10",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"0",
+   reason:"Close source A=10 consumed=10 with stocktake stCA",
+  });
+  expect(closeCA).toMatchObject({closureKind:"terminal",reviewRequired:true});
+  await pause();
+
+  const stCB=await custody.recordCustodyStocktake(doctorA,key(),{id:key(),locationId:fCons.destination,lotId:fCons.lot,countedQuantity:"20",reason:"Stocktake after c1+c2 for closeCB"});
+  const closeCB=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackCB.id}:${trCB.lines[0].id}`,
+   evidenceEventId:stCB.id,
+   locationId:fCons.destination,
+   lotId:fCons.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"10",
+   recordedConsumptionQuantity:"10",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"0",
+   reason:"Close source B=10 consumed=10 with stocktake stCB",
+  });
+  expect(closeCB).toMatchObject({closureKind:"terminal",reviewRequired:true});
+  await pause();
+
+  const c3=await custody.recordCustodyUsage(doctorA,key(),{id:key(),locationId:fCons.destination,lotId:fCons.lot,kind:"consumed",quantity:"10",reason:"Record c3=10 after closeCA and closeCB"});
+
+  const consCountsBefore=(await db.getPool().query<{closures:number;usages:number}>(
+   "SELECT (SELECT COUNT(*)::int FROM custody_package_closures WHERE location_id=$1 AND lot_id=$2) AS closures,(SELECT COUNT(*)::int FROM custody_usage_events WHERE location_id=$1 AND lot_id=$2) AS usages",
+   [fCons.destination,fCons.lot],
+  )).rows[0];
+
+  for(const retiredConsId of [c1.id,c2.id]){
+   await expect(custody.closeCustodyPackage(doctorA,key(),{
+    id:key(),
+    packageId:`${ackCC.id}:${trCC.lines[0].id}`,
+    evidenceEventId:retiredConsId,
+    locationId:fCons.destination,
+    lotId:fCons.lot,
+    hazard:"sharp",
+    policy:"safe_disposal_record",
+    originalQuantity:"20",
+    recordedConsumptionQuantity:"10",
+    returnedOrTransferredQuantity:"0",
+    approvedWasteQuantity:"0",
+    remainingQuantity:"10",
+    reason:"Reject exhausted consumption evidence on source C checkpoint",
+   })).rejects.toMatchObject({code:"package_evidence_mismatch"});
+  }
+
+  const consCountsAfterReject=(await db.getPool().query<{closures:number;usages:number}>(
+   "SELECT (SELECT COUNT(*)::int FROM custody_package_closures WHERE location_id=$1 AND lot_id=$2) AS closures,(SELECT COUNT(*)::int FROM custody_usage_events WHERE location_id=$1 AND lot_id=$2) AS usages",
+   [fCons.destination,fCons.lot],
+  )).rows[0];
+  expect(consCountsAfterReject).toEqual(consCountsBefore);
+
+  const closeCC=await custody.closeCustodyPackage(doctorA,key(),{
+   id:key(),
+   packageId:`${ackCC.id}:${trCC.lines[0].id}`,
+   evidenceEventId:c3.id,
+   locationId:fCons.destination,
+   lotId:fCons.lot,
+   hazard:"sharp",
+   policy:"safe_disposal_record",
+   originalQuantity:"20",
+   recordedConsumptionQuantity:"10",
+   returnedOrTransferredQuantity:"0",
+   approvedWasteQuantity:"0",
+   remainingQuantity:"10",
+   reason:"Accept fresh c3=10 on source C checkpoint",
+  });
+  expect(closeCC).toMatchObject({
+   closureKind:"checkpoint",
+   terminalClosure:false,
+   reviewRequired:true,
+   retiredOriginalQuantity:"10",
+   remainingQuantity:"10",
+  });
+ });
 });
 
 

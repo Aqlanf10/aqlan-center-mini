@@ -689,13 +689,17 @@ export async function closeCustodyPackage(actor:InventoryActor,key:string,input:
        WHERE u2.location_id=$1 AND u2.lot_id=$2 AND u2.kind='consumed' AND u2.quantity_state='confirmed'
          AND (u2.created_at < u.created_at OR (u2.created_at = u.created_at AND u2.id <= u.id))
      ),0) > COALESCE((
-       SELECT SUM(
+       SELECT MAX(
          GREATEST(
-           c.consumed_qty - COALESCE((
+           COALESCE((
+             SELECT SUM(c2.consumed_qty) FROM custody_package_closures c2
+             WHERE c2.location_id=$1 AND c2.lot_id=$2
+               AND (c2.created_at < c.created_at OR (c2.created_at = c.created_at AND c2.id <= c.id))
+           ),0) - COALESCE((
              SELECT SUM(u3.qty) FROM custody_usage_events u3
              WHERE u3.location_id=$1 AND u3.lot_id=$2 AND u3.kind='consumed' AND u3.quantity_state='confirmed'
                AND (u3.created_at > u.created_at OR (u3.created_at = u.created_at AND u3.id > u.id))
-               AND u3.created_at <= GREATEST(c.created_at, u.created_at)
+               AND u3.created_at <= c.created_at
            ),0),
            0
          )
@@ -714,13 +718,17 @@ export async function closeCustodyPackage(actor:InventoryActor,key:string,input:
        WHERE u2.location_id=$1 AND u2.lot_id=$2 AND u2.kind='approved_waste'
          AND (u2.created_at < u.created_at OR (u2.created_at = u.created_at AND u2.id <= u.id))
      ),0) > COALESCE((
-       SELECT SUM(
+       SELECT MAX(
          GREATEST(
-           c.waste_qty - COALESCE((
+           COALESCE((
+             SELECT SUM(c2.waste_qty) FROM custody_package_closures c2
+             WHERE c2.location_id=$1 AND c2.lot_id=$2
+               AND (c2.created_at < c.created_at OR (c2.created_at = c.created_at AND c2.id <= c.id))
+           ),0) - COALESCE((
              SELECT SUM(u3.qty) FROM custody_usage_events u3
              WHERE u3.location_id=$1 AND u3.lot_id=$2 AND u3.kind='approved_waste'
                AND (u3.created_at > u.created_at OR (u3.created_at = u.created_at AND u3.id > u.id))
-               AND u3.created_at <= GREATEST(c.created_at, u.created_at)
+               AND u3.created_at <= c.created_at
            ),0),
            0
          )
