@@ -895,6 +895,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # Exact synthetic read-only planned case links and review cards only.
+      - name: Upload planned orthodontic case follow-up evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ortho-planned-case-followup-ui
+          path: |
+            .settings-ui-artifacts/ortho-planned-followup-exact-390.png
+            .settings-ui-artifacts/ortho-planned-followup-exact-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-review-390.png
+            .settings-ui-artifacts/ortho-planned-followup-review-1280.png
+            .settings-ui-artifacts/ortho-planned-followup-exact-390.json
+            .settings-ui-artifacts/ortho-planned-followup-exact-1280.json
+            .settings-ui-artifacts/ortho-planned-followup-review-390.json
+            .settings-ui-artifacts/ortho-planned-followup-review-1280.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       # Exactly two synthetic built Today screenshots and target/occlusion bounds.
       # No traces, HAR, cookies, browser state, real records or broad uploads.
       - name: Upload Today readiness read lifetime evidence

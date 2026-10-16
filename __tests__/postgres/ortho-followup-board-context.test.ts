@@ -427,7 +427,7 @@ describe("real referral/case/Ortho bridge joins preserve patient boundaries", ()
     const row = await boardRow(caseId);
     expect(row.nextAppointment).toBeNull();
     expect(row.bookingContext.reviewAppointments).toEqual([expect.objectContaining({
-      id, reason: "planned_visit_requires_review", matchBasis: null,
+      id, reason: "unresolved_planned_visit", matchBasis: null,
     })]);
   });
 });
@@ -540,6 +540,7 @@ async function databaseSnapshot() {
 }
 
 it("repeated board reads leave every stored row and sequence untouched, including inconsistent legacy links", async () => {
+  await plannedFixture();
   const target = await fixture();
   const foreign = await fixture();
   const bridge = await clinicalCase(foreign.patientId, foreign.caseId);
@@ -553,4 +554,128 @@ it("repeated board reads leave every stored row and sequence untouched, includin
   const second = await db.orthoFollowupBoard(TODAY);
   expect(second).toEqual(first);
   expect(await databaseSnapshot()).toEqual(before);
+});
+
+async function plannedFixture() {
+  const target = await fixture();
+  const clinical = 900000 + target.caseId;
+  await q(`INSERT INTO clinical_cases (id, patient_id, ortho_case_id, specialty, title, started_on, created_by)
+    VALUES ($1, $2, $3, 'orthodontics', 'Synthetic distinct clinical identity', $4::date, $5)`,
+  [clinical, target.patientId, target.caseId, START, ACTOR]);
+  const [plan] = await q<{ id: number }>(
+    `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status)
+     VALUES ($1, 'Synthetic existing SAR plan', 125000, 'SAR', 'active') RETURNING id`, [target.patientId]);
+  await q("UPDATE ortho_cases SET plan_id=$2 WHERE id=$1", [target.caseId, plan.id]);
+  const [item] = await q<{ id: number }>(
+    `INSERT INTO plan_items (plan_id, service_name, category, case_id, status)
+     VALUES ($1, 'Synthetic case-linked item', 'ortho', $2, 'in_progress') RETURNING id`, [plan.id, clinical]);
+  const [planned] = await q<{ id: number }>(
+    `INSERT INTO planned_visits (patient_id, plan_id, sequence, title, status)
+     VALUES ($1, $2, 1, 'Synthetic periodic planned visit', 'scheduled') RETURNING id`, [target.patientId, plan.id]);
+  const [session] = await q<{ id: string }>(
+    `INSERT INTO treatment_sessions (plan_item_id, sequence, planned_visit_id)
+     VALUES ($1, 1, $2) RETURNING id`, [item.id, planned.id]);
+  const booking = await appointment(target.patientId, { plannedVisitId: planned.id });
+  await q("UPDATE planned_visits SET appointment_id=$2 WHERE id=$1", [planned.id, booking]);
+  return { ...target, clinical, plan: plan.id, item: item.id, planned: planned.id, session: session.id, booking };
+}
+
+describe("existing planned-session / plan-item / clinical-case read projection", () => {
+  it("identifies a periodic appointment through the exact case chain, without exposing plan amounts or raw links", async () => {
+    const target = await plannedFixture();
+    expect(target.caseId).not.toBe(target.clinical);
+    const row = await boardRow(target.caseId);
+    expect(row.nextAppointment).toMatchObject({ id: target.booking, matchBasis: "planned_case_sessions", reason: "planned_periodic_case_sessions" });
+    expect(row.bookingContext.reviewAppointments).toEqual([]);
+    const rendered = JSON.stringify(row);
+    for (const key of ['"planId"', '"sessions"', '"itemId"', '"total_minor"', '125000']) expect(rendered).not.toContain(key);
+  });
+
+  it("does not reuse a shared plan or doctor as evidence for another case of the same patient", async () => {
+    const target = await plannedFixture();
+    await q("UPDATE ortho_cases SET status='completed' WHERE id=$1", [target.caseId]);
+    const otherCase = await orthoCase(target.patientId, { planId: target.plan });
+    await clinicalCase(target.patientId, otherCase);
+    const row = await boardRow(otherCase);
+    expect(row.nextAppointment).toBeNull();
+    expect(row.bookingContext.reviewAppointments).toEqual([expect.objectContaining({
+      id: target.booking, reason: "different_or_unresolved_planned_case",
+    })]);
+  });
+
+  it("retains a mixed-specialty planned visit for review instead of silently dropping unrelated sessions", async () => {
+    const target = await plannedFixture();
+    const endo = await clinicalCase(target.patientId, null, "endodontics");
+    const [item] = await q<{ id: number }>(
+      `INSERT INTO plan_items (plan_id, service_name, category, case_id)
+       VALUES ($1, 'Synthetic endodontic item', 'endo', $2) RETURNING id`, [target.plan, endo]);
+    await q("INSERT INTO treatment_sessions (plan_item_id, sequence, planned_visit_id) VALUES ($1, 1, $2)", [item.id, target.planned]);
+    const row = await boardRow(target.caseId);
+    expect(row.nextAppointment).toBeNull();
+    expect(row.bookingContext.reviewAppointments[0]).toMatchObject({ id: target.booking, reason: "different_or_unresolved_planned_case" });
+  });
+
+  it.each(["cancelled", "completed"])("reviews a %s plan without changing the stored appointment", async status => {
+    const target = await plannedFixture();
+    await q("UPDATE treatment_plans SET status=$2 WHERE id=$1", [target.plan, status]);
+    const row = await boardRow(target.caseId);
+    expect(row.nextAppointment).toBeNull();
+    expect(row.bookingContext.reviewAppointments[0]).toMatchObject({ id: target.booking, reason: "unresolved_planned_plan" });
+    expect(await q("SELECT status FROM appointments WHERE id=$1", [target.booking])).toEqual([{ status: "booked" }]);
+  });
+
+  it("reviews foreign-patient plans, items and clinical bridges without hiding the inconsistent appointment", async () => {
+    const target = await plannedFixture(), foreign = await plannedFixture();
+    await q("UPDATE planned_visits SET plan_id=$2 WHERE id=$1", [target.planned, foreign.plan]);
+    expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_plan");
+    await q("UPDATE planned_visits SET plan_id=$2 WHERE id=$1", [target.planned, target.plan]);
+    const [foreignItem] = await q<{ id: number }>(`INSERT INTO plan_items (plan_id, service_name, category, case_id)
+      VALUES ($1, 'Synthetic foreign plan item without a session', 'ortho', $2) RETURNING id`, [foreign.plan, foreign.clinical]);
+    await q("UPDATE treatment_sessions SET plan_item_id=$2 WHERE id=$1", [target.session, foreignItem.id]);
+    expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_session");
+    await q("UPDATE treatment_sessions SET plan_item_id=$2 WHERE id=$1", [target.session, target.item]);
+    await q("UPDATE plan_items SET case_id=$2 WHERE id=$1", [target.item, foreign.clinical]);
+    expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("different_or_unresolved_planned_case");
+  });
+
+  it("requires the appointment backlink and does not treat a stale duplicate booking as confirmed", async () => {
+    const target = await plannedFixture();
+    const duplicate = await appointment(target.patientId, { plannedVisitId: target.planned, date: "2026-10-09" });
+    const row = await boardRow(target.caseId);
+    expect(row.nextAppointment?.id).toBe(target.booking);
+    expect(row.bookingContext.reviewAppointments).toEqual([expect.objectContaining({ id: duplicate, reason: "unresolved_planned_visit" })]);
+  });
+
+  it("requires an explicit periodic purpose even when every planned case link is correct", async () => {
+    const target = await plannedFixture();
+    await q("UPDATE appointments SET service_id=NULL, appointment_type=NULL WHERE id=$1", [target.booking]);
+    const row = await boardRow(target.caseId);
+    expect(row.nextAppointment).toBeNull();
+    expect(row.bookingContext.reviewAppointments[0]).toMatchObject({ id: target.booking, reason: "untyped_legacy" });
+  });
+
+  it("reviews completed/skipped session facts instead of presenting scheduled work as completed care", async () => {
+    const target = await plannedFixture();
+    for (const status of ["done", "skipped"]) {
+      await q("UPDATE treatment_sessions SET status=$2 WHERE id=$1", [target.session, status]);
+      const row = await boardRow(target.caseId);
+      expect(row.nextAppointment).toBeNull();
+      expect(row.bookingContext.reviewAppointments[0].reason).toBe("planned_session_not_pending");
+    }
+  });
+
+  it("resolves an arrived planned visit but reviews signed or foreign-patient clinical visit links", async () => {
+    const target = await plannedFixture();
+    const [visit] = await q<{ id: number }>(`INSERT INTO visits (patient_id, patient_name, planned_visit_id, status)
+      VALUES ($1, 'Synthetic pending planned visit', $2, 'in_chair') RETURNING id`, [target.patientId, target.planned]);
+    await q("UPDATE planned_visits SET status='in_progress', visit_id=$2 WHERE id=$1", [target.planned, visit.id]);
+    await q("UPDATE treatment_sessions SET status='in_progress', visit_id=$2 WHERE id=$1", [target.session, visit.id]);
+    await q("UPDATE appointments SET status='arrived' WHERE id=$1", [target.booking]);
+    expect((await boardRow(target.caseId)).nextAppointment).toMatchObject({ id: target.booking, status: "arrived", matchBasis: "planned_case_sessions" });
+    await q("UPDATE visits SET signed_at=NOW(), signed_by=$2, status='done' WHERE id=$1", [visit.id, ACTOR]);
+    expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
+    const foreignPatient = await patient();
+    await q("UPDATE visits SET signed_at=NULL, signed_by=NULL, patient_id=$2, status='in_chair' WHERE id=$1", [visit.id, foreignPatient]);
+    expect((await boardRow(target.caseId)).bookingContext.reviewAppointments[0].reason).toBe("unresolved_planned_visit_record");
+  });
 });

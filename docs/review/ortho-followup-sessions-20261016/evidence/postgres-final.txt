@@ -1,0 +1,19 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-followup-board-context.test.ts __tests__/postgres/ortho-baseline.test.ts __tests__/postgres/visit-flow-ortho-attach.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-followups-20261016
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+
+ Test Files  3 passed (3)
+      Tests  50 passed (50)
+   Start at  04:11:24
+   Duration  9.52s (transform 1.62s, setup 0ms, import 912ms, tests 7.73s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
