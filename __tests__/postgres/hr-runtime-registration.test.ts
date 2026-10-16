@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { applyRuntimeMigrationFiles, loadMigrationFiles, migrate } from '../../lib/migrations';
 import bundled from '../../lib/hr-temporal-schema.generated.json';
+import ortho from '../../lib/ortho-assessment-runtime.generated.json';
 
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let db: typeof import('../../lib/db');
@@ -23,7 +24,7 @@ afterAll(async () => {
 });
 it('runtime registers exact additive contracts without fabricating facts, receipts, or old migration ownership', async () => {
   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
-  expect(registered).toEqual(bundled.map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+  expect(registered).toEqual([...ortho, ...bundled].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
   }

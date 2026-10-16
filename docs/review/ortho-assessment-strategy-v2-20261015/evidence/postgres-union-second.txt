@@ -1,0 +1,44 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-assessment-strategy-union.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-assessment-strategy-union.test.ts (7 tests | 1 failed) 1341ms
+     × uses explicit versioned clinical fingerprints independent of unrelated nullable schema columns 48ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-assessment-strategy-union.test.ts > existing explicitly linked Ortho episodes in the main/HR/finance union > uses explicit versioned clinical fingerprints independent of unrelated nullable schema columns
+AssertionError: expected [ { kind: 'patient_history', …(3) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ versions __tests__/postgres/ortho-assessment-strategy-union.test.ts:84:24
+     82|       if (!read.ok || read.state !== "ready") throw new Error(JSON.str…
+     83|       const selected = read.sources.items.filter(source => source.kind…
+     84|       expect(selected).toHaveLength(2);
+       |                        ^
+     85|       return selected.map(source => ({ kind: source.kind, id: source.i…
+     86|     };
+ ❯ __tests__/postgres/ortho-assessment-strategy-union.test.ts:87:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  20:52:40
+   Duration  3.60s (transform 1.41s, setup 0ms, import 1.72s, tests 1.34s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

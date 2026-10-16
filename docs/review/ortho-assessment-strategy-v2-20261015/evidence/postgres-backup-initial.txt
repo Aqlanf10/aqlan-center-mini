@@ -1,0 +1,58 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-revision-backup.test.ts __tests__/postgres/hr-composed-backup.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/hr-composed-backup.test.ts (4 tests | 4 skipped) 1791ms
+ ❯ __tests__/postgres/ortho-revision-backup.test.ts (2 tests | 2 skipped) 1865ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/hr-composed-backup.test.ts [ __tests__/postgres/hr-composed-backup.test.ts ]
+Error: SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 حرفًا.
+ ❯ secret lib/auth.ts:64:11
+     62|   // هنا مقصود: تشغيل الأداة بلا حماية أسوأ من عدم تشغيلها.
+     63|   if (!value || value.length < 32) {
+     64|     throw new Error("SESSION_SECRET مفقود أو قصير — يجب ألا يقل عن 32 …
+       |           ^
+     65|   }
+     66|   return value;
+ ❯ Module.sessionCredentialVersion lib/auth.ts:74:31
+ ❯ __tests__/postgres/hr-composed-backup.test.ts:41:110
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/postgres/ortho-revision-backup.test.ts [ __tests__/postgres/ortho-revision-backup.test.ts ]
+AssertionError: expected { ok: false, status: 400, …(2) } to match object { ok: true, revision: { version: 2 } }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "ok": true,
+-   "revision": {
+-     "version": 2,
+-   },
++   "ok": false,
+  }
+
+ ❯ __tests__/postgres/ortho-revision-backup.test.ts:58:174
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 skipped (6)
+   Start at  21:04:07
+   Duration  6.61s (transform 1.65s, setup 0ms, import 2.25s, tests 3.66s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

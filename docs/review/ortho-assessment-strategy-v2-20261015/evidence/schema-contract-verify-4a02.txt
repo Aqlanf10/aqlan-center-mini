@@ -1,0 +1,10 @@
+
+> aqlan-center@0.1.0 schema:contract:verify
+> tsx scripts/verify-schema-contract-drift.ts
+
+schema contract drift verify: OK — البنية متطابقة: 122 جدولًا · 1576 عمودًا · 1721 قيدًا · 383 فهرسًا · 55 مُشغِّلًا.
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

@@ -1,0 +1,50 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/ortho-revision-registration.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/ortho-revision-registration.test.ts (9 tests | 1 failed) 21770ms
+     × refuses conflicting registered metadata through cli even if the checksum agrees 2277ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/ortho-revision-registration.test.ts > 0051/0052 registration on a real fresh main/HR/finance predecessor > refuses conflicting registered metadata through cli even if the checksum agrees
+AssertionError: promise resolved "{ adoptedBaseline: false, …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "adoptedBaseline": false,
++   "alreadyUpToDate": false,
++   "appliedVersions": [
++     "0052",
++   ],
+  }
+
+ ❯ __tests__/postgres/ortho-revision-registration.test.ts:51:133
+     49|     await fixture.source.query("INSERT INTO schema_migrations(version,…
+     50|     const before = await registry();
+     51|     await expect(mode === "runtime" ? applyOrthoAssessmentRuntime(fixt…
+       |                                                                                                                                     ^
+     52|     expect(await registry()).toEqual(before);
+     53|     expect((await fixture.source.query("SELECT to_regclass('public.ort…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  21:06:27
+   Duration  22.91s (transform 274ms, setup 0ms, import 407ms, tests 21.77s, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

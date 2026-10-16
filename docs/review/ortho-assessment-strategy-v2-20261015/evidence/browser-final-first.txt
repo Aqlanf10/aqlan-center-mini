@@ -1,0 +1,86 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts __tests__/security-http/hr-temporal-history-ui.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-ortho-assessment-20261015
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts (2 tests | 2 failed) 60497ms
+     × saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 390px 30043ms
+     × saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 1280px 29080ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts > existing linked episodes: real built assessment/strategy editors > saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 390px
+TimeoutError: locator.fill: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for getByLabel('قيمة السن 11 (mm)', { exact: true })[22m
+[2m    - locator resolved to <input disabled dir="ltr" value="7" maxlength="80" inputmode="decimal" class="min-h-11 min-w-11 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm disabled:opacity-40"/>[22m
+[2m    - fill("7.5")[22m
+[2m  - attempting fill action[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m      - waiting 100ms[22m
+[2m    30 × waiting for element to be visible, enabled and editable[22m
+[2m       - element is not enabled[22m
+[2m     - retrying fill action[22m
+[2m       - waiting 500ms[22m
+
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts:56:67
+     54|       // Enter one clinical value once, choose two teeth for explicitl…
+     55|       // session provenance, and reuse the same input across multiple …
+     56|       await page.getByLabel("قيمة السن 11 (mm)", { exact: true }).fill…
+       |                                                                   ^
+     57|       await page.getByRole("checkbox", { name: "اختيار السن 11 لجلسة ا…
+     58|       await page.getByRole("checkbox", { name: "اختيار السن 12 لجلسة ا…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts > existing linked episodes: real built assessment/strategy editors > saves/reopens, reconciles a lost response and keeps stale/denied edits isolated at 1280px
+TimeoutError: locator.fill: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for getByLabel('قيمة السن 11 (mm)', { exact: true })[22m
+[2m    - locator resolved to <input disabled dir="ltr" value="7" maxlength="80" inputmode="decimal" class="min-h-11 min-w-11 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm disabled:opacity-40"/>[22m
+[2m    - fill("7.5")[22m
+[2m  - attempting fill action[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m      - waiting 100ms[22m
+[2m    29 × waiting for element to be visible, enabled and editable[22m
+[2m       - element is not enabled[22m
+[2m     - retrying fill action[22m
+[2m       - waiting 500ms[22m
+
+ ❯ __tests__/security-http/ortho-assessment-strategy-v2-browser.test.ts:56:67
+     54|       // Enter one clinical value once, choose two teeth for explicitl…
+     55|       // session provenance, and reuse the same input across multiple …
+     56|       await page.getByLabel("قيمة السن 11 (mm)", { exact: true }).fill…
+       |                                                                   ^
+     57|       await page.getByRole("checkbox", { name: "اختيار السن 11 لجلسة ا…
+     58|       await page.getByRole("checkbox", { name: "اختيار السن 12 لجلسة ا…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 7 passed (9)
+   Start at  21:14:55
+   Duration  108.95s (transform 423ms, setup 0ms, import 1.33s, tests 98.89s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

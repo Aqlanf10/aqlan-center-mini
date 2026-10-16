@@ -1,0 +1,14 @@
+
+/workspace/aqlan-ortho-assessment-20261015/components/PatientOrtho.tsx
+   302:51  warning  React Hook useMemo has unnecessary dependencies: 'authority', 'caseId', and 'patientId'. Either exclude them or remove the dependency array  react-hooks/exhaustive-deps
+   305:48  warning  React Hook useMemo has unnecessary dependencies: 'draft' and 'owner'. Either exclude them or remove the dependency array                     react-hooks/exhaustive-deps
+   393:44  warning  React Hook useMemo has unnecessary dependencies: 'authority' and 'patientId'. Either exclude them or remove the dependency array             react-hooks/exhaustive-deps
+  1243:54  warning  React Hook useMemo has unnecessary dependencies: 'booking' and 'form.draft'. Either exclude them or remove the dependency array              react-hooks/exhaustive-deps
+
+✖ 4 problems (0 errors, 4 warnings)
+
+npm notice
+npm notice New major version of npm available! 11.21.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

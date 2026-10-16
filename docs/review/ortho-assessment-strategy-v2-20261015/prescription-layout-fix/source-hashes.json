@@ -1,0 +1,5 @@
+{
+  "components/PatientOrtho.tsx": "3b314a7f9818cfa17702e3a06febc026589b31b92de641d43af920be377e4434",
+  "components/OrthoTreatmentStrategy.tsx": "1211d01de91fe1ee4e488331ea07c9f471f34c1fe848b828f57efb9fbad85eb5",
+  "__tests__/security-http/ortho-prescription-truth-built-page.test.ts": "92a80a702258d99a487dcb5d4955ede3165558e9a563f5dd8ec1ba54b6a61763"
+}

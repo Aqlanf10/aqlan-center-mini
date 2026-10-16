@@ -1,0 +1,200 @@
+diff --git a/__tests__/migrations.test.ts b/__tests__/migrations.test.ts
+index bea8e882..e753e86b 100644
+--- a/__tests__/migrations.test.ts
++++ b/__tests__/migrations.test.ts
+@@ -188,7 +188,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
+     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
+     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
+     const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
+-    expect(rows.map(row => row.version)).toEqual(['0056', '0057', '0058']);
++    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058']);
+     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
+   });
+ 
+diff --git a/__tests__/patient-ortho-read-safety.test.tsx b/__tests__/patient-ortho-read-safety.test.tsx
+index 837bd754..0a7c1f9e 100644
+--- a/__tests__/patient-ortho-read-safety.test.tsx
++++ b/__tests__/patient-ortho-read-safety.test.tsx
+@@ -27,6 +27,10 @@ vi.mock("../components/OrthoPackageLink", () => ({ OrthoPackageLink: ({ onChange
+ } }));
+ vi.mock("../components/PatientCeph", () => ({ PatientCeph: () => null }));
+ vi.mock("../components/PatientDiagnosis", () => ({ PatientDiagnosis: () => null }));
++// This suite isolates parent reads/prescription truth, like the other specialist
++// leaves above. The new editors have separate actual HTTP/React acceptance.
++vi.mock("../components/OrthoTreatmentStrategy", () => ({ OrthoTreatmentStrategy: () => null }));
++vi.mock("../components/OrthoCaseAssessmentV2", () => ({ OrthoCaseAssessmentV2: () => null }));
+ vi.mock("../components/WebCephRecordsGrid", () => ({ WebCephRecordsGrid: () => null }));
+ vi.mock("react", async (original) => {
+   const react = await original<typeof import("react")>();
+diff --git a/__tests__/periodontal-schema.test.ts b/__tests__/periodontal-schema.test.ts
+index 8c242241..29240807 100644
+--- a/__tests__/periodontal-schema.test.ts
++++ b/__tests__/periodontal-schema.test.ts
+@@ -11,7 +11,9 @@ describe("unregistered periodontal SQL source contract (SQL never executed)", ()
+   });
+   it("does not register schema, a numbered migration, a route or an editor", () => {
+     expect(readFileSync("lib/db.ts", "utf8")).not.toContain("PERIODONTAL_SQL");
+-    expect(readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name))).toHaveLength(54);
++    const files = readdirSync("migrations").filter((name) => /^\d{4}_.*\.sql$/.test(name));
++    expect(files).toHaveLength(56);
++    expect(files.filter(name => /^005[12]_/.test(name)).sort()).toEqual(["0051_ortho_treatment_strategy.sql", "0052_ortho_assessment.sql"]);
+     expect(readdirSync("migrations")).toContain("0061_invoice_correction_lineage.sql");
+     expect(readdirSync("migrations").some((name) => name.includes("periodontal"))).toBe(false);
+     expect(readdirSync("app/api/patients/[id]")).not.toContain("periodontal");
+diff --git a/__tests__/postgres/_periodontal-fixture.ts b/__tests__/postgres/_periodontal-fixture.ts
+index 732ed63e..2a5fe7a8 100644
+--- a/__tests__/postgres/_periodontal-fixture.ts
++++ b/__tests__/postgres/_periodontal-fixture.ts
+@@ -7,6 +7,15 @@ import { validatePostgresTestTarget } from "./_safe-target";
+ 
+ /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
+ export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
++  if (files.length === 56) {
++    const ortho = files.filter(file => file.version === "0051" || file.version === "0052");
++    if (ortho.length !== 2 || ortho[0].filename !== "0051_ortho_treatment_strategy.sql" || ortho[1].filename !== "0052_ortho_assessment.sql") {
++      throw new Error("Unreviewed Ortho strategy/assessment union for periodontal test fixture.");
++    }
++    // Strip only the exact two root-authorized additions, then preserve every
++    // existing HR/finance chain guard. No number is allocated by this fixture.
++    return periodontalCandidateMigrationVersion(files.filter(file => file.version !== "0051" && file.version !== "0052"));
++  }
+   if (files.length === 54) {
+     const hr = [
+       "0045_hr_staff.sql", "0046_hr_tasks.sql", "0048_hr_contracts_attendance_leaves.sql",
+diff --git a/__tests__/postgres/debt-installments-storage.test.ts b/__tests__/postgres/debt-installments-storage.test.ts
+index 15da3a0d..1a3ed01d 100644
+--- a/__tests__/postgres/debt-installments-storage.test.ts
++++ b/__tests__/postgres/debt-installments-storage.test.ts
+@@ -18,7 +18,7 @@ const input=(key:string,version=0)=>({target:target(),terms,expectedVersion:vers
+ beforeAll(async()=>{
+   await dropPublicSchema(process.env.DATABASE_URL!);
+   const files=(await loadMigrationFiles()).filter(file=>file.version<="0059");expect(files.at(-1)?.filename).toBe("0059_invoice_debt_installments.sql");
+-  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0045","0046","0048","0049","0050","0056","0057","0058","0059"]);
++  expect(files.filter(f=>Number(f.version)>43).map(f=>f.version)).toEqual(["0045","0046","0048","0049","0050","0051","0052","0056","0057","0058","0059"]);
+   await migrate(db.getPool(),{apply:true,files:files.filter(f=>Number(f.version)<=43)});
+   patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES('DEBT-SYN','Synthetic schedule') RETURNING id"))[0].id;
+   invoiceId=(await q("INSERT INTO invoices(invoice_number,patient_id,base_currency,total_minor,discount_minor,created_by) VALUES('DEBT-OLD', $1,'SAR',60000,0,'synthetic') RETURNING id",[patientId]))[0].id;
+diff --git a/__tests__/postgres/hr-composed-backup.test.ts b/__tests__/postgres/hr-composed-backup.test.ts
+index 9f32a0fa..da2f3dd9 100644
+--- a/__tests__/postgres/hr-composed-backup.test.ts
++++ b/__tests__/postgres/hr-composed-backup.test.ts
+@@ -34,7 +34,7 @@ beforeAll(async () => {
+   process.env.DATABASE_URL = fixture.source.options.connectionString!;
+   process.env.SKIP_SEED = 'true';
+   db = await import('../../lib/db'); await db.resetPoolForTesting(); await db.ensureSchema();
+-  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0056', '0057', '0058']);
++  expect((await fixture.source.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058']);
+   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(710,'composed-admin','Synthetic administrator','synthetic-hash','admin')");
+   await fixture.source.query("INSERT INTO hr_staff(id,full_name,created_by,contract_kind,salary_amount_minor,salary_currency,salary_period,salary_effective_on,hire_date) VALUES(810,'Synthetic receptionist','test','salary',90000,'YER','monthly','2020-01-01','2020-01-01')");
+   await fixture.source.query("SELECT setval(pg_get_serial_sequence('hr_effective_streams','id'),91000,true)");
+@@ -68,7 +68,7 @@ it('SQL backup restores every application table, explicit identities, revision o
+   // Exercise the supported SQL restore CLI against a runtime-owned target registry.
+   const restored = await promisify(execFile)(process.execPath, ['scripts/restore.mjs', join(directory, 'synthetic-backup.sql')], { env: { ...process.env } });
+   expect(restored.stdout).toContain('تمت الاستعادة');
+-  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0056', '0057', '0058']);
++  expect((await fixture.sqlTarget.query('SELECT version FROM schema_migrations ORDER BY version')).rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058']);
+   expect(await rows(fixture.sqlTarget)).toEqual(await rows(fixture.source));
+   expect(await recordHrHistory(db.getPool(),hrTemporalAuthority(actor),originalCommand)).toEqual(originalReceipt);
+   expect((await fixture.sqlTarget.query('SELECT count(*)::int AS n FROM hr_effective_revisions')).rows[0].n).toBe(2);
+diff --git a/__tests__/postgres/hr-runtime-registration.test.ts b/__tests__/postgres/hr-runtime-registration.test.ts
+index 80b5c353..23eeedb5 100644
+--- a/__tests__/postgres/hr-runtime-registration.test.ts
++++ b/__tests__/postgres/hr-runtime-registration.test.ts
+@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
+ import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
+ import { applyRuntimeMigrationFiles, loadMigrationFiles, migrate } from '../../lib/migrations';
+ import bundled from '../../lib/hr-temporal-schema.generated.json';
++import ortho from '../../lib/ortho-assessment-runtime.generated.json';
+ 
+ let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
+ let db: typeof import('../../lib/db');
+@@ -23,7 +24,7 @@ afterAll(async () => {
+ });
+ it('runtime registers exact additive contracts without fabricating facts, receipts, or old migration ownership', async () => {
+   const registered = (await fixture.source.query('SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version')).rows;
+-  expect(registered).toEqual(bundled.map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
++  expect(registered).toEqual([...ortho, ...bundled].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
+   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings']) {
+     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);
+   }
+diff --git a/__tests__/postgres/legacy-doctor-fk-compatibility.test.ts b/__tests__/postgres/legacy-doctor-fk-compatibility.test.ts
+index a75b228b..22a5b3cb 100644
+--- a/__tests__/postgres/legacy-doctor-fk-compatibility.test.ts
++++ b/__tests__/postgres/legacy-doctor-fk-compatibility.test.ts
+@@ -295,7 +295,7 @@ describe.each(paths)("PG18 visit-doctor FK compatibility: %s", (path) => {
+     expect((await client.query("SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version")).rows).toEqual(registryBefore);
+     // Runtime now registers only the three reviewed HR extensions. The probe
+     // must still never adopt the legacy baseline or rewrite any existing row.
+-    const expectedFiles = path === "fresh_numbered" ? files : files.filter(file => ["0056", "0057", "0058"].includes(file.version));
++    const expectedFiles = path === "fresh_numbered" ? files : files.filter(file => ["0051", "0052", "0056", "0057", "0058"].includes(file.version));
+     expect(registryBefore.map(({version,name,checksum,adopted}) => ({version,name,checksum,adopted})))
+       .toEqual(expectedFiles.map(({version,name,checksum}) => ({version,name,checksum,adopted:false})));
+     expect((await client.query(
+diff --git a/__tests__/postgres/schema-ownership.test.ts b/__tests__/postgres/schema-ownership.test.ts
+index d94e57c2..bc1a1ff1 100644
+--- a/__tests__/postgres/schema-ownership.test.ts
++++ b/__tests__/postgres/schema-ownership.test.ts
+@@ -290,10 +290,10 @@ describe("PG18 schema ownership characterization", () => {
+     expect(report.migrationProvenance.map((item) => item.version)).toEqual([
+       "0001", "0002", "0003", "0004", "0005", "0006",
+       "0007", "0008", "0009", "0010", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043",
+-      '0045', '0046', '0048', '0049', '0050', '0056', '0057', '0058', '0059', '0060', '0061',
++      '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061',
+     ]);
+     expect(report.migrationRegistry.present).toBe(true);
+-    expect(report.migrationRegistry.rows).toHaveLength(54);
++    expect(report.migrationRegistry.rows).toHaveLength(56);
+     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
+ 
+     const migrationApplicationTables = report.migrationCatalog.tables
+@@ -301,14 +301,18 @@ describe("PG18 schema ownership characterization", () => {
+     const runtimeApplicationTables = report.runtimeCatalog.tables
+       .filter((entry) => entry.table !== "schema_migrations");
+ 
+-    expect(migrationApplicationTables).toHaveLength(119);
+-    expect(runtimeApplicationTables).toHaveLength(119);
++    expect(migrationApplicationTables).toHaveLength(121);
++    expect(runtimeApplicationTables).toHaveLength(121);
++    for (const table of ["ortho_strategy_revisions", "ortho_assessment_revisions"]) {
++      expect(migrationApplicationTables.some(entry => entry.table === table)).toBe(true);
++      expect(runtimeApplicationTables.some(entry => entry.table === table)).toBe(true);
++    }
+     for(const table of ["invoice_corrections","invoice_correction_lines","invoice_correction_receipts"]){
+       expect(migrationApplicationTables.some(entry=>entry.table===table)).toBe(true);
+       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
+     }
+     expect(report.runtimeCatalog.registry.present).toBe(true);
+-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0056', '0057', '0058'].includes(row.version)));
++    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058'].includes(row.version)));
+ 
+     expect(report.comparison.characterizationOk).toBe(true);
+     expect(report.comparison.applicationSchemaEqual).toBe(false);
+diff --git a/__tests__/schema-preflight-cli.test.ts b/__tests__/schema-preflight-cli.test.ts
+index 19e524f9..5f2f1ce3 100644
+--- a/__tests__/schema-preflight-cli.test.ts
++++ b/__tests__/schema-preflight-cli.test.ts
+@@ -71,9 +71,9 @@ describe("read-only preflight connection contract", () => {
+   it("uses the immutable filesystem loader without importing the runtime/probe graph", async () => {
+     const files = await loadMigrationFiles();
+     expect(files[0].version).toBe("0001");
+-    expect(files).toHaveLength(54);
++    expect(files).toHaveLength(56);
+     expect(files.at(-1)?.filename).toBe("0061_invoice_correction_lineage.sql");
+-    expect(files.slice(43).map(file => file.version)).toEqual(['0045', '0046', '0048', '0049', '0050', '0056', '0057', '0058', '0059', '0060', '0061']);
++    expect(files.slice(43).map(file => file.version)).toEqual(['0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061']);
+     for (const file of ["lib/migration-files.ts", "lib/schema-preflight.ts", "lib/schema-manifest.ts", "lib/schema-fingerprint.ts", "lib/preflight-provenance.ts", "scripts/db-preflight.ts"]) {
+       const source = await readFile(file, "utf8");
+       const imports = source.split("\n").filter((line) => /^import\b/.test(line)).join("\n");
+diff --git a/__tests__/security-http/hr-temporal-history-ui.test.ts b/__tests__/security-http/hr-temporal-history-ui.test.ts
+index 636777aa..162a5051 100644
+--- a/__tests__/security-http/hr-temporal-history-ui.test.ts
++++ b/__tests__/security-http/hr-temporal-history-ui.test.ts
+@@ -22,7 +22,7 @@ beforeAll(async () => {
+   // Withhold only the receipt table in this owned fixture to retain the original
+   // partial-schema refusal assertion; the real runtime already registered0056–0058.
+   const id = await staff('اختبار بوابة الإدماج');
+-  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0056','0057','0058']);
++  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0051','0052','0056','0057','0058']);
+   await owned.db.query('ALTER TABLE hr_temporal_write_receipts RENAME TO synthetic_withheld_receipts');
+   try { expect((await api('GET', `/api/hr/staff/${id}/history`))).toMatchObject({ status: 503, body: { code: 'integration_pending' } }); }
+   finally { await owned.db.query('ALTER TABLE synthetic_withheld_receipts RENAME TO hr_temporal_write_receipts'); }
