@@ -8,8 +8,9 @@ client settings leave them disabled. Do not configure it in `next.config` or use
 `NEXT_PUBLIC_` alias. Dynamic server pages pass only the evaluated boolean to the
 legacy inventory overview. Direct procurement/custody pages show an unavailable
 message and never mount their fetching/mutation components. GET and POST on the
-exact procurement API return 503 / `inventory_integration_disabled` before body
-parsing or store calls. Both store readiness paths fail before schema/pool access.
+exact procurement API return 503 / `inventory_integration_disabled` after normal session validation and before body
+parsing or store calls. Authentication queries remain permitted; disabled store
+access does not bypass authentication. Both store readiness paths fail before schema/pool access.
 The shared transactional writer covers procurement and custody mutations.
 
 Legacy inventory remains available, including its valuation/review page, movements,

@@ -1,11 +1,13 @@
 # Coordinated schema reservation request
 
-No migration number has been selected or registered. Root controls serial integration after invoice, HR and Ortho/Ceph acceptance. These SQL modules are proposals explicitly applied in synthetic PostgreSQL fixtures only. Runtime fails closed with `schema_not_ready` until a reviewed migration exists.
+No migration number has been selected or registered. Root controls serial integration after invoice, HR and Ortho/Ceph acceptance. These SQL modules are proposals explicitly applied in synthetic PostgreSQL fixtures only. Runtime is disabled by default through the server-only rollout gate. Authentication precedes that gate; admitted authenticated requests receive `inventory_integration_disabled`. Explicit test enablement still fails with `schema_not_ready` when proposal tables are absent. The environment key is not authorization for live activation; Production remains closed and no settings are changed.
 
-Observed migration ranges as of 2026-10-15:
-- `origin/main` (`d79df32b1ec8250d11c2d20fd284fd914e4da4ad`): `0001–0051` and `0059–0061` (`0059_invoice_service_discount_attribution.sql`, `0060_discount_approvals.sql`, `0061_financial_idempotency_keys.sql`).
-- Ortho/Ceph (`0052–0055`) and HR (`origin/feat/hr-main-recovery-20261015` `2c0522e2e092438ea2823f9d58391018cf59c7ea`: `0056–0058`) occupy `0052–0058`.
-- Therefore, inventory schema proposals remain strictly unnumbered (`lib/inventory-domain/schema-proposal.ts` and `lib/inventory-domain/custody-schema-proposal.ts`) until root assigns the next post-`0061` migration slot.
+Verified against `origin/main` (`6090722977a37981ddf56585c180f782b5a5249b`) on 2026-10-16:
+- `0059_invoice_debt_installments.sql`
+- `0060_historical_treatment_documents.sql`
+- `0061_invoice_correction_lineage.sql`
+- HR history occupies `0056–0058`; Ortho migrations include `0051_ortho_treatment_strategy.sql` and `0052_ortho_assessment.sql`.
+- Inventory schema proposals remain strictly unnumbered (`lib/inventory-domain/schema-proposal.ts` and `lib/inventory-domain/custody-schema-proposal.ts`). Root must recheck the registry and coordinate any future assignment; this document reserves no number.
 
 Inventory proposes ownership of these **29 additive append-only tables**, with root-owned migration/contract adoption:
 

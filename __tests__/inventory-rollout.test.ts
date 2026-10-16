@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { inventoryIntegrationEnabled, requireInventoryIntegration } from "../lib/inventory-domain/rollout";
 const database = vi.hoisted(() => ({ ensureSchema: vi.fn(), getPool: vi.fn() }));
 vi.mock("../lib/db", () => database);
-vi.mock("../lib/session", () => ({ requireSession: vi.fn(() => { throw new Error("disabled route must stop before session/store access"); }) }));
+const authentication = vi.hoisted(() => ({ requireSession: vi.fn() }));
+vi.mock("../lib/session", () => authentication);
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 describe("inventory integration rollout", () => {
   it.each([undefined, "", "false", "1", "TRUE", " true "])("fails closed for %s", value => {
@@ -11,15 +12,17 @@ describe("inventory integration rollout", () => {
     expect(inventoryIntegrationEnabled()).toBe(false);
     expect(requireInventoryIntegration).toThrow(expect.objectContaining({ code: "inventory_integration_disabled" }));
   });
-  it("rejects direct API calls before parsing or calling stores", async () => {
+  it.each([null, { userId: 1, username: "synthetic", role: "admin" }])("authenticates before the gate, then blocks body parsing and stores: %s", async session => {
+    authentication.requireSession.mockResolvedValue(session);
     vi.stubEnv("INVENTORY_INTEGRATION_ENABLED", undefined);
     const { GET, POST } = await import("../app/api/inventory/procurement/route");
     const request = new Request("http://localhost/api/inventory/procurement", { method: "POST", body: "not-json" });
     for (const handler of [GET, POST]) {
       const response = await handler(request);
-      expect(response.status).toBe(503);
-      expect((await response.json()).code).toBe("inventory_integration_disabled");
+      expect(response.status).toBe(session ? 503 : 401);
+      if (session) expect((await response.json()).code).toBe("inventory_integration_disabled");
     }
+    expect(authentication.requireSession).toHaveBeenCalledTimes(2);
     expect(request.bodyUsed).toBe(false);
     expect(database.getPool).not.toHaveBeenCalled();
   });
