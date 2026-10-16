@@ -22,7 +22,10 @@ export default defineConfig({
     // الخادم يبدأ مرة واحدة لكل الجولة (لا لكل ملف) — التوكنات تبقى صالحة
     // بين الملفات، وإيقافه/إسقاط القاعدة في التفكيك العالمي.
     globalSetup: ["__tests__/security-http/_global-setup.ts"],
-    include: ["__tests__/security-http/**/*.test.ts"],
+    include: process.env.INVENTORY_SCHEMA_TEST === "1"
+      ? ["__tests__/security-http/inventory-procurement-http-ui.test.ts"]
+      : ["__tests__/security-http/**/*.test.ts"],
+    exclude: process.env.INVENTORY_SCHEMA_TEST === "1" ? [] : ["__tests__/security-http/inventory-procurement-http-ui.test.ts"],
     pool: "forks",
     fileParallelism: false,
     maxConcurrency: 1,

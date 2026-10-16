@@ -1,3 +1,4 @@
+vi.mock("server-only", () => ({}));
 import { randomUUID } from "node:crypto";
 import { beforeAll,afterAll,describe,expect,it,vi } from "vitest";
 import { assertRealPostgresUrl,stubPostgresEnv } from "./_setup";
@@ -9,11 +10,12 @@ const {valuationSnapshot}=await import("../../lib/inventory-domain/procurement")
 import type {InventoryActor} from "../../lib/inventory-domain/procurement-store";
 let admin:InventoryActor;let doctorA:InventoryActor;let doctorB:InventoryActor;let reception:InventoryActor;let partyA:number;let partyB:number;let supplier:number;
 const key=()=>randomUUID();
-beforeAll(async()=>{await db.ensureSchema();await db.getPool().query(INVENTORY_PROCUREMENT_SQL);await db.getPool().query(INVENTORY_CUSTODY_SQL);
+beforeAll(async()=>{
+ vi.stubEnv("INVENTORY_INTEGRATION_ENABLED", "true");await db.ensureSchema();await db.getPool().query(INVENTORY_PROCUREMENT_SQL);await db.getPool().query(INVENTORY_CUSTODY_SQL);
  for(const role of ["admin","doctorA","doctorB","reception"]){const party=role.startsWith("doctor")?(await db.getPool().query("INSERT INTO parties(name,kind) VALUES($1,'doctor') RETURNING id",[`SYN-CUSTODY-${role}`])).rows[0].id:null;const username=`SYN-CUSTODY-${role}-${key()}`;const result=await db.getPool().query("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES($1,$1,'synthetic-disabled-login',$2,$3) RETURNING id",[username,role.startsWith("doctor")?"doctor":role,party]);const actor={userId:result.rows[0].id,username,role:role.startsWith("doctor")?"doctor":role};if(role==="admin")admin=actor;else if(role==="doctorA"){doctorA=actor;partyA=party;}else if(role==="doctorB"){doctorB=actor;partyB=party;}else reception=actor;}
  supplier=(await db.getPool().query("INSERT INTO parties(name,kind) VALUES('SYN-CUSTODY-supplier','supplier') RETURNING id")).rows[0].id;
  await db.getPool().query("INSERT INTO inventory_approval_policies(id,branch_key,version,currency,limit_minor,created_by) SELECT $1,'clinic',COALESCE(MAX(version),0)+1,'YER',150000,$2 FROM inventory_approval_policies WHERE branch_key='clinic'",[key(),admin.userId]);
-});afterAll(async()=>{await db.resetPoolForTesting();});
+});afterAll(async()=>{vi.unstubAllEnvs();await db.resetPoolForTesting();});
 async function fixture(){const item=await db.createInventoryItem({name:`SYN-CUSTODY-${key()}`,unit:"cartridge",category:"anesthesia",minLevel:5,note:null,createdBy:admin.username});const conversion={itemId:item.id,version:1,enteredUnit:"box",baseUnit:"cartridge",baseUnitsPerEnteredUnit:"50",enteredPrecision:0,basePrecision:0};await db.getPool().query("INSERT INTO inventory_item_unit_versions(item_id,version,entered_unit,base_unit,factor,entered_precision,base_precision) VALUES($1,1,'box','cartridge',50,0,0)",[item.id]);
  const store=`store-${key()}`,destination=`custody-${key()}`,other=`custody-${key()}`,transit=`transit-${key()}`;
  for(const [id,label,kind,doctor] of [[store,"Synthetic main store","store",null],[destination,"Synthetic Doctor A","custody",partyA],[other,"Synthetic Doctor B","custody",partyB],[transit,"Synthetic transit","transit",null]])await db.getPool().query("INSERT INTO inventory_locations(id,branch_key,label,kind,doctor_party_id) VALUES($1,'clinic',$2,$3,$4)",[id,label,kind,doctor]);

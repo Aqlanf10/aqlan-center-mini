@@ -1,3 +1,4 @@
+import { requireInventoryIntegration } from "./rollout";
 import { createHash, randomUUID } from "node:crypto";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "../db";
 import { withTransaction } from "../transactions";
@@ -36,6 +37,7 @@ export interface InventoryActor { userId: number; username: string; role: string
 function docId(value: string) { invariant(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value), "invalid_document_id", "Document ID must be a UUID"); }
 function scope(value: string) { invariant(value === INVENTORY_CLINIC_SCOPE, "branch_forbidden", "This actor is not authorized for that inventory scope"); }
 async function ready() {
+  requireInventoryIntegration();
   await ensureSchema();
   const { rows } = await getPool().query<{ present: boolean }>("SELECT to_regclass('purchase_requests') IS NOT NULL AND to_regclass('inventory_operations') IS NOT NULL AS present");
   if (!rows[0]?.present) throw new InventoryDomainError("schema_not_ready", "Inventory procurement schema awaits coordinated migration");

@@ -1,5 +1,6 @@
+vi.mock("server-only", () => ({}));
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 assertRealPostgresUrl(); stubPostgresEnv();
 const db=await import("../../lib/db");
@@ -10,6 +11,7 @@ import type { InventoryActor } from "../../lib/inventory-domain/procurement-stor
 import type { RequestRevision,PurchaseOrder,ReceiptRevision,SupplierInvoiceRevision } from "../../lib/inventory-domain/procurement";
 let admin:InventoryActor; let doctor:InventoryActor; let itemId:number;let supplierId:number;let locationId:string;
 beforeAll(async()=>{
+ vi.stubEnv("INVENTORY_INTEGRATION_ENABLED", "true");
  await db.ensureSchema();await db.getPool().query(INVENTORY_PROCUREMENT_SQL);
  for(const role of ["admin","doctor"]){const username=`SYN-${role}-${randomUUID()}`;const row=await db.getPool().query("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,$1,'synthetic-disabled-login',$2) RETURNING id",[username,role]);const actor={userId:row.rows[0].id,username,role};if(role==="admin")admin=actor;else doctor=actor;}
  const item=await db.createInventoryItem({name:`SYN-CARTRIDGE-${randomUUID()}`,category:"anesthesia",unit:"cartridge",minLevel:5,note:null,createdBy:admin.username});itemId=item.id;
@@ -17,7 +19,7 @@ beforeAll(async()=>{
  await db.getPool().query("INSERT INTO inventory_item_unit_versions(item_id,version,entered_unit,base_unit,factor,entered_precision,base_precision) VALUES($1,1,'box','cartridge',50,0,0)",[itemId]);
  locationId=`store-${randomUUID()}`;await db.getPool().query("INSERT INTO inventory_locations(id,branch_key,label,kind) VALUES($1,'clinic','Synthetic main store','store')",[locationId]);
  await db.getPool().query("INSERT INTO inventory_approval_policies(id,branch_key,version,currency,limit_minor,allow_self_approval,created_by) SELECT $1,'clinic',COALESCE(MAX(version),0)+1,'YER',150000,FALSE,$2 FROM inventory_approval_policies WHERE branch_key='clinic'",[randomUUID(),admin.userId]);
-});afterAll(async()=>{await db.resetPoolForTesting();});
+});afterAll(async()=>{vi.unstubAllEnvs();await db.resetPoolForTesting();});
 const key=()=>randomUUID();
 function request():RequestRevision{return {id:randomUUID(),version:1,branchId:"clinic",requestedBy:doctor.userId,reason:"Synthetic requirement",proposedSupplierPartyId:supplierId,value:{currency:"SAR",amountMinor:30000},lines:[{id:randomUUID(),itemId,quantity:"3",conversion:{itemId,version:1,baseUnit:"cartridge",enteredUnit:"box",baseUnitsPerEnteredUnit:"50",enteredPrecision:0,basePrecision:0}}]};}
 async function approved(quantity="3") {const r=request();await store.submitPurchaseRequest(doctor,key(),r);await store.approvePurchaseRequest(admin,key(),{requestId:r.id,version:1,decisions:[{lineId:r.lines[0].id,quantity,reason:"Explicit synthetic approval"}],valuation:valuationSnapshot({purpose:"approval_estimate",currency:"SAR",amountMinor:30000,rateToBase:"500",capturedAt:"2026-10-14T01:00:00Z",sourceRef:"synthetic-quote"})});return r;}

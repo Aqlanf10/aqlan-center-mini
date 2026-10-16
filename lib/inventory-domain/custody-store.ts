@@ -1,3 +1,4 @@
+import { requireInventoryIntegration } from "./rollout";
 import { randomUUID } from "node:crypto";
 import { doctorOwnsPatient,ensureSchema,getPool,type DbClient } from "../db";
 import { withTransaction } from "../transactions";
@@ -80,7 +81,7 @@ export interface CustodySettlementObjectionInput {
 const uuid=(id:string)=>invariant(typeof id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),"invalid_document_id","Use a document UUID");
 const reason=(value:string)=>invariant(typeof value==="string"&&value.trim().length>0&&value.length<=2000,"reason_required","A bounded reason is required");
 function mapDomainCall<T>(fn:()=>T):T{try{return fn();}catch(err){if(err instanceof InventoryDomainError)throw err;const code=err instanceof Error&&err.message?err.message:"invalid_custody_operation";throw new InventoryDomainError(code,code);}}
-async function ready(){await ensureSchema();const r=await getPool().query<{present:boolean}>("SELECT to_regclass('inventory_transfers') IS NOT NULL AS present");if(!r.rows[0]?.present)throw new InventoryDomainError("schema_not_ready","Doctor custody schema awaits coordinated migration");}
+async function ready(){requireInventoryIntegration();await ensureSchema();const r=await getPool().query<{present:boolean}>("SELECT to_regclass('inventory_transfers') IS NOT NULL AS present");if(!r.rows[0]?.present)throw new InventoryDomainError("schema_not_ready","Doctor custody schema awaits coordinated migration");}
 const BALANCES_SQL=`SELECT lot_id,location_id,SUM(delta)::text AS qty FROM (
  SELECT a.lot_id,a.location_id,CASE WHEN m.kind='out' OR(m.kind='adjust' AND m.qty<0) THEN -a.qty ELSE a.qty END AS delta
  FROM inventory_movement_allocations a JOIN inventory_movements m ON m.id=a.movement_id

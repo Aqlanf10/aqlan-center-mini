@@ -1,3 +1,4 @@
+import { inventoryIntegrationEnabled, INVENTORY_DISABLED_MESSAGE } from "@/lib/inventory-domain/rollout";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
@@ -130,8 +131,8 @@ function shape(document:unknown,command:string){const source=record(document);in
   if(command==="invoice.match"){record(line.price);list(line.receiptAllocations);}
 }return source;}
 const DOCTOR_OR_ADMIN_COMMANDS=new Set(["request.submit","custody.acknowledge","custody.consume","custody.return_to_store","custody.stocktake","custody.close_package","custody.object_settlement"]);
-export async function GET(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
-export async function POST(request:Request){const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{
+export async function GET(request:Request){if(!inventoryIntegrationEnabled())return disabled();const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{const url=new URL(request.url);if(url.searchParams.get("view")==="workbench")return NextResponse.json(await readProcurementWorkbench(session,Number(url.searchParams.get("requestOffset")??"0"),Number(url.searchParams.get("orderOffset")??"0")));if(url.searchParams.get("view")==="custody")return NextResponse.json(await readDoctorCustody(session,Number(url.searchParams.get("offset")??"0")));if(url.searchParams.get("view")==="catalog")return NextResponse.json(await readProcurementCatalog(session));const offset=Number(url.searchParams.get("offset") ?? "0");invariant(Number.isSafeInteger(offset)&&offset>=0&&offset<=100000,"invalid_page","Invalid page offset");return NextResponse.json(await readProcurementRequests(session,offset));}catch(error){return failure(error);}}
+export async function POST(request:Request){if(!inventoryIntegrationEnabled())return disabled();const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول."},{status:401});try{
   const source=record(await readJsonBody(request,JSON_BODY_LIMIT_BYTES));const command=String(source.command??"");
   invariant(typeof source.operationKey==="string","invalid_operation_key","Operation key is required");
   invariant(DOCTOR_OR_ADMIN_COMMANDS.has(command) || session.role==="admin","operation_forbidden","This management transition requires administrator authority");
@@ -158,3 +159,7 @@ export async function POST(request:Request){const session=await requireSession()
     default:throw new InventoryDomainError("invalid_command","Use a supported procurement transition");
   }
 }catch(error){return failure(error);}}
+
+function disabled() {
+  return NextResponse.json({ code: "inventory_integration_disabled", message: INVENTORY_DISABLED_MESSAGE }, { status: 503 });
+}
