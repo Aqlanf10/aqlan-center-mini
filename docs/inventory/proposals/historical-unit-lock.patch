@@ -1,0 +1,40 @@
+--- a/lib/db.ts
++++ b/lib/db.ts
+@@ -23334,7 +23334,23 @@
+   actor: string,
+ ): Promise<InventoryItem | null> {
+   await ensureSchema();
+-  const { rows } = await getPool().query<InventoryItemRow>(
++  const updated = await withTransaction(getPool(), async client => {
++    // Same item-row lock as createInventoryMovement: a concurrent first movement
++    // cannot slip between the history check and changing the meaning of its unit.
++    const { rows: locked } = await client.query<{ unit: string }>(
++      "SELECT unit FROM inventory_items WHERE id = $1 FOR UPDATE", [id],
++    );
++    if (!locked[0]) return null;
++    if (patch.unit !== undefined && patch.unit !== locked[0].unit) {
++      const history = await client.query<{ present: boolean }>(
++        "SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE item_id = $1) AS present", [id],
++      );
++      if (history.rows[0].present) {
++        throw Object.assign(new Error("Changing a historical inventory unit requires an approved conversion"),
++          { code: "historical_unit_change" });
++      }
++    }
++    const { rows } = await client.query<InventoryItemRow>(
+     `UPDATE inventory_items SET
+        name       = COALESCE($2, name),
+        category   = COALESCE($3, category),
+@@ -23350,8 +23366,10 @@
+       patch.isActive ?? null,
+     ],
+   );
+-  if (!rows[0]) return null;
+-  const item = await inventoryBalanceFor(id, rows[0]);
++    return rows[0] ?? null;
++  });
++  if (!updated) return null;
++  const item = await inventoryBalanceFor(id, updated);
+   void recordAudit({
+     action: "inventory.item", entity: "inventory_item", entityId: id,
+     entityLabel: item.name,

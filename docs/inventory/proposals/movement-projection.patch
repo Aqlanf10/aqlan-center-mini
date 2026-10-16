@@ -1,0 +1,11 @@
+--- a/lib/db.ts
++++ b/lib/db.ts
+@@ -23576,7 +23576,7 @@
+   await ensureSchema();
+   const { rows } = await getPool().query<InventoryMovementRow>(
+     `SELECT id, item_id, kind, qty, expiry_date, reason, visit_id, created_by, created_at,
+-            unit_cost_minor, is_return
++            unit_cost_minor, is_return, party_id, payable_id
+        FROM inventory_movements WHERE item_id = $1 ORDER BY id DESC LIMIT $2`,
+     [itemId, limit],
+   );

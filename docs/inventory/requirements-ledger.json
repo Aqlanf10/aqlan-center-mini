@@ -1,0 +1,4692 @@
+{
+  "sourceLibraryId": "libfile_05f8e16e32508191aefa2093c44f9a21",
+  "sourceSHA256": "ed47678714550343cc489825db47686bbbf36c2446b8344229c8d2a90ac53e81",
+  "sourceBytes": 104993,
+  "sourceLines": 499,
+  "base": "148fcbeac229cb279848e6ea37049d1599a4fafe",
+  "branch": "feat/inventory-procurement-custody",
+  "acceptanceCount": 69,
+  "entries": [
+    {
+      "id": "INV-01",
+      "line": 36,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "شجرة main وعقد المخطط لا يحتويان كيانات طلب شراء/أمر شراء/سند استلام ومطابقة مستقلة",
+      "expected": "بناء دورة الطلب والاعتماد والشراء والاستلام والفاتورة على مراحل مترابطة",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-02",
+      "line": 37,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`createInventoryMovement` ينشئ مستحقًا لكل حركة إدخال مرتبطة بمورد؛ والفهرس `inventory_movements_payable_uniq` يفرض تفرد رابط المستحق",
+      "expected": "النموذج لا يمثل فاتورة مورد متعددة الأصناف والدفعات والاستلامات كما يلزم؛ يلزم تصميم ربط يمنع مضاعفة الدين",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-03",
+      "line": 38,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "مسار الإدخال يحلل `unitCost` بعملة `CLINIC_BASE_CURRENCY`، وينشئ المستحق بها وبسعر 1",
+      "expected": "لا يمكن اعتبار إدخال المخزون الحالي تسجيلًا كاملًا لفاتورة شراء أصلها SAR أو USD؛ يلزم فصل عملة الفاتورة عن تكلفة المخزون الأساسية",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-04",
+      "line": 39,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`unit` نص، و`updateInventoryItem` يسمح بتغييره دون فحص تاريخ حركات أو تحويل كميات",
+      "expected": "تغيير «علبة» إلى «قطعة» يغير معنى الرصيد ظاهريًا؛ يلزم وحدة أساس ومعاملات تحويل بإصدارات",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [
+        "shared-foundations-observed.log"
+      ],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-05",
+      "line": 40,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "الصرف اليدوي والآلي يفحصان الرصيد الإجمالي؛ `batchRemaining` يرتب الدفعات ولا يستبعد المنتهي من الصرف",
+      "expected": "تنبيه الصلاحية ليس منع استخدام؛ يلزم دفعات فعلية وحالات حجز/حجر/صلاحية واستهلاك من المتاح الصالح فقط",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [
+        "shared-foundations-observed.log"
+      ],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-06",
+      "line": 41,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "لا تحمل الحركة رابط تخصيص إلى دفعة مصروفة بعينها أو رقم LOT مصنع أو موقع مخزن في المخطط المفحوص",
+      "expected": "لا يمكن إثبات الدفعة المستخدمة أو إرجاعها واستدعائها بدقة من الاستنتاج وحده",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-07",
+      "line": 42,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "المسار و`createInventoryMovement` لا يتلقيان مفتاح منع تكرار طلب الإدخال اليدوي",
+      "expected": "انقطاع الرد ثم إعادة الطلب قد يكرر المخزون ومستحق المورد؛ قفل الصف يمنع تجاوز الرصيد لكنه لا يمنع تكرار الطلب نفسه",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [
+        "shared-foundations-observed.log"
+      ],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-08",
+      "line": 43,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`GET /api/inventory/[id]` يعيد تفاصيل الحركات ومنها `unitCostMinor` بعد فحص الجلسة فقط، بينما مسار القيمة `/value` مقيد بالمدير",
+      "expected": "حماية السعر غير متسقة في الكود؛ يلزم تنقيح الاستجابة حسب الصلاحية وإثبات HTTP قبل إعلان إصلاحها",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "http-browser-premium.log"
+      ],
+      "status": "foundation-fixed-with-recorded-limits"
+    },
+    {
+      "id": "INV-09",
+      "line": 44,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "تجربة `costNow([{kind:'in', qty:10}])` أعادت تكلفة وحدة 0 وقيمة 0؛ وعدّ `withoutCost` يعتمد على `null`",
+      "expected": "رصيد بسعر مجهول قد يبدو مجانيًا ومكتمل التقييم؛ يلزم حالة تكلفة معروفة/مجهولة/تقديرية صريحة",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "http-browser-premium.log"
+      ],
+      "status": "foundation-fixed-with-recorded-limits"
+    },
+    {
+      "id": "INV-10",
+      "line": 45,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`listInventoryMovements` لا يختار `party_id` و`payable_id` رغم أن `toMovement` يتوقعهما ويعيدهما null عند غيابهما",
+      "expected": "الربط المخزن بالمورد والمستحق لا يصل كاملًا في قراءة سجل الصنف؛ أصلح projection ولا تُنشئ روابط جديدة بدل القديمة",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/proposals/movement-projection.patch"
+      ],
+      "tests": [
+        "__tests__/postgres/inventory-foundation-read.test.ts"
+      ],
+      "evidence": [
+        "shared-foundations-observed.log"
+      ],
+      "status": "owned-HTTP-read-fixed; shared-projection-patch-proposed"
+    },
+    {
+      "id": "INV-11",
+      "line": 46,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "حد النقص في `stockStatus` يستخدم `<`، وأداة الملخص الذكي تستخدم `<=`؛ تجربة الرصيد 5 والحد 5 أعادت `ok`",
+      "expected": "توحيد معنى «وصل حد الطلب» بين الشاشات والتنبيهات والاقتراحات",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "http-browser-premium.log"
+      ],
+      "status": "foundation-fixed-with-recorded-limits"
+    },
+    {
+      "id": "INV-12",
+      "line": 47,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "أداة AI تستبدل فشل `listInventoryItems` بمصفوفة فارغة وقد تقول إن كل المواد آمنة",
+      "expected": "فشل القراءة لا يعني مخزنًا سليمًا أو فارغًا؛ يجب عرض تعذر القراءة",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "http-browser-premium.log"
+      ],
+      "status": "foundation-fixed-with-recorded-limits"
+    },
+    {
+      "id": "INV-13",
+      "line": 48,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "تدقيق إنشاء/تعديل الصنف والحركة يُطلق بـ`void recordAudit` خارج المعاملة الأساسية في الوظائف المفحوصة",
+      "expected": "لا تعتبر الأثر التدقيقي مضمون الذرية؛ اجعل اعتماد الطلب والاستلام والترحيل المالي مع تدقيق مضمون أو outbox معاملاتي",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-14",
+      "line": 49,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "لا توجد أعمدة موقع/مخزن/فرع في جدولَي المخزون المفحوصين",
+      "expected": "دعم المواقع والفروع يحتاج نموذجًا صريحًا وترحيلًا أمينًا للمخزون الحالي",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-15",
+      "line": 50,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`issuedCostForPatient` في `lib/db.ts` يجمع حركات `out` للمريض عبر تاريخه؛ لا يطرح مرتجعات `in` في هذه الدالة",
+      "expected": "لا يمثل صافي تكلفة حالة أو زيارة بعينها؛ يلزم نطاق واضح وربط المرتجع بالصرف الأصلي",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-16",
+      "line": 51,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "زر إدراج المواد في `CaseProfitabilityModal` يضع إجمالي مواد المريض في الإجراء الأول",
+      "expected": "يمكن تحميل علاج بتكلفة علاجات أخرى؛ ألغِ هذا التخصيص التلقائي وأظهر غير الموزع للمراجعة",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-17",
+      "line": 52,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "`lib/profitability.ts` يجمع المواد والمختبر والعمولة فقط، ويسمي الناتج `netClinicProfitMinor`؛ القيم الناقصة تعامل كصفر، وحدود 20/35/55 ثابتة مع وصف معياري",
+      "expected": "هذا هامش بعد التكاليف المباشرة المدخلة، وليس صافي ربح مؤكد؛ أظهر اكتمال البيانات والمصاريف الموزعة، واجعل الأهداف إعدادات دون ادعاء معيار عالمي",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "INV-18",
+      "line": 53,
+      "section": "2. النواقص والملاحظات المثبتة",
+      "requirement": "توجد أصلًا نسب إهلاك `lib/materialRate.ts` وتاريخ نسب وخصم في حساب مستحق الطبيب؛ `netEarnedMinor` مقيد بحد أدنى صفر",
+      "expected": "أعد استخدام السياسة الحالية؛ لا تفترض أن النسبة النظرية كلها خُصمت فعلًا، ولا تنشئ خصمًا ثانيًا عند التسوية السنوية",
+      "sources": [
+        "lib/db.ts",
+        "lib/inventory.ts",
+        "lib/inventoryCost.ts",
+        "docs/inventory/procurement-contract.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "source-verified; integration-pending"
+    },
+    {
+      "id": "R001",
+      "line": 73,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "1. الطبيب/المساعد/أمين المخزن يحدد المواد المطلوبة والكميات والسبب والموعد المطلوب والجهة المستفيدة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R002",
+      "line": 74,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "2. النظام يعرض المتاح الصالح بالمخزن وما طُلب سابقًا وما هو متوقع وصوله؛ يقترح الكمية دون تكرار طلب قائم أو افتراض الشراء تلقائيًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R003",
+      "line": 75,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "3. يرفع الموظف **طلب شراء**؛ تراجعه الإدارة وتوافق أو تعدل بمراجعة موثقة أو تعيده أو ترفضه بسبب.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R004",
+      "line": 76,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "4. مسؤول المشتريات يختار المورد ويضيف عرض السعر وشروط التوريد والعملة، ثم يصدر **أمر شراء معتمدًا** ضمن الموافقة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R005",
+      "line": 77,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "5. عند الوصول يفتح أمين المخزن أمر الشراء ويرى كل صنف وكميته المطلوبة والمستلمة سابقًا والمتبقية؛ يسجل ما وصل فعلًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R006",
+      "line": 78,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "6. يفحص الكميات والمواصفات والدفعات والصلاحية والتلف، ويسجل المقبول والمرفوض والمحجور والناقص.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R007",
+      "line": 79,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "7. عند **ترحيل سند الاستلام** تدخل الكمية المقبولة إلى موقع المخزون الصحيح مرة واحدة. المواد المعلقة على الفحص لا تصبح متاحة للاستهلاك.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R008",
+      "line": 80,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "8. المحاسب/المسؤول المالي يطابق **أمر الشراء + الاستلام + فاتورة المورد**، ويوثق الفروق ثم يرحل الفاتورة إلى حساب المورد بالمقدار الصحيح دون تكرار.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R009",
+      "line": 81,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "9. يسدد المسؤول المالي الفاتورة من مسار السداد القائم، بما في ذلك عملة مختلفة وسعر محفوظ، وتظهر حالة الدفع في سياق الطلب.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R010",
+      "line": 82,
+      "section": "أ. رحلة المستخدم الأساسية",
+      "requirement": "10. يظل أثر كل صنف قابلًا للتتبع: من طلبه، ومن وافق، ومن استلمه، وأين خُزن، ومن صرفه ولأي قسم/زيارة، وما بقي منه.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R011",
+      "line": 101,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- الصنف: معرف ورمز داخلي، اسم عربي وإنجليزي إن توفر، تصنيف، شركة/علامة ومواصفات، باركود أو أكثر، صورة اختيارية، موردون معتادون، وحدة أساس، عبوات شراء وصرف، حد طلب ومستوى مستهدف ومدة توريد، وتتبع دفعات/صلاحية/تسلسل عند الحاجة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R012",
+      "line": 102,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- افصل الصنف عن البدائل: مقاسات أسلاك التقويم وموادها وفكيها، حجم القفازات، لون الكمبوزيت، ومقاس ملفات العصب لا تُجمع تحت صنف عام يصعب تمييزه. لا تنشئ أصنافًا تلقائيًا من أسماء متشابهة في فاتورة دون مراجعة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R013",
+      "line": 103,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- مثال وحدات: علبة بنج = 50 كاربولة؛ شراء 3 علب يضيف 150 كاربولة بوحدة الأساس؛ صرف كاربولتين يخفض المتاح إلى 148. تحفظ وحدة الشراء والكمية الأصلية ومعامل التحويل المستخدم على المستند.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R014",
+      "line": 104,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- معامل العبوة خاص بالصنف/عبوته، وليس قاعدة عامة أن كل «علبة» لها نفس العدد. لا تستنتج المعامل من النص «علبة 50» وحده عند ترحيل البيانات القديمة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R015",
+      "line": 105,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- لا تسمح بتغيير وحدة أساس صنف ذي حركات تاريخية وكأنها مجرد اسم. اعمل ترحيلًا موثقًا بتحويل ومعاينة أو صنفًا جديدًا مرتبطًا، مع الحفاظ على معنى كميات الماضي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R016",
+      "line": 106,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- الكسور والدقة بحسب وحدة الصنف. تتحقق الواجهة والخادم وقاعدة البيانات من الحدود والتقريب، وتُرفض كمية تصبح صفرًا بعد التقريب بدل خطأ 500 أو قيد مشوه.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R017",
+      "line": 107,
+      "section": "ج. الأصناف ووحدات القياس",
+      "requirement": "- أصناف غير مخزنية/خدمات ومعدات وأصول لها مسار شراء مناسب دون إضافة «رصيد مادة مستهلكة» وهمي. لا توسع نطاق المشروع إلى نظام صيانة أصول كامل، لكن لا تمنع تصنيف مشترياتها الصحيح.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R018",
+      "line": 115,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- يمكن الموافقة على بعض البنود أو كميات أقل، مع سبب؛ تحفظ كمية الطلب الأصلية والكمية المعتمدة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R019",
+      "line": 116,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- الموافقة مرتبطة بإصدار محدد. تغيير الصنف أو الكمية أو المورد/القيمة خارج حدود الموافقة بعد اعتمادها يحتاج إعادة اعتماد؛ لا تبقى علامة موافقة صالحة على محتوى تغير.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R020",
+      "line": 117,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- سياسات الإعدادات تحدد من يطلب ومن يوافق، وحدود الاعتماد المالية والفروع والتفويض والبديل. الإدارة يمكن أن تفوض شخصًا مثل مدير المركز دون منحه جميع صلاحيات النظام.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R021",
+      "line": 118,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- فصل مقدم الطلب والموافق افتراضيًا؛ استثناء المالك أو الطوارئ إن اختاره المركز يكون صريحًا ومسببًا ومدققًا، لا التفافًا مخفيًا على الموافقة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R022",
+      "line": 119,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- حدود الموافقة المالية عبر العملات تستخدم عملة سياسة معلنة وسعر تقييم مثبت في الطلب، مع إظهار المبلغ الأصلي والمكافئ؛ لا تقارن 100 USD مباشرة بحد 100 YER ولا تعتبر سعر اليوم موافقة على تجاوز جديد.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R023",
+      "line": 120,
+      "section": "د. طلب الشراء وموافقة الإدارة",
+      "requirement": "- إشعارات داخلية للمعنيين، وسجل زمني لكل تغيير وتعليق. إشعار خارجي أو إرسال أمر للمورد يستخدم القناة القائمة بعد فعل إرسال مصرح من المستخدم؛ إنشاء المستند ليس إرسالًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R024",
+      "line": 124,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- دعم إرفاق عرض واحد أو أكثر ومقارنة السعر والعملة ووحدة العبوة وعدد الوحدات والشحن وموعد التوريد وشروط السداد. لا تجعل المقارنة بعدد محدود إلزامية لكل شراء صغير إلا بإعداد الإدارة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R025",
+      "line": 125,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- أمر الشراء يجمع بنودًا معتمدة من طلب أو عدة طلبات مع حفظ روابط الكميات؛ ويجوز تقسيم طلب على موردين. لا يتجاوز المجموع الكمية المعتمدة إلا بتعديل مصرح.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R026",
+      "line": 126,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- المورد من `parties`؛ يراعى السماح بدور المورد حسب النموذج الفعلي، ولا يُقبل معرف جهة أخرى لمجرد أنه رقم صالح. المورد الموقوف لا يُستخدم لطلب جديد دون إجراء تفعيل مصرح.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R027",
+      "line": 127,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- بيانات الأمر: المورد، عنوان/موقع التسليم، رقم وتاريخ ونسخة، عملة YER/SAR/USD، كل كمية وسعر بوحدة الشراء، خصم وشحن ورسوم مفعلة فقط، الإجمالي، موعد التوريد، وشروط السداد.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R028",
+      "line": 128,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- لا تعتبر أمر الشراء فاتورة مورد أو استلامًا أو مصروفًا نقديًا. هو التزام شراء تشغيلي، ولا يدخل كمية للمخزن أو يقبض/يصرف مالًا تلقائيًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R029",
+      "line": 129,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- سعر الصرف المقدر عند الطلب مختلف عن سعر فاتورة المورد وعن سعر الدفع الفعلي؛ تحفظ أغراضها بوضوح ولا يستبدل واحد الآخر بأثر رجعي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R030",
+      "line": 130,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- حالات الأمر: مسودة، بانتظار اعتماد إن تطلبته السياسة، معتمد/صادر، مؤكد من المورد عند وجود إثبات، مستلم جزئيًا، مستلم بالكامل، متبقٍ مغلق بسبب، ملغى. الدفع والمطابقة حالتان منفصلتان.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R031",
+      "line": 131,
+      "section": "هـ. عروض الأسعار وأمر الشراء",
+      "requirement": "- بعد الاستلام الجزئي يُلغى المتبقي فقط عند الحاجة، ولا تختفي الاستلامات والفواتير السابقة. تعديل أمر صادر نسخة جديدة، مع عرض ما تغير ومن اعتمده.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R032",
+      "line": 137,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- سند الاستلام له معرف مستقل ورقم إذن تسليم المورد إن توفر، وتاريخ وصول فعلي ووقت إدخال ومستخدم وموقع، وصور/مرفقات إثبات اختيارية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R033",
+      "line": 138,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- سجل الاختلاف في المواصفات أو العلامة أو الصنف بدل استبداله تلقائيًا. قبول بديل يحتاج موافقة وربطًا واضحًا ببند الأمر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R034",
+      "line": 139,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- يدعم وصول 6 من 10 ثم 4 لاحقًا، وتعدد الدفعات والصلاحيات في الصنف نفسه، ووصول عدة أوامر في شحنة واحدة دون ضياع الربط.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R035",
+      "line": 140,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- كل كمية فعلية تُصنف مرة واحدة: مقبولة أو محجورة أو مرفوضة. عرّف معادلات المتبقي بدقة عند رفض بضاعة أو انتظار بديل. لا تعد المرفوض توريدًا ناجحًا يُغلق الطلب.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R036",
+      "line": 141,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- الكمية الزائدة عن المسموح لا تُقبل بصمت؛ تُعرض وتحتاج قرارًا ضمن حدود تفاوت معتمدة أو تعديل الأمر. تكون حدود السعر والكمية والصلاحية مستقلة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R037",
+      "line": 142,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- رقم LOT المصنع، الصلاحية، الشركة/المواصفة والكمية والموقع لكل دفعة. الصنف الذي يحتاج صلاحية لا يُستلم كمتاح بتاريخ مجهول دون استثناء محدد مدقق، ولا يفرض تاريخ مصطنع على صنف لا تنطبق عليه الصلاحية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R038",
+      "line": 143,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- المنتهي أو التالف لا يدخل المتاح للاستعمال؛ الواصل قد يُوثق كمرفوض أو محجور تمهيدًا للرد. عرّف سياسة الحد الأدنى للصلاحية المتبقية لكل صنف/فئة بإعدادات المركز.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R039",
+      "line": 144,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- زر «ترحيل الاستلام» معاملة ذرية: يثبت الاعتماد، يكتب سندًا مرحلًا وتخصيصات الدفعات والحركات وروابطها والأثر التدقيقي. الفشل لا يترك نصف البنود مدخلًا والنصف الآخر مفقودًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R040",
+      "line": 145,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- مسودة الاستلام لا تغير الرصيد. مجرد رفع صورة الفاتورة أو الضغط على «وصلت الشحنة» لا يرحل جميع الأصناف تلقائيًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R041",
+      "line": 146,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- استخدم مفتاح تكرار وإصدار مستند وأقفالًا مناسبة؛ تأكيد الاستلام مرتين أو من موظفين متزامنين لا يكرر كمية ولا يسمح بتجاوز المتبقي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R042",
+      "line": 147,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- الاستلام المصحح لا يُحذف ولا يُعدل بصمت. التصحيح حدث عكس/فرق مرتبط بالأصل، مع مراعاة أن بعض الكمية قد صُرفت أو حُولت أو فُوترت بالفعل.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R043",
+      "line": 148,
+      "section": "و. الاستلام والفحص والترحيل للمخزون",
+      "requirement": "- وثّق الوقت الفعلي والاستلام التاريخي بأمان؛ لا تعِد ترتيب حركات WAC السابقة بتغيير تاريخ حقل على حركة منشورة. للترحيل المتأخر سياسة واضحة واختبارات.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R044",
+      "line": 154,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "1. فاتورة المورد مستند متعدد البنود يحمل المورد ورقمه الخارجي وتاريخه وعملته والخصم والشحن/الرسوم ومرفق الفاتورة وحالة المراجعة. اكشف تكرار الرقم لدى المورد ضمن سياسة تطبيع/سنة واضحة، مع معالجة المورد الذي لا يصدر رقمًا موثقًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R045",
+      "line": 155,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "2. المطابقة ثلاثية: كمية/سعر أمر الشراء، الكمية المقبولة أو المصير الموثق في الاستلام، والكمية/السعر المفوتران. أظهر الفروق وأسبابها وحالة الاعتماد لكل بند.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R046",
+      "line": 156,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "3. قد تغطي فاتورة عدة أصناف وعدة استلامات، وقد يغطي الاستلام فواتير جزئية. احفظ تخصيصات الكميات والمبالغ، وامنع إعادة فوترة الكمية نفسها بلا تسوية صريحة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R047",
+      "line": 157,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "4. المتأخر وصوله لا يُعلّم مستلمًا لإرضاء الفاتورة. إن وصلت الفاتورة قبل المواد يمكن تسجيلها قيد المطابقة؛ اعتماد التزام أو دفعة مقدمة قبل الاستلام مسار استثناء مصرح، لا استلام وهمي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R048",
+      "line": 158,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "5. الترحيل المالي ينشئ أو يربط مستحق `payable` واحدًا بالمستند المالي المعتمد وفق النموذج المختار، مع توزيع البنود إلى الاستلامات؛ **لا ينشئ مستحقًا عند كل دفعة ثم يضيف إجمالي الفاتورة فوقه**.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R049",
+      "line": 159,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "6. عالج `inventory_movements_payable_uniq` وعلاقة المستحق بالحركة القديمة بخطة ترحيل صريحة. يمكن إبقاء روابط التاريخ القديمة وبناء جداول تخصيص للمسار الجديد؛ لا تُسقط القيد بلا بديل يمنع التكرار ولا تُلصق مستحقًا واحدًا بعدة حركات مخالفة للمخطط.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R050",
+      "line": 160,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "7. الشراء المباشر القائم له مسار انتقال محدد: إما استثناء شراء مباشر مصرح ينشئ الوثائق المكافئة مرة واحدة، أو يُقيد الإدخال لأغراض رصيد افتتاحي/هبة/مرتجع/تصحيح ذات سبب. لا يبقى طريقًا لتجاوز اعتماد المشتريات دون أثر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R051",
+      "line": 161,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "8. لا يعاد استخدام `createInventoryMovement` مع `supplierPartyId` داخل المسار الجديد ثم ينشأ payable مرة ثانية. افصل إنشاء حركة المخزون عن إنشاء التزام المورد في خدمة المجال المناسبة مع الحفاظ على التوافق مع السجلات القديمة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R052",
+      "line": 162,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "9. السداد عبر `recordExpense`/التسوية القائمة وصلاحياتها، لا جدول دفعات جديد. استخدم لقطة العملة والسعر والتخصيص ومنع تجاوز المتبقي و`stale_quote` وعكس السداد الموجودة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R053",
+      "line": 163,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "10. إذا دُفعت مقدمة، تسجل عبر مسار الدفعة المقدمة المعتمد، ثم تسوى على الفاتورة دون خروج مال مرة ثانية أو اعتبار المقدمة خصمًا من سعر المواد.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R054",
+      "line": 164,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "11. استلام المواد لا يخرج نقدًا، وتسجيل الفاتورة لا يخرج نقدًا، والسداد هو حركة المال. لا تسجل شراء المخزون مصروفًا نقديًا تلقائيًا ثم تسجل دفع المورد مصروفًا آخر لنفس العملية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R055",
+      "line": 165,
+      "section": "ز. مطابقة فاتورة المورد والربط المالي",
+      "requirement": "12. عالج إشعار دائن/تسوية المورد والمرتجع مع المحرك الحالي. رد بضاعة لا يعني رد نقدي تلقائيًا، واستلام مبلغ مرتجع لا يعني أن البضاعة خرجت من المخزن.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R056",
+      "line": 169,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- أمر/فاتورة الشراء يمكن أن يكون YER أو SAR أو USD، والسداد بأي منها وفق محرك التحويل القائم. تظهر قيمة الفاتورة الأصلية، والمدفوع بعملته، والمكافئ المخصص، والمتبقي بعملة الفاتورة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R057",
+      "line": 170,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- العملة الأساسية الحالية في الكود هي YER؛ لا تغيرها ضمن هذه المهمة. خزن تكلفة التقييم الأساسية مع أصل سعر الشراء وعملته وسعر التقييم المستخدم، ولا تحول الفواتير القديمة كلما تغير سعر الإعدادات.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R058",
+      "line": 171,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- WAC الموجود يُحافظ عليه ما لم تُعتمد مواصفة تغيير واضحة. FEFO سياسة اختيار دفعة صالحة للصرف، وWAC طريقة تقييم؛ لا تعتبر أحدهما بديلًا حسابيًا عن الآخر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R059",
+      "line": 172,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- إذا وصلت البضاعة قبل معرفة سعرها النهائي، ميّز التكلفة التقديرية/المجهولة عن الصفر الحقيقي. يحدد التصميم هل يُستخدم سعر أمر معتمد مؤقتًا أو تقييم معلق، ثم كيف تُثبت فروق الفاتورة مع منع التقييم المضلل.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R060",
+      "line": 173,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- تكلفة الفاتورة اللاحقة والشحن والخصم لا تُعدل `unit_cost_minor` لحركة تاريخية محمية. ضع سياسة فروق تقييم موثقة تبين أثرها على المخزون المتبقي والمستهلك، وتختبر على مواد صُرفت قبل وصول الفاتورة. لا تغير عمولات/تقارير تاريخية معتمدة بصمت.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R061",
+      "line": 174,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- وزّع الشحن والخصومات على البنود بطريقة معلنة قابلة للمراجعة، واحفظ سياسة التقريب ومجموع التوزيع. لا تضف إجمالي الشحن كاملًا لكل صنف.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R062",
+      "line": 175,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- مجاني/هدية معلوم يختلف عن سعر مجهول؛ الأول يمكن أن تكون تكلفته صفرًا مع سبب، والثاني يظهر ضمن المواد غير مكتملة التقييم ولا يُستخدم لإعلان ربح/عمولة دقيقة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R063",
+      "line": 176,
+      "section": "ح. العملات والتكلفة",
+      "requirement": "- جميع الحسابات على الخادم وعبر تمثيل الأرقام المالية القائم، مع حدود overflow ودقة كمية متوافقة مع `NUMERIC` ووحدات العملة الصغرى. لا تقارن إجماليات عملات مختلفة دون تحويل معلن.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R064",
+      "line": 180,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- أضف هوية دفعة حقيقية وتخصيص صرف إلى دفعة/موقع، بدل استنتاج تاريخها من جميع الحركات لاحقًا وحده. هوية دفعة المصنع تتضمن الصنف والمصنع/السياق المناسب، فلا يعتبر LOT متشابه لصنفين دفعة واحدة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R065",
+      "line": 181,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- أرصدة مختلفة ظاهرة: موجود فعليًا، محجور، محجوز، صالح متاح، قيد النقل، ومتوقع وصوله. الطلب الموافق عليه ليس رصيدًا فعليًا، والمحجور ليس متاحًا للعمل.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R066",
+      "line": 182,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- عند الصرف، اختر FEFO من الدفعات الصالحة المتاحة مع قفل والتحقق من الصلاحية لحظة الترحيل. عند اختيار دفعة أخرى يظهر سبب إذا تطلبت السياسة. لا تُصرف دفعة منتهية أو محجورة عبر استدعاء API مباشر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R067",
+      "line": 183,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- اربط الصرف بالقسم/الطبيب أو زيارة/مريض/إجراء عند توفر هذا السياق وبصلاحياته. المواد العامة كالتنظيف والقرطاسية لا تُجبر على مريض وهمي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R068",
+      "line": 184,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- افحص `service_materials` والخصم عند توقيع الزيارة بعد إضافة الوحدات والمواقع؛ تمنع المسارات اليدوية والآلية صرف المادة نفسها مرتين بالخطأ. اجعل مصدر الخصم والإجراء واضحين.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R069",
+      "line": 185,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- لا تغير سياسة توقيع الزيارة والنقص الحالية خفية. احتفظ بمسودة التوثيق السريري عند النقص وقدّم معالجة تشغيلية مصرح بها؛ لا تنشئ مخزونًا أو تسوية آلية لتجاوز النقص، ولا يضيع توثيق الطبيب عند فشل الخصم.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R070",
+      "line": 186,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- استدعاء/حجز LOT يمنع استخدام المتبقي ويكشف مواقعها والصرف الذي يمكن تتبعه فعليًا إلى الزيارات. لا تدّعِ تتبع المرضى لدفعات قديمة لم تُسجل تخصيصاتها؛ وسمها «تتبع تاريخي غير متاح».",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R071",
+      "line": 187,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- مرتجع الصرف يربط بحركة الأصل وبكمية لم تُرد سابقًا، وتُسجل حالته وقابليته لإعادة التخزين. مادة غير صالحة للعودة للاستخدام تُحجر أو تتلف، ولا تعاد للمتاح تلقائيًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R072",
+      "line": 188,
+      "section": "ط. الدفعات والصلاحية والمواقع والاستهلاك",
+      "requirement": "- تالف/منتهي/مفقود: مستند إتلاف أو تسوية بسبب وصلاحية واعتماد، محدد الدفعة والموقع والكمية؛ لا يُخصم من دفعة مختلفة لمجرد أنها الأقرب صلاحية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R073",
+      "line": 192,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- المواقع: مخزن رئيسي، فرع، غرفة أو مخزن فرعي حسب حاجة المركز؛ استخدم تعريف الفرع الموجود إن توفر ولا تنشئ هوية فرع ثانية. الرصيد الحالي يُرحل إلى موقع افتراضي مصرح وموسوم بدل اختراع موقع قديم لكل حركة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R074",
+      "line": 193,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- التحويل داخل موقعين أو فرعين مستند واحد: طلب/إرسال، قيد النقل، استلام جزئي/كامل وفروق. لا تدخل البضاعة الوجهة بمجرد إرسالها، ولا تكررها بين المصدر والوجهة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R075",
+      "line": 194,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- اختلاف الفرع لا يبيح قراءة جميع المخازن؛ صلاحية خاصة للمدير/المخول بالتجميع.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R076",
+      "line": 195,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- الجرد مستند له نطاق ووقت مرجعي وبنود وكميات فعلية وإعادة عدّ وفروق وأسباب واعتماد. اختر بوضوح تجميد الموقع مؤقتًا أو مصالحة الحركات بين بداية العد وترحيله؛ لا تحسب فرقًا مقابل رصيد تغير أثناء العد بلا معالجة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R077",
+      "line": 196,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- لا يعدّل الجرد قيمة balance مباشرة؛ الفروق المعتمدة تنتج حركات تسوية مرة واحدة. الجرد الأعمى خيار إعداد لمنع نسخ الموظف الرصيد المتوقع دون عدّ.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R078",
+      "line": 197,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- مرتجع المورد مرتبط بالاستلام/الدفعة والفاتورة، بكمية لا تتجاوز المتاح غير المرتجع، وسبب وحالة إرسال/قبول. أثر الكمية مستقل عن الإشعار الدائن أو استرداد المال أو انتظار البديل.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R079",
+      "line": 198,
+      "section": "ي. التحويل والجرد والمرتجعات",
+      "requirement": "- دعم استبدال مادة مرفوضة/مرتجعة دون احتساب توريد جديد غير مطلوب أو إغلاق المتبقي خطأً. يُربط سند البديل بالمصدر وقرار المعالجة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R080",
+      "line": 218,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- معاملة الترحيل تتضمن قفل المستندات والصفوف بترتيب ثابت، فحص الحالة والإصدار والصلاحية، حساب المتبقي بالخادم، ثم كتابة جميع الآثار أو التراجع عنها معًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R081",
+      "line": 219,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- معرف منع التكرار مع فريدية قاعدة بيانات لكل أثر مصدر، مثل بند استلام/تخصيص دفعة/نوع الحدث؛ نفس المفتاح بمحتوى مختلف تعارض، لا قبول صامت.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R082",
+      "line": 220,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- الموافقة أو تغيير الحالة ليس PATCH عامًا يقبل أي status؛ انتقالات مسموحة وحراس تمنع أن يصير الطلب معتمدًا أو الفاتورة مدفوعة بإرسال نص من العميل.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R083",
+      "line": 221,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- فشل/انقطاع الرد يعرض «تعذّر تأكيد النتيجة» ويستعلم عن نفس العملية؛ لا يدفع المستخدم لإعادة كتابة استلام جديد.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R084",
+      "line": 222,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- التدقيق يسجل الفاعل الحقيقي والدور والتاريخ والنسخة والسبب والروابط والتغييرات. العمليات الحساسة تحتاج أثرًا مضمونًا في المعاملة أو outbox؛ لا تعتمد على promise غير منتظرة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R085",
+      "line": 223,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- تحقق من ارتباط المورد والفرع والطلب والأمر والاستلام والفاتورة على الخادم. تزوير IDs لا يسمح بمطابقة أمر مورد آخر أو القراءة خارج الفرع.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-source; shared-contracts-and-complete-acceptance-pending"
+    },
+    {
+      "id": "R086",
+      "line": 224,
+      "section": "ك. البيانات والخدمات والتزامن",
+      "requirement": "- المرفقات خاصة ومحدودة النوع والحجم، مع صلاحية عند الرفع والقراءة، لا روابط عامة للفواتير. لا تُنقل بيانات مالية إلى أدوات OCR/AI خارجية دون سياسة وتفعيل مصرح.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R087",
+      "line": 230,
+      "section": "ل. الصلاحيات والإعدادات",
+      "requirement": "- يمكن تكليف الإدارة بالموافقة، وأمين المخزن بالاستلام، والمسؤول المالي بالمطابقة والسداد. في المركز الصغير يمكن جمع الصلاحيات للمخول، مع بقاء سجل من فعل كل خطوة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R088",
+      "line": 231,
+      "section": "ل. الصلاحيات والإعدادات",
+      "requirement": "- تنقيح البيانات الحساسة في API؛ إخفاء عمود سعر بالواجهة لا يحجب `unitCostMinor` في JSON. يشمل ذلك التقارير والبحث والمرفقات والتصدير وأدوات AI.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R089",
+      "line": 232,
+      "section": "ل. الصلاحيات والإعدادات",
+      "requirement": "- إعدادات للوحدات والعبوات والتصنيفات والمخازن وسقوف الموافقة والبدائل وحدود الفروق وسياسات الصلاحية وحد الطلب والإشعارات وترقيم المستندات والعملة الافتراضية للمورد. عملة المورد الافتراضية لا تمنع فاتورة بعملة أخرى.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R090",
+      "line": 233,
+      "section": "ل. الصلاحيات والإعدادات",
+      "requirement": "- تغيير إعداد اليوم لا يعيد تفسير مستندات قديمة. يحتفظ المستند بإصدار الإعداد/القيمة المؤثرة مثل معامل العبوة وسعر الصرف وحدود الموافقة المطبقة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R091",
+      "line": 234,
+      "section": "ل. الصلاحيات والإعدادات",
+      "requirement": "- اعتمد سياسة واضحة للمساواة بحد الطلب واستخدمها في المخزون وAI والتقارير. فشل القراءة حالة خطأ وليس نتيجة «كل شيء آمن».",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R092",
+      "line": 238,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- طلب شراء، أمر شراء، سند استلام، محضر رفض/فرق، إذن صرف، تحويل، جرد، ومرتجع؛ مستندات مولدة بهوية المركز لا طباعة عشوائية للشاشة.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R093",
+      "line": 239,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- بطاقة صنف بموقعه ودفعاته وتواريخه ومراجع حركاته؛ رصيد افتتاحي ووارد وصادر وختامي متطابق حسب النطاق والتوقيت والوحدة.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R094",
+      "line": 240,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- تقرير المشتريات حسب المورد/الصنف/التخصص/الفرع والفترة، مع تمييز المطلوب والمستلم والمفوتر والمدفوع وعدم جمع عملات مختلفة بلا تحويل معلن.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R095",
+      "line": 241,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- أوامر لم تصل أو وصلت جزئيًا، تأخر المورد، فروق الأسعار والكميات، المواد المرفوضة، أداء المورد، ونسبة الوفاء المبنية على تعريفات موثقة.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R096",
+      "line": 242,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- الصلاحيات القريبة والمنتهية والمحجورة، والمواد الراكدة والمستهلكة والتالفة، وقيمة المخزون مع إظهار الجزء مجهول/مؤقت التكلفة.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R097",
+      "line": 243,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- تكلفة مواد الزيارة والطبيب/التخصص تُقرأ من المصدر القائم دون تغيير العمولات أو تكلفة الماضي بصمت.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R098",
+      "line": 244,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- اقتراح إعادة شراء يأخذ المتاح الصالح والحد/الهدف والاستهلاك والطلبات المفتوحة المؤكدة ومدة التوريد؛ بيانات غير كافية تعني اقتراحًا محدودًا موضحًا، لا طلبًا آليًا متكررًا.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R099",
+      "line": 245,
+      "section": "م. التقارير والطباعة والاقتراحات الذكية",
+      "requirement": "- OCR لقراءة فاتورة مورد ميزة لاحقة اختيارية: اقتراح أصناف وكميات وأسعار للمراجعة، وليس ترحيلًا ماليًا أو مخزنيًا تلقائيًا. لا يؤخر إكمال الدورة الأساسية.",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "AI-OCR-deferred-by-user; ordinary-existing-read-safety-only"
+    },
+    {
+      "id": "R100",
+      "line": 249,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "1. جرد الأصناف والحركات والوحدات وروابط payables الحالية، مع تقرير القيم الناقصة والمكررة والمبهمة. لا تعد قراءة السجلات فحصًا لبيانات الإنتاج إن لم تستخدم وصولًا مصرحًا إليها.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R101",
+      "line": 250,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "2. إنشاء وحدات وموقع افتراضي ونموذج دفعات مناسب لما يُعرف فعليًا؛ LOT مجهول يظل مجهولًا. لا تحول الرصيد القديم إلى شراء جديد أو فاتورة جديدة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R102",
+      "line": 251,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "3. الحركات القديمة ذات payable تبقى مرتبطة بديونها؛ لا تُنشأ فواتير جديدة بالقيمة نفسها في عملية الترحيل. يمكن إنشاء غلاف مرجعي للمستند القديم دون قيد مالي ثانٍ.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R103",
+      "line": 252,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "4. الأسعار القديمة المجهولة لا تُملأ بصفر ولا بسعر آخر شراء تلقائيًا. إن اعتمدت الإدارة تقييمًا افتتاحيًا، فهو حدث تقييم واضح ومؤرخ لا إعادة كتابة تاريخ الحركات.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R104",
+      "line": 253,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "5. ترحيلات إضافية متوافقة، قابلة للاستئناف والتحقق، مع معالجة قيود append-only ومخطط ownership/manifests وفق المشروع. لا تعطل الحراس أو تُسقطها لتسهيل الاستيراد.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R105",
+      "line": 254,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "6. استيراد CSV/Excel للأصناف والأرصدة/الدفعات الأولية يدعم معاينة وتعيين أعمدة والتحقق والتكرار وتقرير الرفض؛ توثق الوحدة والمصدر وتاريخ الانتقال. الدفعة المستوردة لا تُنفذ مرتين.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R106",
+      "line": 255,
+      "section": "ن. ترحيل البيانات الموجودة والتوافق",
+      "requirement": "7. قارِن قبل/بعد: كمية كل صنف، قيمة المخزون المعروفة، ديون الموردين بكل عملة، المصروفات والسندات، وعدد وروابط الحركات. اشرح أي فرق مطلوب بدل إخفائه.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R107",
+      "line": 261,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "1. لكل صنف وحدة شراء ووحدة استهلاك أساسية ومعامل تحويل موثق: علبة جتابركا إلى أقماع، علبة بيبر بوينت إلى قطع، علبة أسلاك إلى أسلاك، عبوة سائل إلى ملليلترات عند إمكانية قياس ذلك. لا تفترض عددًا موحدًا للعبوات؛ سجّل العلامة والمقاس والمحتوى الفعلي. المعامل المستخدم محفوظ مع الحركة ولا يتغير تاريخيًا بتعديل الإعدادات.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R108",
+      "line": 262,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "2. فتح العلبة أو نقلها إلى الطبيب لا يستهلك كامل محتواها. تبقى الكمية المتبقية ضمن مخزون الموقع/العهدة. إذا أوجب استخدام المنتج إتلاف الباقي، فسجله كإتلاف بسبب واضح، دون اختراع قاعدة سريرية عامة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R109",
+      "line": 263,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "3. العبوة المختلطة: فكّ مكونات موثق بتوزيع كمية وقيمة متزن على الأصناف والمقاسات؛ لا تصرف قيمة الطقم كاملة ثم قيمة مكوناته مرة ثانية. الكميات غير المعروفة تُراجع قبل اعتماد تفكيكها.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R110",
+      "line": 264,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "4. أضف لكل خدمة/مرحلة علاج قالب مواد قابلًا للإصدار، مع كمية معيارية قابلة للتعديل، ومواد بديلة ومستهلكات مشتركة على مستوى الزيارة. يراجع الطبيب أو المساعد الكميات المستخدمة في نموذج قصير؛ الكمية الافتراضية غير المؤكدة تبقى «تقديرية» ولا تُعرض باعتبارها عدًا فعليًا.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R111",
+      "line": 265,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "5. ادعم التسجيل السريع بالباركود والمفضلة والتكرار من قالب؛ لا تطلب تسجيل كل قفاز أثناء العلاج. الاستهلاك الجماعي قليل القيمة يمكن تقديره بقواعد معلنة، ثم مراجعته بالجرد. لا توزع فرق الجرد على مرضى بعينهم وتصفه باستهلاك مثبت.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R112",
+      "line": 266,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "6. اربط الصرف الفعلي بالزيارة وبند الإجراء والحالة/الخطة والطبيب المسؤول وموقع المصدر، والسن عند انطباقه. الحالة الواحدة قد تمتد زيارات وسنوات، والمريض قد يحمل حالات منفصلة. لا تحمل مواد علاج عصب سابق على تقويم جديد للمريض نفسه.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R113",
+      "line": 267,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "7. القفازات أو تجهيز الكرسي المشترك يخصص مرة واحدة للزيارة، ثم يوزع تحليليًا على إجراءاتها إن لزم، دون تكرار الصرف. انتقال الطبيب أو اشتراك طبيبين يستلزم نسبة تخصيص صريحة مجموعها 100% أو تحديد المسؤول؛ لا يحمل الاثنان كامل الكمية.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R114",
+      "line": 268,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "8. حركة المخزون هي مصدر حقيقة الكمية؛ تخصيص التكلفة للمريض والطبيب روابط على الحركة نفسها. لا تجمع صرفًا آليًا وصرفًا يدويًا لنفس الاستخدام. المرتجع يربط بالصرف الأصلي ويعكس الكمية والتكلفة المنسوبة له بحدود ما صُرف وما سبق إرجاعه.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R115",
+      "line": 269,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "9. المواد مجهولة التكلفة أو غير المنسوبة تظهر في قائمة معالجة مع سبب ونسبة اكتمال. الصفر الحقيقي يختلف عن «لم يسجل». لا تعالج البيانات القديمة بافتراض أن الأطباء استهلكوها مجانًا أو بأن نسب الإهلاك دليل على عدد المواد.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R116",
+      "line": 270,
+      "section": "سـ1. تكلفة المادة من العلبة إلى المريض والحالة",
+      "requirement": "10. ثبّت التكلفة التاريخية وفق سياسة WAC المعتمدة ووحدة الأساس ولقطة الصرف؛ حدد مجمع التقييم المالي وكيف تنقل القيمة بين المواقع والعهد دون إعادة تسعير التحويل. احتفظ بدقة كافية لتكلفة القطعة، وقرّب عند الترحيل النقدي بسياسة واحدة مع تسوية فروق التقريب؛ لا تجعل القطعة الرخيصة صفرًا بتقريب مبكر.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R117",
+      "line": 282,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "1. اعرض لكل إجراء وزيارة وحالة: المواد الفعلية، المواد التقديرية، المختبر، أجر العمل المباشر، التكاليف المشتركة المخصصة، والإجمالي، مع مصدر كل مبلغ وحالة اكتماله. لا تسمِّ التكاليف التقديرية أو الموزعة قياسًا فعليًا دقيقًا.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R118",
+      "line": 283,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "2. استخدم أجور الأطباء والمساعدين حسب الاتفاق الفعلي: عمولة أو وقت عمل أو مكونات مستقلة إن جمع العقد بينهما. لا تضف الراتب نفسه مرة كتكلفة دقيقة عمل ومرة ضمن المصاريف المشتركة. إعادة عمل أو زيارة مجانية لها تكلفة حتى إن كان إيرادها صفرًا، مع سببها وربطها بالحالة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R119",
+      "line": 284,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "3. اجعل المصاريف المشتركة مجموعات واضحة: إيجار وكهرباء وإدارة وتعقيم وصيانة واستخدام معدات، بمفاتيح تخصيص مناسبة مثل دقائق الكرسي أو عدد دورات التعقيم. وثّق الفترة والطاقة التشغيلية المستخدمة ومصدر المصروف؛ أظهر الطاقة غير المستغلة والجزء غير الموزع بدل تحميله خفية على عدد قليل من المرضى. طابق مجموع الموزع وغير الموزع مع إجمالي المجموعة. شراء جهاز نقدًا لا يدخل بكامل ثمنه تكلفة زيارة مع احتساب استخدامه/استهلاكه مرة أخرى.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R120",
+      "line": 285,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "4. افصل سعر الاتفاق، وصافي الإيراد الخاص بالعلاج المنفذ، والمفوتر، والمقبوض، والمديونية؛ سداد متأخر لا يولد ربحًا جديدًا للعلاج. في الحالة المستمرة اعرض تكلفة فعلية حتى الآن، وتكلفة متوقعة للإكمال، وربحية متوقعة عند الإكمال. لا تقارن كامل سعر تقويم سنتين بتكلفة أول زيارة وتسميه الربح النهائي.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R121",
+      "line": 286,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "5. إذا احتاجت الإدارة ربحية كل زيارة ضمن اتفاق شامل، استخدم توزيعًا معتمدًا لإيراد الاتفاق على مراحل العلاج؛ المجموع لا يتجاوز الاتفاق وصافي تعديلاته. إن لم توجد قاعدة معتمدة، اعرض تكلفة الزيارة فقط وربحية الحالة، دون اختراع إيراد لكل موعد.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R122",
+      "line": 287,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "6. صحح مسميات المحرك القائم: «هامش بعد التكاليف المباشرة» و«نتيجة بعد المصاريف المخصصة» مع تعريف كل منهما. ألغِ القول بأن حدود 20/35/55% معيار عالمي؛ تُحدد الأهداف من الإعدادات حسب الخدمة وسياسة المركز.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R123",
+      "line": 288,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "7. عند غياب تكلفة أو مدة أو فاتورة مختبر، أظهر «النتيجة غير مكتملة» ومقدار المعلوم والمقدر، لا شارة ربح ممتاز. يجب أن تستند التقارير إلى بيانات حقيقية؛ أي أمثلة في الواجهة تحمل وسم تجربة واضحًا ولا تدخل تقارير المركز.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R124",
+      "line": 289,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "8. افصل التكلفة التاريخية عن تكلفة شراء بديل اليوم المستخدمة للتسعير المستقبلي، مع تاريخ عرض المورد وسعر الصرف. لا تُعدّل نتائج الحالات الماضية بسبب تغير سعر صرف اليوم.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R125",
+      "line": 290,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "9. تقرير الخدمات يجمع عدد الحالات واكتمال بياناتها ومتوسط ووسيط التكلفة والمدة والهدر والخصومات. قارن الخدمات المتشابهة ودرجة تعقيدها، ولا تحكم على طبيب من إجمالي المواد وحده دون حجم العمل ونوع الحالات.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R126",
+      "line": 291,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "10. محاكي السعر يعرض تكلفة وتقديرًا وهامشًا مستهدفًا وسيناريو خصم، دون تغيير أسعار البرنامج تلقائيًا. عندما تكون التكلفة C مستقلة عن السعر، يكون السعر الصافي المستهدف `C / (1 - m)`، حيث m هامش بين 0 وأقل من 1. إذا وُجدت عمولة نسبتها r من السعر الصافي نفسه وكانت مستبعدة من C، يكون السعر `C / (1 - r - m)` بشرط مقام موجب. إذا اختلف أساس العمولة، استخدم محرك الاتفاق الفعلي ولا تطبق الصيغة الثانية عمياء.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R127",
+      "line": 292,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "11. مثال تكلفة مستقلة 180 SAR وسعر 200 SAR: الفرق 20 SAR والهامش 10%. هامش مستهدف 25% يعطي 240 SAR؛ إضافة 25% على التكلفة تعطي 225 SAR وهامشًا 20% فقط. هذه أمثلة حسابية وليست توصية برفع أسعار المركز دون بيانات.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R128",
+      "line": 293,
+      "section": "سـ2. التكلفة الكاملة ومراجعة أسعار الخدمات",
+      "requirement": "12. تعديل قائمة الأسعار يحتاج صلاحية واعتمادًا وتاريخ سريان وإصدارًا؛ لا يعدل اتفاقات مرضى قديمة أو فواتير معتمدة. احتفظ بسجل سبب التعديل وأثره المتوقع. لا تعرض أسعار التكلفة والربحية لمن لا يملك صلاحيتها عبر الواجهة أو API أو التصدير.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R129",
+      "line": 299,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "1. أضف عهدة مرتبطة بطبيب وفرع وموقع، ويمكن وجود عهدة مشتركة لكرسي/قسم مع مسؤول محدد. تبقى المواد ملكًا للمركز داخل مخزونه حتى استهلاكها أو تسوية حركتها، إلا إذا وجد اتفاق مختلف موثق؛ مجرد تسليم الطبيب علبة ليس خسارة ولا دينًا عليه.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R130",
+      "line": 300,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "2. دورة التسليم: طلب شهري أو طلب تزويد عند النقص → مراجعة رصيد عهدته والاستخدام المتوقع → اعتماد وفق الحدود → تحويل من المخزن إلى «قيد النقل» → إقرار استلام الطبيب/المفوض → إتاحة في عهدته. ادعم رفض/نقص الاستلام والعودة للمصدر. النقل يحفظ الكمية والقيمة على مستوى المركز ولا ينشئ مصروفًا أو مستحق مورد.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R131",
+      "line": 301,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "3. اختر حصصًا استرشادية حسب حجم عمل الطبيب ومواعيده ونوع تخصصه؛ تجاوز الحصة يولد سببًا ومراجعة، وليس اتهامًا تلقائيًا بالإسراف. وفر طلبًا عاجلًا موثقًا. قيود المخزون المالية لا تمحو توثيق العلاج السريري أو تمنع حفظ مسودته.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R132",
+      "line": 302,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "4. عند استخدام الطبيب للمادة، تخصم من عهدته مرة واحدة مع رابط المريض/الزيارة إن كان الاستخدام منسوبًا. يسمح للمساعد بالتسجيل نيابة عنه بصلاحية، مع حفظ المنفذ والطبيب المسؤول. النقل بين طبيبين يتطلب حركة تحويل وتسلم، لا صرفًا على مريض وهمي.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R133",
+      "line": 303,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "5. جرد دوري وعند الإجازة/تغيير الفرع/إنهاء العمل؛ حصر أول وآخر المدة بالكمية والقيمة والدفعة والصلاحية. الرصيد الختامي يصبح افتتاح الفترة التالية دون حركة شراء جديدة. الوحدات القابلة لإعادة الاستخدام والأجهزة عهد منفصلة، فلا تعامل كاستهلاك مادة تستخدم مرة واحدة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R134",
+      "line": 304,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "6. شاشة الطبيب تبين افتتاح العهدة، الوارد، المحول للغير، المرتجع للمخزن، الاستهلاك للمرضى، التالف/الفاقد بأسبابه، والختامي. كل رقم يفتح مستنداته. يمكن تمكينه من الاعتراض ومرفق توضيح؛ لا يحق له اعتماد تسويته أو تعديل الحركات المرحّلة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R135",
+      "line": 305,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "7. معادلة الكميات لكل صنف ووحدة أساس: `الختامي المتوقع = الافتتاحي + الوارد - المحول للخارج - المرتجع للمخزن - الاستهلاك - التالف/الفاقد المرحّل`. اختلاف الجرد الفعلي يولد فرقًا يحتاج تحقيقًا واعتمادًا. لا تسجل الفرق مرة كاستهلاك ومرة كفاقد.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R136",
+      "line": 306,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "8. سياسة تحمل الطبيب بإصدار وتاريخ سريان: الأصناف المشمولة والمستثناة، نسبة تحمله من تكلفة الاستهلاك، معالجة الاستهلاك المشترك والفاقد المقبول والتالف والتجارب والإعادات، ومن يعتمد الاستثناء. لا تحمل الطبيب تلقائيًا كل مشتريات المركز أو تلف انتهى قبل استلامه.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R137",
+      "line": 307,
+      "section": "سـ3. عهدة المواد لكل طبيب والصرف الشهري والتزويد",
+      "requirement": "9. «المواد التي يتحملها الطبيب» مبلغ تعاقدي منفصل عن كامل تكلفة علاج المريض. تتكلف العيادة بالمادة كاملة لأغراض تحليل العلاج، ثم تعالج استردادها من الطبيب وفق النموذج المالي المعتمد دون تكرار الخصم في الربحية.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R138",
+      "line": 311,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "1. افحص `materialRate` و`material_rate_history` ومسارات مستحقات الأطباء والعمولات أولًا، وأعد استخدامها. لا تستبدل السياسة التاريخية ولا تعيد احتساب خصومات السنوات السابقة بالنسبة الحالية. أضف نمطًا اختياريًا واضحًا «خصم مواد تقديري مع تسوية دورية» لكل اتفاق؛ لا تنقل جميع الأطباء إليه تلقائيًا.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R139",
+      "line": 312,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "2. وثّق أساس النسبة صراحة: من التحصيل المنسوب للطبيب أو من العمولة أو من أساس آخر متفق عليه؛ هذه أسس مختلفة. احتفظ بالنسبة والأساس والمبلغ وتاريخ الحدث ونسخة الاتفاق وعملته. لا تفترض أن 10% من التحصيل تساوي 10% من عمولة الطبيب.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R140",
+      "line": 313,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "3. سجل فصلًا بين مبلغ الخصم المحسوب، والمبلغ الذي خُفض به مستحق الطبيب فعليًا، وغير المطبق بسبب حد الرصيد أو استثناء أو نقص نسبة. التسوية تستخدم الخصومات المطبقة والمرحلة فقط، بعد عكوسها؛ لا تعتبر المبلغ النظري أعلى من العمولة خصمًا كاملًا إذا قُيد الصافي بصفر.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R141",
+      "line": 314,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "4. وفر كشفًا شهريًا للتوقع والمراجعة وتسوية سنوية، وكذلك تسوية عند إنهاء اتفاق الطبيب. حدد بداية ونهاية الفترة وتاريخ القطع والإصدار، وما إذا كانت الخصومات مرتبطة بالتحصيل أو بمرحلة العمل. حصّل رابط الحالة/الفترة كي لا يحمل تحصيل في سنة لاحقة موادًا سويت في سنة سابقة مرتين؛ اعرض بنود اختلاف التوقيت وغير المطابقة مستقلة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R142",
+      "line": 315,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "5. قبل الإقفال: جرد العهدة واعتماد الفروقات، استكمال التكلفة المجهولة، مطابقة التحويلات والمرتجعات، تجميد قائمة الحركات الداخلة ونسخة الاتفاق، ثم معاينة واطلاع الطبيب واعتماد المخول. المادة السليمة الباقية لا تدخل الاستهلاك لمجرد مرور السنة. إن كانت البيانات ناقصة، يسمح بكشف مؤقت موسوم مع بنود معلقة؛ لا تعلن تسوية نهائية دقيقة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R143",
+      "line": 316,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "6. التعريف الحاكم: D = مجموع الخصومات المطبقة على الطبيب داخل نطاق التسوية بعد العكس؛ A = تكلفة المواد التي يتحملها حسب الاتفاق والجرد والحركات المعتمدة لنفس النطاق؛ `الفرق = D - A`. موجب: مستحق يرد للطبيب؛ سالب: فرق مطلوب منه؛ صفر: لا تعديل. لا تقارن النسب وحدها ولا تقلب الإشارة بحسب وصف «أقل/أكثر» الغامض.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R144",
+      "line": 317,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "7. أمثلة بنفس العملة: خُصم 12,000 واستهلاك يتحمله 10,000 → 2,000 مستحق للطبيب. خُصم 8,000 واستهلاك يتحمله 10,000 → 2,000 فرق عليه. قبل الاعتماد يسمى «فرق تسوية مقترح»؛ بعد الاعتماد يرحل إلى حسابه القائم مع مستند وسبب، دون صرف نقد أو اقتطاع من راتب قادم تلقائيًا.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R145",
+      "line": 318,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "8. لكل طبيب وفترة/نطاق معرف تسوية فريد ومفتاح منع تكرار وقفل تزامن. يمكن لتسوية تكميلية أن تضم حركات جديدة أو تعكس فروقًا لاحقة، مع مرجع الأصل؛ لا تعِد طرح D أو A كاملين بعد تسوية سابقة. النتيجة النهائية تراعي جميع تعديلات التسوية السابقة لنفس النطاق.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R146",
+      "line": 319,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "9. تعامل مع YER/SAR/USD صراحة: لا تجمع أرقام العملات مباشرة. اعرض الكميات والتكلفة الأصلية والتقييم بعملة التسوية وأسعار الصرف وتواريخها وفق اتفاق موثق، مع فصل فروق العملة. سياسة تحويل الخصم والتكلفة متسقة ولا تعيد تسعير الماضي بسعر اليوم خفية.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R147",
+      "line": 320,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "10. عند الربحية استخدم أحد العرضين المتطابقين: المواد + أتعاب الطبيب الصافية بعد تحمل المواد، أو المواد + أتعابه الإجمالية - استرداد المواد منه. لا تخصم كامل المواد مرتين ولا تضف التسوية كدخل علاجي للمريض. اختبر تطابق العرضين، وافصل نتيجة مؤقتة أثناء السنة عن النتيجة المعدلة بعد التسوية.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R148",
+      "line": 321,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "11. قيود الاعتماد المالية قابلة للعكس بمستند مقابل، لا حذف أو تعديل صامت. مراجعة الطبيب واعتماد الإدارة وترحيل المالية صلاحيات منفصلة قابلة للإعداد؛ الطبيب يرى كشفه فقط، والمدير يرى المقارنات وفق صلاحياته. لا تغيّر اتفاق خصم على فترة مغلقة بأثر رجعي دون إجراء تعديل موثق.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R149",
+      "line": 322,
+      "section": "سـ4. الخصم الدوري والتسوية السنوية للأطباء",
+      "requirement": "12. لوحة الإدارة: استهلاك كل طبيب شهريًا وسنويًا، تكلفة لكل زيارة وخدمة متشابهة، المتوقع مقابل المؤكد، نسبة اكتمال التسجيل، التالف والمرتجعات وأسبابها، عهد متوقفة، D وA والفرق المتوقع. راقب الانحراف للتدقيق وتحسين العمل، دون اعتبار ارتفاع الاستخدام وحده دليل إسراف أو دين.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R150",
+      "line": 328,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "1. اجعل سياسة كل صنف قابلة للإعداد: عبوة فارغة آمنة يجب تسليمها عند نفادها؛ أو توثيق تخلص آمن للمواد الحادة/الملوثة؛ أو مادة سائبة يضبطها القياس والجرد؛ أو عهدة قابلة لإعادة الاستخدام لها مسار استرجاع/صيانة. راجع تصنيف السلامة مع مسؤول مكافحة العدوى. لا تفرض استرجاع كل قطعة مستهلكة ولا تجمع النفايات الطبية في المخزن.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R151",
+      "line": 329,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "2. عند تسليم العبوات، أنشئ معرفًا فريدًا للعبوة أو لمجموعة صرف موثقة مع العدد والطبيب والموقع والدفعة، ويمكن طباعته QR. باركود المنتج العام ليس معرفًا فريدًا للعلبة؛ لا يقبل النظام نفس العبوة الفارغة لإغلاق عمليتي صرف مختلفتين.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R152",
+      "line": 330,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "3. عند النفاد تفتح المساعدة «طلب استبدال»، تختار العبوة والعهدة وتسجل المتبقي الظاهر وسبب الطلب. يستلم أمين المخزن العبوة الآمنة ويؤكد التسليم بنفسه، ثم يوافق المخول على الصرف وفق الحدود. تحفظ هوية الطالب والمسلّم والمستلم والمعتمد وأوقاتها؛ لا تعتمد المساعدة طلبها بنفسها ولا يغني حساب مشترك عن هوية المنفذ.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R153",
+      "line": 331,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "4. إرجاع العبوة الفارغة وثيقة رقابية بلا قيمة مخزون للمادة، ولا ينشئ حركة `in` لكمية المادة أو يلغي استهلاك المرضى. إذا أعيدت عبوة بها مادة صالحة فعلًا، أنشئ مرتجع كمية مستقلًا بعد فحص صلاحيتها وسياسة قبولها؛ لا تخلط العبوة الفارغة مع مرتجع المادة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R154",
+      "line": 332,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "5. المطابقة عند الإغلاق: محتوى العبوة الأصلي = الاستهلاك المسجل + الكمية المرتجعة/المحولة + التالف المعتمد + المتبقي + الفرق غير المفسر. عند تعدد العبوات المفتوحة دون تتبع دقيق لكل واحدة، تطابق الكميات على مستوى الصنف والعهدة والدفعة والفترة وتوضح حدود الدقة؛ لا تخترع تخصيصًا لعبوة بعينها.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R155",
+      "line": 333,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "6. إذا كانت العلبة 120 قطعة ومسجلًا استعمال 80 فقط بينما أُعيدت فارغة، يظهر فرق 40 يحتاج مراجعة. قبول الفارغ لا يختلق 40 صرفًا على المرضى، ولا يسجل تلقائيًا 40 مسروقة أو دينًا. يفحص الخطأ في وحدة العبوة أو التسجيل أو الهدر أو النقل، ثم يعتمد السبب والإجراء بمستند.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R156",
+      "line": 334,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "7. طلب تزويد قبل النفاد مشروع عند وجود مواعيد أو حد إعادة الطلب؛ يسجل «تزويد مبكر» مع الرصيد، ولا يطلب عبوة فارغة غير موجودة. تفرض قاعدة الاستبدال على العبوات المنتهية الاستهلاك عند حلول موعد تسليمها، وليس على كل شراء أو إعادة تزويد.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R157",
+      "line": 335,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "8. فقد العبوة أو تلفها أو التخلص منها خطأً يفتح استثناء موثقًا ومراجعة. وفر صرفًا عاجلًا بموافقة مخول وسبب وتنبيه لاحق حتى لا يتوقف علاج جارٍ؛ لا يحوّل الاستثناء إلى صلاحية دائمة. تكرار الاستثناءات يولد تنبيه مراجعة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R158",
+      "line": 336,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "9. الإبر والمشارط والأجزاء الحادة المستعملة تذهب إلى حاويات مقاومة للثقب قرب موضع الاستخدام وفق إجراءات مكافحة العدوى، ولا تعاد للمخزن ولا تستخرج من حاوية النفايات للعد أو التصوير. وثّق التخلص المناسب من المواد الملوثة بأحداث ومرجع/شاهد عند الحاجة، دون مطالبة الموظف بالتعامل معها مجددًا لإثبات استهلاكها.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R159",
+      "line": 337,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "10. احتفظ بسجل العبوات الآمنة المستلمة ثم التخلص منها وفق سياسة المركز، بحيث لا تعاد إلى الموظفين لاستعمالها كإثبات مرة أخرى. الصورة اختيارية مساندة ولا تكفي وحدها لإثبات الاستلام أو الاستهلاك، ويُمنع تضمين بيانات مرضى فيها بلا حاجة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R160",
+      "line": 338,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "11. اجمع الضبط البرمجي مع إجراءات تشغيل: حفظ المواد في مكان مضبوط الوصول، صرف بأشخاص محددين، جرد دوري ومفاجئ وفق صلاحيات الإدارة، وتسليم عهد موثق عند تغيير المناوبة. اعرض الفروق بحسب الصنف والعهدة والدوام وحجم العمل، لا تصدر حكمًا آليًا على أشخاص.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R161",
+      "line": 339,
+      "section": "سـ4ب. استبدال العبوة الفارغة وضبط الفاقد",
+      "requirement": "12. أضف تقرير «عبوات واجبة التسليم»، «استبدال قبل الوقت المتوقع»، «طلبات استثناء متكررة»، «فروق غير مفسرة»، ومهلة للمراجعة. أي تحميل مالي للطبيب أو العامل يستلزم قرارًا معتمدًا وفق الاتفاق؛ لا ينشأ دين بمجرد تنبيه رقابي، ولا يحمل نفس الفاقد على الطبيب والمساعدة مرتين.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R162",
+      "line": 343,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- وسّع مواقع المخزون لتشمل عهد الأطباء، وحركات تحويل بمرحلة نقل وقبول، دون دفتر كمية موازٍ. أضف ربط تخصيص الاستهلاك بإجراءات الزيارة والحالة ومصدر المادة مع قيود تمنع تجاوز الكمية وتكرار التخصيص.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R163",
+      "line": 344,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- وسّع قوالب `service_materials` بإصدارات وكميات معيارية وأساس تقدير وتأكيد. أعد بناء تكلفة المريض من نطاق محدد وصافي الصرف والمرتجعات؛ صحح واجهة `CaseProfitabilityModal` بدل زر وضع إجمالي التاريخ في أول إجراء.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R164",
+      "line": 345,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- صمم سياسة تكلفة مشتركة وإصدارات معدلات تخصيص ونماذج تسعير معتمدة، ثم read models قابلة لإعادة البناء من المستندات؛ لا تجعل التقارير مصدرًا ثانيًا للمال أو المخزون.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R165",
+      "line": 346,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- أضف سياسة تحمل مواد الطبيب وخصوماته المطبقة وتسوياته وبنود المطابقة والتعديلات، بالاستفادة من دفتر العمولات/الموظفين القائم. وثّق حدود التكامل مع وكيل الموظفين إن كان يعمل؛ لا تعيد كتابة وحدة الموظفين ضمن المهمة.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R166",
+      "line": 347,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- نفّذ الحركات والترحيل المالي والتدقيق بصورة ذرية أو outbox موثق عند عبور حدود الخدمات، مع مفاتيح منع تكرار وفهارس تحقق من ملكية الفرع والطبيب وحالة الفترة. استخدم مبالغ دقيقة وعملات صريحة، لا جمع floating point نقدي.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R167",
+      "line": 348,
+      "section": "سـ5. عقود البيانات والدمج لهذه التوسعة",
+      "requirement": "- ترحيل البداية: جرد فعلي افتتاحي لعهد الأطباء وتوثيق الخصومات القديمة القابلة للإثبات، مع كشف غير المعروف. لا تحوّل أرصدة افتتاحية إلى مشتريات أو استهلاك مرضى أو ديون أطباء جديدة. المسودة ثم المعاينة ثم اعتماد الترحيل وفق الصلاحيات.",
+      "sources": [
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "partial-domain-source; integration-unrun"
+    },
+    {
+      "id": "R168",
+      "line": 374,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "1. موظف يطلب 3 علب مخدر، كل علبة 50 كاربولة، مع سبب وتاريخ احتياج. المتاح قبل الطلب صفر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R169",
+      "line": 375,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "2. الإدارة تعتمد الثلاث علب. أمر شراء بسعر 100 SAR للعلبة، الإجمالي 300 SAR. لا كمية ولا دين ولا نقد يُسجل بمجرد إصدار الأمر.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R170",
+      "line": 376,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "3. يصل صندوقان/علبتان مطابقان من دفعة صالحة؛ يُقبلان ويُرحلان: المخزون المتاح 100 كاربولة، والمتبقي توريده علبة واحدة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R171",
+      "line": 377,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "4. فاتورة أولى عن العلبتين بقيمة 200 SAR تُطابق وتُرحل: دين المورد 200 SAR مرة واحدة. لا 200 عن الاستلام و200 أخرى عن الفاتورة.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R172",
+      "line": 378,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "5. يُدفع 50,000 YER بسعر اختبار معلن 1 SAR = 500 YER؛ الصندوق ينقص 50,000 YER ويسدد 100 SAR؛ يبقى 100 SAR على الفاتورة الأولى.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R173",
+      "line": 379,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "6. تصل العلبة الثالثة وتُرحل: المخزون 150 كاربولة قبل الاستهلاك. فاتورة ثانية صحيحة بقيمة 100 SAR تجعل إجمالي المتبقي 200 SAR قبل دفعات أخرى.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R174",
+      "line": 380,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "7. تُستهلك كاربولتان عبر زيارة موثقة: الرصيد 148 مع تحديد الدفعة والموقع، بلا صرف يدوي وآلي مزدوج وبلا رسوم شراء إضافية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R175",
+      "line": 381,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "8. إعادة أي طلب ترحيل بنفس مفتاح العملية لا تضيف مخزونًا أو فاتورة أو سند دفع جديدًا.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R176",
+      "line": 382,
+      "section": "ع. سيناريو قبول عملي يمثل طلب د. عقلان",
+      "requirement": "9. بديل فحص مستقل: من الواصل علبتان، واحدة تالفة؛ تدخل الصالحة فقط إلى المتاح، والتالفة موثقة مرفوضة/محجورة، ويظل التوريد البديل واضحًا. لا تطبق أرقام السيناريو السليم على السيناريو التالف دون إعادة حساب.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "P01",
+      "line": 388,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تقديم طلب",
+      "expected": "لا حركة مخزون ولا مستحق ولا دفع",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "No stock/debt/cash; request API and UI persist once.",
+      "remainingBlocker": "Coordinated migration activation; full approved deployment remains unrun.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P02",
+      "line": 389,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "موافقة/رفض جزئي",
+      "expected": "حفظ الأصل والمعتمد والسبب وإتاحة المعتمد فقط للطلب",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Actual Arabic admin UI and PG preserve original requested3boxes and save approved2boxes=100cartridges with reason and explicit value/FX snapshot.",
+      "remainingBlocker": "English administration copy, policy/delegation setup UI and full integrated lifecycle.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P03",
+      "line": 390,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تعديل بعد الاعتماد",
+      "expected": "رفض استخدام موافقة قديمة على نسخة أو مبلغ مختلف",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Admin monetary revision preserves old document/approval, requires fresh approval, serializes concurrent revisions and refuses demand revision after order allocation; actual390/1280 UI.",
+      "remainingBlocker": "Quantity/supplier amendment workflow after ordering and full integrated scenario.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P04",
+      "line": 391,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "صلاحيات وتفويض",
+      "expected": "منع اعتماد غير مخول وتجاوز الفرع أو السقف، بما في ذلك API مباشرة",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementAdministration.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Fresh active actor/admin checks, exact API gate and frozen currency ceiling.",
+      "remainingBlocker": "Delegation UI/policy configuration and branch model: base has one clinic scope.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P05",
+      "line": 392,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "وحدات عبوة",
+      "expected": "3 × 50 = 150 ثم صرف 2 = 148؛ حفظ معامل المستند وعدم تغييره بأثر رجعي",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Exact 3×50=150 and 150−2=148 arithmetic; frozen conversion; receipt PG.",
+      "remainingBlocker": "Old manual/automatic issue writer and historical unit lock integration.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P06",
+      "line": 393,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "أمر من عدة طلبات",
+      "expected": "كل تخصيص داخل المعتمد، ولا تكرار نفس كمية الطلب",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual admin order form selects immutable approved sources; stored quantities/budget are rechecked in posting transaction.",
+      "remainingBlocker": "Broader delegated capabilities and complete multi-request/multi-item acceptance on coordinated migration.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P07",
+      "line": 394,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "وصول جزئي",
+      "expected": "زيادة المقبول فقط وبقاء المتبقي صحيحًا",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Actual390/1280 partial inspected receipt adds50 pieces; last partial reaches100 with preserved remaining; no debt/cash.",
+      "remainingBlocker": "Complete damaged/replacement/quarantine release lifecycle and coordinated migration.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P08",
+      "line": 395,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فحص وتلف/بديل",
+      "expected": "لا إتاحة للمرفوض/المحجور، وربط بديل بتوريده الأصلي",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Rejected has no stock; quarantine not available; replacement fulfillment stays open.",
+      "remainingBlocker": "Replacement document workflow and quarantine release approval.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P09",
+      "line": 396,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "زيادة وصول",
+      "expected": "منع التجاوز غير المعتمد مع قرار واضح للكمية الزائدة",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Planner and locked receipt reject excessive arrival.",
+      "remainingBlocker": "Explicit excess-arrival decision UI/policy.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P10",
+      "line": 397,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استلام متعدد البنود",
+      "expected": "ذرية العملية، لا نصف استلام عند فشل بند",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Transactional audit failure rolls back receipt and stock.",
+      "remainingBlocker": "Actual multi-item browser receipt failure scenario.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P11",
+      "line": 398,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تكرار/انقطاع رد",
+      "expected": "عملية واحدة ومخرجات قابلة للاستعلام، لا استلام أو مستحق مكرر",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/useInventoryCommand.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "PG concurrent replay plus real request response-loss retry with identical payload/key.",
+      "remainingBlocker": "Lost-response receipt/invoice browser journeys; only request uncertainty witnessed.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P12",
+      "line": 399,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استلامان متزامنان",
+      "expected": "لا يتجاوزان المتبقي أو يكرران الأثر",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Two simultaneous different receipts cannot exceed locked remaining quantity.",
+      "remainingBlocker": "Coordinated production schema; UI concurrent receipt journey.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P13",
+      "line": 400,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "دفعتان وصلاحيتان",
+      "expected": "تتبع مستقل وتخصيص صرف واضح وصحيح",
+      "sources": [
+        "lib/inventory-domain/lots.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-lots.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure FEFO allocates exact valid lots and reservations.",
+      "remainingBlocker": "Connect allocations to existing manual/automatic issue writers.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P14",
+      "line": 401,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "مادة منتهية/محجورة",
+      "expected": "منع صرفها يدويًا وآليًا حتى لو الرصيد الإجمالي كافٍ",
+      "sources": [
+        "lib/inventory-domain/lots.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-lots.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure FEFO rejects unsafe lots; new custody dispatch/accept also rejects unsafe lots.",
+      "remainingBlocker": "Existing manual/automatic issue paths still permit expired-only stock: release blocker.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P15",
+      "line": 402,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "لا سعر/سعر صفر حقيقي",
+      "expected": "حالة مجهولة منفصلة عن المجاني وتقرير تقييم غير مضلل",
+      "sources": [
+        "lib/inventory-domain/valuation.ts",
+        "lib/inventory-domain/read.ts",
+        "lib/inventory-domain/presentation.ts",
+        "components/inventory/InventoryValuationReview.tsx",
+        "components/inventory/ProcurementOperations.tsx",
+        "lib/inventory-domain/procurement-store.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/postgres/inventory-foundation-read.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "pg-checkpoint.log",
+        "http-browser-premium.log",
+        "browser/valuation-ar-390.png",
+        "browser/valuation-ar-1280.png",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Real missing-vs-free valuation plus missing invoice price UI saves review with null total, never known zero.",
+      "remainingBlocker": "Actual invoice valuation/adjustment adapter deferred to coordinated finance integration.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P16",
+      "line": 403,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فاتورة متعددة الأصناف",
+      "expected": "مستحق صحيح مرة واحدة وربط بجميع الاستلامات دون كسر قيود التاريخ",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Actual invoice match UI spans two accepted receipts; persisted reservations and print; no duplicate stock/debt/cash.",
+      "remainingBlocker": "One existing payable/payment integration deferred until invoices stabilize; complete financial acceptance unrun.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P17",
+      "line": 404,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فاتورة مكررة",
+      "expected": "منع/مراجعة التكرار لدى المورد؛ اختلاف المورد لا يعد تكرارًا تلقائيًا",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Duplicate supplier/year key and explicit unnumbered review; actual missing-number UI never fabricates number.",
+      "remainingBlocker": "Approved held-document correction/review and financial posting integration.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P18",
+      "line": 405,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فاتورة قبل الوصول",
+      "expected": "لا استلام وهمي؛ مسار مطابقة/استثناء/مقدمة مصرح وواضح",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Invoice before arrival held for match; never fabricates stock.",
+      "remainingBlocker": "Authorized advance/exception path through existing supplier payment engine.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P19",
+      "line": 406,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "اختلاف السعر أو الكمية",
+      "expected": "فرق ظاهر لا يُرحل بلا سياسة وموافقة مناسبة",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual UI displays match issues and price difference; deviations remain review with no financial posting.",
+      "remainingBlocker": "Variance approval/posting policy deferred with financial ownership.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P20",
+      "line": 407,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "سداد بعملة أخرى",
+      "expected": "لقطة سعر ومكافئ ومتبقٍ وصندوق مطابقون، وتغير السعر لاحقًا لا يغير الأصل",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Immutable FX arithmetic only; old supplier-payment regressions separately passed.",
+      "remainingBlocker": "Procurement payable integration plus full cross-currency payment E2E has not run.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P21",
+      "line": 408,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "مقدمة وتسوية",
+      "expected": "لا خروج نقد جديد عند تخصيص المقدمة ولا دين مكرر",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No procurement advance allocation implemented.",
+      "remainingBlocker": "Shared supplier advance allocation writer, permission/FX and cash-conservation E2E.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P22",
+      "line": 409,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "عكس دفع/مرتجع مورد",
+      "expected": "كمية ودين ونقد بأحداث مستقلة مرتبطة، وعدم تجاوز كمية/قيمة قابلة للرد",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No procurement supplier return/reversal writer implemented.",
+      "remainingBlocker": "Independent stock/debt/cash return documents using existing finance writers.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P23",
+      "line": 410,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "شحن وخصم وتقريب",
+      "expected": "مجموع التوزيع يساوي الإجمالي بلا تحميل متكرر",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Exact minor-unit apportionment, shipping/discount and stable rounding unit tests.",
+      "remainingBlocker": "Persist cumulative allocation approval and verify final payable charges.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P24",
+      "line": 411,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تعديل تكلفة بعد استهلاك",
+      "expected": "آثار تقييم موثقة دون تعديل صامت لحركة أو عمولة تاريخية",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Historical valuation is not silently repriced by new modules.",
+      "remainingBlocker": "Invoice-after-consumption adjustment adapter/audit and commission-owner review.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P25",
+      "line": 412,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "صرف متزامن/يدوي وآلي",
+      "expected": "لا سالب ولا مضاعفة لصرف مرتبط بنفس العمل",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Existing inventory concurrency regression passed; new FEFO planner only.",
+      "remainingBlocker": "Shared manual/automatic usage identity and locked allocation writer.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P26",
+      "line": 413,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تحويل فرعين",
+      "expected": "مصدر/قيد نقل/وجهة متطابقون، واستلام جزئي وفروق دون ازدواج",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Single-clinic store/transit/doctor transfer tested.",
+      "remainingBlocker": "Base has no branch identity: cross-branch authority and partial differences not implemented.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P27",
+      "line": 414,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "جرد مع حركة أثناء العد",
+      "expected": "تنفيذ سياسة التجميد/المصالحة ومنع تسوية على رصيد قديم",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No stocktake posting implemented.",
+      "remainingBlocker": "Count-cutoff/freeze/reconcile policy and shared writer concurrency.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P28",
+      "line": 415,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "إتلاف دفعة معينة",
+      "expected": "الخصم منها تحديدًا لا من دفعة أخرى باستنتاج FEFO",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No exact-lot disposal posting implemented.",
+      "remainingBlocker": "Approved lot-specific disposal and existing movement allocation writer.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P29",
+      "line": 416,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استدعاء LOT",
+      "expected": "منع المتبقي وإظهار التتبع المعروف مع حدود التاريخ القديم",
+      "sources": [
+        "lib/inventory-domain/lots.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-lots.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; legacy-issue-integration-blocked",
+      "verifiedSubset": "Pure planner rejects recalled lot.",
+      "remainingBlocker": "Persist recall events, trace known patient/custody use and old-history limits.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P30",
+      "line": 417,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "قراءة أسعار دون إذن",
+      "expected": "لا تكلفة في JSON أو طباعة أو تصدير أو أداة AI أو مرفق محمي",
+      "sources": [
+        "lib/inventory-domain/valuation.ts",
+        "lib/inventory-domain/read.ts",
+        "lib/inventory-domain/presentation.ts",
+        "components/inventory/InventoryValuationReview.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/postgres/inventory-foundation-read.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "pg-checkpoint.log",
+        "http-browser-premium.log",
+        "browser/valuation-ar-390.png",
+        "browser/valuation-ar-1280.png"
+      ],
+      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "verifiedSubset": "Non-admin JSON omits prices/payable/supplier refs; valuation endpoint denied; existing tool read failures truthful.",
+      "remainingBlocker": "Full export/attachment/print coverage beyond owned review surface.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P31",
+      "line": 418,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فشل قراءة/حد طلب",
+      "expected": "لا «آمن» زائف، وتعريف متسق للرصيد المساوي للحد",
+      "sources": [
+        "lib/inventory-domain/valuation.ts",
+        "lib/inventory-domain/read.ts",
+        "lib/inventory-domain/presentation.ts",
+        "components/inventory/InventoryValuationReview.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/postgres/inventory-foundation-read.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "pg-checkpoint.log",
+        "http-browser-premium.log",
+        "browser/valuation-ar-390.png",
+        "browser/valuation-ar-1280.png"
+      ],
+      "status": "partial-real-HTTP-browser; complete-scenario-unrun",
+      "verifiedSubset": "Equal reorder boundary low; read failure cannot yield false safe stock.",
+      "remainingBlocker": "Full operator journey and root integration verification.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P32",
+      "line": 419,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "ترحيل أرصدة قديمة",
+      "expected": "الكميات وديون الموردين ثابتة؛ لا شراء أو دين أو نقد جديد",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Custody refuses unallocated historical stock; no invented ownership or new stock/debt.",
+      "remainingBlocker": "Historical balance import preview/reconciliation, opening migration and preservation rehearsal.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P33",
+      "line": 420,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استيراد مرتين",
+      "expected": "منع التكرار وتقرير رفض ومراجعة للوحدات والأسعار المجهولة",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "No import workflow implemented.",
+      "remainingBlocker": "Idempotent import mapping/reject report and unknown-price review.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P34",
+      "line": 421,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "ربط مورد/فرع مزور",
+      "expected": "رفض خادمي بلا أي كتابة أو تسرب",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Server rejects supplier role/activity/scope mismatch.",
+      "remainingBlocker": "All related receipt/financial attachment access and authenticated spoofing matrix.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P35",
+      "line": 422,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تدقيق",
+      "expected": "الموافقة والاستلام والمالية لها أحداث مؤلف وسبب ونسخة مضمونة",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Existing audit writer in same transaction; mandatory audit failure rollback tested.",
+      "remainingBlocker": "Finance approvals/posting/reversal audit and shared audit action vocabulary.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P36",
+      "line": 423,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "رحلة المثال كاملة",
+      "expected": "تطابق 150/148 كاربولة و300 SAR فواتير و100 SAR مسدد و200 SAR متبقٍ",
+      "sources": [
+        "lib/inventory-domain/procurement.ts",
+        "lib/inventory-domain/procurement-store.ts",
+        "lib/inventory-domain/schema-proposal.ts"
+      ],
+      "tests": [
+        "__tests__/inventory-procurement-domain.test.ts",
+        "__tests__/postgres/inventory-procurement-store.test.ts"
+      ],
+      "evidence": [
+        "procurement-domain.log",
+        "procurement-store-pg.log",
+        "pg-checkpoint.log"
+      ],
+      "status": "partial-domain-or-PG-fixture",
+      "verifiedSubset": "Partial example 100 received/50 remaining, invoice200SAR matched and no debt/cash.",
+      "remainingBlocker": "Complete150/148, payable300SAR, payment100SAR, remaining200SAR requires shared finance/issue adapters.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P37",
+      "line": 424,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "واجهة وطباعة",
+      "expected": "نماذج فعلية RTL/English وهاتف/حاسب، ومستندات مولدة مرتبة بهوية المركز",
+      "sources": [
+        "lib/inventory-domain/valuation.ts",
+        "lib/inventory-domain/read.ts",
+        "lib/inventory-domain/presentation.ts",
+        "components/inventory/InventoryValuationReview.tsx",
+        "components/inventory/ProcurementAdministration.tsx",
+        "lib/inventory-domain/procurement-store.ts",
+        "components/inventory/ProcurementOperations.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-foundation.test.ts",
+        "__tests__/postgres/inventory-foundation-read.test.ts",
+        "__tests__/security-http/inventory-foundation-http-ui.test.ts",
+        "__tests__/security-http/inventory-procurement-http-ui.test.ts"
+      ],
+      "evidence": [
+        "foundation-before.log",
+        "unit-checkpoint.log",
+        "pg-checkpoint.log",
+        "http-browser-premium.log",
+        "browser/valuation-ar-390.png",
+        "browser/valuation-ar-1280.png",
+        "http-browser-checkpoint.log",
+        "http-browser-authorized.log",
+        "evidence/custody/http-visual-handoff.log",
+        "evidence/custody/pg-approval-regression.log",
+        "evidence/custody/http-operations-capture.log",
+        "evidence/custody/pg-operations-final.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "HTTPStatus": "passed covered fixture subset after root-delegated registration; full acceptance scenario remains partial",
+      "verifiedSubset": "Actual inventory/request/approval/order/inspection/match/custody/valuation UI and branded prints at390/1280; custody/valuation Arabic/English.",
+      "remainingBlocker": "English request/administration/operations copy and full premium/acceptance audit.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P38",
+      "line": 425,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "نشر اختبار/رجوع/استعادة",
+      "expected": "مخطط متوافق، بيانات محفوظة، وعدم إرسال أوامر/رسائل حقيقية",
+      "sources": [],
+      "tests": [],
+      "evidence": [],
+      "status": "unrun-full-scenario; limited-independent-evidence",
+      "verifiedSubset": "Synthetic local PG/build and prior exact-head CI passed; no orders/messages sent.",
+      "remainingBlocker": "Coordinated migration upgrade/restore rehearsal and authorized later release: unrun.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P39",
+      "line": 426,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "عبوة إلى قطعة",
+      "expected": "أمثلة الجتابركا والبيبر والأسلاك تعطي 3/1/8 SAR مع بقاء الكميات الصحيحة ودقة القطع الرخيصة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Exact3/1/8SAR and sub-minor cost arithmetic.",
+      "remainingBlocker": "Package settings/admin UI and applied movement valuation.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P40",
+      "line": 427,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فتح عبوة/تفكيك طقم",
+      "expected": "فتح العبوة ليس استهلاكًا؛ مجموع قيمة المكونات يساوي قيمة الطقم دون صرف مزدوج",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Custody transfer changes allocation only; empty evidence changes no stock.",
+      "remainingBlocker": "Kit decomposition/component value persistence and UI.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P41",
+      "line": 428,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "حالتان للمريض",
+      "expected": "مواد حالة لا تدخل حالة أخرى، ومرتجع مرتبط ينقص تكلفة الصرف الأصلي",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure treatment costs isolate patient case/visit/procedure and linked return.",
+      "remainingBlocker": "Shared clinical source adapter and actual movement allocations.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P42",
+      "line": 429,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تسجيل آلي ويدوي",
+      "expected": "نفس استهلاك الإجراء لا يخصم مرتين عند التأكيد أو إعادة الطلب أو توقيع الزيارة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure usage duplicate/overallocation rejected.",
+      "remainingBlocker": "Durable unique usage identity, locked issue and visit-sign transaction.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P43",
+      "line": 430,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "مواد مشتركة/تقديرية",
+      "expected": "مستهلك الزيارة لا يتكرر بعدد إجراءاتها، والكميات المقدرة لا تعرض باعتبارها مؤكدة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure shared-visit supplies are not repeated; estimated quantities remain estimated.",
+      "remainingBlocker": "Versioned service_materials source and confirmation UI.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P44",
+      "line": 431,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تكلفة ناقصة",
+      "expected": "غياب تسجيل أو سعر لا يولد صفرًا موثوقًا أو شارة ربح مكتمل",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure cost/category/registration completeness never gives trustworthy zero.",
+      "remainingBlocker": "Replace existing patient-wide profitability read via coordinated adapter and UI.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P45",
+      "line": 432,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "حالة ممتدة",
+      "expected": "اتفاق تقويم لا يتحول كاملًا إلى إيراد كل موعد؛ المقبوض منفصل، والتوقع يشمل الإكمال",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure staged performed revenue separated from collection and agreement cap.",
+      "remainingBlocker": "Ortho/agreement owner source adapter and completion estimates.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P46",
+      "line": 433,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "المصاريف المشتركة",
+      "expected": "الموزع وغير الموزع يطابقان الأصل؛ لا ازدواج راتب/دقائق ولا أصل/استهلاك، مع سيناريو طاقة منخفضة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure exact overhead allocations, idle capacity and duplicate/direct/capital rejection.",
+      "remainingBlocker": "Approved expense/capacity policy and persisted period source allocations.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P47",
+      "line": 434,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "التسعير",
+      "expected": "تكلفة 180 وسعر 200 تعطي هامش 10%؛ هدف 25% يعطي 240، وعمولة سعرية تستعمل أساسها الصحيح وترفض مقامًا غير موجب",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure180/200=10%,25% target240 and valid commission denominator.",
+      "remainingBlocker": "Authorized pricing simulation UI and agreement basis adapter.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P48",
+      "line": 435,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "أسعار وصرف تاريخي",
+      "expected": "تعديل السعر أو FX لا يغير اتفاقات أو تكاليف سابقة؛ السعر البديل موسوم بتاريخ ومصدر",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure snapshots/quotes immutable and currency mixing rejected.",
+      "remainingBlocker": "Persist historical applied valuations and show replacement quote source/date.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P49",
+      "line": 436,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تحويل للطبيب",
+      "expected": "100 قطعة بالمخزن ونقل 30 يعطي 70 بالمخزن و30 بالعهدة بعد القبول، وإجمالي 100؛ لا استهلاك أو مصروف أو دين",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual PG/HTTP/browser store100→70store+30doctor over two15 transfers; no stock/debt/cash write.",
+      "remainingBlocker": "Coordinated transfer migration; period reporting and full valuation adapter.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P50",
+      "line": 437,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استهلاك ومرتجع عهدة",
+      "expected": "من عهدة 30 استخدام 8 للمرضى وإرجاع 2 للمخزن يبقي 20؛ إجمالي المركز 92، والاستهلاك 8 فقط",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure30−8−2=20; clinic92.",
+      "remainingBlocker": "Clinical consumption/return existing-writer integration not implemented; transfer UI does not record consumption.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P51",
+      "line": 438,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "نقل وجرد",
+      "expected": "تحويل طبيب لطبيب يحفظ القيمة والكمية، وفروق الجرد لها اعتماد وسبب ولا تسجل استهلاكًا مرتين",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "partial-PG-and-domain",
+      "verifiedSubset": "Actual doctor-to-doctor transfer conserves quantity/value; pure count difference held.",
+      "remainingBlocker": "Stocktake approval/source cutoff and consumption correction transaction.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P52",
+      "line": 439,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "أساس النسبة",
+      "expected": "10% من تحصيل 10,000 تساوي 1,000؛ 10% من عمولة 3,000 تساوي 300؛ لا خلط بينهما",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure collections10000→1000 versus commission3000→300.",
+      "remainingBlocker": "Existing effective doctor contract/materialRate source history.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P53",
+      "line": 440,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "سقف خصم/عكس",
+      "expected": "مبلغ نظري 1,000 طُبق منه 600 يدخل D بمقدار 600 فقط؛ عكس 100 يجعله 500",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure actual-applied600 less reversal100 =D500.",
+      "remainingBlocker": "Commission-owner actual deduction and linked reversal adapter.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P54",
+      "line": 441,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "اتجاه التسوية",
+      "expected": "D=12,000 وA=10,000 يعطي مستحق طبيب 2,000؛ D=8,000 يعطي فرقًا عليه 2,000؛ المتساوي صفر",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure D−A positive/negative/zero and supplemental directions.",
+      "remainingBlocker": "Authorized supplemental posting into existing doctor account; no automatic posting.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P55",
+      "line": 442,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "عهدة ختامية",
+      "expected": "المواد السليمة غير المستهلكة لا تدخل A، وترحل افتتاحًا دون شراء أو دين جديد",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "partial-PG-and-domain",
+      "verifiedSubset": "Pure closing custody excluded from A; actual transfers create no purchase/debt.",
+      "remainingBlocker": "Opening import/period close/rollforward transaction and incomplete reconciliation policy.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P56",
+      "line": 443,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استثناءات التحمل",
+      "expected": "المادة غير المشمولة في الاتفاق لا تحمل للطبيب، والتالف يتبع قرارًا موثقًا لا إجمالي الصرف",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure contract exclusions and held waste exception.",
+      "remainingBlocker": "Effective item coverage and independent approved exception source.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P57",
+      "line": 444,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تكرار وتزامن التسوية",
+      "expected": "اعتمادان متزامنان يرحلان تعديلًا واحدًا؛ التسوية التكميلية تغير الفرق فقط دون إعادة الخصم السابق",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure supplemental proposal excludes previous adjustments.",
+      "remainingBlocker": "Concurrent settlement approval/idempotency/source membership PG constraints not implemented.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P58",
+      "line": 445,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فترة وسنة جديدة",
+      "expected": "تحصيل متأخر وتغيير نسبة وانتقال طبيب لا يعيد تسوية نفس المواد؛ فروق التوقيت تظهر قابلة للمطابقة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure wrong doctor/period rejected.",
+      "remainingBlocker": "Stable frozen cross-period source sets, late collections and doctor transfer reconciliation.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P59",
+      "line": 446,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "عملات التسوية",
+      "expected": "لا جمع YER/SAR/USD دون تحويل موثق؛ التقييم واللقطات وفروق العملة قابلة للمراجعة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure explicit immutable settlement FX; mixed currencies rejected.",
+      "remainingBlocker": "Approved valuation source and original/converted/FX difference statement.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P60",
+      "line": 447,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "ربحية وتحمل طبيب",
+      "expected": "المواد 100 وأتعاب إجمالية 300 وتحمل طبيب 40: التكلفة 360 في عرض 100+260 أو 100+300-40، لا 400 ولا 320",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure materials100+grossfee300−recovery40 =360.",
+      "remainingBlocker": "Actual finance recovery source and profitability read adapter.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P61",
+      "line": 448,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "صلاحيات واعتراض",
+      "expected": "الطبيب يقرأ عهدته وكشفه فقط؛ الاعتراض لا يغير المرحل؛ اعتماد الفرق لا يصرف نقدًا تلقائيًا",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts",
+        "__tests__/postgres/inventory-custody-transfer.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
+      ],
+      "status": "partial-actual-PG-HTTP-browser",
+      "verifiedSubset": "Actual doctor own custody read/receiver only; anotherdoctor/reception denied; no automatic finances.",
+      "remainingBlocker": "Immutable objection, separate settlement approval/posting and own financial statement not implemented.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P62",
+      "line": 449,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "أرصدة غير مؤكدة",
+      "expected": "الاستيراد لا يخترع استهلاكًا أو خصمًا قديمًا؛ نقص الجرد أو التكلفة يمنع وصف التسوية بأنها نهائية مكتملة",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Missing valuation/count keeps pure settlement provisional; legacy allocation discrepancies block transfer.",
+      "remainingBlocker": "Historical importer and reviewed closing quantity/cost completeness.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P63",
+      "line": 450,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "تكامل الرحلة",
+      "expected": "شراء عبوة وتحويلها لطبيب واستهلاك جزء لحالة وإرجاع جزء وجرد الباقي ثم تسوية يطابق المخزون والمالية وتكلفة المريض دون تكرار",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure arithmetic composition plus actual purchase→custody transfer subset.",
+      "remainingBlocker": "Actual case consumption/return/count/settlement/payment complete PG/browser journey unrun.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P64",
+      "line": 451,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فارغ لا مادة",
+      "expected": "استلام علبة فارغة يغلق إثبات العبوة مرة واحدة، ولا يرفع كمية المادة أو يعكس تكلفتها",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure empty package closes evidence without stock/cost reversal.",
+      "remainingBlocker": "Persist unique package closure actor/lot/custody linkage and UI.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P65",
+      "line": 452,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "فرق غير مفسر",
+      "expected": "عبوة 120 ومسجل 80 وفارغ فعلي يولد فرق 40 للمراجعة؛ لا استهلاك وهمي ولا مديونية آلية",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure120−80=40 unexplained for review without debt/usage.",
+      "remainingBlocker": "Persist investigation and independently approved cause.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P66",
+      "line": 453,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "إعادة إثبات",
+      "expected": "رفض استخدام معرف نفس العبوة أو حدث تسليمها في طلبين، حتى مع تزامن الطلبات",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure supplied-history rejects repeated package/evidence IDs.",
+      "remainingBlocker": "Concurrent unique package/evidence PG closure not implemented.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P67",
+      "line": 454,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "استثناء وتزويد مبكر",
+      "expected": "الطلب المبكر يراعي المتبقي؛ الطارئ يحتاج صلاحية وسببًا؛ المساعدة لا تعتمد استثناءها بنفسها",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure remaining-stock early replenishment and emergency self-approval rejection.",
+      "remainingBlocker": "Trusted capabilities, emergency request approval transitions and audit UI.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P68",
+      "line": 455,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "سلامة التخلص",
+      "expected": "صنف حاد/ملوث يوجَّه للتخلص الآمن ولا تطلب الشاشة إعادته للمخزن أو استخراجه من النفايات",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md",
+        "lib/inventory-domain/custody-store.ts",
+        "components/inventory/DoctorCustody.tsx"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log",
+        "evidence/custody/http-browser-en-print.log",
+        "evidence/custody/pg-final-regression.log"
+      ],
+      "status": "partial-domain-and-Arabic-UI",
+      "verifiedSubset": "Pure hazard disposal and actual Arabic/English custody UI/printed instructions forbid sharps/waste returns.",
+      "remainingBlocker": "Package-specific safe disposal evidence/closure workflow and its complete browser journey.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "P69",
+      "line": 456,
+      "section": "ف. اختبارات القبول الإلزامية",
+      "requirement": "لا تحميل مزدوج",
+      "expected": "قرار فاقد واحد لا ينشئ نفس المديونية على الطبيب والمساعدة؛ كل تعديل له مستند وصلاحية وعكس",
+      "sources": [
+        "lib/inventory-domain/treatment-cost.ts",
+        "lib/inventory-domain/custody.ts",
+        "docs/inventory/treatment-custody-contract.md"
+      ],
+      "tests": [
+        "__tests__/inventory-treatment-custody.test.ts"
+      ],
+      "evidence": [
+        "unit-checkpoint.log"
+      ],
+      "status": "domain-only; persistence-HTTP-E2E-unrun",
+      "verifiedSubset": "Pure unknown loss creates no doctor/assistant debt.",
+      "remainingBlocker": "Any authorized loss posting must share one unique decision across accounts and reverse independently.",
+      "fullAcceptanceExecuted": false
+    },
+    {
+      "id": "R177",
+      "line": 462,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- كود مترابط يعمل فعليًا، ترحيلات وعقود API وصلاحيات وتدقيق، وليس صفحات بلا حفظ أو مقترحات فقط.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R178",
+      "line": 463,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- وثيقة متطلبات تربط كل بند بالملفات والاختبارات وحالته، ومخطط ملكية البيانات والحالات وعلاقة المستندات بالمخزون والمستحقات.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R179",
+      "line": 464,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- أدلة نتائج على SHA محدد وبيئة محددة، مع ذكر ما لم يُشغّل ولماذا؛ مثال كامل مصور ببيانات اصطناعية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R180",
+      "line": 465,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- مستندات طلب/أمر/استلام/مطابقة قابلة للطباعة وتقارير فعلية، ودليل قصير لمقدم الطلب والإدارة والمخزن والمالية.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R181",
+      "line": 466,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- سياسة ترحيل وإرجاع/استعادة وقيود البيانات التاريخية. تحديث README بخطوات التشغيل والاختبار والوضع الفعلي.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R182",
+      "line": 467,
+      "section": "ص. المطلوب تسليمه ومعيار الإنهاء",
+      "requirement": "- استمر من مرحلة إلى التالية ضمن التفويض المتاح، وسجّل نقطة تقدم قابلة للاستئناف. إذا وجدت عائقًا انتقل لما هو مستقل عنه؛ لا تعلن الاستمرار في الخلفية إذا كانت البيئة لا تدعمه.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R183",
+      "line": 475,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [شاشة المخزون](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/app/inventory/page.tsx)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R184",
+      "line": 476,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [منطق المخزون والدفعات](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/inventory.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R185",
+      "line": 477,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [التقييم WAC](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/inventoryCost.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R186",
+      "line": 478,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [قاعدة البيانات ووظائف الحركة والربط والاستهلاك](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/db.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R187",
+      "line": 479,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [مسار تسجيل الحركة](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/app/api/inventory/%5Bid%5D/movements/route.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R188",
+      "line": 480,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [قراءة تفاصيل الصنف وتعديله](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/app/api/inventory/%5Bid%5D/route.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R189",
+      "line": 481,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [ربط الحركة بالمورد والمستحق](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/stock-supplier-schema.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R190",
+      "line": 482,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [سداد الموردين والعملات](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/supplier-payments.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R191",
+      "line": 483,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [وثيقة حوكمة سداد الموردين](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/docs/SUPPLIER_PAYMENTS.md)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R192",
+      "line": 484,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [عقد مخطط قاعدة البيانات](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/schema/current-schema-contract.pg18.json)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R193",
+      "line": 485,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [اختبار ربط المخزون بالمورد](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/__tests__/postgres/stock-supplier-link.test.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R194",
+      "line": 486,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [اختبارات تدقيق المخزون](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/__tests__/postgres/inventory-audit.test.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R195",
+      "line": 487,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [اختبارات تزامن المخزون والتكلفة](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/__tests__/postgres/inventory-wac-concurrency.test.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R196",
+      "line": 489,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [محرك الربحية الحالي](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/profitability.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R197",
+      "line": 490,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [واجهة ربحية الحالة](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/components/CaseProfitabilityModal.tsx)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R198",
+      "line": 491,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [نسب إهلاك المواد الحالية](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/lib/materialRate.ts)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R199",
+      "line": 492,
+      "section": "مصادر الكود المثبتة على نسخة الفحص",
+      "requirement": "- [إعداد ربط المواد بالخدمات](https://github.com/Aqlanf10/aqlan-center-mini/blob/148fcbeac229cb279848e6ea37049d1599a4fafe/app/settings/service-materials/page.tsx)",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R200",
+      "line": 496,
+      "section": "مرجعان للمنهج والسلامة",
+      "requirement": "- [ACCA — Activity-based costing](https://www.accaglobal.com/gb/en/student/exam-support-resources/fundamentals-exams-study-resources/f5/technical-articles/ABC.html): يدعم تجميع المصاريف المشتركة وتوزيعها بمحركات تكلفة مناسبة. اختيار دقائق الكرسي أو دورات التعقيم هنا مقترح تصميم للمركز يحتاج بياناته واعتماده، وليس معيار سعر أو ربح مفروضًا عليه.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    },
+    {
+      "id": "R201",
+      "line": 497,
+      "section": "مرجعان للمنهج والسلامة",
+      "requirement": "- [CDC — Standard Precautions in Dental Settings](https://www.cdc.gov/dental-infection-control/hcp/summary/standard-precautions.html): يوصي بوضع الأدوات الحادة المستعملة في حاويات مقاومة للثقب قرب موضع الاستخدام. بناء عليه صُمم استثناء استرجاع النفايات الحادة من سياسة تسليم الفوارغ؛ لا تعد هذه الوثيقة بديلًا لخطة مكافحة العدوى والتخلص من النفايات الخاصة بالمركز.",
+      "sources": [
+        "docs/inventory/procurement-contract.md",
+        "docs/inventory/WORKLOG.md"
+      ],
+      "tests": [],
+      "evidence": [],
+      "status": "pending-or-partial; see source contract"
+    }
+  ],
+  "checkpointDate": "2026-10-14",
+  "sharedDbOwner": "root",
+  "releaseStatus": "blocked; review checkpoint only",
+  "gates": {
+    "focusedUnit": "179 passed /11 files, plus separately executed 16 route/contract tests",
+    "focusedPG": "130 passed previous regression round; refreshed procurement store 11 passed including revoked actor",
+    "foundationHTTPBrowser": "4 passed; 390/1280 ar/en and printed report",
+    "combinedHTTPBrowser": "42 passed /4 files after explicitly delegated one-line registration; prior failures retained",
+    "build": "passed",
+    "typecheck": "passed",
+    "targetedLint": "passed",
+    "completeAcceptance69": "not executed",
+    "migrationRegistration": "pending root reservation",
+    "fullCIReleaseRestore": "unrun/blocked",
+    "httpPermissionContract": "16 passed /2 files after exact literal registration; dynamic routes and unknown/method refusal verified"
+  },
+  "sharedSurfaceException": "Root explicitly delegated only exact /api/inventory/procurement GET/POST CLINIC registration; all other shared surfaces unchanged",
+  "acceptanceAudit": {
+    "count": 69,
+    "completeAcceptanceExecuted": 0,
+    "note": "Scenario numbering is requirements inventory, not number of executed tests. Fixture tables applied explicitly in synthetic PG; migration not registered. Prior CI green applies only to 659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
+    "sourceCheckpoint": "659f61d2a66be22b12a0c1eb1bb69b31f611e4f0",
+    "continuation": "Monetary request revision/approval and actual visual handoff verified; full integrated acceptance remains0/69. Exact source/evidence hashes in checkpoint manifests."
+  },
+  "latestScopeBoundary": {
+    "priority": "invoices first, reception next, shared design last",
+    "allowed": "owned inventory UI/request/order/inspection/receipt/custody with synthetic tests",
+    "deferred": "all shared invoice/signed-receipt/commission/payable writers, financial posting, clinical visit/invoice consumption links",
+    "mainOrDeployment": "not authorized"
+  }
+}

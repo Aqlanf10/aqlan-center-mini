@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getInventoryItemDetail, updateInventoryItem } from "@/lib/db";
-import { canManageInventory } from "@/lib/roles";
+import { updateInventoryItem } from "@/lib/db";
+import { inventoryDetailWithLinks } from "@/lib/inventory-domain/read";
+import { inventoryMovementForRead } from "@/lib/inventory-domain/presentation";
+import { canManageInventory, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +25,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const id = readId(rawId);
   if (!id) return NextResponse.json({ message: "رقم البند غير صالح." }, { status: 400 });
   try {
-    const detail = await getInventoryItemDetail(id);
+    const detail = await inventoryDetailWithLinks(id);
     if (!detail) return NextResponse.json({ message: "البند غير موجود." }, { status: 404 });
-    return NextResponse.json(detail);
+    return NextResponse.json({ ...detail, movements: detail.movements.map(movement => inventoryMovementForRead(movement, isAdmin(session.role))) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل تفاصيل البند." }, { status: 500 });
   }
@@ -72,7 +74,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const item = await updateInventoryItem(id, patch, session.username);
     if (!item) return NextResponse.json({ message: "البند غير موجود." }, { status: 404 });
     return NextResponse.json(item);
-  } catch {
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "historical_unit_change") {
+      return NextResponse.json({ code: "historical_unit_change", message: "وحدة الصنف مرتبطة بحركات تاريخية. تحتاج تحويلًا معتمدًا يحفظ معنى الكميات السابقة." }, { status: 409 });
+    }
     return NextResponse.json({ message: "تعذّر تعديل البند. أعد المحاولة." }, { status: 500 });
   }
 }

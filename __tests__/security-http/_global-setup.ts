@@ -272,6 +272,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     env: {
       ...process.env,
       NODE_ENV: "production",
+      INVENTORY_INTEGRATION_ENABLED: process.env.INVENTORY_SCHEMA_TEST === "1" ? "true" : undefined,
       PORT: String(PORT),
       HOSTNAME: "127.0.0.1",
       // الخادم يتصل بالمعزولة — لا باختبار PG ولا بإنتاج أبدًا

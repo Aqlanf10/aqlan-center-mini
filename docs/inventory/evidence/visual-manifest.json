@@ -1,0 +1,286 @@
+{
+  "images": [
+    {
+      "bytes": 119444,
+      "sha256": "5b2016b24c2428b6ac5cd0d4b58bee0d291b0097bfb141469c26516413c96c2e",
+      "repoPath": "docs/inventory/evidence/Inventory-Valuation-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 87612,
+      "sha256": "80c74c0d21d934329c99349867fc2b42fe39ffec530639e7f3064547199b8fd4",
+      "repoPath": "docs/inventory/evidence/Inventory-Valuation-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 96892,
+      "sha256": "ee66cc01e1e0c640584b4ee4600a7091715ebcb85ef3250746d33dcc890120ed",
+      "repoPath": "docs/inventory/evidence/Procurement-Request-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 54310,
+      "sha256": "a40f5bdc9692567dc667072597f472720d5e56f9c79b9f8d85295467609f9a1a",
+      "repoPath": "docs/inventory/evidence/Procurement-Request-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 103450,
+      "sha256": "bba6e2c33d23f5805228f2f0584084286788765cb292defe945f05458d1aaba8",
+      "repoPath": "docs/inventory/evidence/Doctor-Custody-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 62783,
+      "sha256": "46cad326377912bb3d2396c859ed15e5c550c2bc37484464a3e7eff570025bc0",
+      "repoPath": "docs/inventory/evidence/Doctor-Custody-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 174122,
+      "sha256": "eb73bab5973029f0b362e2849e2a2e4087ac903940eaea362ec458ab6022b898",
+      "repoPath": "docs/inventory/evidence/Custody-Admin-Arabic-1280.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "bytes": 132314,
+      "sha256": "0d5960c9de444928acc70445bb6ceb9c53063e28d2b2aeed67a63624410cbb45",
+      "repoPath": "docs/inventory/evidence/Custody-Admin-Arabic-390.png",
+      "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+      "syntheticOnly": true
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-overview-ar-1280.png",
+      "bytes": 128223,
+      "sha256": "c0f7e4f89d31f8f7d8f909528928008ed5b57c03b707f31382ed2fcf04e6ac87",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-overview-ar-390.png",
+      "bytes": 89145,
+      "sha256": "bf2bdf59bba05976150f594bc983fd63f8e9816d646da5365b751189ed06711d",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-item-form-ar-1280.png",
+      "bytes": 29526,
+      "sha256": "9f3fcb7684572f046da32b7617788831d9ab04f076f4c4f3f524ceab05d0df5b",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-item-form-ar-390.png",
+      "bytes": 33166,
+      "sha256": "733a4e3b2c182a13ced95d365722ecf762bdeee96723d9ff7bc3afa202abd4bf",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-movements-ar-1280.png",
+      "bytes": 43028,
+      "sha256": "11c26154a2be8eaa187221566da6e3c162543c5fe8e54e408221a024074550f4",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-movements-ar-390.png",
+      "bytes": 40945,
+      "sha256": "9e4f6b4b58c33f784c31f65179eda082196ec8b472eeeb027d309295e6a9c830",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-movement-in-form-ar-1280.png",
+      "bytes": 31396,
+      "sha256": "0eb4648b81cabbefaefd522eafd8c4bfb50435cc0999ab48d81d37b816952608",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/inventory-movement-in-form-ar-390.png",
+      "bytes": 32245,
+      "sha256": "2dd9894a4239b5d505583af8995d5148c3cbaceaf2add92c00142ef87db63d49",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/approval-ar-1280.png",
+      "bytes": 126871,
+      "sha256": "92422317f9613d7a36bdce213d1efb1cacbe77de5398c4b3b52e0e1b011071fb",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/approval-ar-390.png",
+      "bytes": 82457,
+      "sha256": "b1ec6f8ab0dcb36faf830424be5acd62e7ddeaa0fcee37984ee7ab0f21a8d57e",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/approval-ar-1280.pdf",
+      "bytes": 226374,
+      "sha256": "da782d01b781d2f68b331741f3295572c460fcdb3eea140db78082572eaff920",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/approval-ar-390.pdf",
+      "bytes": 226388,
+      "sha256": "d83eeec6e54240204ae7acb9d834a3d4f2638516124bf34b778a6eab7cfbb850",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "monetary approval continuation on d6c6e451; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/operations-ar-1280.png",
+      "bytes": 246013,
+      "sha256": "98591495ca1c1b8ea897fcaef3d09ad890a8dfa82790860db6d96b61e906b0b1",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/operations-ar-390.png",
+      "bytes": 196531,
+      "sha256": "88a4966339d7a694c2911c77a3f8c50794610b13772b737b5eb8a1677cd46eb5",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-form-ar-1280.png",
+      "bytes": 58812,
+      "sha256": "7caf5d5e0b7861b6072416a519260bf32e3fae96c44a27d1da00070d2e258632",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-form-ar-390.png",
+      "bytes": 58232,
+      "sha256": "056ebef647b999697e8a8f72c71be45ad00a37e20a1f3c3c0976001e3c9e6da3",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-form-ar-1280.png",
+      "bytes": 49509,
+      "sha256": "9953830f310711272391070296e5d7bbd369b73f6a548324bd99a85b6af3d629",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-form-ar-390.png",
+      "bytes": 53355,
+      "sha256": "6856b851b704844005e2d59f4630c683c923dd8e66a2ad9fbf8ffe798aa639ed",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-form-ar-1280.png",
+      "bytes": 85210,
+      "sha256": "d2b94c38f586d9a88dc0f140c50972ac638f2bc70ca271b9df1011451c59f683",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-form-ar-390.png",
+      "bytes": 65540,
+      "sha256": "b4293463f52150acdc10fac7a032de8b21d2727363183ea7254da70f482a71db",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-missing-review-ar-390.png",
+      "bytes": 234993,
+      "sha256": "1503d8ad02f828455fdfe7b71224c3af8b7b3e430e4047eeb4fa703b27a042ce",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual browser UI"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-ar-1280.pdf",
+      "bytes": 223925,
+      "sha256": "aa677654989087a7e2138e8011f08fa4e13d040feade19a6e56e78dc8a1b7920",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/order-ar-390.pdf",
+      "bytes": 223820,
+      "sha256": "a8605b0aa5e2100ef98e214c09f642aa223ff3c518a6bf2f7859918bf50e440d",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-ar-1280.pdf",
+      "bytes": 225810,
+      "sha256": "fdf1fa6f539f29ab0d956161853f6b7fffe6008c54fb70aa7a66f3f085d48e80",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/receipt-ar-390.pdf",
+      "bytes": 225798,
+      "sha256": "9e2e6630a652244b5f7c910f94347be78f958fac407579b425686fe1d7558db3",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-ar-1280.pdf",
+      "bytes": 225007,
+      "sha256": "1a8a83f8a6b3d70b0493fbe7438079daa3964d4f4a0d4af1a781463207584b02",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    },
+    {
+      "repoPath": "docs/inventory/evidence/invoice-ar-390.pdf",
+      "bytes": 224999,
+      "sha256": "be7cd758ef08c5ab203c77a15f739c2112b2c87c21688cf1b6cf904144318fa1",
+      "syntheticOnly": true,
+      "sourceCheckpoint": "owned inventory operations continuation on cfaa84ac; source in accompanying commit",
+      "kind": "actual generated print"
+    }
+  ],
+  "patientData": false,
+  "secrets": false,
+  "sourceCheckpoint": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+  "remainingScreens": [
+    "English request/administration/operations copy",
+    "exact clinical consumption/returns integration",
+    "D-A financial account posting",
+    "unique safe package closure/disposal evidence"
+  ],
+  "deferredIntegration": "Invoice/receipt/commission/payable writers, financial posting and visit/invoice consumption links deferred until invoices stabilize and root coordinates ownership."
+}

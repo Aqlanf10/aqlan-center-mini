@@ -3,7 +3,8 @@
  */
 
 import { listInventoryItems, type InventoryItem } from "../db";
-import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable, ActionButton } from "./types";
+import { stockStatus } from "../inventory";
+import type { AiToolContext, ToolExecutionResult, KpiCard, StructuredTable } from "./types";
 
 /**
  * أداة جلب حالة المخزون ونواقص المواد السنية
@@ -15,16 +16,21 @@ export async function getInventorySummary(
   if (!context.isDbConnected) {
     return {
       success: true,
-      textSummary: `📦 **تقرير المخزون:**\n⚠️ خدمة قاعدة البيانات غير متصلة في هذا الوضع التجريبي. عند التشغيل الحي، سيعرض النظام رصيد المواد ونواقص حد الطلب.`,
-      cards: [{ title: "المخزون", value: "وضع تجريبي", tone: "calm" }],
+      textSummary:
+        "📦 **تقرير المخزون:**\n⚠️ خدمة قاعدة البيانات غير متصلة حالياً؛ لا يمكن تأكيد أرصدة المخزون أو سلامة المواد حتى استعادة الاتصال.",
+      cards: [{ title: "المخزون", value: "غير متصل — غير مؤكد", tone: "calm" }],
+      warnings: ["inventory_unavailable", "قاعدة البيانات غير متصلة — حالة المخزون غير مؤكدة"],
       actions: [{ label: "فتح شاشة المخزون", href: "/inventory", actionType: "navigate" }],
     };
   }
 
   try {
-    const items: InventoryItem[] = await listInventoryItems().catch(() => []);
+    const items: InventoryItem[] = await listInventoryItems();
+    if (!Array.isArray(items)) {
+      throw new Error("invalid_inventory_response");
+    }
     const activeItems = items.filter((it) => it.isActive);
-    const lowStock = activeItems.filter((it) => it.balance <= it.minLevel);
+    const lowStock = activeItems.filter((it) => stockStatus(it.balance, it.minLevel) !== "ok");
     const outOfStock = activeItems.filter((it) => it.balance <= 0);
 
     const cards: KpiCard[] = [
@@ -79,11 +85,11 @@ ${itemsList}${lowStock.length > 8 ? `\n... و (${lowStock.length - 8}) مواد 
       actions: [{ label: "شاشة المخزون", href: "/inventory", actionType: "navigate" }],
       data: { activeCount: activeItems.length, lowStockCount: 0 },
     };
-  } catch (err) {
+  } catch {
     return {
       success: false,
-      textSummary: `تعذر جلب تقرير المخزون: ${(err as Error).message}`,
-      warnings: [(err as Error).message],
+      textSummary: "تعذّر تحميل المخزون. أعد المحاولة؛ لا يمكن تأكيد حالة المواد الآن.",
+      warnings: ["inventory_unavailable"],
     };
   }
 }

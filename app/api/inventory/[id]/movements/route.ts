@@ -4,7 +4,8 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { AUTO_MATERIAL_REASON_PREFIX, createInventoryMovement, visitPatientOf } from "@/lib/db";
 import { isMovementKind } from "@/lib/inventory";
 import { parseAmount, CLINIC_BASE_CURRENCY, type Currency } from "@/lib/money";
-import { canHandleMoney, canManageInventory } from "@/lib/roles";
+import { inventoryMovementForRead } from "@/lib/inventory-domain/presentation";
+import { canHandleMoney, canManageInventory, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
@@ -94,7 +95,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (kind !== "out") {
       return NextResponse.json({ message: "الزيارة تُربط بصرف المواد وحده." }, { status: 400 });
     }
-    const visit = await visitPatientOf(visitId).catch(() => null);
+    let visit: { patientId: number | null } | null;
+    try {
+      visit = await visitPatientOf(visitId);
+    } catch {
+      return NextResponse.json({ message: "تعذّر التحقق من بيانات الزيارة. أعد المحاولة." }, { status: 500 });
+    }
     if (!visit) {
       return NextResponse.json({ message: "الزيارة غير موجودة." }, { status: 404 });
     }
@@ -108,8 +114,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json({ message: "الزيارة لا تخص هذا المريض." }, { status: 400 });
     }
   }
-  if (patientId && !(await canAccessPatient(session, patientId))) {
-    return NextResponse.json({ message: "غير مصرّح لك بربط حركة المواد بهذا المريض." }, { status: 403 });
+  if (patientId) {
+    let allowed = false;
+    try {
+      allowed = await canAccessPatient(session, patientId);
+    } catch {
+      return NextResponse.json({ message: "تعذّر التحقق من صلاحية ملف المريض. أعد المحاولة." }, { status: 500 });
+    }
+    if (!allowed) {
+      return NextResponse.json({ message: "غير مصرّح لك بربط حركة المواد بهذا المريض." }, { status: 403 });
+    }
   }
 
   /* (P2-10) مورّد الشراء: فاتورته تولد مع الإدخال. التزامٌ ماليٌّ فهو لمن يتعامل
@@ -133,7 +147,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!result.ok) {
       return NextResponse.json({ message: result.message }, { status: 409 });
     }
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json({ ...result, movement: inventoryMovementForRead(result.movement, isAdmin(session.role)) }, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر تسجيل الحركة. أعد المحاولة." }, { status: 500 });
   }

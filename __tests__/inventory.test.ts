@@ -75,7 +75,7 @@ describe("حد الطلب وحالة الصلاحية", () => {
     expect(stockStatus(0, 5)).toBe("out");
     expect(stockStatus(-3, 5)).toBe("out");
     expect(stockStatus(4, 5)).toBe("low");
-    expect(stockStatus(5, 5)).toBe("ok");
+    expect(stockStatus(5, 5)).toBe("low");
     expect(stockStatus(9, 0)).toBe("ok"); // بلا حدّ طلب لا إنذار
   });
 

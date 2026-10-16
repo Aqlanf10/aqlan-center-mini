@@ -1,0 +1,49 @@
+{
+  "priorSource": "8f4a394dcaa5d81ea7d72ff3161c11958ca0f1c4",
+  "priorVisualCommit": "d6c6e4519987d0d42ac2b10c597a0f5166f37212",
+  "schemaReservation": "none;22tables proposed",
+  "fullAcceptanceExecuted": 0,
+  "gates": [
+    {
+      "log": "evidence/custody/build-visual-handoff.log",
+      "sha256": "8b6380daf98ce8dd67b59a4d09358e2a08a23e47398fc8485deffcfafbfc48ec",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/typecheck-visual-handoff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/lint-visual-handoff.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/http-visual-handoff.log",
+      "sha256": "d559be4bae8617f0dfd2049b64957c05832a42fdf29ce611de095ecf05a9205b",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/http-overview-final.log",
+      "sha256": "3aa97cffe7c3fe66013fba6c08235e3e9192ea2069769f7f0253428135cd6e8f",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/pg-approval-regression.log",
+      "sha256": "5486a7d73bef9c5239f114d17f634bee30103d2127bba0daab7a5822b50ff007",
+      "result": "passed"
+    },
+    {
+      "log": "evidence/custody/unit-approval-routes.log",
+      "sha256": "5bbd7ba4a91aefc720babc47de6e9cd1c8f99695df922e1b60bef23c33a2ea2a",
+      "result": "passed"
+    }
+  ],
+  "ci8f4": {
+    "run": 38506328610,
+    "result": "cancelled",
+    "codeThroughHttp": "passed",
+    "artifactUploads": "multiple failure statuses; logs inaccessible; reason unverified"
+  }
+}

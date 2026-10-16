@@ -253,6 +253,11 @@ jobs:
           HR_EVIDENCE_DIR: /tmp/hr-evidence
         run: npm run test:security-http
 
+      - name: Isolated inventory proposal HTTP tests (explicit opt-in)
+        env:
+          INVENTORY_SCHEMA_TEST: "1"
+        run: npm run test:security-http
+
       # Explicit synthetic HR viewports/PDFs only; no browser state, cookies,
       # traces, database dumps or employee data from an external environment.
       - name: Upload employee workflow evidence
