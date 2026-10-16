@@ -1,4 +1,4 @@
-import { getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getCephReferenceSet, getCephStudy, getPatient } from "@/lib/db";
 import { CephTracer } from "@/components/CephTracer";
 import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
@@ -39,6 +39,7 @@ export default async function CephWorkspacePage({ params }: { params: Promise<{ 
         المعالم تُحفَظ لحظة نقرها وسحبها، والاعتماد يختم القياسات والتشخيص ويقفل التحليل.
       </p>
       <CephTracer
+        clinicTimeZone={CLINIC_TIME_ZONE}
         patientName={patient?.fullName ?? ""}
         patientBirthYear={patient?.birthYear ?? null}
         analysis={study.analysis}

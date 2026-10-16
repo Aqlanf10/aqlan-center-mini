@@ -1,0 +1,108 @@
+/** Additive0055: kept byte-identical to its migration; no automatic grants. */
+export const ORTHO_CLINICAL_GRANT_SQL = `-- Additive0055: default-denied explicit authority. No grants/backfill.
+-- No assessment approval or clinical record is created by this migration.
+CREATE TABLE IF NOT EXISTS ortho_clinical_grant_anchors (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  doctor_party_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT ortho_clinical_grant_identity UNIQUE(user_id, doctor_party_id)
+);
+CREATE TABLE IF NOT EXISTS ortho_clinical_grant_events (
+  id SERIAL PRIMARY KEY,
+  anchor_id INTEGER NOT NULL REFERENCES ortho_clinical_grant_anchors(id) ON DELETE RESTRICT,
+  version INTEGER NOT NULL CHECK (version > 0),
+  predecessor_id INTEGER,
+  action TEXT NOT NULL CHECK(action IN ('grant','revoke','identity_relinked','account_disabled','role_changed','party_disabled')),
+  enabled BOOLEAN NOT NULL,
+  actor_kind TEXT NOT NULL CHECK(actor_kind IN ('user','system_policy')),
+  actor_user_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+  actor_label TEXT NOT NULL CHECK(length(btrim(actor_label)) BETWEEN 1 AND 200),
+  reason TEXT NOT NULL CHECK(length(btrim(reason)) BETWEEN 1 AND 500),
+  command_id TEXT NOT NULL CHECK(command_id ~ '^[A-Za-z0-9_-]{16,80}$'),
+  request_fingerprint TEXT NOT NULL CHECK(request_fingerprint ~ '^[a-f0-9]{64}$'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT ortho_clinical_grant_actor CHECK(
+    (actor_kind='user' AND actor_user_id IS NOT NULL AND action IN ('grant','revoke')) OR
+    (actor_kind='system_policy' AND actor_user_id IS NULL AND action IN ('identity_relinked','account_disabled','role_changed','party_disabled'))),
+  CONSTRAINT ortho_clinical_grant_enabling CHECK(enabled = (action='grant')),
+  CONSTRAINT ortho_clinical_grant_root CHECK((version=1) = (predecessor_id IS NULL)),
+  CONSTRAINT ortho_clinical_grant_initial CHECK(version<>1 OR action='grant'),
+  CONSTRAINT ortho_clinical_grant_not_self CHECK(predecessor_id IS NULL OR predecessor_id<>id),
+  CONSTRAINT ortho_clinical_grant_version UNIQUE(anchor_id,version),
+  CONSTRAINT ortho_clinical_grant_event_identity UNIQUE(anchor_id,id),
+  CONSTRAINT ortho_clinical_grant_state_identity UNIQUE(anchor_id,id,version,enabled),
+  CONSTRAINT ortho_clinical_grant_successor UNIQUE(predecessor_id),
+  CONSTRAINT ortho_clinical_grant_command UNIQUE(anchor_id,command_id),
+  CONSTRAINT ortho_clinical_grant_predecessor FOREIGN KEY(anchor_id,predecessor_id)
+    REFERENCES ortho_clinical_grant_events(anchor_id,id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ortho_clinical_grant_one_root ON ortho_clinical_grant_events(anchor_id) WHERE predecessor_id IS NULL;
+CREATE TABLE IF NOT EXISTS ortho_clinical_grant_states (
+  anchor_id INTEGER PRIMARY KEY REFERENCES ortho_clinical_grant_anchors(id) ON DELETE RESTRICT,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  version INTEGER NOT NULL CHECK(version>0),
+  last_event_id INTEGER NOT NULL,
+  CONSTRAINT ortho_clinical_grant_exact_state FOREIGN KEY(anchor_id,last_event_id,version,enabled)
+    REFERENCES ortho_clinical_grant_events(anchor_id,id,version,enabled) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ortho_clinical_grant_party_idx ON ortho_clinical_grant_anchors(doctor_party_id,id);
+
+CREATE OR REPLACE FUNCTION reject_ortho_clinical_grant_history_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Clinical grant identity and history are immutable' USING ERRCODE='55000';
+END;
+$$;
+CREATE OR REPLACE FUNCTION guard_ortho_clinical_grant_state_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='UPDATE' AND NEW.anchor_id=OLD.anchor_id AND NEW.version>OLD.version THEN RETURN NEW; END IF;
+  RAISE EXCEPTION 'Clinical grant state must advance on its exact immutable identity' USING ERRCODE='55000';
+END;
+$$;
+CREATE OR REPLACE FUNCTION check_ortho_clinical_grant_final_state() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  witness ortho_clinical_grant_events%ROWTYPE;
+  prior ortho_clinical_grant_events%ROWTYPE;
+  current_state ortho_clinical_grant_states%ROWTYPE;
+  latest ortho_clinical_grant_events%ROWTYPE;
+BEGIN
+  -- These queries never acquire user/party locks. In particular system revocation
+  -- events have no non-null actor FK and target identity derives from the anchor.
+  IF TG_TABLE_NAME='ortho_clinical_grant_events' THEN
+    SELECT * INTO witness FROM ortho_clinical_grant_events WHERE id=NEW.id;
+    IF witness.predecessor_id IS NOT NULL THEN
+      SELECT * INTO prior FROM ortho_clinical_grant_events WHERE id=witness.predecessor_id AND anchor_id=witness.anchor_id;
+      IF NOT FOUND OR witness.version<>prior.version+1 THEN
+        RAISE EXCEPTION 'Clinical grant predecessor/version mismatch' USING ERRCODE='23514';
+      END IF;
+    END IF;
+  END IF;
+  SELECT * INTO latest FROM ortho_clinical_grant_events WHERE anchor_id=NEW.anchor_id ORDER BY version DESC LIMIT 1;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Clinical grant event missing' USING ERRCODE='23514'; END IF;
+  SELECT * INTO current_state FROM ortho_clinical_grant_states WHERE anchor_id=NEW.anchor_id;
+  IF NOT FOUND OR current_state.last_event_id<>latest.id OR current_state.version<>latest.version OR current_state.enabled<>latest.enabled THEN
+    RAISE EXCEPTION 'Clinical grant final state does not match its latest event' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DO $$
+BEGIN
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='ortho_clinical_grant_anchors'::regclass AND tgname='ortho_clinical_grant_anchor_immutable' AND NOT tgisinternal) THEN
+    CREATE TRIGGER ortho_clinical_grant_anchor_immutable BEFORE UPDATE OR DELETE ON ortho_clinical_grant_anchors FOR EACH ROW EXECUTE FUNCTION reject_ortho_clinical_grant_history_mutation();
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='ortho_clinical_grant_events'::regclass AND tgname='ortho_clinical_grant_event_immutable' AND NOT tgisinternal) THEN
+    CREATE TRIGGER ortho_clinical_grant_event_immutable BEFORE UPDATE OR DELETE ON ortho_clinical_grant_events FOR EACH ROW EXECUTE FUNCTION reject_ortho_clinical_grant_history_mutation();
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='ortho_clinical_grant_states'::regclass AND tgname='ortho_clinical_grant_state_monotonic' AND NOT tgisinternal) THEN
+    CREATE TRIGGER ortho_clinical_grant_state_monotonic BEFORE UPDATE OR DELETE ON ortho_clinical_grant_states FOR EACH ROW EXECUTE FUNCTION guard_ortho_clinical_grant_state_mutation();
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='ortho_clinical_grant_events'::regclass AND tgname='ortho_clinical_grant_event_final' AND NOT tgisinternal) THEN
+    CREATE CONSTRAINT TRIGGER ortho_clinical_grant_event_final AFTER INSERT ON ortho_clinical_grant_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_ortho_clinical_grant_final_state();
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='ortho_clinical_grant_states'::regclass AND tgname='ortho_clinical_grant_state_final' AND NOT tgisinternal) THEN
+    CREATE CONSTRAINT TRIGGER ortho_clinical_grant_state_final AFTER INSERT OR UPDATE ON ortho_clinical_grant_states DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_ortho_clinical_grant_final_state();
+  END IF;
+END;
+$$;
+`;

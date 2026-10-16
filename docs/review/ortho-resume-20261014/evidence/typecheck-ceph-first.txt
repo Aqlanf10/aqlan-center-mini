@@ -1,0 +1,9 @@
+components/CephTracer.tsx(1679,104): error TS2339: Property 'retired' does not exist on type 'EnrichedMeasurement'.
+components/CephTracer.tsx(1680,38): error TS2339: Property 'retired' does not exist on type 'EnrichedMeasurement'.
+components/CephTracer.tsx(1748,98): error TS2339: Property 'retired' does not exist on type 'EnrichedMeasurement'.
+components/CephTracer.tsx(1749,38): error TS2339: Property 'retired' does not exist on type 'EnrichedMeasurement'.
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

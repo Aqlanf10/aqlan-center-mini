@@ -3,7 +3,7 @@ import {
   getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
 } from "@/lib/db";
 import {
-  computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
+  computeAll, enrichWithRefs, projectCephStampedValues, projectOnLine,
   type LandmarkCode, type LandmarkMap, type MeasurementResult,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
@@ -21,10 +21,10 @@ function PrintDeviationGauge({
   sd,
 }: {
   value: number | null;
-  mean: number;
-  sd: number;
+  mean: number | null;
+  sd: number | null;
 }) {
-  if (value == null || !Number.isFinite(value) || !Number.isFinite(sd) || sd <= 0) {
+  if (value == null || !Number.isFinite(value) || mean == null || !Number.isFinite(mean) || sd == null || !Number.isFinite(sd) || sd <= 0) {
     return <div style={{ height: "3.5px", width: "35px", backgroundColor: "#e2e8f0", borderRadius: "1.5px", margin: "0 auto" }} />;
   }
 
@@ -101,36 +101,17 @@ export default async function CephPrintReportPage({
 
   // حساب القياسات أو قراءة اللقطة المعتمدة
   const rawResults = computeAll(points, study.analysis.mmPerPixel ?? NaN);
-  const table: MeasurementResult[] = study.analysis.status === "completed" && study.measurements.length > 0
-    ? (() => {
-        const snap = new Map(study.measurements.map((s) => [s.code, s.value]));
-        return rawResults.map((r) => {
-          const v = snap.get(r.code);
-          if (v == null || !Number.isFinite(v)) return { ...r, value: null, display: "—", status: null, severityStars: "", interpretationEn: "", interpretationAr: "" };
-          const def = MEASUREMENTS.find((d) => d.code === r.code);
-          const interp = getClinicalInterpretation(r.code, v);
-          return {
-            ...r,
-            value: v,
-            display: String(v),
-            status: def ? interpret(v, def) : r.status,
-            severityStars: def ? getSeverityStars(v, def.mean, def.tol) : r.severityStars,
-            interpretationEn: interp.en,
-            interpretationAr: interp.ar,
-          };
-        });
-      })()
+  const table: MeasurementResult[] = study.analysis.status === "completed"
+    ? projectCephStampedValues(study.measurements)
     : rawResults;
 
   const enriched = enrichWithRefs(table, refSet?.values ?? null);
 
   // حساب عمر المريض وقت تصوير الشععة
   let ageAtXray: number | null = null;
-  if (patient?.birthYear) {
-    const refYear = study.analysis.xrayDate
-      ? new Date(study.analysis.xrayDate).getUTCFullYear()
-      : new Date().getUTCFullYear();
-    ageAtXray = Math.max(0, refYear - patient.birthYear);
+  if (patient?.birthYear && study.analysis.xrayDate) {
+    const refYear = new Date(study.analysis.xrayDate).getUTCFullYear();
+    if (Number.isFinite(refYear) && refYear >= patient.birthYear) ageAtXray = refYear - patient.birthYear;
   }
 
   // حساب أبعاد المخطط السيفالومتري للتوليد المتجهي
@@ -154,6 +135,7 @@ export default async function CephPrintReportPage({
     ["S", "N", "#2563eb"],
     ["Or", "Po", "#0284c7"],
     ["Go", "Me", "#059669"],
+    ["Go", "Gn", "#0891b2"],
     ["N", "A", "#64748b"],
     ["N", "B", "#64748b"],
     ["N", "Pog", "#0891b2"],
@@ -337,7 +319,7 @@ export default async function CephPrintReportPage({
         {/* جدول القياسات السيفالومترية الشاملة */}
         <div style={{ margin: "2mm 0" }}>
           <h3 style={{ fontSize: "9pt", fontWeight: 800, margin: "2mm 0 1.5mm", color: "#0f172a" }}>
-            📊 جدول القياسات السيفالومترية المعتمدة · Cephalometric Measurements Table
+            📊 {study.analysis.status === "completed" ? "لقطة القياسات المعتمدة" : "قياسات المسودة غير المعتمدة"} · Cephalometric Measurements Table
           </h3>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm" }}>
@@ -373,7 +355,7 @@ export default async function CephPrintReportPage({
                         const statusColor = r.status === "above" ? "#1d4ed8" : r.status === "below" ? "#b91c1c" : "#047857";
                         const refNorm = r.refMean != null && r.refSd != null
                           ? `${r.refMean}±${r.refSd}`
-                          : `${r.mean}±${r.tol}`;
+                          : r.mean == null || r.tol == null ? "المرجع غير محقق / Reference unverified" : `${r.mean}±${r.tol}`;
                         return (
                           <tr key={r.code}>
                             <td>
@@ -390,10 +372,10 @@ export default async function CephPrintReportPage({
                               )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
-                              {r.value != null ? `${r.value}${r.unit}` : "—"}
+                              {r.value != null ? `${r.display}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {refNorm} {r.referencePending ? "" : r.unit}
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}
@@ -449,7 +431,7 @@ export default async function CephPrintReportPage({
                         const statusColor = r.status === "above" ? "#1d4ed8" : r.status === "below" ? "#b91c1c" : "#047857";
                         const refNorm = r.refMean != null && r.refSd != null
                           ? `${r.refMean}±${r.refSd}`
-                          : `${r.mean}±${r.tol}`;
+                          : r.mean == null || r.tol == null ? "المرجع غير محقق / Reference unverified" : `${r.mean}±${r.tol}`;
                         return (
                           <tr key={r.code}>
                             <td>
@@ -466,10 +448,10 @@ export default async function CephPrintReportPage({
                               )}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
-                              {r.value != null ? `${r.value}${r.unit}` : "—"}
+                              {r.value != null ? `${r.display}${r.unit}` : "—"}
                             </td>
                             <td className="num" style={{ color: "#475569" }}>
-                              {refNorm} {r.unit}
+                              {refNorm} {r.referencePending ? "" : r.unit}
                             </td>
                             <td style={{ textAlign: "center", color: "#d97706", fontWeight: "bold", fontSize: "7.5pt" }}>
                               {r.severityStars || "—"}
@@ -504,7 +486,7 @@ export default async function CephPrintReportPage({
           borderRadius: "2mm",
         }}>
           <h4 style={{ fontSize: "9pt", fontWeight: 800, margin: "0 0 2mm", color: "#0f172a" }}>
-            🩺 الخلاصة التشخيصية المعتمدة وتوصيات خطة العلاج · Orthodontic Diagnosis & Plan
+            🩺 {study.analysis.status === "completed" ? "الخلاصة التشخيصية المعتمدة" : "مسودة الخلاصة التشخيصية"} وتوصيات خطة العلاج · Orthodontic Diagnosis & Plan
           </h4>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2mm", fontSize: "8pt" }}>

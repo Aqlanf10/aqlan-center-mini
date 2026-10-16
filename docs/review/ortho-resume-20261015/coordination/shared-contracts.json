@@ -1,0 +1,223 @@
+{
+  "purpose": "Review-only current/source comparisons, NOT approved patches. No shared files applied. Historical source contains unrelated HR and older finance; never apply whole comparisons.",
+  "heads": {
+    "resume": "4d6ba3f8c8f3c0e2fd327a85a251545ffc5373e3",
+    "main": "ce78247278397a02e8b9a0c437ab5605951a411c",
+    "hr": "63386ed44450b3ea25b5067cf3b6efc914b6ccad",
+    "inventory": "e74481cb6250bbefea1393248eff5e883fcc96f6",
+    "frozen": "82e6e52cfb72ee8f360c4a6d09c0ec41277c7d76",
+    "presentation": "4fcc75e55bdee1ab96d206674b1d5cf9b7aae48b"
+  },
+  "shared_files": [
+    {
+      "path": "lib/db.ts",
+      "blobs": {
+        "resume": "4b90850e39adf77cba84bbc98c489a3f5cf62827",
+        "main": "75994b1a5ab8b26b852ca20c4c583254e42b1dd2",
+        "hr": "75994b1a5ab8b26b852ca20c4c583254e42b1dd2",
+        "inventory": "5c22307f37e73c03628b4f29aadee9d3eb933311",
+        "frozen": "ca443eaedaafa5e887abbade4cb2024e8507a854",
+        "presentation": "d2ad699a6cbd08085558c8ff5959d2cee52dada8"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/migrations.ts",
+      "blobs": {
+        "resume": "ff4455de1ef142e160a29140c3ec747eedb7c4dd",
+        "main": "531e58298edcdc606f2352726213fe8fdaaa6296",
+        "hr": "531e58298edcdc606f2352726213fe8fdaaa6296",
+        "inventory": "ff4455de1ef142e160a29140c3ec747eedb7c4dd",
+        "frozen": "1ae0a2995d7c80e46196ea324973bc54478fe557",
+        "presentation": "1ae0a2995d7c80e46196ea324973bc54478fe557"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/http-permissions.ts",
+      "blobs": {
+        "resume": "e79374a2c3b3a70e5c0575fb75624badebf8558d",
+        "main": "231e5a74d64862f45f962d03930b0a9ed45f11c6",
+        "hr": "231e5a74d64862f45f962d03930b0a9ed45f11c6",
+        "inventory": "1bc99a273d22c2a58ffb714fb53ad12a0de789ae",
+        "frozen": "f4737e3c8b48e1ace470af9397e6f04de6884c75",
+        "presentation": "f4737e3c8b48e1ace470af9397e6f04de6884c75"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": true,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/audit.ts",
+      "blobs": {
+        "resume": "72527c98ad801ad8930e275480f5b7ada1f9f07d",
+        "main": "ca462efb6d7d939775700a2fc551479a3950583a",
+        "hr": "ca462efb6d7d939775700a2fc551479a3950583a",
+        "inventory": "1cba2dead6c2f5d59fe032ccfe30b06d4d345b19",
+        "frozen": "00547e26d00fef0d9eaacc7792eb505456408a58",
+        "presentation": "00547e26d00fef0d9eaacc7792eb505456408a58"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/backup.ts",
+      "blobs": {
+        "resume": "ff41369fd0c268542f5ba61fb91559a3733247fe",
+        "main": "33fff067d7623028dd3270b728c16f7c874fa766",
+        "hr": "33fff067d7623028dd3270b728c16f7c874fa766",
+        "inventory": "ff41369fd0c268542f5ba61fb91559a3733247fe",
+        "frozen": "ff41369fd0c268542f5ba61fb91559a3733247fe",
+        "presentation": "ff41369fd0c268542f5ba61fb91559a3733247fe"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/clinic-reset.ts",
+      "blobs": {
+        "resume": "c7156aca94f8d13e590c372e6d11c0530fb20d56",
+        "main": "8a464b7e61bdc12d91ba1fa0a8fd8929a073883b",
+        "hr": "8a464b7e61bdc12d91ba1fa0a8fd8929a073883b",
+        "inventory": "a7f038239b87af38298e3ee2ec85d933b21a23d5",
+        "frozen": "5804d7b32497f30bd9b8dfebef48dd40be9276bd",
+        "presentation": "5804d7b32497f30bd9b8dfebef48dd40be9276bd"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/session.ts",
+      "blobs": {
+        "resume": "a3af81d45538ec222558a79843b5c1752e3bb450",
+        "main": "a3af81d45538ec222558a79843b5c1752e3bb450",
+        "hr": "a3af81d45538ec222558a79843b5c1752e3bb450",
+        "inventory": "fc2803dc18555b6a98b7319f3e100e7707baa878",
+        "frozen": "a3af81d45538ec222558a79843b5c1752e3bb450",
+        "presentation": "a3af81d45538ec222558a79843b5c1752e3bb450"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "lib/patient-access.ts",
+      "blobs": {
+        "resume": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1",
+        "main": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1",
+        "hr": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1",
+        "inventory": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1",
+        "frozen": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1",
+        "presentation": "c69a00c4a1a7fbfe6e9691f08ea53e26618d18e1"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "components/PatientOrtho.tsx",
+      "blobs": {
+        "resume": "19c514d7885081b81fd2d28bd0d9413627d0bcba",
+        "main": "19c514d7885081b81fd2d28bd0d9413627d0bcba",
+        "hr": "19c514d7885081b81fd2d28bd0d9413627d0bcba",
+        "inventory": "63c507826bae567df72d973312222b4df2fe5875",
+        "frozen": "2b069021f6b51c124c693d8625e0b4529b57cf34",
+        "presentation": "2b069021f6b51c124c693d8625e0b4529b57cf34"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "components/PatientPlans.tsx",
+      "blobs": {
+        "resume": "2e0c4ef1e106d361c81d4c40eecd6feeb8f8556b",
+        "main": "2e0c4ef1e106d361c81d4c40eecd6feeb8f8556b",
+        "hr": "2e0c4ef1e106d361c81d4c40eecd6feeb8f8556b",
+        "inventory": "36572231c49ac090bd7545b450112c55564a6378",
+        "frozen": "2e0c4ef1e106d361c81d4c40eecd6feeb8f8556b",
+        "presentation": "2e0c4ef1e106d361c81d4c40eecd6feeb8f8556b"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "components/PatientLedger.tsx",
+      "blobs": {
+        "resume": "ed3c0aae5895ef987ef32e06d83887294b3d445c",
+        "main": "db68800ea957fd108b4cc9c45d414e69d8575c92",
+        "hr": "db68800ea957fd108b4cc9c45d414e69d8575c92",
+        "inventory": "b32f9b9715473ff9a9f390c1e761ad22e174ddd7",
+        "frozen": "35f630944b01b31518a25bbfc11d12d00d3a30a9",
+        "presentation": "35f630944b01b31518a25bbfc11d12d00d3a30a9"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "schema/current-schema-contract.pg18.json",
+      "blobs": {
+        "resume": "5a5ba34dc9e7ddf0a11a5d372e7662c9e466986f",
+        "main": "63554f6a2c0bcbe97764e9b9adec48c47aaba020",
+        "hr": "63554f6a2c0bcbe97764e9b9adec48c47aaba020",
+        "inventory": "b0aa3552701e898431c58b4ee52448faac9c0135",
+        "frozen": "d086b97474f8f3bcf2682e43aac25fcc74d5b7ac",
+        "presentation": "d086b97474f8f3bcf2682e43aac25fcc74d5b7ac"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    },
+    {
+      "path": "scripts/verify-schema-ownership.ts",
+      "blobs": {
+        "resume": "133fa3cafc6b7bc943dafc940c6467b60dd9e11d",
+        "main": "44e1667ddbf06a328a3bed931d4c4f8569618430",
+        "hr": "44e1667ddbf06a328a3bed931d4c4f8569618430",
+        "inventory": "231762acc5d44b294d8f370c1938bd69bcd367fe",
+        "frozen": "db378d0574110011b0e3997ac0527f9f04062272",
+        "presentation": "db378d0574110011b0e3997ac0527f9f04062272"
+      },
+      "changed_in_hr": false,
+      "changed_in_inventory_since_its_base": false,
+      "hr_already_merged": true
+    }
+  ],
+  "migration_0055_found_in_fetched_source": false,
+  "reserved_hr": [
+    "0056",
+    "0057",
+    "0058"
+  ],
+  "initial_heads": {
+    "resume": "fde81ac2f77f5e32bf77813b4c765036535189c6",
+    "main": "d79df32b1ec8250d11c2d20fd284fd914e4da4ad",
+    "hr": "63386ed44450b3ea25b5067cf3b6efc914b6ccad",
+    "inventory": "e74481cb6250bbefea1393248eff5e883fcc96f6",
+    "frozen": "82e6e52cfb72ee8f360c4a6d09c0ec41277c7d76",
+    "presentation": "4fcc75e55bdee1ab96d206674b1d5cf9b7aae48b"
+  },
+  "migration_0055_recovered_from_library": true,
+  "historical_comparisons_withdrawn": true,
+  "pending_additions_only_proposals": [
+    "lib__clinic-reset.ts.additions-only.patch.txt",
+    "lib__http-permissions.ts.additions-only.patch.txt"
+  ],
+  "notes": [
+    "No shared application changes; patches are review-only.",
+    "No lib/migrations.ts replacement: preserve applyRuntimeMigrationFiles on main.",
+    "No lib/backup.ts change: preserve identityInsert and OVERRIDING SYSTEM VALUE.",
+    "Preserve all main HR keep tables and 0059\u20130061 financial wipe tables.",
+    "0055 grant tables reset/restore ownership unresolved and intentionally absent from proposed wipe additions.",
+    "HTTP role rows await root policy review; registration is not row/transaction authorization."
+  ]
+}

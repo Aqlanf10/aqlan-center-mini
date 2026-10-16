@@ -1,0 +1,58 @@
+import { describe, expect, it } from "vitest";
+import { ORTHO_CLINICAL_APPROVAL, checkClinicalGrantCommand, checkClinicalGrantManagement, checkClinicalApprovalGrant,
+  clinicalGrantUserRevocation, clinicalGrantPartyRevocation, type ClinicalGrantCommand, type CurrentClinicalGrant,
+  type CurrentClinicalUser, type CurrentDoctorParty } from "../lib/ortho-clinical-grant";
+const user: CurrentClinicalUser = { id: 7, active: true, role: "admin", doctorPartyId: 11 };
+const party: CurrentDoctorParty = { id: 11, active: true, kind: "doctor" };
+const actor = { id: 7, active: true, role: "admin", sessionCurrent: true };
+const grant: CurrentClinicalGrant = { anchorId: 23, version: 2, eventId: 31, userId: 7, doctorPartyId: 11, enabled: true };
+const ref = { anchorId: 23, version: 2, eventId: 31 };
+const command: ClinicalGrantCommand = { commandId: "synthetic_grant_command", capability: ORTHO_CLINICAL_APPROVAL,
+  action: "grant", userId: 7, doctorPartyId: 11, expected: null, reason: "Explicit synthetic clinical authority" };
+describe("default-denied explicit Ortho clinical grant contracts", () => {
+  it("strictly parses bounded exact commands without permission coercion or actor injection", () => {
+    expect(checkClinicalGrantCommand(command)).toEqual({ ok: true, value: command });
+    for (const malformed of [{ ...command, userId: "7" }, { ...command, reason: " " }, { ...command, reason: "x".repeat(501) },
+      { ...command, capability: [ORTHO_CLINICAL_APPROVAL] }, { ...command, actorId: 7 }, { ...command, enabled: true },
+      { ...command, expected: { ...ref, version: 0 } }, { ...command, expected: { ...ref, userId: 7 } },
+      { ...command, action: "revoke", expected: null }, { ...command, commandId: "short" }])
+      expect(checkClinicalGrantCommand(malformed).ok).toBe(false);
+  });
+  it("permits explicit ordinary admin self-target and other-target management, never a role-derived grant", () => {
+    expect(checkClinicalGrantManagement(actor, command, user, party, null).ok).toBe(true);
+    expect(checkClinicalGrantManagement({ ...actor, id: 8 }, command, user, party, null).ok).toBe(true);
+    expect(checkClinicalApprovalGrant(user, true, party, null, ref)).toEqual({ ok: false, code: "grant_required" });
+    expect(checkClinicalApprovalGrant(user, true, party, { ...grant, enabled: false }, ref)).toEqual({ ok: false, code: "grant_required" });
+    expect(checkClinicalGrantManagement({ ...actor, role: "doctor" }, command, user, party, null).ok).toBe(false);
+    expect(checkClinicalGrantManagement({ ...actor, sessionCurrent: false }, command, user, party, null).ok).toBe(false);
+  });
+  it("requires exact active linked clinical identity and exact expected grant version", () => {
+    expect(checkClinicalApprovalGrant(user, true, party, grant, ref)).toEqual({ ok: true, value: grant });
+    for (const wrong of [{ ...user, active: false }, { ...user, role: "reception" as const }, { ...user, doctorPartyId: 12 }])
+      expect(checkClinicalApprovalGrant(wrong, true, party, grant, ref).ok).toBe(false);
+    expect(checkClinicalApprovalGrant(user, false, party, grant, ref).ok).toBe(false);
+    expect(checkClinicalApprovalGrant(user, true, { ...party, active: false }, grant, ref).ok).toBe(false);
+    expect(checkClinicalApprovalGrant(user, true, { ...party, kind: "laboratory" }, grant, ref).ok).toBe(false);
+    for (const wrong of [{ ...grant, userId: 8 }, { ...grant, doctorPartyId: 12 }, { ...grant, version: 3 }, { ...grant, eventId: 32 }, { ...grant, anchorId: 24 }])
+      expect(checkClinicalApprovalGrant(user, true, party, wrong, ref).ok).toBe(false);
+    expect(checkClinicalGrantManagement(actor, command, user, party, grant)).toEqual({ ok: false, code: "stale_grant" });
+    expect(checkClinicalGrantManagement(actor, { ...command, expected: ref }, user, party, grant).ok).toBe(true);
+  });
+  it("allows explicit revocation of an exact historical grant without enabling an inactive or relinked identity", () => {
+    const target = { ...user, active: false, doctorPartyId: 12 };
+    expect(checkClinicalGrantManagement(actor, { ...command, expected: ref }, target, party, grant).ok).toBe(false);
+    expect(checkClinicalGrantManagement(actor, { ...command, action: "revoke", expected: ref }, target, { ...party, active: false }, grant).ok).toBe(true);
+    expect(checkClinicalGrantManagement(actor, { ...command, action: "revoke", expected: { ...ref, version: 1 } }, target, party, grant).ok).toBe(false);
+  });
+  it("detects actual disabling/relink events and never turns restoration into an implicit grant", () => {
+    expect(clinicalGrantUserRevocation(user, { ...user, doctorPartyId: 12 })).toBe("identity_relinked");
+    expect(clinicalGrantUserRevocation(user, { ...user, active: false })).toBe("account_disabled");
+    expect(clinicalGrantUserRevocation(user, { ...user, role: "doctor" })).toBe("role_changed");
+    expect(clinicalGrantUserRevocation({ ...user, active: false }, user)).toBeNull();
+    expect(clinicalGrantUserRevocation({ ...user, doctorPartyId: 12 }, user)).toBe("identity_relinked");
+    expect(clinicalGrantPartyRevocation(party, { ...party, active: false })).toBe("party_disabled");
+    expect(clinicalGrantPartyRevocation({ ...party, active: false }, party)).toBeNull();
+    expect(() => clinicalGrantUserRevocation(user, { ...user, id: 9 })).toThrow();
+    expect(() => clinicalGrantPartyRevocation(party, { ...party, kind: "lab" })).toThrow();
+  });
+});
