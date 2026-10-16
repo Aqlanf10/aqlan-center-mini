@@ -47,6 +47,7 @@ const FRONT_DESK: readonly Role[] = ["admin", "reception"];
 const CLINICAL: readonly Role[] = ["admin", "doctor"];
 
 export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<HttpMethod, HttpAccess>>>>> = {
+  "/api/hr/identity-preview": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff": { GET: ADMIN, POST: ADMIN },
   "/api/hr/staff/[id]": { GET: ADMIN, PATCH: ADMIN },
   "/api/hr/staff/[id]/history": { GET: ADMIN, POST: ADMIN },

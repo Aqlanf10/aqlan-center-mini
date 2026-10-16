@@ -27,6 +27,7 @@ export const AUDIT_EXEMPT: Readonly<Record<string, string>> = {
   "PATCH /api/reports/saved": "تعديل تقرير محفوظ شخصي.",
   "DELETE /api/reports/saved": "حذف تقرير محفوظ شخصي.",
   "POST /api/invoices/clinical-preview": "معاينة الربط السريري للفاتورة قبل حفظها — قراءةٌ فقط لا تكتب شيئًا؛ الحفظ يُدقَّق في invoice.create.",
+  "POST /api/hr/identity-preview": "معاينة هوية الطاقم بمعرفات صريحة داخل REPEATABLE READ READ ONLY؛ بلا حفظ أو تطبيق أو تخصيص تسلسل. اختبارات PostgreSQL وHTTP تقارن جميع الجداول والتسلسلات قبل المعاينة وبعدها.",
   "POST /api/patients/[id]/legacy-treatments/preview": "معاينة تسجيل علاجٍ بدأ قبل النظام — معاملة READ ONLY لا تكتب شيئًا؛ الحفظ يُدقَّق في legacy_treatment.create.",
   "POST /api/patients/[id]/historical-documents/preview": "معاينة اتفاق تاريخي متعدد البنود — معاملة REPEATABLE READ READ ONLY بلا كتابة مالية أو سريرية؛ الحفظ والتصحيح يُدقَّقان في legacy_document.create وlegacy_document.correct.",
   "POST /api/expenses/quote": "معاينة حساب سند صرف — لا يكتب شيئًا.",
