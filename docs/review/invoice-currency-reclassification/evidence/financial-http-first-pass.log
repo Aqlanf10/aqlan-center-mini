@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts money-durable-recovery money-attempt-real-react invoice-correction invoice-identity-correction invoice-revision-recovery commission historical-correction-recovery reversed-installment-recovery patient-invoice-recovery-labels debt-repayment-workspace
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/debt-repayment-workspace-ui.test.ts (11 tests | 2 failed) 79373ms
+     × 'admin' at1280 persists installments, collects partially, revises only remaining and cancels dates without cancelling debt 32669ms
+     × 'reception' at390 persists installments, collects partially, revises only remaining and cancels dates without cancelling debt 32285ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/debt-repayment-workspace-ui.test.ts > ordinary invoice recovery and persistent repayment workspace > 'admin' at1280 persists installments, collects partially, revises only remaining and cancels dates without cancelling debt
+ FAIL  __tests__/security-http/debt-repayment-workspace-ui.test.ts > ordinary invoice recovery and persistent repayment workspace > 'reception' at390 persists installments, collects partially, revises only remaining and cancels dates without cancelling debt
+TimeoutError: locator.fill: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('debt-repayment-panel').getByLabel('مبلغ السداد 2', { exact: true })[22m
+
+ ❯ __tests__/security-http/debt-repayment-workspace-ui.test.ts:56:124
+     54|       expect(new Set(keys).size).toBe(3);
+     55|       await panel.getByRole("button",{name:"مراجعة أو تعديل السداد",ex…
+     56|       await panel.getByLabel("مبلغ السداد 1",{exact:true}).fill("30");…
+       |                                                                                                                            ^
+     57|       await panel.getByLabel("سبب تعديل السداد",{exact:true}).fill("Sy…
+     58|       await panel.getByRole("button",{name:"حفظ توزيع المتبقي",exact:t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 15 passed (16)
+      Tests  2 failed | 110 passed (112)
+   Start at  21:54:06
+   Duration  189.76s (transform 193ms, setup 0ms, import 449ms, tests 186.50s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

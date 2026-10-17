@@ -41,7 +41,37 @@ describe("bounded collection against existing debt",()=>{
     const {target,write}=await debt();const schedule=await schedules.saveDebtRepayment(write);
     const results=await Promise.allSettled([collect(target.patientId,schedule.arrangementId,40000,"debt-race-a"),collect(target.patientId,schedule.arrangementId,40000,"debt-race-b")]);
     expect(results.filter(r=>r.status==="fulfilled")).toHaveLength(1);expect(results.filter(r=>r.status==="rejected")).toHaveLength(1);
+    expect(results.find(r=>r.status==="rejected")).toMatchObject({reason:{code:"invalid"}});
     expect((await schedules.listDebtRepayments(target.patientId,"2026-10-13"))[0].remainingMinor).toBe(20000);
+  });
+  it("accepts both concurrent fresh keys when their sum fits the unchanged debt",async()=>{
+    const {target,write}=await debt();const schedule=await schedules.saveDebtRepayment(write);
+    const results=await Promise.all([
+      collect(target.patientId,schedule.arrangementId,20000,"debt-fit-race-a"),
+      collect(target.patientId,schedule.arrangementId,20000,"debt-fit-race-b"),
+    ]);
+    expect(new Set(results.map(result=>result.payment?.id)).size).toBe(2);
+    expect((await schedules.listDebtRepayments(target.patientId,"2026-10-13"))[0]).toMatchObject({remainingMinor:20000,requiresReview:false});
+  });
+  it.each(["partial-refund","full-refund","receipt-correction","principal","cancelled"])("keeps review and collection guards after %s",async change=>{
+    const {target,write}=await debt();const schedule=await schedules.saveDebtRepayment(write);
+    const first=await collect(target.patientId,schedule.arrangementId,20000,`debt-change-first-${change}`);
+    expect(first.payment).not.toBeNull();
+    if(change.endsWith("refund")){
+      const refund=await db.recordPayment({patientId:target.patientId,invoiceId:target.invoiceId,kind:"refund",amountMinor:change==="full-refund"?20000:1000,
+        currency:"SAR",baseCurrency:"YER",exchangeRate:140,method:"cash",note:"Synthetic refund guard",createdBy:session.username,
+        reversalOfId:first.payment!.id,idempotencyKey:`debt-change-${change}`});
+      expect(refund.reason).toBeNull();
+    }else if(change==="receipt-correction"){
+      const correction=await db.correctPayment({paymentId:first.payment!.id,reason:"Synthetic receipt correction guard",actor:session.username,actorRole:"admin",
+        idempotencyKey:"debt-change-receipt-correction",replacement:{amountMinor:15000,currency:"SAR",exchangeRate:140,method:"cash",target:{kind:"original"}}});
+      expect(correction.reason).toBeNull();
+    }else if(change==="principal")await q("UPDATE invoices SET total_minor=70000 WHERE id=$1",[target.invoiceId]);
+    else await q("UPDATE invoices SET status='cancelled' WHERE id=$1",[target.invoiceId]);
+    expect((await schedules.listDebtRepayments(target.patientId,"2026-10-13"))[0].requiresReview).toBe(true);
+    const before=(await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[target.patientId]))[0].n;
+    await expect(collect(target.patientId,schedule.arrangementId,1000,`debt-change-after-${change}`)).rejects.toMatchObject({code:"stale"});
+    expect((await q("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[target.patientId]))[0].n).toBe(before);
   });
   it("uses recorded FX only for YER targets and refuses foreign-to-foreign",async()=>{
     const {target,write}=await debt(280,"YER");const schedule=await schedules.saveDebtRepayment(write);

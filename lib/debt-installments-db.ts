@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import {debtRequestHash,debtRevisionSourceMatches} from "./debt-source-proof";
+export {debtRequestHash} from "./debt-source-proof";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import { revalidateSessionInTransaction } from "./session";
@@ -11,9 +12,6 @@ export type DebtTarget = { patientId: number; currency: Currency; invoiceId: num
 export class DebtRepaymentError extends Error {
   constructor(readonly code: "invalid" | "stale" | "conflict" | "unauthorized" | "missing", message: string) { super(message); }
 }
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
-  : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b)).map(([key,item]) => [key,canonical(item)])) : value;
-export const debtRequestHash = (value: unknown) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 const safe = (value: string | number) => { const number = Number(value); if (!Number.isSafeInteger(number)) throw new DebtRepaymentError("invalid","المبلغ خارج النطاق الآمن."); return number; };
 
 export async function assertDebtSession(client: DbClient, session: SessionPayload): Promise<void> {
@@ -141,7 +139,7 @@ export async function readDebtRepayments(client: DbClient, patientId: number, to
       terms:revision.terms,remainingMinor:position.remainingMinor,collectedMinor:position.settledMinor,principalMinor:position.principalMinor,sourceHash:position.sourceHash,
       revisionPrincipalMinor:safe(revision.principal_minor),available:position.available,
       accountDueMinor,collectibleMinor:Math.max(0,Math.min(position.remainingMinor,accountDueMinor)),
-      requiresReview:!position.available || position.remainingMinor>Math.max(0,accountDueMinor) || position.sourceHash !== debtRequestHash(revision.source_snapshot) || Boolean(progress?.requiresRevision),progress,history });
+      requiresReview:!position.available || position.remainingMinor>Math.max(0,accountDueMinor) || !debtRevisionSourceMatches(position.sourceSnapshot,revision.source_snapshot) || Boolean(progress?.requiresRevision),progress,history });
   }
   return result;
 }

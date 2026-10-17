@@ -3,7 +3,7 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore} from "react";
 import {acknowledgeFinancialCommand,readFinancialJournal,reserveFinancialCommand,FinancialRecoveryError,type FinancialCommand} from "@/lib/financial-command-journal";
 import {durableMoneyCommand,restoreMoneyCommand,readDurableMoneyAcknowledgment,type DurableMoneyCommand,type MoneyReceiptContext} from "@/lib/durable-money-command";
-import {MONEY_UNCERTAIN,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
+import {MONEY_UNCERTAIN,moneyRecoveryFailure,type MoneyAttempt,type MoneyRequest} from "@/lib/money-attempt";
 import {newIdempotencyKey} from "@/lib/idempotency-key";
 import {readInvoiceCommandResponse} from "@/lib/invoice-command-transport";
 import {useSession} from "./SessionProvider";
@@ -54,6 +54,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
     publish(scope,{...current,command});
     const durable=durableMoneyCommand(command);
     let reserved=false;
+    let failure=MONEY_UNCERTAIN;
     try {
       const saved=await reserveFinancialCommand({actor,patientId},current.revision,durable);
       if(saved.command?.key!==durable.key||saved.command.original!==durable.original){adopt(scope,saved.command,saved.revision,patientId,actor);return {kind:"blocked" as const,message:"تغيّر الطلب المالي في شاشة أخرى. راجع الطلب المحفوظ في الحساب."};}
@@ -67,6 +68,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
         const confirmed={...command.attempt,phase:"confirmed" as const,acknowledgment};publish(scope,{...current,revision:completed.revision,command:{...command,attempt:confirmed}});announce();
         return lifetime.current===token?{kind:"confirmed" as const,attempt:confirmed,acknowledgment}:null;}
       const message=payload&&typeof payload==="object"&&"message" in payload?payload.message:null;
+      if(!response.redirected)failure=moneyRecoveryFailure(response.status,message);
       if(!previous&&!response.redirected&&[400,401,403,404,409,422].includes(response.status)&&typeof message==="string"&&message.trim()){
         const retired=await acknowledgeFinancialCommand({actor,patientId},durable);publish(scope,{...current,revision:retired.revision,command:null});announce();return lifetime.current===token?{kind:"refused" as const,message}:null;}
     }catch{
@@ -79,7 +81,7 @@ export function useDurableMoneyAttempt(owner:string,context:MoneyDurableContext|
       // Once reserved, any ambiguous failure retains the original intent.
     }
     publish(scope,{...current,command:{...command,attempt:{...command.attempt,phase:"uncertain"}}});
-    return lifetime.current===token?{kind:"uncertain" as const,message:MONEY_UNCERTAIN}:null;
+    return lifetime.current===token?{kind:"uncertain" as const,message:failure}:null;
   };
   const consume=(attempt:MoneyAttempt)=>{const current=states.get(scope);if(current?.command?.attempt===attempt&&attempt.phase==="confirmed"){publish(scope,{...current,command:null});announce();}};
   return {attempt:own?.attempt??null,run,consume,ready:state.ready&&!blocked&&!state.error,error:state.error??(blocked?"يوجد طلب مالي سابق لهذا المريض. استعده من الحساب قبل تسجيل عملية جديدة.":null)};
