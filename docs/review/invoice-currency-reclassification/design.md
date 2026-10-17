@@ -1,10 +1,12 @@
 # Invoice currency correction: append-only settlement reclassification
 
-Implementation is local on `fix/invoice-currency-settlement-recovery`, based on
-main `4f65b60793db94c1ca8c8a52a32acd83d666c5fb`. Draft PR343 still contains only
-phase1 until the parent authorizes another push. Migration0063 was explicitly
-allocated by the parent after checking remote branches. HR0062/PR342 are excluded.
-No production correction or migration has been performed.
+Implementation is on the single continuation branch
+`fix/invoice-currency-reclassification`, based on merged main
+`482cbed4a434407514cdf73221e96cde7aaaadbb`. PR343 contains the merged phase1;
+the original local branch is preserved. Migration0063 was explicitly allocated
+by the parent after checking remote branches. HR0062/PR342 are excluded.
+No production correction or migration has been performed. Parent reserves merge
+and deployment; continuation publication requires the agreed verification gate.
 
 ## Supported boundary
 

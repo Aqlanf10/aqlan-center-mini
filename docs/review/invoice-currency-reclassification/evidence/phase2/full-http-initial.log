@@ -1,0 +1,207 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+[security-http] الخادم جاهز على http://127.0.0.1:3217 — قاعدة aqlan_sec_http معزولة
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts (1 test | 1 skipped) 2ms
+stdout | __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts (3 tests | 1 failed) 8457ms
+     × keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels 4501ms
+ ❯ __tests__/security-http/patient-lab-status-refusal-ui.test.ts (12 tests | 12 skipped) 2ms
+ ❯ __tests__/security-http/hr-temporal-history-ui.test.ts (7 tests | 7 skipped) 2050ms
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts (8 tests | 8 skipped) 2ms
+ ❯ __tests__/security-http/inventory-foundation-http-ui.test.ts (4 tests | 4 skipped) 61ms
+ ❯ __tests__/security-http/inventory-disabled-http-ui.test.ts (2 tests | 2 skipped) 8ms
+ ❯ __tests__/security-http/hr-status-rollover-native.test.ts (2 tests | 2 failed) 4511ms
+   × refreshes the actual staff UI, filters assignment and prints truthful unknown status at 390 42ms
+   × refreshes the actual staff UI, filters assignment and prints truthful unknown status at 1280 22ms
+ ❯ __tests__/security-http/inventory-overview-visual.test.ts (2 tests | 2 skipped) 37ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-temporal-history-ui.test.ts [ __tests__/security-http/hr-temporal-history-ui.test.ts ]
+AssertionError: expected [ Array(6) ] to deeply equal [ Array(5) ]
+
+- Expected
++ Received
+
+@@ -2,6 +2,7 @@
+    "0051",
+    "0052",
+    "0056",
+    "0057",
+    "0058",
++   "0063",
+  ]
+
+ ❯ __tests__/security-http/hr-temporal-history-ui.test.ts:25:121
+     23|   // partial-schema refusal assertion; the real runtime already regist…
+     24|   const id = await staff('اختبار بوابة الإدماج');
+     25|   expect((await owned.db.query("SELECT version FROM schema_migrations …
+       |                                                                                                                         ^
+     26|   await owned.db.query('ALTER TABLE hr_temporal_write_receipts RENAME …
+     27|   try { expect((await api('GET', `/api/hr/staff/${id}/history`))).toMa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  __tests__/security-http/inventory-disabled-http-ui.test.ts [ __tests__/security-http/inventory-disabled-http-ui.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-disabled-http-ui.test.ts:15:28
+     13|   db = new Client({ connectionString: url.toString(), ssl: false });
+     14|   await db.connect();
+     15|   browser = await chromium.launch({ headless: true, ...(process.env.IN…
+       |                            ^
+     16| });
+     17| afterAll(async () => { await browser?.close(); await db?.end(); });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  __tests__/security-http/inventory-foundation-http-ui.test.ts [ __tests__/security-http/inventory-foundation-http-ui.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-foundation-http-ui.test.ts:38:28
+     36|   unknownId = await create(`${witness}-missing`);
+     37|   freeId = await create(`${witness}-free`, "0");
+     38|   browser = await chromium.launch({ headless: true, ...(process.env.IN…
+       |                            ^
+     39|   await mkdir(evidence, { recursive: true });
+     40| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  __tests__/security-http/inventory-overview-visual.test.ts [ __tests__/security-http/inventory-overview-visual.test.ts ]
+Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     npx playwright install                                 ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+ ❯ __tests__/security-http/inventory-overview-visual.test.ts:9:582
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+ FAIL  __tests__/security-http/lab-dispatch-privacy-ui.test.ts [ __tests__/security-http/lab-dispatch-privacy-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/lab-dispatch-privacy-ui.test.ts:64:26
+     62|
+     63| beforeAll(async () => {
+     64|   expect(process.env.CI).toBe("true");
+       |                          ^
+     65|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     66|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯
+
+ FAIL  __tests__/security-http/patient-lab-read-state-ui.test.ts [ __tests__/security-http/patient-lab-read-state-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/patient-lab-read-state-ui.test.ts:15:26
+     13| let h: Awaited<ReturnType<typeof harness>>;
+     14| beforeAll(async () => {
+     15|   expect(process.env.CI).toBe("true");
+       |                          ^
+     16|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     17|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯
+
+ FAIL  __tests__/security-http/patient-lab-status-refusal-ui.test.ts [ __tests__/security-http/patient-lab-status-refusal-ui.test.ts ]
+AssertionError: expected undefined to be 'true' // Object.is equality
+
+- Expected:
+"true"
+
++ Received:
+undefined
+
+ ❯ __tests__/security-http/patient-lab-status-refusal-ui.test.ts:17:26
+     15| let h: Awaited<ReturnType<typeof harness>>;
+     16| beforeAll(async () => {
+     17|   expect(process.env.CI).toBe("true");
+       |                          ^
+     18|   expect(process.env.GITHUB_ACTIONS).toBe("true");
+     19|   expect(new URL(baseUrl).origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/hr-status-rollover-native.test.ts > refreshes the actual staff UI, filters assignment and prints truthful unknown status at 390
+ FAIL  __tests__/security-http/hr-status-rollover-native.test.ts > refreshes the actual staff UI, filters assignment and prints truthful unknown status at 1280
+AssertionError: expected 401 to be 201 // Object.is equality
+
+- Expected
++ Received
+
+- 201
++ 401
+
+ ❯ __tests__/security-http/hr-status-rollover-native.test.ts:23:23
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/10]⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:330:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:239:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/10]⎯
+
+
+ Test Files  9 failed | 215 passed | 3 skipped (227)
+      Tests  3 failed | 1554 passed | 67 skipped (1624)
+   Start at  22:50:34
+   Duration  1639.76s (transform 4.39s, setup 0ms, import 4.31s, tests 1632.48s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

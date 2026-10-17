@@ -1,0 +1,42 @@
+{
+  "baselineCommit": "482cbed4a434407514cdf73221e96cde7aaaadbb",
+  "featureCheckpoint": "47b578e3dbf87a994bc664e697b9211af3557146",
+  "test": "__tests__/security-http/receipt-provenance-ui.test.ts",
+  "oracle": "__tests__/helpers/print-pdf-glyphs.ts:120",
+  "error": "PDF signature receipt fragments violate exact glyph geometry",
+  "systemChromium": "151.0.7922.173",
+  "playwrightExpectedChromium": "153.0.8010.12",
+  "browserDownload": "HTTP403 Domain forbidden",
+  "maximumAllowedGapPoints": 0.5,
+  "printRouteAndOracleSourceUnchanged": true,
+  "baseline": {
+    "rightFragment": {
+      "xMin": "266.009564",
+      "yMin": "355.362291",
+      "xMax": "274.728406",
+      "yMax": "370.037542"
+    },
+    "leftFragment": {
+      "xMin": "256.971336",
+      "yMin": "356.462340",
+      "xMax": "264.176822",
+      "yMax": "370.037542"
+    },
+    "gapPoints": 1.832741999999996
+  },
+  "feature": {
+    "rightFragment": {
+      "xMin": "266.009564",
+      "yMin": "355.362291",
+      "xMax": "274.728406",
+      "yMax": "370.037542"
+    },
+    "leftFragment": {
+      "xMin": "256.971336",
+      "yMin": "356.462340",
+      "xMax": "264.176822",
+      "yMax": "370.037542"
+    },
+    "gapPoints": 1.832741999999996
+  }
+}

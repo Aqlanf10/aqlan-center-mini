@@ -1,0 +1,42 @@
+
+> aqlan-center@0.1.0 test:security-http
+> vitest run --config vitest.config.security.mts __tests__/security-http/receipt-provenance-ui.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-currency-baseline
+
+[security-http] الخادم جاهز على http://127.0.0.1:3218 — قاعدة aqlan_sec_http معزولة
+stdout | __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts (3 tests | 1 failed) 6815ms
+     × keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels 3342ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/security-http/receipt-provenance-ui.test.ts > receipt provenance on real built pages and native A6 paper > keeps face values and timestamps, shows structural lineage at both widths, and prints truthful reversal labels
+Error: PDF signature receipt fragments violate exact glyph geometry
+ ❯ assertReceiptPrintPdfSignature __tests__/helpers/print-pdf-glyphs.ts:120:11
+    118|     || Math.abs(right.yMin - left.yMin) > 2 || gap < 0 || gap > 0.5
+    119|     || merged.text !== expectedLabel) {
+    120|     throw new Error("PDF signature receipt fragments violate exact gly…
+       |           ^
+    121|   }
+    122|   // Neither input words nor their geometry change. The unchanged shar…
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:330:9
+ ❯ Object.run __tests__/helpers/guarded-browser-routes.ts:42:13
+ ❯ __tests__/security-http/receipt-provenance-ui.test.ts:239:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  23:05:50
+   Duration  9.30s (transform 22ms, setup 0ms, import 212ms, tests 6.81s, environment 0ms)
+
+[security-http] أُوقف الخادم وأُسقطت القاعدة المعزولة
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
