@@ -53,7 +53,7 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
       }
       expect(new Set(keys).size).toBe(3);
       await panel.getByRole("button",{name:"مراجعة أو تعديل السداد",exact:true}).click();
-      await panel.getByLabel("مبلغ السداد 1",{exact:true}).fill("30");await panel.getByLabel("مبلغ السداد 2",{exact:true}).fill("33.45");
+      await panel.getByLabel("مبلغ السداد 1",{exact:true}).fill("63.45");
       await panel.getByLabel("سبب تعديل السداد",{exact:true}).fill("Synthetic remaining redistribution");
       await panel.getByRole("button",{name:"حفظ توزيع المتبقي",exact:true}).click();await expect.poll(()=>panel.innerText()).toContain("النسخة 2");
       await panel.getByRole("button",{name:"مراجعة أو تعديل السداد",exact:true}).click();await panel.getByLabel("سبب تعديل السداد",{exact:true}).fill("Synthetic dates cancellation");
