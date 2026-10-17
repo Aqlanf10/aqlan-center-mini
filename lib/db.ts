@@ -65,7 +65,7 @@ import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
 import { LEGACY_TREATMENT_COVERAGE_SQL } from "./legacy-treatment-coverage-schema";
 import { DEBT_INSTALLMENTS_SQL } from "./debt-installments-schema";
 import { LEGACY_TREATMENT_DOCUMENT_SQL } from "./legacy-treatment-document-schema";
-import { INVOICE_CORRECTION_SQL } from "./invoice-correction-schema";
+import {ensureInvoiceCurrencySchema} from "./invoice-currency-runtime";
 import { INVOICE_CORRECTION_COVERAGE_SQL } from "./invoice-correction-coverage";
 import { legacyCoverageContains, legacyCoverageOverlaps, legacyCoverageStateFromContext, type LegacyCoverageState } from "./legacy-treatment-coverage";
 import { LEGACY_ITEM_COVERAGE_CONTEXT_SQL } from "./legacy-treatment-coverage-db";
@@ -2070,7 +2070,7 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(LEGACY_TREATMENT_COVERAGE_SQL);
     await getPool().query(DEBT_INSTALLMENTS_SQL);
     await getPool().query(LEGACY_TREATMENT_DOCUMENT_SQL);
-    await getPool().query(INVOICE_CORRECTION_SQL);
+    await ensureInvoiceCurrencySchema(getPool());
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
