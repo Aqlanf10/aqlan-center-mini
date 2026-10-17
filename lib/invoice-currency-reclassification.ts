@@ -1,7 +1,7 @@
 import {isCurrency, toBaseAmount, type Currency} from "./money";
 
-/** Design-stage arithmetic only. No route/writer consumes this until the
- * append-only evidence schema and ALL settlement readers are integrated. */
+/** Arithmetic for the guarded writer. Ownership, complete lineage and locking
+ * are proved separately by the database adapter before this planner is called. */
 export interface ReclassificationPayment {
   id: number; patientId: number; invoiceId: number | null;
   kind: "payment" | "refund"; reversalOfId: number | null;

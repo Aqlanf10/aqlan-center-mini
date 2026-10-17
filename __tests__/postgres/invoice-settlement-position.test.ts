@@ -162,20 +162,27 @@ it.each(["replay","receipt","refund"])("serializes a currency correction racing 
   }
   expect((await q("SELECT id FROM payments WHERE patient_id=$1 AND kind='payment'",[owner])).length).toBeLessThanOrEqual(kind==="receipt"?2:1);
 });
-it("reclassifies unpaid commissions and applies a full refund exactly once while preserving the independent YER credit",async()=>{
+it.each(["collected_cash","invoiced"] as const)("reclassifies unpaid %s commissions with original policy and applies a full refund exactly once",async basis=>{
   const owner=await patient(),doctor=await db.createParty({name:"Synthetic currency commission",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  const staff=await db.createStaffUser({username:`currency-doctor-${++serial}`,displayName:"Synthetic commission",passwordHash:"synthetic",role:"doctor",partyId:doctor.id});
+  const config={calculationMode:"percentage" as const,defaultPercent:30,categoryRates:{},fixedAmountPerVisitMinor:0,deductLabCost:false,deductMaterialCost:false,basis,effectiveDate:"",rateHistory:[]};
+  await db.updateUser(staff.id,{commissionConfig:config},{actor:session.username});
+  const unrelatedDoctor=await db.createParty({name:"Synthetic unrelated SAR doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  await db.createInvoice({patientId:owner,baseCurrency:"SAR",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:unrelatedDoctor.id,description:"Synthetic unrelated SAR invoice",quantity:1,unitPriceMinor:10000}]});
   const original=(await db.createInvoice({patientId:owner,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:doctor.id,description:"Synthetic currency commission",quantity:1,unitPriceMinor:2500}]}))!;
   const paid=await db.recordPayment({patientId:owner,invoiceId:original.id,kind:"payment",amountMinor:90000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-full-paid-${++serial}`});expect(paid.reason).toBeNull();
+  await db.updateUser(staff.id,{commissionConfig:{...config,defaultPercent:60}},{actor:session.username});
   const view=await revision.readInvoiceRevision(original.id,session),command={idempotencyKey:`currency-full-correct-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic currency commission correction",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:160000};
   await expect(revision.reviseInvoice(original.id,command,{...session,role:"cashier"})).rejects.toMatchObject({code:"unauthorized"});
   await revision.reviseInvoice(original.id,command,session);
-  const rows=await db.commissionReport("2000-01-01","2099-12-31");expect(rows.find(row=>row.doctorId===doctor.id&&row.currency==="SAR")).toMatchObject({earnedMinor:27000});
+  const rows=await db.commissionReport("2000-01-01","2099-12-31");expect(rows.find(row=>row.doctorId===doctor.id&&row.currency==="SAR")).toMatchObject({earnedMinor:basis==="invoiced"?75000:27000});
+  expect(rows.find(row=>row.doctorId===unrelatedDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(0);
   expect(rows.find(row=>row.doctorId===doctor.id&&row.currency==="YER")?.earnedMinor??0).toBe(0);
   const request={patientId:owner,invoiceId:original.id,kind:"refund" as const,amountMinor:90000,currency:"SAR" as const,baseCurrency:"YER" as const,exchangeRate:410,method:"cash" as const,note:null,createdBy:session.username,reversalOfId:paid.payment!.id,idempotencyKey:`currency-full-refund-${++serial}`};
   expect((await db.recordPayment(request)).reason).toBeNull();expect((await db.recordPayment(request)).reason).toBeNull();
-  expect(db.ledgerBalancesByCurrency(owner,await db.patientLedger(owner),new Map()).SAR.dueMinor).toBe(250000);
+  expect(db.ledgerBalancesByCurrency(owner,await db.patientLedger(owner),new Map()).SAR.dueMinor).toBe(260000);
   expect((await q("SELECT e.id FROM invoice_settlement_reclassification_events e JOIN payments p ON p.id=e.payment_id WHERE p.patient_id=$1 AND e.direction=-1",[owner]))).toHaveLength(1);
-  expect((await db.commissionReport("2000-01-01","2099-12-31")).find(row=>row.doctorId===doctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(0);
+  expect((await db.commissionReport("2000-01-01","2099-12-31")).find(row=>row.doctorId===doctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(basis==="invoiced"?75000:0);
 });
 it("keeps pre-correction report and commission cutoffs in YER and records today's noncash change in SAR",async()=>{
   const owner=await patient(),doctor=await db.createParty({name:"Synthetic historical commission",kind:"doctor",phone:null,commissionPercent:30,note:null});

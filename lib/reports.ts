@@ -393,9 +393,12 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
          FROM invoice_items it
          JOIN invoices i ON i.id = it.invoice_id
          LEFT JOIN services s ON s.id = it.service_id
-        WHERE i.status <> 'cancelled' AND i.patient_id = ANY($1::int[])
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c
+          JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+          WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $3)::date>$2::date))
+          AND i.patient_id = ANY($1::int[])
         ORDER BY it.invoice_id, it.id`,
-      [ids],
+      [ids,opts.asOf??clinicTodayISO(),CLINIC_TIME_ZONE],
     ),
   ]);
 

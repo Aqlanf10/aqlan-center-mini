@@ -12762,7 +12762,7 @@ export async function commissionReport(
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
-              i.created_at, to_char(i.created_at, 'US') AS created_at_us,
+              COALESCE(currency_origin.created_at,i.created_at) AS created_at, to_char(COALESCE(currency_origin.created_at,i.created_at), 'US') AS created_at_us,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
               it.service_id,
@@ -12773,6 +12773,14 @@ export async function commissionReport(
               COALESCE(pi.plan_id, i.plan_id) AS plan_id,
               COALESCE(SUM(it.total_minor), 0) AS share_minor
          FROM invoices i
+         LEFT JOIN LATERAL (
+           WITH RECURSIVE lineage(id) AS (SELECT i.id UNION
+             SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
+           SELECT original.created_at FROM invoice_corrections c
+           JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+           JOIN invoices original ON original.id=c.original_invoice_id
+           WHERE c.corrected_invoice_id IN(SELECT id FROM lineage) ORDER BY d.id LIMIT 1
+         ) currency_origin ON TRUE
          LEFT JOIN invoice_items it ON it.invoice_id = i.id
          LEFT JOIN services s ON s.id = it.service_id
          /* (COMM-DETAIL-1) الحالة والخطة مشتقتان لا منسوختان: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
@@ -12787,7 +12795,7 @@ export async function commissionReport(
                    WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
                    AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, currency_origin.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
@@ -12863,6 +12871,7 @@ export async function commissionReport(
     settlementMinor: number;
     effectiveMinor: number;
     createdAt: string;
+    allocatedInvoiceId?:number;
   };
   const paymentsByPatient = new Map<number, SettledPayment[]>();
   /* (المراجعة النهائية ٣) الردود الحرة بدلو عملة هدفها — لا scalar يُخصم من
@@ -12919,6 +12928,7 @@ export async function commissionReport(
     for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},patientIds)){
       if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
     }
+    const reclassifiedTargets=new Set([...currencyEvidence.values()].map(event=>event.targetInvoiceId));
     for (const row of paymentRows.rows) {
       const currency = requireCurrency(row.currency, "دفعة", row.id);
       /* (المراجعة النهائية ٢) هدف التسوية من الخريطة المرجعية الشاملة — لا من
@@ -12989,7 +12999,8 @@ export async function commissionReport(
           target,
           settlementMinor: value,
           effectiveMinor: value,
-          createdAt: allocation?.createdAt??commissionTimestampIso(row.created_at, row.created_at_us),
+          createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
+          allocatedInvoiceId:allocation?.targetInvoiceId??(row.invoice_id!==null&&reclassifiedTargets.has(row.invoice_id)?row.invoice_id:undefined),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;
@@ -13015,17 +13026,17 @@ export async function commissionReport(
   // أقدم من كل فاتورة في هذا النظام. فما دخل منه على دَينٍ سابق **لا عمولة
   // عليه**: عمله تمّ قبل النظام وعمولته صُرفت في حينها، وصرفها ثانية دفعٌ
   // مرتين عن عمل واحد. (يُستهلك أوّل طاقةٍ في دلو الأساس — انظر الأجزاء أدناه.)
-  const openingByPatient = await openingBalanceAmounts(patientIds);
+  const openingByPatient = await openingBalanceAmounts(patientIds,pool);
 
   /* (P0-1) سياسات الأطباء من سجلّها الزمني — لا من القيمة الحيّة. كل طبيبٍ
      مستقل: إعدادٌ متقدّم لطبيبٍ لا يمسّ غيره، ومن لا إعداد له على نسبة جهته. */
   const policies = await loadCommissionPolicyTimelines(queryRunner);
   /* (COMM-DETAIL-1 · F-5) القواعد القديمة المخزَّنة بالاسم تُحلّ إلى معرّف الخدمة مرّةً
      هنا (في الذاكرة) — والملتبس وغير المحلول يُقال في التفصيل ولا يُخمَّن. */
-  const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies);
+  const serviceRateFindings = await resolveLegacyServiceRatesInPolicies(policies,pool);
   const policyAt = commissionPolicyResolver(policies);
   /* (F-11) النسب الخاصة بالحالات — تُحلّ داخل المحرّك وقت كل حدث. */
-  const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows());
+  const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows(pool));
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
    * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
@@ -13097,7 +13108,7 @@ export async function commissionReport(
   /* (COMM-DETAIL-1 · F-4) تكلفة المواد الفعلية لكل حصة — من حركات صرف الزيارة مقوَّمةً
      بإعادة تشغيل خطّ متوسّط كل بند (لا `unit_cost_minor` على الصرف). وما لا يُنسب إلى
      حصةٍ واحدة بيقين يُقال «غير منسوب» ولا يُخمَّن. */
-  const unallocatedMaterials = await attributeInventoryMaterials(invoiceById, inRange);
+  const unallocatedMaterials = await attributeInventoryMaterials(invoiceById, inRange,pool);
   /* تُملأ في حلقة أجزاء التحصيل أدناه: كل جزءٍ بطابع دفعته الأصلية. */
   const perPatient: Array<ReturnType<typeof commissionForPatientAtEventTime>> = [];
 
@@ -13130,7 +13141,7 @@ export async function commissionReport(
    *  ٥) ما فاض عن كل طاقة دلوٍ (افتتاحي + فواتيره) = رصيد مريض في عملته لا
    *     يُنسب لفاتورة ولا عمولة عليه.
    */
-  const rateTimeline = await materialRateTimeline();
+  const rateTimeline = await materialRateTimeline(pool);
   const coveredByDoctorRate = new Map<number, Map<Currency, Map<string | null, Map<number | null, number>>>>();
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
@@ -13160,8 +13171,17 @@ export async function commissionReport(
       invoiceId: number; amount: number; currency: Currency;
       sourcePaymentId: number; sourceTime: string;
     }> = [];
-    for (const payment of payments) {
+    // Proven invoice allocations reserve their own capacity before legacy FIFO.
+    // Any excess stays patient credit; it cannot earn on another treatment.
+    const orderedPayments=[...payments.filter(payment=>payment.allocatedInvoiceId!==undefined),...payments.filter(payment=>payment.allocatedInvoiceId===undefined)];
+    for (const payment of orderedPayments) {
       let amount = payment.effectiveMinor;
+      if(payment.allocatedInvoiceId!==undefined){
+        const capacity=capacitiesByCurrency.get(payment.target)!.find(row=>row.invoiceId===payment.allocatedInvoiceId);
+        const take=Math.min(amount,capacity?.remaining??0);
+        if(capacity&&take>0){capacity.remaining-=take;chunks.push({invoiceId:payment.allocatedInvoiceId,amount:take,currency:payment.target,sourcePaymentId:payment.id,sourceTime:payment.createdAt});}
+        continue;
+      }
       const capacities = capacitiesByCurrency.get(payment.target)!;
       let capIndex = capIndexByCurrency.get(payment.target) ?? 0;
       while (amount > 0 && capIndex < capacities.length) {
@@ -13244,7 +13264,7 @@ export async function commissionReport(
       }
     }
   }
-  const settings = await getSettings();
+  const settings = await readSettings(pool);
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
   if (detail) {
     detail.unallocatedMaterials.push(...unallocatedMaterials);
@@ -13312,9 +13332,9 @@ export async function commissionReport(
 
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
-export async function materialRateTimeline(): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
+export async function materialRateTimeline(queryRunner?:Pick<DbClient,"query">): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ category: string; rate_bp: number; effective_from: Date }>(
+  const { rows } = await (queryRunner??getPool()).query<{ category: string; rate_bp: number; effective_from: Date }>(
     /* الترتيب بالمعرّف عند تساوي السريان: تغييران في اللحظة نفسها — الأحدث إدراجًا هو الساري. */
     `SELECT category, rate_bp, effective_from FROM material_rate_history ORDER BY category, effective_from, id`,
   );
@@ -18748,10 +18768,10 @@ export async function listOpeningBalances(): Promise<OpeningBalance[]> {
  * (P1-5ب) بعملاتها: مستهلكها (العمولات) يضع كل رصيدٍ سابق أولًا في دلو عملته، فما
  * غطّاه التحصيل منه لا يُنسب لفاتورة ولا عمولة عليه.
  */
-export async function openingBalanceAmounts(patientIds: number[]): Promise<Map<number, OpeningByCurrency>> {
+export async function openingBalanceAmounts(patientIds: number[],queryRunner?:Pick<DbClient,"query">): Promise<Map<number, OpeningByCurrency>> {
   if (patientIds.length === 0) return new Map();
   await ensureSchema();
-  const { rows } = await getPool().query<{ patient_id: number; currency: string; amount_minor: string }>(
+  const { rows } = await (queryRunner??getPool()).query<{ patient_id: number; currency: string; amount_minor: string }>(
     `SELECT patient_id, currency, amount_minor FROM patient_opening_balances WHERE patient_id = ANY($1::int[])`,
     [patientIds],
   );
@@ -27009,8 +27029,8 @@ export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], 
 async function resolveLegacyServiceRatesInPolicies(policies: {
   timelines: Map<number, Array<{ at: bigint; percent: number; config: DoctorCommissionConfig | null }>>;
   live: Map<number, CommissionSnapshotValue>;
-}): Promise<ServiceRateFinding[]> {
-  const { rows: catalog } = await getPool().query<{ id: number; name: string }>(`SELECT id, name FROM services`);
+},queryRunner?:Pick<DbClient,"query">): Promise<ServiceRateFinding[]> {
+  const { rows: catalog } = await (queryRunner??getPool()).query<{ id: number; name: string }>(`SELECT id, name FROM services`);
   const findings: ServiceRateFinding[] = [];
   const seen = new Set<string>();
   const collect = (doctorId: number, config: DoctorCommissionConfig | null): DoctorCommissionConfig | null => {
@@ -27035,8 +27055,8 @@ async function resolveLegacyServiceRatesInPolicies(policies: {
 }
 
 /** (F-11) سجل النسب الخاصة كاملًا — جدولٌ صغير يُقرأ مرّة لكل تقرير. */
-async function loadCaseOverrideRows(): Promise<CaseOverrideRow[]> {
-  const { rows } = await getPool().query<{
+async function loadCaseOverrideRows(queryRunner?:Pick<DbClient,"query">): Promise<CaseOverrideRow[]> {
+  const { rows } = await (queryRunner??getPool()).query<{
     id: number; doctor_id: number; case_id: number | null; plan_id: number | null;
     percent: string | null; action: "set" | "void"; effective_from: Date;
   }>(
@@ -27066,10 +27086,11 @@ async function loadCaseOverrideRows(): Promise<CaseOverrideRow[]> {
 async function attributeInventoryMaterials(
   invoiceById: Map<number, CommissionInvoice>,
   inRange: (invoiceId: number) => boolean,
+  queryRunner?:Pick<DbClient,"query">,
 ): Promise<UnallocatedMaterial[]> {
   const invoiceIds = [...invoiceById.keys()].filter(inRange);
   if (invoiceIds.length === 0) return [];
-  const pool = getPool();
+  const pool = queryRunner??getPool();
   const { rows: moves } = await pool.query<{
     id: number; item_id: number; visit_id: number; invoice_id: number; patient_id: number | null; item_name: string;
   }>(
