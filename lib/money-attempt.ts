@@ -1,6 +1,12 @@
 import { newIdempotencyKey } from "./idempotency-key";
 
 export const MONEY_UNCERTAIN = "تعذّر تأكيد نتيجة العملية. قد تكون سُجّلت ماليًا. أعد التحقق بنفس الطلب قبل تسجيل عملية أخرى.";
+/** A later refusal is diagnostic, never proof that the first write failed. */
+export function moneyRecoveryFailure(status: number, message: unknown): string {
+  return status >= 400 && status < 500 && typeof message === "string" && message.trim()
+    ? `تعذّرت المحاولة الحالية: ${message.trim()}\n${MONEY_UNCERTAIN}`
+    : MONEY_UNCERTAIN;
+}
 export type MoneyRequest = Readonly<{
   url: string;
   body: string;
@@ -80,6 +86,7 @@ export class MoneyAttemptStore {
       ? { ...previous, phase: "sending" }
       : { request: { ...request! }, key: this.key(), phase: "sending" };
     this.publish(scope, attempt); // synchronous lock, before fetch/React renders
+    let failure = MONEY_UNCERTAIN;
     try {
       const response = await this.transport(attempt.request.url, {
         method: "POST",
@@ -94,6 +101,7 @@ export class MoneyAttemptStore {
         return { kind: "confirmed", attempt: confirmed, acknowledgment };
       }
       const message = object(payload)?.message;
+      if (!response.redirected) failure = moneyRecoveryFailure(response.status, message);
       // These routes return their explicit pre-commit refusals as 4xx. Once a
       // reply was lost, even a later permission/shift/target refusal cannot clear it.
       if (!previous && [400, 401, 403, 404, 409, 422].includes(response.status) && typeof message === "string" && message.trim()) {
@@ -104,7 +112,7 @@ export class MoneyAttemptStore {
       // The server may have committed. Never rotate the key here.
     }
     this.publish(scope, { ...attempt, phase: "uncertain" });
-    return { kind: "uncertain", message: MONEY_UNCERTAIN };
+    return { kind: "uncertain", message: failure };
   }
 }
 

@@ -68,7 +68,7 @@ describe("DOT-PF-01: money request identity until acknowledged", () => {
     const store = new MoneyAttemptStore(transport);
     await store.run("a", payment);
     const key = store.get("a")?.key;
-    expect((await store.run("a")).kind).toBe("uncertain");
+    expect(await store.run("a")).toMatchObject({kind:"uncertain",message:expect.stringContaining("shift closed")});
     expect(store.get("a")?.key).toBe(key);
     expect((await store.run("a")).kind).toBe("confirmed");
     expect(transport.mock.calls[2]).toEqual(transport.mock.calls[0]);

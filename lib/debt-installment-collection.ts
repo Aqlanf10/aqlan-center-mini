@@ -5,6 +5,7 @@ import { rateFromSettings } from "./settings";
 import { assertDebtSession, DebtRepaymentError, debtRequestHash, readDebtPosition, type DebtTarget } from "./debt-installments-db";
 
 import { debtAccountDue } from "./debt-account-position";
+import {debtRevisionSourceMatches} from "./debt-source-proof";
 export async function collectDebtInstallment(input: {
   patientId:number;arrangementId:number;expectedVersion:number;amountMinor:number;currency:Currency;
   method:"cash"|"transfer";note:string|null;idempotencyKey:string;session:SessionPayload;
@@ -47,7 +48,7 @@ export async function collectDebtInstallment(input: {
         if(!revision||revision.version!==input.expectedVersion||revision.status!=="active")throw new DebtRepaymentError("stale","تغيّر جدول السداد أو أُلغي؛ راجع النسخة الحالية.");
         const target:DebtTarget={patientId:input.patientId,currency:arrangement.currency,invoiceId:arrangement.invoice_id,openingCurrency:arrangement.opening_currency};
         const position=await readDebtPosition(client,target,true);
-        if(!position.available||position.sourceHash!==debtRequestHash(revision.source_snapshot)||position.settledMinor<Number(revision.settled_snapshot_minor))
+        if(!position.available||!debtRevisionSourceMatches(position.sourceSnapshot,revision.source_snapshot)||position.settledMinor<Number(revision.settled_snapshot_minor))
           throw new DebtRepaymentError("stale","تغيّر مصدر الدين أو رُدّ تحصيل سابق؛ راجع توزيع المتبقي قبل القبض.");
         if(input.currency!==target.currency&&target.currency!==CLINIC_BASE_CURRENCY)throw new DebtRepaymentError("invalid","حصّل الدين بعملته؛ التحويل بين عملتين أجنبيتين غير مدعوم.");
         const rate=rateFromSettings(await getSettingsInTransaction(client,{requireStoredExchangeRates:true}),input.currency,CLINIC_BASE_CURRENCY);
