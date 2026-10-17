@@ -51,6 +51,8 @@ describe("actual invoice correction and durable original command",()=>{
       expect(ledger.balances.SAR.dueMinor).toBe(160000);expect(ledger.balances.YER.dueMinor).toBe(-100);
       const printed=await context.request.get(`${baseUrl}/print/statement/${patientId}`);expect(printed.status()).toBe(200);
       const printPage=await context.newPage();await printPage.goto(`${baseUrl}/print/statement/${patientId}`,{waitUntil:"domcontentloaded"});
+      const paperFit=await printPage.evaluate(()=>{const sheet=document.querySelector(".sheet")!.getBoundingClientRect();return [...document.querySelectorAll("table.items")].map(table=>{const box=table.getBoundingClientRect();return {left:box.left-sheet.left,right:box.right-sheet.right};});});
+      for(const box of paperFit){expect(box.left).toBeGreaterThanOrEqual(0);expect(box.right).toBeLessThanOrEqual(1);}
       expect(await printPage.locator("body").innerText()).toMatch(/1[٬,]?600|١[٬,]?٦٠٠/);await printPage.screenshot({path:`${evidence}/statement-${width}.png`,fullPage:true});await printPage.close();
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
       await page.screenshot({path:`${evidence}/correction-${width}-saved.png`,fullPage:true});

@@ -12902,8 +12902,15 @@ export async function commissionReport(
       /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
        * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
-        `SELECT id, patient_id, base_currency FROM invoices WHERE patient_id = ANY($1::int[])`,
+      pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null }>(
+        `SELECT i.id, i.patient_id, i.base_currency,
+          (WITH RECURSIVE successors(id) AS (SELECT i.id UNION
+            SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id
+              JOIN invoices n ON n.id=c.corrected_invoice_id
+              WHERE c.patient_id=i.patient_id AND n.patient_id=i.patient_id AND n.base_currency=i.base_currency
+                AND COALESCE(c.original_currency,c.currency)=i.base_currency AND c.currency=i.base_currency)
+           SELECT s.id FROM successors s WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=s.id)) AS settlement_leaf_id
+         FROM invoices i WHERE i.patient_id = ANY($1::int[])`,
         [patientIds],
       ),
     ]);
@@ -12929,6 +12936,12 @@ export async function commissionReport(
       if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
     }
     const reclassifiedTargets=new Set([...currencyEvidence.values()].map(event=>event.targetInvoiceId));
+    // New SAR receipts keep their historical invoice ID through later ordinary
+    // corrections; reserve them for the proven reclassified chain's live leaf.
+    const reclassifiedReceiptTargets=new Map<number,number>();
+    for(const invoice of invoiceCurrencyRows.rows)if(invoice.settlement_leaf_id!==null&&reclassifiedTargets.has(invoice.settlement_leaf_id)){
+      reclassifiedReceiptTargets.set(invoice.id,invoice.settlement_leaf_id);
+    }
     for (const row of paymentRows.rows) {
       const currency = requireCurrency(row.currency, "دفعة", row.id);
       /* (المراجعة النهائية ٢) هدف التسوية من الخريطة المرجعية الشاملة — لا من
@@ -13000,7 +13013,7 @@ export async function commissionReport(
           settlementMinor: value,
           effectiveMinor: value,
           createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
-          allocatedInvoiceId:allocation?.targetInvoiceId??(row.invoice_id!==null&&reclassifiedTargets.has(row.invoice_id)?row.invoice_id:undefined),
+          allocatedInvoiceId:allocation?.targetInvoiceId??(row.invoice_id!==null?reclassifiedReceiptTargets.get(row.invoice_id):undefined),
         });
         paymentsByPatient.set(row.patient_id, list);
         continue;

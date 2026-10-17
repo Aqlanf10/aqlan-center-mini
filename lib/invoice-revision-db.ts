@@ -103,7 +103,9 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     if (!owner) bad("الفاتورة غير موجودة.", "missing");
     // Payroll/commission writers can need shift locks; fence them before holding
     // patient, receipt or shift locks to avoid reversing their lock order.
-    if(source.currency==="SAR")await client.query("LOCK TABLE expenses,hr_payroll_items IN SHARE MODE");
+    // Calculation writes its run before reading commissions and inserting items.
+    // Fence that first write too, including a run with no items yet.
+    if(source.currency==="SAR")await client.query("LOCK TABLE expenses,hr_payroll_runs,hr_payroll_items IN SHARE MODE");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
     // Event foreign keys need receipt KEY SHARE locks. Refunds/corrections lock
     // their original receipt before shift, so acquire these compatible read-only

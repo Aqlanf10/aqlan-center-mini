@@ -178,11 +178,20 @@ it.each(["collected_cash","invoiced"] as const)("reclassifies unpaid %s commissi
   const rows=await db.commissionReport("2000-01-01","2099-12-31");expect(rows.find(row=>row.doctorId===doctor.id&&row.currency==="SAR")).toMatchObject({earnedMinor:basis==="invoiced"?75000:27000});
   expect(rows.find(row=>row.doctorId===unrelatedDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(0);
   expect(rows.find(row=>row.doctorId===doctor.id&&row.currency==="YER")?.earnedMinor??0).toBe(0);
+  // A later same-currency correction must carry new SAR receipts to its leaf,
+  // without donating them to the patient's earlier unrelated SAR invoice.
+  const active=(await q("SELECT corrected_invoice_id FROM invoice_corrections WHERE original_invoice_id=$1",[original.id]))[0].corrected_invoice_id;
+  const later=await db.recordPayment({patientId:owner,invoiceId:active,kind:"payment",amountMinor:10000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-later-${++serial}`});expect(later.reason).toBeNull();
+  const next=await revision.readInvoiceRevision(active,session);
+  await revision.reviseInvoice(active,{...command,idempotencyKey:`currency-later-invoice-${++serial}`,expectedSourceHash:next.sourceHash,lines:next.invoice.items.map(item=>({itemId:item.id,quantity:1,unitPrice:"2500"})),expectedRemainingMinor:150000},session);
+  const afterLater=await db.commissionReport("2000-01-01","2099-12-31");
+  expect(afterLater.find(row=>row.doctorId===unrelatedDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(0);
+  expect(afterLater.find(row=>row.doctorId===doctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(basis==="invoiced"?75000:33000);
   const request={patientId:owner,invoiceId:original.id,kind:"refund" as const,amountMinor:90000,currency:"SAR" as const,baseCurrency:"YER" as const,exchangeRate:410,method:"cash" as const,note:null,createdBy:session.username,reversalOfId:paid.payment!.id,idempotencyKey:`currency-full-refund-${++serial}`};
   expect((await db.recordPayment(request)).reason).toBeNull();expect((await db.recordPayment(request)).reason).toBeNull();
-  expect(db.ledgerBalancesByCurrency(owner,await db.patientLedger(owner),new Map()).SAR.dueMinor).toBe(260000);
+  expect(db.ledgerBalancesByCurrency(owner,await db.patientLedger(owner),new Map()).SAR.dueMinor).toBe(250000);
   expect((await q("SELECT e.id FROM invoice_settlement_reclassification_events e JOIN payments p ON p.id=e.payment_id WHERE p.patient_id=$1 AND e.direction=-1",[owner]))).toHaveLength(1);
-  expect((await db.commissionReport("2000-01-01","2099-12-31")).find(row=>row.doctorId===doctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(basis==="invoiced"?75000:0);
+  expect((await db.commissionReport("2000-01-01","2099-12-31")).find(row=>row.doctorId===doctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(basis==="invoiced"?75000:6000);
 });
 it("keeps pre-correction report and commission cutoffs in YER and records today's noncash change in SAR",async()=>{
   const owner=await patient(),doctor=await db.createParty({name:"Synthetic historical commission",kind:"doctor",phone:null,commissionPercent:30,note:null});
@@ -245,4 +254,22 @@ it("rolls back a partially written currency correction by destroying a connectio
  expect(await q("SELECT id FROM invoice_settlement_reclassifications WHERE patient_id=$1",[original.patientId])).toEqual([]);
  expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[original.patientId])).toEqual([{id:original.id}]);
  await expect(revision.reviseInvoice(original.id,command,session)).resolves.toMatchObject({currency:"SAR",remainingMinor:250000});
+});
+
+it("waits for a new payroll calculation before it can read and store pre-correction commissions",async()=>{
+  const original=await invoice(),view=await revision.readInvoiceRevision(original.id,session);
+  const command={idempotencyKey:`currency-payroll-race-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic new payroll fence",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"1000"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:100000};
+  const calculator=await db.getPool().connect();let pending:ReturnType<typeof revision.reviseInvoice>|undefined;
+  try{
+    await calculator.query("BEGIN");
+    const period=await calculator.query("INSERT INTO hr_payroll_periods(period_key,name,start_date,end_date,created_by) VALUES('2099-11','Synthetic concurrent run','2099-11-01','2099-11-30',$1) RETURNING id",[session.username]);
+    // calculatePayrollRun performs this write before its commissionReport read.
+    await calculator.query("INSERT INTO hr_payroll_runs(period_id,currency,created_by) VALUES($1,'YER',$2)",[period.rows[0].id,session.username]);
+    pending=revision.reviseInvoice(original.id,command,session);
+    // Observe a real PostgreSQL lock wait, not a timing-only assertion.
+    await vi.waitFor(async()=>expect((await q("SELECT 1 FROM pg_locks WHERE relation='hr_payroll_runs'::regclass AND mode='ShareLock' AND NOT granted")).length).toBe(1),{timeout:5000,interval:25});
+    expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[original.patientId])).toHaveLength(0);
+    await calculator.query("ROLLBACK");
+    await expect(pending).resolves.toMatchObject({currency:"SAR",settledMinor:0,remainingMinor:100000});
+  }finally{await calculator.query("ROLLBACK");calculator.release();await pending?.catch(()=>undefined);}
 });
