@@ -12753,7 +12753,7 @@ export async function commissionReport(
       `SELECT id, name, commission_percent FROM parties WHERE kind = 'doctor'`,
     ),
     pool.query<{
-      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string;
+      patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
       case_id: number | null; plan_id: number | null;
@@ -12762,6 +12762,7 @@ export async function commissionReport(
               i.id AS invoice_id,
               GREATEST(0, i.total_minor - i.discount_minor) AS net_minor,
               i.base_currency,
+              i.created_at AS issued_at, to_char(i.created_at, 'US') AS issued_at_us,
               COALESCE(currency_origin.created_at,i.created_at) AS created_at, to_char(COALESCE(currency_origin.created_at,i.created_at), 'US') AS created_at_us,
               (i.created_at AT TIME ZONE $1)::date AS clinic_date,
               it.doctor_id,
@@ -12789,6 +12790,7 @@ export async function commissionReport(
            CASE WHEN it.source_type = 'plan_item' THEN it.source_id END, vp.plan_item_id)
         WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
           WHERE correction.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
+          AND (currency_origin.created_at IS NULL OR (i.created_at AT TIME ZONE $1)::date <= $3::date)
           AND i.patient_id IN (
                 SELECT historical.patient_id FROM invoices historical
                  WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
@@ -12821,7 +12823,10 @@ export async function commissionReport(
   // تجميع الفواتير لكل مريض مع حصص الأطباء فيها — بعملة كل فاتورة (تصحيح ٢).
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
+  const allocationTimeOfInvoice = new Map<number, string>();
   for (const row of invoiceRows) {
+    // Policy time may remain the original YER issue; allocation starts at the actual issue.
+    allocationTimeOfInvoice.set(row.invoice_id, commissionTimestampIso(row.issued_at, row.issued_at_us));
     clinicDateOfInvoice.set(row.invoice_id, dateText(row.clinic_date));
     const patientInvoices = byPatient.get(row.patient_id) ?? new Map<number, CommissionInvoice>();
     const invoice = patientInvoices.get(row.invoice_id) ?? {
@@ -12902,8 +12907,12 @@ export async function commissionReport(
       /* (المراجعة النهائية ٢) الخريطة المرجعية الشاملة لعملة كل فاتورة —
        * الملغاة معها كما يفعل تقرير المديونية: الدفعة واقعة تاريخية، وهدفها
        * عملة فاتورتها وإن أُلغيت لاحقًا — لا سقوطٌ صامت إلى الأساس. */
-      pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null }>(
+      pool.query<{ id: number; patient_id: number; base_currency: string; settlement_leaf_id:number|null; reclassified_at_cutoff:boolean }>(
         `SELECT i.id, i.patient_id, i.base_currency,
+          EXISTS(SELECT 1 FROM invoice_settlement_reclassifications d
+            JOIN invoice_corrections c ON c.id=d.correction_id
+            WHERE c.corrected_invoice_id=i.id AND d.patient_id=i.patient_id AND d.target_currency=i.base_currency
+              AND (d.created_at AT TIME ZONE $2)::date <= $3::date) AS reclassified_at_cutoff,
           (WITH RECURSIVE successors(id) AS (SELECT i.id UNION
             SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id
               JOIN invoices n ON n.id=c.corrected_invoice_id
@@ -12911,7 +12920,7 @@ export async function commissionReport(
                 AND COALESCE(c.original_currency,c.currency)=i.base_currency AND c.currency=i.base_currency)
            SELECT s.id FROM successors s WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=s.id)) AS settlement_leaf_id
          FROM invoices i WHERE i.patient_id = ANY($1::int[])`,
-        [patientIds],
+        [patientIds, CLINIC_TIME_ZONE, to],
       ),
     ]);
     /* (المراجعة النهائية للمال ٢) المراجع يحمل مالكه: خرائط مجموعة مرضى قد تحلّ خطة/فاتورة مريضٍ آخر داخل
@@ -12935,7 +12944,11 @@ export async function commissionReport(
     for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},patientIds)){
       if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
     }
-    const reclassifiedTargets=new Set([...currencyEvidence.values()].map(event=>event.targetInvoiceId));
+    // The evidence reader above validates every document, including zero-event
+    // corrections. Their owned same-currency successor chain exists before any receipt.
+    const reclassifiedTargets=new Set(invoiceCurrencyRows.rows
+      .filter(invoice=>invoice.reclassified_at_cutoff&&invoice.settlement_leaf_id!==null)
+      .map(invoice=>invoice.settlement_leaf_id!));
     // New SAR receipts keep their historical invoice ID through later ordinary
     // corrections; reserve them for the proven reclassified chain's live leaf.
     const reclassifiedReceiptTargets=new Map<number,number>();
@@ -13171,7 +13184,7 @@ export async function commissionReport(
     for (const currency of CURRENCIES) {
       const ordered = [...invoices.values()]
         .filter((invoice) => invoice.currency === currency)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        .sort((a, b) => allocationTimeOfInvoice.get(a.id)!.localeCompare(allocationTimeOfInvoice.get(b.id)!));
       for (const invoice of ordered) {
         const net = Math.max(0, invoice.netMinor);
         if (net > 0) capacitiesByCurrency.get(currency)!.push({ invoiceId: invoice.id, remaining: net });

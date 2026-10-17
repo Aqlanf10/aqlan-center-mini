@@ -273,3 +273,41 @@ it("waits for a new payroll calculation before it can read and store pre-correct
     await expect(pending).resolves.toMatchObject({currency:"SAR",settledMinor:0,remainingMinor:100000});
   }finally{await calculator.query("ROLLBACK");calculator.release();await pending?.catch(()=>undefined);}
 });
+
+it("keeps another doctor's historical SAR commission unchanged when an older YER invoice is corrected today",async()=>{
+  const owner=await patient();
+  const olderDoctor=await db.createParty({name:"Synthetic older YER doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  const independentDoctor=await db.createParty({name:"Synthetic historical SAR doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  const [older]=await q("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at) VALUES($1,$2,2500,0,'YER',$3,'2020-01-01T09:00:00Z') RETURNING id",[`CURRENCY-FIFO-OLD-${++serial}`,owner,session.username]);
+  const [item]=await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id) VALUES($1,'Synthetic older YER item',1,2500,2500,$2) RETURNING id",[older.id,olderDoctor.id]);
+  const [independent]=await q("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at) VALUES($1,$2,10000,0,'SAR',$3,'2020-01-10T09:00:00Z') RETURNING id",[`CURRENCY-FIFO-SAR-${++serial}`,owner,session.username]);
+  await q("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id) VALUES($1,'Synthetic independent SAR item',1,10000,10000,$2)",[independent.id,independentDoctor.id]);
+  const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' LIMIT 1"))[0].id;
+  for(const [target,amount,date] of [[older.id,90000,'2020-01-02T09:00:00Z'],[independent.id,10000,'2020-01-11T09:00:00Z']] as const){
+    await q("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,created_at) VALUES($1,$2,$3,$4,'payment',$5,'SAR',410,$6,'YER','cash',$7,$8)",[`CURRENCY-FIFO-P-${++serial}`,owner,target,shift,amount,amount/100*410,session.username,date]);
+  }
+  const before=await db.commissionReport("2020-01-01","2020-01-31"),receipts=await footprint(owner);
+  expect(before.find(row=>row.doctorId===independentDoctor.id&&row.currency==="SAR")).toMatchObject({earnedMinor:3000});
+  const view=await revision.readInvoiceRevision(older.id,session);
+  await revision.reviseInvoice(older.id,{idempotencyKey:`currency-fifo-correction-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic historical FIFO isolation",lines:[{itemId:item.id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:160000},session);
+  const after=await db.commissionReport("2020-01-01","2020-01-31");
+  expect(after).toEqual(before);
+  expect(await footprint(owner)).toEqual(receipts);
+});
+
+it("reserves a later receipt for an unpaid currency correction instead of an older independent SAR invoice",async()=>{
+  const owner=await patient();
+  const independentDoctor=await db.createParty({name:"Synthetic unpaid independent doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  const correctedDoctor=await db.createParty({name:"Synthetic unpaid corrected doctor",kind:"doctor",phone:null,commissionPercent:30,note:null});
+  await db.createInvoice({patientId:owner,baseCurrency:"SAR",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:independentDoctor.id,description:"Synthetic earlier independent SAR invoice",quantity:1,unitPriceMinor:10000}]});
+  const original=(await db.createInvoice({patientId:owner,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:correctedDoctor.id,description:"Synthetic unpaid YER invoice",quantity:1,unitPriceMinor:2500}]}))!;
+  const view=await revision.readInvoiceRevision(original.id,session);
+  const result=await revision.reviseInvoice(original.id,{idempotencyKey:`currency-unpaid-later-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic unpaid currency correction",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:250000},session);
+  const active=(result as {corrected:{id:number}}).corrected.id;
+  expect(await q("SELECT e.id FROM invoice_settlement_reclassification_events e JOIN invoice_settlement_reclassifications d ON d.id=e.reclassification_id WHERE d.patient_id=$1",[owner])).toHaveLength(0);
+  expect((await db.recordPayment({patientId:owner,invoiceId:active,kind:"payment",amountMinor:10000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-unpaid-receipt-${++serial}`})).reason).toBeNull();
+  const receipts=await footprint(owner),report=await db.commissionReport("2000-01-01","2099-12-31");
+  expect(report.find(row=>row.doctorId===independentDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(0);
+  expect(report.find(row=>row.doctorId===correctedDoctor.id&&row.currency==="SAR")?.earnedMinor??0).toBe(3000);
+  expect(await footprint(owner)).toEqual(receipts);
+});

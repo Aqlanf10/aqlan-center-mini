@@ -94,6 +94,19 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
     void send({key,actor:session.username,patientId,invoiceId,body:JSON.stringify(body),expected:{...(changingCurrency?{currency}:{}),original:view.invoice,lines:preview.lines,discountMinor:preview.discountMinor,settledMinor,accountDueMinor:changingCurrency?view.currencyCorrection!.accountDueMinor:view.accountDueMinor,terms:checked.value},outcome:"pending",message:""});
   };
   const clearRefused=async()=>{if(!recovery||recovery.outcome!=="refused"||busy)return;try{await financialRecovery.acknowledge(durableInvoiceRevision(recovery));if(lifetime.current.active){onRecoveryChange(null);setReason("");await load();}}catch{setError("تعذّر إغلاق الطلب المرفوض بأمان؛ أعد المحاولة.");}};
+  const changeCurrency=(next:Currency)=>{
+    if(!view)return;
+    if(next!==view.invoice.baseCurrency&&view.invoice.items.some(item=>{
+      const draft=drafts[item.id];
+      return !draft?.keep||Number(draft.quantity)!==item.quantity
+        ||draft.serviceId!==String(item.serviceId??"")||draft.doctorId!==String(item.doctorId??"")
+        ||draft.tooth!==String(item.toothCode??"")||draft.surfaces!==(item.surfaces??"");
+    })){
+      setError("لتصحيح العملة، أعد البنود المحذوفة والكمية وهوية العلاج إلى قيمها الأصلية أولًا. بقيت تعديلاتك محفوظة دون تغيير.");
+      return;
+    }
+    setError(null);setCurrency(next);setTerms({mode:"full",rows:[]});
+  };
   const locked=busy||!!recovery||!allowed;
   const invoice=view?.invoice??recovery?.expected.original;
   return <section aria-label="تصحيح الفاتورة" data-testid="invoice-correction-editor" dir="rtl" className="my-4 min-w-0 space-y-4 rounded-2xl border border-amber-300 bg-white p-4">
@@ -108,7 +121,7 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
       {recovery.outcome==="refused"?<button type="button" className={button} disabled={busy} onClick={()=>void clearRefused()}>مراجعة التصحيح بعد الرفض</button>:null}
     </div>:null}
     {view?<><fieldset disabled={locked} className="space-y-3">
-      <label className="block text-sm font-bold">عملة الفاتورة المصححة<select aria-label="عملة الفاتورة المصححة" className={input} value={currency} onChange={event=>{setCurrency(event.target.value as Currency);setTerms({mode:"full",rows:[]});}}>
+      <label className="block text-sm font-bold">عملة الفاتورة المصححة<select aria-label="عملة الفاتورة المصححة" className={input} value={currency} onChange={event=>changeCurrency(event.target.value as Currency)}>
         <option value={view.invoice.baseCurrency}>{view.invoice.baseCurrency}</option>
         {view.invoice.baseCurrency==="YER"&&view.currencyCorrection?.available?<option value="SAR">SAR — تصحيح العملة مع إعادة تصنيف التسوية</option>:null}
       </select></label>
