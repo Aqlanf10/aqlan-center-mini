@@ -1,0 +1,119 @@
+
+> aqlan-center@0.1.0 test:postgres
+> vitest run --config vitest.config.postgres.mts __tests__/postgres/debt-installment-sequential.test.ts
+
+
+ RUN  v4.1.11 /workspace/aqlan-center-mini
+
+✓ عقد PostgreSQL مستوفى — الخادم 18.6 (Debian 18.6-1.pgdg13+2) (major 18 = عقد الاختبار/التطوير).
+ ❯ __tests__/postgres/debt-installment-sequential.test.ts (1 test | 1 failed) 511ms
+     × collects three fresh keys without review, schedule rewrites or duplicate invoices 52ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/postgres/debt-installment-sequential.test.ts > scheduled debt remains collectible after ordinary sequential receipts > collects three fresh keys without review, schedule rewrites or duplicate invoices
+AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+
+- Expected
++ Received
+
+@@ -3,15 +3,13 @@
+      "invoiceId": 1,
+      "replayed": false,
+      "step": 1,
+    },
+    {
+-     "invoiceId": 1,
+-     "replayed": false,
++     "error": "تغيّر مصدر الدين أو رُدّ تحصيل سابق؛ راجع توزيع المتبقي قبل القبض.",
+      "step": 2,
+    },
+    {
+-     "invoiceId": 1,
+-     "replayed": false,
++     "error": "تغيّر مصدر الدين أو رُدّ تحصيل سابق؛ راجع توزيع المتبقي قبل القبض.",
+      "step": 3,
+    },
+  ]
+
+ ❯ __tests__/postgres/debt-installment-sequential.test.ts:40:27
+     38|       positions.push({remainingMinor:position.remainingMinor,collected…
+     39|     }
+     40|     expect.soft(outcomes).toEqual([1,2,3].map(step=>({step,invoiceId,r…
+       |                           ^
+     41|     expect.soft(positions).toEqual([1,2,3].map(step=>({remainingMinor:…
+     42|     expect.soft((await q("SELECT count(*)::int AS n FROM invoices WHER…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  __tests__/postgres/debt-installment-sequential.test.ts > scheduled debt remains collectible after ordinary sequential receipts > collects three fresh keys without review, schedule rewrites or duplicate invoices
+AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+
+- Expected
++ Received
+
+  [
+    {
+      "collectedMinor": 20000,
+      "remainingMinor": 40000,
+-     "requiresReview": false,
++     "requiresReview": true,
+    },
+    {
+-     "collectedMinor": 40000,
+-     "remainingMinor": 20000,
+-     "requiresReview": false,
++     "collectedMinor": 20000,
++     "remainingMinor": 40000,
++     "requiresReview": true,
+    },
+    {
+-     "collectedMinor": 60000,
+-     "remainingMinor": 0,
+-     "requiresReview": false,
++     "collectedMinor": 20000,
++     "remainingMinor": 40000,
++     "requiresReview": true,
+    },
+  ]
+
+ ❯ __tests__/postgres/debt-installment-sequential.test.ts:41:28
+     39|     }
+     40|     expect.soft(outcomes).toEqual([1,2,3].map(step=>({step,invoiceId,r…
+     41|     expect.soft(positions).toEqual([1,2,3].map(step=>({remainingMinor:…
+       |                            ^
+     42|     expect.soft((await q("SELECT count(*)::int AS n FROM invoices WHER…
+     43|     expect.soft((await q("SELECT count(*)::int AS n FROM payments WHER…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  __tests__/postgres/debt-installment-sequential.test.ts > scheduled debt remains collectible after ordinary sequential receipts > collects three fresh keys without review, schedule rewrites or duplicate invoices
+AssertionError: expected 1 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 1
+
+ ❯ __tests__/postgres/debt-installment-sequential.test.ts:43:108
+     41|     expect.soft(positions).toEqual([1,2,3].map(step=>({remainingMinor:…
+     42|     expect.soft((await q("SELECT count(*)::int AS n FROM invoices WHER…
+     43|     expect.soft((await q("SELECT count(*)::int AS n FROM payments WHER…
+       |                                                                                                            ^
+     44|     expect((await q("SELECT count(*)::int AS n FROM debt_repayment_rev…
+     45|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  21:50:12
+   Duration  2.38s (transform 1.20s, setup 0ms, import 1.52s, tests 511ms, environment 0ms)
+
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

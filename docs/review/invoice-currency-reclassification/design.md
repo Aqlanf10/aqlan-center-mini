@@ -140,3 +140,51 @@ rollback injection and restore; all existing financial/commission tests; real
 PostgreSQL 18; built HTTP and Arabic UI at 390/1280. Prototype unit tests alone
 are explicitly insufficient. Recovery UI evidence does not establish currency
 correction support.
+
+## Separate approved-agreement debt contract (owner audit)
+
+The owner reports an independently verified legacy behavior: `recordPlanInstallment`
+(`lib/db.ts`, around 19998–20064 on this base) invoices only the collected installment,
+then marks that invoice paid. `operational-agreement-summary.test.ts` explicitly
+expects a 300 SAR agreement with 100 then 40 collected to retain agreement balances
+200/160 while `balanceMinor` stays zero. `td05-currency-persistence.test.ts` expects
+a 1500 USD plan with 500 collected to generate only a 500 invoice. This is a
+pre-existing contract, not proof that reported patient records were deleted.
+
+The newly requested contract is full outstanding **approved** obligation as debt,
+with currently due installments shown separately. It needs its own approved
+agreement migration, coverage of already-issued installment invoices, and proof
+that opening principal is not billed twice. Never invoice every draft plan and
+never add debt based on an unverified patient report. No change to that legacy
+writer or live data is included here.
+
+## Confirmed sequential-collection defect and narrow repair
+
+PostgreSQL regression (three fresh keys on one 600 SAR schedule) failed before the
+repair: one 200 SAR receipt was issued, `requiresReview` became true, and the next
+two requests were rejected as stale. The final position incorrectly remained
+400 SAR outstanding because the schedule's immutable source snapshot included
+the original payment list. Ordinary collection changed that fingerprint.
+
+`debt-source-proof.ts` now compares principal identity separately from settlement
+extension. It preserves all source facts except the payment list and the current
+invoice's derived open/paid status. Every baseline receipt must still exist with
+identical canonical JSON. Only additional positive ordinary payment events with
+no reversal reference are accepted. Any new refund, baseline mutation/removal,
+changed principal/currency/lineage, or cancellation still requires review. The
+existing complete request/preview `sourceHash` is unchanged, and no revision
+snapshot is rewritten. Opening-balance snapshots keep their exact comparison
+policy. Collection amount/account caps, actor checks, locks and replay checks are
+unchanged. Both collection admission and `requiresReview` use the same predicate.
+
+The new PostgreSQL tests pass for three fresh payments without another invoice or
+revision; two concurrent payments whose sum fits the balance; overcollection
+rejected specifically as invalid; partial/full refunds; receipt corrections;
+principal changes and cancellation. The built Arabic workspace test now collects
+three fresh keys at 390/1280 and checks `requiresReview=false` after each before
+editing the remaining schedule. This fix needs no migration and no PR342 file.
+
+Other owner-audited candidates are recorded but deliberately not changed here:
+`computeDebtRows` uses independent pool reads rather than one consistent snapshot;
+`lib/reports.ts` mixes an as-of balance with lifetime billed/paid aggregates. Their
+implementation ownership is separate to avoid concurrent edits.

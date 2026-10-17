@@ -2,7 +2,7 @@ import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {chromium,type Browser} from "playwright";
 import {Client} from "pg";
 import {mkdirSync} from "node:fs";
-import {authedMutation,baseUrl,harness} from "./_server";
+import {authedGet,authedMutation,baseUrl,harness} from "./_server";
 let browser:Browser;let h:Awaited<ReturnType<typeof harness>>;let db:Client;let serviceId:number;let serial=0;
 beforeAll(async()=>{
   h=await harness();db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
@@ -39,20 +39,27 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
       await page.getByRole("region",{name:"فاتورة جديدة",exact:true}).waitFor({state:"detached"});
       const panel=page.getByTestId("debt-repayment-panel");await expect.poll(()=>panel.innerText()).toContain("جدول أقساط");
       expect((await db.query("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1",[patientId])).rows[0].n).toBe(0);
-      await panel.getByRole("button",{name:"تحصيل دفعة فعلية",exact:true}).click();await panel.getByLabel("مبلغ تحصيل القسط",{exact:true}).fill("20");
-      const collectionResponse=page.waitForResponse(response=>response.url().endsWith("/collect")&&response.request().method()==="POST");
-      await panel.getByRole("button",{name:"تأكيد التحصيل وإصدار السند",exact:true}).click();
-      const collection=await collectionResponse;const collectionBody=await collection.json();expect(collection.status(),JSON.stringify(collectionBody)).toBe(201);
-      await panel.getByRole("link",{name:"طباعة سند التحصيل",exact:true}).waitFor();
-      await expect.poll(()=>panel.innerText()).toContain("103.45");
+      const keys:string[]=[];
+      for(let step=1;step<=3;step++){
+        await panel.getByRole("button",{name:"تحصيل دفعة فعلية",exact:true}).click();await panel.getByLabel("مبلغ تحصيل القسط",{exact:true}).fill("20");
+        const collectionResponse=page.waitForResponse(response=>response.url().endsWith("/collect")&&response.request().method()==="POST");
+        await panel.getByRole("button",{name:"تأكيد التحصيل وإصدار السند",exact:true}).click();
+        const collection=await collectionResponse;const collectionBody=await collection.json();expect(collection.status(),JSON.stringify(collectionBody)).toBe(201);
+        keys.push(collection.request().headers()["idempotency-key"]);
+        await panel.getByRole("link",{name:"طباعة سند التحصيل",exact:true}).waitFor();
+        await expect.poll(()=>panel.innerText()).toContain((123.45-step*20).toFixed(2));
+        const workspace=await (await authedGet(`/api/patients/${patientId}/debt-repayments`,h.sessions[role])).json();
+        expect(workspace.arrangements[0]).toMatchObject({requiresReview:false,remainingMinor:12345-step*2000,collectedMinor:step*2000,version:1});
+      }
+      expect(new Set(keys).size).toBe(3);
       await panel.getByRole("button",{name:"مراجعة أو تعديل السداد",exact:true}).click();
-      await panel.getByLabel("مبلغ السداد 1",{exact:true}).fill("50");await panel.getByLabel("مبلغ السداد 2",{exact:true}).fill("53.45");
+      await panel.getByLabel("مبلغ السداد 1",{exact:true}).fill("30");await panel.getByLabel("مبلغ السداد 2",{exact:true}).fill("33.45");
       await panel.getByLabel("سبب تعديل السداد",{exact:true}).fill("Synthetic remaining redistribution");
       await panel.getByRole("button",{name:"حفظ توزيع المتبقي",exact:true}).click();await expect.poll(()=>panel.innerText()).toContain("النسخة 2");
       await panel.getByRole("button",{name:"مراجعة أو تعديل السداد",exact:true}).click();await panel.getByLabel("سبب تعديل السداد",{exact:true}).fill("Synthetic dates cancellation");
       page.once("dialog",dialog=>dialog.accept());await panel.getByRole("button",{name:"إلغاء ترتيب المواعيد",exact:true}).click();await expect.poll(()=>panel.innerText()).toContain("ترتيب ملغى");
       const [facts]=(await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) AS invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) AS payments,(SELECT sum(amount_minor)::int FROM payments WHERE patient_id=$1) AS paid",[patientId])).rows;
-      expect(facts).toEqual({invoices:1,payments:1,paid:2000});expect(await panel.innerText()).toContain("103.45");
+      expect(facts).toEqual({invoices:1,payments:3,paid:6000});expect(await panel.innerText()).toContain("63.45");
       const geometry=await page.evaluate(()=>({width:innerWidth,document:document.documentElement.scrollWidth}));expect(geometry.document).toBeLessThanOrEqual(geometry.width+1);
       expect(errors).toEqual([]);await page.screenshot({path:`.settings-ui-artifacts/debt-repayment-${role}-${width}.png`,fullPage:true});
     }finally{await context.close();}
