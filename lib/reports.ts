@@ -520,7 +520,7 @@ async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],
   }
 
   const currencyAllocations=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
-  for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool),release(){}},ids)){
+  for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},ids)){
     if(clinicTodayISO(new Date(event.createdAt))<=(opts.asOf??clinicTodayISO()))currencyAllocations.set(event.paymentId,event);
   }
   for (const patient of byId.values()) {

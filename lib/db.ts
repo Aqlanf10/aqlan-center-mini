@@ -12916,7 +12916,7 @@ export async function commissionReport(
     }
 
     const currencyEvidence=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
-    for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool),release(){}},patientIds)){
+    for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool)},patientIds)){
       if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
     }
     for (const row of paymentRows.rows) {
