@@ -1,3 +1,4 @@
+import {attachCurrencyReclassifications} from "./invoice-currency-evidence";
 import type { DbClient } from "./db";
 import {
   patientBalancesByCurrency, requireCurrency, toCurrencyPaymentLikes, type OpeningByCurrency,
@@ -73,7 +74,7 @@ export async function readRecoveryDocumentStates(client: Executor, patientId: nu
     openings[currency] = (openings[currency] ?? 0) + amount;
   }
   const balances = patientBalancesByCurrency(invoices, toCurrencyPaymentLikes(
-    patientId, payments.filter((payment) => payment.patientId === patientId),
+    patientId, await attachCurrencyReclassifications({...client,query:client.query.bind(client),release(){}},payments.filter((payment) => payment.patientId === patientId)),
     new Map(invoices.map((invoice) => [invoice.id, { patientId: invoice.patientId, currency: invoice.baseCurrency }])),
     new Map([...plans.values()].map((plan) => [plan.id, { patientId: plan.patientId, currency: plan.baseCurrency }])),
   ), openings);

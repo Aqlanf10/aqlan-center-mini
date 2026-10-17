@@ -86,7 +86,7 @@ export function projectTreatmentFinancialReferences(snapshot: TreatmentFinancial
     const settlements = receipts.map((receipt) => ({
       receiptId: receipt.id, reversalOfId: receipt.reversalOfId, kind: receipt.kind ?? "payment",
       originalCurrency: receipt.currency, originalAmountMinor: receipt.amountMinor,
-      settlementCurrency: invoice.currency, settlementMinor: settlePaymentMinor(receipt, invoice.currency),
+      settlementCurrency: receipt.settlementAllocation?.targetCurrency??invoice.currency, settlementMinor: settlePaymentMinor(receipt, receipt.settlementAllocation?.targetCurrency??invoice.currency),
     }));
     return {
       invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, status: invoice.status,

@@ -1,3 +1,4 @@
+import {attachCurrencyReclassifications} from "./invoice-currency-evidence";
 import { legacyCoverageStateFromSnapshot } from "./legacy-treatment-coverage";
 import { SITE_SCOPE_LABEL } from "./invoice-clinical-linkage";
 import { CLINIC_TIME_ZONE, getPool } from "./db";
@@ -316,7 +317,7 @@ export async function loadDailyClinicReportSource(
   }));
   const expenses = await loadDailyClinicExpenseReport({ date, timeZone }, runner);
   return { date, clinicTimeZone: timeZone, generatedAt: timestamp(clock[0].generated_at), selectedDayCutoff: timestamp(clock[0].cutoff),
-    visits, plans, items, work, invoices, invoiceLines, invoiceCorrections, legacyAgreements, historicalDocuments, payments, openings,
+    visits, plans, items, work, invoices, invoiceLines, invoiceCorrections, legacyAgreements, historicalDocuments, payments:await attachCurrencyReclassifications({query:runner.query.bind(runner),release(){}},payments), openings,
     additionalPlanLinks: sessionLinks.map((row) => ({ planId: integer(row.plan_id), patientId: integer(row.patient_id), visitId: integer(row.visit_id) })),
     expenses };
 }

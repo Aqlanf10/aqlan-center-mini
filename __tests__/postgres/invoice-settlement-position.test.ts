@@ -104,3 +104,38 @@ describe("one scoped settlement/proof across immutable invoice corrections",()=>
     }finally{await client.query("ROLLBACK");client.release();}
   });
 });
+it("corrects the issued partially paid synthetic 2500 YER invoice to 2500 SAR through the canonical writer",async()=>{
+  const patientId=await patient();
+  const original=(await db.createInvoice({patientId,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:null,description:"Synthetic currency correction",quantity:1,unitPriceMinor:2500}]}))!;
+  const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id LIMIT 1"))[0].id;
+  for(const amount of [70000,10000,10000])await q("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by) VALUES($1,$2,$3,$4,'payment',$5,'SAR',410,$6,'YER','cash',$7)",[`SYN-CURRENCY-${++serial}`,patientId,original.id,shift,amount,amount/100*410,session.username]);
+  await q("INSERT INTO payments(receipt_number,patient_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by) VALUES($1,$2,$3,'payment',100,'YER',1,100,'YER','cash',$4)",[`SYN-CURRENCY-${++serial}`,patientId,shift,session.username]);
+  const before=await footprint(patientId),view=await revision.readInvoiceRevision(original.id,session);
+  expect(view.currencyCorrection).toMatchObject({available:true,settledMinor:90000,accountDueMinor:0});
+  const request={idempotencyKey:`currency-writer-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic incorrect original currency",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",discountReason:null,repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:160000};
+  const receipt=await revision.reviseInvoice(original.id,request,session);
+  expect(receipt).toMatchObject({currency:"SAR",settledMinor:90000,remainingMinor:160000,accountDueMinor:160000});
+  const corrected=(receipt as {corrected:{id:number}}).corrected;
+  const client=await db.getPool().connect();try{expect(await readInvoiceSettlementPosition(client,{patientId,invoiceId:corrected.id,currency:"SAR"})).toMatchObject({settledMinor:90000,remainingMinor:160000});}finally{client.release();}
+  const ledger=await db.patientLedger(patientId);
+  const balances=db.ledgerBalancesByCurrency(patientId,ledger,new Map());
+  expect(balances.SAR.dueMinor).toBe(160000);expect(balances.YER.dueMinor).toBe(-100);
+  const rows=await db.computeDebtRows([patientId],true);expect(rows.find(row=>row.currency==="SAR")?.dueMinor).toBe(160000);expect(rows.find(row=>row.currency==="YER")?.dueMinor).toBe(-100);
+  expect(await revision.reviseInvoice(original.id,request,session)).toMatchObject({replayed:true,settledMinor:90000,remainingMinor:160000});
+  expect(await footprint(patientId)).toEqual(before);
+  const [visit]=await q("INSERT INTO visits(patient_name,patient_id,invoice_id) VALUES('Synthetic currency walkout',$1,$2) RETURNING id",[patientId,corrected.id]);
+  const walkout=await db.visitWalkout(visit.id);expect(walkout?.checkout.current).toMatchObject({SAR:160000,YER:-100});expect(walkout?.checkout.invoicePaidMinor).toBe(90000);
+  const {clinicDateString}=await import("../../lib/schedule");const today=clinicDateString(new Date(),db.CLINIC_TIME_ZONE);
+  const entries=await db.journalEntries("2000-01-01",today);
+  const refs=new Set([original.invoiceNumber,(await db.getInvoice(corrected.id))!.invoiceNumber,...before.map(row=>row.value.receipt_number)]);
+  const owned=entries.filter(entry=>refs.has(entry.reference)||entry.reference===`ISR-${(receipt as {reclassificationId:number}).reclassificationId}/${original.invoiceNumber}`||entry.reference.startsWith(`ISR-${(receipt as {reclassificationId:number}).reclassificationId}/P-`));
+  const ar={YER:0,SAR:0};for(const entry of owned)for(const line of entry.lines)if(line.accountCode==="1201"&&(line.currency==="YER"||line.currency==="SAR"))ar[line.currency]+=(line.side==="debit"?1:-1)*line.amountMinor;
+  expect(ar).toEqual({YER:-100,SAR:160000});
+  const adjustments=owned.filter(entry=>entry.source==="invoice-settlement-reclassification");expect(adjustments).toHaveLength(3);expect(adjustments.flatMap(entry=>entry.lines).every(line=>!["1101","1102"].includes(line.accountCode))).toBe(true);
+  const paidId=before[0].value.id;
+  const refund=await db.recordPayment({patientId,invoiceId:original.id,kind:"refund",amountMinor:5000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,reversalOfId:paidId,idempotencyKey:`currency-refund-${++serial}`});expect(refund.reason).toBeNull();
+  const afterRefund=db.ledgerBalancesByCurrency(patientId,await db.patientLedger(patientId),new Map());expect(afterRefund.SAR.dueMinor).toBe(165000);expect(afterRefund.YER.dueMinor).toBe(-100);
+  const correction=await db.correctPayment({paymentId:paidId,reason:"Synthetic receipt correction after allocation",actor:session.username,actorRole:"admin",idempotencyKey:`currency-receipt-correction-${++serial}`,replacement:{amountMinor:65000,currency:"SAR",exchangeRate:410,method:"cash",target:{kind:"original"}}});
+  expect(correction.reason).toBeNull();if(correction.reason===null)expect(correction.replacement?.invoiceId).toBe(corrected.id);
+  expect(db.ledgerBalancesByCurrency(patientId,await db.patientLedger(patientId),new Map()).SAR.dueMinor).toBe(165000);
+});

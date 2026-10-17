@@ -362,7 +362,7 @@ export function buildDailyClinicReport(source: DailyClinicSource): DailyClinicRe
     if (reasons.length === 0) continue;
     const currency = invoiceRefs.get(invoice.id)!.currency;
     const status = invoiceStatus(invoice.status);
-    const explicit = resolvedPayments.filter((payment) => payment.source.invoiceId === invoice.id);
+    const explicit = resolvedPayments.filter((payment) => (payment.source.settlementAllocation?.targetInvoiceId??payment.source.invoiceId) === invoice.id);
     for (const payment of explicit) {
       if (payment.settlementCurrency !== currency) throw new DailyClinicReportIntegrityError("Invoice settlement currency conflict");
     }

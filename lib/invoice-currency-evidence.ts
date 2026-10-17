@@ -2,7 +2,7 @@ import type {DbClient} from "./db";
 import {ReclassificationProofError} from "./invoice-currency-reclassification";
 
 export interface SettlementReclassification {
-  documentId:number;correctionId:number;paymentId:number;sourceInvoiceId:number;
+  documentId:number;correctionId:number;paymentId:number;sourceInvoiceId:number;targetInvoiceId:number;
   sourceCurrency:"YER";targetCurrency:"SAR";sourceMinor:number;targetMinor:number;
   direction:1|-1;createdAt:string;
 }
@@ -31,8 +31,12 @@ export async function readCurrencyReclassificationEvidence(client:DbClient,patie
   if(documents.some(row=>row.valid!==true))throw new ReclassificationProofError();
   const sourceIds=documents.flatMap(row=>row.source_invoice_ids);
   if(new Set(sourceIds).size!==sourceIds.length)throw new ReclassificationProofError();
-  const {rows}=await client.query<{id:number;correction_id:number;payment_id:number;invoice_id:number;source_minor:string;target_minor:string;direction:1|-1;created_at:string;valid:boolean}>(`
-    SELECT d.id,d.correction_id,e.payment_id,p.invoice_id,e.source_minor::text,e.target_minor::text,e.direction,
+  const {rows}=await client.query<{id:number;correction_id:number;payment_id:number;invoice_id:number;target_invoice_id:number;source_minor:string;target_minor:string;direction:1|-1;created_at:string;valid:boolean}>(`
+    SELECT d.id,d.correction_id,e.payment_id,p.invoice_id,
+      (WITH RECURSIVE successors(id) AS (SELECT corrected_invoice_id FROM invoice_corrections WHERE id=d.correction_id UNION
+        SELECT c.corrected_invoice_id FROM invoice_corrections c JOIN successors s ON c.original_invoice_id=s.id)
+       SELECT i.id FROM invoices i JOIN successors s ON s.id=i.id WHERE NOT EXISTS(SELECT 1 FROM invoice_corrections c WHERE c.original_invoice_id=i.id)) AS target_invoice_id,
+      e.source_minor::text,e.target_minor::text,e.direction,
       to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
       (e.payment_snapshot=to_jsonb(p) AND p.patient_id=d.patient_id AND p.invoice_id=ANY(d.source_invoice_ids)
        AND p.currency=d.target_currency AND p.base_currency=d.source_currency
@@ -49,7 +53,15 @@ export async function readCurrencyReclassificationEvidence(client:DbClient,patie
   return rows.map(row=>{
     const sourceMinor=Number(row.source_minor),targetMinor=Number(row.target_minor);
     if(row.valid!==true||!Number.isSafeInteger(sourceMinor)||sourceMinor<0||!Number.isSafeInteger(targetMinor)||targetMinor<0)throw new ReclassificationProofError();
-    return {documentId:row.id,correctionId:row.correction_id,paymentId:row.payment_id,sourceInvoiceId:row.invoice_id,
+    return {documentId:row.id,correctionId:row.correction_id,paymentId:row.payment_id,sourceInvoiceId:row.invoice_id,targetInvoiceId:row.target_invoice_id,
       sourceCurrency:"YER",targetCurrency:"SAR",sourceMinor,targetMinor,direction:row.direction,createdAt:row.created_at};
   });
+}
+
+export async function attachCurrencyReclassifications<T extends {id:number;patientId:number}>(client:DbClient,payments:T[]):Promise<(T&{settlementAllocation?:SettlementReclassification})[]>{
+  const byId=new Map<number,SettlementReclassification>();
+  for(const patientId of new Set(payments.map(payment=>payment.patientId))){
+    for(const evidence of await readCurrencyReclassificationEvidence(client,patientId))byId.set(evidence.paymentId,evidence);
+  }
+  return payments.map(payment=>{const proof=byId.get(payment.id);return proof?{...payment,settlementAllocation:proof}:payment;});
 }

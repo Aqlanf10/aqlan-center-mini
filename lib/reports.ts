@@ -1,3 +1,4 @@
+import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
  *
@@ -270,6 +271,7 @@ interface PatientMovement {
 }
 
 async function loadMovements(opts: {
+  asOf?:string;
   patientId?: number | null;
   patientStatus?: PatientStatusFilter;
 }): Promise<PatientMovement[]> {
@@ -323,8 +325,9 @@ async function loadMovements(opts: {
               (SELECT COALESCE(json_agg(DISTINCT it.description) FILTER (WHERE it.description IS NOT NULL), '[]'::json)
                  FROM invoice_items it WHERE it.invoice_id = i.id) AS items
          FROM invoices i
-        WHERE i.status <> 'cancelled' AND i.patient_id = ANY($2::int[])`,
-      [CLINIC_TIME_ZONE, ids],
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections c JOIN invoice_settlement_reclassifications d ON d.correction_id=c.id
+          WHERE c.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date)) AND i.patient_id = ANY($2::int[])`,
+      [CLINIC_TIME_ZONE, ids,opts.asOf??clinicTodayISO()],
     ),
     pool.query<{
       id: number; patient_id: number; date: string; kind: string; amount: string; currency: string;
@@ -511,6 +514,10 @@ async function loadMovements(opts: {
     });
   }
 
+  const currencyAllocations=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
+  for(const patientId of ids)for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool),release(){}},patientId)){
+    if(clinicTodayISO(new Date(event.createdAt))<=(opts.asOf??clinicTodayISO()))currencyAllocations.set(event.paymentId,event);
+  }
   for (const patient of byId.values()) {
     const planById = new Map(patient.plans.map((plan) => [plan.id, plan]));
     for (const payment of patient.payments) {
@@ -556,6 +563,8 @@ async function loadMovements(opts: {
           null,
         );
       }
+      const allocation=currencyAllocations.get(payment.id);
+      if(allocation)target=allocation.targetCurrency;
       payment.settlementCurrency = target;
       /* (المراجعة النهائية للمال ٣) قاعدة التسوية الواحدة: بمبلغها بعملة
        * الهدف، وبمكافئها الأساسي المسجَّل إن كان الهدف الأساس — والعابر بين
@@ -748,7 +757,7 @@ export async function executiveFinancialReadModels(
   billingByCurrency: ExecutiveBillingRow[];
   receivableByCurrency: ExecutiveReceivableRow[];
 }> {
-  const movements = await loadMovements({});
+  const movements = await loadMovements({asOf:to});
   const gross = emptyCurrencyRecord();
   const discount = emptyCurrencyRecord();
   const net = emptyCurrencyRecord();
@@ -1072,7 +1081,7 @@ async function loadContext(
   }));
 
   const movements = needMovements
-    ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus })
+    ? await loadMovements({ patientId: filters.patientId, patientStatus: filters.patientStatus,asOf:filters.to })
     : [];
   const visits = needMovements ? await loadVisits(filters) : [];
 
@@ -2048,12 +2057,13 @@ function debtReport(ctx: ReportContext): ReportResult {
     totalDueByCurrency[currency] += row.balanceMinor;
     // (P-01/D-1) مفوتر الدلو = فواتير عملته (+ الافتتاحي بعملته — P1-5ب)؛
     // محصّله = تسويات دلوها — كلٌّ داخل عملته، لا يُقترض من دلوٍ آخر.
+    const opening = patient.openings[currency];
     const billedMinor = patient.invoices
-      .filter((inv) => inv.currency === currency)
+      .filter((inv) => inv.currency === currency && inv.date <= asOf)
       .reduce((sum, inv) => sum + inv.netMinor, 0)
-      + (patient.openings[currency]?.minor ?? 0);
+      + (opening && opening.date <= asOf ? opening.minor : 0);
     const paidMinor = patient.payments
-      .filter((p) => p.settlementCurrency === currency)
+      .filter((p) => p.settlementCurrency === currency && p.date <= asOf)
       .reduce((sum, p) => sum + (p.kind === "refund" ? -p.settlementMinor : p.settlementMinor), 0);
     rows.push({
       patientId: patient.patientId,
@@ -2117,10 +2127,10 @@ function debtReport(ctx: ReportContext): ReportResult {
       { key: "planStart", label: "بداية العلاج" },
       { key: "planTitle", label: "الخطة" },
       { key: "planCurrency", label: "عملة الخطة" },
-      { key: "planTotalMinor", label: "إجمالي الخطة", type: "money", currencyKey: "planCurrency" },
-      { key: "planPaidMinor", label: "مدفوع الخطة", type: "money", currencyKey: "planCurrency" },
-      { key: "billedMinor", label: "إجمالي المفوتر", type: "money", currencyKey: "currency" },
-      { key: "paidMinor", label: "إجمالي المدفوع", type: "money", currencyKey: "currency" },
+      { key: "planTotalMinor", label: "إجمالي الخطة الحالي (مرجعي)", type: "money", currencyKey: "planCurrency" },
+      { key: "planPaidMinor", label: "مدفوع الخطة الحالي (مرجعي)", type: "money", currencyKey: "planCurrency" },
+      { key: "billedMinor", label: "المفوتر والافتتاحي حتى نهاية الفترة", type: "money", currencyKey: "currency" },
+      { key: "paidMinor", label: "صافي المدفوع حتى نهاية الفترة", type: "money", currencyKey: "currency" },
       { key: "balanceMinor", label: "المتبقي", type: "money", currencyKey: "currency" },
       { key: "lastPaymentDate", label: "آخر دفعة" },
       { key: "ageDays", label: "أيام التأخير", type: "count" },
@@ -2128,7 +2138,8 @@ function debtReport(ctx: ReportContext): ReportResult {
     rows,
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "الرصيد = الافتتاحي (بالأساس) + صافي فواتير الدلو − تسوياته (+ الاستردادات) — لكل عملة على حدة.",
+      "الرصيد = الافتتاحي بعملته + صافي فواتير الدلو − تسوياته (+ الاستردادات)، وكلها حتى نهاية الفترة شاملًا بتوقيت العيادة؛ لا يحدّها تاريخ بداية الفترة.",
+      "قيم الخطة ومدفوعها مراجع حالية من كامل السجل وليست لقطة تاريخية، ولا تُستخدم لاشتقاق المديونية.",
       "المريض باتفاقاتٍ بعملاتٍ متعددة يظهر صفًّا لكل عملة — لا يُجمع ولا يُطرح بين الدلاء.",
       "اضغط اسم المريض لفتح كشف حسابه.",
     ],

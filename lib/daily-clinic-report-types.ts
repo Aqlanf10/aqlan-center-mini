@@ -277,6 +277,7 @@ export interface DailyClinicSourceLegacyAgreement {
   historicalAsOf: string; status: string; voidReason: string | null; planItemId: number; caseId: number | null;
 }
 export interface DailyClinicSourcePayment {
+  settlementAllocation?:import("./money").SettlementAllocation;
   id: number; patientId: number; patientName: string; receiptNumber: string;
   invoiceId: number | null; planId: number | null; openingCurrency: string | null;
   currency: string; amountMinor: number; baseAmountMinor: number; exchangeRate: number;

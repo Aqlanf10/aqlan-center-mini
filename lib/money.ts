@@ -168,7 +168,13 @@ export function toBaseAmount(
   return Math.round(major * rate * MINOR_UNITS[base]);
 }
 
+export interface SettlementAllocation {
+  paymentId:number;sourceInvoiceId:number;targetInvoiceId:number;sourceCurrency:"YER";targetCurrency:"SAR";
+  sourceMinor:number;targetMinor:number;documentId:number;
+}
 export interface PaymentLike {
+  /** Verified non-cash allocation; never changes the receipt's cash fields. */
+  settlementAllocation?: SettlementAllocation;
   amountMinor: number;
   currency: Currency;
   exchangeRate: number;
@@ -478,6 +484,15 @@ export function toCurrencyPaymentLikes(
       invoiceCurrency = resolved.currency;
     } else if (payment.openingCurrency) {
       invoiceCurrency = payment.openingCurrency;
+    }
+    if(payment.settlementAllocation){
+      const proof=payment.settlementAllocation;
+      if(payment.invoiceId!==proof.sourceInvoiceId||invoiceCurrency!==proof.sourceCurrency
+        ||payment.currency!==proof.targetCurrency||payment.amountMinor!==proof.targetMinor
+        ||payment.baseAmountMinor!==proof.sourceMinor||(payment.id!=null&&payment.id!==proof.paymentId)){
+        throw new FinancialCurrencyIntegrityError("إثبات إعادة تصنيف التسوية غير مطابق",String(payment.id??proof.paymentId),"إثبات التسوية");
+      }
+      invoiceCurrency=proof.targetCurrency;
     }
     return {
       id: payment.id ?? null,
