@@ -9,7 +9,7 @@ export interface SettlementReclassification {
 /** A recorded receipt remains the cash authority. This projection carries only
  * an independently verified, append-only settlement allocation. Read in the
  * same snapshot as the invoices/payments consuming it. */
-export async function readCurrencyReclassificationEvidence(client:DbClient,patientId:number|readonly number[]):Promise<SettlementReclassification[]>{
+export async function readCurrencyReclassificationEvidence(client:Pick<DbClient,"query">,patientId:number|readonly number[]):Promise<SettlementReclassification[]>{
   const patientIds=typeof patientId==="number"?[patientId]:[...patientId];
   if(!patientIds.length)return [];
   const {rows:documents}=await client.query<{id:number;correction_id:number;source_invoice_ids:number[];valid:boolean}>(`
@@ -61,7 +61,7 @@ export async function readCurrencyReclassificationEvidence(client:DbClient,patie
   });
 }
 
-export async function attachCurrencyReclassifications<T extends {id:number;patientId:number}>(client:DbClient,payments:T[]):Promise<(T&{settlementAllocation?:SettlementReclassification})[]>{
+export async function attachCurrencyReclassifications<T extends {id:number;patientId:number}>(client:Pick<DbClient,"query">,payments:T[]):Promise<(T&{settlementAllocation?:SettlementReclassification})[]>{
   const byId=new Map<number,SettlementReclassification>();
   for(const evidence of await readCurrencyReclassificationEvidence(client,[...new Set(payments.map(payment=>payment.patientId))]))byId.set(evidence.paymentId,evidence);
   return payments.map(payment=>{const proof=byId.get(payment.id);return proof?{...payment,settlementAllocation:proof}:payment;});

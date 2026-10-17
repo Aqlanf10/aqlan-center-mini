@@ -1,3 +1,4 @@
+import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {currencyReclassificationJournal} from "./invoice-currency-journal";
 import {attachCurrencyReclassifications,readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 import type {InvoiceIdentityAmendment} from "./invoice-identity-amendments";
@@ -169,7 +170,7 @@ export interface QueryResult<T = any> {
 
 export interface DbClient {
   query<T = any>(sql: string, values?: any[]): Promise<QueryResult<T>>;
-  release(): void;
+  release(destroy?: boolean): void;
 }
 
 export interface DbPool {
@@ -180,6 +181,7 @@ export interface DbPool {
 
 let pool: DbPool | null = null;
 let pgliteInstance: PGlite | null = null;
+export function usesSharedLocalDatabaseConnection():boolean{return pgliteInstance!==null;}
 
 function getPgliteInstance(): PGlite {
   if (!pgliteInstance) {
@@ -9352,12 +9354,12 @@ export async function correctInvoice(input: InvoiceCorrectionWrite): Promise<Inv
   return { ok: true, original: original!, corrected: corrected! };
 }
 
-export async function listPatientPayments(patientId: number, client?: DbClient): Promise<Payment[]> {
-  if (!client) await ensureSchema();
-  const { rows } = await (client ?? getPool()).query<PaymentRow>(
+export async function listPatientPayments(patientId: number, client?: DbClient | DbPool): Promise<Payment[]> {
+  if(!client){await ensureSchema();return withFinancialReadSnapshot(getPool(),runner=>listPatientPayments(patientId,runner),pgliteInstance!==null);}
+  const { rows } = await client.query<PaymentRow>(
     `${PAYMENT_SELECT} WHERE y.patient_id = $1 ORDER BY y.created_at DESC, y.id DESC`, [patientId],
   );
-  return attachCurrencyReclassifications(client??{query:getPool().query.bind(getPool()),release(){}},rows.map(toPayment));
+  return attachCurrencyReclassifications(client,rows.map(toPayment));
 }
 
 export async function getPayment(id: number): Promise<Payment | null> {
@@ -12743,6 +12745,7 @@ export async function commissionReport(
   queryRunner?: DbClient | DbPool,
 ): Promise<CommissionRow[]> {
   await ensureSchema();
+  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>commissionReport(from,to,detail,runner),pgliteInstance!==null);
   const pool = queryRunner ?? getPool();
 
   const [{ rows: doctorRows }, { rows: invoiceRows }, { rows: paidRows }] = await Promise.all([
@@ -13401,20 +13404,21 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
   await ensureSchema();
   const scope = patientIds === null ? null : [...patientIds];
   if (scope !== null && scope.length === 0) return [];
-  const client = await getPool().connect();
+  const debtPool=getPool();
+  if(pgliteInstance!==null)return computeDebtRowsInSnapshot(scope,includeNonPositive,debtPool);
+  const client=await debtPool.connect();let destroy=false;
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    const rows = await computeDebtRowsInSnapshot(scope, includeNonPositive, client);
-    await client.query("COMMIT");
-    return rows;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    const rows=await computeDebtRowsInSnapshot(scope,includeNonPositive,client);
+    await client.query("COMMIT");return rows;
+  }catch(error){
+    try{await client.query("ROLLBACK");}catch{destroy=true;}
     throw error;
-  } finally { client.release(); }
+  }finally{client.release(destroy);}
 }
 
 /** Caller owns the snapshot for debt inputs and reclassification evidence. */
-async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: DbClient): Promise<DebtRow[]> {
+async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: Pick<DbClient,"query">): Promise<DebtRow[]> {
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
@@ -14883,9 +14887,10 @@ function clinicDayOf(iso: string): string {
  * الدفاتر والمستندات، ولا ترحيل خلفي للبيانات القائمة، ولا قيد يتيم. وما لا يُشتقّ
  * من مستند — التسويات وإعادة التقييم — يأتي من `journal_manual` ويُدمج هنا.
  */
-export async function journalEntries(from: string, to: string): Promise<JournalEntry[]> {
+export async function journalEntries(from: string, to: string, queryRunner?:DbClient|DbPool): Promise<JournalEntry[]> {
   await ensureSchema();
-  const pool = getPool();
+  if(!queryRunner)return withFinancialReadSnapshot(getPool(),runner=>journalEntries(from,to,runner),pgliteInstance!==null);
+  const pool = queryRunner;
 
   const [invoices, payments, expenses, allocations, payables, shifts, manual, openings, partyOpenings, partyAdvances] = await Promise.all([
     pool.query<{

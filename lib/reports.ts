@@ -1,3 +1,5 @@
+import {withFinancialReadSnapshot} from "./financial-read-snapshot";
+import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
 import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
@@ -278,8 +280,9 @@ async function loadMovements(opts: {
   patientStatus?: PatientStatusFilter;
 }): Promise<PatientMovement[]> {
   await ensureSchema();
-  const pool = getPool();
-
+  return withFinancialReadSnapshot(getPool(),runner=>loadMovementsInSnapshot(opts,runner),usesSharedLocalDatabaseConnection());
+}
+async function loadMovementsInSnapshot(opts:Parameters<typeof loadMovements>[0],pool:DbClient|DbPool):Promise<PatientMovement[]>{
   // حالة المريض مشتقّة: آخر خطة علاج، فإن لم توجد فحداثة آخر زيارة.
   const statusExpr = `
     COALESCE(

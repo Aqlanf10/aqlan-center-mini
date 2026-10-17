@@ -208,3 +208,17 @@ it("serializes receipt correction against currency correction without a deadlock
  if(documents.length)expect(balance.SAR.dueMinor).toBe(180000);else expect(balance.YER.dueMinor).toBe(1000-287000);
  expect((await q("SELECT id FROM payments WHERE patient_id=$1",[owner]))).toHaveLength(3);
 });
+it("refuses currency correction in a locked period and after a paid commission without changing receipts",async()=>{
+ const owner=await patient(),doctor=await db.createParty({name:"Synthetic blocked currency",kind:"doctor",phone:null,commissionPercent:30,note:null});
+ const original=(await db.createInvoice({patientId:owner,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,items:[{serviceId:null,doctorId:doctor.id,description:"Synthetic blocked correction",quantity:1,unitPriceMinor:2500}]}))!;
+ const paid=await db.recordPayment({patientId:owner,invoiceId:original.id,kind:"payment",amountMinor:90000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-block-paid-${++serial}`});expect(paid.reason).toBeNull();
+ const before=await footprint(owner),view=await revision.readInvoiceRevision(original.id,session);
+ const command={idempotencyKey:`currency-block-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic blocked currency correction",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:160000};
+ await q("INSERT INTO settings(key,value) VALUES('finance.locked_before','2099-01-01') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+ try{await expect(revision.reviseInvoice(original.id,command,session)).rejects.toThrow(/مقفلة/);}finally{await q("DELETE FROM settings WHERE key='finance.locked_before'");}
+ const shift=(await q("SELECT id FROM cashier_shifts WHERE status='open' LIMIT 1"))[0].id;
+ await q("INSERT INTO expenses(voucher_number,category,party_id,shift_id,amount_minor,currency,base_amount_minor) VALUES($1,'commission',$2,$3,100,'YER',100)",[`CURRENCY-EXPENSE-${++serial}`,doctor.id,shift]);
+ const blocked=await revision.readInvoiceRevision(original.id,session);expect(blocked.currencyCorrection).toMatchObject({available:false});expect(blocked.currencyCorrection?.message).toMatch(/عمولات/);
+ await expect(revision.reviseInvoice(original.id,{...command,expectedSourceHash:blocked.sourceHash},session)).rejects.toThrow(/عمولات/);
+ expect(await footprint(owner)).toEqual(before);expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[owner])).toEqual([]);
+});

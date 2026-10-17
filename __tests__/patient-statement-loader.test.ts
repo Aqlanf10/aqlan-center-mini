@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ query: vi.fn(), session: vi.fn() }));
 vi.mock("../lib/db", async (importOriginal) => ({ ...await importOriginal<typeof import("../lib/db")>(),
-  ensureSchema: vi.fn(), listParties: vi.fn().mockResolvedValue([]), getPool: () => ({ query: mocks.query }) }));
+  ensureSchema: vi.fn(), listParties: vi.fn().mockResolvedValue([]), getPool: () => ({ query: mocks.query,connect:async()=>({query:mocks.query,release:vi.fn()}) }) }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 import { buildReport, parseFilters } from "../lib/reports";
 import { GET } from "../app/api/reports/route";
@@ -22,6 +22,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.session.mockResolvedValue({ role: "reception", username: "synthetic", userId: 1 });
   mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
+    if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql))return {rows:[]};
     if (sql.includes("FROM invoice_settlement_reclassification")) return {rows:[]};
     if (sql.includes("AS today")) return { rows: [{ today: "2026-10-02" }] };
     if (sql.includes("FROM expenses")) return { rows: [] };

@@ -36,10 +36,11 @@ describe("computeDebtRows coherent PostgreSQL snapshot (integrated with currency
  });
  it.each(["success","read","commit","rollback"] as const)("releases the snapshot connection after %s",async scenario=>{
   const pool=db.getPool(),client=await pool.connect(),originalQuery=client.query.bind(client),statements:string[]=[],failure=new Error(`synthetic ${scenario} failure`);
+  const originalConnect=pool.connect.bind(pool),backendPid=(await originalQuery<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
   const release=vi.spyOn(client,"release");const query=vi.spyOn(client,"query").mockImplementation((...args:Parameters<typeof client.query>)=>{
    const sql=String(args[0]);statements.push(sql);if((scenario==="read"||scenario==="rollback")&&sql.includes("FROM patients WHERE"))return Promise.reject(failure);
    if(scenario==="commit"&&sql==="COMMIT")return Promise.reject(failure);
-   if(scenario==="rollback"&&sql==="ROLLBACK")return originalQuery(...args).then(()=>{throw new Error("synthetic rollback failure");});return originalQuery(...args);
+   if(scenario==="rollback"&&sql==="ROLLBACK")return Promise.reject(new Error("synthetic rollback failure"));return originalQuery(...args);
   });
   const connect=vi.spyOn(pool,"connect").mockResolvedValueOnce(client),poolQuery=vi.spyOn(pool,"query");
   try{if(scenario==="success")await expect(db.computeDebtRows(null,true)).resolves.toBeInstanceOf(Array);else await expect(db.computeDebtRows(null,true)).rejects.toBe(failure);
@@ -47,6 +48,13 @@ describe("computeDebtRows coherent PostgreSQL snapshot (integrated with currency
    // Six original inputs plus two batch evidence reads, all on the same client.
    expect(statements.filter(sql=>sql.trim().startsWith("SELECT"))).toHaveLength(scenario==="read"||scenario==="rollback"?1:8);
    expect(statements.at(-1)).toBe(scenario==="success"?"COMMIT":"ROLLBACK");expect(release).toHaveBeenCalledTimes(1);
+   if(scenario==="rollback"){
+    const next=await originalConnect();let nextPid:number;
+    try{nextPid=(await next.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;}
+    finally{await originalQuery("ROLLBACK").catch(()=>undefined);next.release();}
+    expect(nextPid).not.toBe(backendPid);expect(release).toHaveBeenNthCalledWith(1,true);
+    await expect(db.computeDebtRows(null,true)).resolves.toBeInstanceOf(Array);
+   }
   }finally{connect.mockRestore();poolQuery.mockRestore();query.mockRestore();release.mockRestore();}
  });
  it("does not acquire a snapshot connection for an empty patient scope",async()=>{const connect=vi.spyOn(db.getPool(),"connect");try{await expect(db.computeDebtRows([])).resolves.toEqual([]);expect(connect).not.toHaveBeenCalled();}finally{connect.mockRestore();}});

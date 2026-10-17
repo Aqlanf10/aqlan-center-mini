@@ -28,6 +28,8 @@ vi.mock("../../lib/db", async (importOriginal) => {
   };
 });
 
+vi.mock("../../lib/financial-read-snapshot",()=>({withFinancialReadSnapshot:async(pool:unknown,read:(runner:unknown)=>Promise<unknown>)=>read(pool)}));
+
 const connectionString = assertLocalExpenseComparisonUrl(assertRealPostgresUrl());
 stubPostgresEnv();
 const { buildReport, parseFilters } = await import("../../lib/reports");
