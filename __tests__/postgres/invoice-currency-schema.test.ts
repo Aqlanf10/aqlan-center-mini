@@ -75,3 +75,24 @@ it("rejects duplicate event allocation and ordinary new receipts aimed at retire
     await expect(client.query("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by) VALUES($1,$2,$3,$4,'payment',100,'SAR',410,410,'YER','cash','synthetic')",[`CUR-${f.n}-LATE`,f.patient.id,f.original.id,f.shift.id])).rejects.toThrow(/current corrected invoice/);
   }finally{await client.query("ROLLBACK");client.release();}
 });
+
+it("restores complete reclassification and a later refund without generating duplicate events",async()=>{
+  const {openBackupTimestampFixture}=await import("./_backup-timestamp-fixture");
+  const {loadMigrationFiles,migrate}=await import("../../lib/migrations");
+  const {prepareBackupSql}=await import("../../lib/restore/sql.mjs");
+  const isolated=await openBackupTimestampFixture({...process.env});
+  const client=await db.getPool().connect();
+  try{await client.query("BEGIN");const f=await fixture(client);await document(client,f);
+    await client.query("INSERT INTO payments(receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,method,created_by,reversal_of_id) VALUES($1,$2,$3,$4,'refund',5000,'SAR',410,20500,'YER','cash','synthetic',$5)",[`CUR-${f.n}-RESTORE-REFUND`,f.patient.id,f.original.id,f.shift.id,f.before[0].receipt.id]);
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    const expected=await readCurrencyReclassificationEvidence(client,f.patient.id);
+    const parts:string[]=[];for await(const line of db.backupSnapshotSqlLines(client))parts.push(line);
+    const sql=prepareBackupSql(parts.join("")).sql;
+    expect(sql.indexOf("INSERT INTO payments ")).toBeLessThan(sql.indexOf("INSERT INTO invoice_settlement_reclassifications "));
+    await migrate(isolated.sqlTarget,{apply:true,files:await loadMigrationFiles()});
+    await isolated.sqlTarget.query(sql);
+    const restored=await isolated.sqlTarget.connect();try{expect(await readCurrencyReclassificationEvidence(restored,f.patient.id)).toEqual(expected);}finally{restored.release();}
+    expect((await isolated.sqlTarget.query("SELECT count(*)::int AS n FROM invoice_settlement_reclassification_events")).rows).toEqual([{n:4}]);
+    expect((await isolated.sqlTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled<>'O'")).rows).toEqual([]);
+  }finally{await client.query("ROLLBACK");client.release();await isolated.close();}
+});

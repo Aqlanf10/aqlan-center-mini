@@ -33,7 +33,9 @@ beforeAll(async () => {
   // This additive-migration test deliberately starts before the temporal extension.
   // Only fixture bootstrap is withheld; all original financial/history assertions remain.
   const migrationRuntime = await import('../../lib/migrations');
-  const legacyBootstrap = vi.spyOn(migrationRuntime, 'applyRuntimeMigrationFiles').mockResolvedValueOnce([]);
+  const actualApply=migrationRuntime.applyRuntimeMigrationFiles;
+  const legacyBootstrap = vi.spyOn(migrationRuntime, 'applyRuntimeMigrationFiles').mockImplementation((pool,files)=>
+    files.some(file=>file.version==='0056')?Promise.resolve([]):actualApply(pool,files));
   db = await import('../../lib/db'); await db.resetPoolForTesting();
   try { await db.ensureSchema(); } finally { legacyBootstrap.mockRestore(); }
   const { sessionCredentialVersion } = await import('../../lib/auth');

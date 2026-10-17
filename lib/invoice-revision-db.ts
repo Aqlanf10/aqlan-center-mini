@@ -101,10 +101,22 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     if (early) { await authority(client,session); await client.query("COMMIT"); return { ...early, replayed: true }; }
     const { rows: [owner] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM invoices WHERE id=$1", [invoiceId]);
     if (!owner) bad("الفاتورة غير موجودة.", "missing");
+    // Payroll/commission writers can need shift locks; fence them before holding
+    // patient, receipt or shift locks to avoid reversing their lock order.
+    if(source.currency==="SAR")await client.query("LOCK TABLE expenses,hr_payroll_items IN SHARE MODE");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [owner.patient_id]);
-    // Cash writers take shift before invoice/plan locks. We never take a receipt
-    // row lock or alter a closed shift; existing cash remains immutable.
+    // Event foreign keys need receipt KEY SHARE locks. Refunds/corrections lock
+    // their original receipt before shift, so acquire these compatible read-only
+    // fences in the same order, never implicitly through an FK after shift.
+    const receiptFenceSql=`WITH RECURSIVE lineage(id) AS (SELECT $1::int UNION
+      SELECT c.original_invoice_id FROM invoice_corrections c JOIN lineage l ON c.corrected_invoice_id=l.id)
+      SELECT p.id FROM payments p WHERE p.invoice_id IN(SELECT id FROM lineage) AND p.patient_id=$2 ORDER BY p.id`;
+    const receiptFence=source.currency==="SAR"?(await client.query<{id:number}>(receiptFenceSql+" FOR KEY SHARE OF p",[invoiceId,owner.patient_id])).rows:null;
     await client.query("SELECT id FROM cashier_shifts WHERE status='open' ORDER BY id FOR UPDATE");
+    // A new receipt may commit between the receipt scan and shift acquisition.
+    // Never take its receipt lock after shift: require a fresh preview instead.
+    if(receiptFence){const current=(await client.query<{id:number}>(receiptFenceSql,[invoiceId,owner.patient_id])).rows;
+      if(JSON.stringify(current)!==JSON.stringify(receiptFence))bad("تغيّرت السندات أثناء تثبيت التصحيح؛ حدّث المعاينة.","stale");}
     // The canonical correction relinks these exact visits. Fence them before
     // plans/invoices so checkout cannot hold visit and wait on our invoice.
     await client.query("SELECT id FROM visits WHERE invoice_id=$1 ORDER BY id FOR UPDATE",[invoiceId]);
@@ -128,7 +140,6 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     const currency=source.currency===undefined?before.invoice.baseCurrency:source.currency;
     if(currency!==before.invoice.baseCurrency&&!(before.invoice.baseCurrency==="YER"&&currency==="SAR"))bad("انتقال العملة غير مدعوم.");
     const changingCurrency=currency!==before.invoice.baseCurrency;
-    if(changingCurrency)await client.query("LOCK TABLE expenses,hr_payroll_items IN SHARE MODE");
     const currencyPlan=changingCurrency?await prepareInvoiceCurrencyChange(client,before.invoice,0):null;
     const settledMinor=currencyPlan?.settledMinor??before.settledMinor;
     if(changingCurrency&&(source.lines.length!==before.invoice.items.length||source.lines.some(line=>before.invoice.items.find(item=>item.id===line.itemId)?.quantity!==line.quantity)))bad("عند تصحيح العملة يجب إبقاء جميع بنود العلاج وكمياتها.");
@@ -139,6 +150,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       return { itemId: line.itemId, quantity: line.quantity, unitPriceMinor };
     });
     const amendments=await validateInvoiceIdentityAmendments(client,before.invoice,source.lines,before.work,before.identityAmendmentAvailable);
+    if(changingCurrency&&amendments.size)bad("تصحيح العملة لا يغيّر هوية العلاج أو الطبيب أو السن؛ استخدم مسار تصحيح العلاج المستقل.");
     const discountMinor = typeof source.discount === "string" ? parseAmount(source.discount,currency as "YER"|"SAR"|"USD") : null;
     if (discountMinor === null) bad("الخصم غير صالح.");
     const discountReason = typeof source.discountReason === "string" ? source.discountReason.trim() : "";

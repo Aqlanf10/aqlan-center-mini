@@ -1,7 +1,7 @@
 import type {DbClient,Invoice} from "./db";
 import {DebtRepaymentError} from "./debt-installments-db";
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
-import {planCurrencyReclassification,type ReclassificationPayment} from "./invoice-currency-reclassification";
+import {planCurrencyReclassification,ReclassificationProofError,type ReclassificationPayment} from "./invoice-currency-reclassification";
 const reject=(message:string):never=>{throw new DebtRepaymentError("conflict",message);};
 /** Narrow first release: explicit YER -> recorded SAR, one fully covered
  * per-procedure plan at a time. Existing clinical identities remain untouched. */
@@ -35,7 +35,8 @@ export async function prepareInvoiceCurrencyChange(client:DbClient,invoice:Invoi
   const {rows}=await client.query<{id:number;patient_id:number;invoice_id:number;kind:"payment"|"refund";reversal_of_id:number|null;currency:"SAR";base_currency:"YER";amount_minor:string;base_amount_minor:string;exchange_rate:string}>(
     "SELECT id,patient_id,invoice_id,kind,reversal_of_id,currency,base_currency,amount_minor::text,base_amount_minor::text,exchange_rate::text FROM payments WHERE invoice_id=ANY($1::int[]) ORDER BY id",[ids]);
   const payments:ReclassificationPayment[]=rows.map(row=>({id:row.id,patientId:row.patient_id,invoiceId:row.invoice_id,kind:row.kind,reversalOfId:row.reversal_of_id,currency:row.currency,baseCurrency:row.base_currency,amountMinor:Number(row.amount_minor),baseAmountMinor:Number(row.base_amount_minor),exchangeRate:Number(row.exchange_rate)}));
-  const result=planCurrencyReclassification({patientId:invoice.patientId,lineageInvoiceIds:ids,fromCurrency:"YER",toCurrency:"SAR",principalMinor,payments});
+  let result:ReturnType<typeof planCurrencyReclassification>;
+  try{result=planCurrencyReclassification({patientId:invoice.patientId,lineageInvoiceIds:ids,fromCurrency:"YER",toCurrency:"SAR",principalMinor,payments});}catch(error){if(error instanceof ReclassificationProofError)reject(error.message);throw error;}
   return {...result,lineageInvoiceIds:ids,planIds:plans.map(plan=>plan.id)};
 }
 export async function writeInvoiceCurrencyEvidence(client:DbClient,correctionId:number,patientId:number,lineageInvoiceIds:number[]){

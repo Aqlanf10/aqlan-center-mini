@@ -273,3 +273,24 @@ describe("safe pre-treatment clinical identity correction",()=>{
     expect((await db.getInvoice(issued.invoice.id))?.status).toBe("open");
   });
 });
+it.each([false,true])("currency correction preserves clinical identity; shared plan=%s is explicitly refused",async shared=>{
+  const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic clinical currency') RETURNING id",[`CURRENCY-CLINICAL-${++serial}`]))[0].id;
+  const serviceId=(await q("INSERT INTO services(name,category,price_minor,is_active) VALUES('Synthetic currency root treatment','rct',2500,TRUE) RETURNING id"))[0].id;
+  const doctorId=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic currency treating doctor','doctor') RETURNING id"))[0].id;
+  const issued=await linked.createLinkedInvoice({patientId,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,actorRole:"admin",items:[{serviceId,category:"rct",doctorId,description:"Synthetic currency root treatment",quantity:1,unitPriceMinor:2500,toothCode:36,caseId:null,sessions:null}],templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
+  if(!issued.ok)throw new Error("Clinical currency fixture");
+  const item=issued.links[0].planItemId!,caseId=issued.links[0].caseId!;
+  await q("UPDATE clinical_cases SET problem='Synthetic clinical history remains unchanged' WHERE id=$1",[caseId]);
+  if(shared)await q("INSERT INTO plan_items(plan_id,service_name,quantity,unit_price_minor,status) VALUES($1,'Synthetic unrelated priced treatment',1,1000,'planned')",[issued.planId]);
+  const cash=await db.recordPayment({patientId,invoiceId:issued.invoice.id,kind:"payment",amountMinor:10000,currency:"SAR",baseCurrency:"YER",exchangeRate:410,method:"cash",note:null,createdBy:session.username,idempotencyKey:`currency-clinical-payment-${serial}`});expect(cash.reason).toBeNull();
+  const cases=await q("SELECT to_jsonb(c) AS value FROM clinical_cases c WHERE patient_id=$1",[patientId]);
+  const before=await revision.readInvoiceRevision(issued.invoice.id,session);
+  const request={idempotencyKey:`currency-clinical-correction-${serial}`,expectedSourceHash:before.sourceHash,currency:"SAR",reason:"Synthetic documented currency correction",lines:[{itemId:issued.invoice.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:terms(240000),expectedRemainingMinor:240000};
+  if(shared){expect(before.currencyCorrection).toMatchObject({available:false});await expect(revision.reviseInvoice(issued.invoice.id,request,session)).rejects.toThrow(/الخطة مشتركة/);expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).toHaveLength(0);}
+  else{const result=await revision.reviseInvoice(issued.invoice.id,request,session);expect(result).toMatchObject({settledMinor:10000,remainingMinor:240000});
+    expect(await q("SELECT id,base_currency,total_minor::text FROM treatment_plans WHERE patient_id=$1",[patientId])).toEqual([{id:issued.planId,base_currency:"SAR",total_minor:"250000"}]);
+    expect(await q("SELECT id,quantity,case_id FROM plan_items WHERE plan_id=$1",[issued.planId])).toEqual([{id:item,quantity:1,case_id:caseId}]);
+    expect((await db.getInvoice((result as {corrected:{id:number}}).corrected.id))?.items[0]).toMatchObject({planItemId:item,caseId,financialReviewRequired:false});
+  }
+  expect(await q("SELECT to_jsonb(c) AS value FROM clinical_cases c WHERE patient_id=$1",[patientId])).toEqual(cases);
+});

@@ -1,51 +1,54 @@
-# Local phase 2 — incomplete, not a release candidate
+# Local phase 2 — under verification, not authorized for push or deployment
 
-Base remains PR343 / `5910878f6807df5ff621ac03e1883dd8483c2ac4`.
-Per the parent instruction, none of this phase has been committed or pushed.
-The parent authorized 0063 after checking all 360 fetched remote branch heads;
-no 0063 file conflict was found. HR 0062 and PR342 were not used.
+Remote Draft PR343 remains at 5910878f. Local checkpoints 25798c93 and fded41f2
+contain the append-only schema and operational writer. The parent authorized
+migration 0063 after checking 360 remote heads. No HR0062/PR342 work was used.
+The parent explicitly requires keeping subsequent work local until review.
 
-Implemented locally:
+Implemented:
+- Exact registered migration/runtime 0063: immutable noncash document and one
+  proven event per original receipt, including refunds; source receipt rows,
+  numbers, FX and cash remain unchanged. Missing/foreign/ambiguous evidence fails.
+- Admin preview and writer for YER -> SAR using each recorded SAR receipt amount;
+  immutable acknowledgement, request/actor/body binding and replay protection.
+- Full coverage and exclusive ownership of per-procedure plans; shared plans,
+  agreements, unsupported source types, quantity/identity changes are rejected.
+  Plan/item/case/visit identities are retained; no duplicate clinical treatment.
+- Paid commission expenses for affected doctors and any non-reversed payroll
+  commission block this narrow first release. This conservative payroll guard
+  can block an unrelated doctor; it never silently reprices approved payroll.
+- Settlement, account, debt, repayment, checkout, treatment finance, portal,
+  printing, reports and commission consumers use verified allocation evidence.
+  Historical report cutoffs retain source currency before the correction.
+- General ledger preserves original receipt entries and appends dated balanced
+  noncash reclassification and original-invoice reversal entries.
+- Refunds append one negative event; receipt correction replacements follow the
+  current SAR invoice. Receipt/shift fences avoid the observed refund deadlock.
+- Restore dependency ordering loads original receipts before immutable evidence;
+  schema contract, ownership and preflight disclosure regenerated from synthetic
+  PostgreSQL source schemas only.
+- Recovery UI retains saved request/journal and displays blocked/busy/rejected
+  outcomes; retry is explicit, with the original key and body.
 
-- Additive migration 0063 and byte-identical runtime SQL, registered with the
-  standard migration lock/checksum mechanism. Repeated initialization does not
-  reinstall the old 0061 same-currency guard over the successor.
-- Append-only document and per-receipt event tables, YER -> SAR only. Every
-  historical receipt in the authoritative source lineage requires an event.
-  Each event proves its original payment row, recorded SAR amount, historical
-  YER base amount and recorded FX arithmetic. It is not a cash entry.
-- Automatic negative event for a refund of an already reclassified receipt.
-  Ordinary receipts cannot newly target the retired YER lineage. Receipt
-  correction replacement routing is still outstanding.
-- Independent read adapter verifies document ownership, full coverage,
-  disjoint lineages, exact stored payment snapshots and recorded amounts.
-  This adapter is not yet consumed by the operational settlement readers.
-- Reset table ordering includes both new evidence tables.
+Verified locally so far (synthetic PostgreSQL18.6 only):
+- Real writer2500YER ->2500SAR: settled900SAR, due1600SAR, independent100YER
+  credit; full original receipt fingerprint unchanged; replay creates no money.
+- Account/debt/checkout/report/daily clinic/GL agreement; partial refund and
+  receipt correction; full refund repeated under one key produces one event.
+- Commission270SAR for900SAR settlement, zero after full refund; historical
+  pre-correction commission750YER remains unchanged for its historical cutoff.
+- Missing/forged evidence, destructive writes, shared coverage refusal,
+  clinical identity preservation and exact backup/restore plus later refund.
+- Actual Arabic HTTP/UI at390 and1280: lose committed response, reload and
+  explicit retry; one correction, unchanged receipts,1600SAR visible in print.
+- Snapshot composition25 tests passed, but parent is reviewing follow-up
+  rollback disposal/PGlite compatibility; that portion is not final.
+- Updated private temporary report schemas and schema ownership:36 tests pass.
 
-Validation on disposable local PostgreSQL 18.6 at localhost:55433:
-
-- `invoice-currency-schema.test.ts`: 12 passing tests. Synthetic 700/100/100 SAR
-  receipts prove 369000 YER -> 90000 SAR minor; the independent 100 YER payment
-  stays outside the evidence. Original receipt rows remain identical. A 50 SAR
-  refund appends one negative event. Missing evidence, duplicate allocation,
-  destructive writes, imported snapshot/ownership/coverage corruption and a
-  new ordinary receipt to the retired source are rejected.
-- Existing `invoice-settlement-position.test.ts`: 13 passing tests.
-- Typecheck and targeted ESLint pass.
-- Logs: `/tmp/currency-phase2-pg.log`, `/tmp/currency-phase2-typecheck.log`,
-  `/tmp/currency-phase2-lint.log`.
-
-Not completed: operational currency writer/preview, exclusive plan coverage,
-paid/locked commission policy, receipt-correction replacement targeting,
-settlement/debt/account/checkout/portal/print/report/commission projections,
-noncash GL entries and dated history, backup/restore schema contracts, and
-full regression/concurrency/HTTP Arabic evidence for the complete feature.
-The schema tests deliberately use low-level synthetic fixtures; they do not
-prove the real API/UI workflow. The original API still rejects a currency field.
-Do not present the user's partially-paid scenario as fixed yet.
-
-Coordination: `lib/reports.ts` is reserved to the parent's separate report cutoff
-repair. No edits were made there. Integrating settlement allocations needs an
-agreed handoff to that reader. Do not push this partial phase into PR343 while
-the parent is reviewing the smaller fixes. No production data was accessed or
-modified and stopped staging was not started.
+Still required before release claim: finish full frozen regression (unit,
+PostgreSQL, HTTP), final typecheck/lint/build, integrate parent's reviewed
+snapshot cleanup, and review multi-query read consistency beyond debt rows.
+Evidence logs currently in /tmp/currency-*.log; final consolidated evidence and
+screenshots will be added after the frozen run. Prior verification.md describes
+phase1, not a complete phase2 release. No production data or stopped staging
+was accessed or started.

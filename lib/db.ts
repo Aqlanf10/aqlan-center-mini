@@ -12776,11 +12776,13 @@ export async function commissionReport(
          LEFT JOIN visit_procedures vp ON it.source_type = 'visit_procedure' AND vp.id = it.source_id
          LEFT JOIN plan_items pi ON pi.id = COALESCE(it.plan_item_id,
            CASE WHEN it.source_type = 'plan_item' THEN it.source_id END, vp.plan_item_id)
-        WHERE i.status <> 'cancelled'
+        WHERE (i.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+          WHERE correction.original_invoice_id=i.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
           AND i.patient_id IN (
-                SELECT patient_id FROM invoices
-                 WHERE status <> 'cancelled'
-                   AND (created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+                SELECT historical.patient_id FROM invoices historical
+                 WHERE (historical.status <> 'cancelled' OR EXISTS(SELECT 1 FROM invoice_corrections correction JOIN invoice_settlement_reclassifications d ON d.correction_id=correction.id
+                   WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
+                   AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
         GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
       [CLINIC_TIME_ZONE, from, to],
@@ -12911,7 +12913,7 @@ export async function commissionReport(
     }
 
     const currencyEvidence=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
-    for(const patientId of patientIds)for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool),release(){}},patientId)){
+    for(const event of await readCurrencyReclassificationEvidence({query:pool.query.bind(pool),release(){}},patientIds)){
       if(clinicDateString(new Date(event.createdAt),CLINIC_TIME_ZONE)<=to)currencyEvidence.set(event.paymentId,event);
     }
     for (const row of paymentRows.rows) {
@@ -13397,22 +13399,31 @@ export async function patientDebtReport(): Promise<DebtRow[]> {
  */
 export async function computeDebtRows(patientIds: readonly number[] | null, includeNonPositive = false): Promise<DebtRow[]> {
   await ensureSchema();
-  if(patientIds!==null&&patientIds.length===0)return [];
-  const pool = await getPool().connect();
-  try {
-  await pool.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   const scope = patientIds === null ? null : [...patientIds];
   if (scope !== null && scope.length === 0) return [];
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const rows = await computeDebtRowsInSnapshot(scope, includeNonPositive, client);
+    await client.query("COMMIT");
+    return rows;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
 
+/** Caller owns the snapshot for debt inputs and reclassification evidence. */
+async function computeDebtRowsInSnapshot(scope: number[] | null, includeNonPositive: boolean, client: DbClient): Promise<DebtRow[]> {
   // حملة واحدة لكل الجداول — نفس الجداول التي مسحها الاستعلام القديم، لكن
   // بعملة الفاتورة معها ليُحسب الرصيد بالمرجع الكانوني لا بـSQL مزدوج.
   const [patientsRes, invoicesRes, invoiceCurrenciesRes, paymentsRes, openingRes, planCurrenciesRes] =
-    await Promise.all([
-      pool.query<{ id: number; full_name: string; phone: string | null }>(
+    [
+      await client.query<{ id: number; full_name: string; phone: string | null }>(
         `SELECT id, full_name, phone FROM patients WHERE ($1::int[] IS NULL OR id = ANY($1::int[])) ORDER BY id`,
         [scope],
       ),
-      pool.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
+      await client.query<{ id: number; patient_id: number; net_minor: string; base_currency: string; created_at: Date }>(
         `SELECT id, patient_id, GREATEST(0, total_minor - discount_minor) AS net_minor,
                 base_currency, created_at
            FROM invoices WHERE status <> 'cancelled' AND ($1::int[] IS NULL OR patient_id = ANY($1::int[]))
@@ -13421,11 +13432,11 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
       ),
       // عملة كل فاتورة (المحكومة وغير المحكومة معًا): هدف تسوية الدفعة المرتبطة
       // بها يُقرأ من الفاتورة نفسها وإن أُلغيت لاحقًا — الدفعة واقعة تاريخية.
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      await client.query<{ id: number; patient_id: number; base_currency: string }>(
         `SELECT id, patient_id, base_currency FROM invoices WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
       ),
-      pool.query<{
+      await client.query<{
         id: number; patient_id: number; invoice_id: number | null; plan_id: number | null;
         opening_currency: string | null;
         kind: string; amount_minor: string; currency: string; exchange_rate: string;
@@ -13436,7 +13447,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
            FROM payments WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[])) ORDER BY created_at, id`,
         [scope],
       ),
-      pool.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
+      await client.query<{ patient_id: number; currency: string; amount_minor: string; as_of_date: Date }>(
         `SELECT patient_id, currency, amount_minor, as_of_date FROM patient_opening_balances
           WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
@@ -13445,14 +13456,14 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
       // دلو عملة الخطة — الخريطة الهدف الكانوني للدفعات المقدَّمة قبل الفوترة.
       // (P-01 owner review — تصحيح ٣) بلا COALESCE: عملة الخطة الفاسدة تُقال
       // لا تُوسَم يمنيًّا بصمت.
-      pool.query<{ id: number; patient_id: number; base_currency: string }>(
+      await client.query<{ id: number; patient_id: number; base_currency: string }>(
         `SELECT id, patient_id, base_currency FROM treatment_plans WHERE ($1::int[] IS NULL OR patient_id = ANY($1::int[]))`,
         [scope],
       ),
-    ]);
+    ] as const;
 
   const allocations=new Map<number,import("./invoice-currency-evidence").SettlementReclassification>();
-  for(const patient of patientsRes.rows)for(const row of await readCurrencyReclassificationEvidence(pool,patient.id))allocations.set(row.paymentId,row);
+  for(const row of await readCurrencyReclassificationEvidence(client,patientsRes.rows.map(patient=>patient.id)))allocations.set(row.paymentId,row);
   const patientNameById = new Map(patientsRes.rows.map((row) => [row.id, row.full_name]));
   const patientPhoneById = new Map(patientsRes.rows.map((row) => [row.id, row.phone]));
   // (P-01 owner review — تصحيح ٣) كل عملة تُتحقَّق قبل الدخول — fail-closed:
@@ -13598,9 +13609,7 @@ export async function computeDebtRows(patientIds: readonly number[] | null, incl
     return a.patientId - b.patientId;
   });
 
-  await pool.query("COMMIT");
   return rows;
-  }catch(error){await pool.query("ROLLBACK");throw error;}finally{pool.release();}
 }
 
 export interface TopServiceRow {
@@ -15495,6 +15504,10 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     if (row.child === "patient_families" && row.parent === "patients") continue;
     dependsOn.get(row.child)?.add(row.parent);
   }
+  // Restore historical receipts before their allocation document. Otherwise
+  // the refund-follow trigger would generate events already present in backup.
+  if(dependsOn.has("invoice_settlement_reclassifications"))
+    dependsOn.get("invoice_settlement_reclassifications")!.add("payments");
   //0060 seals a complete clinical snapshot on revision INSERT. These trigger
   // dependencies are additional to declared foreign keys and must survive restore.
   if(dependsOn.has("legacy_treatment_document_revisions")) {

@@ -9,8 +9,8 @@ export async function currencyReclassificationJournal(client:DbClient,from:strin
     JOIN invoices i ON i.id=c.original_invoice_id JOIN patients p ON p.id=d.patient_id
     ORDER BY d.id`);
   const entries:JournalEntry[]=[];
-  for(const patientId of new Set(documents.map(row=>row.patient_id))){
-    for(const event of await readCurrencyReclassificationEvidence(client,patientId)){
+  {
+    for(const event of await readCurrencyReclassificationEvidence(client,[...new Set(documents.map(row=>row.patient_id))])){
       const date=clinicDateString(new Date(event.createdAt),timeZone);
       if(date<from||date>to)continue;
       const debit=event.direction===1?"debit":"credit",credit=event.direction===1?"credit":"debit";

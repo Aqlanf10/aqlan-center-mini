@@ -50,7 +50,7 @@ BEGIN
     IF document.id IS NULL OR receipt.id IS NULL OR receipt.patient_id<>document.patient_id
       OR receipt.invoice_id IS NULL OR NOT(receipt.invoice_id=ANY(document.source_invoice_ids))
       OR receipt.currency<>document.target_currency OR receipt.base_currency<>document.source_currency
-      OR receipt.exchange_rate<=0 OR receipt.base_amount_minor<>ROUND(receipt.amount_minor::numeric/100*receipt.exchange_rate)
+      OR receipt.exchange_rate<=0 OR receipt.base_amount_minor<>FLOOR(receipt.amount_minor::double precision/100*receipt.exchange_rate::double precision+0.5)
       OR NEW.source_minor<>receipt.base_amount_minor OR NEW.target_minor<>receipt.amount_minor
       OR NEW.direction<>(CASE WHEN receipt.kind='payment' THEN 1 WHEN receipt.kind='refund' THEN -1 ELSE 0 END)
       OR NEW.payment_snapshot IS DISTINCT FROM to_jsonb(receipt) THEN
