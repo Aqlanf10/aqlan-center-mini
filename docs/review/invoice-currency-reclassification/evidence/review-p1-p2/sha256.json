@@ -1,0 +1,42 @@
+{
+  "productCommit": "bb39664bcb873049840bd09ece0cfd85063f59ea",
+  "synthetic": true,
+  "files": [
+    {
+      "file": "build.log",
+      "sha256": "3353d12c46fd7bd3ed459825c1edde1b400c735f7931aeb71e8d879fbd240485"
+    },
+    {
+      "file": "commission-payroll-regression.log",
+      "sha256": "0f0a53ae10705d0bd8d312f9141c25a0cd9e72603b6f37a69b8697b6a175dd83"
+    },
+    {
+      "file": "green-feature.log",
+      "sha256": "e664162d06108b90aa6aec4345f77b0baa6d1316108006cdb8b529257179a313"
+    },
+    {
+      "file": "http.log",
+      "sha256": "833da8447c51a2f7bf2962cb900fde0ba87e2b77e2697deeefcc83705212cfd3"
+    },
+    {
+      "file": "lint.log",
+      "sha256": "3b9444740100fa3a701b8b48c95ee191eaf7e0f258fb3387716440dcaedc9c36"
+    },
+    {
+      "file": "money-scan.log",
+      "sha256": "632f0372f5474f63c51d4baf8397d04fcdb53e3c29de4325ba975b7bb88be938"
+    },
+    {
+      "file": "red-both.log",
+      "sha256": "c8bf7ee378ebb779b7a5e0a44d25e51d11dfab7bb44f057ef851ebac76ba1f5b"
+    },
+    {
+      "file": "typecheck.log",
+      "sha256": "abbbc5e1595eb05f5d213af2183ca9842e35bc698e6a81f7f6536b42a2f23060"
+    },
+    {
+      "file": "unit.log",
+      "sha256": "a75955cf65a454b1915155d3e93f5fcfdf4b6033703b81d8b99b87be601852cf"
+    }
+  ]
+}
