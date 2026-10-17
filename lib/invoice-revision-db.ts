@@ -67,12 +67,12 @@ async function contextInTx(client: DbClient, invoiceId: number) {
 }
 
 export async function readInvoiceRevision(invoiceId: number, session: SessionPayload) {
-  await ensureSchema(); const client = await getPool().connect();
+  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
   try {
     // Current authority is checked before the strictly read-only snapshot.
     await authority(client,session); await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const result = await contextInTx(client,invoiceId); await client.query("COMMIT"); return result;
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
 }
 
 /** One transaction owns replacement, settlement lineage, dated repayment terms
@@ -85,7 +85,7 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
     || typeof source.reason !== "string" || source.reason.trim().length < 3 || source.reason.trim().length > 300) bad("راجع مفتاح الطلب والنسخة وسبب التصحيح.");
   const reason = source.reason.trim(), key = source.idempotencyKey;
   const hash = debtRequestHash({ purpose: "invoice-revision-v1", invoiceId, source, actor: { userId: session.userId, username: session.username, role: session.role } });
-  await ensureSchema(); const client = await getPool().connect();
+  await ensureSchema(); const client = await getPool().connect(); let destroy=false;
   try {
     await client.query("BEGIN"); await authority(client,session);
     const replay = async () => {
@@ -218,5 +218,5 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       details:{correctionId:revision.id,correctedInvoiceId:result.correctedId,reason,discountReason,settledMinor,remainingMinor,
         creditMinor:receipt.creditMinor,identityAmendments:[...amendments].map(([itemId,after])=>({itemId,before:before.invoice.items.find(item=>item.id===itemId),after})),repayment,receiptsPreserved:true,cashMovement:0,idempotencyKey:key}});
     await authority(client,session); await client.query("COMMIT"); return { ...receipt, replayed:false };
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+  } catch (error) { try{await client.query("ROLLBACK");}catch{destroy=true;} throw error; } finally { client.release(destroy); }
 }

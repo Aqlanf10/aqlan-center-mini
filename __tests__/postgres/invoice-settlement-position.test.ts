@@ -1,4 +1,4 @@
-import {afterAll,beforeAll,describe,it,expect} from "vitest";
+import {afterAll,beforeAll,describe,it,expect,vi} from "vitest";
 import {assertRealPostgresUrl,dropPublicSchema,stubPostgresEnv} from "./_setup";
 import {readInvoiceSettlementPosition} from "../../lib/invoice-settlement-position";
 import type {SessionPayload} from "../../lib/auth";
@@ -228,4 +228,21 @@ it("refuses currency correction in a locked period and after a paid commission w
  const blocked=await revision.readInvoiceRevision(original.id,session);expect(blocked.currencyCorrection).toMatchObject({available:false});expect(blocked.currencyCorrection?.message).toMatch(/عمولات/);
  await expect(revision.reviseInvoice(original.id,{...command,expectedSourceHash:blocked.sourceHash},session)).rejects.toThrow(/عمولات/);
  expect(await footprint(owner)).toEqual(before);expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[owner])).toEqual([]);
+});
+it("rolls back a partially written currency correction by destroying a connection whose rollback failed",async()=>{
+ const original=await invoice(),view=await revision.readInvoiceRevision(original.id,session);
+ const command={idempotencyKey:`currency-rollback-${++serial}`,expectedSourceHash:view.sourceHash,currency:"SAR",reason:"Synthetic injected correction failure",lines:[{itemId:original.items[0].id,quantity:1,unitPrice:"2500"}],discount:"0",repaymentTerms:{mode:"full",installments:[]},expectedRemainingMinor:250000};
+ const pool=db.getPool(),client=await pool.connect(),query=client.query.bind(client),failure=new Error("Synthetic document insert failure");
+ const spy=vi.spyOn(client,"query").mockImplementation((...args:Parameters<typeof client.query>)=>{
+  if(String(args[0]).includes("INSERT INTO invoice_settlement_reclassifications("))return Promise.reject(failure);
+  if(args[0]==="ROLLBACK")return Promise.reject(new Error("Synthetic rollback transport failure"));
+  return query(...args);
+ }),release=vi.spyOn(client,"release"),connect=vi.spyOn(pool,"connect").mockResolvedValueOnce(client);
+ try{await expect(revision.reviseInvoice(original.id,command,session)).rejects.toBe(failure);expect(release).toHaveBeenCalledWith(true);}
+ finally{connect.mockRestore();spy.mockRestore();release.mockRestore();}
+ expect((await db.getInvoice(original.id))?.status).not.toBe("cancelled");
+ expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[original.patientId])).toEqual([]);
+ expect(await q("SELECT id FROM invoice_settlement_reclassifications WHERE patient_id=$1",[original.patientId])).toEqual([]);
+ expect(await q("SELECT id FROM invoices WHERE patient_id=$1",[original.patientId])).toEqual([{id:original.id}]);
+ await expect(revision.reviseInvoice(original.id,command,session)).resolves.toMatchObject({currency:"SAR",remainingMinor:250000});
 });
